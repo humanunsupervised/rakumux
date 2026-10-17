@@ -64,8 +64,8 @@ pub fn check_remote_bearer(headers: &HeaderMap, token: &Token) -> Result<(), Htt
     bearer(
         headers,
         token,
-        "`orchestra remote token` prints the token",
-        "invalid remote token (it changes with `orchestra remote token --rotate`)",
+        "`rakumux remote token` prints the token",
+        "invalid remote token (it changes with `rakumux remote token --rotate`)",
     )
 }
 
@@ -108,9 +108,9 @@ fn bearer(headers: &HeaderMap, token: &Token, hint: &str, invalid: &str) -> Resu
     }
 }
 
-/// The caller's identity from `X-Orchestra-Session-Id` and
-/// `X-Orchestra-Session-Token` (both → that session), or `X-Orchestra-Agent`
-/// and `X-Orchestra-Agent-Conversation` (both → the session that bound that
+/// The caller's identity from `X-Rakumux-Session-Id` and
+/// `X-Rakumux-Session-Token` (both → that session), or `X-Rakumux-Agent`
+/// and `X-Rakumux-Agent-Conversation` (both → the session that bound that
 /// conversation); none → the user.
 pub fn identity(headers: &HeaderMap) -> Result<Identity, HttpError> {
     let id = header_text(headers, headers::SESSION_ID)?;
@@ -131,13 +131,11 @@ pub fn identity(headers: &HeaderMap) -> Result<Identity, HttpError> {
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
             if !valid_agent {
                 return Err(HttpError::invalid(
-                    "X-Orchestra-Agent must be an agent kind such as opencode",
+                    "X-Rakumux-Agent must be an agent kind such as opencode",
                 ));
             }
             if conversation.is_empty() {
-                return Err(HttpError::invalid(
-                    "X-Orchestra-Agent-Conversation is empty",
-                ));
+                return Err(HttpError::invalid("X-Rakumux-Agent-Conversation is empty"));
             }
             return Ok(Identity::Delegated {
                 agent,
@@ -146,7 +144,7 @@ pub fn identity(headers: &HeaderMap) -> Result<Identity, HttpError> {
         }
         _ => {
             return Err(HttpError::invalid(
-                "X-Orchestra-Agent and X-Orchestra-Agent-Conversation must be sent together",
+                "X-Rakumux-Agent and X-Rakumux-Agent-Conversation must be sent together",
             ))
         }
     }
@@ -159,16 +157,16 @@ pub fn identity(headers: &HeaderMap) -> Result<Identity, HttpError> {
                     .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
             if !valid_id {
                 return Err(HttpError::invalid(
-                    "X-Orchestra-Session-Id is not a session id",
+                    "X-Rakumux-Session-Id is not a session id",
                 ));
             }
             if token.is_empty() {
-                return Err(HttpError::invalid("X-Orchestra-Session-Token is empty"));
+                return Err(HttpError::invalid("X-Rakumux-Session-Token is empty"));
             }
             Ok(Identity::Session { id, token })
         }
         _ => Err(HttpError::invalid(
-            "X-Orchestra-Session-Id and X-Orchestra-Session-Token must be sent together",
+            "X-Rakumux-Session-Id and X-Rakumux-Session-Token must be sent together",
         )),
     }
 }
@@ -292,17 +290,17 @@ mod tests {
         assert!(check_remote_bearer(&with("abcdefghijklmnopqrstuvwxyy"), &remote).is_err());
         assert!(check_remote_bearer(&with("abcdefghijklm"), &remote).is_err());
         let error = check_remote_bearer(&HeaderMap::new(), &remote).unwrap_err();
-        assert!(error.body.message.contains("orchestra remote token"));
+        assert!(error.body.message.contains("rakumux remote token"));
     }
 
     #[test]
     fn remote_callers_may_not_send_identity_headers() {
         assert!(refuse_identity(&headers(&[("origin", "http://phone")])).is_ok());
         for name in [
-            "x-orchestra-session-id",
-            "x-orchestra-session-token",
-            "x-orchestra-agent",
-            "x-orchestra-agent-conversation",
+            "x-rakumux-session-id",
+            "x-rakumux-session-token",
+            "x-rakumux-agent",
+            "x-rakumux-agent-conversation",
         ] {
             let error = refuse_identity(&headers(&[(name, "x")])).unwrap_err();
             assert_eq!(error.status.as_u16(), 403, "{name}");
@@ -314,8 +312,8 @@ mod tests {
     fn identity_needs_both_headers() {
         assert_eq!(identity(&HeaderMap::new()).unwrap(), Identity::User);
         let both = headers(&[
-            ("x-orchestra-session-id", "01JABC"),
-            ("x-orchestra-session-token", "tok"),
+            ("x-rakumux-session-id", "01JABC"),
+            ("x-rakumux-session-token", "tok"),
         ]);
         assert_eq!(
             identity(&both).unwrap(),
@@ -324,11 +322,11 @@ mod tests {
                 token: "tok".into()
             }
         );
-        let only_id = headers(&[("x-orchestra-session-id", "01JABC")]);
+        let only_id = headers(&[("x-rakumux-session-id", "01JABC")]);
         assert_eq!(identity(&only_id).unwrap_err().status.as_u16(), 400);
         let bad_id = headers(&[
-            ("x-orchestra-session-id", "../x"),
-            ("x-orchestra-session-token", "tok"),
+            ("x-rakumux-session-id", "../x"),
+            ("x-rakumux-session-token", "tok"),
         ]);
         assert!(identity(&bad_id).is_err());
     }
@@ -336,8 +334,8 @@ mod tests {
     #[test]
     fn agent_headers_ask_for_a_delegated_identity() {
         let agent = headers(&[
-            ("x-orchestra-agent", "opencode"),
-            ("x-orchestra-agent-conversation", "ses_1"),
+            ("x-rakumux-agent", "opencode"),
+            ("x-rakumux-agent-conversation", "ses_1"),
         ]);
         assert_eq!(
             identity(&agent).unwrap(),
@@ -346,18 +344,18 @@ mod tests {
                 conversation: "ses_1".into()
             }
         );
-        let only_agent = headers(&[("x-orchestra-agent", "opencode")]);
+        let only_agent = headers(&[("x-rakumux-agent", "opencode")]);
         assert_eq!(identity(&only_agent).unwrap_err().status.as_u16(), 400);
         let bad_agent = headers(&[
-            ("x-orchestra-agent", "Open Code"),
-            ("x-orchestra-agent-conversation", "ses_1"),
+            ("x-rakumux-agent", "Open Code"),
+            ("x-rakumux-agent-conversation", "ses_1"),
         ]);
         assert!(identity(&bad_agent).is_err());
         let mixed = headers(&[
-            ("x-orchestra-agent", "opencode"),
-            ("x-orchestra-agent-conversation", "ses_1"),
-            ("x-orchestra-session-id", "01JABC"),
-            ("x-orchestra-session-token", "tok"),
+            ("x-rakumux-agent", "opencode"),
+            ("x-rakumux-agent-conversation", "ses_1"),
+            ("x-rakumux-session-id", "01JABC"),
+            ("x-rakumux-session-token", "tok"),
         ]);
         assert_eq!(identity(&mixed).unwrap_err().status.as_u16(), 400);
     }

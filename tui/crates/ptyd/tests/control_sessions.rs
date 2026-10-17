@@ -49,8 +49,8 @@ fn create_builds_argv_env_cwd_and_startup_input() {
         ("CLAUDECODE".into(), "1".into()),
         ("CLAUDE_CODE_SESSION_ID".into(), "c".into()),
         ("CODEX_THREAD_ID".into(), "t".into()),
-        ("ORCHESTRA_SESSION_ID".into(), "PARENT".into()),
-        ("ORCHESTRA_SESSION_TOKEN".into(), "parent-token".into()),
+        ("RAKUMUX_SESSION_ID".into(), "PARENT".into()),
+        ("RAKUMUX_SESSION_TOKEN".into(), "parent-token".into()),
         ("TERM".into(), "screen".into()),
     ];
     request.cols = 0;
@@ -69,16 +69,13 @@ fn create_builds_argv_env_cwd_and_startup_input() {
     );
     let env = |name: &str| env_value(&spec.env, name);
     assert_eq!(env("PATH").as_deref(), Some("/client/bin"));
+    assert_eq!(env("RAKUMUX_SESSION_ID").as_deref(), Some(view.id.as_str()));
+    assert_eq!(env("RAKUMUX_SESSION_TOKEN").unwrap().len(), 64);
     assert_eq!(
-        env("ORCHESTRA_SESSION_ID").as_deref(),
-        Some(view.id.as_str())
+        env("RAKUMUX_SOCKET").as_deref(),
+        Some("/tmp/rakumux-test/ptyd.sock")
     );
-    assert_eq!(env("ORCHESTRA_SESSION_TOKEN").unwrap().len(), 64);
-    assert_eq!(
-        env("ORCHESTRA_SOCKET").as_deref(),
-        Some("/tmp/orchestra-test/ptyd.sock")
-    );
-    assert_eq!(env("ORCHESTRA_BIN").as_deref(), Some(ORCHESTRA_BIN));
+    assert_eq!(env("RAKUMUX_BIN").as_deref(), Some(RAKUMUX_BIN));
     assert_eq!(env("TERM").as_deref(), Some("xterm-256color"));
     assert_eq!(env("COLORTERM").as_deref(), Some("truecolor"));
     for stripped in [

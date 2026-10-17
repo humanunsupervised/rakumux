@@ -228,7 +228,7 @@ pub fn draw_daemon_restart_dialog(f: &mut Frame, dialog: &DaemonRestartDialog, a
         };
         vec![
             Line::from(format!(
-                "The running Orchestra server{version} is from an older Orchestra, so it can't \
+                "The running Rakumux server{version} is from an older Rakumux, so it can't \
                  show {}. Restart it to get them.",
                 or_list(&dialog.missing)
             )),
@@ -238,8 +238,8 @@ pub fn draw_daemon_restart_dialog(f: &mut Frame, dialog: &DaemonRestartDialog, a
     } else {
         vec![
             Line::from(format!(
-                "The running Orchestra server{version} speaks a different protocol than this \
-                 version of Orchestra ({}).",
+                "The running Rakumux server{version} speaks a different protocol than this \
+                 version of Rakumux ({}).",
                 crate::app::app_version()
             )),
             Line::from(""),
@@ -281,7 +281,7 @@ pub fn draw_daemon_restart_dialog(f: &mut Frame, dialog: &DaemonRestartDialog, a
     let inner = dialog_frame(
         f,
         popup,
-        "Restart the Orchestra daemon?",
+        "Restart the Rakumux daemon?",
         palette().accent_gold,
     );
     let above = draw_keys(f, inner, &keys);
@@ -326,7 +326,7 @@ pub fn draw_api_key_dialog(f: &mut Frame, dialog: &ApiKeyDialog, area: Rect) {
         ]));
     }
     lines.push(Line::from(Span::styled(
-        "Saved to ~/.orchestra/config.json. Leave empty to remove the key.",
+        "Saved to ~/.rakumux/config.json. Leave empty to remove the key.",
         Style::default().fg(p.text_muted),
     )));
     let keys = [("Enter", "Save"), ("Esc", "Cancel")];
@@ -427,7 +427,7 @@ pub fn draw_openai_model_dialog(f: &mut Frame, dialog: &OpenAiModelDialog, area:
 pub fn draw_upgrade_dialog(f: &mut Frame, dialog: &UpgradeDialog, area: Rect) {
     let p = palette();
     let popup = popup_area(area, 60, 40);
-    let inner = dialog_frame(f, popup, "Upgrade Orchestra", p.accent_primary);
+    let inner = dialog_frame(f, popup, "Upgrade Rakumux", p.accent_primary);
     let keys: &[(&str, &str)] = if dialog.installing {
         &[]
     } else if dialog.checking {

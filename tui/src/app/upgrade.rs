@@ -1,5 +1,5 @@
 //! Upgrade dialog (`u`): check for a newer release and install it with the
-//! method Orchestra was installed by, then restart.
+//! method Rakumux was installed by, then restart.
 
 use crate::updater::InstallMethod;
 

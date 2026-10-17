@@ -1,4 +1,4 @@
-//! The socket server end to end: real socket in a temp `ORCHESTRA_HOME`, the
+//! The socket server end to end: real socket in a temp `RAKUMUX_HOME`, the
 //! real terminal host with `bash --norc --noprofile`, and a fake `Control`.
 
 mod runtime_support;

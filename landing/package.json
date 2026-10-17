@@ -1,8 +1,8 @@
 {
-  "name": "orchestra-landing",
+  "name": "rakumux-landing",
   "version": "0.1.0",
   "private": true,
-  "description": "Marketing site for Orchestra, a terminal session manager for coding agents",
+  "description": "Marketing site for Rakumux, a terminal session manager for coding agents",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

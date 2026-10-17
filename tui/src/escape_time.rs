@@ -1,9 +1,9 @@
 //! Keys whose escape sequence arrives in pieces.
 //!
 //! An arrow key is three bytes (`ESC [ A`). Over a slow link (a phone on a
-//! mobile network, Termius over SSH) they can reach Orchestra in two reads.
+//! mobile network, Termius over SSH) they can reach Rakumux in two reads.
 //! crossterm then reports a lone `ESC` as the Esc key and the rest as `[`
-//! and `A`, so in Orchestra mode an arrow would act as Esc ("back to the
+//! and `A`, so in Rakumux mode an arrow would act as Esc ("back to the
 //! session"). Like tmux's `escape-time`, a lone Esc is held for
 //! [`ESCAPE_TIME`]: when the rest of a key's sequence follows, that key is
 //! reported instead; otherwise the Esc (and whatever followed) is, in order.
@@ -18,11 +18,11 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 /// later.
 pub const ESCAPE_TIME: Duration = Duration::from_millis(300);
 
-/// The same in Orchestra mode, where Esc only goes back to a session or
+/// The same in Rakumux mode, where Esc only goes back to a session or
 /// cancels: an arrow's pieces may come later still on a slow link (a
 /// retransmitted packet), and an arrow taken for Esc throws the user into a
 /// session.
-pub const ESCAPE_TIME_ORCHESTRA: Duration = Duration::from_millis(800);
+pub const ESCAPE_TIME_RAKUMUX: Duration = Duration::from_millis(800);
 
 /// Holds a lone Esc and the pieces after it until they make a key or time
 /// runs out.
@@ -43,7 +43,7 @@ impl EscapeJoiner {
 
     /// Take in a terminal event; returns the events to handle now, in order.
     /// `wait` is how long a lone Esc waits for the rest of a key
-    /// ([`ESCAPE_TIME`], [`ESCAPE_TIME_ORCHESTRA`]).
+    /// ([`ESCAPE_TIME`], [`ESCAPE_TIME_RAKUMUX`]).
     pub fn feed(&mut self, event: Event, now: Instant, wait: Duration) -> Vec<Event> {
         let Some(pending) = self.pending.as_mut() else {
             if is_lone_esc(&event) {
@@ -304,16 +304,16 @@ mod tests {
     }
 
     #[test]
-    fn orchestra_mode_waits_longer_for_the_rest() {
+    fn rakumux_mode_waits_longer_for_the_rest() {
         let now = Instant::now();
         let mut joiner = EscapeJoiner::default();
-        joiner.feed(key(KeyCode::Esc), now, ESCAPE_TIME_ORCHESTRA);
-        assert_eq!(joiner.deadline(), Some(now + ESCAPE_TIME_ORCHESTRA));
+        joiner.feed(key(KeyCode::Esc), now, ESCAPE_TIME_RAKUMUX);
+        assert_eq!(joiner.deadline(), Some(now + ESCAPE_TIME_RAKUMUX));
         // 400 ms later, the rest of the arrow still makes an arrow.
         let later = now + Duration::from_millis(400);
         assert_eq!(joiner.expire(later), vec![]);
         assert_eq!(
-            run_at(&mut joiner, typed("[A"), later, ESCAPE_TIME_ORCHESTRA),
+            run_at(&mut joiner, typed("[A"), later, ESCAPE_TIME_RAKUMUX),
             vec![key(KeyCode::Up)]
         );
     }

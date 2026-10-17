@@ -385,11 +385,11 @@ fn sessions_create_sessions_in_their_own_project() {
     // The child has its own identity, not the parent's.
     let spec = h.host.spec_of(&child.id);
     assert_eq!(
-        env_value(&spec.env, "ORCHESTRA_SESSION_ID").as_deref(),
+        env_value(&spec.env, "RAKUMUX_SESSION_ID").as_deref(),
         Some(child.id.as_str())
     );
     assert_ne!(
-        env_value(&spec.env, "ORCHESTRA_SESSION_TOKEN"),
+        env_value(&spec.env, "RAKUMUX_SESSION_TOKEN"),
         Some(h.token_of(&parent.id))
     );
     assert!(h.get(&parent.id).children.contains(&child.id));

@@ -18,7 +18,7 @@
 //! waiters only peek with `WNOWAIT`), so its exit code isn't lost.
 //!
 //! Before switching, the daemon asks the target which state versions it
-//! reads (`orchestra-ptyd handoff-versions`); a binary that can't take over
+//! reads (`rakumux-ptyd handoff-versions`); a binary that can't take over
 //! is refused and nothing changes. If the `exec` itself fails, the daemon
 //! tries its own executable, then restores the state in this process.
 
@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 /// Version of [`HandoffState`] this daemon writes and reads.
 pub const HANDOFF_VERSION: u32 = 1;
 
-/// `orchestra-ptyd handoff-versions`: the state versions this build reads.
+/// `rakumux-ptyd handoff-versions`: the state versions this build reads.
 pub const VERSIONS_COMMAND: &str = "handoff-versions";
 
 /// How long the target may take to answer `handoff-versions`.
@@ -270,7 +270,7 @@ pub fn check_target(binary: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "{} can't take over running sessions (it's from an Orchestra without in-place restarts)",
+            "{} can't take over running sessions (it's from a Rakumux without in-place restarts)",
             binary.display()
         ))
     }

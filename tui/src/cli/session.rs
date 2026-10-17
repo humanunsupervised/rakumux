@@ -1,4 +1,4 @@
-//! `orchestra session …`: JSON-first commands for agents and scripts
+//! `rakumux session …`: JSON-first commands for agents and scripts
 //! (agent control stage A: list, get, read, wait, report, bind). Results go to
 //! stdout as one JSON object; errors to stderr as `{"error":{…}}`.
 

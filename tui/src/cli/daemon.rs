@@ -1,4 +1,4 @@
-//! `orchestra daemon status|stop|restart|logs`.
+//! `rakumux daemon status|stop|restart|logs`.
 
 use super::args::DaemonCommand;
 use super::{layout, output_error, CliError, Globals};
@@ -25,9 +25,9 @@ pub(crate) fn run(
         DaemonCommand::Status { json } => status(globals, &layout, json, out),
         DaemonCommand::Stop { yes } => {
             if stop(globals, &layout, yes)? {
-                writeln!(out, "orchestra-ptyd stopped").map_err(output_error)?;
+                writeln!(out, "rakumux-ptyd stopped").map_err(output_error)?;
             } else {
-                writeln!(out, "orchestra-ptyd is not running").map_err(output_error)?;
+                writeln!(out, "rakumux-ptyd is not running").map_err(output_error)?;
             }
             Ok(0)
         }
@@ -66,7 +66,7 @@ fn start(globals: &Globals, layout: &Layout) -> Result<String, CliError> {
         Ok(client) => {
             let info = client.status()?;
             return Ok(format!(
-                "orchestra-ptyd {} is already running (pid {})",
+                "rakumux-ptyd {} is already running (pid {})",
                 info.version, info.pid
             ));
         }
@@ -76,13 +76,13 @@ fn start(globals: &Globals, layout: &Layout) -> Result<String, CliError> {
     }
     let info = globals.connect(true)?.status()?;
     Ok(format!(
-        "orchestra-ptyd {} started (pid {})",
+        "rakumux-ptyd {} started (pid {})",
         info.version, info.pid
     ))
 }
 
-/// Replace the daemon with a new one from this Orchestra's
-/// `orchestra-ptyd`. A daemon that can restart in place (`daemon.restart`)
+/// Replace the daemon with a new one from this Rakumux's
+/// `rakumux-ptyd`. A daemon that can restart in place (`daemon.restart`)
 /// keeps every session running; an older one is stopped (after asking,
 /// unless `yes`) and a new one started; with none running, one starts.
 /// Returns what happened, for the person.
@@ -111,7 +111,7 @@ pub(crate) fn restart(globals: &Globals, layout: &Layout, yes: bool) -> Result<S
             Ok(()) => {
                 let info = wait_for_restart(globals)?;
                 return Ok(format!(
-                    "orchestra-ptyd {} restarted in place (pid {}); {} running session{} kept running",
+                    "rakumux-ptyd {} restarted in place (pid {}); {} running session{} kept running",
                     info.version,
                     info.pid,
                     info.live_terminals,
@@ -124,7 +124,7 @@ pub(crate) fn restart(globals: &Globals, layout: &Layout, yes: bool) -> Result<S
         }
     }
     let why = refused.unwrap_or_else(|| {
-        "The running orchestra-ptyd is from an older Orchestra and can't hand its sessions \
+        "The running rakumux-ptyd is from an older Rakumux and can't hand its sessions \
          to a new one."
             .to_string()
     });
@@ -132,15 +132,15 @@ pub(crate) fn restart(globals: &Globals, layout: &Layout, yes: bool) -> Result<S
     stop_with(globals, layout, yes, &format!("{why} Restarting it"))?;
     let info = globals.connect(true)?.status()?;
     Ok(format!(
-        "orchestra-ptyd {} started (pid {})",
+        "rakumux-ptyd {} started (pid {})",
         info.version, info.pid
     ))
 }
 
-/// The `orchestra-ptyd` this Orchestra uses, as an absolute path.
+/// The `rakumux-ptyd` this Rakumux uses, as an absolute path.
 fn ptyd_binary(globals: &Globals) -> Result<std::path::PathBuf, CliError> {
     let binary = session_core::paths::find_ptyd_binary(globals.ptyd_path.as_deref())
-        .ok_or_else(|| CliError::internal("orchestra-ptyd not found next to orchestra"))?;
+        .ok_or_else(|| CliError::internal("rakumux-ptyd not found next to rakumux"))?;
     std::path::absolute(&binary)
         .map_err(|error| CliError::internal(format!("{}: {error}", binary.display())))
 }
@@ -161,7 +161,7 @@ fn wait_for_restart(globals: &Globals) -> Result<DaemonStatusInfo, CliError> {
             return Err(CliError::Api(ApiError::new(
                 ErrorCode::Timeout,
                 format!(
-                    "orchestra-ptyd didn't answer within {} s of restarting; see `orchestra daemon logs`",
+                    "rakumux-ptyd didn't answer within {} s of restarting; see `rakumux daemon logs`",
                     RESTART_WAIT.as_secs()
                 ),
             )));
@@ -184,7 +184,7 @@ fn status(
             let text = if json {
                 json!({ "running": false }).to_string()
             } else {
-                "orchestra-ptyd is not running".into()
+                "rakumux-ptyd is not running".into()
             };
             writeln!(out, "{text}").map_err(output_error)?;
             return Ok(1);
@@ -212,10 +212,7 @@ fn describe(info: &DaemonStatusInfo, log_file: &Path) -> String {
         None => "unknown".into(),
     };
     [
-        format!(
-            "orchestra-ptyd {} (protocol {})",
-            info.version, info.protocol
-        ),
+        format!("rakumux-ptyd {} (protocol {})", info.version, info.protocol),
         format!("  pid       {}", info.pid),
         format!("  uptime    {}", uptime(info.uptime_secs)),
         format!(
@@ -240,7 +237,7 @@ fn uptime(secs: u64) -> String {
 
 /// Stop the daemon. Returns false when none was running.
 fn stop(globals: &Globals, layout: &Layout, yes: bool) -> Result<bool, CliError> {
-    stop_with(globals, layout, yes, "Stopping orchestra-ptyd")
+    stop_with(globals, layout, yes, "Stopping rakumux-ptyd")
 }
 
 /// [`stop`], asking "`what` ends N running sessions. Continue?".
@@ -314,7 +311,7 @@ fn terminate(layout: &Layout) -> Result<(), CliError> {
         Ok(())
     } else {
         Err(CliError::internal(format!(
-            "cannot signal orchestra-ptyd (pid {})",
+            "cannot signal rakumux-ptyd (pid {})",
             registration.pid
         )))
     }
@@ -327,7 +324,7 @@ fn wait_until_stopped(layout: &Layout) -> Result<(), CliError> {
             return Err(CliError::Api(ApiError::new(
                 ErrorCode::Timeout,
                 format!(
-                    "orchestra-ptyd is still running after {} s",
+                    "rakumux-ptyd is still running after {} s",
                     STOP_WAIT.as_secs()
                 ),
             )));
@@ -453,7 +450,7 @@ mod tests {
             rss_bytes: Some(5 * 1024 * 1024),
         };
         let text = describe(&info, Path::new("/h/logs/ptyd.log"));
-        assert!(text.starts_with("orchestra-ptyd 0.6.0 (protocol 1)\n"));
+        assert!(text.starts_with("rakumux-ptyd 0.6.0 (protocol 1)\n"));
         assert!(text.contains("pid       42"));
         assert!(text.contains("uptime    1h 2m"));
         assert!(text.contains("sessions  3 (2 running)"));

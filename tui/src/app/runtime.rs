@@ -231,7 +231,7 @@ impl Exec {
             ExecMode::Threaded => {
                 let tx = self.tx.clone();
                 let spawned = std::thread::Builder::new()
-                    .name("orchestra-attach".into())
+                    .name("rakumux-attach".into())
                     .spawn(move || {
                         while !cancel.load(Ordering::Relaxed) {
                             let Some(event) = stream.recv_timeout(PUMP_POLL) else {
@@ -265,7 +265,7 @@ impl Exec {
             ExecMode::Threaded => {
                 let tx = self.tx.clone();
                 let spawned = std::thread::Builder::new()
-                    .name("orchestra-events".into())
+                    .name("rakumux-events".into())
                     .spawn(move || {
                         while !cancel.load(Ordering::Relaxed) {
                             match stream.recv_timeout(PUMP_POLL) {

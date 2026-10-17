@@ -1,25 +1,25 @@
 #!/bin/bash
 
-echo "=== Testing the orchestra wrapper command ==="
+echo "=== Testing the rakumux wrapper command ==="
 echo ""
 
 echo "1. Checking if the wrapper is defined in the current shell:"
-if type orchestra >/dev/null 2>&1; then
-    echo "✅ orchestra command is defined"
+if type rakumux >/dev/null 2>&1; then
+    echo "✅ rakumux command is defined"
 else
-    echo "❌ orchestra command is NOT defined"
+    echo "❌ rakumux command is NOT defined"
 fi
 
 echo ""
 echo "2. Testing the launcher directly:"
-echo "orchestra.sh --help:"
-./orchestra.sh --help | head -3
+echo "rakumux.sh --help:"
+./rakumux.sh --help | head -3
 
 echo ""
 echo "3. Checking what's in your shell profile:"
 if [[ -f "$HOME/.bash_profile" ]]; then
     echo "Last 20 lines of ~/.bash_profile:"
-    tail -20 "$HOME/.bash_profile" | grep -E "orchestra" | head -5 || true
+    tail -20 "$HOME/.bash_profile" | grep -E "rakumux" | head -5 || true
 else
     echo "~/.bash_profile not found; skipping shell profile check"
 fi

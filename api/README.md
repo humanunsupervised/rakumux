@@ -1,37 +1,37 @@
-# orchestra-api
+# rakumux-api
 
-Orchestra's external API: HTTP/1.1 + JSON on **127.0.0.1**, exposing a subset of the session
-operations of the running Orchestra daemon (`orchestra-ptyd`), plus WebSocket streams for a live
+Rakumux's external API: HTTP/1.1 + JSON on **127.0.0.1**, exposing a subset of the session
+operations of the running Rakumux daemon (`rakumux-ptyd`), plus WebSocket streams for a live
 terminal and for session events. It is a thin adapter over `session_core::client`: the daemon
 still decides everything (folder confinement, permissions, audit). The contract is
 [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1).
 
-`orchestra-mcp` (see `../mcp`) is its main local client; scripts can use it directly. With
-[remote access](#remote-access) on, it also serves the Orchestra app on your phone over Tailscale.
+`rakumux-mcp` (see `../mcp`) is its main local client; scripts can use it directly. With
+[remote access](#remote-access) on, it also serves the Rakumux app on your phone over Tailscale.
 
 ## Running
 
 ```bash
-orchestra-api                      # foreground, any free port; Ctrl-C stops it
-orchestra-api --port 7420          # a fixed port (still 127.0.0.1 only)
-orchestra-api --detach             # background; returns once it answers /v1/health
-orchestra-api --ptyd-path <bin>    # daemon binary to start when none runs
-orchestra-api --remote-listen 127.0.0.1:7400   # remote listener here (remote access must be on)
+rakumux-api                      # foreground, any free port; Ctrl-C stops it
+rakumux-api --port 7420          # a fixed port (still 127.0.0.1 only)
+rakumux-api --detach             # background; returns once it answers /v1/health
+rakumux-api --ptyd-path <bin>    # daemon binary to start when none runs
+rakumux-api --remote-listen 127.0.0.1:7400   # remote listener here (remote access must be on)
 ```
 
-- One API per Orchestra home: a second `orchestra-api` exits with "another orchestra-api is
+- One API per Rakumux home: a second `rakumux-api` exits with "another rakumux-api is
   running"; `--detach` with a healthy API already running just prints its URL.
 - The API starts the daemon on the first user request when none runs (like the CLI), looking for
-  `orchestra-ptyd` in `--ptyd-path`, `$ORCHESTRA_PTYD_BIN`, next to `orchestra-api`, then `PATH`.
+  `rakumux-ptyd` in `--ptyd-path`, `$RAKUMUX_PTYD_BIN`, next to `rakumux-api`, then `PATH`.
   It never stops the daemon; stopping the API leaves every session running.
 - `SIGINT`/`SIGTERM` stop it cleanly: requests in flight finish and `api.json` is removed.
 - A detached API logs to `<home>/logs/api.log` (rotated to `api.log.1` above 1 MiB at start).
-  `ORCHESTRA_API_LOG=debug` logs every request (never tokens).
-- `ORCHESTRA_HOME` selects an isolated Orchestra home (tests); the default is `~/.orchestra`.
+  `RAKUMUX_API_LOG=debug` logs every request (never tokens).
+- `RAKUMUX_HOME` selects an isolated Rakumux home (tests); the default is `~/.rakumux`.
 
 ## Discovery: `api.json`
 
-While it runs, the API writes `<ORCHESTRA_HOME or ~/.orchestra>/api.json`, mode 0600, atomically:
+While it runs, the API writes `<RAKUMUX_HOME or ~/.rakumux>/api.json`, mode 0600, atomically:
 
 ```json
 { "url": "http://127.0.0.1:39123", "token": "<64 hex chars>", "pid": 4242, "version": "0.6.0",
@@ -67,11 +67,11 @@ Without identity headers the API acts as **the user**: every folder, every opera
 allows users. With both
 
 ```
-X-Orchestra-Session-Id: $ORCHESTRA_SESSION_ID
-X-Orchestra-Session-Token: $ORCHESTRA_SESSION_TOKEN
+X-Rakumux-Session-Id: $RAKUMUX_SESSION_ID
+X-Rakumux-Session-Token: $RAKUMUX_SESSION_TOKEN
 ```
 
-(the variables Orchestra sets in every session) the API opens a daemon client **as that session**,
+(the variables Rakumux sets in every session) the API opens a daemon client **as that session**,
 so the daemon's agent policy applies: the session is confined to its own folder, may read and
 list anything in it, may create sessions in it, and may rename only itself (controlling other
 sessions is planned for 0.7.0). Creates are limited: at most 4 running sessions per creating
@@ -80,9 +80,9 @@ beyond that the answer is 429 `limit_exceeded`, with the limit in `details`. Sen
 two headers is a 400.
 
 For agents whose tool calls arrive without the session's environment (OpenCode 2.x runs MCP servers
-in a service shared by every conversation), send `X-Orchestra-Agent: opencode` and
-`X-Orchestra-Agent-Conversation: <conversation id>` instead: the API acts as the running session that
-bound that conversation with `orchestra session bind` (the Orchestra plugin for OpenCode does this).
+in a service shared by every conversation), send `X-Rakumux-Agent: opencode` and
+`X-Rakumux-Agent-Conversation: <conversation id>` instead: the API acts as the running session that
+bound that conversation with `rakumux session bind` (the Rakumux plugin for OpenCode does this).
 No such session is a 401 with `details: {"agent_conversation": "unbound"}`; a daemon without the
 `auth.delegated` capability, a 501 with `"unsupported"`. Agent and session headers together are a
 400. A session client never
@@ -165,26 +165,26 @@ and drops a client that didn't answer the previous ping; it closes the socket wh
 Off by default: nothing listens on the network until you turn it on.
 
 ```bash
-orchestra remote on [--port N]     # turn it on (it stays on) and print URL, token, link and QR code
-orchestra remote pair              # the URL, token, link and QR code again
-orchestra remote status [--json]   # on/off, the URLs the running API listens on, the token's start
-orchestra remote token [--rotate]  # print the token; --rotate makes a new one (re-pair the app)
-orchestra remote off               # turn it off
+rakumux remote on [--port N]     # turn it on (it stays on) and print URL, token, link and QR code
+rakumux remote pair              # the URL, token, link and QR code again
+rakumux remote status [--json]   # on/off, the URLs the running API listens on, the token's start
+rakumux remote token [--rotate]  # print the token; --rotate makes a new one (re-pair the app)
+rakumux remote off               # turn it off
 ```
 
-`orchestra remote on` writes `<home>/remote.json` (mode 0600) and restarts the API (`SIGTERM` to
-the pid in `api.json` when that process is `orchestra-api`, then `orchestra-api --detach`):
+`rakumux remote on` writes `<home>/remote.json` (mode 0600) and restarts the API (`SIGTERM` to
+the pid in `api.json` when that process is `rakumux-api`, then `rakumux-api --detach`):
 
 ```json
 { "enabled": true, "port": 7337, "token": "<26 chars a-z2-7>", "listen": [] }
 ```
 
 It prints the URLs (`http://<MagicDNS name>:7337` when `tailscale status --json` names the machine,
-then `http://<tailscale ip>:7337`), the token and a link, `orchestra://connect?url=…&token=…`, that
+then `http://<tailscale ip>:7337`), the token and a link, `rakumux://connect?url=…&token=…`, that
 fills both in when tapped on the phone; on a terminal also the link as a QR code to scan with the
-app (`orchestra remote pair` shows it again). The TUI has the same switch (Settings → Phone access)
-and asks once, when Tailscale runs and remote access was never set up. When Orchestra starts and remote access is on but no API
-runs (after a reboot), it starts `orchestra-api --detach` in the background.
+app (`rakumux remote pair` shows it again). The TUI has the same switch (Settings → Phone access)
+and asks once, when Tailscale runs and remote access was never set up. When Rakumux starts and remote access is on but no API
+runs (after a reboot), it starts `rakumux-api --detach` in the background.
 
 - **Where it listens.** The API keeps its loopback listener and adds a remote listener on every
   Tailscale address of the machine at `port`: IPv4 in `100.64.0.0/10` or IPv6 in
@@ -193,7 +193,7 @@ runs (after a reboot), it starts `orchestra-api --detach` in the background.
   interface is an anonymous `utun`). The ranges alone aren't enough: `100.64.0.0/10` is the
   carrier-grade NAT range some ISPs and hotspots hand out, and other VPNs (Cloudflare WARP) use it
   too; those addresses are never bound. `remote.json`'s `listen` (`["ADDR:PORT", …]`) or
-  `orchestra-api --remote-listen ADDR:PORT` (repeatable) binds those addresses instead, for other
+  `rakumux-api --remote-listen ADDR:PORT` (repeatable) binds those addresses instead, for other
   networks or for `tailscale serve` (below). No Tailscale address and no `listen`: a warning in
   `logs/api.log`, loopback only. `api.json`'s `remote_urls` says what was bound.
 - **Who gets in.** Every request except `GET /v1/health` needs `Authorization: Bearer <remote
@@ -201,11 +201,11 @@ runs (after a reboot), it starts `orchestra-api --detach` in the background.
   loopback). Health without the token says only "the daemon is not reachable" in `daemon.error`
   (the detailed reason names local paths). A remote caller is **the user**: it can do what the TUI
   does, including typing into any
-  session. The identity headers (`X-Orchestra-Session-*`, `X-Orchestra-Agent*`) are refused (403).
+  session. The identity headers (`X-Rakumux-Session-*`, `X-Rakumux-Agent*`) are refused (403).
   The remote listener doesn't check `Host` and allows `Origin` (React Native's WebSocket sends one);
   the token is what admits a request. Same routes as on loopback.
 - **Keep the token secret.** Anyone on your tailnet with it can run commands as you. Rotate it
-  (`orchestra remote token --rotate`) when a phone is lost; the API restarts and the old token
+  (`rakumux remote token --rotate`) when a phone is lost; the API restarts and the old token
   stops working at once.
 - **Encryption.** Traffic over Tailscale is encrypted by WireGuard, so plain `http://` to a
   Tailscale address is private to your tailnet. On any other network, put TLS in front.
@@ -221,7 +221,7 @@ loopback listener refuses a non-loopback `Host` and any `Origin`, and requests t
 `Origin`). The remote listener checks neither, and wants the remote token.
 
 ```bash
-orchestra remote on            # the remote listener on the Tailscale addresses, port 7337
+rakumux remote on            # the remote listener on the Tailscale addresses, port 7337
 tailscale serve --bg --https=443 http://<tailscale-ip>:7337
 tailscale serve status
 ```
@@ -231,9 +231,9 @@ Tailscale IP as the target, bind the remote listener on loopback instead (it is 
 listener, with its rules) and proxy to that:
 
 ```bash
-# In ~/.orchestra/remote.json:  "listen": ["127.0.0.1:7337"]
+# In ~/.rakumux/remote.json:  "listen": ["127.0.0.1:7337"]
 #   (add "<tailscale-ip>:7337" too to keep the plain http:// tailnet URL working)
-orchestra remote on
+rakumux remote on
 tailscale serve --bg --https=443 http://127.0.0.1:7337
 ```
 
@@ -244,7 +244,7 @@ on the public internet.
 ## curl
 
 ```bash
-API=$(jq -r .url ~/.orchestra/api.json); TOKEN=$(jq -r .token ~/.orchestra/api.json)
+API=$(jq -r .url ~/.rakumux/api.json); TOKEN=$(jq -r .token ~/.rakumux/api.json)
 auth=(-H "Authorization: Bearer $TOKEN")
 
 curl -s "$API/v1/health"
@@ -261,9 +261,9 @@ curl -s "${auth[@]}" "$API/v1/sessions/01JAB…/content?source=scrollback&lines=
 curl -s "${auth[@]}" -X PATCH "$API/v1/sessions/01JAB…" -H 'Content-Type: application/json' \
   -d '{"name": "unit tests"}'
 
-# From inside an Orchestra session, act as that session:
-curl -s "${auth[@]}" -H "X-Orchestra-Session-Id: $ORCHESTRA_SESSION_ID" \
-  -H "X-Orchestra-Session-Token: $ORCHESTRA_SESSION_TOKEN" "$API/v1/sessions"
+# From inside a Rakumux session, act as that session:
+curl -s "${auth[@]}" -H "X-Rakumux-Session-Id: $RAKUMUX_SESSION_ID" \
+  -H "X-Rakumux-Session-Token: $RAKUMUX_SESSION_TOKEN" "$API/v1/sessions"
 
 curl -s "${auth[@]}" "$API/v1/sessions?all=true"
 curl -s "${auth[@]}" -X POST "$API/v1/sessions/01JAB…/kill"
@@ -271,14 +271,14 @@ curl -s "${auth[@]}" -X POST "$API/v1/sessions/01JAB…/revive"
 curl -s "${auth[@]}" -X DELETE "$API/v1/sessions/01JAB…"
 
 # Remote access, from another machine on the tailnet:
-REMOTE=http://box.tail1234.ts.net:7337; RTOKEN=$(orchestra remote token)   # on the server
+REMOTE=http://box.tail1234.ts.net:7337; RTOKEN=$(rakumux remote token)   # on the server
 curl -s -H "Authorization: Bearer $RTOKEN" "$REMOTE/v1/sessions?all=true"
 
 # WebSockets, e.g. with websocat:
 websocat -H "Authorization: Bearer $TOKEN" "${API/http/ws}/v1/events"
 ```
 
-(`jq` and `websocat` are only used by these examples; Orchestra itself doesn't need them.)
+(`jq` and `websocat` are only used by these examples; Rakumux itself doesn't need them.)
 
 ## Code
 
@@ -290,7 +290,7 @@ api/
                       clean up
   src/remote.rs       remote access: remote.json, Tailscale addresses (getifaddrs), what to bind
   src/instance.rs     one API per home (flock on api.lock)
-  src/discovery.rs    api.json (shared with orchestra-mcp)
+  src/discovery.rs    api.json (shared with rakumux-mcp)
   src/routes.rs       routing per listener, bodies, responses
   src/guard.rs        Host / Origin / bearer checks, identity headers; the remote listener's rules
   src/query.rs        query parameters
@@ -299,11 +299,11 @@ api/
                       (against SessionApi)
   src/folders.rs      folders, and `folder` (alias `project`) argument resolution
   src/daemon.rs       daemon clients per identity (blocking; used via spawn_blocking)
-  src/dto.rs          JSON shapes (shared with orchestra-mcp)
+  src/dto.rs          JSON shapes (shared with rakumux-mcp)
   src/error.rs        error envelope and status mapping
   src/detach.rs       --detach; src/probe.rs: blocking health probe
-  tests/api_e2e.rs    the real binary against a real orchestra-ptyd in a temp ORCHESTRA_HOME
+  tests/api_e2e.rs    the real binary against a real rakumux-ptyd in a temp RAKUMUX_HOME
                       (remote listener on 127.0.0.1:0, WebSocket clients)
 ```
 
-Build and test from `tui/` (the Cargo workspace root): `cargo test -p orchestra-api`.
+Build and test from `tui/` (the Cargo workspace root): `cargo test -p rakumux-api`.

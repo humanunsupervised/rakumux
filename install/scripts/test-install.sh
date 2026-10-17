@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ###############################################################################
-# test-install.sh - Test Orchestra release packages before deployment
+# test-install.sh - Test Rakumux release packages before deployment
 #
 # Builds (unless SKIP_BUILD=1) and checks the release packages: contents,
 # binaries for this host, a real install.sh run into a temporary PREFIX,
@@ -33,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RELEASE_DIR="$REPO_ROOT/release"
 
-info "🧪 Testing Orchestra v$VERSION release packages"
+info "🧪 Testing Rakumux v$VERSION release packages"
 echo "=============================================="
 
 cd "$REPO_ROOT"
@@ -49,7 +49,7 @@ fi
 
 PACKAGES=()
 for platform in macos-intel macos-arm64 linux-x64; do
-    if [[ -d "$RELEASE_DIR/orchestra-$platform" ]]; then
+    if [[ -d "$RELEASE_DIR/rakumux-$platform" ]]; then
         PACKAGES+=("$platform")
     fi
 done
@@ -72,16 +72,16 @@ run_with_timeout() {
 # Step 2: Package contents
 info "📋 Step 2: Verifying package contents..."
 REQUIRED_FILES=(
-    "orchestra"
-    "orchestra-ptyd"
-    "orchestra-api"
-    "orchestra-mcp"
-    "orchestra.sh"
-    "orchestra-local.sh"
+    "rakumux"
+    "rakumux-ptyd"
+    "rakumux-api"
+    "rakumux-mcp"
+    "rakumux.sh"
+    "rakumux-local.sh"
     "shell/gwr_load.sh"
     "shell/gwr_binary.sh"
     "shell/gwr/check-updates.sh"
-    "shell/orchestra-command-hook.sh"
+    "shell/rakumux-command-hook.sh"
     "install.sh"
     "README.md"
     "LICENSE"
@@ -89,7 +89,7 @@ REQUIRED_FILES=(
 )
 # Removed in 0.6.0 (git/tmux era); must never ship again.
 FORBIDDEN_PATHS=(
-    "orchestra-cli.sh"
+    "rakumux-cli.sh"
     "services.sh"
     "env-copy"
     "server"
@@ -99,25 +99,25 @@ FORBIDDEN_PATHS=(
 )
 
 verify_package() {
-    local package_dir="$RELEASE_DIR/orchestra-$1"
+    local package_dir="$RELEASE_DIR/rakumux-$1"
     local path
     for path in "${REQUIRED_FILES[@]}"; do
         if [[ ! -f "$package_dir/$path" ]]; then
-            error "✗ orchestra-$1: $path missing"
+            error "✗ rakumux-$1: $path missing"
             return 1
         fi
     done
     for path in "${FORBIDDEN_PATHS[@]}"; do
         if [[ -e "$package_dir/$path" ]]; then
-            error "✗ orchestra-$1: $path must not ship"
+            error "✗ rakumux-$1: $path must not ship"
             return 1
         fi
     done
     if ! cmp -s "$package_dir/LICENSE" "$REPO_ROOT/install/npm/LICENSE"; then
-        error "✗ orchestra-$1: LICENSE differs from install/npm/LICENSE"
+        error "✗ rakumux-$1: LICENSE differs from install/npm/LICENSE"
         return 1
     fi
-    success "✓ orchestra-$1 contents"
+    success "✓ rakumux-$1 contents"
 }
 
 for platform in "${PACKAGES[@]}"; do
@@ -133,23 +133,23 @@ case "$(uname -s)-$(uname -m)" in
     *) HOST_PLATFORM="" ;;
 esac
 
-if [[ -n "$HOST_PLATFORM" && -d "$RELEASE_DIR/orchestra-$HOST_PLATFORM" ]]; then
-    package_dir="$RELEASE_DIR/orchestra-$HOST_PLATFORM"
-    version_output="$(run_with_timeout "$package_dir/orchestra" --version)"
-    if [[ "$version_output" != "orchestra $VERSION" ]]; then
-        error "orchestra --version printed '$version_output', expected 'orchestra $VERSION'"
+if [[ -n "$HOST_PLATFORM" && -d "$RELEASE_DIR/rakumux-$HOST_PLATFORM" ]]; then
+    package_dir="$RELEASE_DIR/rakumux-$HOST_PLATFORM"
+    version_output="$(run_with_timeout "$package_dir/rakumux" --version)"
+    if [[ "$version_output" != "rakumux $VERSION" ]]; then
+        error "rakumux --version printed '$version_output', expected 'rakumux $VERSION'"
         exit 1
     fi
-    success "✓ orchestra --version: $version_output"
+    success "✓ rakumux --version: $version_output"
 
-    if ! ptyd_output="$(run_with_timeout "$package_dir/orchestra-ptyd" --version 2>&1)"; then
-        error "orchestra-ptyd --version failed: $ptyd_output"
+    if ! ptyd_output="$(run_with_timeout "$package_dir/rakumux-ptyd" --version 2>&1)"; then
+        error "rakumux-ptyd --version failed: $ptyd_output"
         exit 1
     fi
-    success "✓ orchestra-ptyd --version: $ptyd_output"
+    success "✓ rakumux-ptyd --version: $ptyd_output"
 
     # --version never starts an API, a daemon or an MCP session.
-    for binary in orchestra-api orchestra-mcp; do
+    for binary in rakumux-api rakumux-mcp; do
         if ! binary_output="$(run_with_timeout "$package_dir/$binary" --version 2>&1)"; then
             error "$binary --version failed: $binary_output"
             exit 1
@@ -161,43 +161,43 @@ if [[ -n "$HOST_PLATFORM" && -d "$RELEASE_DIR/orchestra-$HOST_PLATFORM" ]]; then
         success "✓ $binary --version: $binary_output"
     done
 
-    if ! run_with_timeout "$package_dir/orchestra.sh" --help >/dev/null; then
-        error "orchestra.sh --help failed"
+    if ! run_with_timeout "$package_dir/rakumux.sh" --help >/dev/null; then
+        error "rakumux.sh --help failed"
         exit 1
     fi
-    success "✓ orchestra.sh --help"
+    success "✓ rakumux.sh --help"
 else
     warn "No package for this host ($(uname -s) $(uname -m)); skipping binary tests"
 fi
 
 # Step 4: install.sh into a temporary PREFIX
 info "⚙️  Step 4: Testing install.sh..."
-if [[ -n "$HOST_PLATFORM" && -d "$RELEASE_DIR/orchestra-$HOST_PLATFORM" ]]; then
+if [[ -n "$HOST_PLATFORM" && -d "$RELEASE_DIR/rakumux-$HOST_PLATFORM" ]]; then
     TEST_PREFIX="$(mktemp -d)"
     trap 'rm -rf "$TEST_PREFIX"' EXIT
-    PREFIX="$TEST_PREFIX" "$RELEASE_DIR/orchestra-$HOST_PLATFORM/install.sh" >/dev/null
-    installed_version="$(env -u GW_TUI_BIN -u GW_PTYD_BIN "$TEST_PREFIX/bin/orchestra" --version)"
-    if [[ "$installed_version" != "orchestra $VERSION" ]]; then
-        error "Installed orchestra --version printed '$installed_version'"
+    PREFIX="$TEST_PREFIX" "$RELEASE_DIR/rakumux-$HOST_PLATFORM/install.sh" >/dev/null
+    installed_version="$(env -u GW_TUI_BIN -u GW_PTYD_BIN "$TEST_PREFIX/bin/rakumux" --version)"
+    if [[ "$installed_version" != "rakumux $VERSION" ]]; then
+        error "Installed rakumux --version printed '$installed_version'"
         exit 1
     fi
-    for path in orchestra orchestra-ptyd orchestra-api orchestra-mcp orchestra.sh LICENSE THIRD_PARTY_NOTICES; do
-        if [[ ! -e "$TEST_PREFIX/libexec/orchestra/$path" ]]; then
+    for path in rakumux rakumux-ptyd rakumux-api rakumux-mcp rakumux.sh LICENSE THIRD_PARTY_NOTICES; do
+        if [[ ! -e "$TEST_PREFIX/libexec/rakumux/$path" ]]; then
             error "install.sh did not install $path"
             exit 1
         fi
     done
-    for binary in orchestra-api orchestra-mcp; do
+    for binary in rakumux-api rakumux-mcp; do
         installed_version="$("$TEST_PREFIX/bin/$binary" --version)"
         if [[ "$installed_version" != "$binary $VERSION" ]]; then
             error "Installed $binary --version printed '$installed_version'"
             exit 1
         fi
     done
-    success "✓ install.sh installs a working orchestra command"
+    success "✓ install.sh installs a working rakumux command"
 else
     for platform in "${PACKAGES[@]}"; do
-        bash -n "$RELEASE_DIR/orchestra-$platform/install.sh"
+        bash -n "$RELEASE_DIR/rakumux-$platform/install.sh"
     done
     warn "No package for this host; checked install.sh syntax only"
 fi
@@ -216,7 +216,7 @@ sha256_of() {
     fi
 }
 for platform in "${PACKAGES[@]}"; do
-    tarball="orchestra-$platform.tar.gz"
+    tarball="rakumux-$platform.tar.gz"
     listed="$(awk -v name="$tarball" '$2 == name { print $1 }' "$RELEASE_DIR/checksums.txt")"
     actual="$(sha256_of "$RELEASE_DIR/$tarball")"
     if [[ -z "$listed" || "$listed" != "$actual" ]]; then
@@ -232,7 +232,7 @@ done
 
 # Step 6: Script syntax
 info "🐚 Step 6: Testing shell script syntax..."
-SCRIPTS=(orchestra.sh build.sh shell/orchestra-local.sh)
+SCRIPTS=(rakumux.sh build.sh shell/rakumux-local.sh)
 for script in shell/gwr_*.sh shell/gwr/*.sh shell/build/*.sh install/scripts/*.sh; do
     SCRIPTS+=("$script")
 done
@@ -245,7 +245,7 @@ done
 success "✓ ${#SCRIPTS[@]} scripts pass bash -n"
 
 echo
-info "🎉 Test Summary for Orchestra v$VERSION"
+info "🎉 Test Summary for Rakumux v$VERSION"
 echo "========================================="
 success "✓ Package contents verified (${PACKAGES[*]})"
 success "✓ Host binaries and install.sh tested"

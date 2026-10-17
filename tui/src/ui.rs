@@ -197,7 +197,7 @@ mod tests {
         assert!(wide.contains("Press n to start one in repo"), "{wide}");
         // The folder filter heads the list.
         assert!(wide.contains("\n   ▤ All folders "), "{wide}");
-        assert!(wide.contains("ORCHESTRA"), "{wide}");
+        assert!(wide.contains("RAKUMUX"), "{wide}");
         // Narrow: the list, and the detail stacked below it.
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("+ New session"), "{narrow}");
@@ -235,7 +235,7 @@ mod tests {
             assert!(screen.contains("controlling"), "{screen}");
             let footer = screen.lines().last().unwrap();
             assert!(footer.starts_with(" SESSION "), "{footer:?}");
-            assert!(footer.contains(" Ctrl-\\ orchestra "), "{footer:?}");
+            assert!(footer.contains(" Ctrl-\\ rakumux "), "{footer:?}");
             assert!(footer.trim_end().ends_with("settings"), "{footer:?}");
         }
     }
@@ -255,13 +255,13 @@ mod tests {
         };
         let p = theme::palette();
         for (width, height) in [(120, 30), (60, 20)] {
-            // Orchestra mode: bright orange, bottom left.
+            // Rakumux mode: bright orange, bottom left.
             if h.app.focus == Focus::Session {
-                h.orchestra().await;
+                h.rakumux().await;
             }
             assert_eq!(h.app.focus, Focus::List);
             let (text, fg, bg) = badge(&mut h, width, height);
-            assert!(text.starts_with(" ORCHESTRA "), "{text:?}");
+            assert!(text.starts_with(" RAKUMUX "), "{text:?}");
             assert_eq!((fg, bg), (p.background, p.accent_orange));
             // A session: a quiet badge that blends in.
             h.press(KeyCode::Enter).await;
@@ -278,7 +278,7 @@ mod tests {
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             let first = screen.lines().next().unwrap();
-            assert!(!first.contains("ORCHESTRA"), "{first:?}");
+            assert!(!first.contains("RAKUMUX"), "{first:?}");
             assert!(!first.contains("session"), "no count: {first:?}");
             let list = h.app.screen().list.unwrap();
             assert_eq!(list.y, 0);
@@ -296,7 +296,7 @@ mod tests {
             let rows: Vec<&str> = screen.lines().collect();
             assert_eq!(rows.len(), usize::from(height));
             let footer = rows[rows.len() - 1];
-            assert!(footer.starts_with(" ORCHESTRA "), "{footer:?}");
+            assert!(footer.starts_with(" RAKUMUX "), "{footer:?}");
             assert!(
                 footer.trim_end().ends_with("? help  , settings"),
                 "{footer:?}"
@@ -311,10 +311,7 @@ mod tests {
         h.app.set_status("Layout: Tabs");
         let screen = render(&mut h.app, 80, 24);
         let footer = screen.lines().last().unwrap();
-        assert!(
-            footer.starts_with(" ORCHESTRA  Layout: Tabs "),
-            "{footer:?}"
-        );
+        assert!(footer.starts_with(" RAKUMUX  Layout: Tabs "), "{footer:?}");
         assert!(
             footer.trim_end().ends_with("? help  , settings"),
             "{footer:?}"
@@ -354,9 +351,9 @@ mod tests {
                 let footer = screen.lines().last().unwrap();
                 assert!(footer.starts_with(" SESSION "), "{footer:?}");
             }
-            h.orchestra().await;
+            h.rakumux().await;
             render(&mut h.app, width, height);
-            assert_eq!(still(&h), before, "{layout:?}: orchestra mode");
+            assert_eq!(still(&h), before, "{layout:?}: rakumux mode");
         }
     }
 
@@ -383,7 +380,7 @@ mod tests {
         for hint in [
             "Action",
             "Key",
-            "▶ Orchestra mode (from a session)",
+            "▶ Rakumux mode (from a session)",
             "Esc, Ctrl-\\",
             "↓, j, Alt-↓",
             "gg, Home",
@@ -494,20 +491,20 @@ mod tests {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("hello from the fake"), "{screen}");
             assert!(!screen.contains("▤ All folders"), "{screen}");
-            assert!(!screen.contains("ORCHESTRA"), "{screen}");
+            assert!(!screen.contains("RAKUMUX"), "{screen}");
             // The terminal starts at the top; the footer keeps the mode, the
             // zoomed session and the way out.
             assert!(screen.starts_with("hello from the fake"), "{screen}");
             let footer = screen.lines().last().unwrap();
             assert!(footer.starts_with(" SESSION  api · zoomed "), "{footer:?}");
-            assert!(footer.contains("Ctrl-\\ orchestra"), "{footer:?}");
+            assert!(footer.contains("Ctrl-\\ rakumux"), "{footer:?}");
         }
-        // Back in Orchestra mode the list returns, and the badge says so.
-        h.orchestra().await;
+        // Back in Rakumux mode the list returns, and the badge says so.
+        h.rakumux().await;
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("▤ All folders"), "{screen}");
         let footer = screen.lines().last().unwrap();
-        assert!(footer.starts_with(" ORCHESTRA "), "{footer:?}");
+        assert!(footer.starts_with(" RAKUMUX "), "{footer:?}");
     }
 
     #[tokio::test]
@@ -525,7 +522,7 @@ mod tests {
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("Help"), "{screen}");
-            assert!(screen.contains("What Orchestra is"), "{screen}");
+            assert!(screen.contains("What Rakumux is"), "{screen}");
         }
         h.press(KeyCode::Esc).await;
         h.press(KeyCode::Char('n')).await;
@@ -612,13 +609,13 @@ mod tests {
         options.connector = std::sync::Arc::new(|| {
             Err(ApiError::new(
                 ErrorCode::DaemonUnavailable,
-                "can't start orchestra-ptyd",
+                "can't start rakumux-ptyd",
             ))
         });
         let mut h = start(options, fake, dir);
         let wide = render(&mut h.app, 160, 48);
-        assert!(wide.contains("Can't reach the Orchestra daemon"), "{wide}");
-        assert!(wide.contains("can't start orchestra-ptyd"), "{wide}");
+        assert!(wide.contains("Can't reach the Rakumux daemon"), "{wide}");
+        assert!(wide.contains("can't start rakumux-ptyd"), "{wide}");
         assert!(wide.contains("Ctrl-r"), "{wide}");
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("daemon unavailable"), "{narrow}");
@@ -626,7 +623,7 @@ mod tests {
         for screen in [wide, narrow] {
             let footer = screen.lines().last().unwrap();
             assert!(
-                footer.starts_with(" ORCHESTRA  ✕ daemon unavailable · can't start"),
+                footer.starts_with(" RAKUMUX  ✕ daemon unavailable · can't start"),
                 "{footer:?}"
             );
         }
@@ -639,7 +636,7 @@ mod tests {
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             let footer = screen.lines().last().unwrap();
-            assert!(footer.starts_with(" ORCHESTRA  "), "{footer:?}");
+            assert!(footer.starts_with(" RAKUMUX  "), "{footer:?}");
             assert!(footer.contains(" connecting "), "{footer:?}");
             assert!(footer.trim_end().ends_with("settings"), "{footer:?}");
         }
@@ -753,7 +750,7 @@ mod tests {
         assert!(!wide.contains("worktree"), "branch only: {wide}");
         assert!(!wide.contains("──"), "no folder headers: {wide}");
         // No header above the list: the folder filter says what's shown.
-        assert!(wide.lines().last().unwrap().starts_with(" ORCHESTRA "));
+        assert!(wide.lines().last().unwrap().starts_with(" RAKUMUX "));
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("▤ All folders"), "{narrow}");
         assert!(narrow.contains("docs ★"), "{narrow}");
@@ -1063,8 +1060,8 @@ mod tests {
         let options = options(&fake, scope(), &dir);
         let mut h = start(options, fake, dir);
         let wide = render(&mut h.app, 160, 48);
-        assert!(wide.contains("Restart the Orchestra daemon?"), "{wide}");
-        assert!(wide.contains("from an older Orchestra"), "{wide}");
+        assert!(wide.contains("Restart the Rakumux daemon?"), "{wide}");
+        assert!(wide.contains("from an older Rakumux"), "{wide}");
         assert!(wide.contains("[y] Restart"), "{wide}");
         h.press(KeyCode::Esc).await;
         let wide = render(&mut h.app, 160, 48);
@@ -1156,10 +1153,7 @@ mod tests {
             ("new", &["Enter create  Esc cancel", "in ▤ repo"]),
             ("rename", &["Current: api", "[Enter] Rename • [Esc] Cancel"]),
             ("delete", &["output removed.", "[y/Enter] Yes • [n/Esc] No"]),
-            (
-                "restart",
-                &["to get them.", "are.", "[y] Restart", "[q] Quit"],
-            ),
+            ("restart", &["them.", "are.", "[y] Restart", "[q] Quit"]),
             (
                 "upgrade",
                 &[
@@ -1228,9 +1222,9 @@ mod tests {
             .join("\n")
     }
 
-    /// On a phone, one thing at a time: Orchestra mode is the list alone;
+    /// On a phone, one thing at a time: Rakumux mode is the list alone;
     /// going in gives the session the screen under a row of tabs; the
-    /// Orchestra key goes back to the list.
+    /// Rakumux key goes back to the list.
     #[tokio::test]
     async fn a_phone_shows_the_list_then_the_session_under_tabs() {
         for (width, height) in PHONES {
@@ -1245,7 +1239,7 @@ mod tests {
             // No session on screen.
             assert!(!screen.contains("hello from the fake"), "{screen}");
             assert!(!screen.contains("observing"), "{screen}");
-            assert!(screen.lines().last().unwrap().starts_with(" ORCHESTRA "));
+            assert!(screen.lines().last().unwrap().starts_with(" RAKUMUX "));
 
             // j: only the selection moves.
             h.press(KeyCode::Char('j')).await;
@@ -1268,8 +1262,8 @@ mod tests {
             assert!(screen.lines().last().unwrap().starts_with(" SESSION "));
             assert_eq!(h.app.terminal_size(), (width, height - 2));
 
-            // The Orchestra key: back to the list, not the session.
-            h.orchestra().await;
+            // The Rakumux key: back to the list, not the session.
+            h.rakumux().await;
             assert_eq!(h.app.focus, Focus::List);
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("▤ All folders"), "{screen}");
@@ -1345,13 +1339,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn taps_drive_orchestra_on_a_phone() {
+    async fn taps_drive_rakumux_on_a_phone() {
         use crate::app::FooterKey;
         use crate::help::{Modal, ModalTab};
         let mut h = harness(vec![aged("A", "api", 1, 20), aged("B", "docs", 2, 10)]);
         let (width, height) = (45, 40);
         render(&mut h.app, width, height);
-        // Nowhere to go back to yet: the ORCHESTRA badge does nothing.
+        // Nowhere to go back to yet: the RAKUMUX badge does nothing.
         tap(&mut h, Hit::ModeBadge);
         assert_eq!(h.app.focus, Focus::List);
         assert!(matches!(h.app.mode, AppMode::Normal));
@@ -1384,26 +1378,26 @@ mod tests {
         let footer = screen.lines().last().unwrap();
         // Both the way out and Help fit 45 columns.
         assert!(
-            footer.ends_with("Ctrl-\\ orchestra  Ctrl-\\ ? help "),
+            footer.ends_with("Ctrl-\\ rakumux  Ctrl-\\ ? help "),
             "{footer:?}"
         );
 
-        // The SESSION badge: out to Orchestra mode, remembering the session.
+        // The SESSION badge: out to Rakumux mode, remembering the session.
         tap(&mut h, Hit::ModeBadge);
         assert_eq!(h.app.focus, Focus::List);
         assert_eq!(
             h.app.came_from.as_ref().map(|id| id.to_string()),
             Some("B".into())
         );
-        // The ORCHESTRA badge: back into it.
+        // The RAKUMUX badge: back into it.
         render(&mut h.app, width, height);
         tap(&mut h, Hit::ModeBadge);
         assert_eq!(h.app.focus, Focus::Session);
         assert_eq!(h.selected().as_deref(), Some("B"));
 
-        // `Ctrl-\ orchestra` does what the badge does.
+        // `Ctrl-\ rakumux` does what the badge does.
         render(&mut h.app, width, height);
-        tap(&mut h, Hit::FooterKey(FooterKey::Orchestra));
+        tap(&mut h, Hit::FooterKey(FooterKey::Rakumux));
         assert_eq!(h.app.focus, Focus::List);
 
         // `? help` and `, settings` open them, in either mode.
@@ -1420,7 +1414,7 @@ mod tests {
         render(&mut h.app, width, height);
         tap(&mut h, Hit::FooterKey(FooterKey::Help));
         assert_eq!(modal_tab(&h), Some(Modal::Help.first_tab()));
-        // Like `Ctrl-\ ?`: Orchestra mode under Help.
+        // Like `Ctrl-\ ?`: Rakumux mode under Help.
         assert_eq!(h.app.focus, Focus::List);
         h.press(KeyCode::Esc).await;
 
@@ -1439,7 +1433,7 @@ mod tests {
                 if session {
                     h.press(KeyCode::Enter).await;
                 } else if h.app.focus == Focus::Session {
-                    h.orchestra().await;
+                    h.rakumux().await;
                 }
                 let screen = render(&mut h.app, width, height);
                 let footer: Vec<char> = screen.lines().last().unwrap().chars().collect();
@@ -1455,13 +1449,13 @@ mod tests {
                     .filter(|(area, _)| area.y == height - 1)
                     .copied()
                     .collect();
-                let badge = if session { " SESSION " } else { " ORCHESTRA " };
+                let badge = if session { " SESSION " } else { " RAKUMUX " };
                 assert_eq!(text(targets[0].0), badge);
                 assert_eq!(targets[0].1, Hit::ModeBadge);
                 for (area, hit) in &targets[1..] {
                     let shown = text(*area);
                     let wanted = match hit {
-                        Hit::FooterKey(crate::app::FooterKey::Orchestra) => "orchestra",
+                        Hit::FooterKey(crate::app::FooterKey::Rakumux) => "rakumux",
                         Hit::FooterKey(crate::app::FooterKey::Help) => "? help",
                         Hit::FooterKey(crate::app::FooterKey::Settings) => ", settings",
                         other => panic!("{other:?}"),

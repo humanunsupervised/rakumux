@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-REPO_SLUG="humanunsupervised/orchestra"
+REPO_SLUG="humanunsupervised/rakumux"
 VERSION=""
 NOTES_LAST_COMMITS=""
 FALLBACK_COMMITS=5
@@ -68,15 +68,15 @@ load_env_file() {
   set -u
 }
 
-# Load the Anthropic API key: environment, ~/.orchestra/config.json, then .env files
+# Load the Anthropic API key: environment, ~/.rakumux/config.json, then .env files
 load_anthropic_api_key() {
   # If already set, keep it
   if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
     return 0
   fi
 
-  # Prefer ~/.orchestra/config.json (jq required)
-  local config_file="$HOME/.orchestra/config.json"
+  # Prefer ~/.rakumux/config.json (jq required)
+  local config_file="$HOME/.rakumux/config.json"
   if [[ -f "$config_file" ]] && command -v jq >/dev/null 2>&1; then
     local api_key
     api_key="$(jq -r '.anthropic_api_key // empty' "$config_file" 2>/dev/null || echo "")"
@@ -150,7 +150,7 @@ anthropic_summarize() {
 
   # Build JSON using jq if available, else here-doc escaped
   if command -v jq >/dev/null 2>&1; then
-    local system_prompt="You are a release notes generator for a developer tool named Orchestra. Given a list of git commit subjects since the last public release, produce concise, user-focused bullet points. Group similar items, highlight important changes, and omit purely internal refs unless impactful. Prefer sections: What's New, Improvements, Bug Fixes, Breaking Changes (only if present). Keep it short and specific."
+    local system_prompt="You are a release notes generator for a developer tool named Rakumux. Given a list of git commit subjects since the last public release, produce concise, user-focused bullet points. Group similar items, highlight important changes, and omit purely internal refs unless impactful. Prefer sections: What's New, Improvements, Bug Fixes, Breaking Changes (only if present). Keep it short and specific."
 
     local request
     request=$(jq -n --arg model "claude-3-5-haiku-20241022" \
@@ -163,7 +163,7 @@ anthropic_summarize() {
                    temperature: 0.2,
                    system: $system,
                    messages: [
-                     { role: "user", content: ("Generate Markdown release notes for Orchestra v" + $version + " based on these commit subjects since the last release.\n\nCommit subjects (one per line):\n" + ($commits | split("\n") | map(select(length>0) | "- " + .) | join("\n")) + "\n\nOutput:\n- A brief intro line (one sentence).\n- Then 5-12 bullet points grouped under headings if helpful.\n- Avoid generic phrasing. Be specific and user-facing.\n- No backticks, no code blocks, plain Markdown.") }
+                     { role: "user", content: ("Generate Markdown release notes for Rakumux v" + $version + " based on these commit subjects since the last release.\n\nCommit subjects (one per line):\n" + ($commits | split("\n") | map(select(length>0) | "- " + .) | join("\n")) + "\n\nOutput:\n- A brief intro line (one sentence).\n- Then 5-12 bullet points grouped under headings if helpful.\n- Avoid generic phrasing. Be specific and user-facing.\n- No backticks, no code blocks, plain Markdown.") }
                    ]
                  }')
   else
@@ -175,11 +175,11 @@ anthropic_summarize() {
   "model": "claude-3-5-haiku-20241022",
   "max_tokens": 600,
   "temperature": 0.2,
-  "system": "You are a release notes generator for a developer tool named Orchestra. Given a list of git commit subjects since the last public release, produce concise, user-focused bullet points. Group similar items, highlight important changes, and omit purely internal refs unless impactful. Prefer sections: What's New, Improvements, Bug Fixes, Breaking Changes (only if present). Keep it short and specific.",
+  "system": "You are a release notes generator for a developer tool named Rakumux. Given a list of git commit subjects since the last public release, produce concise, user-focused bullet points. Group similar items, highlight important changes, and omit purely internal refs unless impactful. Prefer sections: What's New, Improvements, Bug Fixes, Breaking Changes (only if present). Keep it short and specific.",
   "messages": [
     {
       "role": "user",
-      "content": "Generate Markdown release notes for Orchestra v$version based on these commit subjects since the last release.\\n\\nCommit subjects (one per line):\\n$safe_commits\\n\\nOutput:\\n- A brief intro line (one sentence).\\n- Then 5-12 bullet points grouped under headings if helpful.\\n- Avoid generic phrasing. Be specific and user-facing.\\n- No backticks, no code blocks, plain Markdown."
+      "content": "Generate Markdown release notes for Rakumux v$version based on these commit subjects since the last release.\\n\\nCommit subjects (one per line):\\n$safe_commits\\n\\nOutput:\\n- A brief intro line (one sentence).\\n- Then 5-12 bullet points grouped under headings if helpful.\\n- Avoid generic phrasing. Be specific and user-facing.\\n- No backticks, no code blocks, plain Markdown."
     }
   ]
 }
@@ -268,7 +268,7 @@ main() {
   fi
 
   # Header
-  echo "## Orchestra v${VERSION:-(unreleased)}"
+  echo "## Rakumux v${VERSION:-(unreleased)}"
   echo
 
   if [[ -z "${commits//[[:space:]]/}" ]]; then

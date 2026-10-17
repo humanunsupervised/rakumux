@@ -2,8 +2,8 @@
 name = "tui"
 version = "0.1.0"
 edition = "2021"
-description = "Orchestra: terminal sessions for coding agents (TUI and CLI)"
-authors = ["Orchestra contributors"]
+description = "Rakumux: terminal sessions for coding agents (TUI and CLI)"
+authors = ["Rakumux contributors"]
 publish = false
 
 [workspace]
@@ -13,8 +13,8 @@ members = [".", "crates/vt", "crates/session-core", "crates/ptyd", "../api", "..
 ratatui = "0.25"
 crossterm = { version = "0.27", features = ["event-stream"] }
 futures-util = "0.3"
-orchestra-session-core = { path = "crates/session-core" }
-orchestra-vt = { path = "crates/vt" }
+rakumux-session-core = { path = "crates/session-core" }
+rakumux-vt = { path = "crates/vt" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["process", "io-util", "rt", "rt-multi-thread", "macros", "time", "sync", "signal"] }

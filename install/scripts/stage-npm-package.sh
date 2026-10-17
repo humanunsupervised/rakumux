@@ -5,8 +5,8 @@
 #
 # Fills install/npm from the release built by build-release.sh, so npm ships
 # exactly what the tarballs ship:
-#   resources/prebuilt/<platform>/{orchestra,orchestra-ptyd,orchestra-api,orchestra-mcp}  per tarball
-#   resources/scripts/{orchestra.sh,orchestra-local.sh,shell/}  from one tarball
+#   resources/prebuilt/<platform>/{rakumux,rakumux-ptyd,rakumux-api,rakumux-mcp}  per tarball
+#   resources/scripts/{rakumux.sh,rakumux-local.sh,shell/}  from one tarball
 #   THIRD_PARTY_NOTICES                                         from release/
 # and sets package.json "version". LICENSE is committed in install/npm.
 #
@@ -44,7 +44,7 @@ if [[ -z "$VERSION" ]]; then
     exit 2
 fi
 
-if ! grep -q "^# Orchestra v$VERSION\$" "$RELEASE_DIR/RELEASE_NOTES.md" 2>/dev/null; then
+if ! grep -q "^# Rakumux v$VERSION\$" "$RELEASE_DIR/RELEASE_NOTES.md" 2>/dev/null; then
     error "release/ was not built for v$VERSION; run ./install/scripts/build-release.sh $VERSION"
     exit 1
 fi
@@ -75,7 +75,7 @@ trap 'rm -rf "$work_dir"' EXIT
 staged=()
 scripts_staged=false
 for platform in "${PLATFORMS[@]}"; do
-    tarball="$RELEASE_DIR/orchestra-$platform.tar.gz"
+    tarball="$RELEASE_DIR/rakumux-$platform.tar.gz"
     if [[ ! -f "$tarball" ]]; then
         if [[ "$ALLOW_PARTIAL" == "true" ]]; then
             warn "Skipping $platform: $tarball not found"
@@ -87,10 +87,10 @@ for platform in "${PLATFORMS[@]}"; do
 
     mkdir -p "$work_dir/$platform"
     tar -xzf "$tarball" -C "$work_dir/$platform"
-    package_dir="$work_dir/$platform/orchestra-$platform"
+    package_dir="$work_dir/$platform/rakumux-$platform"
 
     mkdir -p "$RESOURCES_DIR/prebuilt/$platform"
-    for binary in orchestra orchestra-ptyd orchestra-api orchestra-mcp; do
+    for binary in rakumux rakumux-ptyd rakumux-api rakumux-mcp; do
         if [[ ! -f "$package_dir/$binary" ]]; then
             error "$tarball has no $binary"
             exit 1
@@ -100,7 +100,7 @@ for platform in "${PLATFORMS[@]}"; do
     done
 
     if [[ "$scripts_staged" == "false" ]]; then
-        cp "$package_dir/orchestra.sh" "$package_dir/orchestra-local.sh" "$RESOURCES_DIR/scripts/"
+        cp "$package_dir/rakumux.sh" "$package_dir/rakumux-local.sh" "$RESOURCES_DIR/scripts/"
         cp -R "$package_dir/shell" "$RESOURCES_DIR/scripts/"
         find "$RESOURCES_DIR/scripts" -type f -name '*.sh' -exec chmod 755 {} +
         scripts_staged=true
@@ -116,4 +116,4 @@ fi
 cp "$RELEASE_DIR/THIRD_PARTY_NOTICES" "$NPM_DIR/THIRD_PARTY_NOTICES"
 chmod 644 "$NPM_DIR/THIRD_PARTY_NOTICES"
 
-info "Staged @humanu/orchestra@$VERSION with binaries for: ${staged[*]}"
+info "Staged rakumux@$VERSION with binaries for: ${staged[*]}"

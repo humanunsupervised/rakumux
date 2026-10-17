@@ -2,11 +2,11 @@
 //!
 //! The daemon's own environment goes stale, so a session inherits the
 //! **requesting client's** environment snapshot, minus multiplexer and agent
-//! markers that belong to the client's own context, plus Orchestra's session
+//! markers that belong to the client's own context, plus Rakumux's session
 //! identity.
 
 use session_core::api::{ApiError, ErrorCode};
-use session_core::env as orchestra_env;
+use session_core::env as rakumux_env;
 use session_core::ids::{SessionId, Token};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -22,14 +22,14 @@ const STRIPPED: &[&str] = &[
     "CODEX_THREAD_ID",
     "OMPCODE",
     // Replaced below with this session's values.
-    orchestra_env::SOCKET,
+    rakumux_env::SOCKET,
     "TERM",
     "COLORTERM",
 ];
 
 /// Prefixes removed from the inherited environment (a parent session's
 /// identity must never leak into a child).
-const STRIPPED_PREFIXES: &[&str] = &["ORCHESTRA_SESSION_"];
+const STRIPPED_PREFIXES: &[&str] = &["RAKUMUX_SESSION_"];
 
 /// Fallback when neither the request nor the daemon knows a shell.
 pub(crate) const FALLBACK_SHELL: &str = "/bin/sh";
@@ -39,9 +39,9 @@ pub(crate) struct Identity<'a> {
     pub session_id: &'a SessionId,
     pub token: &'a Token,
     pub socket: &'a Path,
-    /// Daemon-configured `ORCHESTRA_BIN`; when None, the request's value (if
+    /// Daemon-configured `RAKUMUX_BIN`; when None, the request's value (if
     /// any) is kept.
-    pub orchestra_bin: Option<&'a Path>,
+    pub rakumux_bin: Option<&'a Path>,
 }
 
 /// Validate a request environment: names must be non-empty and free of `=`
@@ -116,22 +116,19 @@ pub(crate) fn child_env(
         !STRIPPED.contains(&name.as_str()) && !STRIPPED_PREFIXES.iter().any(|p| name.starts_with(p))
     });
     env.insert(
-        orchestra_env::SESSION_ID.into(),
+        rakumux_env::SESSION_ID.into(),
         identity.session_id.as_str().into(),
     );
     env.insert(
-        orchestra_env::SESSION_TOKEN.into(),
+        rakumux_env::SESSION_TOKEN.into(),
         identity.token.as_str().into(),
     );
     env.insert(
-        orchestra_env::SOCKET.into(),
+        rakumux_env::SOCKET.into(),
         identity.socket.to_string_lossy().into_owned(),
     );
-    if let Some(bin) = identity.orchestra_bin {
-        env.insert(
-            orchestra_env::BIN.into(),
-            bin.to_string_lossy().into_owned(),
-        );
+    if let Some(bin) = identity.rakumux_bin {
+        env.insert(rakumux_env::BIN.into(), bin.to_string_lossy().into_owned());
     }
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("COLORTERM".into(), "truecolor".into());
@@ -229,7 +226,7 @@ mod tests {
             session_id: &id,
             token: &token,
             socket: Path::new("/tmp/o.sock"),
-            orchestra_bin: Some(Path::new("/opt/orchestra")),
+            rakumux_bin: Some(Path::new("/opt/rakumux")),
         };
         let request = pairs(&[
             ("PATH", "/bin"),
@@ -241,39 +238,39 @@ mod tests {
             ("CLAUDE_CODE_MESSAGING_TOKEN", "m"),
             ("CODEX_THREAD_ID", "t"),
             ("OMPCODE", "1"),
-            ("ORCHESTRA_SESSION_ID", "PARENT"),
-            ("ORCHESTRA_SESSION_TOKEN", "parent-token"),
-            ("ORCHESTRA_SESSION_FUTURE", "x"),
-            ("ORCHESTRA_BIN", "/old"),
-            ("ORCHESTRA_HOME", "/h"),
+            ("RAKUMUX_SESSION_ID", "PARENT"),
+            ("RAKUMUX_SESSION_TOKEN", "parent-token"),
+            ("RAKUMUX_SESSION_FUTURE", "x"),
+            ("RAKUMUX_BIN", "/old"),
+            ("RAKUMUX_HOME", "/h"),
             ("TERM", "screen"),
         ]);
         let env: BTreeMap<_, _> = child_env(&request, &identity).into_iter().collect();
         let expected = pairs(&[
             ("COLORTERM", "truecolor"),
-            ("ORCHESTRA_BIN", "/opt/orchestra"),
-            ("ORCHESTRA_HOME", "/h"),
-            ("ORCHESTRA_SESSION_ID", "S1"),
-            ("ORCHESTRA_SESSION_TOKEN", "tok"),
-            ("ORCHESTRA_SOCKET", "/tmp/o.sock"),
             ("PATH", "/bin"),
+            ("RAKUMUX_BIN", "/opt/rakumux"),
+            ("RAKUMUX_HOME", "/h"),
+            ("RAKUMUX_SESSION_ID", "S1"),
+            ("RAKUMUX_SESSION_TOKEN", "tok"),
+            ("RAKUMUX_SOCKET", "/tmp/o.sock"),
             ("TERM", "xterm-256color"),
         ]);
         assert_eq!(env.into_iter().collect::<Vec<_>>(), expected);
     }
 
     #[test]
-    fn request_orchestra_bin_kept_when_daemon_has_none() {
+    fn request_rakumux_bin_kept_when_daemon_has_none() {
         let id = SessionId::from_string("S1");
         let token = Token::from_string("tok");
         let identity = Identity {
             session_id: &id,
             token: &token,
             socket: Path::new("/s"),
-            orchestra_bin: None,
+            rakumux_bin: None,
         };
-        let env = child_env(&pairs(&[("ORCHESTRA_BIN", "/client/orchestra")]), &identity);
-        assert!(env.contains(&("ORCHESTRA_BIN".into(), "/client/orchestra".into())));
+        let env = child_env(&pairs(&[("RAKUMUX_BIN", "/client/rakumux")]), &identity);
+        assert!(env.contains(&("RAKUMUX_BIN".into(), "/client/rakumux".into())));
     }
 
     #[test]
@@ -320,8 +317,8 @@ mod tests {
     fn empty_session_snapshot_inherits_the_caller_sessions_env() {
         let parent_spawn_env = pairs(&[
             ("PATH", "/parent/bin"),
-            ("ORCHESTRA_SESSION_ID", "PARENT"),
-            ("ORCHESTRA_SESSION_TOKEN", "parent-token"),
+            ("RAKUMUX_SESSION_ID", "PARENT"),
+            ("RAKUMUX_SESSION_TOKEN", "parent-token"),
             ("CLAUDECODE", "1"),
         ]);
         // A session caller that sent no snapshot inherits its own spawn env…
@@ -332,12 +329,12 @@ mod tests {
             session_id: &id,
             token: &token,
             socket: Path::new("/s"),
-            orchestra_bin: None,
+            rakumux_bin: None,
         };
         let env: BTreeMap<_, _> = child_env(&base, &identity).into_iter().collect();
         assert_eq!(env["PATH"], "/parent/bin");
-        assert_eq!(env["ORCHESTRA_SESSION_ID"], "CHILD");
-        assert_eq!(env["ORCHESTRA_SESSION_TOKEN"], "child-token");
+        assert_eq!(env["RAKUMUX_SESSION_ID"], "CHILD");
+        assert_eq!(env["RAKUMUX_SESSION_TOKEN"], "child-token");
         assert!(!env.contains_key("CLAUDECODE"));
         // …an explicit snapshot wins…
         let explicit = pairs(&[("PATH", "/explicit")]);

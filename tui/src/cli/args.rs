@@ -1,4 +1,4 @@
-//! Command-line grammar of the `orchestra` subcommands.
+//! Command-line grammar of the `rakumux` subcommands.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use session_core::api::{ReadSource, TextFormat, WaitUntil};
@@ -14,13 +14,13 @@ pub const SUBCOMMANDS: &[&str] = &[
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "orchestra",
-    bin_name = "orchestra",
+    name = "rakumux",
+    bin_name = "rakumux",
     about = "Sessions for coding agents: terminals grouped by the folder they run in",
     disable_version_flag = true
 )]
 pub struct CliArgs {
-    /// Path to the orchestra-ptyd daemon binary
+    /// Path to the rakumux-ptyd daemon binary
     #[arg(long, value_name = "PATH", global = true)]
     pub ptyd_path: Option<PathBuf>,
 
@@ -94,14 +94,14 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Manage the orchestra-ptyd daemon
+    /// Manage the rakumux-ptyd daemon
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
     },
-    /// Remote access for the Orchestra app on your phone, over Tailscale
+    /// Remote access for the Rakumux app on your phone, over Tailscale
     ///
-    /// Off until `orchestra remote on`. orchestra-api then also listens on
+    /// Off until `rakumux remote on`. rakumux-api then also listens on
     /// this machine's Tailscale addresses (port 7337), for requests that
     /// carry the remote token.
     Remote {

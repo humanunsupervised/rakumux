@@ -23,7 +23,7 @@ pub struct Config {
     pub openai_model: Option<String>,
 }
 
-/// Everything in `~/.orchestra/config.json` (`$ORCHESTRA_HOME` respected):
+/// Everything in `~/.rakumux/config.json` (`$RAKUMUX_HOME` respected):
 /// the AI settings at the top level plus the `"sessions"` section. Load
 /// and save through this type so neither part is lost.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -34,7 +34,7 @@ pub struct Settings {
     pub sessions: SessionsConfig,
 }
 
-/// The `"sessions"` section. The TUI reads `orchestra_key` (and the older
+/// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
 /// `phone_offer_seen`, `layout`, `icons`, `sidebar_width`, `stacked_list_percent` and
 /// `session_order`; other keys in the
@@ -44,16 +44,16 @@ pub struct Settings {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub struct SessionsConfig {
-    /// The key that takes you from a session to Orchestra mode, e.g.
-    /// `"ctrl+\\"`; see [`SessionsConfig::orchestra_key_spec`].
+    /// The key that takes you from a session to Rakumux mode, e.g.
+    /// `"ctrl+\\"`; see [`SessionsConfig::rakumux_key_spec`].
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub orchestra_key: Option<String>,
+    pub rakumux_key: Option<String>,
     /// The in-session prefix of earlier versions. Kept as it is in the
-    /// file; one the user changed from `"ctrl+b"` becomes the Orchestra key
-    /// while `orchestra_key` isn't set.
+    /// file; one the user changed from `"ctrl+b"` becomes the Rakumux key
+    /// while `rakumux_key` isn't set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefix_key: Option<String>,
-    /// Keys that select the previous/next session in Orchestra mode.
+    /// Keys that select the previous/next session in Rakumux mode.
     pub cycle_keys: CycleKeysConfig,
     /// The cycle keys also work in session mode, so the program in the
     /// session never receives them.
@@ -62,7 +62,7 @@ pub struct SessionsConfig {
     /// Don't show the welcome tour on startup (the box on its cards).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub welcome_seen: bool,
-    /// "Use Orchestra from your phone?" was offered (once, when Tailscale
+    /// "Use Rakumux from your phone?" was offered (once, when Tailscale
     /// runs here and phone access was never set up); Settings' Phone access
     /// row turns it on any time.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -108,7 +108,7 @@ pub struct SessionsConfig {
 impl Default for SessionsConfig {
     fn default() -> Self {
         Self {
-            orchestra_key: None,
+            rakumux_key: None,
             prefix_key: None,
             cycle_keys: CycleKeysConfig::default(),
             cycle_keys_in_session: false,
@@ -125,17 +125,17 @@ impl Default for SessionsConfig {
 }
 
 impl SessionsConfig {
-    /// The Orchestra key to use: `orchestra_key`, else a customised
+    /// The Rakumux key to use: `rakumux_key`, else a customised
     /// `prefix_key`, else the default (`Ctrl-\\`).
-    pub fn orchestra_key_spec(&self) -> &str {
+    pub fn rakumux_key_spec(&self) -> &str {
         let customised_prefix =
             self.prefix_key.as_deref().map(str::trim).filter(|p| {
                 !p.is_empty() && !p.eq_ignore_ascii_case(super::keys::OLD_DEFAULT_PREFIX)
             });
-        self.orchestra_key
+        self.rakumux_key
             .as_deref()
             .or(customised_prefix)
-            .unwrap_or(super::keys::DEFAULT_ORCHESTRA_KEY)
+            .unwrap_or(super::keys::DEFAULT_RAKUMUX_KEY)
     }
 }
 
@@ -164,7 +164,7 @@ fn lenient_layout<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SessionL
 }
 
 /// `"cycle_keys": { "previous": "alt+up", "next": "alt+down" }`. Both
-/// empty turns them off (`j`/`k` and the arrows still move in Orchestra
+/// empty turns them off (`j`/`k` and the arrows still move in Rakumux
 /// mode).
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
@@ -216,9 +216,7 @@ impl Settings {
         }
         let home_dir = std::env::var("HOME")
             .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
-        Ok(PathBuf::from(home_dir)
-            .join(".orchestra")
-            .join("config.json"))
+        Ok(PathBuf::from(home_dir).join(".rakumux").join("config.json"))
     }
 }
 
@@ -233,7 +231,7 @@ mod tests {
 
         let settings = Settings::load_from(&path).expect("load default config");
         assert_eq!(settings, Settings::default());
-        assert_eq!(settings.sessions.orchestra_key_spec(), "ctrl+\\");
+        assert_eq!(settings.sessions.rakumux_key_spec(), "ctrl+\\");
 
         let settings = Settings {
             ai: Config {
@@ -374,20 +372,20 @@ mod tests {
     }
 
     #[test]
-    fn the_orchestra_key_replaces_the_old_default_prefix_but_keeps_a_custom_one() {
+    fn the_rakumux_key_replaces_the_old_default_prefix_but_keeps_a_custom_one() {
         let read = |json: &str| -> SessionsConfig { serde_json::from_str(json).unwrap() };
-        assert_eq!(read("{}").orchestra_key_spec(), "ctrl+\\");
+        assert_eq!(read("{}").rakumux_key_spec(), "ctrl+\\");
         // Earlier versions saved their default prefix; it doesn't stick.
         assert_eq!(
-            read(r#"{"prefix_key":"ctrl+b"}"#).orchestra_key_spec(),
+            read(r#"{"prefix_key":"ctrl+b"}"#).rakumux_key_spec(),
             "ctrl+\\"
         );
         assert_eq!(
-            read(r#"{"prefix_key":"ctrl+a"}"#).orchestra_key_spec(),
+            read(r#"{"prefix_key":"ctrl+a"}"#).rakumux_key_spec(),
             "ctrl+a"
         );
         assert_eq!(
-            read(r#"{"prefix_key":"ctrl+a","orchestra_key":"ctrl+q"}"#).orchestra_key_spec(),
+            read(r#"{"prefix_key":"ctrl+a","rakumux_key":"ctrl+q"}"#).rakumux_key_spec(),
             "ctrl+q"
         );
         let config = read(r#"{"cycle_keys_in_session":true,"icons":"emoji"}"#);
@@ -397,7 +395,7 @@ mod tests {
         // Off isn't written out.
         let json = serde_json::to_value(read("{}")).unwrap();
         assert!(json.get("cycle_keys_in_session").is_none());
-        assert!(json.get("orchestra_key").is_none());
+        assert!(json.get("rakumux_key").is_none());
         assert!(json.get("icons").is_none());
     }
 }

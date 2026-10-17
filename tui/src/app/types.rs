@@ -23,12 +23,12 @@ pub enum AppResult {
 /// Where keys go when no dialog is open: the two modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Focus {
-    /// Orchestra mode: keys drive Orchestra (the list or tab bar); the
+    /// Rakumux mode: keys drive Rakumux (the list or tab bar); the
     /// detail pane observes the selected session.
     #[default]
     List,
     /// Session mode: keys go to the selected session, which this client
-    /// controls, except the Orchestra key.
+    /// controls, except the Rakumux key.
     Session,
 }
 
@@ -200,7 +200,7 @@ pub struct DaemonRestartDialog {
     /// running.
     pub in_place: bool,
     pub detail: String,
-    /// What this Orchestra shows that the running (older, compatible)
+    /// What this Rakumux shows that the running (older, compatible)
     /// daemon can't, e.g. "git branches and worktrees"; empty when the
     /// daemon speaks another protocol.
     pub missing: Vec<String>,
@@ -406,7 +406,7 @@ pub enum AppMode {
     Upgrade(UpgradeDialog),
     /// The welcome tour (first start, or `t` in Help).
     Welcome(WelcomeState),
-    /// "Use Orchestra from your phone?": offered once, when Tailscale runs
+    /// "Use Rakumux from your phone?": offered once, when Tailscale runs
     /// here and phone access was never set up.
     PhoneOffer,
     /// The pairing dialog (Settings' Phone access row, or the offer).

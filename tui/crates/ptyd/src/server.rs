@@ -47,8 +47,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Daemon version reported in `hello`, `daemon_status` and `service.json`.
-/// Release builds may set `ORCHESTRA_VERSION` at compile time.
-pub const VERSION: &str = match option_env!("ORCHESTRA_VERSION") {
+/// Release builds may set `RAKUMUX_VERSION` at compile time.
+pub const VERSION: &str = match option_env!("RAKUMUX_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),
 };
@@ -119,15 +119,15 @@ const MAX_PRE_HELLO_ERRORS: u32 = 8;
 /// How often an event stream checks for a closed client or shutdown.
 const EVENT_POLL: Duration = Duration::from_millis(250);
 
-const USAGE: &str = "usage: orchestra-ptyd serve | orchestra-ptyd --version";
+const USAGE: &str = "usage: rakumux-ptyd serve | rakumux-ptyd --version";
 
-/// Process entry point for the `orchestra-ptyd` binary. Returns the exit code.
-/// `orchestra-ptyd serve` | `orchestra-ptyd --version`; internally also
+/// Process entry point for the `rakumux-ptyd` binary. Returns the exit code.
+/// `rakumux-ptyd serve` | `rakumux-ptyd --version`; internally also
 /// `serve --handoff-fd <fd>` (a restart in place) and `handoff-versions`.
 pub fn main_entry(args: Vec<String>) -> i32 {
     match args.get(1).map(String::as_str) {
         Some("--version" | "-V" | "version") if args.len() == 2 => {
-            println!("orchestra-ptyd {VERSION} (protocol {PROTOCOL_VERSION})");
+            println!("rakumux-ptyd {VERSION} (protocol {PROTOCOL_VERSION})");
             0
         }
         Some("--help" | "-h" | "help") => {
@@ -163,7 +163,7 @@ fn current() -> Option<ServerHandle> {
     CURRENT.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-/// `orchestra-ptyd serve`: run the daemon in the foreground. With
+/// `rakumux-ptyd serve`: run the daemon in the foreground. With
 /// `handoff_fd`, carry on from the previous image of this process.
 fn serve_main(handoff_fd: Option<RawFd>) -> i32 {
     // Block the daemon's signals before any thread exists so every thread
@@ -172,7 +172,7 @@ fn serve_main(handoff_fd: Option<RawFd>) -> i32 {
     let signals = match block_daemon_signals() {
         Ok(set) => set,
         Err(e) => {
-            eprintln!("orchestra-ptyd: cannot block signals: {e}");
+            eprintln!("rakumux-ptyd: cannot block signals: {e}");
             return 1;
         }
     };
@@ -181,7 +181,7 @@ fn serve_main(handoff_fd: Option<RawFd>) -> i32 {
         Err(e) => {
             // The handed-over descriptors are lost with the state: exiting
             // closes them and the programs get SIGHUP.
-            eprintln!("orchestra-ptyd: cannot read the handoff state: {e}");
+            eprintln!("rakumux-ptyd: cannot read the handoff state: {e}");
             if let Ok(layout) = Layout::from_env() {
                 crate::log::init(&layout);
                 log_error!("cannot read the handoff state: {e}; running sessions end");
@@ -206,20 +206,20 @@ fn serve_main(handoff_fd: Option<RawFd>) -> i32 {
     let layout = match layout {
         Ok(layout) => layout,
         Err(e) => {
-            eprintln!("orchestra-ptyd: cannot resolve the Orchestra home: {e}");
+            eprintln!("rakumux-ptyd: cannot resolve the Rakumux home: {e}");
             return 1;
         }
     };
     crate::log::init(&layout);
     match &handed {
         Some(state) => log_info!(
-            "orchestra-ptyd {VERSION} restarted in place from {} (pid {}, {} running terminal(s))",
+            "rakumux-ptyd {VERSION} restarted in place from {} (pid {}, {} running terminal(s))",
             state.from_version,
             std::process::id(),
             state.terminals.len()
         ),
         None => log_info!(
-            "orchestra-ptyd {VERSION} starting (pid {}, home {})",
+            "rakumux-ptyd {VERSION} starting (pid {}, home {})",
             std::process::id(),
             layout.home.display()
         ),
@@ -244,7 +244,7 @@ fn serve_main(handoff_fd: Option<RawFd>) -> i32 {
         };
         let (binary, state) = match outcome {
             Ok(Ended::Stopped) => {
-                log_info!("orchestra-ptyd stopped");
+                log_info!("rakumux-ptyd stopped");
                 return 0;
             }
             Ok(Ended::Restart { binary, state }) => (binary, *state),
@@ -312,12 +312,12 @@ impl Instance<'_> {
             Ok(claim) => claim,
             Err(e @ ClaimError::AlreadyRunning(_)) => {
                 log_info!("not starting: {e}");
-                eprintln!("orchestra-ptyd: {e}");
+                eprintln!("rakumux-ptyd: {e}");
                 return Err(1);
             }
             Err(e) => {
                 log_error!("{e}");
-                eprintln!("orchestra-ptyd: {e}");
+                eprintln!("rakumux-ptyd: {e}");
                 return Err(1);
             }
         };
@@ -344,7 +344,7 @@ impl Instance<'_> {
             Ok(claim) => claim,
             Err(e) => {
                 log_error!("cannot take over the daemon's socket: {e}; running sessions end");
-                eprintln!("orchestra-ptyd: {e}");
+                eprintln!("rakumux-ptyd: {e}");
                 for fd in terminal_fds {
                     handoff::close(fd);
                 }
@@ -371,7 +371,7 @@ impl Instance<'_> {
             layout: self.layout.clone(),
             user_token: claim.user_token.clone(),
             socket: claim.registration.socket.clone(),
-            orchestra_bin: std::env::var_os(session_core::env::BIN).map(PathBuf::from),
+            rakumux_bin: std::env::var_os(session_core::env::BIN).map(PathBuf::from),
             version: VERSION.to_string(),
             limits: Limits::default(),
         }
@@ -387,7 +387,7 @@ impl Instance<'_> {
             Ok(control) => Arc::new(control),
             Err(e) => {
                 log_error!("cannot open the session registry: {e}");
-                eprintln!("orchestra-ptyd: cannot open the session registry: {e}");
+                eprintln!("rakumux-ptyd: cannot open the session registry: {e}");
                 host.shutdown();
                 return Err(1);
             }
@@ -435,7 +435,7 @@ fn start_registration_watchdog(layout: Layout, instance_id: String) {
     }
 }
 
-/// Make `ORCHESTRA_HOME` absolute before the daemon changes directory.
+/// Make `RAKUMUX_HOME` absolute before the daemon changes directory.
 fn absolute_layout(layout: Layout) -> io::Result<Layout> {
     if layout.home.is_absolute() && layout.run_dir.is_absolute() {
         return Ok(layout);
@@ -504,7 +504,7 @@ const REGISTRATION_CHECK: std::time::Duration = std::time::Duration::from_secs(5
 
 /// Shut down when the registration file is gone or names another daemon:
 /// the runtime directory was deleted (e.g. a removed temporary
-/// `ORCHESTRA_HOME`), so no client could find this daemon any more.
+/// `RAKUMUX_HOME`), so no client could find this daemon any more.
 fn watch_registration(layout: Layout, instance_id: String) {
     loop {
         std::thread::sleep(REGISTRATION_CHECK);

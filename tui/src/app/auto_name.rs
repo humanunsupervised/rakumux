@@ -1,4 +1,4 @@
-//! AI naming: a session whose name Orchestra generated (`auto_named`, from
+//! AI naming: a session whose name Rakumux generated (`auto_named`, from
 //! whichever client created it) gets an AI-suggested name the first time it
 //! settles (`Idle`/`Done`), from its command history and visible screen
 //! (`crate::naming`).

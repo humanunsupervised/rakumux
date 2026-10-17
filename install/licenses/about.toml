@@ -1,8 +1,8 @@
 # cargo-about configuration for THIRD_PARTY_NOTICES.
 # Used by install/scripts/generate-third-party-notices.sh; see install/AGENTS.md.
 #
-# Licenses of crates linked into the shipped binaries (tui, orchestra-ptyd,
-# orchestra-api, orchestra-mcp).
+# Licenses of crates linked into the shipped binaries (tui, rakumux-ptyd,
+# rakumux-api, rakumux-mcp).
 # Adding a license here is a legal decision: anything copyleft beyond MPL-2.0's
 # file-level terms (GPL, LGPL, AGPL, ...) must not be accepted for a closed-source
 # release. MPL-2.0 (webpki-roots, via reqwest/rustls) is used unmodified; the notices
@@ -27,7 +27,7 @@ accepted = [
 ignore-dev-dependencies = true
 ignore-build-dependencies = true
 
-# Orchestra's own crates are proprietary (publish = false); they aren't third-party.
+# Rakumux's own crates are proprietary (publish = false); they aren't third-party.
 private = { ignore = true }
 
 # Release targets (install/scripts/build-release.sh), so platform-specific crates count.

@@ -1,6 +1,6 @@
-//! Phone access: remote access for the Orchestra app on a phone
+//! Phone access: remote access for the Rakumux app on a phone
 //! (`crate::remote_access`). Checked at startup; offered once ("Use
-//! Orchestra from your phone?") when Tailscale runs here and it was never
+//! Rakumux from your phone?") when Tailscale runs here and it was never
 //! set up; turned on and off from Settings' Phone access row; and the
 //! pairing dialog, with the QR code the app scans.
 
@@ -30,7 +30,7 @@ impl App {
         self.offer_phone_access();
     }
 
-    /// Show the pending offer once nothing else is: Orchestra mode, no
+    /// Show the pending offer once nothing else is: Rakumux mode, no
     /// dialog (so after the welcome tour). It's recorded as offered as it
     /// opens, so it never comes back. Returns whether it opened.
     pub fn offer_phone_access(&mut self) -> bool {

@@ -1,6 +1,6 @@
 {
-  "name": "@humanu/orchestra",
-  "version": "0.6.0",
+  "name": "rakumux",
+  "version": "0.1.0",
   "description": "Terminal session manager for coding agents, with a fast TUI, a background session daemon and an MCP server",
   "keywords": [
     "terminal",
@@ -16,22 +16,22 @@
     "opencode",
     "mcp"
   ],
-  "homepage": "https://github.com/humanunsupervised/orchestra",
+  "homepage": "https://github.com/humanunsupervised/rakumux",
   "bugs": {
-    "url": "https://github.com/humanunsupervised/orchestra/issues"
+    "url": "https://github.com/humanunsupervised/rakumux/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/humanunsupervised/orchestra.git"
+    "url": "git+https://github.com/humanunsupervised/rakumux.git"
   },
   "license": "SEE LICENSE IN LICENSE",
   "author": "Human Unsupervised",
   "main": "install.js",
   "bin": {
-    "orchestra": "bin/orchestra.js",
-    "orchestra-local": "bin/orchestra-local.js",
-    "orchestra-mcp": "bin/orchestra-mcp.js",
-    "orchestra-api": "bin/orchestra-api.js"
+    "rakumux": "bin/rakumux.js",
+    "rakumux-local": "bin/rakumux-local.js",
+    "rakumux-mcp": "bin/rakumux-mcp.js",
+    "rakumux-api": "bin/rakumux-api.js"
   },
   "files": [
     "bin/",

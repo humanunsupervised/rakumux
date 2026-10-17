@@ -57,7 +57,7 @@ const RESUME_CHECK_MS: i64 = 5_000;
 /// forgotten (programs killed during a reboot leave the prompt for a
 /// moment).
 const SHELL_SETTLE_MS: i64 = 15_000;
-/// Sessions that were running, in the Orchestra home (see
+/// Sessions that were running, in the Rakumux home (see
 /// [`Inner::save_running`]).
 const RUNNING_FILE: &str = "running.json";
 /// Limits on what a session may report about itself.
@@ -1670,7 +1670,7 @@ impl Inner {
         }
     }
 
-    /// Write which sessions run to `running.json` in the Orchestra home, so
+    /// Write which sessions run to `running.json` in the Rakumux home, so
     /// the next daemon start can revive them if this one ends without the
     /// user stopping it (a crash, a reboot).
     fn save_running(&self, state: &State) {
@@ -1717,7 +1717,7 @@ impl Inner {
         };
         let caller = Caller {
             info: session_core::api::CallerInfo::User,
-            client: "orchestra-ptyd".into(),
+            client: "rakumux-ptyd".into(),
             max_blocking_ms: None,
         };
         let mut state = self.lock();
@@ -1830,7 +1830,7 @@ impl Inner {
                 session_id: &record.id,
                 token: &token,
                 socket: &self.config.socket,
-                orchestra_bin: self.config.orchestra_bin.as_deref(),
+                rakumux_bin: self.config.rakumux_bin.as_deref(),
             },
         );
         let spec = SpawnSpec {

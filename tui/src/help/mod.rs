@@ -1,15 +1,15 @@
 //! The Settings and Help modals, which share their frame, tabs and keys.
 //!
-//! - **Settings** (`,` or `o` in Orchestra mode): the General
+//! - **Settings** (`,` or `o` in Rakumux mode): the General
 //!   tab lists the settings (layout, AI naming provider, API keys) for the
 //!   caller to change; the Keys tab is a table of actions and their keys,
 //!   built from the user's configured keys, where `Enter` runs the selected
 //!   action.
-//! - **Help** (`?` in Orchestra mode): sessions and
+//! - **Help** (`?` in Rakumux mode): sessions and
 //!   folders (the folder filter, All folders, multi-select, grouping, order,
 //!   pinning, git branch and worktree), the screen, moving around, the mouse, layouts, observer vs
 //!   controller, exited/dead sessions and revive, the single background
-//!   server shared by several windows, the `orchestra` CLI and agent
+//!   server shared by several windows, the `rakumux` CLI and agent
 //!   commands, AI naming, and the license.
 //!
 //! The caller keeps a [`ModalState`] while a modal is open (its tab says
@@ -30,9 +30,9 @@ use ratatui::Frame;
 use crate::layout::{self, char_width, str_width, truncate, SessionLayout, TabItem};
 use crate::theme;
 
-/// Opens Settings in Orchestra mode, besides `,`.
+/// Opens Settings in Rakumux mode, besides `,`.
 pub const SETTINGS_KEY: &str = "o";
-/// The key the footer shows for Settings in Orchestra mode.
+/// The key the footer shows for Settings in Rakumux mode.
 pub const SETTINGS_KEY_PRIMARY: &str = ",";
 
 /// The modal never shrinks below this size unless the screen does.
@@ -60,7 +60,7 @@ const LITERAL_BACKTICK: char = '\u{E000}';
 pub enum Modal {
     /// What you can change and do: General, Keys.
     Settings,
-    /// How Orchestra works: Overview, Sessions, Layouts, Agents & CLI,
+    /// How Rakumux works: Overview, Sessions, Layouts, Agents & CLI,
     /// License.
     Help,
 }
@@ -172,12 +172,12 @@ impl ModalTab {
 }
 
 /// An action on the Settings modal's Keys tab: a row of the table, run with
-/// `Enter` there or with its keys in Orchestra mode.
+/// `Enter` there or with its keys in Rakumux mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyAction {
-    /// From a session to Orchestra mode (the Orchestra key).
-    OrchestraMode,
-    /// Back into the session Orchestra mode was entered from.
+    /// From a session to Rakumux mode (the Rakumux key).
+    RakumuxMode,
+    /// Back into the session Rakumux mode was entered from.
     BackToSession,
     /// Work in the selected session (take control).
     GoIn,
@@ -217,19 +217,19 @@ pub enum KeyAction {
     Reload,
     QuitAndCd,
     Quit,
-    /// Into the session and send it the Orchestra key itself.
-    SendOrchestraKey,
+    /// Into the session and send it the Rakumux key itself.
+    SendRakumuxKey,
 }
 
 impl KeyAction {
     /// The rows of the Keys tab, in order.
     pub const ALL: [KeyAction; 33] = [
-        KeyAction::OrchestraMode,
+        KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
         KeyAction::LastSession,
         KeyAction::NumberedSession,
-        KeyAction::SendOrchestraKey,
+        KeyAction::SendRakumuxKey,
         KeyAction::NextSession,
         KeyAction::PreviousSession,
         KeyAction::Top,
@@ -262,12 +262,12 @@ impl KeyAction {
     /// The Keys tab heading it's listed under.
     pub fn section(self) -> &'static str {
         match self {
-            KeyAction::OrchestraMode
+            KeyAction::RakumuxMode
             | KeyAction::BackToSession
             | KeyAction::GoIn
             | KeyAction::LastSession
             | KeyAction::NumberedSession
-            | KeyAction::SendOrchestraKey => "Modes",
+            | KeyAction::SendRakumuxKey => "Modes",
             KeyAction::NextSession
             | KeyAction::PreviousSession
             | KeyAction::Top
@@ -301,7 +301,7 @@ impl KeyAction {
     /// The Action column.
     pub fn label(self) -> &'static str {
         match self {
-            KeyAction::OrchestraMode => "Orchestra mode (from a session)",
+            KeyAction::RakumuxMode => "Rakumux mode (from a session)",
             KeyAction::BackToSession => "Back to the session you came from",
             KeyAction::GoIn => "Go into the selected session",
             KeyAction::LastSession => "Last session",
@@ -332,12 +332,12 @@ impl KeyAction {
             KeyAction::CheckForUpdate => "Check for updates",
             KeyAction::Reload => "Reconnect or reload the list",
             KeyAction::QuitAndCd => "Quit and cd to the session's folder",
-            KeyAction::Quit => "Quit Orchestra (sessions keep running)",
-            KeyAction::SendOrchestraKey => "Send the Orchestra key to the session",
+            KeyAction::Quit => "Quit Rakumux (sessions keep running)",
+            KeyAction::SendRakumuxKey => "Send the Rakumux key to the session",
         }
     }
 
-    /// The Key column: the Orchestra key for leaving a session, Orchestra
+    /// The Key column: the Rakumux key for leaving a session, Rakumux
     /// mode's keys for the rest, from the configured keys.
     fn keys(self, k: &KeyNames) -> String {
         let plain = |keys: &[&str]| keys.join(", ");
@@ -349,7 +349,7 @@ impl KeyAction {
             all.join(", ")
         };
         match self {
-            KeyAction::OrchestraMode => k.key.clone(),
+            KeyAction::RakumuxMode => k.key.clone(),
             KeyAction::BackToSession => format!("Esc, {}", k.key),
             KeyAction::GoIn => plain(&["Enter", "i", "l", "→"]),
             KeyAction::LastSession => plain(&["Tab"]),
@@ -381,7 +381,7 @@ impl KeyAction {
             KeyAction::Reload => plain(&["Ctrl-r"]),
             KeyAction::QuitAndCd => plain(&["c"]),
             KeyAction::Quit => plain(&["q"]),
-            KeyAction::SendOrchestraKey => plain(&["\\"]),
+            KeyAction::SendRakumuxKey => plain(&["\\"]),
         }
     }
 
@@ -390,10 +390,10 @@ impl KeyAction {
     fn note(self, k: &KeyNames) -> String {
         let p = &k.p;
         match self {
-            KeyAction::OrchestraMode => format!(
-                "`{p}` is the one key a session's program never gets. In Orchestra mode your \
-                 keys drive Orchestra and the session is only shown; every other row here is \
-                 an Orchestra mode key."
+            KeyAction::RakumuxMode => format!(
+                "`{p}` is the one key a session's program never gets. In Rakumux mode your \
+                 keys drive Rakumux and the session is only shown; every other row here is \
+                 a Rakumux mode key."
             ),
             KeyAction::BackToSession => format!(
                 "Esc first cancels what's pending (the second key of `gg` or `dd`, then the \
@@ -413,7 +413,7 @@ impl KeyAction {
                      Option/Alt: in Terminal.app turn on \"Use Option as Meta key\"."
                 ),
                 Some(cycle) => format!(
-                    "`{cycle}` works in Orchestra mode; turn on \"Option+↑/↓ in sessions\" \
+                    "`{cycle}` works in Rakumux mode; turn on \"Option+↑/↓ in sessions\" \
                      (General) to use it inside a session too. If it does nothing, your \
                      terminal isn't sending Option/Alt: in Terminal.app turn on \"Use Option as \
                      Meta key\"."
@@ -442,11 +442,11 @@ impl KeyAction {
             KeyAction::Zoom => {
                 format!("The list or tab bar hides until you press `{p}`.")
             }
-            KeyAction::SendOrchestraKey => {
+            KeyAction::SendRakumuxKey => {
                 format!("Goes back into the session and sends it `{p}`, for programs that use it.")
             }
             KeyAction::QuitAndCd => {
-                "Needs the shell wrapper described at the top of orchestra.sh.".into()
+                "Needs the shell wrapper described at the top of rakumux.sh.".into()
             }
             _ => String::new(),
         }
@@ -616,8 +616,8 @@ impl ModalState {
 /// the configured keys and the General tab the current settings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModalContext {
-    /// The Orchestra key as the user should read it, e.g. `Ctrl-\\`.
-    pub orchestra_key: String,
+    /// The Rakumux key as the user should read it, e.g. `Ctrl-\\`.
+    pub rakumux_key: String,
     /// Session cycle keys as the user should read them, e.g. `Alt-↑/↓`.
     /// Empty when cycling is turned off.
     pub cycle_keys: String,
@@ -631,9 +631,9 @@ pub struct ModalContext {
     pub icons: crate::icons::Icons,
     /// Layout currently in use.
     pub layout: SessionLayout,
-    /// Orchestra version, shown in the modal's title.
+    /// Rakumux version, shown in the modal's title.
     pub version: String,
-    /// Opened while a session had the keys rather than Orchestra mode.
+    /// Opened while a session had the keys rather than Rakumux mode.
     pub in_session: bool,
     /// The General tab's rows, in order.
     pub general: Vec<SettingRow>,
@@ -681,7 +681,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext)
         ))
         .title(
             Title::from(Span::styled(
-                format!(" Orchestra {} ", ctx.version),
+                format!(" Rakumux {} ", ctx.version),
                 Style::default().fg(palette.neutral_gray),
             ))
             .alignment(Alignment::Right),
@@ -978,9 +978,9 @@ fn row(keys: impl Into<String>, description: impl Into<String>) -> (String, Stri
 
 /// Key names as they appear in the help, from the user's configuration.
 struct KeyNames {
-    /// The Orchestra key, escaped for markup.
+    /// The Rakumux key, escaped for markup.
     p: String,
-    /// The Orchestra key, raw (key tables).
+    /// The Rakumux key, raw (key tables).
     key: String,
     /// Cycle keys, escaped for markup; `None` when cycling is off.
     cycle: Option<String>,
@@ -999,8 +999,8 @@ impl KeyNames {
     fn new(ctx: &ModalContext) -> Self {
         let cycle_raw = ctx.cycle_keys.trim().to_string();
         Self {
-            p: esc(ctx.orchestra_key.trim()),
-            key: ctx.orchestra_key.trim().to_string(),
+            p: esc(ctx.rakumux_key.trim()),
+            key: ctx.rakumux_key.trim().to_string(),
             cycle: (!cycle_raw.is_empty()).then(|| esc(&cycle_raw)),
             cycle_raw,
             cycle_previous: ctx.cycle_previous.trim().to_string(),
@@ -1030,20 +1030,20 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     let p = &k.p;
     doc.note("New here? Press `t` for a one-minute tour of the keys.");
 
-    doc.heading("What Orchestra is");
+    doc.heading("What Rakumux is");
     doc.text(
-        "Orchestra runs terminal sessions in the background and shows them together on one \
+        "Rakumux runs terminal sessions in the background and shows them together on one \
          screen. A session is a folder plus a terminal: your login shell, a command you choose, \
          or a coding agent such as Claude Code, Codex or OpenCode.",
     );
     doc.text(
-        "Sessions keep running when you quit Orchestra, close the window or lose an SSH \
-         connection. Start Orchestra again in the same folder and they are all still there.",
+        "Sessions keep running when you quit Rakumux, close the window or lose an SSH \
+         connection. Start Rakumux again in the same folder and they are all still there.",
     );
     doc.text(
-        "They run in a background server, one per user on this machine. Orchestra connects to \
+        "They run in a background server, one per user on this machine. Rakumux connects to \
          it from any login (SSH, mosh, your phone) and starts it only when none runs; \
-         `orchestra --new-server` replaces it. Restarting the server keeps every program \
+         `rakumux --new-server` replaces it. Restarting the server keeps every program \
          running. After a crash or a reboot, the sessions that were running come back by \
          themselves: Claude Code, Codex and OpenCode in the same conversation, other programs \
          with their command waiting at the prompt.",
@@ -1052,8 +1052,8 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("Two modes");
     doc.text(format!(
         "In session mode your keys go to the program in the session, all of them except \
-         `{p}`, the Orchestra key. Press it to switch to Orchestra mode, where your keys \
-         drive Orchestra: the list, new sessions, folders, Help and Settings. The session \
+         `{p}`, the Rakumux key. Press it to switch to Rakumux mode, where your keys \
+         drive Rakumux: the list, new sessions, folders, Help and Settings. The session \
          keeps showing beside the list (below it on a narrow screen; on a phone you see the \
          list alone) while you look around, \
          faded: it's live, but your keys \
@@ -1069,7 +1069,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("Folders");
     doc.text(
         "Every session belongs to a folder: the one it was started in, such as a git \
-         repository, a worktree or any other folder. Orchestra shows the sessions of all \
+         repository, a worktree or any other folder. Rakumux shows the sessions of all \
          folders, under a header per folder. `Enter` on the folder filter at the top of the \
          list (or `P`) narrows the list to one folder or several, or adds a folder. The \
          Sessions tab has the details.",
@@ -1093,10 +1093,10 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     }
     doc.bullet("Detail: the selected session's screen, updating as its program runs.");
     doc.bullet(format!(
-        "Footer, the bottom row: the mode on the left (an orange ORCHESTRA, or a quiet \
+        "Footer, the bottom row: the mode on the left (an orange RAKUMUX, or a quiet \
          SESSION), then messages and the daemon connection when it isn't up, and on the right \
          the keys for this Help (`?`) and Settings (`,`); in a session they come after `{p}`, \
-         the way to Orchestra mode. Settings' Keys tab lists every key."
+         the way to Rakumux mode. Settings' Keys tab lists every key."
     ));
     doc.note(format!(
         "Current layout: {}. The Layouts tab explains both layouts and how to switch.",
@@ -1106,13 +1106,13 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("Quick start");
     doc.step(
         1,
-        "Press `n` to start a session. Leave the name empty and Orchestra picks one. You're \
+        "Press `n` to start a session. Leave the name empty and Rakumux picks one. You're \
          working in it straight away.",
     );
     doc.step(
         2,
         format!(
-            "Press `{p}` for Orchestra mode. Move between sessions with `↑`/`↓` or `j`/`k`; the \
+            "Press `{p}` for Rakumux mode. Move between sessions with `↑`/`↓` or `j`/`k`; the \
              right side shows each one live, faded until you go in."
         ),
     );
@@ -1123,7 +1123,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     );
     doc.step(
         4,
-        "In Orchestra mode, `?` opens this Help and `,` opens Settings: the General tab holds \
+        "In Rakumux mode, `?` opens this Help and `,` opens Settings: the General tab holds \
          the layout and API keys, and the Keys tab lists every key and runs the one you pick. \
          `q` quits; quitting leaves every session running.",
     );
@@ -1133,11 +1133,11 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     modal_keys(doc);
 }
 
-/// Orchestra mode's keys for moving around and getting back into a
+/// Rakumux mode's keys for moving around and getting back into a
 /// session, and the cycle keys.
 fn moving_around(doc: &mut Doc, k: &KeyNames) {
     let p = &k.p;
-    doc.heading("Moving around (Orchestra mode)");
+    doc.heading("Moving around (Rakumux mode)");
     let mut keys = vec![
         row(
             "↑, ↓, j, k",
@@ -1170,7 +1170,7 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         keys.push(row(
             k.cycle_raw.clone(),
             if k.cycle_in_session {
-                "Previous / next session, in Orchestra mode and inside sessions"
+                "Previous / next session, in Rakumux mode and inside sessions"
             } else {
                 "Previous / next session"
             },
@@ -1207,7 +1207,7 @@ fn mouse(doc: &mut Doc) {
          or up and down when the list is above the session (narrow screens).",
     );
     doc.bullet(
-        "Click the mode badge at the bottom left: SESSION switches to Orchestra mode, ORCHESTRA \
+        "Click the mode badge at the bottom left: SESSION switches to Rakumux mode, RAKUMUX \
          goes back to the session you came from. Click a key on the right of the footer (`? \
          help`, `, settings`) to do what it says. Phones send taps as clicks, so all of this \
          works there too.",
@@ -1288,15 +1288,15 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          command, and it can type startup commands into the shell once it's ready.",
     );
     doc.text(format!(
-        "Every session has a name. Leave it empty when you create a session and Orchestra picks \
-         one; rename it any time with `r` in Orchestra mode (`{p} r` from inside it)."
+        "Every session has a name. Leave it empty when you create a session and Rakumux picks \
+         one; rename it any time with `r` in Rakumux mode (`{p} r` from inside it)."
     ));
     doc.text(
         "`n` (or + New session) asks only for a name. The session goes in the current folder, \
          shown under the name, and starts your login shell there: the selected session's \
          folder, the folder whose header is selected, the folder the filter shows, or else the \
-         folder you started Orchestra in. For another folder, a command or startup commands, \
-         use the command line: `orchestra new --cwd DIR --cmd C -- ARGV`.",
+         folder you started Rakumux in. For another folder, a command or startup commands, \
+         use the command line: `rakumux new --cwd DIR --cmd C -- ARGV`.",
     );
 
     doc.heading("Folders");
@@ -1310,7 +1310,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
         "The list shows the sessions of All folders, including sessions started from another \
          window, the command line or an agent, as they appear. With more than one folder shown, \
          each folder has a header row with its name, git branch and how many of its sessions \
-         are running (live/total). The folder you started Orchestra in comes first, then the \
+         are running (live/total). The folder you started Rakumux in comes first, then the \
          others by name. `{` and `}` jump between folders.",
     );
     doc.text(
@@ -1325,7 +1325,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          it and `Enter` adds it.",
     );
     doc.text(
-        "The filter only narrows what this window shows; it isn't saved, so Orchestra always \
+        "The filter only narrows what this window shows; it isn't saved, so Rakumux always \
          starts on All folders.",
     );
 
@@ -1338,16 +1338,16 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     );
     doc.text(
         "To move a session, drag it up or down with the mouse (in the Tabs layout, drag its tab \
-         left or right), or press `J` or `K` in Orchestra mode to move the selected one down \
+         left or right), or press `J` or `K` in Rakumux mode to move the selected one down \
          or up. It stays in its folder, and among the pinned sessions or the others. The \
-         order is saved in ~/.orchestra/config.json as `sessions.session_order`.",
+         order is saved in ~/.rakumux/config.json as `sessions.session_order`.",
     );
 
     doc.heading("Pinning");
     doc.text(
         "`p` pins the selected session, or unpins it. Pinned sessions show ★ after their name \
          and come first in their folder, in both layouts, in the order you give them. \
-         Unpinned, a session goes back to its place among the others. Every Orchestra window \
+         Unpinned, a session goes back to its place among the others. Every Rakumux window \
          sees the same pins.",
     );
 
@@ -1357,10 +1357,10 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
         "The second line of each session shows its git branch ({b} main, or {b} @ and a short \
          commit id when no branch is checked out), then the program and what it's doing. \
          What the session reported follows when there's room; widen the list (drag the line \
-         beside it) to see more. Orchestra reads this from the repository's files as the \
+         beside it) to see more. Rakumux reads this from the repository's files as the \
          session moves around, so a branch switch shows within seconds; it never runs git. A \
-         server started by an older Orchestra can't read it: Orchestra offers to restart it \
-         (`orchestra daemon restart` does too)."
+         server started by an older Rakumux can't read it: Rakumux offers to restart it \
+         (`rakumux daemon restart` does too)."
     ));
     doc.text(
         "Settings, General, Icons picks the marks for folders and branches: plain symbols, \
@@ -1382,21 +1382,21 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     ]);
     doc.text(
         "For coding agents the list also shows what they're doing: working, blocked (waiting \
-         for you), done (finished, not looked at yet) or idle. Orchestra reads this from the \
+         for you), done (finished, not looked at yet) or idle. Rakumux reads this from the \
          screen and the running process, and agents can report it themselves.",
     );
 
     doc.heading("Watching and controlling");
     doc.text(
         "Selecting a session shows it as an observer: you see its output as it happens, and your keys \
-         stay in Orchestra.",
+         stay in Rakumux.",
     );
     doc.text(format!(
         "`Enter` makes you the controller: your keys go to the program and its terminal is \
-         resized to fit your pane. `{p}` hands control back and switches to Orchestra mode."
+         resized to fit your pane. `{p}` hands control back and switches to Rakumux mode."
     ));
     doc.text(
-        "One client controls a session at a time. When another Orchestra window or `orchestra \
+        "One client controls a session at a time. When another Rakumux window or `rakumux \
          attach` takes control, you become an observer again and the pane says so.",
     );
 
@@ -1406,7 +1406,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          and `Enter` restarts it in the same folder.",
     );
     doc.text(
-        "Dead: the terminal no longer exists, for example after `orchestra daemon stop`. The \
+        "Dead: the terminal no longer exists, for example after `rakumux daemon stop`. The \
          saved scrollback is shown dimmed, and `Enter` revives the session: a new terminal in \
          the same folder, its startup commands run again, an agent (Claude Code, Codex, \
          OpenCode) picks up its conversation, and another program's command waits at the \
@@ -1416,28 +1416,28 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
 
     doc.heading("One server, many windows");
     doc.text(
-        "A single background server, `orchestra-ptyd`, owns every session for your user. \
-         Orchestra starts it when needed. Each Orchestra window, `orchestra attach` and every \
-         `orchestra` command is a client of that server.",
+        "A single background server, `rakumux-ptyd`, owns every session for your user. \
+         Rakumux starts it when needed. Each Rakumux window, `rakumux attach` and every \
+         `rakumux` command is a client of that server.",
     );
     doc.text(
-        "Run Orchestra in as many terminals as you like: they show the same sessions and stay \
+        "Run Rakumux in as many terminals as you like: they show the same sessions and stay \
          in step as sessions are created, renamed or exit. Several windows can watch one \
          session; one of them at a time controls it.",
     );
     doc.text(
-        "Quitting Orchestra never stops sessions. `orchestra daemon stop` stops the server and \
+        "Quitting Rakumux never stops sessions. `rakumux daemon stop` stops the server and \
          ends every session; they show as dead and can be revived.",
     );
     doc.text(
-        "You can run Orchestra inside one of its own sessions. That session is marked as the \
+        "You can run Rakumux inside one of its own sessions. That session is marked as the \
          current one and can't be opened from inside itself.",
     );
 
     doc.heading("AI naming");
     doc.text(
         "A session you didn't name gets a better name the first time it settles (its program \
-         goes idle or finishes a task): Orchestra sends the session's recent commands and \
+         goes idle or finishes a task): Rakumux sends the session's recent commands and \
          screen text to your AI provider and renames the session with its suggestion.",
     );
     doc.text(format!(
@@ -1460,15 +1460,15 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         "Below {} columns (a split window) the list goes on top and the selected session \
          below it, so you see it while you pick one; drag the line between them up or down to \
          resize the list. Once you press `Enter` the session fills the screen, and `{p}` \
-         brings the list back. Below {} rows only the list shows in Orchestra mode.",
+         brings the list back. Below {} rows only the list shows in Rakumux mode.",
         layout::SINGLE_PANE_BELOW,
         layout::STACK_MIN_ROWS + 1
     ));
     doc.text(format!(
         "On a phone (below {} columns, in either layout) you see one thing at a time: \
-         Orchestra mode is the session list; tap a session to open it, full screen under a \
+         Rakumux mode is the session list; tap a session to open it, full screen under a \
          row of tabs (tap a tab to switch); `{p}` or a tap on the SESSION badge at the bottom \
-         left goes back to the list, and the ORCHESTRA badge returns to the session. Tap \
+         left goes back to the list, and the RAKUMUX badge returns to the session. Tap \
          `? help` or `, settings` to open them.",
         layout::PHONE_BELOW
     ));
@@ -1490,21 +1490,21 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         None => String::new(),
     };
     doc.text(format!(
-        "In Orchestra mode, switch tabs with `↑`/`↓`, `j`/`k`{cycle} or the number keys, or \
+        "In Rakumux mode, switch tabs with `↑`/`↓`, `j`/`k`{cycle} or the number keys, or \
          click a tab. Drag a tab left or right to move it. All other keys work as in the \
          Sidebar layout."
     ));
 
     doc.heading("Switching layouts");
     doc.text(format!(
-        "Change Layout on the Settings General tab (`,` or `{SETTINGS_KEY}` in Orchestra mode). \
-         It applies at once and is saved in ~/.orchestra/config.json as `sessions.layout` \
+        "Change Layout on the Settings General tab (`,` or `{SETTINGS_KEY}` in Rakumux mode). \
+         It applies at once and is saved in ~/.rakumux/config.json as `sessions.layout` \
          (`sidebar` or `tabs`)."
     ));
 
     doc.heading("Zoom");
     doc.text(format!(
-        "`z` in Orchestra mode works in the selected session with the list or tab bar hidden, \
+        "`z` in Rakumux mode works in the selected session with the list or tab bar hidden, \
          so it gets the whole screen above the footer, which keeps showing the mode; `{p}` \
          brings the list back. Works in both layouts."
     ));
@@ -1513,7 +1513,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     match &k.cycle {
         Some(cycle) => {
             doc.text(format!(
-                "`{cycle}` moves to the previous or next session in list order in Orchestra \
+                "`{cycle}` moves to the previous or next session in list order in Rakumux \
                  mode, in both layouts. It needs a terminal that sends Option/Alt with the key \
                  (iTerm2, Ghostty, kitty, WezTerm, Alacritty; Terminal.app with \"Use Option \
                  as Meta key\")."
@@ -1528,120 +1528,120 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         None => doc.text("Turned off in your settings; `↑`/`↓` and `j`/`k` move."),
     }
     doc.text(
-        "The keys are set by `sessions.cycle_keys` in ~/.orchestra/config.json, and the \
-         Orchestra key by `sessions.orchestra_key`.",
+        "The keys are set by `sessions.cycle_keys` in ~/.rakumux/config.json, and the \
+         Rakumux key by `sessions.rakumux_key`.",
     );
 }
 
 fn agents_and_cli(doc: &mut Doc) {
     doc.heading("Command line");
     doc.text(
-        "The `orchestra` command also manages sessions without opening this screen. Names are \
+        "The `rakumux` command also manages sessions without opening this screen. Names are \
          looked up among the current folder's sessions; an id always works.",
     );
-    doc.command("orchestra", "Open this screen for the current folder.");
+    doc.command("rakumux", "Open this screen for the current folder.");
     doc.command(
-        "orchestra new [--name N] [--cwd DIR] [--cmd C]... [--detach] [-- PROGRAM ARGS...]",
+        "rakumux new [--name N] [--cwd DIR] [--cmd C]... [--detach] [-- PROGRAM ARGS...]",
         "Create a session and attach to it, or leave it running with --detach. --cmd adds a \
          startup command; after -- give a program to run instead of your shell.",
     );
     doc.command(
-        "orchestra ls [--json] [--dead] [--folder DIR]... | --all",
+        "rakumux ls [--json] [--dead] [--folder DIR]... | --all",
         "List this folder's sessions, those of the folders given, or of every folder with \
          --all; --dead includes dead ones. ^ marks a pinned session.",
     );
     doc.command(
-        "orchestra pin <name|id>, orchestra unpin <name|id>",
+        "rakumux pin <name|id>, rakumux unpin <name|id>",
         "Pin a session first in its folder, or unpin it.",
     );
     doc.command(
-        "orchestra folders [--json], orchestra folders add|rm <dir>",
+        "rakumux folders [--json], rakumux folders add|rm <dir>",
         "List the folders, add one, or remove one that has no sessions.",
     );
     doc.command(
-        "orchestra attach <name|id>",
+        "rakumux attach <name|id>",
         "One session full screen, outside this screen (works over SSH). `Ctrl-b` then `d` \
          detaches, `>` / `<` switch session, `n` starts a new one.",
     );
     doc.command(
-        "orchestra rename [<name|id>] <new name>",
+        "rakumux rename [<name|id>] <new name>",
         "Rename a session. Inside a session, without a target it renames itself.",
     );
     doc.command(
-        "orchestra kill <name|id> [--tree]",
+        "rakumux kill <name|id> [--tree]",
         "End a session's program; --tree also ends the sessions it started.",
     );
     doc.command(
-        "orchestra rm <name|id>",
+        "rakumux rm <name|id>",
         "Delete a session and its saved scrollback.",
     );
     doc.command(
-        "orchestra daemon start|status|stop|restart|logs",
+        "rakumux daemon start|status|stop|restart|logs",
         "Start (if it isn't running), check, stop or restart the background server, or follow \
          its log. Restarting keeps every session running; stopping ends them.",
     );
     doc.command(
-        "orchestra --new-server",
-        "Replace the running server with this Orchestra's (sessions keep running), or start \
+        "rakumux --new-server",
+        "Replace the running server with this Rakumux's (sessions keep running), or start \
          one, then open the session screen.",
     );
     doc.note("Exit codes: 0 success, 1 error (message on stderr), 2 wrong usage.");
 
     doc.heading("On your phone");
     doc.text(
-        "The Orchestra app shows your sessions on a phone and types into them, over Tailscale. \
-         It's off until you turn it on: Settings (,) → Phone access, or the question Orchestra \
+        "The Rakumux app shows your sessions on a phone and types into them, over Tailscale. \
+         It's off until you turn it on: Settings (,) → Phone access, or the question Rakumux \
          asks once when it sees Tailscale running. Only devices on your tailnet that have the \
-         pairing code get in, and Orchestra listens only on Tailscale's own addresses.",
+         pairing code get in, and Rakumux listens only on Tailscale's own addresses.",
     );
     doc.command(
-        "orchestra remote on|off",
+        "rakumux remote on|off",
         "Turn phone access on (it stays on) or off.",
     );
     doc.command(
-        "orchestra remote pair",
+        "rakumux remote pair",
         "Show the URL, the pairing code and a QR code to scan with the app.",
     );
     doc.command(
-        "orchestra remote status, orchestra remote token --rotate",
+        "rakumux remote status, rakumux remote token --rotate",
         "Check it, or make a new pairing code (paired phones need the new one).",
     );
 
     doc.heading("For agents and scripts");
     doc.text(
-        "Every session's environment says where it is: ORCHESTRA_SESSION_ID, \
-         ORCHESTRA_SESSION_TOKEN, ORCHESTRA_SOCKET and ORCHESTRA_BIN. Coding agents and scripts \
-         use them through `orchestra session`, which prints JSON:",
+        "Every session's environment says where it is: RAKUMUX_SESSION_ID, \
+         RAKUMUX_SESSION_TOKEN, RAKUMUX_SOCKET and RAKUMUX_BIN. Coding agents and scripts \
+         use them through `rakumux session`, which prints JSON:",
     );
     doc.command(
-        "orchestra session list",
+        "rakumux session list",
         "This folder's sessions, with status and what their agents are doing.",
     );
-    doc.command("orchestra session get <name|id>", "One session in detail.");
+    doc.command("rakumux session get <name|id>", "One session in detail.");
     doc.command(
-        "orchestra session read <name|id>",
+        "rakumux session read <name|id>",
         "Text on a session's screen or in its recent history.",
     );
     doc.command(
-        "orchestra session wait <name|id>",
+        "rakumux session wait <name|id>",
         "Wait until a session settles, exits or shows some output.",
     );
     doc.command(
-        "orchestra session report --state done --text \"...\"",
+        "rakumux session report --state done --text \"...\"",
         "Report this session's own state, a result (--summary, --file) and how to resume it \
          after a reboot (--resume -- PROGRAM ARGS).",
     );
     doc.command(
-        "orchestra session bind --agent opencode <conversation>",
+        "rakumux session bind --agent opencode <conversation>",
         "Claim agent conversations for this session, so the MCP tools they call act as it. \
-         The OpenCode plugin does this for you (see `orchestra-mcp opencode-plugin`).",
+         The OpenCode plugin does this for you (see `rakumux-mcp opencode-plugin`).",
     );
-    doc.note("`orchestra session --help` lists every option.");
+    doc.note("`rakumux session --help` lists every option.");
 
     doc.heading("What agents may do");
     doc.text(
         "From inside a session, an agent can list, read and wait on the sessions of its \
-         folder, start new sessions there (`orchestra new --detach`), and rename or report on \
+         folder, start new sessions there (`rakumux new --detach`), and rename or report on \
          its own session. It may have 4 of the sessions it started running at once, and those \
          may start sessions of their own but no deeper. Typing into or ending other sessions \
          from an agent comes in a later release; those requests are refused for now.",
@@ -1656,7 +1656,7 @@ fn agents_and_cli(doc: &mut Doc) {
 }
 
 fn license(doc: &mut Doc) {
-    doc.heading("Orchestra License");
+    doc.heading("Rakumux License");
     doc.text("Copyright (c) 2024 Antonio de Perio and Human Unsupervised Pty Ltd");
     doc.text("All rights reserved.");
     doc.text(
@@ -1900,8 +1900,8 @@ fn general_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line
     }
     lines.push(Line::default());
     let saved = words(
-        "Saved in ~/.orchestra/config.json. The Keys tab lists every action and its keys; Help \
-         (`?`) explains how Orchestra works.",
+        "Saved in ~/.rakumux/config.json. The Keys tab lists every action and its keys; Help \
+         (`?`) explains how Rakumux works.",
         styles.note,
         styles.key,
     );
@@ -2021,7 +2021,7 @@ fn action_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line<
     let p = &names.p;
     let hint = words(
         &format!(
-            "Press `Enter` to run the selected action, or press its keys in Orchestra mode. \
+            "Press `Enter` to run the selected action, or press its keys in Rakumux mode. \
              From inside a session, press `{p}` first."
         ),
         styles.note,
@@ -2245,7 +2245,7 @@ mod tests {
             note: note.into(),
         };
         ModalContext {
-            orchestra_key: prefix.to_string(),
+            rakumux_key: prefix.to_string(),
             cycle_keys: "Option/Alt+↑/↓".to_string(),
             cycle_previous: "Option/Alt+↑".to_string(),
             cycle_next: "Option/Alt+↓".to_string(),
@@ -2487,7 +2487,7 @@ mod tests {
         assert_eq!(state.action, 0);
         assert_eq!(
             state.handle_key(&press(KeyCode::Enter)),
-            ModalAction::Run(KeyAction::OrchestraMode)
+            ModalAction::Run(KeyAction::RakumuxMode)
         );
         state.handle_key(&press(KeyCode::Up));
         assert_eq!(state.action, 0);
@@ -2582,7 +2582,7 @@ mod tests {
         let text = buffer_text(&buf);
         let top = text.lines().next().unwrap();
         assert!(top.contains("Settings"), "{top}");
-        assert!(top.contains("Orchestra 0.6.0"), "{top}");
+        assert!(top.contains("Rakumux 0.6.0"), "{top}");
         assert!(text.contains("Ctrl-a"), "{text}");
         assert!(!text.contains("Ctrl-b"), "{text}");
         assert!(text.contains("Esc"), "{text}");
@@ -2601,7 +2601,7 @@ mod tests {
         let help = draw(80, 24, &self::state(ModalTab::Overview), &context);
         let text = buffer_text(&help);
         assert!(text.lines().next().unwrap().contains("Help"), "{text}");
-        assert!(text.contains("What Orchestra is"), "{text}");
+        assert!(text.contains("What Rakumux is"), "{text}");
         let strip = text.lines().nth(1).unwrap();
         for label in [
             "1 Overview",
@@ -2661,7 +2661,7 @@ mod tests {
         assert!(text.contains("  OpenAI model       gpt-4o-mini"), "{text}");
         assert!(text.contains("Used for AI session naming"), "{text}");
         assert!(!text.contains("List on the left."), "{text}");
-        assert!(text.contains("~/.orchestra/config.json"), "{text}");
+        assert!(text.contains("~/.rakumux/config.json"), "{text}");
         assert!(text.contains("Enter change"), "{text}");
         // The selected row is white, with no background of its own.
         let p = theme::palette();
@@ -2808,7 +2808,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no {action} row: {text}"))
         };
         for (action, keys) in [
-            ("Orchestra mode", "C-a"),
+            ("Rakumux mode", "C-a"),
             ("Back to the session you came from", "Esc, C-a"),
             ("Go into the selected session", "Enter, i, l, →"),
             ("Last session", "Tab"),
@@ -2838,8 +2838,8 @@ mod tests {
             ("Check for updates", "u"),
             ("Reconnect or reload the list", "Ctrl-r"),
             ("Quit and cd", "c"),
-            ("Quit Orchestra", "q"),
-            ("Send the Orchestra key", "\\"),
+            ("Quit Rakumux", "q"),
+            ("Send the Rakumux key", "\\"),
         ] {
             assert!(row(action).trim_end().ends_with(keys), "{action}: {text}");
         }
@@ -2855,7 +2855,7 @@ mod tests {
         );
         assert!(!text.contains("Ctrl-b"), "{text}");
         // The first row is selected, with its note below the table.
-        assert!(row("Orchestra mode").starts_with("▶ "), "{text}");
+        assert!(row("Rakumux mode").starts_with("▶ "), "{text}");
         assert!(
             text.contains("the one key a session's program never gets"),
             "{text}"
@@ -2913,7 +2913,7 @@ mod tests {
         let mut state = state(ModalTab::Keys);
         state.action = KeyAction::ALL.len() - 1;
         let buf = draw(80, 12, &state, &context);
-        assert!(buffer_text(&buf).contains("▶ Quit Orchestra"));
+        assert!(buffer_text(&buf).contains("▶ Quit Rakumux"));
     }
 
     #[test]
@@ -2991,25 +2991,25 @@ mod tests {
             "isn't saved",
             "Folders (Enter on the folder filter, or P)",
             "asks only for a name",
-            "orchestra new --cwd DIR --cmd C -- ARGV",
-            "orchestra folders",
+            "rakumux new --cwd DIR --cmd C -- ARGV",
+            "rakumux folders",
             "--folder DIR",
-            "orchestra pin <name|id>",
+            "rakumux pin <name|id>",
             "--dead",
             "observer",
             "controller",
             "Exited",
             "Dead",
             "revive",
-            "orchestra-ptyd",
+            "rakumux-ptyd",
             "many windows",
             "Sidebar",
             "Tabs",
-            "orchestra attach <name|id>",
-            "orchestra daemon start|status|stop|restart|logs",
-            "orchestra --new-server",
-            "orchestra session report",
-            "ORCHESTRA_SESSION_ID",
+            "rakumux attach <name|id>",
+            "rakumux daemon start|status|stop|restart|logs",
+            "rakumux --new-server",
+            "rakumux session report",
+            "RAKUMUX_SESSION_ID",
             "AI naming",
             "Zoom",
             "Ctrl-r",
@@ -3034,7 +3034,7 @@ mod tests {
     fn no_tmux_git_remote_or_merge_content() {
         // Git appears only as read-only context (branch, worktree); the
         // product has no git commands, tmux or git remotes ("remote" is
-        // only `orchestra remote`, phone access).
+        // only `rakumux remote`, phone access).
         let context = ctx("Ctrl-b");
         for tab in ModalTab::ALL {
             let text = tab_text(tab, &context, 200).to_lowercase();
@@ -3047,8 +3047,8 @@ mod tests {
             assert!(!text.contains("git remote"), "{tab:?} mentions git remotes");
             for (i, _) in text.match_indices("remote") {
                 assert!(
-                    text[..i].ends_with("orchestra "),
-                    "{tab:?} mentions remote outside `orchestra remote`"
+                    text[..i].ends_with("rakumux "),
+                    "{tab:?} mentions remote outside `rakumux remote`"
                 );
             }
         }

@@ -1,9 +1,9 @@
 //! One-line footer, the last row of every screen (zoom too): the mode
-//! badge at the left (a bright orange `ORCHESTRA` while keys drive
-//! Orchestra, a quiet `SESSION` while they go to a session), then the
+//! badge at the left (a bright orange `RAKUMUX` while keys drive
+//! Rakumux, a quiet `SESSION` while they go to a session), then the
 //! connection state and a message (a status message, why the daemon is
 //! unreachable, the zoomed session, a pending upgrade), and on the right the
-//! keys for Help and Settings (in session mode after the Orchestra key,
+//! keys for Help and Settings (in session mode after the Rakumux key,
 //! which is shown too). Settings' Keys tab lists every key.
 //!
 //! The footer never wraps or grows: when the row is short the message is
@@ -11,7 +11,7 @@
 //! the right (Settings first, then Help); the badge always shows.
 //!
 //! The badge and the hints are tap targets, for phones and the mouse: the
-//! `SESSION` badge switches to Orchestra mode, the `ORCHESTRA` badge goes
+//! `SESSION` badge switches to Rakumux mode, the `RAKUMUX` badge goes
 //! back to the session you came from, and a hint does what its keys do.
 
 use ratatui::{
@@ -66,14 +66,14 @@ impl Hint {
 /// A tap target in the footer: `width` columns from column `x` of the row.
 pub type FooterTarget = (u16, u16, Hit);
 
-/// The mode badge: a bright orange `ORCHESTRA` while the keys drive
-/// Orchestra (the mode to notice), a quiet `SESSION` that blends into the
+/// The mode badge: a bright orange `RAKUMUX` while the keys drive
+/// Rakumux (the mode to notice), a quiet `SESSION` that blends into the
 /// theme while they go to a session.
 pub fn mode_badge(app: &App) -> Span<'static> {
     let p = theme::palette();
     match app.focus {
         Focus::List => Span::styled(
-            " ORCHESTRA ",
+            " RAKUMUX ",
             Style::default()
                 .fg(p.background)
                 .bg(p.accent_orange)
@@ -89,8 +89,8 @@ pub fn mode_badge(app: &App) -> Span<'static> {
     }
 }
 
-/// The footer's hints: the keys for Help and Settings, after the Orchestra
-/// key in session mode (where the Orchestra key itself comes first, as the
+/// The footer's hints: the keys for Help and Settings, after the Rakumux
+/// key in session mode (where the Rakumux key itself comes first, as the
 /// way out). Nothing while typing a filter (those keys type) or while a
 /// dialog is open.
 pub fn hints(app: &App) -> Vec<Hint> {
@@ -104,9 +104,9 @@ pub fn hints(app: &App) -> Vec<Hint> {
             Hint::new(settings, "settings", FooterKey::Settings),
         ],
         Focus::Session => {
-            let key = app.orchestra_key.label();
+            let key = app.rakumux_key.label();
             vec![
-                Hint::new(key.clone(), "orchestra", FooterKey::Orchestra),
+                Hint::new(key.clone(), "rakumux", FooterKey::Rakumux),
                 Hint::new(format!("{key} ?"), "help", FooterKey::Help),
                 Hint::new(format!("{key} {settings}"), "settings", FooterKey::Settings),
             ]
@@ -209,7 +209,7 @@ fn message(app: &App) -> Vec<Span<'static>> {
         ]
     } else if let Some(version) = &app.pending_update_version {
         vec![Span::styled(
-            format!("🔄 Orchestra will upgrade to version {version} next time you restart"),
+            format!("🔄 Rakumux will upgrade to version {version} next time you restart"),
             Style::default().fg(p.accent_gold),
         )]
     } else {
@@ -346,22 +346,22 @@ mod tests {
     async fn the_badge_leads_and_the_help_and_settings_keys_end_the_line() {
         let mut h = harness(vec![view("A", "api", 10)]);
         let p = theme::palette();
-        // Orchestra mode: the orange badge, then the keys themselves.
+        // Rakumux mode: the orange badge, then the keys themselves.
         let line = footer_line(&h.app, 60);
         let shown = text(&line);
-        assert!(shown.starts_with(" ORCHESTRA "), "{shown:?}");
+        assert!(shown.starts_with(" RAKUMUX "), "{shown:?}");
         assert!(shown.ends_with("? help  , settings "), "{shown:?}");
         assert_eq!(str_width(&shown), 60, "{shown:?}");
         assert_eq!(line.spans[0].style.bg, Some(p.accent_orange));
         assert_eq!(line.spans[0].style.fg, Some(p.background));
-        // Session mode: a quiet badge; the keys after the Orchestra key,
+        // Session mode: a quiet badge; the keys after the Rakumux key,
         // which comes first.
         h.press(KeyCode::Enter).await;
         let line = footer_line(&h.app, 80);
         let shown = text(&line);
         assert!(shown.starts_with(" SESSION "), "{shown:?}");
         assert!(
-            shown.ends_with("Ctrl-\\ orchestra  Ctrl-\\ ? help  Ctrl-\\ , settings "),
+            shown.ends_with("Ctrl-\\ rakumux  Ctrl-\\ ? help  Ctrl-\\ , settings "),
             "{shown:?}"
         );
         assert_eq!(line.spans[0].style.bg, Some(p.selection));
@@ -374,10 +374,10 @@ mod tests {
         assert_eq!(key.style.fg, Some(p.accent_primary));
         // While typing a filter those keys type, so none show; the badge
         // stays.
-        h.orchestra().await;
+        h.rakumux().await;
         h.press(KeyCode::Char('/')).await;
         assert!(hints(&h.app).is_empty());
-        assert_eq!(text(&footer_line(&h.app, 60)).trim(), "ORCHESTRA");
+        assert_eq!(text(&footer_line(&h.app, 60)).trim(), "RAKUMUX");
     }
 
     #[tokio::test]
@@ -385,21 +385,21 @@ mod tests {
         let mut h = harness(vec![view("A", "api", 10)]);
         h.app.set_status("Layout: Tabs");
         let line = text(&footer_line(&h.app, 60));
-        assert!(line.starts_with(" ORCHESTRA  Layout: Tabs "), "{line:?}");
+        assert!(line.starts_with(" RAKUMUX  Layout: Tabs "), "{line:?}");
         assert!(line.ends_with("? help  , settings "), "{line:?}");
         // A long message is cut to keep the hints while it keeps 30
         // columns…
         let long = "A status message long enough to need the whole line here, and then some";
         h.app.set_status(long);
         let line = text(&footer_line(&h.app, 80));
-        assert!(line.starts_with(" ORCHESTRA  A status message"), "{line:?}");
+        assert!(line.starts_with(" RAKUMUX  A status message"), "{line:?}");
         assert!(line.contains("…"), "{line:?}");
         assert!(line.ends_with("? help  , settings "), "{line:?}");
         assert_eq!(str_width(&line), 80, "{line:?}");
         // …then the hints go and the message takes the row.
         let line = text(&footer_line(&h.app, 50));
         assert!(!line.contains("settings"), "{line:?}");
-        assert!(line.starts_with(" ORCHESTRA  A status message"), "{line:?}");
+        assert!(line.starts_with(" RAKUMUX  A status message"), "{line:?}");
         assert_eq!(str_width(&line), 50, "{line:?}");
     }
 
@@ -427,7 +427,7 @@ mod tests {
                     let badge = if focus_session {
                         " SESSION "
                     } else {
-                        " ORCHESTRA "
+                        " RAKUMUX "
                     };
                     assert!(line.starts_with(badge), "{width}: {line:?}");
                     if width >= str_width(badge) {
@@ -442,11 +442,11 @@ mod tests {
         assert!(line.contains("Renamed"), "{line:?}");
         expire(&mut h);
         let line = text(&footer_line(&h.app, 40));
-        assert!(line.ends_with("Ctrl-\\ orchestra "), "{line:?}");
+        assert!(line.ends_with("Ctrl-\\ rakumux "), "{line:?}");
         assert!(!line.contains("help"), "{line:?}");
-        let line = text(&footer_line(&h.app, 60));
+        let line = text(&footer_line(&h.app, 50));
         assert!(
-            line.ends_with("Ctrl-\\ orchestra  Ctrl-\\ ? help "),
+            line.ends_with("Ctrl-\\ rakumux  Ctrl-\\ ? help "),
             "{line:?}"
         );
     }
@@ -454,10 +454,10 @@ mod tests {
     #[tokio::test]
     async fn a_phone_keeps_the_badge_and_help_longest() {
         let mut h = harness(vec![view("A", "api", 10)]);
-        // Orchestra mode: both hints fit 40 columns.
+        // Rakumux mode: both hints fit 40 columns.
         for width in [40, 45] {
             let line = text(&footer_line(&h.app, width));
-            assert!(line.starts_with(" ORCHESTRA "), "{line:?}");
+            assert!(line.starts_with(" RAKUMUX "), "{line:?}");
             assert!(line.ends_with("? help  , settings "), "{line:?}");
         }
         // Then Settings goes before Help.
@@ -468,11 +468,11 @@ mod tests {
         let line = text(&footer_line(&h.app, 45));
         assert!(line.starts_with(" SESSION "), "{line:?}");
         assert!(
-            line.ends_with("Ctrl-\\ orchestra  Ctrl-\\ ? help "),
+            line.ends_with("Ctrl-\\ rakumux  Ctrl-\\ ? help "),
             "{line:?}"
         );
         let line = text(&footer_line(&h.app, 40));
-        assert!(line.ends_with("Ctrl-\\ orchestra "), "{line:?}");
+        assert!(line.ends_with("Ctrl-\\ rakumux "), "{line:?}");
         // The targets match what's shown.
         let (line, targets) = footer(&h.app, 45);
         let shown: Vec<char> = text(&line).chars().collect();
@@ -484,8 +484,8 @@ mod tests {
         assert_eq!(targets.len(), 3);
         assert_eq!(at(&targets[0]), " SESSION ");
         assert_eq!(targets[0].2, Hit::ModeBadge);
-        assert_eq!(at(&targets[1]), "Ctrl-\\ orchestra");
-        assert_eq!(targets[1].2, Hit::FooterKey(FooterKey::Orchestra));
+        assert_eq!(at(&targets[1]), "Ctrl-\\ rakumux");
+        assert_eq!(targets[1].2, Hit::FooterKey(FooterKey::Rakumux));
         assert_eq!(at(&targets[2]), "Ctrl-\\ ? help");
         assert_eq!(targets[2].2, Hit::FooterKey(FooterKey::Help));
     }
@@ -495,23 +495,23 @@ mod tests {
         let mut h = harness(vec![view("A", "api", 10)]);
         h.app.connection = Connection::Connecting;
         let line = text(&footer_line(&h.app, 80));
-        assert!(line.starts_with(" ORCHESTRA  "), "{line:?}");
+        assert!(line.starts_with(" RAKUMUX  "), "{line:?}");
         assert!(line.contains(" connecting "), "{line:?}");
         assert!(line.ends_with("? help  , settings "), "{line:?}");
         h.app.connection = Connection::Failed(ApiError::new(
             ErrorCode::DaemonUnavailable,
-            "can't start orchestra-ptyd",
+            "can't start rakumux-ptyd",
         ));
         let line = text(&footer_line(&h.app, 100));
         assert!(
-            line.starts_with(" ORCHESTRA  ✕ daemon unavailable · can't start orchestra-ptyd "),
+            line.starts_with(" RAKUMUX  ✕ daemon unavailable · can't start rakumux-ptyd "),
             "{line:?}"
         );
         // A status message takes the error's place; the state stays.
         h.app.set_status("Reconnecting…");
         let line = text(&footer_line(&h.app, 100));
         assert!(
-            line.starts_with(" ORCHESTRA  ✕ daemon unavailable · Reconnecting… "),
+            line.starts_with(" RAKUMUX  ✕ daemon unavailable · Reconnecting… "),
             "{line:?}"
         );
     }

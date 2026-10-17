@@ -69,7 +69,7 @@ pub enum ListChange {
 
 #[derive(Debug)]
 pub struct SessionList {
-    /// The folder Orchestra started in: its group comes first.
+    /// The folder Rakumux started in: its group comes first.
     launch: ScopeRoot,
     /// The folder filter: the folders shown, or every folder when empty.
     folders: Vec<ScopeRoot>,

@@ -1,5 +1,5 @@
-//! End to end through the real binary: `orchestra-ptyd serve` with the real
-//! control layer and terminal host in a temp `ORCHESTRA_HOME`, driven over
+//! End to end through the real binary: `rakumux-ptyd serve` with the real
+//! control layer and terminal host in a temp `RAKUMUX_HOME`, driven over
 //! its socket.
 //!
 //! Needs the real `control::ControlService` (work package A2); on a branch
@@ -16,7 +16,7 @@ use session_core::paths::Registration;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-const EXE: &str = env!("CARGO_BIN_EXE_orchestra-ptyd");
+const EXE: &str = env!("CARGO_BIN_EXE_rakumux-ptyd");
 
 /// Kills the daemon if a test fails before shutting it down.
 struct Daemon(Child);
@@ -43,26 +43,26 @@ impl Drop for Daemon {
     }
 }
 
-fn start_daemon(home: &TestHome, orchestra_bin: &str) -> (Daemon, Registration) {
-    start_daemon_with(home, orchestra_bin, &[])
+fn start_daemon(home: &TestHome, rakumux_bin: &str) -> (Daemon, Registration) {
+    start_daemon_with(home, rakumux_bin, &[])
 }
 
 fn start_daemon_with(
     home: &TestHome,
-    orchestra_bin: &str,
+    rakumux_bin: &str,
     env: &[(&str, &std::path::Path)],
 ) -> (Daemon, Registration) {
     let child = Command::new(EXE)
         .arg("serve")
         .envs(env.iter().map(|(k, v)| (*k, *v)))
         .env(session_core::env::HOME, &home.layout.home)
-        .env(session_core::env::BIN, orchestra_bin)
-        .env("ORCHESTRA_PTYD_LOG", "debug")
+        .env(session_core::env::BIN, rakumux_bin)
+        .env("RAKUMUX_PTYD_LOG", "debug")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn orchestra-ptyd");
+        .expect("spawn rakumux-ptyd");
     let mut registration = None;
     assert!(
         wait_until(TIMEOUT, || {
@@ -131,7 +131,7 @@ fn wait_read(client: &mut TestClient, id: &session_core::ids::SessionId, needle:
 #[test]
 fn serve_runs_sessions_with_the_real_control_layer() {
     let home = TestHome::new();
-    let (mut daemon, registration) = start_daemon(&home, "/opt/orchestra/bin/orchestra");
+    let (mut daemon, registration) = start_daemon(&home, "/opt/rakumux/bin/rakumux");
     let mut client = TestClient::connect(&registration.socket);
     assert!(matches!(
         client.hello(&registration.token),
@@ -145,10 +145,10 @@ fn serve_runs_sessions_with_the_real_control_layer() {
     // The control layer injects the session identity and daemon details.
     client.submit(
         &session.id,
-        "echo \"ID=$ORCHESTRA_SESSION_ID SOCK=$ORCHESTRA_SOCKET BIN=$ORCHESTRA_BIN TERM=$TERM\"",
+        "echo \"ID=$RAKUMUX_SESSION_ID SOCK=$RAKUMUX_SOCKET BIN=$RAKUMUX_BIN TERM=$TERM\"",
     );
     let expected = format!(
-        "ID={} SOCK={} BIN=/opt/orchestra/bin/orchestra TERM=xterm-256color",
+        "ID={} SOCK={} BIN=/opt/rakumux/bin/rakumux TERM=xterm-256color",
         session.id,
         registration.socket.display()
     );
@@ -190,7 +190,7 @@ fn serve_runs_sessions_with_the_real_control_layer() {
     assert!(!registration.socket.exists());
     assert!(!home.layout.registration_file().exists());
     let log = std::fs::read_to_string(home.layout.log_file()).unwrap();
-    assert!(log.contains("orchestra-ptyd stopped"), "{log}");
+    assert!(log.contains("rakumux-ptyd stopped"), "{log}");
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn projects_pins_and_git_context_through_the_real_daemon() {
     std::fs::write(repo.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
     let other = home.dir.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
-    let (mut daemon, registration) = start_daemon(&home, "orchestra");
+    let (mut daemon, registration) = start_daemon(&home, "rakumux");
     let mut client = TestClient::connect(&registration.socket);
     match client.hello(&registration.token) {
         Response::Hello(ok) => {
@@ -300,7 +300,7 @@ fn projects_pins_and_git_context_through_the_real_daemon() {
 #[test]
 fn sigterm_shuts_down_gracefully() {
     let home = TestHome::new();
-    let (mut daemon, registration) = start_daemon(&home, "orchestra");
+    let (mut daemon, registration) = start_daemon(&home, "rakumux");
     let mut client = TestClient::connect(&registration.socket);
     assert!(matches!(
         client.hello(&registration.token),
@@ -321,7 +321,7 @@ fn sigterm_shuts_down_gracefully() {
 #[test]
 fn exits_when_its_registration_file_is_removed() {
     let home = TestHome::new();
-    let (mut daemon, _registration) = start_daemon(&home, "orchestra");
+    let (mut daemon, _registration) = start_daemon(&home, "rakumux");
     std::fs::remove_file(home.layout.registration_file()).unwrap();
     let mut status = None;
     wait_until(Duration::from_secs(15), || {
@@ -378,7 +378,7 @@ fn reconnect(socket: &std::path::Path, token: &str) -> TestClient {
 #[test]
 fn restart_in_place_keeps_sessions_running() {
     let home = TestHome::new();
-    let (mut daemon, registration) = start_daemon(&home, "orchestra");
+    let (mut daemon, registration) = start_daemon(&home, "rakumux");
     let mut client = TestClient::connect(&registration.socket);
     match client.hello(&registration.token) {
         Response::Hello(ok) => assert!(ok
@@ -392,10 +392,7 @@ fn restart_in_place_keeps_sessions_running() {
         &mut client,
         &home,
         &[
-            &format!(
-                "echo \"$ORCHESTRA_SESSION_TOKEN\" > {}",
-                token_file.display()
-            ),
+            &format!("echo \"$RAKUMUX_SESSION_TOKEN\" > {}", token_file.display()),
             "seq 1 60; echo BEFORE_$((1+1))",
         ],
     );
@@ -550,7 +547,7 @@ fn sessions_come_back_after_a_crash_but_not_after_a_stop() {
         ("CLAUDE_CONFIG_DIR", claude_dir.as_path()),
         ("PATH", path_value.as_path()),
     ];
-    let (mut daemon, registration) = start_daemon_with(&home, "orchestra", &daemon_env);
+    let (mut daemon, registration) = start_daemon_with(&home, "rakumux", &daemon_env);
     let mut client = TestClient::connect(&registration.socket);
     assert!(matches!(
         client.hello(&registration.token),
@@ -614,7 +611,7 @@ fn sessions_come_back_after_a_crash_but_not_after_a_stop() {
     // A crash: the programs end with the daemon's PTYs.
     daemon.kill().unwrap();
     daemon.wait().unwrap();
-    let (mut daemon, registration) = start_daemon_with(&home, "orchestra", &daemon_env);
+    let (mut daemon, registration) = start_daemon_with(&home, "rakumux", &daemon_env);
     let mut client = TestClient::connect(&registration.socket);
     assert!(matches!(
         client.hello(&registration.token),
@@ -645,7 +642,7 @@ fn sessions_come_back_after_a_crash_but_not_after_a_stop() {
     // Stopping on purpose: nothing comes back.
     assert_eq!(client.request(&Request::DaemonShutdown), Response::Ok);
     assert_eq!(wait_exit(&mut daemon), Some(0));
-    let (mut daemon, registration) = start_daemon_with(&home, "orchestra", &daemon_env);
+    let (mut daemon, registration) = start_daemon_with(&home, "rakumux", &daemon_env);
     let mut client = TestClient::connect(&registration.socket);
     assert!(matches!(
         client.hello(&registration.token),

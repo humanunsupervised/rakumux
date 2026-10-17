@@ -34,7 +34,7 @@ gwr_scan_global_args() {
     done
 }
 
-# Window title for the launch folder: "orchestra: /<folder name>".
+# Window title for the launch folder: "rakumux: /<folder name>".
 gwr_terminal_title_text() {
     local folder
     folder="$(basename "$(pwd -P)")"
@@ -42,7 +42,7 @@ gwr_terminal_title_text() {
     if [[ -z "$folder" || "$folder" == "/" ]]; then
         folder="root"
     fi
-    printf 'orchestra: /%s' "$folder"
+    printf 'rakumux: /%s' "$folder"
 }
 
 # Set the terminal window title when a writable controlling terminal exists.

@@ -25,7 +25,7 @@ error() { printf "${RED}[VERSION]${NC} %s\n" "$*" >&2; }
 INCREMENT_TYPE="${1:-patch}"
 
 # GitHub repository (from humanunsupervised org)
-GITHUB_REPO="humanunsupervised/orchestra"
+GITHUB_REPO="humanunsupervised/rakumux"
 
 # Function to validate increment type
 validate_increment_type() {

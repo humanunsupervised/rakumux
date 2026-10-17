@@ -1,7 +1,7 @@
 # tui/src/app – TUI application state and logic
 
-This directory holds the state, key handling and session pipelines of the `orchestra` TUI. The TUI is
-one client of the `orchestra-ptyd` daemon: everything it knows about sessions comes from
+This directory holds the state, key handling and session pipelines of the `rakumux` TUI. The TUI is
+one client of the `rakumux-ptyd` daemon: everything it knows about sessions comes from
 `session_core::client::SessionApi`, and other TUIs, CLI calls and agents may change the same
 sessions at any time. Rendering lives in `tui/src/ui.rs`, `components/`, `terminal_view/`, `layout/`
 and `help/`; nothing here draws.
@@ -15,8 +15,8 @@ work package merges.
 - `app.rs` (in `tui/src`): facade. Owns `App` (state slices below, `Arc<dyn SessionApi>`, config,
   updater state) and dispatches events by mode and focus.
 - `types.rs`: `AppMode`, `AppResult`, dialog structs, shared enums.
-- `config.rs`: `~/.orchestra/config.json` load/save: API keys, AI provider and model, and
-  `sessions { orchestra_key (prefix_key read for older configs), cycle_keys,
+- `config.rs`: `~/.rakumux/config.json` load/save: API keys, AI provider and model, and
+  `sessions { rakumux_key (prefix_key read for older configs), cycle_keys,
   cycle_keys_in_session, welcome_seen, phone_offer_seen, layout, icons, sidebar_width,
   stacked_list_percent,
   session_order }`. Retired
@@ -51,9 +51,9 @@ work package merges.
   (`layout::PaneSizes`: `sidebar_width`, `stacked_list_percent`). No header: the panes start at
   the top row and the footer (mode badge, messages, Help/Settings keys) is always exactly the
   last row, zoom included, so modes, selection and messages never move a pane. Phones
-  (`layout::is_phone`, under 80 columns, `App::phone`) show the list alone in Orchestra mode and
+  (`layout::is_phone`, under 80 columns, `App::phone`) show the list alone in Rakumux mode and
   the session under a tab bar in session mode (no title row; `App::list_layout` is Sidebar there).
-  Narrow Sidebar windows (80–99 columns) stack the list above the detail in Orchestra mode
+  Narrow Sidebar windows (80–99 columns) stack the list above the detail in Rakumux mode
   (`Screen::stacked`, the divider a row) and give the session everything above the footer in
   session mode; `terminal_size` is always the session-mode pane.
 - Terminal size: `sync_terminal_size` (attach, own pane change) and `claim_terminal_size` (the
@@ -63,7 +63,7 @@ work package merges.
   on screen (a phone's list). Nobody fits back on its own.
 - Mouse (`sessions.rs::handle_mouse`): clicks go to the targets the last draw recorded
   (`App::hits`, `Hit`): list rows, the folder filter, the Folders modal's rows, and the footer's
-  mode badge (`Hit::ModeBadge`: `enter_orchestra_mode` / `return_to_session`) and key hints
+  mode badge (`Hit::ModeBadge`: `enter_rakumux_mode` / `return_to_session`) and key hints
   (`Hit::FooterKey`: what the keys do). The divider drags side to side, or up and down when
   stacked. A click on the previewed session (its title row or terminal) goes in. On a phone a
   tap on a session row (or "+ New session") opens it, and a tap on a tab switches session in
@@ -78,14 +78,14 @@ work package merges.
 - `sessions.rs`: pipelines over `SessionApi`: create, rename, delete, kill, revive, touch; attach,
   detach, promote and demote; applying `EventEnvelope`s to the list; re-listing after a reconnect;
   triggering AI naming (`crate::naming`) when a generated-name session first goes idle or done.
-- `handlers/`: key handling by mode (`Focus::List` = Orchestra mode, `Focus::Session` = session
+- `handlers/`: key handling by mode (`Focus::List` = Rakumux mode, `Focus::Session` = session
   mode):
-  - Orchestra mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
+  - Rakumux mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
     `{`/`}` folders), `gg`/`dd` via `App::pending_key`, Enter/`i` go in, Esc (cancel first) or the
-    Orchestra key back to `App::came_from`, Tab to `App::recent.previous`, `1`-`9`, and the action
+    Rakumux key back to `App::came_from`, Tab to `App::recent.previous`, `1`-`9`, and the action
     letters (`n`, `r`, `p`, `J`/`K` move, `x`, `z`, `P`, `/`, `?`, `,`, `q`, `\`);
-  - session mode (`handlers/session.rs`): the Orchestra key enters Orchestra mode
-    (`App::enter_orchestra_mode`), the cycle keys only with `cycle_keys_in_session`, then
+  - session mode (`handlers/session.rs`): the Rakumux key enters Rakumux mode
+    (`App::enter_rakumux_mode`), the cycle keys only with `cycle_keys_in_session`, then
     `terminal_view::key_to_bytes` / `mouse_to_bytes` / `paste_to_bytes` to the attach stream;
   - own Promote/Demote go through `Attachment::change_role`, so their `RoleChanged` answers aren't
     taken for another client's takeover;
@@ -93,7 +93,7 @@ work package merges.
     `App::current_folder`, with the login shell; one made in a folder the filter hides adds that
     folder to the filter), the Folders modal (`AppMode::Folders`, `handlers/folders.rs`), rename, delete confirmation, upgrade, daemon-restart consent,
     and the Settings and Help modals (`AppMode::Modal`, `help::ModalState::handle_key`; `,` or `o`
-    opens Settings, `?` Help, in Orchestra mode). Settings' Keys tab runs the selected
+    opens Settings, `?` Help, in Rakumux mode). Settings' Keys tab runs the selected
     `help::KeyAction` (`handlers/settings.rs::run_action`); the General tab's API key, provider and
     model dialogs go back to it. The welcome tour (`AppMode::Welcome(WelcomeState)`,
     `handlers/dialogs.rs::handle_welcome_key`, `components/welcome.rs`) opens from `main.rs` while
@@ -101,7 +101,7 @@ work package merges.
     `App::close_welcome` saves its "Don't show this on startup" box (on every card).
   - Phone access (`phone_access.rs`, over `crate::remote_access::PhoneAccess`, a fake
     `FakePhone` in tests): `App::start` checks it in a job (`AppEvent::PhoneChecked`); the
-    one-time offer (`AppMode::PhoneOffer`) waits until Orchestra mode has no dialog
+    one-time offer (`AppMode::PhoneOffer`) waits until Rakumux mode has no dialog
     (`App::offer_phone_access`, also on every tick) and saves `sessions.phone_offer_seen` as it
     opens; the pairing dialog (`AppMode::Pairing`) turns it on, shows the QR code and turns it off
     (`AppEvent::PhonePairing`, `PhoneOff`); from Settings' Phone access row it goes back there.
@@ -133,7 +133,7 @@ timers ───────────┘                                     
   `not_found` / `session_not_live` gracefully.
 - Select = attach as observer; Enter = promote; leaving session focus = demote. Only the
   controller's pane size is sent to the PTY.
-- `ORCHESTRA_SESSION_ID` set → that session is "current" and must not be attached (nesting guard).
+- `RAKUMUX_SESSION_ID` set → that session is "current" and must not be attached (nesting guard).
 - Shortcut text shown to the user (footer hints, the Keys tab, Help) is generated from the
   configured keys.
 - Errors from the daemon are `ApiError { code, message }`; show the message, branch on the code.
@@ -154,7 +154,7 @@ timers ───────────┘                                     
 - `cd tui && cargo test -p tui`.
 - Program against a fake `SessionApi` (in-memory sessions; `AttachStream::pair` and
   `EventStream::from_receiver` for streams). Never start a real daemon in unit tests; if a test needs
-  files, set `ORCHESTRA_HOME` to a temp dir.
+  files, set `RAKUMUX_HOME` to a temp dir.
 - The fake (`testing.rs`) records `list_all`, `subscribe all` and `subscribe <scopes>`;
   `FakeApi::without_all` is a daemon without `sessions.all`, `FakeApi::without_folders` one from
   before folders.

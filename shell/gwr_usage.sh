@@ -2,13 +2,13 @@
 
 gwr_show_usage() {
     cat <<EOF
-orchestra - terminal sessions for coding agents
+rakumux - terminal sessions for coding agents
 
-Usage: orchestra [global options] [command]
+Usage: rakumux [global options] [command]
 
-With no command, opens the Orchestra TUI for the current folder. Sessions belong
+With no command, opens the Rakumux TUI for the current folder. Sessions belong
 to the folder they were started in and keep running in the background (owned by
-the orchestra-ptyd daemon) after you quit.
+the rakumux-ptyd daemon) after you quit.
 
 Commands:
   new [--name N] [--cwd P] [--cmd C]... [--detach] [-- ARGV...]
@@ -31,7 +31,7 @@ Commands:
 
 Global options:
   -d, --debug             Enable debug output
-  --ptyd-path <PATH>      Use this orchestra-ptyd binary
+  --ptyd-path <PATH>      Use this rakumux-ptyd binary
 
 Launcher options:
   -h, --help              Show this help
@@ -40,16 +40,16 @@ Launcher options:
                           Check for a newer release
 
 Environment:
-  GW_TUI_BIN              Path to the orchestra (tui) binary
-  GW_PTYD_BIN             Path to the orchestra-ptyd binary
-  ORCHESTRA_HOME          Data directory (default: ~/.orchestra)
+  GW_TUI_BIN              Path to the rakumux (tui) binary
+  GW_PTYD_BIN             Path to the rakumux-ptyd binary
+  RAKUMUX_HOME          Data directory (default: ~/.rakumux)
 
 Keys: open Help inside the TUI.
 
 Examples:
-  orchestra                         # Open the TUI here
-  orchestra new --name dev -- pnpm dev
-  orchestra ls
-  orchestra attach dev
+  rakumux                         # Open the TUI here
+  rakumux new --name dev -- pnpm dev
+  rakumux ls
+  rakumux attach dev
 EOF
 }

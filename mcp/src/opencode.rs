@@ -1,21 +1,21 @@
-//! The Orchestra plugin for OpenCode 2.x's TUI
-//! (`mcp/opencode/orchestra-session/tui.js`) and its installer.
+//! The Rakumux plugin for OpenCode 2.x's TUI
+//! (`mcp/opencode/rakumux-session/tui.js`) and its installer.
 //!
 //! OpenCode 2.x runs MCP servers in a service shared by every conversation, so
 //! tool calls reach this server without the calling session's environment; they
 //! only name the OpenCode conversation. The plugin runs in the TUI (inside the
-//! Orchestra session) and binds the conversations it shows to that session with
-//! `orchestra session bind`; the server then acts as the session that bound a
+//! Rakumux session) and binds the conversations it shows to that session with
+//! `rakumux session bind`; the server then acts as the session that bound a
 //! call's conversation. OpenCode 1.x needs no plugin: its MCP servers run inside
 //! each TUI, with the session's environment.
 
 use std::path::{Path, PathBuf};
 
 /// The plugin's source.
-pub const PLUGIN: &str = include_str!("../opencode/orchestra-session/tui.js");
+pub const PLUGIN: &str = include_str!("../opencode/rakumux-session/tui.js");
 /// The plugin's directory under `<OpenCode config>/plugins/`. OpenCode 2.x
 /// loads every directory there (its `tui` module) without configuration.
-pub const PLUGIN_DIR: &str = "orchestra-session";
+pub const PLUGIN_DIR: &str = "rakumux-session";
 
 /// OpenCode's config directory: `$XDG_CONFIG_HOME/opencode`, else
 /// `~/.config/opencode`.
@@ -54,7 +54,7 @@ mod tests {
         let path = install(&config).unwrap();
         assert_eq!(
             path,
-            config.join("plugins/orchestra-session/tui.js"),
+            config.join("plugins/rakumux-session/tui.js"),
             "OpenCode 2.x loads <config>/plugins/<dir>/tui.js"
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), PLUGIN);

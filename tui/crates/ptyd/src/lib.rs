@@ -1,4 +1,4 @@
-//! `orchestra-ptyd`: the single per-user Orchestra server. It owns every
+//! `rakumux-ptyd`: the single per-user Rakumux server. It owns every
 //! session's terminal (PTY + process + emulator) and the session registry,
 //! and serves any number of clients (TUIs, CLI calls, agents) over a local
 //! Unix socket.

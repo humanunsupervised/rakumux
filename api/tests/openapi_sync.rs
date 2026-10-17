@@ -1,7 +1,7 @@
 //! Keeps `openapi.yaml` in step with the code: every route, query parameter
 //! and JSON field the API produces or accepts must be named in the document.
 
-use orchestra_api::dto::*;
+use rakumux_api::dto::*;
 use session_core::model::{Creator, GitInfo, Lifecycle, SessionStatus};
 use std::collections::BTreeMap;
 
@@ -88,10 +88,10 @@ fn routes_and_parameters_are_documented() {
         );
     }
     for header in [
-        "X-Orchestra-Session-Id",
-        "X-Orchestra-Session-Token",
-        "X-Orchestra-Agent",
-        "X-Orchestra-Agent-Conversation",
+        "X-Rakumux-Session-Id",
+        "X-Rakumux-Session-Token",
+        "X-Rakumux-Agent",
+        "X-Rakumux-Agent-Conversation",
     ] {
         assert!(
             SPEC.contains(&format!("name: {header}")),
@@ -224,7 +224,7 @@ fn every_json_field_is_documented() {
     );
     assert_documented(
         "Error",
-        orchestra_api::error::HttpError::invalid("m")
+        rakumux_api::error::HttpError::invalid("m")
             .with_details(serde_json::json!(null))
             .envelope(),
     );

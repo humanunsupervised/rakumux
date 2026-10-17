@@ -350,7 +350,7 @@ async fn run_attach(socket: Socket, stream: AttachStream, mut shutdown: watch::R
                 Err(ending) => break ending,
             },
             _ = shutdown.changed() => {
-                break close_frame(CloseCode::Away, "orchestra-api is stopping");
+                break close_frame(CloseCode::Away, "rakumux-api is stopping");
             }
         }
     };
@@ -419,7 +419,7 @@ async fn run_events(socket: Socket, stream: EventStream, mut shutdown: watch::Re
                 Err(ending) => break ending,
             },
             _ = shutdown.changed() => {
-                break close_frame(CloseCode::Away, "orchestra-api is stopping");
+                break close_frame(CloseCode::Away, "rakumux-api is stopping");
             }
         }
     };

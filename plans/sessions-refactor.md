@@ -21,19 +21,19 @@ stage A, and the contracts fixed in code at `71b0ff3`. **The contract files are 
 | Topic | Decision | Section |
 |---|---|---|
 | Core concept | **Session** = a folder + a terminal: a durable record plus, while it runs, a live terminal. Sessions carry no git metadata. | §3 |
-| Architecture | **One server, many clients.** Exactly one `orchestra-ptyd` per user owns every session's terminal and the session registry. Any number of TUIs, CLI calls and agents connect at the same time. Several TUIs may watch the same session; at most one is controller. | §5 |
+| Architecture | **One server, many clients.** Exactly one `rakumux-ptyd` per user owns every session's terminal and the session registry. Any number of TUIs, CLI calls and agents connect at the same time. Several TUIs may watch the same session; at most one is controller. | §5 |
 | Session API owner | **The daemon** (agent-control Option A): registry (SQLite), scope confinement, identity tokens, permissions, waits, lifecycle, audit. TUI and CLI are thin clients of `session_core::client::SessionApi`. | §3.1, §5.14, §11 |
-| Scope | The **canonical folder Orchestra is launched from** (`ScopeRoot::resolve(cwd)`), with no `git rev-parse`. A session's cwd must be inside its scope at creation. The list shows only the current scope. | §4 |
-| Git | **None in the product.** No worktrees, branches, git status, merge helpers, env-copy or `orchestra-cli`. Users run git inside a session like any other program. | §10 |
+| Scope | The **canonical folder Rakumux is launched from** (`ScopeRoot::resolve(cwd)`), with no `git rev-parse`. A session's cwd must be inside its scope at creation. The list shows only the current scope. | §4 |
+| Git | **None in the product.** No worktrees, branches, git status, merge helpers, env-copy or `rakumux-cli`. Users run git inside a session like any other program. | §10 |
 | Shell layer | **Deleted.** `services.sh`, `server/` and `api/` only served git, tmux and AI naming; AI naming moves to Rust (`tui/src/naming`). `git`, `tmux`, `jq` and `python3` stop being runtime dependencies. | §10 |
-| Runtime | `orchestra-ptyd` (`portable-pty` + `vt100` through `crates/vt`), detached, outlives every client. | §5 |
+| Runtime | `rakumux-ptyd` (`portable-pty` + `vt100` through `crates/vt`), detached, outlives every client. | §5 |
 | Emulator | `vt100` 0.16.2. The phase 2 spike passed (2026-10-13); libghostty-vt is a follow-up. | §5.6 |
-| tmux | **Removed outright**, with no tmux dependency. Running Orchestra inside tmux is unsupported. | §10 |
+| tmux | **Removed outright**, with no tmux dependency. Running Rakumux inside tmux is unsupported. | §10 |
 | Older tmux sessions | **Not supported.** 0.6.0 does not list, attach to, migrate, adopt or clean up sessions created by 0.5.x. They stay in tmux until the user kills them. | §2, §10 |
 | Remote / cloud mode | **Deleted** (done in `728de9a`). | §10 |
 | Default command | The user's **login shell**. | §5.7, §8 |
-| Key model | As built: **two modes and one key**. Session mode passes every key to the program except the **Orchestra key, `Ctrl-\`** (configurable, `sessions.orchestra_key`), chosen because Claude Code, OpenCode, Pi and editors leave it alone (`Ctrl-b` is Claude Code's and OpenCode's "background" key, and Alt+↑/↓ are taken by OpenCode, Claude Code and Pi). Orchestra mode (the list focus) takes single keys: arrows and Vim keys, Enter/`i` in, Esc or `Ctrl-\` back to the session you came from, Tab last session, letters for actions. Originally planned: a `Ctrl-b` prefix. | §7 |
-| Session cycling | **`Option`/`Alt` + `↑`/`↓`** selects the previous/next session in Orchestra mode, and inside sessions only when `sessions.cycle_keys_in_session` is on (Settings, General). Configurable (`sessions.cycle_keys`). | §7 |
+| Key model | As built: **two modes and one key**. Session mode passes every key to the program except the **Rakumux key, `Ctrl-\`** (configurable, `sessions.rakumux_key`), chosen because Claude Code, OpenCode, Pi and editors leave it alone (`Ctrl-b` is Claude Code's and OpenCode's "background" key, and Alt+↑/↓ are taken by OpenCode, Claude Code and Pi). Rakumux mode (the list focus) takes single keys: arrows and Vim keys, Enter/`i` in, Esc or `Ctrl-\` back to the session you came from, Tab last session, letters for actions. Originally planned: a `Ctrl-b` prefix. | §7 |
+| Session cycling | **`Option`/`Alt` + `↑`/`↓`** selects the previous/next session in Rakumux mode, and inside sessions only when `sessions.cycle_keys_in_session` is on (Settings, General). Configurable (`sessions.cycle_keys`). | §7 |
 | Layouts | **Sidebar** (default: list left, detail right) and **Tabs** (session tab bar on top, the selected session's detail below), chosen in the settings menu and saved as `sessions.layout`. Applies live. | §6 |
 | Help | A **modal** (`?` from the list, `prefix ?` from a session) covering the whole flow, with shortcuts generated from the configured keys. | §6.6 |
 | Survive reboot | Scrollback and metadata on disk; **revive** starts a new terminal for the same session and runs its resume command. | §5.8–5.9 |
@@ -47,7 +47,7 @@ stage A, and the contracts fixed in code at `71b0ff3`. **The contract files are 
 
 ## Goals
 
-1. Make the **session** Orchestra's primary concept: a persistent, resumable terminal in a folder, not
+1. Make the **session** Rakumux's primary concept: a persistent, resumable terminal in a folder, not
    tied to a worktree or branch.
 2. Run every session in **one per-user daemon** that outlives all clients, so any number of TUIs and
    CLI calls can show and drive the same sessions at once.
@@ -57,15 +57,15 @@ stage A, and the contracts fixed in code at `71b0ff3`. **The contract files are 
    (the most recent is selected by default).
 5. Let coding agents inside sessions **see** their scope and **report** their own state
    (agent-control stage A).
-6. **Shrink the product**: remove tmux, remote/cloud mode, every git feature, `orchestra-cli`,
+6. **Shrink the product**: remove tmux, remote/cloud mode, every git feature, `rakumux-cli`,
    env-copy and the shell services layer.
 
 ## Non-goals
 
-- **Any support for older tmux-based Orchestra sessions.** No listing, attaching, migration,
+- **Any support for older tmux-based Rakumux sessions.** No listing, attaching, migration,
   adoption or cleanup, and no code that detects them. They keep running in tmux until the user kills
   them (`tmux ls`, `tmux kill-session`); the release notes say so.
-- **Any git integration.** Orchestra never runs git. Users who want a worktree create it with git
+- **Any git integration.** Rakumux never runs git. Users who want a worktree create it with git
   (inside the scope folder) and start a session there.
 - Auth changes and usage tracking (deferred to the next round; §18).
 - Showing sessions from other folders (future work).
@@ -83,8 +83,8 @@ stage A, and the contracts fixed in code at `71b0ff3`. **The contract files are 
 
 | Area | 0.5.x | Problem |
 |---|---|---|
-| Product focus | Git worktrees first: worktree tree, git status panel, merge/rebase/squash helpers, env-copy into new worktrees, `orchestra-cli` worktree commands | Git workflows belong to git and to the agents; they dominate the code and the UI. |
-| Session identity | tmux name `orchestra__<slug>__<hash>__<date>__<time>__<name>` (`server/session/tmux_api.sh` `tmux_ensure_session`) | Branch slug baked into identity; renames rewrite the tmux name and need ~450 lines of prefix parsing in `tui/src/app/session_name.rs`. |
+| Product focus | Git worktrees first: worktree tree, git status panel, merge/rebase/squash helpers, env-copy into new worktrees, `rakumux-cli` worktree commands | Git workflows belong to git and to the agents; they dominate the code and the UI. |
+| Session identity | tmux name `rakumux__<slug>__<hash>__<date>__<time>__<name>` (`server/session/tmux_api.sh` `tmux_ensure_session`) | Branch slug baked into identity; renames rewrite the tmux name and need ~450 lines of prefix parsing in `tui/src/app/session_name.rs`. |
 | Registry | SQLite `sessions` table (`worktree_path`, `branch`, `slug` all `NOT NULL`) written by Rust (`tui/src/app/session_registry.rs`) **and** shell (`_tmux_registry_*` via embedded `python3`) | A session can't exist without a worktree; two writers in two languages. |
 | Backend | Rust TUI → `services.sh` → `server/services/dispatch.sh` → `api/git.sh`, `api/tmux.sh`; JSON built with `jq` | One process per call, four runtime dependencies (`git`, `tmux`, `jq`, `python3`), logic split across two languages. |
 | Layout | `DisplayItem::{Worktree, Session, NewSession}` tree + preview + git status (`components/worktree_list.rs`, `app/navigation.rs`) | Sessions are children of worktrees. |
@@ -113,7 +113,7 @@ The remaining work is in §14.
 
 There are no analytics, so this comes from public npm and GitHub numbers (collected 2026-10-13).
 
-**npm `@humanu/orchestra`** (the main install channel; binaries are bundled in the package):
+**npm `rakumux`** (the main install channel; binaries are bundled in the package):
 
 | Window | Downloads |
 |---|---|
@@ -131,7 +131,7 @@ There are no analytics, so this comes from public npm and GitHub numbers (collec
 - On quiet days the baseline is a **median of 2 downloads/day over the year and 1/day over the last
   30 days**. Downloads of very old versions also point to automated traffic.
 
-**GitHub `humanunsupervised/orchestra`** (public release repo): 29 stars, 2 forks, one issue ever
+**GitHub `humanunsupervised/rakumux`** (public release repo): 29 stars, 2 forks, one issue ever
 (#1, "Brew install fails", opened 2026-03-08 by an external user, still open). Release-asset downloads
 (Homebrew and manual installs): **180 in total across 93 releases**, 3 for v0.5.81.
 
@@ -150,14 +150,14 @@ one external person has tried it (issue #1).
 4. Release notes must cover:
    - older tmux sessions are not supported (they keep running in tmux and are no longer shown);
    - `tmux`, `git` and `jq` are no longer needed;
-   - every git feature (worktree list, git status, merge helpers, env-copy) and `orchestra-cli` are
+   - every git feature (worktree list, git status, merge helpers, env-copy) and `rakumux-cli` are
      gone; run git in a session instead;
    - sessions are listed per launch folder;
-   - the command history hook changed; re-source `shell/orchestra-command-hook.sh`;
+   - the command history hook changed; re-source `shell/rakumux-command-hook.sh`;
    - remote mode is gone;
-   - leftover files that can be deleted by hand: `.orchestra/cloud.json`, `ssh.json`,
+   - leftover files that can be deleted by hand: `.rakumux/cloud.json`, `ssh.json`,
      `worktree.json` and `options.json` in repos, any DigitalOcean token in the OS keyring, and
-     `~/.orchestra/history/` files named after tmux sessions.
+     `~/.rakumux/history/` files named after tmux sessions.
 
 ---
 
@@ -201,11 +201,11 @@ pub struct SessionView {        // what every client sees
 
 ```
   TUI (tui/src/app, components,      CLI (tui/src/cli)       agents and scripts in sessions
-       terminal_view, layout, help)                          (orchestra session …)
+       terminal_view, layout, help)                          (rakumux session …)
                  │                          │                          │
                  └──────── session_core::client::SessionApi ───────────┘
                                   │  Client: Unix socket, frames (§5.4)
-  ┌─────────────────────────── orchestra-ptyd ────────────────────────────────┐
+  ┌─────────────────────────── rakumux-ptyd ────────────────────────────────┐
   │ server    accept loop, peer-UID check, hello, dispatch, attach/event      │
   │           streams                                                         │
   │    │  control_api::Control                                                │
@@ -237,7 +237,7 @@ pub struct SessionView {        // what every client sees
 
 - **Scope root** = `ScopeRoot::resolve(cwd)`: the canonical folder (symlinks resolved) the TUI or CLI
   was started from. No git lookup of any kind.
-- The list, `orchestra ls` and name resolution (`attach`, `rename`, `kill`, `rm`, `session …`) all
+- The list, `rakumux ls` and name resolution (`attach`, `rename`, `kill`, `rm`, `session …`) all
   work within the current scope. `<name|id>` resolves to an exact id first, then a unique name.
 - Launching from a subfolder is a different scope with its own list (§17).
 - A session's scope is fixed at creation. Its cwd must canonicalise inside the scope at creation
@@ -250,7 +250,7 @@ pub struct SessionView {        // what every client sees
 
 ---
 
-## 5. `orchestra-ptyd`: the session daemon
+## 5. `rakumux-ptyd`: the session daemon
 
 Modelled on `opencode-pty` (MIT, `~/repos/opencode-pty`, see `SPEC.md`) for threading and protocol,
 and on Herdr (`~/repos/herdr`, Apache-2.0) for the detached lifecycle, persistence and agent resume.
@@ -276,17 +276,17 @@ The key difference from opencode-pty: **no single owner**; the daemon outlives e
 
 | Package | Lib / bin | Contents | Notable deps |
 |---|---|---|---|
-| `orchestra-session-core` | lib `session_core` | model, wire protocol, frame codec, ids, filesystem layout, client (`SessionApi`, `Client`, streams). No tokio, no ratatui. | serde, serde_json, base64, getrandom |
-| `orchestra-vt` | lib `vt` | `Emulator` (vt100 wrapper, query responder, checkpoints, history rows), `input` encoders; `examples/{spike.rs, throughput.rs}` | vt100 0.16.2 |
-| `orchestra-ptyd` | lib `ptyd`, bin `orchestra-ptyd` | server, control, terminal, persist, procinfo, detect, registration, log | portable-pty 0.9, rusqlite (bundled), libc |
-| `tui` | bin `tui` (installed as `orchestra`) | TUI, CLI subcommands, AI naming, help, layouts, updater, auth (off) | ratatui 0.25, crossterm 0.27 (`event-stream`), tokio, reqwest, clap |
+| `rakumux-session-core` | lib `session_core` | model, wire protocol, frame codec, ids, filesystem layout, client (`SessionApi`, `Client`, streams). No tokio, no ratatui. | serde, serde_json, base64, getrandom |
+| `rakumux-vt` | lib `vt` | `Emulator` (vt100 wrapper, query responder, checkpoints, history rows), `input` encoders; `examples/{spike.rs, throughput.rs}` | vt100 0.16.2 |
+| `rakumux-ptyd` | lib `ptyd`, bin `rakumux-ptyd` | server, control, terminal, persist, procinfo, detect, registration, log | portable-pty 0.9, rusqlite (bundled), libc |
+| `tui` | bin `tui` (installed as `rakumux`) | TUI, CLI subcommands, AI naming, help, layouts, updater, auth (off) | ratatui 0.25, crossterm 0.27 (`event-stream`), tokio, reqwest, clap |
 
-- A release ships two binaries, `tui` and `orchestra-ptyd`, plus `orchestra.sh` and the launcher
+- A release ships two binaries, `tui` and `rakumux-ptyd`, plus `rakumux.sh` and the launcher
   helpers in `shell/`. The `env-copy` binary is gone.
-- Daemon lookup (`paths::find_ptyd_binary`): explicit `--ptyd-path` → `$ORCHESTRA_PTYD_BIN` → next to
+- Daemon lookup (`paths::find_ptyd_binary`): explicit `--ptyd-path` → `$RAKUMUX_PTYD_BIN` → next to
   the current executable → `PATH`.
-- `orchestra.sh` resolves the daemon like the `tui` binary (override `GW_PTYD_BIN`), passes
-  `--ptyd-path`, and exports `ORCHESTRA_BIN` (the launcher path) so the daemon can inject it into
+- `rakumux.sh` resolves the daemon like the `tui` binary (override `GW_PTYD_BIN`), passes
+  `--ptyd-path`, and exports `RAKUMUX_BIN` (the launcher path) so the daemon can inject it into
   sessions.
 
 ### 5.2 Process lifecycle
@@ -294,22 +294,22 @@ The key difference from opencode-pty: **no single owner**; the daemon outlives e
 Filesystem layout (`session_core::paths::Layout`):
 
 ```text
-~/.orchestra/                    (or $ORCHESTRA_HOME)
-  orchestra.sqlite3              session registry (daemon only)
+~/.rakumux/                    (or $RAKUMUX_HOME)
+  rakumux.sqlite3              session registry (daemon only)
   sessions/<id>/scrollback.ansi  saved scrollback for dead sessions and revive
   sessions/<id>/meta.json
   history/<id>.log               command history (shell hook)
   logs/ptyd.log
-$XDG_RUNTIME_DIR/orchestra/      (or ~/.orchestra/run; $ORCHESTRA_HOME/run when set), mode 0700
+$XDG_RUNTIME_DIR/rakumux/      (or ~/.rakumux/run; $RAKUMUX_HOME/run when set), mode 0700
   service.json                   registration: instance_id, pid, protocol, version, socket, token (0600)
   service.lock                   flock held by the running daemon
-/tmp/orchestra-<uid>/ptyd-<hash>.sock   short path for the sun_path limit; hash of the run dir
+/tmp/rakumux-<uid>/ptyd-<hash>.sock   short path for the sun_path limit; hash of the run dir
 ```
 
 - **Spawn on demand.** When connecting fails and `ClientConfig.spawn` is set (user clients), the
-  client finds the daemon binary and starts `orchestra-ptyd serve` with **stdin, stdout and stderr
+  client finds the daemon binary and starts `rakumux-ptyd serve` with **stdin, stdout and stderr
   on `/dev/null`** and `setsid()`, then waits up to 2 s for the registration file and socket. Stdio
-  must not be inherited: the documented shell wrapper runs Orchestra inside `$(…)`, and an inherited
+  must not be inherited: the documented shell wrapper runs Rakumux inside `$(…)`, and an inherited
   stdout would hang the wrapper until the daemon exits. Session callers never spawn a daemon.
 - **First paint stays fast.** The TUI draws its frame immediately and connects in the background;
   the list fills in when the connection is up. If the daemon can't start, the TUI shows a clear
@@ -356,8 +356,8 @@ max frame 8 MiB.
 **Connection flow**:
 1. The daemon rejects peers with another UID (`SO_PEERCRED` / `getpeereid`).
 2. The client sends `hello { protocol, client, version, auth }`. `auth` is `{ kind: "user", token }`
-   (token from `service.json`) or `{ kind: "session", id, token }` (from `ORCHESTRA_SESSION_ID` and
-   `ORCHESTRA_SESSION_TOKEN`). The daemon answers `hello { protocol, version, capabilities, caller }`
+   (token from `service.json`) or `{ kind: "session", id, token }` (from `RAKUMUX_SESSION_ID` and
+   `RAKUMUX_SESSION_TOKEN`). The daemon answers `hello { protocol, version, capabilities, caller }`
    or an `error` (`unauthenticated`, `protocol_mismatch`) and closes.
 3. Request/response: one control frame each way, strictly in turn.
 4. `attach` and `subscribe` turn the connection into a stream for its remaining lifetime; clients
@@ -476,11 +476,11 @@ for higher fidelity (kitty keyboard protocol, graphics).
 A daemon's own environment goes stale (`PATH`, `SSH_AUTH_SOCK`, `DISPLAY`, …), so `session_create`
 and `session_revive` carry an **environment snapshot from the requesting client**. The child gets:
 
-- the request env **minus** `TMUX`, `TMUX_PANE`, any `ORCHESTRA_SESSION_*`, and the agent-internal
+- the request env **minus** `TMUX`, `TMUX_PANE`, any `RAKUMUX_SESSION_*`, and the agent-internal
   variables `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`,
   `CLAUDE_CODE_MESSAGING_TOKEN`, `CODEX_THREAD_ID`, `OMPCODE` (Herdr strips the same list,
   `herdr/src/pane.rs:187-196`);
-- **plus** `ORCHESTRA_SESSION_ID`, `ORCHESTRA_SESSION_TOKEN`, `ORCHESTRA_SOCKET`, `ORCHESTRA_BIN`
+- **plus** `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN`, `RAKUMUX_SOCKET`, `RAKUMUX_BIN`
   (when known), `TERM=xterm-256color`, `COLORTERM=truecolor` (names in `session_core::env`).
 
 argv = `LaunchSpec.argv`, or the login shell: `SHELL` from the request env, else the daemon's, else
@@ -489,7 +489,7 @@ has produced its first output or after 500 ms, whichever comes first.
 
 ### 5.8 Persistence (surviving reboot / daemon loss)
 
-- `persist::ScrollbackStore` keeps, per session, `~/.orchestra/sessions/<id>/scrollback.ansi`
+- `persist::ScrollbackStore` keeps, per session, `~/.rakumux/sessions/<id>/scrollback.ansi`
   (ANSI-formatted rows separated by `\r\n`, oldest first) and `meta.json`
   (`SessionMeta { cwd, title, foreground_process, exit_code, updated_at }`). Writes are atomic (temp
   file + rename), files 0600, dirs 0700.
@@ -518,7 +518,7 @@ When a session is **Dead** or **Exited**, `session_revive`:
 2. **KnownAgent**: when detection (§5.13) sees a known agent in the foreground, record its resume
    form (e.g. `claude --continue`). Verify the exact flags per agent at implementation time.
 3. **ReportedByAgent**: an agent or its hook reports an exact resume command with
-   `orchestra session report --resume -- <argv…>` (`session_report { resume }`), following Herdr's
+   `rakumux session report --resume -- <argv…>` (`session_report { resume }`), following Herdr's
    `agent_resume.rs` model.
 
 ### 5.10 Upgrades
@@ -526,7 +526,7 @@ When a session is **Dead** or **Exited**, `session_revive`:
 - `hello` negotiates the protocol. A compatible older daemon keeps being used; clients disable
   actions whose capability is missing. On `protocol_mismatch` the TUI shows "Daemon update required:
   restarting ends N running sessions (they can be revived)" and restarts the daemon only with
-  consent. `orchestra daemon restart` does the same from the CLI.
+  consent. `rakumux daemon restart` does the same from the CLI.
 - Future: live handoff (PTY master fds over `SCM_RIGHTS` plus emulator checkpoints, like Herdr's
   `handoff_runtime.rs`). Keep per-terminal state serialisable so this stays possible.
 
@@ -545,10 +545,10 @@ When a session is **Dead** or **Exited**, `session_revive`:
 
 ### 5.12 Observability
 
-- Log to `~/.orchestra/logs/ptyd.log`, size-rotated (1 MiB, keep 1), level from `ORCHESTRA_PTYD_LOG`
+- Log to `~/.rakumux/logs/ptyd.log`, size-rotated (1 MiB, keep 1), level from `RAKUMUX_PTYD_LOG`
   (`error` | `warn` | `info` | `debug`; default `info`).
-- `orchestra daemon status` prints pid, version, protocol, uptime, session count, live terminals,
-  connected clients and RSS; `orchestra daemon logs` tails the log.
+- `rakumux daemon status` prints pid, version, protocol, uptime, session count, live terminals,
+  connected clients and RSS; `rakumux daemon logs` tails the log.
 
 ### 5.13 Agent state
 
@@ -572,7 +572,7 @@ When a session is **Dead** or **Exited**, `session_revive`:
 
 `control::ControlService` implements `Control`. It owns:
 
-- **Registry** (§11): the only reader and writer of `orchestra.sqlite3`.
+- **Registry** (§11): the only reader and writer of `rakumux.sqlite3`.
 - **Identity**: `Auth::User` must match the daemon's user token; `Auth::Session` must match that
   session's in-memory token. Protocol mismatch → `protocol_mismatch`.
 - **Scope confinement** (§4).
@@ -603,7 +603,7 @@ When a session is **Dead** or **Exited**, `session_revive`:
 
 Both layouts show the same things: the header (the scope path), the scope's sessions, the selected
 session's detail (tabs **Terminal** and **Info**) and the footer. The layout is chosen in the settings
-menu (§7), saved as `sessions.layout` in `~/.orchestra/config.json` and applied live. Geometry is
+menu (§7), saved as `sessions.layout` in `~/.rakumux/config.json` and applied live. Geometry is
 `layout::split(area, layout) -> LayoutAreas { list, tabs, detail }` (`tui/src/layout`).
 
 > As built (0.6.x): the header is gone. The panes start at the top row; the project shows as the
@@ -613,7 +613,7 @@ menu (§7), saved as `sessions.layout` in `~/.orchestra/config.json` and applied
 ### 6.1 Sidebar (default)
 
 ```
-┌ ORCHESTRA ───────────────────────────────────────── ~/repos/orchestrator ┐
+┌ RAKUMUX ───────────────────────────────────────── ~/repos/rakumux ┐
 │ Sessions            │ ● api-refactor · claude · working         src/api  │
 │ + New session       │┌─────────────────────────────────────────────────┐ │
 │ ● api-refactor   2m ││ $ cargo test                                    │ │
@@ -643,7 +643,7 @@ returns to the list.
 ### 6.2 Tabs
 
 ```
-┌ ORCHESTRA ───────────────────────────────────────── ~/repos/orchestrator ┐
+┌ RAKUMUX ───────────────────────────────────────── ~/repos/rakumux ┐
 │ ‹ 1 ● api-refactor │ 2 ◐ docs-pass │ 3 ✕ build │ 4 ○ old-spike │ + ›     │
 │ ● api-refactor · claude · working                               src/api  │
 │┌────────────────────────────────────────────────────────────────────────┐│
@@ -693,7 +693,7 @@ Startup:
   TUI.
 - If the focused session exits, focus returns to the list and the pane shows the exit code with
   "Enter to restart".
-- **Nesting guard**: if `ORCHESTRA_SESSION_ID` is set (Orchestra is running inside one of its own
+- **Nesting guard**: if `RAKUMUX_SESSION_ID` is set (Rakumux is running inside one of its own
   sessions), that session is marked "current" and can't be attached, to avoid an infinite mirror.
 
 ### 6.5 Rendering and input
@@ -717,11 +717,11 @@ Startup:
 
 ### 6.6 Help modal
 
-> As built (0.6.0): two modals share this frame. **Settings** (`,` or `o` in Orchestra mode) has
+> As built (0.6.0): two modals share this frame. **Settings** (`,` or `o` in Rakumux mode) has
 > **General** (the settings) and **Keys**, a two-column table of every action and its keys where
-> Enter runs the selected action. **Help** (`?` in Orchestra mode) has **Overview**, **Sessions**,
+> Enter runs the selected action. **Help** (`?` in Rakumux mode) has **Overview**, **Sessions**,
 > **Layouts**, **Agents & CLI** and **License**. There is no header: the footer's bottom-left badge
-> shows the mode (orange ORCHESTRA, quiet SESSION), then messages, and on the right the Help and
+> shows the mode (orange RAKUMUX, quiet SESSION), then messages, and on the right the Help and
 > Settings keys (after `Ctrl-\` in a session).
 
 `?` in list focus and `prefix ?` in session focus open a centred modal (~80% × 80%, full screen below
@@ -729,7 +729,7 @@ Startup:
 It covers the whole flow: sessions and scope, the master-detail screen and both layouts, every
 shortcut (generated from the active key bindings, so a changed prefix or cycle key shows correctly),
 observer vs controller, dead/exited sessions and revive, the single server with several TUIs, the
-`orchestra` CLI and agent commands, AI naming, Shift+drag selection, and the existing proprietary
+`rakumux` CLI and agent commands, AI naming, Shift+drag selection, and the existing proprietary
 license text. No git, tmux, worktree or remote-mode content. Implemented in `tui/src/help`
 (`HelpState`, `HelpContext`, `handle_key`, `render`); it replaces `components/help.rs`.
 
@@ -745,7 +745,7 @@ license text. No git, tmux, worktree or remote-mode content. Implemented in `tui
 
 ### 6.8 Full-screen attach outside the TUI
 
-`orchestra attach <name|id>` is a thin raw-mode client: alternate screen, attach as controller at
+`rakumux attach <name|id>` is a thin raw-mode client: alternate screen, attach as controller at
 the terminal's size, write the checkpoint and then output bytes **straight to stdout** (the user's
 terminal does the emulation), forward stdin as input, send `resize` on SIGWINCH, restore the terminal
 on exit. Prefix commands per §7. Works over SSH.
@@ -755,21 +755,21 @@ on exit. Prefix commands per §7. Works over SSH.
 ## 7. Keybindings
 
 > **As built (0.6.0), superseding the tables below:** two modes. In session mode every key goes to
-> the program except the Orchestra key `Ctrl-\` (`sessions.orchestra_key`), which demotes and
-> switches to Orchestra mode (the list focus). Orchestra mode keys: `↑/↓`, `j/k`,
+> the program except the Rakumux key `Ctrl-\` (`sessions.rakumux_key`), which demotes and
+> switches to Rakumux mode (the list focus). Rakumux mode keys: `↑/↓`, `j/k`,
 > `Option`/`Alt`+`↑/↓` select (preview follows); `gg`/`G`, `Home`/`End`; `Ctrl-d`/`Ctrl-u`; `{`/`}`
 > previous/next project; Enter, `i`, `l`, `→` go in; Esc (after cancelling a pending `g`/`d` or the
-> filter) or `Ctrl-\` back to the session Orchestra mode was entered from; Tab the session before;
+> filter) or `Ctrl-\` back to the session Rakumux mode was entered from; Tab the session before;
 > `1`-`9` into that session; `Ctrl-y`/`Ctrl-e`, PgUp/PgDn scroll the preview; `n` new, `r` rename,
 > `p` pin, `x` close, `dd` delete, `z` full screen, `P` projects, `/` filter, `\` send `Ctrl-\` to
 > the session, `?` Help, `,`/`o` Settings, `q` quit. `Option`/`Alt`+`↑/↓` work inside sessions only
-> with `sessions.cycle_keys_in_session`. `orchestra attach` uses `Ctrl-\` as its prefix. Why: the
+> with `sessions.cycle_keys_in_session`. `rakumux attach` uses `Ctrl-\` as its prefix. Why: the
 > planned `Ctrl-b` prefix is Claude Code's and OpenCode's "background" key and Alt+↑/↓ are OpenCode's,
 > Claude Code's and Pi's; `Ctrl-\` is bound by none of them.
 
-The prefix (default `Ctrl-b`, `sessions.prefix_key`) reuses the key letters of Orchestra's old tmux
+The prefix (default `Ctrl-b`, `sessions.prefix_key`) reuses the key letters of Rakumux's old tmux
 bindings, so muscle memory carries over. Herdr uses the same default
-(`src/config/keybinds.rs:14`). Orchestra is not meant to run inside tmux; if it is, tmux swallows
+(`src/config/keybinds.rs:14`). Rakumux is not meant to run inside tmux; if it is, tmux swallows
 `Ctrl-b` (unsupported, documented in help).
 
 **Everywhere in the TUI** (both layouts, list and session focus):
@@ -794,10 +794,10 @@ bindings, so muscle memory carries over. Herdr uses the same default
 | `q` | Quit |
 | `A`, `K` | Reserved for agent-control stage B (approval queue, kill tree) |
 
-**Session focus (TUI) and `orchestra attach`**: everything goes to the session except the prefix and
+**Session focus (TUI) and `rakumux attach`**: everything goes to the session except the prefix and
 the cycle keys.
 
-| Keys | TUI | `orchestra attach` |
+| Keys | TUI | `rakumux attach` |
 |---|---|---|
 | `prefix Tab` / `prefix Esc` | Back to the list / tab bar | n/a |
 | `prefix l` | Settings modal (both panes) | n/a |
@@ -832,7 +832,7 @@ initial prompt) using the same create path as agents.
 > current project (the selected session's, else the first one shown, displayed under the name),
 > starts in the project folder and runs the login shell. Directory, command and startup commands
 > (and the project picker of `projects-api-mcp.md`) are left to the CLI:
-> `orchestra new --cwd DIR --cmd C -- ARGV`.
+> `rakumux new --cwd DIR --cmd C -- ARGV`.
 
 ---
 
@@ -841,22 +841,22 @@ initial prompt) using the same create path as agents.
 All subcommands live in the `tui` binary (`tui/src/cli`, entry `cli::dispatch`); with no subcommand
 the TUI starts. Global options may precede the subcommand: `--ptyd-path <PATH>`,
 `--services-path <PATH>` (accepted and ignored, for older launchers) and `--debug`. Exit codes: 0 ok,
-1 error (message on stderr), 2 usage. `orchestra.sh` handles `-h`/`--help` and
+1 error (message on stderr), 2 usage. `rakumux.sh` handles `-h`/`--help` and
 `--check-updates`/`--update` itself and passes every other argument through.
 
 | Command | Purpose |
 |---|---|
-| `orchestra` | TUI for the current scope. |
-| `orchestra new [--name N] [--cwd P] [--cmd C]... [--detach] [-- ARGV...]` | Create a session (env snapshot = current env; size = terminal size or 80×24), then attach unless `--detach`. |
-| `orchestra ls [--json] [--all]` | Sessions in the current scope with status; `--all` includes dead ones. |
-| `orchestra attach <name\|id>` | Full-screen attach (§6.8). |
-| `orchestra rename [<name\|id>] <new name>` | Defaults to `$ORCHESTRA_SESSION_ID`. |
-| `orchestra kill <name\|id> [--tree]` | Terminate a session (and its descendants). |
-| `orchestra rm <name\|id>` | Delete a session and its saved scrollback. |
-| `orchestra daemon status\|stop\|restart\|logs` | Daemon management (§5.10, §5.12). |
-| `orchestra session list\|get\|read\|wait\|report` | JSON for agents and scripts (agent-control stage A). `report` takes `--state`, `--text`, `--summary`, `--file` (repeatable), `--agent-kind`, `--agent-session-id`, `--resume -- ARGV...`. |
+| `rakumux` | TUI for the current scope. |
+| `rakumux new [--name N] [--cwd P] [--cmd C]... [--detach] [-- ARGV...]` | Create a session (env snapshot = current env; size = terminal size or 80×24), then attach unless `--detach`. |
+| `rakumux ls [--json] [--all]` | Sessions in the current scope with status; `--all` includes dead ones. |
+| `rakumux attach <name\|id>` | Full-screen attach (§6.8). |
+| `rakumux rename [<name\|id>] <new name>` | Defaults to `$RAKUMUX_SESSION_ID`. |
+| `rakumux kill <name\|id> [--tree]` | Terminate a session (and its descendants). |
+| `rakumux rm <name\|id>` | Delete a session and its saved scrollback. |
+| `rakumux daemon status\|stop\|restart\|logs` | Daemon management (§5.10, §5.12). |
+| `rakumux session list\|get\|read\|wait\|report` | JSON for agents and scripts (agent-control stage A). `report` takes `--state`, `--text`, `--summary`, `--file` (repeatable), `--agent-kind`, `--agent-session-id`, `--resume -- ARGV...`. |
 
-Later: the rest of `orchestra session …` and `orchestra integration …` (stage B), `orchestra mcp`
+Later: the rest of `rakumux session …` and `rakumux integration …` (stage B), `rakumux mcp`
 (stage C, `plans/agent-mcp.md`).
 
 ---
@@ -867,8 +867,8 @@ Later: the rest of `orchestra session …` and `orchestra integration …` (stag
 
 | Feature | New home |
 |---|---|
-| AI session naming | `tui/src/naming`: `suggest_session_name(&Config, &NamingInput { history, screen })`, ported from `server/services/ai.sh` and `json.sh` with the same providers (Anthropic, OpenAI), models, prompt and output clean-up, over `reqwest`. Keys from `~/.orchestra/config.json`, falling back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. The TUI calls it when a session with a generated name first goes `Idle` or `Done`, with the session's history file and its visible screen (`session_read`). |
-| Command history hook (`shell/orchestra-command-hook.sh`) | When `ORCHESTRA_SESSION_ID` is set, logs commands to `~/.orchestra/history/<id>.log` (`$ORCHESTRA_HOME` respected); no tmux; `orchestra_rename_session` runs `"${ORCHESTRA_BIN:-orchestra}" rename "$*"`. |
+| AI session naming | `tui/src/naming`: `suggest_session_name(&Config, &NamingInput { history, screen })`, ported from `server/services/ai.sh` and `json.sh` with the same providers (Anthropic, OpenAI), models, prompt and output clean-up, over `reqwest`. Keys from `~/.rakumux/config.json`, falling back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. The TUI calls it when a session with a generated name first goes `Idle` or `Done`, with the session's history file and its visible screen (`session_read`). |
+| Command history hook (`shell/rakumux-command-hook.sh`) | When `RAKUMUX_SESSION_ID` is set, logs commands to `~/.rakumux/history/<id>.log` (`$RAKUMUX_HOME` respected); no tmux; `rakumux_rename_session` runs `"${RAKUMUX_BIN:-rakumux}" rename "$*"`. |
 | App detection (`app/context.rs`) | Daemon agent detection (`ptyd/src/detect.rs`, §5.13). |
 | Help | The help modal (`tui/src/help`, §6.6) replaces `components/help.rs`. |
 | API keys menu (Anthropic/OpenAI), AI provider, upgrade dialog, updater, config, theme | Kept; the API keys menu becomes part of the settings menu (§7). |
@@ -884,10 +884,10 @@ Later: the rest of `orchestra session …` and `orchestra integration …` (stag
   `app/session_name.rs`, `app/session_registry.rs`, `app/session_preview.rs`,
   `components/session_preview.rs`, `app/context.rs`, and `--new-tmux`/`--cmd` in `main.rs`.
 - env-copy: `src/bin/env_copy.rs` and the `env-copy` binary target, `shell/env_copy*.sh`,
-  `GW_ENV_COPY_BIN`, and the repo file `.orchestra/options.json`.
-- `orchestra-cli`: `orchestra-cli.sh`, `shell/cli_*.sh`, `shell/git/**`, npm's `bin/orchestra-cli.js`
-  and `orchestra-cli` bin, Homebrew's `bin/orchestra-cli`.
-- Launcher: `gwr_check_git_repo` (`shell/gwr_git.sh`); Orchestra runs in any folder.
+  `GW_ENV_COPY_BIN`, and the repo file `.rakumux/options.json`.
+- `rakumux-cli`: `rakumux-cli.sh`, `shell/cli_*.sh`, `shell/git/**`, npm's `bin/rakumux-cli.js`
+  and `rakumux-cli` bin, Homebrew's `bin/rakumux-cli`.
+- Launcher: `gwr_check_git_repo` (`shell/gwr_git.sh`); Rakumux runs in any folder.
 - Cargo (`tui` package): `walkdir`, `strip-ansi-escapes` and `rusqlite` if no longer used.
 
 ### Deleted: the shell services layer
@@ -895,7 +895,7 @@ Later: the rest of `orchestra session …` and `orchestra integration …` (stag
 - `services.sh`, `server/` (services dispatch, JSON helpers, git/tmux/session/AI services,
   `server/session/tmux_api.sh`), `api/` (`git.sh`, `tmux.sh` shims).
 - `gwr_check_services_script` (`shell/gwr_services.sh`), the build's services smoke test
-  (`shell/build/services.sh`), the `--services-path` argument from `orchestra.sh`.
+  (`shell/build/services.sh`), the `--services-path` argument from `rakumux.sh`.
 - `shell/fix_hanging_*.sh` and `fix-hanging-and-redeploy.sh` if only used by removed parts;
   `config.env` if unused.
 
@@ -907,23 +907,23 @@ Later: the rest of `orchestra session …` and `orchestra integration …` (stag
   `test_split*.sh`, `test_actual_split.sh`, `debug-sessions.sh`, `debug_parse.sh`), Homebrew's
   `depends_on "tmux"`, and tmux in npm/Homebrew descriptions, keywords, `shell/gwr_usage.sh` and the
   install scripts.
-- Data: the 0.5.x `sessions` table in `~/.orchestra/orchestra.sqlite3` is dropped when the daemon
-  first opens the registry; `~/.orchestra/history/` files named after tmux sessions are left alone.
+- Data: the 0.5.x `sessions` table in `~/.rakumux/rakumux.sqlite3` is dropped when the daemon
+  first opens the registry; `~/.rakumux/history/` files named after tmux sessions are left alone.
 - Older tmux sessions: nothing in 0.6.0 detects, lists, attaches to or kills them, and the tmux key
   bindings 0.5.x added to the user's tmux server stay until that server restarts.
 
 ### Deleted: remote / cloud mode (done, `728de9a`)
 
-`cloud/`, `orchestra.vm.yaml`, the cloud tests, the TUI's cloud/sync/SSH dialogs and state,
+`cloud/`, `rakumux.vm.yaml`, the cloud tests, the TUI's cloud/sync/SSH dialogs and state,
 `FeatureFlags.remote_mode`, and the Cargo dependencies `keyring`, `directories`, `serde_yaml` and
-`mockito`. Users' `.orchestra/cloud.json`, `ssh.json`, `worktree.json` files and keyring entries are
+`mockito`. Users' `.rakumux/cloud.json`, `ssh.json`, `worktree.json` files and keyring entries are
 not touched (release notes explain how to remove them).
 
 ---
 
 ## 11. Registry (SQLite)
 
-The daemon is the **only** reader and writer of `~/.orchestra/orchestra.sqlite3`
+The daemon is the **only** reader and writer of `~/.rakumux/rakumux.sqlite3`
 (`Layout::registry_db()`). Settings: WAL, `busy_timeout`, `PRAGMA user_version = 2`. Live state
 (terminal id, `Live` status, session tokens) is in memory only.
 
@@ -1015,7 +1015,7 @@ tui/
   tree building in `navigation.rs`.
 - Handlers split by focus (list, session, dialogs) instead of `handlers/browsing.rs`.
 
-### Config additions (`~/.orchestra/config.json`)
+### Config additions (`~/.rakumux/config.json`)
 
 ```json
 "sessions": {
@@ -1035,13 +1035,13 @@ The daemon uses the `HostConfig::new` defaults in 0.6.0 (2,000 rows in memory, 2
 
 ### 13.1 npm
 
-- Bundle `orchestra-ptyd` in `resources/prebuilt/<platform>/` next to `tui`; `install.js` copies it
+- Bundle `rakumux-ptyd` in `resources/prebuilt/<platform>/` next to `tui`; `install.js` copies it
   like `tui`. Drop `env-copy`.
-- Drop `orchestra-cli.sh`, `services.sh`, `server/`, `api/`, `bin/orchestra-cli.js` and the
-  `orchestra-cli` bin from the package.
-- **`bin/orchestra.js` must run `orchestra` (`orchestra.sh`) for every argument.** Today it sends
-  anything other than none / `--debug` / `-d` / `--help` / `-h` / `--version` to `orchestra-cli`
-  (the same routing as Homebrew, §13.2), so `orchestra new`, `ls` and `attach` would break.
+- Drop `rakumux-cli.sh`, `services.sh`, `server/`, `api/`, `bin/rakumux-cli.js` and the
+  `rakumux-cli` bin from the package.
+- **`bin/rakumux.js` must run `rakumux` (`rakumux.sh`) for every argument.** Today it sends
+  anything other than none / `--debug` / `-d` / `--help` / `-h` / `--version` to `rakumux-cli`
+  (the same routing as Homebrew, §13.2), so `rakumux new`, `ls` and `attach` would break.
 - Description and keywords without tmux, git or worktree.
 - Fix the license metadata and ship `LICENSE` + `THIRD_PARTY_NOTICES` (§13.4).
 - Note: `package.json` declares `cpu: arm64` for Linux, but `build-release.sh` only builds macOS
@@ -1049,35 +1049,35 @@ The daemon uses the `HostConfig::new` defaults in 0.6.0 (2,000 rows in memory, 2
 
 ### 13.2 Homebrew: what's wrong today
 
-Checked against the live tap `humanunsupervised/homebrew-orchestra` (formula 0.5.81) and the v0.5.81
+Checked against the live tap `humanunsupervised/homebrew-rakumux` (formula 0.5.81) and the v0.5.81
 release tarballs:
 
 - **Issue #1 ("No such file or directory - commands.sh", reported on 0.5.63)** was caused by the
   formula still listing `commands.sh` after it had left the release tarball. That line was removed in
   `7947b78` (2026-06-05). A simulated install of the 0.5.81 formula on Linux works: the tarball's
   SHA-256 matches, every installed path exists, the formula's own `test` passes and
-  `orchestra --version` prints 0.5.81. It hasn't been confirmed with a real `brew install` on macOS,
+  `rakumux --version` prints 0.5.81. It hasn't been confirmed with a real `brew install` on macOS,
   and the issue is still open.
 - **The repo copy drifted**: it was synced with the tap's 0.5.81 in `1e9bfa7`, but three overlapping
   scripts still touch the formula (`update-homebrew-sha.sh`, `update-homebrew-formula.sh`,
   `update-homebrew-tap.sh`) and none commits the result back.
-- **The wrappers route by argument.** Homebrew's `bin/orchestra` sends any arguments other than
-  none / `--debug` / `-d` / `--help` / `-h` / `--version` to `orchestra-cli.sh`, with a temp-file `cd`
+- **The wrappers route by argument.** Homebrew's `bin/rakumux` sends any arguments other than
+  none / `--debug` / `-d` / `--help` / `-h` / `--version` to `rakumux-cli.sh`, with a temp-file `cd`
   capture that can't change the caller's directory because it runs in a subprocess. npm's
-  `bin/orchestra.js` routes the same way. Every 0.6.0 subcommand (`orchestra new`, `ls`, `attach`, …)
+  `bin/rakumux.js` routes the same way. Every 0.6.0 subcommand (`rakumux new`, `ls`, `attach`, …)
   would break on both channels.
 - **`license "Proprietary"`** fails `brew audit` ("contains non-standard SPDX licenses"), which is
   why `update-homebrew-sha.sh` already expects audit warnings. See §13.4.
 - **Tarballs carry macOS metadata**: built on macOS with AppleDouble `._*` files (89 in the Linux
   tarball) and `com.apple.provenance` xattrs; GNU tar prints a warning for each.
 - `depends_on "git"`, `depends_on "tmux" => :recommended` and `depends_on "jq"`, and the install lines
-  for `orchestra-cli.sh`, `services.sh`, `env-copy`, `server` and `api/*.sh`, must go in 0.6.0.
+  for `rakumux-cli.sh`, `services.sh`, `env-copy`, `server` and `api/*.sh`, must go in 0.6.0.
 
 ### 13.3 Homebrew: fixes
 
 **Before the refactor (phase 0):**
 
-1. Run `brew install humanunsupervised/orchestra/orchestra` (0.5.81) on macOS arm64 and Intel. If it
+1. Run `brew install humanunsupervised/rakumux/rakumux` (0.5.81) on macOS arm64 and Intel. If it
    works, reply on issue #1 and close it (the maintainer posts this; it's public). **Open.**
 2. Copy the tap's 0.5.81 formula back into the repo so the two match. **Done** (`1e9bfa7`).
 
@@ -1087,30 +1087,30 @@ release tarballs:
    a template (version + three SHA-256s), write it to the repo, run `brew audit --strict`, install
    from a local tap, run `brew test`, then push to the tap. The repo copy is the source of truth;
    `full-release-automation.sh` calls the new script.
-2. Wrapper: `bin/orchestra` runs `exec orchestra.sh "$@"` for every argument, the same as npm. The
-   `orchestra-cli` routing and the temp-file `cd` capture go.
-3. Install `orchestra-ptyd` into `libexec` and export `GW_PTYD_BIN` alongside `GW_TUI_BIN`.
-4. No `depends_on` at all (git, tmux and jq are no longer used); no `orchestra-cli`, `env-copy`,
+2. Wrapper: `bin/rakumux` runs `exec rakumux.sh "$@"` for every argument, the same as npm. The
+   `rakumux-cli` routing and the temp-file `cd` capture go.
+3. Install `rakumux-ptyd` into `libexec` and export `GW_PTYD_BIN` alongside `GW_TUI_BIN`.
+4. No `depends_on` at all (git, tmux and jq are no longer used); no `rakumux-cli`, `env-copy`,
    `services.sh`, `server` or `api` install lines; update `desc`.
 5. `license :cannot_represent` (Homebrew's allowed symbol for licenses SPDX can't express), so
    `brew audit --strict` passes (§13.4).
 6. Build tarballs with `COPYFILE_DISABLE=1` and without macOS metadata (`--no-mac-metadata` /
    `--no-xattrs`), so no `._*` files or xattrs ship; include `LICENSE` and `THIRD_PARTY_NOTICES`.
-7. `test do`: `orchestra --version` matches `version` and `orchestra-ptyd --version` works. The test
+7. `test do`: `rakumux --version` matches `version` and `rakumux-ptyd --version` works. The test
    must not start a daemon.
 8. Verify a fresh install and a `brew upgrade` from 0.5.81 on macOS arm64, macOS Intel and Linux x64
    (Linuxbrew).
 
 ### 13.4 License: closed source
 
-Decision: Orchestra stays **closed source** under its existing proprietary license (copyright Antonio
+Decision: Rakumux stays **closed source** under its existing proprietary license (copyright Antonio
 de Perio and Human Unsupervised Pty Ltd). Open-sourcing may be revisited later (§18).
 
 Where the license is declared today:
 
 | Place | Says | Action |
 |---|---|---|
-| Public repo `humanunsupervised/orchestra` `LICENSE` | Proprietary | Source of truth; unchanged. |
+| Public repo `humanunsupervised/rakumux` `LICENSE` | Proprietary | Source of truth; unchanged. |
 | In-app Help → License tab | Proprietary | Text carried over into the help modal (§6.6). |
 | `install/scripts/setup-public-repo.sh` (writes the public `LICENSE`) | Proprietary | Unchanged. |
 | Homebrew formula | `"Proprietary"` (invalid for `brew audit`) | `license :cannot_represent` (§13.3). |
@@ -1148,11 +1148,11 @@ each package's file ownership, rules and "done when". Sizes are relative (S < M 
 | **3. Contracts** | Workspace; `session-core` (model, protocol, frame, ids, paths, client types); `ptyd` boundaries (`host.rs`, `control_api.rs`) and support-module signatures; TUI module contracts (`terminal_view`, `cli`, `naming`); decisions 1–9 | n/a | Done (`71b0ff3`; plans `cf4bdf1`, `208b395`). | M |
 | **4. Daemon** | Terminal runtime, socket server, registration, log; control layer (registry, scope, identity, permissions, waits, lifecycle, events, audit); scrollback store, process info, agent detection | A1, A2, A3 | Per package. | L |
 | **5. Clients** | Client library + CLI; terminal view widget; help modal + layouts; master-detail TUI on `SessionApi` (settings menu, `sessions.layout` / `cycle_keys`, `Option`+`↑`/`↓` in every focus state) | B1, C2, C3, C1 | Per package. | L |
-| **6. Remove the shell layer** | Delete services/server/api/orchestra-cli/git/tmux/env-copy shell code and tests; AI naming in Rust; command hook on session ids | S1 | Per package. | M |
+| **6. Remove the shell layer** | Delete services/server/api/rakumux-cli/git/tmux/env-copy shell code and tests; AI naming in Rust; command hook on session ids | S1 | Per package. | M |
 | **7. Release packaging** | Launcher, `build-release.sh`, npm package and wrapper, Homebrew script and formula, `LICENSE`, `THIRD_PARTY_NOTICES` | R1 | Per package; nothing published. | M |
 | **8. Plans and docs** | This revision, `agent-control.md` rev 2, `AGENTS.md`, `tui/src/app/AGENTS.md`, `shell/AGENTS.md`, `auth/AGENTS.md`, `tui/README.md` | P1 | No doc describes tmux, worktrees, merge helpers, remote mode or the services layer as current behaviour. | S |
 | **9. Integration + hardening** | Merge A3 → A2 → A1 → B1 → C2 → C3 → C1 → S1 → R1 → P1; end-to-end tests (§15); protocol fixture tests; crash/kill tests; upgrade-consent flow; 15+ session load test (observer fan-out, memory); macOS run (procinfo, clipboard/keychain access from daemon-spawned processes, `setsid` vs the Aqua bootstrap namespace); docs finalisation | coordinator | Create a session from the CLI, close the terminal, reattach elsewhere with the screen intact; two TUIs on one scope stay in sync and hand control back and forth; killing a client never kills a session; `kill -9` of the daemon → every session `Dead` → revive restores cwd (and the agent, where known); an agent in a session can list, read, wait and report, and is denied everything else; memory and CPU within budget at 15+ sessions. | M |
-| **10. Release 0.6.0** | Version above npm's 0.5.81; release notes (§2); publish npm and Homebrew | maintainer | Fresh `npm i -g @humanu/orchestra` and `brew install` work on macOS (arm64, x64) and Linux x64 without git, tmux or jq installed; `orchestra new/ls/attach` behave the same on both channels; upgrading from 0.5.81 (in-app updater, `brew upgrade`) works. | S |
+| **10. Release 0.6.0** | Version above npm's 0.5.81; release notes (§2); publish npm and Homebrew | maintainer | Fresh `npm i -g rakumux` and `brew install` work on macOS (arm64, x64) and Linux x64 without git, tmux or jq installed; `rakumux new/ls/attach` behave the same on both channels; upgrading from 0.5.81 (in-app updater, `brew upgrade`) works. | S |
 | **11. Agent control stages B–C** | 0.7.0 / 0.7.x per `agent-control.md` §8; MCP per `plans/agent-mcp.md` (in progress) | later | n/a | n/a |
 | **12. Follow-ups** | libghostty-vt evaluation; cross-folder view; live upgrade handoff; in-app selection/copy mode; multiple terminals per session; daemon tuning in config; Linux logind delay inhibitor to flush scrollback before shutdown | later | n/a | n/a |
 
@@ -1177,7 +1177,7 @@ Each package's "done when" in `parallel-execution.md` lists its tests; this is t
     `cycle` wrap-around; switching layout applies live and is saved.
   - Help modal key handling; renders contain the configured prefix and cycle keys.
   - Persist, procinfo and detection fixtures per agent.
-- **Daemon integration** (temp `ORCHESTRA_HOME`, real socket, real `bash --norc --noprofile`)
+- **Daemon integration** (temp `RAKUMUX_HOME`, real socket, real `bash --norc --noprofile`)
   - spawn → submit `echo hi` → read sees it; startup input delivered; a query reply reaches the
     program (`printf '\e[6n'` round trip).
   - Two attachments: controller/observer, promotion and `role_changed`; resize broadcast.
@@ -1191,20 +1191,20 @@ Each package's "done when" in `parallel-execution.md` lists its tests; this is t
   attach and event streams); the spawn helper detaches stdio (spawning from inside `$(…)` returns at
   once); argument parsing.
 - **End to end** (coordinator, phase 9): spawn on demand from the TUI and the CLI; two TUIs on one
-  scope; a session created by the CLI appears live in the TUI; `orchestra session …` from inside a
+  scope; a session created by the CLI appears live in the TUI; `rakumux session …` from inside a
   session; `kill -9` the daemon → `Dead` → revive; stale lock/socket cleanup.
 - **UI**: ratatui `TestBackend` renders at 80×24 and 160×48 for empty / live / exited / dead states,
   both focus states, both layouts, zoom and the help modal.
 - **Release**: install from a locally packed npm tarball on a machine without git, tmux or jq;
   `brew audit --strict`, install from a local tap and `brew test` on macOS and Linuxbrew; upgrade
   from 0.5.81 on both channels; the tarballs contain no `._*` files; the npm package and tarballs
-  contain `LICENSE` and `THIRD_PARTY_NOTICES`; `npm view @humanu/orchestra license` shows
+  contain `LICENSE` and `THIRD_PARTY_NOTICES`; `npm view rakumux license` shows
   `SEE LICENSE IN LICENSE`.
 - **Manual** (`tests/manual-test-instructions.md`, rewritten for the session model): first run with
   no sessions; the spike's program list inside the pane; resize; prefix keys; `Option`+`↑`/`↓` in
   iTerm2/Ghostty and in Terminal.app with and without "Use Option as Meta key"; switch layouts in
   settings; help modal; quit and reopen (sessions still running); two TUIs side by side on one
-  folder; two different folders show separate lists; reboot and revive; `orchestra attach` from a
+  folder; two different folders show separate lists; reboot and revive; `rakumux attach` from a
   plain terminal and over SSH; the shell wrapper `cd`s correctly and never hangs; an agent in a
   session reports its state.
 
@@ -1225,14 +1225,14 @@ Each package's "done when" in `parallel-execution.md` lists its tests; this is t
 | `Option`+`↑`/`↓` is swallowed by some terminals, or a program needs it | `prefix >`/`<` fallback; `sessions.cycle_keys` to rebind; help explains the Terminal.app setting. |
 | Agents abuse the session API (runaway fan-out, cross-session prompt injection) | Stage A only lets session callers read within scope and change themselves; `read` results are marked `untrusted`; stage B adds policy, limits, approvals (`agent-control.md` §5). |
 | Same-user processes bypass tokens | Documented, not prevented (§5.11). |
-| Existing users lose access to old tmux sessions and the git features through Orchestra | Accepted: small user base (§2); tmux sessions keep running; git still works in any session; release notes explain. |
+| Existing users lose access to old tmux sessions and the git features through Rakumux | Accepted: small user base (§2); tmux sessions keep running; git still works in any session; release notes explain. |
 | Parallel packages drift from each other | Contracts fixed in code (`71b0ff3`), additive-only changes through the coordinator, merge order and end-to-end tests (phase 9). |
 | Homebrew formula drifts from releases again | One script renders, audits, tests and publishes it; the repo copy is the source of truth (§13.3). |
-| Channel-specific behaviour (npm vs Homebrew wrappers) | Both wrappers run `orchestra.sh` for every argument; the release test runs the same commands on both. |
+| Channel-specific behaviour (npm vs Homebrew wrappers) | Both wrappers run `rakumux.sh` for every argument; the release test runs the same commands on both. |
 | Long unpublished branch drifts from `main` | Merge to `main` as phases finish; only publishing waits. |
 | Mouse capture blocks native text selection | Document Shift+drag; in-app selection is a follow-up. |
 | macOS specifics (process info; `setsid` vs the Aqua bootstrap namespace, see Herdr `src/platform/macos/bootstrap.rs`) | `procinfo` behind `cfg(target_os = "macos")`; clipboard/keychain checks from daemon-spawned processes in phase 9. |
-| Two binaries to ship | Both built by `build-release.sh` and found by `find_ptyd_binary`; `orchestra daemon status` for support. |
+| Two binaries to ship | Both built by `build-release.sh` and found by `find_ptyd_binary`; `rakumux daemon status` for support. |
 
 ---
 
@@ -1257,7 +1257,7 @@ Not part of 0.6.0:
   (it still uses `reqwest`). Design notes in `auth/AGENTS.md`.
 - **Usage tracking**: there are no analytics today (§2). Whatever is chosen (e.g. an opt-in,
   anonymous daily ping) needs its own design, endpoint and privacy note.
-- **Open-sourcing**: Orchestra stays closed source for now (§13.4). If that changes, the license
+- **Open-sourcing**: Rakumux stays closed source for now (§13.4). If that changes, the license
   table in §13.4 lists every place to update.
 - **Agent control stages B–D** (0.7.0 and later, `agent-control.md` §8) and the **MCP adapter**
   (`plans/agent-mcp.md`, in progress).
@@ -1282,7 +1282,7 @@ Terminals come from **opencode-pty** (MIT, ~8k lines Rust): `portable-pty` + lib
 authenticated framed socket protocol (v7), controller/observer attach with bounded replay,
 snapshots, row reads, grouped per conversation via `group_id`
 (`packages/core/src/persistent-pty/index.ts:169`). Single-owner model: the daemon dies with its owner
-connection unless handed off. Fine for OpenCode's long-lived server, wrong for Orchestra, where the
+connection unless handed off. Fine for OpenCode's long-lived server, wrong for Rakumux, where the
 daemon must outlive every client.
 
 | # | Option | Verdict |
@@ -1290,4 +1290,4 @@ daemon must outlive every client.
 | 1 | Plain tmux | Rejected: nesting/prefix issues, user config leaks in, no structured output, nothing survives reboot. |
 | 2 | tmux control mode | Rejected: still tmux-bound. |
 | **3** | **Own PTY daemon** | **Chosen.** Full control of lifecycle, streaming, persistence and agent state; no tmux dependency. |
-| 4 | Herdr as backend | Rejected: heavy dependency on a fast-moving product that overlaps Orchestra. |
+| 4 | Herdr as backend | Rejected: heavy dependency on a fast-moving product that overlaps Rakumux. |

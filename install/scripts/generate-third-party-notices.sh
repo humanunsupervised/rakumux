@@ -4,7 +4,7 @@
 # generate-third-party-notices.sh - Build THIRD_PARTY_NOTICES from Cargo.lock
 #
 # Lists the license of every crate linked into the shipped binaries (tui,
-# orchestra-ptyd, orchestra-api, orchestra-mcp) for all release targets, with
+# rakumux-ptyd, rakumux-api, rakumux-mcp) for all release targets, with
 # each license text in full, using cargo-about and the config/template in
 # install/licenses/.
 #
@@ -26,12 +26,12 @@ TEMPLATE="$PROJECT_ROOT/install/licenses/THIRD_PARTY_NOTICES.hbs"
 MANIFEST="$PROJECT_ROOT/tui/Cargo.toml"
 
 # Workspace crates without `publish = false` (cargo-about's private filter misses
-# them). They're Orchestra's own code, so a missing license is expected.
+# them). They're Rakumux's own code, so a missing license is expected.
 OWN_CRATES_PATTERN="^(tui)$"
 
 # Crates that must appear: one dependency of each shipped binary, so a change
 # that drops a binary from the scan fails loudly.
-# orchestra-api links only crates the others link too (hyper, tokio, serde).
+# rakumux-api links only crates the others link too (hyper, tokio, serde).
 REQUIRED_CRATES=("ratatui" "portable-pty" "rmcp")
 
 error() { printf '\033[0;31m[NOTICES]\033[0m %s\n' "$*" >&2; }

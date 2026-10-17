@@ -1,4 +1,4 @@
-//! `orchestra-api --detach`: start the API in the background (new session,
+//! `rakumux-api --detach`: start the API in the background (new session,
 //! stdio detached, log in `logs/api.log`) and return once `api.json` is
 //! written and the API answers `GET /v1/health`. When a healthy API already
 //! runs for this home, return that one instead.
@@ -42,7 +42,7 @@ pub fn start(
     if let Some(info) = running(layout) {
         return Ok(info);
     }
-    let exe = std::env::current_exe().map_err(|e| format!("cannot find orchestra-api: {e}"))?;
+    let exe = std::env::current_exe().map_err(|e| format!("cannot find rakumux-api: {e}"))?;
     let log_path = discovery::log_path(layout);
     let log =
         open_log(&log_path).map_err(|e| format!("cannot open {}: {e}", log_path.display()))?;
@@ -55,7 +55,7 @@ pub fn start(
         let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
         command.arg("--ptyd-path").arg(path);
     }
-    // The child runs in `/`: a relative ORCHESTRA_HOME would move.
+    // The child runs in `/`: a relative RAKUMUX_HOME would move.
     if let Some(home) = std::env::var_os(session_core::env::HOME) {
         let home = std::path::absolute(PathBuf::from(home)).map_err(|e| e.to_string())?;
         command.env(session_core::env::HOME, home);
@@ -65,7 +65,7 @@ pub fn start(
         .stdout(Stdio::null())
         .stderr(log);
     let mut child =
-        spawn_detached(command).map_err(|e| format!("cannot start orchestra-api: {e}"))?;
+        spawn_detached(command).map_err(|e| format!("cannot start rakumux-api: {e}"))?;
     wait_healthy(layout, &mut child, &log_path)
 }
 
@@ -87,13 +87,13 @@ fn wait_healthy(layout: &Layout, child: &mut Child, log_path: &Path) -> Result<A
                 return Ok(info);
             }
             return Err(format!(
-                "orchestra-api exited ({status}) before it was ready; see {}",
+                "rakumux-api exited ({status}) before it was ready; see {}",
                 log_path.display()
             ));
         }
         if Instant::now() >= deadline {
             return Err(format!(
-                "orchestra-api did not answer within {} s; see {}",
+                "rakumux-api did not answer within {} s; see {}",
                 START_TIMEOUT.as_secs(),
                 log_path.display()
             ));

@@ -1,9 +1,9 @@
-//! Helpers for the API integration tests: a temporary `ORCHESTRA_HOME`, the
-//! real `orchestra-api` and `orchestra-ptyd` binaries, and a raw HTTP/1.1
+//! Helpers for the API integration tests: a temporary `RAKUMUX_HOME`, the
+//! real `rakumux-api` and `rakumux-ptyd` binaries, and a raw HTTP/1.1
 //! client (so tests control every header, including `Host`).
 #![allow(dead_code)]
 
-use orchestra_api::discovery::ApiInfo;
+use rakumux_api::discovery::ApiInfo;
 use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
 use session_core::paths::Layout;
 use std::io::{Read, Write};
@@ -13,7 +13,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub const TIMEOUT: Duration = Duration::from_secs(15);
-pub const API_EXE: &str = env!("CARGO_BIN_EXE_orchestra-api");
+pub const API_EXE: &str = env!("CARGO_BIN_EXE_rakumux-api");
 
 /// Poll `check` until it returns true or `timeout` passes.
 pub fn wait_until(timeout: Duration, mut check: impl FnMut() -> bool) -> bool {
@@ -29,10 +29,10 @@ pub fn wait_until(timeout: Duration, mut check: impl FnMut() -> bool) -> bool {
     }
 }
 
-/// The `orchestra-ptyd` binary of this build (built on demand when the
+/// The `rakumux-ptyd` binary of this build (built on demand when the
 /// test runs without the rest of the workspace).
 pub fn ptyd_binary() -> PathBuf {
-    workspace_binary("orchestra-ptyd", "orchestra-ptyd")
+    workspace_binary("rakumux-ptyd", "rakumux-ptyd")
 }
 
 /// A binary of another workspace package, next to this test's binaries.
@@ -61,7 +61,7 @@ pub fn workspace_binary(package: &str, name: &str) -> PathBuf {
     path
 }
 
-/// A temporary Orchestra home and project directories.
+/// A temporary Rakumux home and project directories.
 pub struct TestEnv {
     pub dir: tempfile::TempDir,
     pub layout: Layout,
@@ -75,7 +75,7 @@ impl TestEnv {
     pub fn new() -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = std::fs::canonicalize(dir.path()).expect("canonical temp dir");
-        let layout = Layout::with_home(root.join("orchestra"));
+        let layout = Layout::with_home(root.join("rakumux"));
         let project = root.join("project");
         let other_project = root.join("other");
         std::fs::create_dir_all(project.join("sub")).expect("project dir");
@@ -99,7 +99,7 @@ impl TestEnv {
             .env("SHELL", "/bin/bash")
             .env("PS1", "$ ")
             .env("HISTFILE", self.dir.path().join("history"))
-            .env("ORCHESTRA_API_LOG", "debug")
+            .env("RAKUMUX_API_LOG", "debug")
             .env_remove(session_core::env::SESSION_ID)
             .env_remove(session_core::env::SESSION_TOKEN)
             .env_remove(session_core::env::SOCKET)
@@ -136,7 +136,7 @@ impl TestEnv {
     }
 }
 
-/// A running `orchestra-api` (and, once a user request was made, its
+/// A running `rakumux-api` (and, once a user request was made, its
 /// daemon). Dropping it stops both.
 pub struct Api {
     pub env: TestEnv,
@@ -173,7 +173,7 @@ impl Api {
             .stdout(Stdio::null())
             .stderr(log)
             .spawn()
-            .expect("spawn orchestra-api");
+            .expect("spawn rakumux-api");
         let pid = child.id();
         let mut info = None;
         let ready = wait_until(TIMEOUT, || {
@@ -182,7 +182,7 @@ impl Api {
                 .filter(|info| info.pid == pid);
             info.is_some()
         });
-        assert!(ready, "orchestra-api never wrote api.json");
+        assert!(ready, "rakumux-api never wrote api.json");
         Self {
             env,
             child,
@@ -245,8 +245,8 @@ impl Api {
         let body = body.map(|b| b.to_string());
         let mut headers = vec![
             ("Authorization", auth.as_str()),
-            ("X-Orchestra-Session-Id", id),
-            ("X-Orchestra-Session-Token", token),
+            ("X-Rakumux-Session-Id", id),
+            ("X-Rakumux-Session-Token", token),
         ];
         if body.is_some() {
             headers.push(("Content-Type", "application/json"));

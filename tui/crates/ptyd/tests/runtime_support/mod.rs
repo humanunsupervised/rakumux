@@ -1,5 +1,5 @@
 //! Shared helpers for the daemon runtime integration tests: a temp
-//! `ORCHESTRA_HOME`, real `bash --norc --noprofile` terminals, a fake
+//! `RAKUMUX_HOME`, real `bash --norc --noprofile` terminals, a fake
 //! `Control`, and a socket client that mirrors attach streams.
 #![allow(dead_code)]
 
@@ -44,7 +44,7 @@ pub fn wait_until(timeout: Duration, mut check: impl FnMut() -> bool) -> bool {
     }
 }
 
-/// A temporary Orchestra home plus a working directory for sessions.
+/// A temporary Rakumux home plus a working directory for sessions.
 pub struct TestHome {
     pub dir: tempfile::TempDir,
     pub layout: Layout,
@@ -54,7 +54,7 @@ pub struct TestHome {
 impl TestHome {
     pub fn new() -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
-        let layout = Layout::with_home(dir.path().join("orchestra"));
+        let layout = Layout::with_home(dir.path().join("rakumux"));
         let work = dir.path().join("work");
         std::fs::create_dir_all(&work).expect("work dir");
         Self { dir, layout, work }

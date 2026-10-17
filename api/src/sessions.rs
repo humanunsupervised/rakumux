@@ -86,7 +86,7 @@ fn known_folders(api: &dyn SessionApi, include_dead: bool) -> Result<Vec<Session
         Ok(folders) => folders.into_iter().map(|f| f.path).collect::<Vec<_>>(),
         Err(error) if error.code == ErrorCode::Unsupported => {
             return Err(folder_required(
-                "folder is required: this Orchestra daemon can't list every folder \
+                "folder is required: this Rakumux daemon can't list every folder \
                  yet; pass ?folder=<directory> (repeatable)",
             ))
         }

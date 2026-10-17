@@ -1,18 +1,18 @@
-//! The `orchestra-ptyd` binary's command line.
+//! The `rakumux-ptyd` binary's command line.
 
 mod runtime_support;
 
 use runtime_support::TestHome;
 use std::process::Command;
 
-const EXE: &str = env!("CARGO_BIN_EXE_orchestra-ptyd");
+const EXE: &str = env!("CARGO_BIN_EXE_rakumux-ptyd");
 
 #[test]
 fn version_and_usage() {
     let out = Command::new(EXE).arg("--version").output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.starts_with("orchestra-ptyd "), "{stdout}");
+    assert!(stdout.starts_with("rakumux-ptyd "), "{stdout}");
     assert!(stdout.contains(&format!("protocol {}", session_core::PROTOCOL_VERSION)));
 
     for args in [&["bogus"][..], &[][..], &["serve", "extra"][..]] {

@@ -1,4 +1,4 @@
-//! Command-line subcommands of the `orchestra` binary (`tui`):
+//! Command-line subcommands of the `rakumux` binary (`tui`):
 //! `new`, `ls`, `attach`, `rename`, `pin`, `unpin`, `kill`, `rm`,
 //! `folders …` (alias `projects`), `session …` (JSON, for agents and
 //! scripts), `daemon …` and `remote …` (remote access for the phone app).
@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 
 /// Shown for `unsupported` errors: the daemon predates an operation.
 const UNSUPPORTED_HINT: &str =
-    "this Orchestra daemon is older; restart it with `orchestra daemon restart`";
+    "this Rakumux daemon is older; restart it with `rakumux daemon restart`";
 
 /// Run a subcommand if `args` (including argv[0]) name one. Returns the
 /// process exit code, or `None` when the TUI should start instead.
@@ -50,7 +50,7 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
     Some(run(cli))
 }
 
-/// `orchestra --new-server`: replace the running daemon with a new one
+/// `rakumux --new-server`: replace the running daemon with a new one
 /// (running sessions keep running when it can restart in place; an older
 /// one is stopped after asking), or start one when none runs. Called before
 /// the TUI takes over the terminal, so it may ask on stdin. Returns what
@@ -91,7 +91,7 @@ fn execute(cli: CliArgs) -> Result<i32, CliError> {
             let client = globals.connect(true)?;
             if globals.debug {
                 eprintln!(
-                    "debug: connected to orchestra-ptyd {} as {:?}; cwd {}",
+                    "debug: connected to rakumux-ptyd {} as {:?}; cwd {}",
                     client.daemon_version(),
                     client.caller(),
                     invocation.cwd.display()
@@ -131,7 +131,7 @@ impl CliError {
     }
 }
 
-/// Map an output failure: a closed pipe (`orchestra ls | head`) ends the
+/// Map an output failure: a closed pipe (`rakumux ls | head`) ends the
 /// command quietly.
 pub(crate) fn output_error(error: io::Error) -> CliError {
     if error.kind() == io::ErrorKind::BrokenPipe {
@@ -158,8 +158,8 @@ fn report_error(error: CliError, json_errors: bool, debug: bool, err: &mut dyn W
     match error {
         CliError::Exit(code) => code,
         CliError::Usage(message) => {
-            let _ = writeln!(err, "orchestra: {message}");
-            let _ = writeln!(err, "Run `orchestra help` for usage.");
+            let _ = writeln!(err, "rakumux: {message}");
+            let _ = writeln!(err, "Run `rakumux help` for usage.");
             2
         }
         CliError::Api(error) => {
@@ -167,7 +167,7 @@ fn report_error(error: CliError, json_errors: bool, debug: bool, err: &mut dyn W
             if json_errors {
                 let _ = writeln!(err, "{}", json!({ "error": error }));
             } else {
-                let _ = writeln!(err, "orchestra: {}", error.message);
+                let _ = writeln!(err, "rakumux: {}", error.message);
                 if debug {
                     let _ = writeln!(err, "debug: {error} {:?}", error.details);
                 }
@@ -202,11 +202,11 @@ impl Globals {
 }
 
 pub(crate) fn layout() -> Result<Layout, CliError> {
-    Layout::from_env().map_err(|error| CliError::internal(format!("no Orchestra home: {error}")))
+    Layout::from_env().map_err(|error| CliError::internal(format!("no Rakumux home: {error}")))
 }
 
 fn version() -> &'static str {
-    option_env!("ORCHESTRA_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    option_env!("RAKUMUX_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
 /// The calling process: where it runs and what it would hand to a new
@@ -216,7 +216,7 @@ pub(crate) struct Invocation {
     pub cwd: PathBuf,
     /// Environment snapshot for `CreateSession::env` (UTF-8 pairs only).
     pub env: Vec<(String, String)>,
-    /// `ORCHESTRA_SESSION_ID`: the session this process runs in.
+    /// `RAKUMUX_SESSION_ID`: the session this process runs in.
     pub self_id: Option<SessionId>,
 }
 
@@ -392,10 +392,7 @@ mod tests {
         let mut err = Vec::new();
         let error = CliError::Api(ApiError::new(ErrorCode::NotFound, "no session `x`"));
         assert_eq!(report_error(error, false, false, &mut err), 1);
-        assert_eq!(
-            String::from_utf8(err).unwrap(),
-            "orchestra: no session `x`\n"
-        );
+        assert_eq!(String::from_utf8(err).unwrap(), "rakumux: no session `x`\n");
 
         let mut err = Vec::new();
         let error = CliError::Api(ApiError::new(ErrorCode::OutOfScope, "elsewhere"));
@@ -411,7 +408,7 @@ mod tests {
         );
         assert!(String::from_utf8(err)
             .unwrap()
-            .starts_with("orchestra: bad\n"));
+            .starts_with("rakumux: bad\n"));
         assert_eq!(
             report_error(CliError::Exit(1), false, false, &mut Vec::new()),
             1
@@ -425,7 +422,7 @@ mod tests {
         assert_eq!(report_error(error, false, false, &mut err), 1);
         assert_eq!(
             String::from_utf8(err).unwrap(),
-            format!("orchestra: {UNSUPPORTED_HINT}\n")
+            format!("rakumux: {UNSUPPORTED_HINT}\n")
         );
 
         let mut err = Vec::new();

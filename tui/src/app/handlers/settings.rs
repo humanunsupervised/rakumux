@@ -1,4 +1,4 @@
-//! The Settings modal (`,` or `o` in Orchestra mode: General and Keys tabs)
+//! The Settings modal (`,` or `o` in Rakumux mode: General and Keys tabs)
 //! and the Help modal (`?`): their tabs, the actions the Keys tab runs,
 //! and the dialogs of the General tab (session layout, AI provider keys and
 //! models); and the upgrade dialog.
@@ -61,11 +61,11 @@ fn handle_modal_key(app: &mut App, key: KeyEvent) -> AppResult {
         }
         ModalAction::Tour => app.open_welcome(),
         // Ctrl/Alt keys: the session cycle keys still work, and the
-        // Orchestra key closes the modal.
+        // Rakumux key closes the modal.
         ModalAction::Ignored => {
             if let Some(delta) = app.cycle_direction(&key) {
                 app.cycle_session(delta);
-            } else if app.orchestra_key.matches(&key) {
+            } else if app.rakumux_key.matches(&key) {
                 app.mode = AppMode::Normal;
             }
         }
@@ -73,17 +73,17 @@ fn handle_modal_key(app: &mut App, key: KeyEvent) -> AppResult {
     AppResult::Continue
 }
 
-/// Run a Keys tab action as its keys would in Orchestra mode.
+/// Run a Keys tab action as its keys would in Rakumux mode.
 pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
     let in_session = app.focus == Focus::Session;
-    // Actions on the list happen in Orchestra mode.
+    // Actions on the list happen in Rakumux mode.
     let leave = |app: &mut App| {
         if app.focus == Focus::Session {
-            app.enter_orchestra_mode();
+            app.enter_rakumux_mode();
         }
     };
     match action {
-        KeyAction::OrchestraMode => leave(app),
+        KeyAction::RakumuxMode => leave(app),
         KeyAction::BackToSession => {
             if !in_session {
                 app.return_to_session();
@@ -96,7 +96,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         }
         KeyAction::LastSession => app.go_to_last_session(),
         KeyAction::NumberedSession => {
-            app.set_status("Press 1 to 9 in Orchestra mode to work in that session.")
+            app.set_status("Press 1 to 9 in Rakumux mode to work in that session.")
         }
         KeyAction::NextSession => app.cycle_session(1),
         KeyAction::PreviousSession => app.cycle_session(-1),
@@ -164,7 +164,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             None => app.set_status("Select a session to cd into its folder."),
         },
         KeyAction::Quit => return AppResult::Exit,
-        KeyAction::SendOrchestraKey => app.send_orchestra_key(),
+        KeyAction::SendRakumuxKey => app.send_rakumux_key(),
     }
     AppResult::Continue
 }

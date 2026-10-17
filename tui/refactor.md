@@ -13,7 +13,7 @@ This document proposes a modular refactor of `tui/src/app.rs` to improve readabi
 ## Current responsibilities inside `app.rs`
 
 - Domain utilities:
-  - Session name parsing/formatting utilities: `session_delim`, `strip_orchestra_prefix`, `extract_*`, `format_*`, `to_sentence_case`, `format_session_timestamp`, `extract_session_prefix`, `extract_session_datetime`, `should_auto_rename_session`.
+  - Session name parsing/formatting utilities: `session_delim`, `strip_rakumux_prefix`, `extract_*`, `format_*`, `to_sentence_case`, `format_session_timestamp`, `extract_session_prefix`, `extract_session_datetime`, `should_auto_rename_session`.
   - Validators: `is_hex8`, `is_digits`, `is_valid_branch_name`, `is_valid_session_name`.
   - Session context detection from tmux metadata (duplicated in 3 places).
 - Application types and UI state:
@@ -77,7 +77,7 @@ Notes:
 ## Function/file mapping (high-level)
 
 - session_name.rs
-  - `session_delim`, `strip_orchestra_prefix`, `is_hex8`, `is_digits`
+  - `session_delim`, `strip_rakumux_prefix`, `is_hex8`, `is_digits`
   - `extract_new_format_session`, `extract_old_format_session`
   - `format_session_content[_with_context]`, `format_session_display_name[_with_context]`
   - `format_session_timestamp`, `extract_session_prefix`, `extract_session_datetime`

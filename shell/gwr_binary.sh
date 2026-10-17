@@ -1,29 +1,29 @@
 # shellcheck shell=bash
 
-# Binary lookup for orchestra.sh. Install layouts:
-#   release package / npm dist / Homebrew libexec: orchestra, orchestra-ptyd next to orchestra.sh
-#   source checkout: tui/target/{release,debug}/{tui,orchestra-ptyd}
+# Binary lookup for rakumux.sh. Install layouts:
+#   release package / npm dist / Homebrew libexec: rakumux, rakumux-ptyd next to rakumux.sh
+#   source checkout: tui/target/{release,debug}/{tui,rakumux-ptyd}
 
 gwr_is_executable_file() {
     [[ -n "$1" && -f "$1" && -x "$1" ]]
 }
 
-# Print the path of the `tui` binary (the `orchestra` program).
-# Order: $GW_TUI_BIN, next to orchestra.sh, source checkout builds, PATH.
+# Print the path of the `tui` binary (the `rakumux` program).
+# Order: $GW_TUI_BIN, next to rakumux.sh, source checkout builds, PATH.
 # $GW_TUI_BIN counts only with a session daemon next to it (or $GW_PTYD_BIN
-# set): sessions started by Orchestra 0.5.x still export it, pointing at an
+# set): sessions started by Rakumux 0.5.x still export it, pointing at an
 # old binary that has no daemon, and it must not win over this install.
 gwr_find_binary() {
     if gwr_is_executable_file "${GW_TUI_BIN:-}"; then
         if gwr_is_executable_file "${GW_PTYD_BIN:-}" \
-            || gwr_is_executable_file "$(dirname "$GW_TUI_BIN")/orchestra-ptyd"; then
+            || gwr_is_executable_file "$(dirname "$GW_TUI_BIN")/rakumux-ptyd"; then
             echo "$GW_TUI_BIN"
             return 0
         fi
     fi
 
     local candidates=(
-        "$SCRIPT_DIR/orchestra"
+        "$SCRIPT_DIR/rakumux"
         "$SCRIPT_DIR/tui/target/release/tui"
         "$SCRIPT_DIR/tui/target/debug/tui"
         "$(command -v tui 2>/dev/null || true)"
@@ -40,8 +40,8 @@ gwr_find_binary() {
     return 1
 }
 
-# Print the path of the `orchestra-ptyd` session daemon.
-# Order: $GW_PTYD_BIN, next to the tui binary ($1), next to orchestra.sh, PATH.
+# Print the path of the `rakumux-ptyd` session daemon.
+# Order: $GW_PTYD_BIN, next to the tui binary ($1), next to rakumux.sh, PATH.
 gwr_find_ptyd_binary() {
     local tui_binary="${1:-}"
 
@@ -52,11 +52,11 @@ gwr_find_ptyd_binary() {
 
     local candidates=()
     if [[ -n "$tui_binary" ]]; then
-        candidates+=("$(dirname "$tui_binary")/orchestra-ptyd")
+        candidates+=("$(dirname "$tui_binary")/rakumux-ptyd")
     fi
     candidates+=(
-        "$SCRIPT_DIR/orchestra-ptyd"
-        "$(command -v orchestra-ptyd 2>/dev/null || true)"
+        "$SCRIPT_DIR/rakumux-ptyd"
+        "$(command -v rakumux-ptyd 2>/dev/null || true)"
     )
 
     local path
@@ -81,7 +81,7 @@ gwr_binary_version() {
 
 gwr_should_check_updates() {
     # Check if we should run update check (once per day)
-    local last_check_file="${HOME}/.cache/orchestra/last_update_check"
+    local last_check_file="${HOME}/.cache/rakumux/last_update_check"
     local current_time
     current_time=$(date +%s)
     local last_check=0

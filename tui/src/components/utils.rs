@@ -10,7 +10,7 @@ pub(crate) const FADE_TEXT: f32 = 0.5;
 const FADE_BACKGROUND: f32 = 0.5;
 
 /// Fade every cell of `area`: shown, but not taking keys (the session pane
-/// in Orchestra mode or under a dialog). Palettes that can't fade colours
+/// in Rakumux mode or under a dialog). Palettes that can't fade colours
 /// (16 colours) dim the text instead.
 pub fn fade(buf: &mut Buffer, area: Rect) {
     let p = theme::palette();

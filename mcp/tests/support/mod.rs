@@ -1,9 +1,9 @@
 //! Helpers for the MCP tests: a stub external API (records every request),
-//! the real `orchestra-mcp` binary driven over stdio JSON-RPC, and access to
+//! the real `rakumux-mcp` binary driven over stdio JSON-RPC, and access to
 //! the workspace's other binaries for the full-stack test.
 #![allow(dead_code)]
 
-use orchestra_api::discovery::{self, ApiInfo};
+use rakumux_api::discovery::{self, ApiInfo};
 use serde_json::{json, Value};
 use session_core::paths::Layout;
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub const MCP_EXE: &str = env!("CARGO_BIN_EXE_orchestra-mcp");
+pub const MCP_EXE: &str = env!("CARGO_BIN_EXE_rakumux-mcp");
 pub const STUB_TOKEN: &str = "stub-token-0123456789";
 pub const TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -46,7 +46,7 @@ impl Recorded {
 
 type Handler = dyn Fn(&Recorded) -> (u16, Value) + Send + Sync;
 
-/// A stub of `orchestra-api` on 127.0.0.1: answers `/v1/health` as the
+/// A stub of `rakumux-api` on 127.0.0.1: answers `/v1/health` as the
 /// current process and everything else with `handler`.
 pub struct StubApi {
     pub url: String,
@@ -210,15 +210,15 @@ pub fn session(id: &str, name: &str, folder: &str) -> Value {
     })
 }
 
-/// A temporary Orchestra home.
+/// A temporary Rakumux home.
 pub fn temp_home() -> (tempfile::TempDir, Layout) {
     let dir = tempfile::tempdir().expect("temp dir");
-    let layout = Layout::with_home(std::fs::canonicalize(dir.path()).unwrap().join("orchestra"));
+    let layout = Layout::with_home(std::fs::canonicalize(dir.path()).unwrap().join("rakumux"));
     std::fs::create_dir_all(&layout.home).unwrap();
     (dir, layout)
 }
 
-/// The `orchestra-mcp` binary speaking JSON-RPC over pipes.
+/// The `rakumux-mcp` binary speaking JSON-RPC over pipes.
 pub struct Mcp {
     child: Child,
     stdin: ChildStdin,
@@ -227,7 +227,7 @@ pub struct Mcp {
 }
 
 impl Mcp {
-    /// Start with `env` (plus an isolated `ORCHESTRA_HOME`) and no session
+    /// Start with `env` (plus an isolated `RAKUMUX_HOME`) and no session
     /// identity unless `env` sets one.
     pub fn start(layout: &Layout, env: &[(&str, &str)]) -> Self {
         let mut command = Command::new(MCP_EXE);
@@ -236,14 +236,14 @@ impl Mcp {
             .env_remove(session_core::env::SESSION_ID)
             .env_remove(session_core::env::SESSION_TOKEN)
             .env_remove(session_core::env::SOCKET)
-            .env(orchestra_api::env::API_BIN, "/nonexistent/orchestra-api")
+            .env(rakumux_api::env::API_BIN, "/nonexistent/rakumux-api")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
         for (key, value) in env {
             command.env(key, value);
         }
-        let mut child = command.spawn().expect("spawn orchestra-mcp");
+        let mut child = command.spawn().expect("spawn rakumux-mcp");
         let stdin = child.stdin.take().unwrap();
         let stdout: ChildStdout = child.stdout.take().unwrap();
         let (tx, lines) = mpsc::channel();
@@ -270,7 +270,7 @@ impl Mcp {
             json!({
                 "protocolVersion": "2025-06-18",
                 "capabilities": {},
-                "clientInfo": {"name": "orchestra-test", "version": "1"}
+                "clientInfo": {"name": "rakumux-test", "version": "1"}
             }),
         );
         let result = result.get("result").cloned().expect("initialize result");
@@ -279,7 +279,7 @@ impl Mcp {
     }
 
     pub fn send(&mut self, message: &Value) {
-        writeln!(self.stdin, "{message}").expect("write to orchestra-mcp");
+        writeln!(self.stdin, "{message}").expect("write to rakumux-mcp");
         self.stdin.flush().unwrap();
     }
 

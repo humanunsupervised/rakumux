@@ -54,7 +54,7 @@ impl std::fmt::Debug for Identity {
 #[derive(Debug, Clone)]
 pub struct DaemonConfig {
     pub layout: Layout,
-    /// Explicit `orchestra-ptyd`; otherwise `paths::find_ptyd_binary`.
+    /// Explicit `rakumux-ptyd`; otherwise `paths::find_ptyd_binary`.
     pub ptyd_path: Option<PathBuf>,
     /// Version announced in the hello.
     pub version: String,
@@ -128,8 +128,8 @@ impl DaemonPool {
                 if !user.capabilities().iter().any(|c| c == "auth.delegated") {
                     let mut error = ApiError::new(
                         ErrorCode::Unsupported,
-                        "this Orchestra daemon can't act for agent conversations yet; \
-                         restart it (`orchestra daemon restart`)",
+                        "this Rakumux daemon can't act for agent conversations yet; \
+                         restart it (`rakumux daemon restart`)",
                     );
                     error.details = Some(serde_json::json!({"agent_conversation": "unsupported"}));
                     return Err(error);

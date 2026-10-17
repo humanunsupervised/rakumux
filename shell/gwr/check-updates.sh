@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ###############################################################################
-# check-updates.sh - Check for Orchestra updates from npm and brew
+# check-updates.sh - Check for Rakumux updates from npm and brew
 #
 # Determines installation method and checks for newer versions
 ###############################################################################
@@ -20,10 +20,10 @@ success() { printf "${GREEN}[UPDATE]${NC} %s\n" "$*"; }
 warn() { printf "${YELLOW}[UPDATE]${NC} %s\n" "$*"; }
 error() { printf "${RED}[UPDATE]${NC} %s\n" "$*"; }
 
-# Version of the installed binary, passed in by orchestra.sh (`orchestra --version`).
-CURRENT_VERSION="${ORCHESTRA_CURRENT_VERSION:-unknown}"
-NPM_PACKAGE="@humanu/orchestra"
-BREW_FORMULA="orchestra"
+# Version of the installed binary, passed in by rakumux.sh (`rakumux --version`).
+CURRENT_VERSION="${RAKUMUX_CURRENT_VERSION:-unknown}"
+NPM_PACKAGE="rakumux"
+BREW_FORMULA="rakumux"
 
 # Function to get latest npm version
 get_npm_latest_version() {
@@ -37,7 +37,7 @@ get_npm_latest_version() {
 # Function to get latest homebrew version
 get_brew_latest_version() {
     if command -v brew >/dev/null 2>&1; then
-        # First line: "==> [tap/]orchestra: stable 0.6.0 (bottled), HEAD"
+        # First line: "==> [tap/]rakumux: stable 0.6.0 (bottled), HEAD"
         local latest
         latest="$(brew info "$BREW_FORMULA" 2>/dev/null | sed -n '1s/.*: stable \([^ ,]*\).*/\1/p')"
         echo "${latest:-unknown}"
@@ -46,7 +46,7 @@ get_brew_latest_version() {
     fi
 }
 
-# Installed Homebrew version ("orchestra 0.5.81 0.6.0" -> newest listed).
+# Installed Homebrew version ("rakumux 0.5.81 0.6.0" -> newest listed).
 get_brew_installed_version() {
     brew list --versions "$BREW_FORMULA" 2>/dev/null | awk '{ print $NF }'
 }
@@ -110,7 +110,7 @@ version_compare() {
 
 # Main update check function
 check_updates() {
-    info "Checking for Orchestra updates..."
+    info "Checking for Rakumux updates..."
     echo
     
     # Detect installation method
@@ -176,7 +176,7 @@ check_updates() {
                     ;;
             esac
             echo
-            info "Release notes: https://github.com/humanunsupervised/orchestra/releases"
+            info "Release notes: https://github.com/humanunsupervised/rakumux/releases"
             return 1
             ;;
         "newer")

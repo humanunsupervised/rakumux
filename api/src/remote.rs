@@ -55,7 +55,7 @@ pub fn plan(layout: &Layout, flags: &[SocketAddr]) -> Result<Option<RemotePlan>,
         Ok(Some(config)) if config.enabled => config,
         Ok(_) if explicit => {
             return Err(
-                "--remote-listen needs remote access to be on: run `orchestra remote on`".into(),
+                "--remote-listen needs remote access to be on: run `rakumux remote on`".into(),
             )
         }
         Ok(_) => return Ok(None),
@@ -63,7 +63,7 @@ pub fn plan(layout: &Layout, flags: &[SocketAddr]) -> Result<Option<RemotePlan>,
     };
     if !config.has_valid_token() {
         return refuse(format!(
-            "{} has no valid token; run `orchestra remote token --rotate`",
+            "{} has no valid token; run `rakumux remote token --rotate`",
             path.display()
         ));
     }
@@ -144,7 +144,7 @@ mod tests {
         assert!(plan(&layout, &[]).unwrap().is_none());
         let flag: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let error = plan(&layout, &[flag]).unwrap_err();
-        assert!(error.contains("orchestra remote on"), "{error}");
+        assert!(error.contains("rakumux remote on"), "{error}");
         let mut config = enabled(&[]);
         config.enabled = false;
         config.save(&layout).unwrap();

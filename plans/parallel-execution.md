@@ -9,15 +9,15 @@ merges them in order and runs end-to-end tests.
 
 ## Decisions taken after rev 6 of the refactor plan (binding for all packages)
 
-1. **Single server, many clients.** Exactly one `orchestra-ptyd` per user owns every session's
+1. **Single server, many clients.** Exactly one `rakumux-ptyd` per user owns every session's
    terminal and the session registry. Any number of TUIs (and CLI calls, agents) attach at the same
    time. Several TUIs may watch the same session; at most one is controller.
 2. **The daemon owns the session API** (agent-control Option A): registry (SQLite), scope
    confinement, identity tokens, permissions, waits, lifecycle, audit. TUI and CLI are thin clients
    of `session_core::client::SessionApi`.
 3. **No git anywhere in the product.** No worktrees, branches, git status, merge helpers, env-copy,
-   or `orchestra-cli` (it was a worktree tool). A session is a folder + a terminal.
-4. **Scope = the canonical folder Orchestra is launched from** (`ScopeRoot::resolve(cwd)`); no
+   or `rakumux-cli` (it was a worktree tool). A session is a folder + a terminal.
+4. **Scope = the canonical folder Rakumux is launched from** (`ScopeRoot::resolve(cwd)`); no
    `git rev-parse`. A session's cwd must be inside its scope at creation.
 5. **No shell services layer.** With git and tmux gone, `services.sh`, `server/`, `api/` only served
    AI naming; AI naming moves to Rust (`tui/src/naming`) and the shell layer is deleted. `jq`,
@@ -28,14 +28,14 @@ merges them in order and runs end-to-end tests.
 7. **Help is a modal** (`?` from the list, `prefix ?` from a session) covering the whole new flow:
    sessions and scope, the master-detail screen, layouts, every shortcut (generated from the active
    key bindings, so a changed prefix shows correctly), observer vs controller, dead/exited sessions
-   and revive, the single server with several TUIs, the `orchestra` CLI and agent commands, AI
+   and revive, the single server with several TUIs, the `rakumux` CLI and agent commands, AI
    naming, and the license.
 8. **`Option`/`Alt` + `↑`/`↓` cycles sessions** (previous/next in list order) from anywhere: list
    focus, session focus (intercepted, never forwarded to the program) and both layouts. Works on
    terminals that send Alt-modified arrows (`CSI 1;3A`/`CSI 1;3B`: iTerm2, Ghostty, kitty, WezTerm,
    Alacritty; Terminal.app needs "Use Option as Meta key"). `prefix >`/`prefix <` stay as the
    fallback. Configurable.
-9. **Two session layouts**, chosen from a settings menu and saved in `~/.orchestra/config.json`
+9. **Two session layouts**, chosen from a settings menu and saved in `~/.rakumux/config.json`
    (`sessions.layout`): **Sidebar** (default, session list on the left, detail on the right) and
    **Tabs** (a tab bar of sessions across the top; the selected tab's session detail fills the
    rest). Switching tabs (`Option`+`↑`/`↓`, `prefix >`/`<`, or clicking a tab) shows that session's
@@ -66,7 +66,7 @@ report. Never rename or remove contract items.
   `tui/` (`cargo build --workspace`, `cargo test -p <crate>`). Keep `cargo fmt --all --check` clean
   and add no new warnings in files you own.
 - **Edit only files you own** (table below). You may add new files inside owned directories.
-- Tests never touch the real `~/.orchestra`: set `ORCHESTRA_HOME` to a temp dir.
+- Tests never touch the real `~/.rakumux`: set `RAKUMUX_HOME` to a temp dir.
 - Don't install software system-wide, don't publish, don't push. `cargo install` into `~/.cargo` is
   allowed only where a package says so.
 - Match the surrounding code: rustfmt, doc comments on public items like the contracts, no
@@ -87,8 +87,8 @@ report. Never rename or remove contract items.
 | C1 | TUI master-detail | `tui/src/**` except `cli/`, `naming/`, `terminal_view/`; `tui/Cargo.toml` deps of the `tui` package |
 | C2 | Terminal view widget | `tui/src/terminal_view/**` |
 | C3 | Help modal + session layouts | `tui/src/help/**`, `tui/src/layout/**` (new modules) |
-| R1 | Release & distribution | `install/**`, `orchestra.sh`, `build.sh`, `shell/gwr_*.sh`, `shell/gwr/**`, `shell/build/**`, `shell/orchestra-local.sh` |
-| S1 | Shell layer removal + AI naming port | `services.sh`, `server/**`, `api/**`, `orchestra-cli.sh`, `shell/**` not owned by R1, `tests/**`, `fix-hanging-and-redeploy.sh`, `config.env`, `tui/src/naming/**` |
+| R1 | Release & distribution | `install/**`, `rakumux.sh`, `build.sh`, `shell/gwr_*.sh`, `shell/gwr/**`, `shell/build/**`, `shell/rakumux-local.sh` |
+| S1 | Shell layer removal + AI naming port | `services.sh`, `server/**`, `api/**`, `rakumux-cli.sh`, `shell/**` not owned by R1, `tests/**`, `fix-hanging-and-redeploy.sh`, `config.env`, `tui/src/naming/**` |
 | P1 | Plans & docs | `plans/sessions-refactor.md`, `plans/agent-control.md`, `AGENTS.md`, `tui/src/app/AGENTS.md`, `shell/AGENTS.md`, `auth/AGENTS.md`, `tui/README.md` |
 
 Merge order (coordinator): A3 → A2 → A1 → B1 → C2 → C3 → C1 → S1 → R1 → P1, then end-to-end
@@ -127,7 +127,7 @@ Implement `terminal::Host` (`host::TerminalHost`), the socket server, registrati
   `Exited{code}`; persist scrollback (`persist::ScrollbackStore`, A3) on exit and every
   `persist_interval` while output flows; drop exited terminals after `exited_retention` unless
   `forget` came first.
-- **Server** (`server::main_entry`, `run`): `orchestra-ptyd serve` (foreground) and `--version`.
+- **Server** (`server::main_entry`, `run`): `rakumux-ptyd serve` (foreground) and `--version`.
   Init log; `registration::claim`; build `Host` and `control::ControlService::open` (A2; stubbed
   until merge — use a test `Control` fake in your tests); accept loop, one thread per connection.
   Reject peers with another UID (`SO_PEERCRED` / `getpeereid`). First frame must be `Hello` →
@@ -144,7 +144,7 @@ Implement `terminal::Host` (`host::TerminalHost`), the socket server, registrati
   socket/registration cleanup, bind socket 0600, write `service.json` atomically 0600, remove both
   on drop only if still ours.
 - **Log**: file logger per `log.rs` docs, size-rotated (1 MiB, keep 1).
-- **Done when**: integration tests (`tests/runtime_*.rs`, temp `ORCHESTRA_HOME`, real socket, real
+- **Done when**: integration tests (`tests/runtime_*.rs`, temp `RAKUMUX_HOME`, real socket, real
   `bash --norc --noprofile`, a fake `Control`) cover: spawn → submit `echo hi` → read sees it;
   two attachments controller/observer, promotion and `RoleChanged`; resize broadcast; client
   disconnect leaves the terminal running; reattach checkpoint equals screen; terminate + exit code;
@@ -173,10 +173,10 @@ in-memory fake host in tests).
 - **Create**: cwd defaults to the scope root and must canonicalise inside it; default name is a
   short readable generated name (e.g. two words), unique within the scope; argv = `LaunchSpec.argv`
   or the login shell (`SHELL` from the request env, else the daemon's, else `/bin/sh`) with `-l`.
-  Child env = request env minus `TMUX`, `TMUX_PANE`, `ORCHESTRA_SESSION_*`, `CLAUDECODE`,
+  Child env = request env minus `TMUX`, `TMUX_PANE`, `RAKUMUX_SESSION_*`, `CLAUDECODE`,
   `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_MESSAGING_TOKEN`,
-  `CODEX_THREAD_ID`, `OMPCODE`, plus `ORCHESTRA_SESSION_ID`, `ORCHESTRA_SESSION_TOKEN`,
-  `ORCHESTRA_SOCKET`, `ORCHESTRA_BIN` (if known), `TERM=xterm-256color`, `COLORTERM=truecolor`.
+  `CODEX_THREAD_ID`, `OMPCODE`, plus `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN`,
+  `RAKUMUX_SOCKET`, `RAKUMUX_BIN` (if known), `TERM=xterm-256color`, `COLORTERM=truecolor`.
   `startup_cmds` become `startup_input` (`cmd\r` each).
 - **Ops**: every `Request` the server forwards (see `control_api.rs`): list (ordered by
   `last_active_at` desc, `include_dead`), get, create, rename (unique-in-scope check), kill
@@ -210,7 +210,7 @@ in-memory fake host in tests).
 - **procinfo**: Linux via `/proc/<pid>/{comm,cmdline,cwd}` and `/proc/self/statm`; macOS via
   `libc` `proc_pidpath`/`proc_pidinfo` (`PROC_PIDVNODEPATHINFO` for cwd) and `sysctl`
   `KERN_PROCARGS2` for the command line, behind `#[cfg(target_os = "macos")]`. Try
-  `cargo check --target x86_64-apple-darwin -p orchestra-ptyd` (`rustup target add` is allowed); if
+  `cargo check --target x86_64-apple-darwin -p rakumux-ptyd` (`rustup target add` is allowed); if
   the C toolchain makes that impossible, say so in the report. Name detection must see through
   wrappers: `node …/claude`, `bun …/opencode`, etc. report the agent name via `cmdline`.
 - **detect.rs**: `detect` identifies the agent (`claude`, `codex`, `opencode`, `pi`, `gemini`,
@@ -227,9 +227,9 @@ in-memory fake host in tests).
 ### B1 — Client library + CLI
 
 - **`Client`** (session-core): `connect(config)`: resolve auth (`AuthMode::Auto`: session env vars
-  → session auth and `ORCHESTRA_SOCKET` if set; else registration file → user auth and its socket).
+  → session auth and `RAKUMUX_SOCKET` if set; else registration file → user auth and its socket).
   If connecting fails and `config.spawn`: find the daemon (`paths::find_ptyd_binary`), spawn
-  `orchestra-ptyd serve` with **stdin/stdout/stderr on `/dev/null`** and `setsid()` in `pre_exec`
+  `rakumux-ptyd serve` with **stdin/stdout/stderr on `/dev/null`** and `setsid()` in `pre_exec`
   (add `libc` to session-core), then wait up to 2 s for the registration file and socket. Hello
   handshake; keep one request connection behind a mutex, reconnect once on a broken pipe. Map every
   `SessionApi` method to its `Request`/`Response`; unexpected responses → `Internal`, `Error` →
@@ -238,18 +238,18 @@ in-memory fake host in tests).
 - **CLI** (`tui/src/cli`, `dispatch`): global options before the subcommand (`--ptyd-path`,
   `--services-path` ignored, `--debug`). Scope for user callers = `ScopeRoot::resolve(cwd)`;
   `<name|id>` resolves within scope (exact id, else unique name).
-  - `orchestra new [--name N] [--cwd P] [--cmd C]... [--detach] [-- ARGV...]` → create (env snapshot
+  - `rakumux new [--name N] [--cwd P] [--cmd C]... [--detach] [-- ARGV...]` → create (env snapshot
     = current process env, size = terminal size or 80×24), then attach unless `--detach`.
-  - `orchestra ls [--json] [--all]` (`--all` includes dead).
-  - `orchestra attach <name|id>`: full-screen raw client. Enter alternate screen + raw mode, attach
+  - `rakumux ls [--json] [--all]` (`--all` includes dead).
+  - `rakumux attach <name|id>`: full-screen raw client. Enter alternate screen + raw mode, attach
     as controller at the terminal's size, write the checkpoint and then output bytes **straight to
     stdout** (the user's terminal does the emulation), forward stdin bytes as input. Prefix `Ctrl-b`
     (0x02) then: `d` detach, `>`/`<` next/previous session in scope by recency (reattach), `n` new
     session in cwd, `Ctrl-b` literal. On SIGWINCH send `Resize`. Restore the terminal on exit/error.
-  - `orchestra rename [<name|id>] <new name>` (defaults to `$ORCHESTRA_SESSION_ID`),
-    `orchestra kill <name|id> [--tree]`, `orchestra rm <name|id>` (delete).
-  - `orchestra daemon status|stop|restart|logs` (`logs` tails `Layout::log_file()`).
-  - `orchestra session list|get|read|wait|report` — JSON output for agents and scripts (stage A).
+  - `rakumux rename [<name|id>] <new name>` (defaults to `$RAKUMUX_SESSION_ID`),
+    `rakumux kill <name|id> [--tree]`, `rakumux rm <name|id>` (delete).
+  - `rakumux daemon status|stop|restart|logs` (`logs` tails `Layout::log_file()`).
+  - `rakumux session list|get|read|wait|report` — JSON output for agents and scripts (stage A).
     `report` flags: `--state`, `--text`, `--summary`, `--file` (repeatable), `--agent-kind`,
     `--agent-session-id`, `--resume -- ARGV...`.
   - Exit codes: 0 ok, 1 error (message on stderr), 2 usage.
@@ -270,7 +270,7 @@ no Git tab, no merge menu, no worktree options). Program against
 - **Behaviour**: subscribe to scope events and keep the list live (multiple TUIs may run at once;
   never assume you're the only client). Selected session attaches as observer; Enter promotes to
   controller (pane size); prefix keys per §7 (`Ctrl-b` default, configurable); zoom; nesting guard
-  (`ORCHESTRA_SESSION_ID` set → that session can't be attached); dead session → saved scrollback
+  (`RAKUMUX_SESSION_ID` set → that session can't be attached); dead session → saved scrollback
   (via `read`) with "Enter to revive"; exited → "Enter to restart".
 - **Dialogs**: new session (name, directory inside scope, optional command, startup commands),
   rename, delete confirmation, daemon-restart consent on protocol mismatch, help (rewrite: overview,
@@ -346,24 +346,24 @@ entry to switch layout (applies live, saved), `Option`/`Alt`+`↑`/`↓` handlin
 ### R1 — Release & distribution
 
 Per `sessions-refactor.md` §13 with the decisions above:
-- `orchestra.sh`: drop `gwr_check_git_repo` and `gwr_check_services_script`; stop passing
+- `rakumux.sh`: drop `gwr_check_git_repo` and `gwr_check_services_script`; stop passing
   `--services-path`; pass `--ptyd-path` (resolved like the `tui` binary; `GW_PTYD_BIN` override)
-  and export `ORCHESTRA_BIN` (path of the launcher). Keep the update check.
-- `install/scripts/build-release.sh`: build and ship `orchestra-ptyd` (workspace member) next to
-  `tui`; stop shipping `env-copy`, `orchestra-cli.sh`, `services.sh`, `server/`, `api/`; include
+  and export `RAKUMUX_BIN` (path of the launcher). Keep the update check.
+- `install/scripts/build-release.sh`: build and ship `rakumux-ptyd` (workspace member) next to
+  `tui`; stop shipping `env-copy`, `rakumux-cli.sh`, `services.sh`, `server/`, `api/`; include
   `LICENSE` and `THIRD_PARTY_NOTICES`; build tarballs with `COPYFILE_DISABLE=1` and without macOS
   metadata. Generate `THIRD_PARTY_NOTICES` from `Cargo.lock` (`cargo install cargo-about` into
   `~/.cargo` is allowed; commit the template/config).
 - npm (`install/npm`): `"license": "SEE LICENSE IN LICENSE"`, add `LICENSE` (same text as
-  `install/scripts/setup-public-repo.sh` writes), `files` updated, drop the `orchestra-cli` bin and
-  `bin/orchestra-cli.js`, copy `orchestra-ptyd` in `install.js`, description/keywords without tmux
+  `install/scripts/setup-public-repo.sh` writes), `files` updated, drop the `rakumux-cli` bin and
+  `bin/rakumux-cli.js`, copy `rakumux-ptyd` in `install.js`, description/keywords without tmux
   or git.
 - Homebrew: one `install/scripts/release-homebrew.sh` replacing `update-homebrew-sha.sh`,
   `update-homebrew-formula.sh`, `update-homebrew-tap.sh` (render from a template with version + three
   SHA-256s; `brew audit --strict`, local-tap install and `brew test` steps documented but **not run
-  by you**); formula: `license :cannot_represent`, install `orchestra-ptyd` into `libexec`, wrapper
-  `exec orchestra.sh "$@"` for every argument, no `orchestra-cli`, no `env-copy`, no
-  `depends_on` git/tmux/jq, `test do` checks `orchestra --version` and `orchestra-ptyd --version`.
+  by you**); formula: `license :cannot_represent`, install `rakumux-ptyd` into `libexec`, wrapper
+  `exec rakumux.sh "$@"` for every argument, no `rakumux-cli`, no `env-copy`, no
+  `depends_on` git/tmux/jq, `test do` checks `rakumux --version` and `rakumux-ptyd --version`.
   `full-release-automation.sh` calls the new script.
 - `install/AGENTS.md`, `install/README.md`, `install/INSTALL.md`: match.
 - **Done when**: `bash -n` on every changed script, `ruby -c` on the formula (if Ruby is present), a
@@ -378,14 +378,14 @@ Per `sessions-refactor.md` §13 with the decisions above:
   API keys from `crate::app::Config` with `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env fallbacks,
   using `reqwest` (already a dependency). Unit-test prompt building and output clean-up with no
   network.
-- Delete `services.sh`, `server/`, `api/`, `orchestra-cli.sh`, `shell/cli_*.sh`, `shell/git/**`,
+- Delete `services.sh`, `server/`, `api/`, `rakumux-cli.sh`, `shell/cli_*.sh`, `shell/git/**`,
   `shell/env_copy*.sh`, `shell/tmux/**`, `shell/fix_hanging_*.sh` and `fix-hanging-and-redeploy.sh`
   if only used by removed parts, `config.env` if unused, and tests under `tests/` that exercise
-  tmux, git worktrees, env-copy or the services layer. Keep anything `orchestra.sh` / R1's files
+  tmux, git worktrees, env-copy or the services layer. Keep anything `rakumux.sh` / R1's files
   still source (check before deleting; ask via the report if unsure).
-- Rewrite `shell/orchestra-command-hook.sh`: history lines go to `~/.orchestra/history/<id>.log`
-  (`$ORCHESTRA_HOME` respected) when `ORCHESTRA_SESSION_ID` is set; no tmux; `orchestra_rename_session`
-  calls `"${ORCHESTRA_BIN:-orchestra}" rename "$*"`.
+- Rewrite `shell/rakumux-command-hook.sh`: history lines go to `~/.rakumux/history/<id>.log`
+  (`$RAKUMUX_HOME` respected) when `RAKUMUX_SESSION_ID` is set; no tmux; `rakumux_rename_session`
+  calls `"${RAKUMUX_BIN:-rakumux}" rename "$*"`.
 - Rewrite `tests/manual-test-instructions.md` for the session model.
 - **Done when**: `cargo test -p tui naming` passes; `bash -n` on remaining scripts; `git grep -n
   tmux -- ':!plans'` only finds intentional mentions (docs about not supporting tmux).
@@ -395,7 +395,7 @@ Per `sessions-refactor.md` §13 with the decisions above:
 - `plans/sessions-refactor.md` → rev 7: fold in the six decisions above, agent-control stage A in
   0.6.0, `plans/agent-control.md` §9 changes that still apply (drop git/worktree items), the Phase
   table re-mapped to these packages, and a pointer to this file. Remove git-related sections (Git
-  tab, merge helpers, worktree creation, env-copy, `orchestra-cli`) rather than leaving them.
+  tab, merge helpers, worktree creation, env-copy, `rakumux-cli`) rather than leaving them.
 - `plans/agent-control.md` → rev 2: decisions taken (Option A; stage A permissions as above); no
   worktree in `session.create`.
 - `AGENTS.md`: rewrite for the new architecture (single daemon + clients, crates, data layout,
@@ -411,18 +411,18 @@ Per `sessions-refactor.md` §13 with the decisions above:
 
 | Merged | Package | Notes |
 |---|---|---|
-| this commit | TUI | Icons setting (`sessions.icons`, Settings ▸ General): Plain `▤`/`⎇`, Emoji 📁/🌿, Nerd Font; passed explicitly (no global), and `format::truncate`/`truncate_middle` now measure columns so 2-column emoji keep the list aligned (checked for every style at 80 and 160 columns). User request: Orchestra mode shows no keys: the which-key strip is gone and the footer shows only the mode and messages (session mode keeps `Ctrl-\ orchestra`). Markdown docs had `Ctrl-\\` (two backslashes) in code spans; fixed. 594 workspace tests. |
-| `e2d3e39` | TUI | A click on the list from a session enters Orchestra mode (Esc goes back). |
-| `552b599` | TUI | Two modes and one key (user decision after a survey of Claude Code 2.1, OpenCode 2.0, Pi and lazygit defaults: `Ctrl-b` is Claude Code's and OpenCode's "background" key, Alt+↑/↓ are taken by OpenCode, Claude Code and Pi). Session mode forwards everything but the Orchestra key `Ctrl-\` (`sessions.orchestra_key`; a customised old `prefix_key` still counts); Orchestra mode is the list focus with arrows plus Vim keys, Enter/`i` in, Esc (cancel first) or `Ctrl-\` back to `came_from`, Tab last session, `1`-`9`, `dd`, `z`, `\`; which-key strip after a pause; footer mode badge; Option+↑/↓ inside sessions only with `cycle_keys_in_session` (Settings, General). `orchestra attach` prefix moved to `Ctrl-\`. Fixed: own Promote/Demote answers were taken for another client's takeover on a fast round trip; the attach test's output race. 592 workspace tests. |
+| this commit | TUI | Icons setting (`sessions.icons`, Settings ▸ General): Plain `▤`/`⎇`, Emoji 📁/🌿, Nerd Font; passed explicitly (no global), and `format::truncate`/`truncate_middle` now measure columns so 2-column emoji keep the list aligned (checked for every style at 80 and 160 columns). User request: Rakumux mode shows no keys: the which-key strip is gone and the footer shows only the mode and messages (session mode keeps `Ctrl-\ rakumux`). Markdown docs had `Ctrl-\\` (two backslashes) in code spans; fixed. 594 workspace tests. |
+| `e2d3e39` | TUI | A click on the list from a session enters Rakumux mode (Esc goes back). |
+| `552b599` | TUI | Two modes and one key (user decision after a survey of Claude Code 2.1, OpenCode 2.0, Pi and lazygit defaults: `Ctrl-b` is Claude Code's and OpenCode's "background" key, Alt+↑/↓ are taken by OpenCode, Claude Code and Pi). Session mode forwards everything but the Rakumux key `Ctrl-\` (`sessions.rakumux_key`; a customised old `prefix_key` still counts); Rakumux mode is the list focus with arrows plus Vim keys, Enter/`i` in, Esc (cancel first) or `Ctrl-\` back to `came_from`, Tab last session, `1`-`9`, `dd`, `z`, `\`; which-key strip after a pause; footer mode badge; Option+↑/↓ inside sessions only with `cycle_keys_in_session` (Settings, General). `rakumux attach` prefix moved to `Ctrl-\`. Fixed: own Promote/Demote answers were taken for another client's takeover on a fast round trip; the attach test's output race. 592 workspace tests. |
 | `96eb17e` | TUI | Project icon `▤` (plain symbol) in the list and the tab bar. |
 | `0a27f55` | TUI | The daemon announced its features but no client could read them: `SessionApi::daemon_capabilities` (default `None`, additive). An older daemon (no `session.git`/`projects`/`session.pin`, e.g. one started before git context) gets a restart offer (`y` only); verified against a daemon built from `b25d073^`. Subtext names the main worktree too (`⎇ main · worktree repo`). 588 tests. |
 | `1df349e` | TUI | Help (`?`, `prefix ?`) and Settings (`prefix l`, `o`) split; Settings' Keys tab is a table of `KeyAction`s run with Enter; every prefix command works in the list; `prefix l` no longer goes back to the list (`prefix Tab`/`Esc` do). |
 | `40f6563` | TUI | Project item (selectable top row, padded band) and project switcher modal (filter, switch, Tab ticks, add or create a typed folder after `y`, Ctrl-x forgets); compact three-row session cells; selected text white, no backgrounds. |
 | `cc9337e` | Merges | Tokyo Night merged as `f809801` (agent `5110ba3`): Tokyo Night assumed unless the terminal clearly can't (no `COLORTERM` needed); 256-colour fallback navy, not grey; `panel` = background `#1a1b26`; `Palette::base()` painted on the root and dialogs; embedded-terminal default colours themed; OSC 10/11 answer Tokyo Night. Settings modal merged (agent `0c32111`) without conflicts. Also "+ New session" moved to the bottom of the list (`115a198`). 584 workspace tests. |
 | `0c32111` | Settings modal | User request: the footer was too crowded. Help modal and the `o` settings menu merged into one **Settings** modal (`AppMode::Settings`, `help::SettingsState`/`SettingsTab`): tabs General (the old menu's rows; its API key, provider and model dialogs now return to the modal), Keys, Overview, Sessions, Layouts, Agents & CLI, License; `o` opens General, `?` and `prefix ?` open Keys; `o` also closes. The Keys tab now carries everything the footer listed (adds `Ctrl-r`, filter keys, `1-9`, Home/End). Footer is one row: messages plus `? settings` (`prefix ? settings` in a session, `⏎ keep  Esc clear` while filtering); panes gain the row. 577 workspace tests; checked headless at 140×40, 120×32 and 80×24. |
-| next commit | OpenCode identity | Why OpenCode refused creates: OpenCode 2.x (the user's `opencode2`, 2.0.28) runs MCP servers in a shared background service, so calls carry no session env, only `_meta["ai.opencode/sessionID"]`; the MCP refused changes. Fix (`agent-mcp.md` N6, now in 0.6.0): `SessionBind` op + `Auth::Delegated` (capability `auth.delegated`, memory-only bindings, newest wins, cleared on exit); `orchestra session bind`; API agent headers; MCP acts for the tagged conversation; OpenCode 2.x TUI plugin + `orchestra-mcp opencode-plugin [--install]` (writes `<config>/plugins/orchestra-session/tui.js`; 2.x skips single-file entries and migrates `tui.json` only once, so no config editing). 567 workspace tests (Node runs the plugin against a fake API). Verified with real OpenCode 2.0.28 + shared service in an isolated home: plugin bound the conversation; the real MCP with that tag created sessions as the Orchestra session, even with a stale env identity. |
-| next commit | Agent creates | User decision: sessions may create sessions in their own project (`policy::authorize` allows `Create`; naming another project or a `cwd` outside it → `out_of_scope`). `control::Limits` now enforced on those creates only: 4 running children per session, depth 2, 8 running agent-created per project, 10 creates per session per minute → `limit_exceeded` with `details {limit, max}` (audited as denied). API maps `limit_exceeded` to 429 (`openapi.yaml`, README). MCP instructions and `create_session` description updated. `orchestra new` inside a session needs `--detach`. 556 workspace tests; verified with the real MCP inside a session (4 creates, then `max_children_per_parent`; another project → `out_of_scope`). |
-| merge of A (`6287358`) | A (API/MCP) | `api/` → `orchestra-api` (hyper 0.14 HTTP/1.1 on 127.0.0.1; `api.json` + `api.lock` per home; bearer token, loopback Host, no Origin/Sec-Fetch-Site; identity headers → session-auth daemon client; `openapi.yaml` kept in sync by tests; falls back per project on older daemons). `mcp/` → `orchestra-mcp` (`rmcp =3.5.1`, stdio; six tools; nonce-delimited untrusted output; starts `orchestra-api --detach`; OpenCode shared-service guard). Build, tarball, npm and Homebrew ship both. 552 workspace tests. Open: agents get `permission_denied` on create (stage A policy); OpenCode 2.x doesn't pass the session identity; Codex install line unverified. |
+| next commit | OpenCode identity | Why OpenCode refused creates: OpenCode 2.x (the user's `opencode2`, 2.0.28) runs MCP servers in a shared background service, so calls carry no session env, only `_meta["ai.opencode/sessionID"]`; the MCP refused changes. Fix (`agent-mcp.md` N6, now in 0.6.0): `SessionBind` op + `Auth::Delegated` (capability `auth.delegated`, memory-only bindings, newest wins, cleared on exit); `rakumux session bind`; API agent headers; MCP acts for the tagged conversation; OpenCode 2.x TUI plugin + `rakumux-mcp opencode-plugin [--install]` (writes `<config>/plugins/rakumux-session/tui.js`; 2.x skips single-file entries and migrates `tui.json` only once, so no config editing). 567 workspace tests (Node runs the plugin against a fake API). Verified with real OpenCode 2.0.28 + shared service in an isolated home: plugin bound the conversation; the real MCP with that tag created sessions as the Rakumux session, even with a stale env identity. |
+| next commit | Agent creates | User decision: sessions may create sessions in their own project (`policy::authorize` allows `Create`; naming another project or a `cwd` outside it → `out_of_scope`). `control::Limits` now enforced on those creates only: 4 running children per session, depth 2, 8 running agent-created per project, 10 creates per session per minute → `limit_exceeded` with `details {limit, max}` (audited as denied). API maps `limit_exceeded` to 429 (`openapi.yaml`, README). MCP instructions and `create_session` description updated. `rakumux new` inside a session needs `--detach`. 556 workspace tests; verified with the real MCP inside a session (4 creates, then `max_children_per_parent`; another project → `out_of_scope`). |
+| merge of A (`6287358`) | A (API/MCP) | `api/` → `rakumux-api` (hyper 0.14 HTTP/1.1 on 127.0.0.1; `api.json` + `api.lock` per home; bearer token, loopback Host, no Origin/Sec-Fetch-Site; identity headers → session-auth daemon client; `openapi.yaml` kept in sync by tests; falls back per project on older daemons). `mcp/` → `rakumux-mcp` (`rmcp =3.5.1`, stdio; six tools; nonce-delimited untrusted output; starts `rakumux-api --detach`; OpenCode shared-service guard). Build, tarball, npm and Homebrew ship both. 552 workspace tests. Open: agents get `permission_denied` on create (stage A policy); OpenCode 2.x doesn't pass the session identity; Codex install line unverified. |
 | merge of T (`255ed04`) | T (projects) | Project selector pill on the list title row (or the tab bar's left end), `P` drop-down with checkboxes, add (`a`, Tab completion) and forget (`x`); selection saved as `sessions.selected_projects` (launch folder always shown, not saved); grouped list with project headers (launch folder first, then activity; Tabs by oldest session); `p` pins (gold `★`), pinned first per group; subtext `⎇ branch · worktree · program · state · report`, no cwd; Project field in the new-session dialog; header and help updated; falls back to the launch folder on `unsupported`. 492 workspace tests; checked against the real daemon with four projects incl. a linked worktree. |
 | merge of D (`85d0703`) | D (projects) | Registry schema 3 (`projects` table backfilled from session scopes, `pinned` column); `SessionList`/`Subscribe` unions for user callers (session callers naming another scope → `out_of_scope`); `ProjectList/Add/Remove` (add needs an absolute path; remove refuses while sessions exist); `SessionPin` (user or self); capabilities `projects`, `session.pin`, `session.git`; git context read from `.git` files with a per-session cache refreshed on cwd change and every 2 s. CLI: `projects [add\|rm]`, `pin`/`unpin`, `ls --project/--all` (dead sessions moved to `--dead`). 461 workspace tests. Open: no project events (clients re-query); reftable repos give no branch. |
 | next commit | K (projects) | Contract for `plans/projects-api-mcp.md`: `GitInfo`, `ProjectView`, `SessionView.{pinned, git}`, `SessionList.scopes`, `SubscribeRequest.scopes`, `SessionPin`, `ProjectList/Add/Remove`, `Response::{Projects, Project}`, `SessionApi::{list_in, projects, add_project, remove_project, pin}` (default `unsupported`). Daemon answers `unsupported` until D lands. Packages D, T, A fan out from here. |
@@ -430,26 +430,26 @@ Per `sessions-refactor.md` §13 with the decisions above:
 | `557d9ec`, `4c5fae2` | contract | v1 additions from `agent-mcp.md` §6.1: `SessionView.{auto_named, description, notes, labels, private}`, `Hello.max_blocking_ms` (enforced on waits), `ErrorCode::{ApprovalTimeout, ApprovalUnavailable}`, capability and read/wait-not-seen docs. TUI AI naming now follows the daemon's `auto_named`. |
 | (load, manual) | — | 20 sessions × 200k lines (~400 MB of output): daemon RSS ~120 MB (~6 MB/session, matches the 2,000-row budget), CPU settles to 0.3% idle, `ls` stays instant, saved scrollback 3.2 MB total. |
 | merge of C1 | C1 | TUI rebuilt as a client of the daemon: Sidebar/Tabs layouts, live list from the event stream, observer/controller panes, prefix keys, zoom, nesting guard, Alt+↑/↓ cycling, help modal, settings menu (`o`) with live layout switch, new-session/rename/delete/daemon-restart dialogs, AI naming, reconnect with backoff. Removed `api.rs`, worktree/git/tmux/merge/env-copy code and the `env-copy`, `walkdir`, `strip-ansi-escapes`, `rusqlite` dependencies. 416 workspace tests. |
-| (e2e, TUI) | — | Real TUI via `orchestra.sh` + real daemon, headless 140×40: create (named and auto-named), type into a controlled pane (PTY resized to the pane), Alt+↓ cycling across three sessions, settings → Tabs (saved to config), help modal, quit and relaunch with sessions intact, two TUIs on one daemon (typing in one mirrors live in the other), vim in a pane mirrored to the observer, zoom, daemon stop → both TUIs reconnect and show dead sessions, Enter revives. |
+| (e2e, TUI) | — | Real TUI via `rakumux.sh` + real daemon, headless 140×40: create (named and auto-named), type into a controlled pane (PTY resized to the pane), Alt+↓ cycling across three sessions, settings → Tabs (saved to config), help modal, quit and relaunch with sessions intact, two TUIs on one daemon (typing in one mirrors live in the other), vim in a pane mirrored to the observer, zoom, daemon stop → both TUIs reconnect and show dead sessions, Enter revives. |
 | `8a9642e`, `42e57a5`, next | fixes | Daemon exits when its registration file disappears (stray test daemons); e2e tests kill their daemon on failure; dead-code allowances removed, `publish = false`; racy procinfo test fixed; Homebrew/npm install detection uses the resolved binary path. |
 | merge of A1 + `e0c45cd` | A1 | Terminal host (per-PTY actor, replay ring, fan-out, backpressure, persistence, 2×2 size clamp, no saves after `forget`), socket server (hello, attach/event streams, `unsupported` for unknown ops, peer-UID check, SIGTERM), registration, logging; daemon end-to-end tests enabled. 366 workspace tests pass. |
-| (e2e, manual) | — | Real CLI + daemon in an isolated `ORCHESTRA_HOME`: spawn-on-demand (`ls` 29 ms), `new`, `ls`, `attach` (typing, `Ctrl-b d`), session identity inside sessions (`is_self`), stage-A denial of `kill` from an agent, `daemon stop` → dead sessions with saved scrollback, `session read` of dead sessions. |
-| next commit | CLI fix | `orchestra attach` revives dead/exited sessions instead of refusing. |
+| (e2e, manual) | — | Real CLI + daemon in an isolated `RAKUMUX_HOME`: spawn-on-demand (`ls` 29 ms), `new`, `ls`, `attach` (typing, `Ctrl-b d`), session identity inside sessions (`is_self`), stage-A denial of `kill` from an agent, `daemon stop` → dead sessions with saved scrollback, `session read` of dead sessions. |
+| next commit | CLI fix | `rakumux attach` revives dead/exited sessions instead of refusing. |
 | merge of A3 | A3 | `ScrollbackStore` (atomic, 0600/0700, id validation), procinfo for Linux (`/proc`) and macOS (libproc, `KERN_PROCARGS2`; compile-checked for both macOS targets outside the repo, not run on a Mac), agent detection for claude/codex/opencode/pi/gemini/qwen/aider/cursor-agent plus name-only agents, 51 screen fixtures (14 captured live). |
-| merge of R1 | R1 | `orchestra.sh` without git/services checks (`--ptyd-path`, `ORCHESTRA_BIN`); tarballs and npm ship `orchestra-ptyd`, `LICENSE`, `THIRD_PARTY_NOTICES` (cargo-about), no macOS metadata; one `release-homebrew.sh` + template (`license :cannot_represent`, wrapper execs `orchestra.sh`); npm launcher no longer routes to `orchestra-cli`; workspace builds. |
+| merge of R1 | R1 | `rakumux.sh` without git/services checks (`--ptyd-path`, `RAKUMUX_BIN`); tarballs and npm ship `rakumux-ptyd`, `LICENSE`, `THIRD_PARTY_NOTICES` (cargo-about), no macOS metadata; one `release-homebrew.sh` + template (`license :cannot_represent`, wrapper execs `rakumux.sh`); npm launcher no longer routes to `rakumux-cli`; workspace builds. |
 | `e361f34` | B1 | Client (auth modes, detached spawn, dedicated connections for wait/attach/subscribe, reconnect) and CLI (`new`, `ls`, `attach`, `rename`, `kill`, `rm`, `daemon …`, `session …` JSON). 30 + 35 tests. Gaps: attach polls for resize (no signal dep); dropped `EventStream` closes on next event; TUI `--help` should list subcommands (C1). |
 | `f05a201` | A2 fix | Revive with resume replaces only the startup/launch command that starts the same program; user touches no longer audited. |
 | merge of A2 | A2 | Control layer: registry (with agent-mcp v1 columns), auth, stage-A policy, waits, lifecycle (Done/Idle), events, audit; 60 tests with a fake host. Delete race reported to A1 (don't persist forgotten terminals). |
 | merge of C3 | C3 | Help modal (six tabs, shortcuts from configured keys) and Sidebar/Tabs layouts with tab bar and cycling; 43 tests. `split` takes a `PaneFocus` third argument (handles zoom). C1 sent the final API. |
-| merge of P1 | P1 | `plans/sessions-refactor.md` rev 7, `plans/agent-control.md` rev 2, `AGENTS.md` and module docs rewritten. Found and sent to R1: npm launcher routes to `orchestra-cli`; build scripts don't build the workspace. Open questions in sessions-refactor §17. |
+| merge of P1 | P1 | `plans/sessions-refactor.md` rev 7, `plans/agent-control.md` rev 2, `AGENTS.md` and module docs rewritten. Found and sent to R1: npm launcher routes to `rakumux-cli`; build scripts don't build the workspace. Open questions in sessions-refactor §17. |
 | merge of C2 | C2 | Terminal view widget (29 tests). Adds `with_scrollback`, `history_len`, `scroll_to_bottom`, `reset_to_text`, `mouse_bytes`. Found: `vt100` panics below 2×2 — A1 asked to clamp sizes in the daemon. Remove the module's `allow(dead_code)` once C1 merges. |
-| `795cfcd` | S1 | AI naming in Rust; shell services layer, `orchestra-cli`, git/tmux shell modules and their tests deleted. Follow-up `e9032f8`: naming moved from the retired `claude-3-5-haiku-latest` to `claude-haiku-5-5` (low effort, `max_tokens` 1024, text block selected by type). |
+| `795cfcd` | S1 | AI naming in Rust; shell services layer, `rakumux-cli`, git/tmux shell modules and their tests deleted. Follow-up `e9032f8`: naming moved from the retired `claude-3-5-haiku-latest` to `claude-haiku-5-5` (low effort, `max_tokens` 1024, text block selected by type). |
 
 Open integration items:
-- The command-history hook (`shell/orchestra-command-hook.sh`) is no longer sourced automatically
-  (tmux used to do it). Decide between an `orchestra integration install shell` command that adds a
+- The command-history hook (`shell/rakumux-command-hook.sh`) is no longer sourced automatically
+  (tmux used to do it). Decide between an `rakumux integration install shell` command that adds a
   guarded `source` line to the user's shell rc, or documenting the line in help/install docs.
 - 0.6.0 release notes are in `install/release-notes/0.6.0.md`; `create-github-release.sh` uses
   `install/release-notes/<version>.md` when it exists (commit subjects otherwise).
 - Needs macOS/real brew (user): full `build-release.sh`, `release-homebrew.sh` audit/install/test
-  from a temporary tap, fresh install + upgrade from 0.5.81, `orchestra.sh` under bash 3.2.
+  from a temporary tap, fresh install + upgrade from 0.5.81, `rakumux.sh` under bash 3.2.

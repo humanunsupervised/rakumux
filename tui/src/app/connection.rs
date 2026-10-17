@@ -72,7 +72,7 @@ pub fn daemon_version(layout: &Layout) -> Option<String> {
 
 /// Stop the registered daemon (the one in `layout`, else one an earlier
 /// build registered in a legacy layout): SIGTERM, then SIGKILL after 5 s.
-/// Refuses to signal a process that isn't `orchestra-ptyd` (stale
+/// Refuses to signal a process that isn't `rakumux-ptyd` (stale
 /// registration with a reused pid).
 pub fn stop_daemon(layout: &Layout) -> Result<(), String> {
     let running = std::iter::once(layout.clone())
@@ -101,9 +101,9 @@ fn stop_registered(layout: &Layout) -> Result<(), String> {
         return Ok(());
     }
     let name = process_name(pid)?;
-    if !name.contains("orchestra-ptyd") {
+    if !name.contains("rakumux-ptyd") {
         return Err(format!(
-            "process {pid} from the registration file is '{name}', not orchestra-ptyd; \
+            "process {pid} from the registration file is '{name}', not rakumux-ptyd; \
              stop the old daemon manually"
         ));
     }
@@ -115,7 +115,7 @@ fn stop_registered(layout: &Layout) -> Result<(), String> {
     if wait_for_exit(pid, Duration::from_secs(1)) {
         Ok(())
     } else {
-        Err(format!("orchestra-ptyd (pid {pid}) did not exit"))
+        Err(format!("rakumux-ptyd (pid {pid}) did not exit"))
     }
 }
 
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn tui_client_is_a_spawning_user_client() {
-        let layout = Layout::with_home("/tmp/orchestra-test-home".into());
+        let layout = Layout::with_home("/tmp/rakumux-test-home".into());
         let config = client_config(layout.clone(), Some("/opt/ptyd".into()));
         assert_eq!(config.client_name, "tui");
         assert_eq!(config.auth, AuthMode::User);
@@ -202,6 +202,6 @@ mod tests {
         .unwrap();
         assert_eq!(daemon_version(&layout).as_deref(), Some("0.5.0"));
         let err = stop_daemon(&layout).unwrap_err();
-        assert!(err.contains("not orchestra-ptyd"), "{err}");
+        assert!(err.contains("not rakumux-ptyd"), "{err}");
     }
 }

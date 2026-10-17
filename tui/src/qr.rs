@@ -85,18 +85,18 @@ impl Qr {
 mod tests {
     use super::*;
 
-    const LINK: &str = "orchestra://connect?url=http%3A%2F%2Fbuild-machine.tail1234ab.ts.net\
+    const LINK: &str = "rakumux://connect?url=http%3A%2F%2Fbuild-machine.tail1234ab.ts.net\
                         %3A7337&token=abcdefghijklmnopqrstuvwx27";
 
     #[test]
     fn a_pairing_link_fits_a_terminal() {
         let qr = Qr::encode(LINK).unwrap();
-        // Version 6 (41 modules) plus the quiet zone.
-        assert_eq!(qr.width(), 45);
-        assert_eq!(qr.height(), 23);
+        // Version 5 (37 modules) plus the quiet zone.
+        assert_eq!(qr.width(), 41);
+        assert_eq!(qr.height(), 21);
         let cells = qr.cells();
-        assert_eq!(cells.len(), 23);
-        assert!(cells.iter().all(|row| row.len() == 45));
+        assert_eq!(cells.len(), 21);
+        assert!(cells.iter().all(|row| row.len() == 41));
     }
 
     #[test]
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn ansi_draws_every_cell_and_resets_each_line() {
-        let qr = Qr::encode("orchestra").unwrap();
+        let qr = Qr::encode("rakumux").unwrap();
         let text = qr.ansi();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), qr.height() as usize);

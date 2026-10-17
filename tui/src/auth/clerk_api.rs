@@ -31,7 +31,7 @@ impl ClerkApi {
         use reqwest::header::{HeaderMap, HeaderValue, ORIGIN};
         let mut h = HeaderMap::new();
         // Minimal header set; Clerk uses publishable key in headers or body; keep minimal for now
-        h.insert(ORIGIN, HeaderValue::from_static("https://orchestra.local"));
+        h.insert(ORIGIN, HeaderValue::from_static("https://rakumux.local"));
         h
     }
 

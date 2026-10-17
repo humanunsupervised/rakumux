@@ -196,7 +196,7 @@ mod tests {
 
     fn store() -> (tempfile::TempDir, ScrollbackStore) {
         let home = tempfile::tempdir().unwrap();
-        let layout = Layout::with_home(home.path().join("orchestra"));
+        let layout = Layout::with_home(home.path().join("rakumux"));
         (home, ScrollbackStore::new(layout))
     }
 

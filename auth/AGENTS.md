@@ -1,13 +1,13 @@
-# Orchestra Auth & Billing — Technical Plan (Clerk)
+# Rakumux Auth & Billing — Technical Plan (Clerk)
 
 Status: **deferred.** Auth is out of scope for the sessions refactor (0.6.0) and is the next round
 after it (`plans/sessions-refactor.md` §18). The partial implementation in `tui/src/auth/` is
 compiled but switched off (`FeatureFlags { auth: false }` in `tui/src/app/feature_flags.rs`), and no
 key opens the auth menu.
 
-This document proposes a full implementation for account auth and subscription management inside the `orchestra` TUI using Clerk. It prioritizes headless (SSH) terminals and supports Mac “open in browser” convenience. No backend changes are required for Phase 1.
+This document proposes a full implementation for account auth and subscription management inside the `rakumux` TUI using Clerk. It prioritizes headless (SSH) terminals and supports Mac “open in browser” convenience. No backend changes are required for Phase 1.
 
-Auth is independent of Orchestra's session architecture: it talks to Clerk directly from the `tui` binary and never goes through the `orchestra-ptyd` daemon. Note the two meanings of "session": an **auth session** is a Clerk sign-in; an **Orchestra session** is a folder + a terminal owned by the daemon. Code and files for auth say "auth" to keep them apart.
+Auth is independent of Rakumux's session architecture: it talks to Clerk directly from the `tui` binary and never goes through the `rakumux-ptyd` daemon. Note the two meanings of "session": an **auth session** is a Clerk sign-in; an **Rakumux session** is a folder + a terminal owned by the daemon. Code and files for auth say "auth" to keep them apart.
 
 ## Goals
 - An Auth menu reachable from list focus (`s` proposed; free in the 0.6.0 key map)
@@ -87,7 +87,7 @@ HTTP defaults:
 - Base URL: `https://{CLERK_FRONTEND_API}`
 - Headers: 
   - `Content-Type: application/x-www-form-urlencoded`
-  - `Origin: https://orchestra.cli` (stable pseudo-origin)
+  - `Origin: https://rakumux.cli` (stable pseudo-origin)
   - `Clerk-Publishable-Key: {CLERK_PUBLISHABLE_KEY}` (helps with rate-limit/classification)
 
 Client lifecycle (first call):
@@ -119,9 +119,9 @@ Notes:
 
 ## Persistence & security
 
-Today `FileStore` writes `~/.orchestra/session.json` (`SessionRecord { session_id, token, email }`), without restricting permissions. Target, in priority order:
-1) macOS Keychain (if available): service `orchestra`, account `clerk_session`
-2) `~/.orchestra/auth.json` (`$ORCHESTRA_HOME` respected), mode 0600. Renamed from `session.json` so it isn't confused with Orchestra sessions (`~/.orchestra/sessions/`).
+Today `FileStore` writes `~/.rakumux/session.json` (`SessionRecord { session_id, token, email }`), without restricting permissions. Target, in priority order:
+1) macOS Keychain (if available): service `rakumux`, account `clerk_session`
+2) `~/.rakumux/auth.json` (`$RAKUMUX_HOME` respected), mode 0600. Renamed from `session.json` so it isn't confused with Rakumux sessions (`~/.rakumux/sessions/`).
 
 Schema (auth.json):
 ```

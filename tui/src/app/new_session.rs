@@ -1,7 +1,7 @@
 //! New session dialog (`sessions-refactor.md` §8, `folders.md`): just an
 //! optional name. The session goes in the current folder
 //! (`App::current_folder`), starts there and runs the login shell. Other folders and commands are for the command line
-//! (`orchestra new --cwd DIR --cmd C -- ARGV`).
+//! (`rakumux new --cwd DIR --cmd C -- ARGV`).
 
 use session_core::api::CreateSession;
 use session_core::model::ScopeRoot;

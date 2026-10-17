@@ -6,7 +6,7 @@ echo "Testing Rust TUI key navigation..."
 echo "This will launch the TUI briefly to test key handling"
 
 # Start TUI in debug mode in background
-timeout 5s ./orchestra.sh --debug &
+timeout 5s ./rakumux.sh --debug &
 TUI_PID=$!
 
 # Give it a moment to start

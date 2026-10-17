@@ -3,18 +3,18 @@
 ###############################################################################
 # build-release.sh - Closed-source release builder
 #
-# Builds the Orchestra binaries for every release platform and packages them
+# Builds the Rakumux binaries for every release platform and packages them
 # with the launcher scripts, LICENSE and THIRD_PARTY_NOTICES (no source):
 #
-#   release/orchestra-<platform>/          staged package (for inspection)
-#     orchestra                            tui binary (the orchestra program)
-#     orchestra-ptyd                       session daemon
-#     orchestra-api                        external HTTP API (127.0.0.1)
-#     orchestra-mcp                        MCP server for coding agents
-#     orchestra.sh, orchestra-local.sh     launchers
+#   release/rakumux-<platform>/          staged package (for inspection)
+#     rakumux                            tui binary (the rakumux program)
+#     rakumux-ptyd                       session daemon
+#     rakumux-api                        external HTTP API (127.0.0.1)
+#     rakumux-mcp                        MCP server for coding agents
+#     rakumux.sh, rakumux-local.sh     launchers
 #     shell/                               launcher modules + command hook
 #     LICENSE, THIRD_PARTY_NOTICES, README.md, install.sh
-#   release/orchestra-<platform>.tar.gz    the release asset
+#   release/rakumux-<platform>.tar.gz    the release asset
 #   release/checksums.txt, release/RELEASE_NOTES.md, release/THIRD_PARTY_NOTICES
 #
 # Platforms built on macOS: macos-intel (x86_64-apple-darwin), macos-arm64
@@ -102,7 +102,7 @@ cd "$PROJECT_ROOT"
 
 # Runtime files every package ships, besides the binaries (paths relative to the repo).
 RUNTIME_SCRIPTS=(
-    "orchestra.sh"
+    "rakumux.sh"
     "shell/gwr_load.sh"
     "shell/gwr_colors.sh"
     "shell/gwr_logging.sh"
@@ -110,7 +110,7 @@ RUNTIME_SCRIPTS=(
     "shell/gwr_terminal.sh"
     "shell/gwr_usage.sh"
     "shell/gwr/check-updates.sh"
-    "shell/orchestra-command-hook.sh"
+    "shell/rakumux-command-hook.sh"
 )
 
 # Release platforms for this host: "platform:target-triple:cargo-subcommand".
@@ -172,28 +172,28 @@ build_platform() {
     (
         cd tui
         cargo "$subcommand" --release --locked --target "$triple" \
-            -p tui -p orchestra-ptyd -p orchestra-api -p orchestra-mcp
+            -p tui -p rakumux-ptyd -p rakumux-api -p rakumux-mcp
     )
 }
 
 create_package() {
     local platform="$1" bin_dir="$2"
-    local package_name="orchestra-$platform"
+    local package_name="rakumux-$platform"
     local package_dir="$RELEASE_DIR/$package_name"
 
     echo "  📦 Creating $package_name..."
     mkdir -p "$package_dir"
 
     local binary
-    for binary in tui orchestra-ptyd orchestra-api orchestra-mcp; do
+    for binary in tui rakumux-ptyd rakumux-api rakumux-mcp; do
         if [[ ! -f "$bin_dir/$binary" ]]; then
             echo "  ❌ $binary not found for $platform ($bin_dir/$binary)" >&2
             exit 1
         fi
         verify_binary_arch "$bin_dir/$binary" "$platform"
     done
-    cp "$bin_dir/tui" "$package_dir/orchestra"
-    for binary in orchestra-ptyd orchestra-api orchestra-mcp; do
+    cp "$bin_dir/tui" "$package_dir/rakumux"
+    for binary in rakumux-ptyd rakumux-api rakumux-mcp; do
         cp "$bin_dir/$binary" "$package_dir/$binary"
     done
 
@@ -206,7 +206,7 @@ create_package() {
         mkdir -p "$package_dir/$(dirname "$script")"
         cp "$script" "$package_dir/$script"
     done
-    cp shell/orchestra-local.sh "$package_dir/orchestra-local.sh"
+    cp shell/rakumux-local.sh "$package_dir/rakumux-local.sh"
 
     cp "$LICENSE_FILE" "$package_dir/LICENSE"
     cp "$RELEASE_DIR/THIRD_PARTY_NOTICES" "$package_dir/THIRD_PARTY_NOTICES"
@@ -214,8 +214,8 @@ create_package() {
     write_install_script "$package_dir/install.sh"
     write_package_readme "$package_dir/README.md" "$platform"
 
-    chmod 755 "$package_dir/orchestra" "$package_dir/orchestra-ptyd" "$package_dir/orchestra-api" \
-        "$package_dir/orchestra-mcp" "$package_dir/install.sh"
+    chmod 755 "$package_dir/rakumux" "$package_dir/rakumux-ptyd" "$package_dir/rakumux-api" \
+        "$package_dir/rakumux-mcp" "$package_dir/install.sh"
     find "$package_dir" -type f -name '*.sh' -exec chmod 755 {} +
     chmod 644 "$package_dir/LICENSE" "$package_dir/THIRD_PARTY_NOTICES" "$package_dir/README.md"
 
@@ -253,9 +253,9 @@ make_tarball() {
 write_install_script() {
     cat >"$1" << 'EOF'
 #!/bin/bash
-# Orchestra installer for release tarballs.
-# Installs the package into $PREFIX/libexec/orchestra and the orchestra,
-# orchestra-local, orchestra-mcp and orchestra-api commands into $PREFIX/bin
+# Rakumux installer for release tarballs.
+# Installs the package into $PREFIX/libexec/rakumux and the rakumux,
+# rakumux-local, rakumux-mcp and rakumux-api commands into $PREFIX/bin
 # (PREFIX defaults to /usr/local).
 
 set -euo pipefail
@@ -263,9 +263,9 @@ set -euo pipefail
 PACKAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${PREFIX:-/usr/local}"
 INSTALL_DIR="$PREFIX/bin"
-LIBEXEC_DIR="$PREFIX/libexec/orchestra"
+LIBEXEC_DIR="$PREFIX/libexec/rakumux"
 
-echo "Installing Orchestra to $LIBEXEC_DIR (commands in $INSTALL_DIR)..."
+echo "Installing Rakumux to $LIBEXEC_DIR (commands in $INSTALL_DIR)..."
 
 # True when any path (or, if it doesn't exist yet, its nearest existing parent)
 # isn't writable by the current user.
@@ -283,93 +283,93 @@ needs_sudo() {
 
 SUDO=""
 if needs_sudo "$LIBEXEC_DIR" "$(dirname "$LIBEXEC_DIR")" "$INSTALL_DIR" \
-    "$INSTALL_DIR/orchestra" "$INSTALL_DIR/orchestra-local" \
-    "$INSTALL_DIR/orchestra-mcp" "$INSTALL_DIR/orchestra-api"; then
+    "$INSTALL_DIR/rakumux" "$INSTALL_DIR/rakumux-local" \
+    "$INSTALL_DIR/rakumux-mcp" "$INSTALL_DIR/rakumux-api"; then
     echo "Need sudo permissions to install to $PREFIX"
     SUDO="sudo"
 fi
 
 # Replace any previous installation, including 0.5.x leftovers.
 $SUDO rm -rf "$LIBEXEC_DIR"
-$SUDO rm -f "$INSTALL_DIR/orchestra-cli" "$INSTALL_DIR/orchestra-bin"
+$SUDO rm -f "$INSTALL_DIR/rakumux-cli" "$INSTALL_DIR/rakumux-bin"
 $SUDO mkdir -p "$LIBEXEC_DIR" "$INSTALL_DIR"
 
 cd "$PACKAGE_DIR"
-$SUDO cp orchestra orchestra-ptyd orchestra-api orchestra-mcp orchestra.sh orchestra-local.sh \
+$SUDO cp rakumux rakumux-ptyd rakumux-api rakumux-mcp rakumux.sh rakumux-local.sh \
     LICENSE THIRD_PARTY_NOTICES "$LIBEXEC_DIR/"
 $SUDO cp -R shell "$LIBEXEC_DIR/"
-$SUDO chmod 755 "$LIBEXEC_DIR/orchestra" "$LIBEXEC_DIR/orchestra-ptyd" "$LIBEXEC_DIR/orchestra-api" \
-    "$LIBEXEC_DIR/orchestra-mcp" "$LIBEXEC_DIR/orchestra.sh" "$LIBEXEC_DIR/orchestra-local.sh"
+$SUDO chmod 755 "$LIBEXEC_DIR/rakumux" "$LIBEXEC_DIR/rakumux-ptyd" "$LIBEXEC_DIR/rakumux-api" \
+    "$LIBEXEC_DIR/rakumux-mcp" "$LIBEXEC_DIR/rakumux.sh" "$LIBEXEC_DIR/rakumux-local.sh"
 $SUDO find "$LIBEXEC_DIR/shell" -type f -name '*.sh' -exec chmod 755 {} +
 
-$SUDO tee "$INSTALL_DIR/orchestra" >/dev/null << WRAPPER
+$SUDO tee "$INSTALL_DIR/rakumux" >/dev/null << WRAPPER
 #!/bin/bash
-export GW_TUI_BIN="$LIBEXEC_DIR/orchestra"
-export GW_PTYD_BIN="$LIBEXEC_DIR/orchestra-ptyd"
-exec "$LIBEXEC_DIR/orchestra.sh" "\$@"
+export GW_TUI_BIN="$LIBEXEC_DIR/rakumux"
+export GW_PTYD_BIN="$LIBEXEC_DIR/rakumux-ptyd"
+exec "$LIBEXEC_DIR/rakumux.sh" "\$@"
 WRAPPER
 
-$SUDO tee "$INSTALL_DIR/orchestra-local" >/dev/null << WRAPPER
+$SUDO tee "$INSTALL_DIR/rakumux-local" >/dev/null << WRAPPER
 #!/bin/bash
-exec "$LIBEXEC_DIR/orchestra-local.sh" "\$@"
+exec "$LIBEXEC_DIR/rakumux-local.sh" "\$@"
 WRAPPER
 
 # The MCP server and the API run directly (no launcher): stdout must stay
 # clean for MCP, and both find each other and the daemon through these.
-$SUDO tee "$INSTALL_DIR/orchestra-mcp" >/dev/null << WRAPPER
+$SUDO tee "$INSTALL_DIR/rakumux-mcp" >/dev/null << WRAPPER
 #!/bin/bash
-export ORCHESTRA_API_BIN="$LIBEXEC_DIR/orchestra-api"
-export ORCHESTRA_PTYD_BIN="$LIBEXEC_DIR/orchestra-ptyd"
-exec "$LIBEXEC_DIR/orchestra-mcp" "\$@"
+export RAKUMUX_API_BIN="$LIBEXEC_DIR/rakumux-api"
+export RAKUMUX_PTYD_BIN="$LIBEXEC_DIR/rakumux-ptyd"
+exec "$LIBEXEC_DIR/rakumux-mcp" "\$@"
 WRAPPER
 
-$SUDO tee "$INSTALL_DIR/orchestra-api" >/dev/null << WRAPPER
+$SUDO tee "$INSTALL_DIR/rakumux-api" >/dev/null << WRAPPER
 #!/bin/bash
-export ORCHESTRA_PTYD_BIN="$LIBEXEC_DIR/orchestra-ptyd"
-exec "$LIBEXEC_DIR/orchestra-api" "\$@"
+export RAKUMUX_PTYD_BIN="$LIBEXEC_DIR/rakumux-ptyd"
+exec "$LIBEXEC_DIR/rakumux-api" "\$@"
 WRAPPER
 
-$SUDO chmod 755 "$INSTALL_DIR/orchestra" "$INSTALL_DIR/orchestra-local" \
-    "$INSTALL_DIR/orchestra-mcp" "$INSTALL_DIR/orchestra-api"
+$SUDO chmod 755 "$INSTALL_DIR/rakumux" "$INSTALL_DIR/rakumux-local" \
+    "$INSTALL_DIR/rakumux-mcp" "$INSTALL_DIR/rakumux-api"
 
-echo "✅ Orchestra installed successfully!"
+echo "✅ Rakumux installed successfully!"
 echo ""
-echo "Type 'orchestra' in any folder to start."
-echo "Coding agents: claude mcp add --scope user orchestra -- $INSTALL_DIR/orchestra-mcp"
+echo "Type 'rakumux' in any folder to start."
+echo "Coding agents: claude mcp add --scope user rakumux -- $INSTALL_DIR/rakumux-mcp"
 EOF
 }
 
 write_package_readme() {
     local readme="$1" platform="$2"
     cat >"$readme" << EOF
-# Orchestra v$VERSION - $platform
+# Rakumux v$VERSION - $platform
 
 Terminal sessions for coding agents, in one fast TUI.
 
 ## Install
 
 \`\`\`bash
-./install.sh                 # installs to /usr/local (PREFIX=/opt/orchestra ./install.sh to change)
+./install.sh                 # installs to /usr/local (PREFIX=/opt/rakumux ./install.sh to change)
 \`\`\`
 
 ## Usage
 
 \`\`\`bash
-orchestra                    # Open the TUI for the current folder
-orchestra new --name dev     # Create a session and attach to it
-orchestra ls                 # List sessions
-orchestra --help             # All commands
+rakumux                    # Open the TUI for the current folder
+rakumux new --name dev     # Create a session and attach to it
+rakumux ls                 # List sessions
+rakumux --help             # All commands
 \`\`\`
 
 ## Contents
 
-- \`orchestra\`: the Orchestra program (TUI and CLI)
-- \`orchestra-ptyd\`: the session daemon, started on demand
-- \`orchestra-api\`: the external HTTP API (127.0.0.1 only), started on demand by orchestra-mcp
-- \`orchestra-mcp\`: the MCP server for coding agents (Claude Code, Codex, OpenCode)
-- \`orchestra.sh\`, \`shell/\`: launcher
-- \`orchestra-local.sh\`: launches a local source checkout (development)
-- \`LICENSE\`: Orchestra license (proprietary)
+- \`rakumux\`: the Rakumux program (TUI and CLI)
+- \`rakumux-ptyd\`: the session daemon, started on demand
+- \`rakumux-api\`: the external HTTP API (127.0.0.1 only), started on demand by rakumux-mcp
+- \`rakumux-mcp\`: the MCP server for coding agents (Claude Code, Codex, OpenCode)
+- \`rakumux.sh\`, \`shell/\`: launcher
+- \`rakumux-local.sh\`: launches a local source checkout (development)
+- \`LICENSE\`: Rakumux license (proprietary)
 - \`THIRD_PARTY_NOTICES\`: licenses of the open-source components included
 
 Built from commit $(git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -378,36 +378,36 @@ EOF
 
 write_release_notes() {
     cat >"$RELEASE_DIR/RELEASE_NOTES.md" << EOF
-# Orchestra v$VERSION
+# Rakumux v$VERSION
 
 Terminal sessions for coding agents, in one fast TUI.
 
 ## Installation
 
 \`\`\`bash
-npm install -g @humanu/orchestra
+npm install -g rakumux
 # or
-brew install humanunsupervised/orchestra/orchestra
+brew install humanunsupervised/rakumux/rakumux
 \`\`\`
 
 ### Release tarballs
 
 \`\`\`bash
-curl -L https://github.com/humanunsupervised/orchestra/releases/download/v$VERSION/orchestra-macos-arm64.tar.gz | tar xz
-cd orchestra-macos-arm64 && ./install.sh
+curl -L https://github.com/humanunsupervised/rakumux/releases/download/v$VERSION/rakumux-macos-arm64.tar.gz | tar xz
+cd rakumux-macos-arm64 && ./install.sh
 \`\`\`
 
-- **macOS Apple Silicon**: \`orchestra-macos-arm64.tar.gz\`
-- **macOS Intel**: \`orchestra-macos-intel.tar.gz\`
-- **Linux x64**: \`orchestra-linux-x64.tar.gz\`
+- **macOS Apple Silicon**: \`rakumux-macos-arm64.tar.gz\`
+- **macOS Intel**: \`rakumux-macos-intel.tar.gz\`
+- **Linux x64**: \`rakumux-linux-x64.tar.gz\`
 
 Each package contains \`LICENSE\` and \`THIRD_PARTY_NOTICES\`.
 
 ## Usage
 
 \`\`\`bash
-orchestra             # Open the TUI for the current folder
-orchestra --help      # All commands
+rakumux             # Open the TUI for the current folder
+rakumux --help      # All commands
 \`\`\`
 
 Built: $(date)
@@ -419,7 +419,7 @@ EOF
 # Main
 ###############################################################################
 
-echo "🏗️  Building Orchestra v$VERSION for closed-source distribution..."
+echo "🏗️  Building Rakumux v$VERSION for closed-source distribution..."
 
 if ! platform_list="$(release_platforms)"; then
     exit 1
@@ -438,7 +438,7 @@ rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
 : >"$RELEASE_DIR/checksums.txt"
 
-export ORCHESTRA_VERSION="$VERSION"
+export RAKUMUX_VERSION="$VERSION"
 export COPYFILE_DISABLE=1
 
 if [[ "$CLEAN_BUILD" == "true" ]]; then

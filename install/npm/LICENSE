@@ -1,50 +1,19 @@
-# Orchestra License
+Rakumux
 
-Copyright (c) 2024 Antonio de Perio and Human Unsupervised Pty Ltd
-
+Copyright (c) 2024-2026 Antonio de Perio and Human Unsupervised Pty Ltd.
 All rights reserved.
 
-This software and associated documentation files (the "Software") are proprietary 
-and confidential to Antonio de Perio and Human Unsupervised Pty Ltd.
+Rakumux is going to be released as open source. Until an open-source licence
+replaces this file, no licence is granted to use, copy, modify or distribute
+this software, beyond what GitHub's Terms of Service allow for public
+repositories (viewing and forking on GitHub).
 
-The Software is distributed under the following terms:
-
-## Permitted Use
-- Personal use for software development workflows
-- Commercial use within your organization
-- Distribution of the binary packages as obtained from official releases
-
-## Restrictions
-- No redistribution of modified versions
-- No reverse engineering or decompilation
-- No creation of derivative works
-- Source code is not provided and remains proprietary
-
-## Commercial Use Disclaimer
-BY USING THIS SOFTWARE FOR COMMERCIAL PURPOSES, YOU ACKNOWLEDGE AND AGREE THAT:
-- The Software is provided without any guarantees of reliability, availability, or fitness for commercial purposes
-- You assume all risks associated with using the Software in a commercial environment
-- Neither Antonio de Perio nor Human Unsupervised Pty Ltd are responsible for any business losses, data corruption, or operational failures
-- You are solely responsible for evaluating whether the Software meets your commercial needs
-- You should maintain appropriate backups and have contingency plans
-
-## Limitation of Liability
-IN NO EVENT SHALL ANTONIO DE PERIO, HUMAN UNSUPERVISED PTY LTD, OR THEIR
-CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
-OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
-GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; BUSINESS INTERRUPTION; LOST
-REVENUE; OR ANY COMMERCIAL DAMAGES OR LOSSES) HOWEVER CAUSED AND ON ANY THEORY
-OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
-OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
-OF THE POSSIBILITY OF SUCH DAMAGE.
-
-THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH YOU.
-SHOULD THE SOFTWARE PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY
-SERVICING, REPAIR, OR CORRECTION.
-
-## Disclaimer of Warranty
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
-For commercial licensing or questions, contact: tony@humanunsupervised.com
+Questions: tony@humanunsupervised.com

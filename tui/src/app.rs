@@ -65,7 +65,7 @@ use types::*;
 
 /// Version helper: single place to resolve version string.
 pub fn app_version() -> &'static str {
-    option_env!("ORCHESTRA_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    option_env!("RAKUMUX_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
 const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
@@ -101,7 +101,7 @@ fn env_snapshot() -> Vec<(String, String)> {
 }
 
 /// Mouse state of the line between the session list and the detail.
-/// The session worked in now and the one before it (Tab in Orchestra mode
+/// The session worked in now and the one before it (Tab in Rakumux mode
 /// goes back to that one).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecentSessions {
@@ -162,8 +162,8 @@ pub enum Hit {
     FolderMenu,
     /// A row of the Folders modal.
     FolderRow(usize),
-    /// The footer's mode badge: `SESSION` switches to Orchestra mode,
-    /// `ORCHESTRA` goes back to the session you came from.
+    /// The footer's mode badge: `SESSION` switches to Rakumux mode,
+    /// `RAKUMUX` goes back to the session you came from.
     ModeBadge,
     /// A key hint on the right of the footer.
     FooterKey(FooterKey),
@@ -172,8 +172,8 @@ pub enum Hit {
 /// What a footer hint does when tapped: what its keys do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FooterKey {
-    /// `Ctrl-\ orchestra` (session mode): switch to Orchestra mode.
-    Orchestra,
+    /// `Ctrl-\ rakumux` (session mode): switch to Rakumux mode.
+    Rakumux,
     /// `? help`: open Help.
     Help,
     /// `, settings`: open Settings.
@@ -187,10 +187,10 @@ pub struct AppOptions {
     /// Where settings are saved (`config.json`); `None` disables saving.
     pub config_path: Option<std::path::PathBuf>,
     pub scope: ScopeRoot,
-    /// Orchestra's data directories (history files for AI naming, daemon
+    /// Rakumux's data directories (history files for AI naming, daemon
     /// registration for restarts).
     pub paths: Option<Layout>,
-    /// `ORCHESTRA_SESSION_ID` when the TUI runs inside a session.
+    /// `RAKUMUX_SESSION_ID` when the TUI runs inside a session.
     pub self_session: Option<SessionId>,
     pub connector: Connector,
     /// Suggests names for auto-named sessions (`ai_namer` in production).
@@ -206,19 +206,19 @@ pub struct App {
     config_path: Option<std::path::PathBuf>,
     pub flags: FeatureFlags,
     pub debug: bool,
-    /// The folder Orchestra started in.
+    /// The folder Rakumux started in.
     pub scope: ScopeRoot,
     /// The folders the daemon knows, and what it can list.
     pub folders: Folders,
     paths: Option<Layout>,
     pub self_session: Option<SessionId>,
-    /// Takes you from session mode to Orchestra mode (`Ctrl-\\`).
-    pub orchestra_key: KeyBinding,
+    /// Takes you from session mode to Rakumux mode (`Ctrl-\\`).
+    pub rakumux_key: KeyBinding,
     /// `None` when cycling is turned off in the config.
     pub cycle_keys: Option<CycleKeys>,
-    /// Orchestra mode: the first key of `gg` or `dd` was pressed.
+    /// Rakumux mode: the first key of `gg` or `dd` was pressed.
     pub pending_key: Option<char>,
-    /// The session Orchestra mode was entered from: Esc and the Orchestra
+    /// The session Rakumux mode was entered from: Esc and the Rakumux
     /// key go back to it.
     pub came_from: Option<SessionId>,
     /// The sessions worked in most recently, for Tab ("last session").
@@ -285,9 +285,9 @@ impl App {
     pub fn new(options: AppOptions) -> Self {
         let (exec, rx) = Exec::new(options.exec_mode);
         let mut warnings = Vec::new();
-        let orchestra_key = KeyBinding::parse(options.settings.sessions.orchestra_key_spec())
+        let rakumux_key = KeyBinding::parse(options.settings.sessions.rakumux_key_spec())
             .unwrap_or_else(|e| {
-                warnings.push(format!("sessions.orchestra_key: {e}; using Ctrl-\\"));
+                warnings.push(format!("sessions.rakumux_key: {e}; using Ctrl-\\"));
                 KeyBinding::default()
             });
         let cycle_keys = parse_cycle_keys(&options.settings, &mut warnings);
@@ -301,7 +301,7 @@ impl App {
             folders,
             paths: options.paths,
             self_session: options.self_session,
-            orchestra_key,
+            rakumux_key,
             cycle_keys,
             pending_key: None,
             came_from: None,
@@ -411,7 +411,7 @@ impl App {
     }
 
     /// Where keys go and what's open, for the input log: `session` or
-    /// `orchestra`, then the mode (`Normal`, a dialog's name).
+    /// `rakumux`, then the mode (`Normal`, a dialog's name).
     pub fn input_state(&self) -> String {
         let mode = format!("{:?}", self.mode);
         let mode: String = mode
@@ -420,7 +420,7 @@ impl App {
             .collect();
         let focus = match self.focus {
             Focus::Session => "session",
-            Focus::List => "orchestra",
+            Focus::List => "rakumux",
         };
         let pending = self
             .pending_key
@@ -434,12 +434,12 @@ impl App {
         format!("{focus} {mode}{pending}{filter}")
     }
 
-    /// Orchestra's data directories.
+    /// Rakumux's data directories.
     pub fn paths(&self) -> Option<&Layout> {
         self.paths.as_ref()
     }
 
-    /// `--debug` (or `ORCHESTRA_DEBUG`) was given.
+    /// `--debug` (or `RAKUMUX_DEBUG`) was given.
     pub fn debug(&self) -> bool {
         self.debug
     }
@@ -451,7 +451,7 @@ impl App {
     }
 
     /// How the list keys and taps behave: a phone always shows the list in
-    /// Orchestra mode, so it behaves like the Sidebar there.
+    /// Rakumux mode, so it behaves like the Sidebar there.
     pub fn list_layout(&self) -> SessionLayout {
         if self.phone() {
             SessionLayout::Sidebar
@@ -518,7 +518,7 @@ impl App {
     /// layout and the General tab's current values.
     pub fn modal_context(&self, in_session: bool) -> ModalContext {
         ModalContext {
-            orchestra_key: self.orchestra_key.label(),
+            rakumux_key: self.rakumux_key.label(),
             cycle_keys: self.cycle_keys.map(|k| k.short_label()).unwrap_or_default(),
             cycle_previous: self
                 .cycle_keys
@@ -611,7 +611,7 @@ impl App {
                     note: format!(
                         "On: {keys} switch sessions from inside a session too, so the program \
                          there never gets them (OpenCode, Pi and Claude Code use them). Off: they \
-                         switch sessions in Orchestra mode only."
+                         switch sessions in Rakumux mode only."
                     ),
                 };
             }
@@ -622,13 +622,13 @@ impl App {
                     None => "…",
                 };
                 let note = if self.phone_enabled == Some(true) {
-                    "Use Orchestra from the Orchestra app on your phone, over Tailscale. Enter \
+                    "Use Rakumux from the Rakumux app on your phone, over Tailscale. Enter \
                      shows the QR code to pair a phone; x there turns phone access off. Kept in \
-                     ~/.orchestra/remote.json."
+                     ~/.rakumux/remote.json."
                 } else {
-                    "Use Orchestra from the Orchestra app on your phone, over Tailscale. Enter \
+                    "Use Rakumux from the Rakumux app on your phone, over Tailscale. Enter \
                      turns it on and shows the QR code to pair a phone. Only devices on your \
-                     tailnet with the pairing code get in. Kept in ~/.orchestra/remote.json."
+                     tailnet with the pairing code get in. Kept in ~/.rakumux/remote.json."
                 };
                 ("Phone access", value.to_string(), note)
             }
@@ -859,10 +859,10 @@ impl App {
         if let Some(restart) = self.restarted_daemon.take() {
             self.set_status(match restart {
                 ServerRestart::InPlace => {
-                    "Restarted the Orchestra server; your sessions kept running."
+                    "Restarted the Rakumux server; your sessions kept running."
                 }
                 ServerRestart::Replaced => {
-                    "Restarted the Orchestra server. Sessions that were running ended; Enter \
+                    "Restarted the Rakumux server. Sessions that were running ended; Enter \
                      brings one back."
                 }
             });
@@ -879,14 +879,14 @@ impl App {
         self.sync();
     }
 
-    /// The daemon still running from an older Orchestra lacks features this
+    /// The daemon still running from an older Rakumux lacks features this
     /// one shows: explain, and offer to restart it (in place when it can,
     /// keeping the sessions; otherwise `y` only, since it ends them).
     fn offer_daemon_upgrade(&mut self, missing: Vec<String>, in_place: bool) {
         if !matches!(self.mode, AppMode::Normal) {
             self.set_status(format!(
-                "The running Orchestra server is older than this app (no {}); \
-                 `orchestra daemon restart` updates it.",
+                "The running Rakumux server is older than this app (no {}); \
+                 `rakumux daemon restart` updates it.",
                 missing.join(", ")
             ));
             return;
@@ -948,7 +948,7 @@ impl App {
             Ok(restart) => {
                 self.mode = AppMode::Normal;
                 self.set_status(match restart {
-                    ServerRestart::InPlace => "Restarting the Orchestra server…",
+                    ServerRestart::InPlace => "Restarting the Rakumux server…",
                     ServerRestart::Replaced => "Stopped the old server; starting a new one…",
                 });
                 self.restarted_daemon = Some(restart);
@@ -988,7 +988,7 @@ impl App {
         }
         let Some(paths) = self.paths.clone() else {
             if let AppMode::DaemonRestart(dialog) = &mut self.mode {
-                dialog.error = Some("Orchestra's data directory is unknown (HOME unset)".into());
+                dialog.error = Some("Rakumux's data directory is unknown (HOME unset)".into());
             }
             return;
         };

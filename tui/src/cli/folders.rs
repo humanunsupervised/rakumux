@@ -1,4 +1,4 @@
-//! `orchestra folders [add|rm]` (alias `projects`): the folders sessions
+//! `rakumux folders [add|rm]` (alias `projects`): the folders sessions
 //! belong to, as the daemon knows them (`project_*` on the wire). Session
 //! callers see only their own folder and can't add or remove any.
 //!

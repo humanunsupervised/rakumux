@@ -1,5 +1,5 @@
 //! Shared test support for the control layer: an in-memory `TerminalHost`
-//! and a harness around `ControlService` with an isolated `ORCHESTRA_HOME`.
+//! and a harness around `ControlService` with an isolated `RAKUMUX_HOME`.
 #![allow(dead_code)]
 
 use ptyd::control::{ControlConfig, ControlService, Detector, Limits};
@@ -371,7 +371,7 @@ pub struct Harness {
     pub detector: Detector,
 }
 
-pub const ORCHESTRA_BIN: &str = "/opt/orchestra/bin/orchestra";
+pub const RAKUMUX_BIN: &str = "/opt/rakumux/bin/rakumux";
 
 impl Harness {
     pub fn new() -> Self {
@@ -479,7 +479,7 @@ impl Harness {
 
     pub fn token_of(&self, id: &SessionId) -> String {
         let spec = self.host.spec_of(id);
-        env_value(&spec.env, "ORCHESTRA_SESSION_TOKEN").expect("session token in env")
+        env_value(&spec.env, "RAKUMUX_SESSION_TOKEN").expect("session token in env")
     }
 
     /// Authenticate as a process inside `id`.
@@ -558,8 +558,8 @@ pub fn open(
     let config = ControlConfig {
         layout: layout.clone(),
         user_token: user_token.clone(),
-        socket: PathBuf::from("/tmp/orchestra-test/ptyd.sock"),
-        orchestra_bin: Some(PathBuf::from(ORCHESTRA_BIN)),
+        socket: PathBuf::from("/tmp/rakumux-test/ptyd.sock"),
+        rakumux_bin: Some(PathBuf::from(RAKUMUX_BIN)),
         version: "test".into(),
         limits: Limits::default(),
     };

@@ -154,7 +154,7 @@ impl App {
         let selected = self.list.selected_session().cloned();
         let shown = self.shown_session();
         // Session mode needs its session selected; without it, back to
-        // Orchestra mode, observing again.
+        // Rakumux mode, observing again.
         let lost_focus = self.focus == Focus::Session && selected.is_none();
         let retarget = lost_focus
             || match (&shown, &self.detail.view) {
@@ -177,7 +177,7 @@ impl App {
     /// The session the detail pane shows: the selected one. While the
     /// folder filter, a folder header or + New session is selected, the
     /// pane keeps a session in view: the one it shows already, else the one
-    /// Orchestra mode came from, else the first shown. Only sessions the
+    /// Rakumux mode came from, else the first shown. Only sessions the
     /// filters show count, so `None` when none is shown.
     pub(super) fn shown_session(&self) -> Option<SessionView> {
         if let Some(session) = self.list.selected_session() {
@@ -509,7 +509,7 @@ impl App {
         };
         if self.is_self_session(&session.id) {
             self.set_status(
-                "This is the session Orchestra runs in; it can't be shown inside itself.",
+                "This is the session Rakumux runs in; it can't be shown inside itself.",
             );
             return;
         }
@@ -572,17 +572,17 @@ impl App {
         self.sync_terminal_size();
     }
 
-    /// The Orchestra key in session mode (or a click on the list): give up
-    /// control and switch to Orchestra mode, remembering the session to go
+    /// The Rakumux key in session mode (or a click on the list): give up
+    /// control and switch to Rakumux mode, remembering the session to go
     /// back to.
-    pub fn enter_orchestra_mode(&mut self) {
+    pub fn enter_rakumux_mode(&mut self) {
         let from = self.detail.session_id().cloned();
         self.leave_session_focus(true);
         self.came_from = from;
     }
 
-    /// Esc (with nothing to cancel) or the Orchestra key in Orchestra mode:
-    /// back into the session Orchestra mode was entered from.
+    /// Esc (with nothing to cancel) or the Rakumux key in Rakumux mode:
+    /// back into the session Rakumux mode was entered from.
     pub fn return_to_session(&mut self) {
         let Some(id) = self.came_from.clone() else {
             return;
@@ -605,7 +605,7 @@ impl App {
         }
     }
 
-    /// Tab in Orchestra mode: into the session worked in before the
+    /// Tab in Rakumux mode: into the session worked in before the
     /// current one.
     pub fn go_to_last_session(&mut self) {
         let last = self
@@ -619,7 +619,7 @@ impl App {
         }
     }
 
-    /// `1`-`9` in Orchestra mode: into the `n`th session shown (1-based).
+    /// `1`-`9` in Rakumux mode: into the `n`th session shown (1-based).
     pub fn go_into_nth(&mut self, n: usize) {
         let id = self
             .list
@@ -661,7 +661,7 @@ impl App {
         }
     }
 
-    /// `z` in Orchestra mode: work in the selected session with the list or
+    /// `z` in Rakumux mode: work in the selected session with the list or
     /// tab bar hidden (the footer stays); leaving the session brings it back.
     pub fn zoom_into_selected(&mut self) {
         if self.list.selected_session().is_none() {
@@ -724,9 +724,9 @@ impl App {
         i32::from(rows.saturating_sub(1).max(1))
     }
 
-    /// `\\` in Orchestra mode: back into the session and send it the
-    /// Orchestra key itself.
-    pub fn send_orchestra_key(&mut self) {
+    /// `\\` in Rakumux mode: back into the session and send it the
+    /// Rakumux key itself.
+    pub fn send_rakumux_key(&mut self) {
         let Some(id) = self
             .came_from
             .clone()
@@ -735,14 +735,14 @@ impl App {
             return;
         };
         if self.list.get(&id).map(|s| s.status) != Some(SessionStatus::Live) {
-            self.set_status("Select a running session to send the Orchestra key to.");
+            self.set_status("Select a running session to send the Rakumux key to.");
             return;
         }
         self.reveal(&id);
         self.list.select(Selection::Session(id));
         self.activate_selected();
         if self.focus == Focus::Session {
-            let key = self.orchestra_key.to_key_event();
+            let key = self.rakumux_key.to_key_event();
             self.forward_key(&key);
         } else {
             self.set_status("Press it again once the session has opened.");
@@ -1039,7 +1039,7 @@ impl App {
             match hit {
                 Some(Hit::ListRow(row)) => {
                     if self.focus == Focus::Session {
-                        self.enter_orchestra_mode();
+                        self.enter_rakumux_mode();
                     }
                     self.list.select_row(row);
                     self.reconcile_detail();
@@ -1065,28 +1065,28 @@ impl App {
                 }
                 Some(Hit::FolderSelector) => {
                     if self.focus == Focus::Session {
-                        self.enter_orchestra_mode();
+                        self.enter_rakumux_mode();
                     }
                     self.open_folder_picker();
                     return;
                 }
                 Some(Hit::ModeBadge) => {
-                    // Like the Orchestra key in session mode, Esc in
-                    // Orchestra mode.
+                    // Like the Rakumux key in session mode, Esc in
+                    // Rakumux mode.
                     match self.focus {
-                        Focus::Session => self.enter_orchestra_mode(),
+                        Focus::Session => self.enter_rakumux_mode(),
                         Focus::List => self.return_to_session(),
                     }
                     return;
                 }
                 Some(Hit::FooterKey(key)) => {
                     // What the hint's keys do: in session mode they start
-                    // with the Orchestra key.
+                    // with the Rakumux key.
                     if self.focus == Focus::Session {
-                        self.enter_orchestra_mode();
+                        self.enter_rakumux_mode();
                     }
                     match key {
-                        FooterKey::Orchestra => {}
+                        FooterKey::Rakumux => {}
                         FooterKey::Help => super::handlers::settings::open_help(self),
                         FooterKey::Settings => super::handlers::settings::open_settings(self),
                     }
@@ -1262,7 +1262,7 @@ impl App {
         }
     }
 
-    /// A click on the previewed session in Orchestra mode: go into it when
+    /// A click on the previewed session in Rakumux mode: go into it when
     /// it's running.
     fn click_preview(&mut self) {
         let live = self
@@ -1415,7 +1415,7 @@ impl App {
                 self.list.upsert(session);
             }
             Err(error) if error.code == ErrorCode::Unsupported => {
-                self.set_status("This Orchestra server doesn't support pinning yet.")
+                self.set_status("This Rakumux server doesn't support pinning yet.")
             }
             Err(error) => {
                 let verb = if pinned { "Pin" } else { "Unpin" };

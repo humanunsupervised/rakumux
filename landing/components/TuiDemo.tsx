@@ -1,6 +1,6 @@
 "use client";
 
-// A small, working copy of Orchestra's screen. It plays by itself until the
+// A small, working copy of Rakumux's screen. It plays by itself until the
 // visitor focuses it, then takes the real keys: j/k or arrows to move (the
 // session previews on the right), Enter to go in, Ctrl-\ to come back out.
 
@@ -121,7 +121,7 @@ const STATE_DOT: Record<State, [string, string]> = {
   idle: ["○", "muted"],
 };
 
-type Mode = "orchestra" | "session";
+type Mode = "rakumux" | "session";
 
 interface Step {
   key: string;
@@ -137,7 +137,7 @@ interface DemoState {
 }
 
 const START: DemoState = {
-  mode: "orchestra",
+  mode: "rakumux",
   selected: 0,
   cameFrom: null,
   typed: {},
@@ -154,8 +154,8 @@ function goIn(s: DemoState): DemoState {
   return { ...s, mode: "session", cameFrom: s.selected };
 }
 
-function toOrchestra(s: DemoState): DemoState {
-  return { ...s, mode: "orchestra", cameFrom: s.selected };
+function toRakumux(s: DemoState): DemoState {
+  return { ...s, mode: "rakumux", cameFrom: s.selected };
 }
 
 function typeInto(s: DemoState, text: string): DemoState {
@@ -181,7 +181,7 @@ function reduce(
   const done = (next: DemoState, handled = true, g = false) => ({ next, handled, pendingG: g });
   if (ctrl) {
     if (key !== "\\") return done(s, false);
-    if (s.mode === "session") return done(toOrchestra(s));
+    if (s.mode === "session") return done(toRakumux(s));
     return done(s.cameFrom !== null ? goIn({ ...s, selected: s.cameFrom }) : s);
   }
   if (s.mode === "session") {
@@ -232,7 +232,7 @@ const AUTOPLAY: Step[] = [
   { key: "Enter", run: goIn },
   { key: "y", run: (s) => typeInto(s, "y") },
   { key: "Enter", run: send },
-  { key: "Ctrl \\", run: toOrchestra },
+  { key: "Ctrl \\", run: toRakumux },
   { key: "k", run: (s) => select(s, s.selected - 1) },
   { key: "G", run: (s) => select(s, SESSIONS.length - 1) },
   { key: "gg", run: (s) => select(s, 0) },
@@ -313,7 +313,7 @@ export default function TuiDemo() {
         className={`window ${focused ? "is-focused" : ""}`}
         tabIndex={0}
         role="application"
-        aria-label="Interactive Orchestra demo. Use j and k to move, Enter to go into a session, Control backslash to switch back to Orchestra mode."
+        aria-label="Interactive Rakumux demo. Use j and k to move, Enter to go into a session, Control backslash to switch back to Rakumux mode."
         onKeyDown={onKeyDown}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
@@ -323,7 +323,7 @@ export default function TuiDemo() {
           <span className="dot" />
           <span className="dot" />
           <span className="dot" />
-          <span className="window-title">~/code/my-app — orchestra</span>
+          <span className="window-title">~/code/my-app — rakumux</span>
         </div>
 
         <div className="tui" aria-hidden="true">
@@ -348,7 +348,7 @@ export default function TuiDemo() {
                     className={`tui-item ${isSelected ? "is-selected" : ""}`}
                     onClick={() => {
                       takeOver();
-                      setState((st) => (st.mode === "session" ? { ...select(st, i), mode: "orchestra" } : select(st, i)));
+                      setState((st) => (st.mode === "session" ? { ...select(st, i), mode: "rakumux" } : select(st, i)));
                     }}
                   >
                     <span className="tui-item-line">
@@ -404,8 +404,8 @@ export default function TuiDemo() {
           </div>
 
           <div className="tui-footer">
-            <span className={`badge ${inSession ? "badge-session" : "badge-orchestra"}`}>
-              {inSession ? " SESSION " : " ORCHESTRA "}
+            <span className={`badge ${inSession ? "badge-session" : "badge-rakumux"}`}>
+              {inSession ? " SESSION " : " RAKUMUX "}
             </span>
             <span className="t-muted tui-footer-msg">
               {inSession ? `Typing into ${current.name}` : live ? "" : "Demo playing: click or tab here to drive it"}
@@ -413,7 +413,7 @@ export default function TuiDemo() {
             <span className="tui-spacer" />
             {inSession ? (
               <span className="tui-footer-keys">
-                <b>Ctrl-\</b> orchestra
+                <b>Ctrl-\</b> rakumux
               </span>
             ) : (
               <span className="tui-footer-keys">

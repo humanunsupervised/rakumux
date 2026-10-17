@@ -1,11 +1,11 @@
 #!/bin/bash
 
 ###############################################################################
-# publish-npm.sh - Publish Orchestra to the npm registry
+# publish-npm.sh - Publish Rakumux to the npm registry
 #
 # Stages install/npm from the release tarballs (stage-npm-package.sh: version,
 # the binaries per platform, launcher scripts, THIRD_PARTY_NOTICES), checks
-# the packed file list, then publishes @humanu/orchestra.
+# the packed file list, then publishes rakumux.
 #
 # Usage: publish-npm.sh <version> [--dry-run]
 #   --dry-run   Stage (missing platforms allowed) and `npm pack --dry-run`;
@@ -55,14 +55,14 @@ REQUIRED_PACKED_FILES=(
     "THIRD_PARTY_NOTICES"
     "README.md"
     "install.js"
-    "bin/orchestra.js"
-    "bin/orchestra-local.js"
-    "resources/scripts/orchestra.sh"
-    "resources/scripts/orchestra-local.sh"
+    "bin/rakumux.js"
+    "bin/rakumux-local.js"
+    "resources/scripts/rakumux.sh"
+    "resources/scripts/rakumux-local.sh"
     "resources/scripts/shell/gwr_load.sh"
 )
 
-info "Publishing Orchestra v$VERSION to npm..."
+info "Publishing Rakumux v$VERSION to npm..."
 
 STAGE_FLAGS=()
 if [[ "$DRY_RUN" == "true" ]]; then
@@ -85,14 +85,14 @@ for file in "${REQUIRED_PACKED_FILES[@]}"; do
 done
 for platform_dir in "$NPM_DIR"/resources/prebuilt/*/; do
     platform="$(basename "$platform_dir")"
-    for binary in orchestra orchestra-ptyd orchestra-api orchestra-mcp; do
+    for binary in rakumux rakumux-ptyd rakumux-api rakumux-mcp; do
         if ! grep -qx "resources/prebuilt/$platform/$binary" <<<"$packed_files"; then
             error "Packed package is missing resources/prebuilt/$platform/$binary"
             exit 1
         fi
     done
 done
-if grep -E '(^|/)(orchestra-cli|services\.sh|env-copy)' <<<"$packed_files"; then
+if grep -E '(^|/)(rakumux-cli|services\.sh|env-copy)' <<<"$packed_files"; then
     error "Packed package contains removed files (above)"
     exit 1
 fi
@@ -100,7 +100,7 @@ success "Packed file list OK ($(wc -l <<<"$packed_files" | tr -d ' ') files)"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     printf '%s\n' "$packed_files" | sed 's/^/    /'
-    success "Dry run: @humanu/orchestra@$VERSION staged and packed, not published"
+    success "Dry run: rakumux@$VERSION staged and packed, not published"
     exit 0
 fi
 
@@ -139,9 +139,9 @@ if [[ -n "$NPM_OTP_VALUE" ]]; then
 fi
 
 if (cd "$NPM_DIR" && npm "${PUBLISH_ARGS[@]}"); then
-    success "Successfully published @humanu/orchestra@$VERSION to npm!"
-    info "View at: https://www.npmjs.com/package/@humanu/orchestra"
-    info "Install with: npm install -g @humanu/orchestra"
+    success "Successfully published rakumux@$VERSION to npm!"
+    info "View at: https://www.npmjs.com/package/rakumux"
+    info "Install with: npm install -g rakumux"
 else
     error "npm publish failed"
     error "Common issues:"

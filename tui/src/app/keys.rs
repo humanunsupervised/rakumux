@@ -1,16 +1,16 @@
-//! Configurable key bindings: the Orchestra key (default `Ctrl-\\`), the
+//! Configurable key bindings: the Rakumux key (default `Ctrl-\\`), the
 //! one key a session never receives, which switches from session mode to
-//! Orchestra mode; and the session cycling keys (default `Alt-↑`/`Alt-↓`),
-//! which work in Orchestra mode and, when the user turns it on, in session
+//! Rakumux mode; and the session cycling keys (default `Alt-↑`/`Alt-↓`),
+//! which work in Rakumux mode and, when the user turns it on, in session
 //! mode too. Everything else typed in session mode goes to the session.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-/// Default Orchestra key, as written in `config.json`
-/// (`sessions.orchestra_key`).
-pub const DEFAULT_ORCHESTRA_KEY: &str = "ctrl+\\";
+/// Default Rakumux key, as written in `config.json`
+/// (`sessions.rakumux_key`).
+pub const DEFAULT_RAKUMUX_KEY: &str = "ctrl+\\";
 /// The in-session prefix before the two modes (`sessions.prefix_key`); a
-/// config still naming it gets the new default Orchestra key.
+/// config still naming it gets the new default Rakumux key.
 pub const OLD_DEFAULT_PREFIX: &str = "ctrl+b";
 /// Default cycling keys (`sessions.cycle_keys`).
 pub const DEFAULT_CYCLE_PREVIOUS: &str = "alt+up";
@@ -218,7 +218,7 @@ impl CycleKeys {
     }
 }
 
-/// The default Orchestra key, `Ctrl-\\`.
+/// The default Rakumux key, `Ctrl-\\`.
 impl Default for KeyBinding {
     fn default() -> Self {
         Self {
@@ -241,8 +241,8 @@ mod tests {
     }
 
     #[test]
-    fn the_orchestra_key_defaults_to_ctrl_backslash_and_matches_its_legacy_byte() {
-        let key = KeyBinding::parse(DEFAULT_ORCHESTRA_KEY).unwrap();
+    fn the_rakumux_key_defaults_to_ctrl_backslash_and_matches_its_legacy_byte() {
+        let key = KeyBinding::parse(DEFAULT_RAKUMUX_KEY).unwrap();
         assert_eq!(key, KeyBinding::default());
         assert_eq!(key.label(), "Ctrl-\\");
         assert_eq!(KeyBinding::parse("ctrl+backslash").unwrap(), key);

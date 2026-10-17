@@ -37,7 +37,7 @@ impl UpdateState {
         let home_dir = std::env::var("HOME")
             .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
         Ok(PathBuf::from(home_dir)
-            .join(".orchestra")
+            .join(".rakumux")
             .join("update_state.json"))
     }
 
@@ -120,13 +120,13 @@ impl InstallMethod {
 
 pub fn detect_install_method() -> InstallMethod {
     // The running binary's real location is the most reliable signal;
-    // `which orchestra` is a fallback. Both are canonicalised because
+    // `which rakumux` is a fallback. Both are canonicalised because
     // Homebrew and npm put symlinks on PATH.
     let mut candidates = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         candidates.push(exe.canonicalize().unwrap_or(exe));
     }
-    if let Ok(output) = Command::new("which").arg("orchestra").output() {
+    if let Ok(output) = Command::new("which").arg("rakumux").output() {
         if output.status.success() {
             let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
             candidates.push(path.canonicalize().unwrap_or(path));
@@ -159,7 +159,7 @@ pub fn get_latest_version(method: InstallMethod) -> Result<String> {
     match method {
         InstallMethod::Npm => {
             let output = Command::new("npm")
-                .args(["view", "@humanu/orchestra", "version"])
+                .args(["view", "rakumux", "version"])
                 .output()?;
 
             if output.status.success() {
@@ -171,7 +171,7 @@ pub fn get_latest_version(method: InstallMethod) -> Result<String> {
         }
         InstallMethod::Homebrew => {
             let output = Command::new("brew")
-                .args(["info", "--json", "orchestra"])
+                .args(["info", "--json", "rakumux"])
                 .output()?;
 
             if output.status.success() {
@@ -239,11 +239,9 @@ pub async fn check_for_updates(current_version: &str) -> Result<Option<(String, 
 pub fn perform_upgrade(method: InstallMethod) -> Result<()> {
     let status = match method {
         InstallMethod::Npm => Command::new("npm")
-            .args(["install", "-g", "@humanu/orchestra"])
+            .args(["install", "-g", "rakumux"])
             .status()?,
-        InstallMethod::Homebrew => Command::new("brew")
-            .args(["upgrade", "orchestra"])
-            .status()?,
+        InstallMethod::Homebrew => Command::new("brew").args(["upgrade", "rakumux"]).status()?,
         _ => return Err(anyhow::anyhow!("Unsupported install method for upgrades")),
     };
 
@@ -264,24 +262,24 @@ mod tests {
     #[test]
     fn install_method_comes_from_the_resolved_binary_path() {
         let method = |p: &str| install_method_for_path(Path::new(p));
-        // Homebrew's bin/orchestra symlink resolves into the Cellar.
+        // Homebrew's bin/rakumux symlink resolves into the Cellar.
         assert_eq!(
-            method("/opt/homebrew/Cellar/orchestra/0.6.0/libexec/orchestra-bin"),
+            method("/opt/homebrew/Cellar/rakumux/0.6.0/libexec/rakumux-bin"),
             Some(InstallMethod::Homebrew)
         );
         assert_eq!(
-            method("/home/u/.linuxbrew/Cellar/orchestra/0.6.0/libexec/orchestra-bin"),
+            method("/home/u/.linuxbrew/Cellar/rakumux/0.6.0/libexec/rakumux-bin"),
             Some(InstallMethod::Homebrew)
         );
         assert_eq!(
-            method("/usr/lib/node_modules/@humanu/orchestra/resources/prebuilt/tui"),
+            method("/usr/lib/node_modules/rakumux/resources/prebuilt/tui"),
             Some(InstallMethod::Npm)
         );
         assert_eq!(
-            method("/home/u/src/orchestra/tui/target/release/tui"),
+            method("/home/u/src/rakumux/tui/target/release/tui"),
             Some(InstallMethod::Source)
         );
-        assert_eq!(method("/usr/local/bin/orchestra"), None);
+        assert_eq!(method("/usr/local/bin/rakumux"), None);
     }
 
     #[test]

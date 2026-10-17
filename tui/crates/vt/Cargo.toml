@@ -1,8 +1,8 @@
 [package]
-name = "orchestra-vt"
+name = "rakumux-vt"
 version = "0.1.0"
 edition = "2021"
-description = "Terminal emulation shared by the Orchestra daemon and TUI"
+description = "Terminal emulation shared by the Rakumux daemon and TUI"
 publish = false
 
 [lib]

@@ -72,10 +72,10 @@ pub struct ControlConfig {
     pub layout: Layout,
     /// Token user clients present (from the registration file).
     pub user_token: Token,
-    /// Injected into sessions as `ORCHESTRA_SOCKET`.
+    /// Injected into sessions as `RAKUMUX_SOCKET`.
     pub socket: PathBuf,
-    /// Injected into sessions as `ORCHESTRA_BIN` when known.
-    pub orchestra_bin: Option<PathBuf>,
+    /// Injected into sessions as `RAKUMUX_BIN` when known.
+    pub rakumux_bin: Option<PathBuf>,
     pub version: String,
     pub limits: Limits,
 }

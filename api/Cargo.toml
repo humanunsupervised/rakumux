@@ -1,21 +1,21 @@
 [package]
-name = "orchestra-api"
+name = "rakumux-api"
 version = "0.1.0"
 edition = "2021"
-description = "Orchestra external API: HTTP/1.1 + JSON (and WebSocket streams) over the session daemon"
+description = "Rakumux external API: HTTP/1.1 + JSON (and WebSocket streams) over the session daemon"
 publish = false
 workspace = "../tui"
 
 [lib]
-name = "orchestra_api"
+name = "rakumux_api"
 path = "src/lib.rs"
 
 [[bin]]
-name = "orchestra-api"
+name = "rakumux-api"
 path = "src/main.rs"
 
 [dependencies]
-orchestra-session-core = { path = "../tui/crates/session-core" }
+rakumux-session-core = { path = "../tui/crates/session-core" }
 clap = { version = "=4.5.46", features = ["derive"] }
 form_urlencoded = "=1.2.2"
 futures-util = { version = "=0.3.31", default-features = false, features = ["sink", "std"] }

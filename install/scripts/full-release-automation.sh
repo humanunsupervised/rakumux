@@ -41,8 +41,8 @@ Arguments:
                       the Homebrew formula is rendered but not verified or pushed
   --prerelease        Mark the GitHub release as a prerelease
   --dry-run           Build and test, preview release notes, render the formula
-                      into release/orchestra.rb and pack (not publish) npm
-  --repo=OWNER/NAME   Override target repository (default: humanunsupervised/orchestra)
+                      into release/rakumux.rb and pack (not publish) npm
+  --repo=OWNER/NAME   Override target repository (default: humanunsupervised/rakumux)
   --notes-last=N      Generate notes from only the last N commits (bootstrap helper)
  
 Examples:
@@ -220,7 +220,7 @@ if [[ -z "$VERSION" ]]; then
     fi
 fi
 
-info "🎵 Orchestra Full Release Automation v$VERSION"
+info "🎵 Rakumux Full Release Automation v$VERSION"
 echo "================================================"
 
 # Step 0: Build release packages
@@ -260,8 +260,8 @@ if ! "$SCRIPT_DIR/create-github-release.sh" "$VERSION" ${CREATE_FLAGS+"${CREATE_
     error "GitHub release creation failed"
     error "You may need to:"
     error "  1. Check GitHub authentication: gh auth status"
-    error "  2. Ensure public repository exists: https://github.com/humanunsupervised/orchestra"
-    error "  3. Delete existing release if needed: gh release delete v$VERSION --repo humanunsupervised/orchestra"
+    error "  2. Ensure public repository exists: https://github.com/humanunsupervised/rakumux"
+    error "  3. Delete existing release if needed: gh release delete v$VERSION --repo humanunsupervised/rakumux"
     exit 1
 fi
 success "GitHub release created"
@@ -279,7 +279,7 @@ fi
 # not public yet) only render the formula; dry runs render into release/.
 HOMEBREW_FLAGS=()
 if [[ "$DRY_RUN" == "true" ]]; then
-    HOMEBREW_FLAGS+=("--render-only" "--output" "$REPO_ROOT/release/orchestra.rb")
+    HOMEBREW_FLAGS+=("--render-only" "--output" "$REPO_ROOT/release/rakumux.rb")
 elif [[ "$DRAFT" == "true" ]]; then
     HOMEBREW_FLAGS+=("--render-only")
 fi
@@ -289,7 +289,7 @@ if ! "$SCRIPT_DIR/release-homebrew.sh" "$VERSION" ${HOMEBREW_FLAGS+"${HOMEBREW_F
     error "Rerun after fixing: ./install/scripts/release-homebrew.sh $VERSION"
     exit 1
 fi
-success "Homebrew formula released (commit install/homebrew/Formula/orchestra.rb)"
+success "Homebrew formula released (commit install/homebrew/Formula/rakumux.rb)"
 
 # Step 6: Publish to npm
 NPM_FLAGS=()
@@ -317,7 +317,7 @@ echo
 success "🎉 RELEASE AUTOMATION COMPLETE!"
 echo "================================"
 info "Version: $VERSION"
-info "GitHub Release: https://github.com/humanunsupervised/orchestra/releases/tag/v$VERSION"
+info "GitHub Release: https://github.com/humanunsupervised/rakumux/releases/tag/v$VERSION"
 if [[ "$NPM_PUBLISH_STATUS" == "failed" ]]; then
     warn "npm publish status: FAILED"
     [[ -n "$NPM_PUBLISH_NOTE" ]] && warn "$NPM_PUBLISH_NOTE"
@@ -328,4 +328,4 @@ else
     info "npm publish status: $UPPER_STATUS"
 fi
 echo
-success "🎵 Orchestra is ready to use!"
+success "🎵 Rakumux is ready to use!"

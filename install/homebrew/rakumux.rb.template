@@ -1,0 +1,69 @@
+class Rakumux < Formula
+  desc "Terminal session manager for coding agents with a fast TUI"
+  homepage "https://github.com/humanunsupervised/rakumux"
+  # Rendered by install/scripts/release-homebrew.sh; edit the template, not Formula/rakumux.rb.
+  #
+  # Binary-only distribution: pre-built packages from GitHub Releases.
+  # `version` is stated only where Homebrew can't parse it from the URL: it reads the
+  # trailing "arm64"/"x64" as version 64. For the Intel URL it is parsed from
+  # "/v@VERSION@/", and stating it there fails `brew audit` as redundant.
+  if OS.mac? && Hardware::CPU.intel?
+    url "https://github.com/humanunsupervised/rakumux/releases/download/v@VERSION@/rakumux-macos-intel.tar.gz"
+    sha256 "@SHA256_MACOS_INTEL@"
+  elsif OS.mac? && Hardware::CPU.arm?
+    url "https://github.com/humanunsupervised/rakumux/releases/download/v@VERSION@/rakumux-macos-arm64.tar.gz"
+    version "@VERSION@"
+    sha256 "@SHA256_MACOS_ARM64@"
+  elsif OS.linux? && Hardware::CPU.intel?
+    url "https://github.com/humanunsupervised/rakumux/releases/download/v@VERSION@/rakumux-linux-x64.tar.gz"
+    version "@VERSION@"
+    sha256 "@SHA256_LINUX_X64@"
+  else
+    odie "Rakumux is not available for #{OS.kernel_name} #{Hardware::CPU.arch}"
+  end
+  # Proprietary (LICENSE in the package); SPDX can't express it.
+  license :cannot_represent
+
+  def install
+    libexec.install "rakumux", "rakumux-ptyd", "rakumux-api", "rakumux-mcp",
+                    "rakumux.sh", "rakumux-local.sh", "shell"
+    doc.install "LICENSE", "THIRD_PARTY_NOTICES"
+
+    # Every argument goes to rakumux.sh, as with npm: no command opens the TUI,
+    # anything else is a CLI subcommand. opt paths stay valid across upgrades.
+    (bin/"rakumux").write_env_script opt_libexec/"rakumux.sh",
+                                       GW_TUI_BIN:  opt_libexec/"rakumux",
+                                       GW_PTYD_BIN: opt_libexec/"rakumux-ptyd"
+    (bin/"rakumux-local").write_env_script opt_libexec/"rakumux-local.sh", {}
+    # The MCP server and the API run directly (MCP needs a clean stdout).
+    (bin/"rakumux-mcp").write_env_script opt_libexec/"rakumux-mcp",
+                                           RAKUMUX_API_BIN:  opt_libexec/"rakumux-api",
+                                           RAKUMUX_PTYD_BIN: opt_libexec/"rakumux-ptyd"
+    (bin/"rakumux-api").write_env_script opt_libexec/"rakumux-api",
+                                           RAKUMUX_PTYD_BIN: opt_libexec/"rakumux-ptyd"
+  end
+
+  def caveats
+    <<~EOS
+      Type `rakumux` in any project folder to start.
+
+      Sessions run in the rakumux-ptyd daemon and survive closing the TUI.
+      After an upgrade, `rakumux daemon restart` switches to the new daemon
+      (running sessions end; they can be revived).
+
+      Coding agents can drive sessions through the MCP server, e.g.:
+        claude mcp add --scope user rakumux -- #{opt_bin}/rakumux-mcp
+    EOS
+  end
+
+  test do
+    # --version never starts the daemon.
+    assert_match version.to_s, shell_output("#{bin}/rakumux --version")
+    assert_match(/\d+\.\d+\.\d+/, shell_output("#{libexec}/rakumux-ptyd --version"))
+    # --version starts no API, daemon or MCP session.
+    assert_match "rakumux-api #{version}", shell_output("#{bin}/rakumux-api --version")
+    assert_match "rakumux-mcp #{version}", shell_output("#{bin}/rakumux-mcp --version")
+    assert_path_exists doc/"LICENSE"
+    assert_path_exists doc/"THIRD_PARTY_NOTICES"
+  end
+end

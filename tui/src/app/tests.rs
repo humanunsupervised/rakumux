@@ -129,7 +129,7 @@ async fn protocol_mismatch_asks_before_restarting_the_daemon() {
         .app
         .status()
         .unwrap()
-        .starts_with("Restarted the Orchestra server"));
+        .starts_with("Restarted the Rakumux server"));
 }
 
 // ---------------------------------------------------------------- live list
@@ -243,7 +243,7 @@ async fn an_older_server_that_restarts_in_place_is_restarted_with_enter() {
     assert!(h.app.connection.is_connected());
     assert_eq!(
         h.app.status(),
-        Some("Restarted the Orchestra server; your sessions kept running.")
+        Some("Restarted the Rakumux server; your sessions kept running.")
     );
 }
 
@@ -332,7 +332,7 @@ async fn the_window_being_used_takes_the_session_size_back() {
 }
 
 #[tokio::test]
-async fn keys_with_a_stray_ctrl_or_alt_act_as_the_plain_key_in_orchestra_mode() {
+async fn keys_with_a_stray_ctrl_or_alt_act_as_the_plain_key_in_rakumux_mode() {
     let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
     let selected = h.selected();
     // Ctrl-↓ (a phone key bar's ctrl, a held modifier): moves like ↓.
@@ -368,7 +368,7 @@ async fn keys_with_a_stray_ctrl_or_alt_act_as_the_plain_key_in_orchestra_mode() 
 }
 
 #[tokio::test]
-async fn enter_promotes_and_the_orchestra_key_demotes() {
+async fn enter_promotes_and_the_rakumux_key_demotes() {
     let mut h = harness(vec![view("A", "a", 10)]);
     let (index, _) = h.last_attach();
     let (cols, rows) = h.app.terminal_size();
@@ -388,7 +388,7 @@ async fn enter_promotes_and_the_orchestra_key_demotes() {
     );
     assert!(h.fake.calls().contains(&"touch A".to_string()));
 
-    // Plain keys, even Orchestra mode keys, go to the session.
+    // Plain keys, even Rakumux mode keys, go to the session.
     h.press(KeyCode::Char('l')).await;
     h.press(KeyCode::Char('q')).await;
     h.press(KeyCode::Enter).await;
@@ -402,7 +402,7 @@ async fn enter_promotes_and_the_orchestra_key_demotes() {
     );
     assert_eq!(h.app.focus, Focus::Session);
 
-    h.orchestra().await;
+    h.rakumux().await;
     assert_eq!(h.app.focus, Focus::List);
     assert_eq!(
         h.fake.outgoing(index),
@@ -411,7 +411,7 @@ async fn enter_promotes_and_the_orchestra_key_demotes() {
 }
 
 #[tokio::test]
-async fn esc_and_the_orchestra_key_go_back_to_the_session_you_came_from() {
+async fn esc_and_the_rakumux_key_go_back_to_the_session_you_came_from() {
     let mut h = harness(vec![aged("A", "a", 1, 30), aged("B", "b", 2, 20)]);
     let (index, _) = h.last_attach();
     h.press(KeyCode::Enter).await;
@@ -427,8 +427,8 @@ async fn esc_and_the_orchestra_key_go_back_to_the_session_you_came_from() {
             AttachOutgoing::Input(b"\x1b".to_vec())
         ]
     );
-    // Orchestra mode, look at B, then Esc: back in A, not B.
-    h.orchestra().await;
+    // Rakumux mode, look at B, then Esc: back in A, not B.
+    h.rakumux().await;
     assert_eq!(h.app.focus, Focus::List);
     assert_eq!(h.app.came_from, Some(id("A")));
     h.press(KeyCode::Char('j')).await;
@@ -437,18 +437,18 @@ async fn esc_and_the_orchestra_key_go_back_to_the_session_you_came_from() {
     assert_eq!(h.app.focus, Focus::Session);
     assert_eq!(h.selected().as_deref(), Some("A"));
     assert_eq!(h.app.came_from, None);
-    // The Orchestra key goes back too, even with a filter typed.
+    // The Rakumux key goes back too, even with a filter typed.
     // A filter hiding it is cleared on the way.
-    h.orchestra().await;
+    h.rakumux().await;
     h.press(KeyCode::Char('/')).await;
     h.type_text("b").await;
     h.press(KeyCode::Enter).await;
-    h.orchestra().await;
+    h.rakumux().await;
     assert_eq!(h.app.focus, Focus::Session);
     assert_eq!(h.selected().as_deref(), Some("A"));
     assert!(h.app.list.filter.is_empty());
     // Esc cancels first: a filter is cleared, then Esc goes back.
-    h.orchestra().await;
+    h.rakumux().await;
     h.press(KeyCode::Char('/')).await;
     h.type_text("b").await;
     h.press(KeyCode::Enter).await;
@@ -463,7 +463,7 @@ async fn esc_and_the_orchestra_key_go_back_to_the_session_you_came_from() {
     assert_eq!(h.app.focus, Focus::List);
     h.press(KeyCode::Esc).await;
     assert_eq!(h.app.focus, Focus::Session);
-    // Started in Orchestra mode, Esc has nowhere to go back to.
+    // Started in Rakumux mode, Esc has nowhere to go back to.
     let mut fresh = harness(vec![view("A", "a", 30)]);
     fresh.press(KeyCode::Esc).await;
     assert_eq!(fresh.app.focus, Focus::List);
@@ -495,10 +495,10 @@ async fn tab_numbers_and_enter_go_into_sessions() {
 }
 
 #[tokio::test]
-async fn orchestra_mode_shows_only_help_and_settings_and_the_mode_in_the_footer() {
+async fn rakumux_mode_shows_only_help_and_settings_and_the_mode_in_the_footer() {
     let mut h = harness(vec![view("A", "a", 30)]);
     h.press(KeyCode::Enter).await;
-    h.orchestra().await;
+    h.rakumux().await;
     h.app
         .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(5));
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
@@ -507,9 +507,9 @@ async fn orchestra_mode_shows_only_help_and_settings_and_the_mode_in_the_footer(
     let footer: String = (0..120)
         .map(|x| buffer.get(x, 39).symbol().to_string())
         .collect();
-    assert!(footer.starts_with(" ORCHESTRA "), "the mode: {footer:?}");
+    assert!(footer.starts_with(" RAKUMUX "), "the mode: {footer:?}");
     assert_eq!(
-        footer.trim_start_matches(" ORCHESTRA ").trim(),
+        footer.trim_start_matches(" RAKUMUX ").trim(),
         "? help  , settings",
         "{footer:?}"
     );
@@ -658,7 +658,7 @@ async fn dragging_the_stacked_divider_resizes_the_list_and_saves_its_height() {
 }
 
 #[tokio::test]
-async fn from_a_session_the_orchestra_key_then_one_key_does_everything() {
+async fn from_a_session_the_rakumux_key_then_one_key_does_everything() {
     let mut h = harness(vec![view("A", "a", 10)]);
     let (index, _) = h.last_attach();
     h.press(KeyCode::Enter).await;
@@ -677,7 +677,7 @@ async fn from_a_session_the_orchestra_key_then_one_key_does_everything() {
     assert_eq!(h.app.focus, Focus::Session);
     h.fake.outgoing(index);
 
-    // `\` sends the Orchestra key itself and goes back in.
+    // `\` sends the Rakumux key itself and goes back in.
     h.prefix('\\').await;
     assert_eq!(h.app.focus, Focus::Session);
     assert!(h
@@ -685,13 +685,13 @@ async fn from_a_session_the_orchestra_key_then_one_key_does_everything() {
         .outgoing(index)
         .contains(&AttachOutgoing::Input(vec![0x1c])));
 
-    // z: work in the session full screen; the Orchestra key brings the
+    // z: work in the session full screen; the Rakumux key brings the
     // list back.
     h.prefix('z').await;
     assert!(h.app.zoomed);
     assert_eq!(h.app.focus, Focus::Session);
     assert_eq!(h.app.terminal_size(), (160, 47));
-    h.orchestra().await;
+    h.rakumux().await;
     assert!(!h.app.zoomed);
     assert_eq!(h.app.focus, Focus::List);
     h.press(KeyCode::Esc).await;
@@ -740,7 +740,7 @@ async fn from_a_session_the_orchestra_key_then_one_key_does_everything() {
 }
 
 #[tokio::test]
-async fn cycle_keys_move_in_orchestra_mode_and_only_on_request_in_sessions() {
+async fn cycle_keys_move_in_rakumux_mode_and_only_on_request_in_sessions() {
     let mut h = harness(vec![
         aged("A", "a", 1, 30),
         aged("B", "b", 2, 20),
@@ -781,7 +781,7 @@ async fn cycle_keys_move_in_orchestra_mode_and_only_on_request_in_sessions() {
     assert_eq!((request.id.as_str(), request.role), ("B", Role::Controller));
     assert_eq!(h.app.focus, Focus::Session);
     // Going in touches B, which moves nothing: the next step goes on to C,
-    // and the order is the same back in Orchestra mode.
+    // and the order is the same back in Rakumux mode.
     h.event(
         "B",
         SessionEvent::Updated {
@@ -790,7 +790,7 @@ async fn cycle_keys_move_in_orchestra_mode_and_only_on_request_in_sessions() {
     );
     h.alt(KeyCode::Down).await;
     assert_eq!(h.last_attach().1.id, id("C"));
-    h.orchestra().await;
+    h.rakumux().await;
     assert_eq!(visible_ids(&h), ["A", "B", "C"]);
 }
 
@@ -830,7 +830,7 @@ async fn nesting_guard_never_attaches_the_session_we_run_in() {
     assert_eq!(h.app.focus, Focus::List);
     assert_eq!(h.fake.attach_count(), 0);
     assert!(h.app.status().unwrap().contains("runs in"));
-    // Cycling from inside another session skips into Orchestra mode, not
+    // Cycling from inside another session skips into Rakumux mode, not
     // into the guarded session.
     h.app.settings.sessions.cycle_keys_in_session = true;
     h.press(KeyCode::Down).await;
@@ -867,7 +867,7 @@ async fn going_straight_back_in_isnt_mistaken_for_another_client() {
     let (index, _) = h.last_attach();
     // Promote, Demote, Promote before the daemon's answers arrive.
     h.press(KeyCode::Enter).await;
-    h.orchestra().await;
+    h.rakumux().await;
     h.press(KeyCode::Esc).await;
     assert_eq!(h.app.focus, Focus::Session);
     for role in [Role::Controller, Role::Observer, Role::Controller] {
@@ -947,14 +947,14 @@ fn cell_within(h: &mut Harness, text: &str, columns: u16) -> ratatui::buffer::Ce
 
 #[tokio::test]
 async fn the_session_list_is_never_faded() {
-    // Only the session pane fades (in Orchestra mode); the list looks the
+    // Only the session pane fades (in Rakumux mode); the list looks the
     // same in session mode.
     let mut h = harness(vec![view("A", "zebra", 10)]);
     let width = h.app.screen().list.unwrap().width;
-    let orchestra = cell_within(&mut h, "zebra", width);
+    let rakumux = cell_within(&mut h, "zebra", width);
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
-    assert_eq!(cell_within(&mut h, "zebra", width), orchestra);
+    assert_eq!(cell_within(&mut h, "zebra", width), rakumux);
 }
 
 #[tokio::test]
@@ -969,7 +969,7 @@ async fn the_session_pane_is_faded_while_it_doesnt_take_keys() {
         },
     );
     let p = crate::theme::palette();
-    // Orchestra mode: shown, faded.
+    // Rakumux mode: shown, faded.
     let cell = cell_of(&mut h, "hello");
     match p.faded(p.text_primary, crate::components::utils::FADE_TEXT) {
         Some(faded) => assert_eq!(cell.fg, faded),
@@ -1119,7 +1119,7 @@ async fn new_session_dialog_creates_and_focuses_the_session() {
 }
 
 #[tokio::test]
-async fn a_blank_name_lets_orchestra_pick_one() {
+async fn a_blank_name_lets_rakumux_pick_one() {
     let mut h = harness(vec![]);
     h.press(KeyCode::Char('n')).await;
     h.type_text("   ").await;
@@ -1132,7 +1132,7 @@ async fn a_blank_name_lets_orchestra_pick_one() {
     assert!(h.app.list.get(&new_id).unwrap().auto_named);
 
     // Esc cancels without creating anything.
-    h.orchestra().await;
+    h.rakumux().await;
     h.press(KeyCode::Char('n')).await;
     h.type_text("never").await;
     h.press(KeyCode::Esc).await;
@@ -1256,12 +1256,12 @@ async fn settings_and_help_open_from_the_list_with_their_keys() {
     assert_eq!(settings_tab(&h), Some(ModalTab::License));
     h.press(KeyCode::Char('?')).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
-    // `,` opens Settings too; the Orchestra key closes a modal.
+    // `,` opens Settings too; the Rakumux key closes a modal.
     h.press(KeyCode::Char(',')).await;
     assert_eq!(settings_tab(&h), Some(ModalTab::General));
     h.press(KeyCode::Char('2')).await;
     assert_eq!(settings_tab(&h), Some(ModalTab::Keys));
-    h.orchestra().await;
+    h.rakumux().await;
     assert!(matches!(h.app.mode, AppMode::Normal));
     assert_eq!(h.app.focus, Focus::List);
 }
@@ -1286,7 +1286,7 @@ async fn the_keys_tab_runs_the_selected_action() {
     h.press(KeyCode::Enter).await;
     assert!(matches!(h.app.mode, AppMode::NewSession(_)));
     h.press(KeyCode::Esc).await;
-    // Next session, from Orchestra mode.
+    // Next session, from Rakumux mode.
     open_keys(&mut h);
     for _ in 0..row(crate::help::KeyAction::NextSession) {
         h.press(KeyCode::Down).await;
@@ -1305,7 +1305,7 @@ async fn the_keys_tab_runs_the_selected_action() {
     open_keys(&mut h);
     h.press(KeyCode::End).await;
     assert_eq!(h.press(KeyCode::Enter).await, AppResult::Exit);
-    // From a session: "Orchestra mode" leaves it, "Back to the session"
+    // From a session: "Rakumux mode" leaves it, "Back to the session"
     // returns.
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
@@ -1576,8 +1576,8 @@ async fn clicking_a_row_selects_it_and_paste_goes_to_the_focused_session() {
         vec![AttachOutgoing::Input(b"echo hi".to_vec())]
     );
 
-    // A click on the list from inside B switches to Orchestra mode like
-    // the Orchestra key: Esc goes back into B.
+    // A click on the list from inside B switches to Rakumux mode like
+    // the Rakumux key: Esc goes back into B.
     terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
     let row_of = |h: &Harness, id: &str| {
         let row = h
@@ -1899,7 +1899,7 @@ async fn the_keys_tab_lists_and_runs_the_move_actions() {
         crate::help::KeyAction::MoveUp.section(),
         "Sessions and folders"
     );
-    // From a session too: it moves in Orchestra mode.
+    // From a session too: it moves in Rakumux mode.
     h.press(KeyCode::Enter).await;
     h.app.mode = AppMode::modal(ModalTab::Keys, true);
     for _ in 0..up {
@@ -2617,7 +2617,7 @@ async fn new_sessions_go_in_the_current_folder() {
     let new_id = h.app.list.selected_id().cloned().unwrap();
     assert_eq!(h.app.list.get(&new_id).unwrap().scope, web);
     assert_eq!(h.app.focus, Focus::Session);
-    h.orchestra().await;
+    h.rakumux().await;
 
     // A session of the launch folder: that folder.
     h.press(KeyCode::Home).await;
@@ -2674,10 +2674,10 @@ async fn new_sessions_go_in_the_current_folder() {
 #[tokio::test]
 async fn the_session_pane_keeps_only_a_session_the_filter_shows_in_view() {
     let mut h = folders_harness();
-    // Work in web-one, then back to Orchestra mode on the folder filter.
+    // Work in web-one, then back to Rakumux mode on the folder filter.
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.detail.view, DetailView::Live(id("W1")));
-    h.orchestra().await;
+    h.rakumux().await;
     assert_eq!(h.app.came_from, Some(id("W1")));
     h.press(KeyCode::Home).await;
     assert_eq!(h.app.detail.view.session_id(), Some(&id("W1")));
@@ -2846,7 +2846,7 @@ async fn welcome_cards_at(h: &mut Harness, width: u16, height: u16) -> Vec<(Stri
             .iter()
             .find_map(|row| {
                 [
-                    "Welcome to Orchestra",
+                    "Welcome to Rakumux",
                     "Folders and sessions",
                     "Two modes",
                     "Moving around",
@@ -2860,7 +2860,7 @@ async fn welcome_cards_at(h: &mut Harness, width: u16, height: u16) -> Vec<(Stri
             .to_string();
         // The popup grows to the tallest card (tighter when that doesn't
         // fit); both its borders show unless it's cut off.
-        let top = rows.iter().any(|row| row.contains("╭ Orchestra tour"));
+        let top = rows.iter().any(|row| row.contains("╭ Rakumux tour"));
         let bottom = rows.iter().any(|row| row.contains("╰──"));
         let end = rows.iter().any(|row| row.contains(last_word));
         let keys = rows.iter().any(|row| row.contains("Esc close"));
@@ -2893,7 +2893,7 @@ async fn the_welcome_tour_explains_folders_and_sessions_before_the_modes() {
     assert_eq!(
         titles,
         [
-            "Welcome to Orchestra",
+            "Welcome to Rakumux",
             "Folders and sessions",
             "Two modes",
             "Moving around",
@@ -2990,7 +2990,7 @@ async fn phone_access_is_offered_once_and_pairs_with_a_qr_code() {
     let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
     assert!(saved.sessions.phone_offer_seen);
     let rows = screen_rows(&mut h, 160, 48).join("\n");
-    assert!(rows.contains("Use Orchestra from your phone?"), "{rows}");
+    assert!(rows.contains("Use Rakumux from your phone?"), "{rows}");
     assert!(rows.contains("Turn on and pair"), "{rows}");
 
     h.press(KeyCode::Char('y')).await;
@@ -3047,7 +3047,7 @@ async fn the_phone_offer_waits_for_the_welcome_tour_and_session_mode() {
     assert_eq!(h.app.focus, Focus::Session);
     assert!(!h.app.on_tick(std::time::Instant::now()));
     assert!(matches!(h.app.mode, AppMode::Normal));
-    h.orchestra().await;
+    h.rakumux().await;
     assert!(h.app.on_tick(std::time::Instant::now()));
     assert!(matches!(h.app.mode, AppMode::PhoneOffer));
     // Declined: off, said where to turn it on, never offered again.
@@ -3103,17 +3103,17 @@ async fn settings_turns_phone_access_on_shows_the_code_and_turns_it_off() {
 #[tokio::test]
 async fn phone_access_errors_stay_in_the_dialog() {
     let (mut h, phone) = phone_harness(false, false);
-    *phone.fail_enable.lock().unwrap() = Some("orchestra-api not found".into());
+    *phone.fail_enable.lock().unwrap() = Some("rakumux-api not found".into());
     h.app.turn_phone_access_on(false);
     h.app.process_pending();
     assert_eq!(
         pairing_state(&h),
         Some(super::types::PairingState::Failed(
-            "orchestra-api not found".into()
+            "rakumux-api not found".into()
         ))
     );
     let text = screen_rows(&mut h, 120, 40).join("\n");
-    assert!(text.contains("✕ orchestra-api not found"), "{text}");
+    assert!(text.contains("✕ rakumux-api not found"), "{text}");
     assert_eq!(h.app.phone_enabled, Some(false));
     h.press(KeyCode::Esc).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
@@ -3125,7 +3125,7 @@ async fn a_small_window_shows_the_link_instead_of_the_code() {
     h.press(KeyCode::Enter).await;
     let text = screen_rows(&mut h, 70, 24).join("\n");
     assert!(!text.contains('▀'), "{text}");
-    assert!(text.contains("window shows a QR code"), "{text}");
-    assert!(text.contains("orchestra://connect?url="), "{text}");
+    assert!(text.contains("shows a QR code to scan"), "{text}");
+    assert!(text.contains("rakumux://connect?url="), "{text}");
     assert!(text.contains("abcdefghijklmnopqrstuvwx27"), "{text}");
 }

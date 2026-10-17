@@ -5,7 +5,7 @@
 //! and are quoted in text.
 
 use crate::untrusted::{inline, sanitize};
-use orchestra_api::dto::{Folder, Session};
+use rakumux_api::dto::{Folder, Session};
 use serde_json::{json, Map, Value};
 use session_core::model::{Creator, Lifecycle, SessionStatus};
 use std::path::Path;
@@ -258,7 +258,7 @@ fn cap(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orchestra_api::dto::{Agent, Reported};
+    use rakumux_api::dto::{Agent, Reported};
 
     pub(crate) fn sample() -> Session {
         Session {

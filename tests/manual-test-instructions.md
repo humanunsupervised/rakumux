@@ -1,37 +1,37 @@
 # Manual Test Instructions
 
-Orchestra manages **sessions**: a folder plus a terminal, owned by one background daemon
-(`orchestra-ptyd`) per user. The TUI, the `orchestra` CLI and agents running inside sessions are all
+Rakumux manages **sessions**: a folder plus a terminal, owned by one background daemon
+(`rakumux-ptyd`) per user. The TUI, the `rakumux` CLI and agents running inside sessions are all
 clients of that daemon. There is no tmux, no git integration and no shell services layer; `tmux`,
 `git`, `jq` and `python3` are not needed at runtime.
 
 Every session belongs to the folder it was started in (its scope). The TUI shows the sessions of
-all folders, narrowed by its folder filter (`P`); `orchestra ls` shows the folder it's run in.
+all folders, narrowed by its folder filter (`P`); `rakumux ls` shows the folder it's run in.
 Key bindings and layout are specified in `plans/sessions-refactor.md` §6–§9 and
 `plans/folders.md`.
 
-Use a throwaway Orchestra home so these tests don't touch your real sessions:
+Use a throwaway Rakumux home so these tests don't touch your real sessions:
 
 ```bash
-export ORCHESTRA_HOME="$(mktemp -d)"
+export RAKUMUX_HOME="$(mktemp -d)"
 cd tui && cargo build --workspace && cd ..
 mkdir -p /tmp/orch-a /tmp/orch-b
-# Two worktrees of one repository, for the folder checks (setup only; Orchestra never runs git).
+# Two worktrees of one repository, for the folder checks (setup only; Rakumux never runs git).
 git init -q /tmp/orch-repo && git -C /tmp/orch-repo commit -q --allow-empty -m init
 git -C /tmp/orch-repo worktree add -q ../orch-wt-a -b a
 git -C /tmp/orch-repo worktree add -q ../orch-wt-b -b b
 ```
 
-Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orchestrator/orchestra.sh`
-(or `orchestra-local`, see `shell/orchestra-local.sh`).
+Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/rakumux/rakumux.sh`
+(or `rakumux-local`, see `shell/rakumux-local.sh`).
 
 ## 1. First run and the daemon
 
-- [ ] With no daemon running, `orchestra` starts one in the background and shows the TUI without
+- [ ] With no daemon running, `rakumux` starts one in the background and shows the TUI without
       noticeable delay; there is no header: the list's folder filter (or, in Tabs, the selector
       at the left of the tab bar) shows `▤ All folders ▾`, and the footer shows `⠋ connecting`
       after the badge until the daemon answers (`✕ daemon unavailable` if it can't start).
-- [ ] On first start (no `welcome_seen` in `$ORCHESTRA_HOME/config.json`) the welcome tour
+- [ ] On first start (no `welcome_seen` in `$RAKUMUX_HOME/config.json`) the welcome tour
       opens: six cards (the second is "Folders and sessions", before the two modes), `←`/`→`
       (`h`/`l`, Tab) move, Enter goes on, Esc closes. Every card shows "Don't show this on
       startup" and Space ticks it on any card. Closing without it ticked shows the tour again
@@ -39,8 +39,8 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orch
       Help (and "Welcome tour" in Settings, Keys) replays it, with the box as saved; unticking it there brings it back on startup. It fits at 80×24 and on a phone (45×40).
 - [ ] With no sessions at all, the right pane says "No sessions yet" with `n` to start one in
       the launch folder.
-- [ ] `orchestra daemon status` reports pid, version, uptime and session count.
-- [ ] `orchestra daemon logs` shows `$ORCHESTRA_HOME/logs/ptyd.log`.
+- [ ] `rakumux daemon status` reports pid, version, uptime and session count.
+- [ ] `rakumux daemon logs` shows `$RAKUMUX_HOME/logs/ptyd.log`.
 - [ ] Works outside a git repository and with `tmux` not on `PATH`.
 
 ## 2. Creating sessions
@@ -54,8 +54,8 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orch
       opens the dialog too); else the one folder the filter shows; else the launch folder (All
       folders on the folder filter or "+ New session"). A session made in a folder the filter
       hides adds that folder to the filter.
-- [ ] Other folders and commands still work from the CLI: `orchestra new --cwd DIR --cmd 'echo
-      ready'` and `orchestra new -- htop` (a folder outside the current folder is rejected with a
+- [ ] Other folders and commands still work from the CLI: `rakumux new --cwd DIR --cmd 'echo
+      ready'` and `rakumux new -- htop` (a folder outside the current folder is rejected with a
       clear error).
 
 ## 3. The live terminal pane
@@ -66,8 +66,8 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orch
       `codex`, …), colours and wide characters included.
 - [ ] Resizing the terminal resizes the session; full-screen programs redraw.
 - [ ] Two modes: in a session every key reaches the program (try `Ctrl-b`, `Esc`, `Tab`,
-      `Option+↑`) except `Ctrl-\`, which switches to Orchestra mode (the footer's bottom-left
-      badge: orange ORCHESTRA, SESSION in a session; on its right `? help  , settings`, after
+      `Option+↑`) except `Ctrl-\`, which switches to Rakumux mode (the footer's bottom-left
+      badge: orange RAKUMUX, SESSION in a session; on its right `? help  , settings`, after
       `Ctrl-\` in a session; switching modes, moving the selection or a message appearing never
       moves the panes). There: `j`/`k` preview other sessions, faded (colours toward the
       background, live output still moving; full colour again once you go in, faded under Help or
@@ -78,7 +78,7 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orch
       selected one, `Tab` the one before, `1`-`9`, `z` full screen, `dd` delete (confirm), `x`
       close (confirm), `\` sends `Ctrl-\` to the session. Quick `Ctrl-\ Esc` never reports
       "Another client took control".
-- [ ] Below 100 columns (Sidebar) Orchestra mode stacks the list above the selected session; in
+- [ ] Below 100 columns (Sidebar) Rakumux mode stacks the list above the selected session; in
       session mode the session fills the screen (see section 10).
 
 ## 4. Lifecycle
@@ -86,17 +86,17 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orch
 - [ ] Quit the TUI (`q`) and reopen it: sessions are still running and output produced meanwhile
       is visible.
 - [ ] A session whose program exits shows the exit code and "Enter to restart".
-- [ ] `orchestra daemon stop`, then reopen: sessions show as dead with their saved scrollback;
+- [ ] `rakumux daemon stop`, then reopen: sessions show as dead with their saved scrollback;
       `Enter` revives them in the same folder.
-- [ ] `orchestra daemon restart` with a busy program in one session (e.g. `top`, or an agent mid
+- [ ] `rakumux daemon restart` with a busy program in one session (e.g. `top`, or an agent mid
       answer) and a TUI in session mode: the CLI says "restarted in place … kept running", the
       program's pid is unchanged, its screen is intact, and the TUI is back in session mode.
-- [ ] `orchestra --new-server`: the same, then the TUI opens with the message in the footer; with no
+- [ ] `rakumux --new-server`: the same, then the TUI opens with the message in the footer; with no
       server running it starts one.
 - [ ] `kill -9` the daemon with Claude Code (or Codex, OpenCode) in one session and `npm run dev`
       typed in another: the TUI reconnects, both sessions are running again, Claude Code reopened
       the same conversation with the same flags, and `npm run dev` waits at the prompt, not run.
-- [ ] Log in another way (SSH and mosh, or Termius on a phone): `orchestra daemon status` shows the
+- [ ] Log in another way (SSH and mosh, or Termius on a phone): `rakumux daemon status` shows the
       same pid from both.
 - [ ] `r` renames (names are unique per scope); `d` deletes after confirmation.
 
@@ -105,7 +105,7 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orch
 - [ ] Two TUIs show the same live list; output appears in both; only the one that pressed `Enter`
       last is controller.
 - [ ] Start the TUI in `/tmp/orch-repo` and create a session there. From another terminal (same
-      `ORCHESTRA_HOME`) run `orchestra new --detach --cwd /tmp/orch-wt-a` and the same for
+      `RAKUMUX_HOME`) run `rakumux new --detach --cwd /tmp/orch-wt-a` and the same for
       `/tmp/orch-wt-b`: both appear live under All folders, each under a header (name, `⎇ a` /
       `⎇ b`, `1/1 live`), with `orch-repo` first and the others by name. No restart or refresh
       needed.
@@ -127,32 +127,32 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orch
       shown as `~/…`. A click on a folder completes it.
 - [ ] With an older daemon (no `sessions.all`), the TUI offers a restart naming "new folders
       live"; declined, it still lists the folders the daemon knew.
-- [ ] Running `orchestra` inside one of its own sessions marks that session as current and refuses
+- [ ] Running `rakumux` inside one of its own sessions marks that session as current and refuses
       to attach to it (no infinite mirror).
 
 ## 6. Command line
 
-- [ ] `orchestra new --name demo --detach` creates a session without attaching; `orchestra ls`
+- [ ] `rakumux new --name demo --detach` creates a session without attaching; `rakumux ls`
       lists it (`--json` for JSON, `--dead` includes dead sessions, `--all` lists every folder,
       `--folder <dir>` another one).
-- [ ] `orchestra pin demo` marks it with `^` in `orchestra ls` and lists it first; `orchestra
+- [ ] `rakumux pin demo` marks it with `^` in `rakumux ls` and lists it first; `rakumux
       unpin demo` undoes it. In a git checkout the GIT column shows the branch (and the worktree
       in a linked worktree), and follows `git checkout` within a few seconds.
-- [ ] `orchestra folders` lists the folders; `orchestra folders add <dir>` adds one,
-      `orchestra folders rm <dir>` removes it only once it has no sessions.
-- [ ] `orchestra attach demo` takes over the terminal; `Ctrl-\ d` detaches, `Ctrl-\ >`/`<`
+- [ ] `rakumux folders` lists the folders; `rakumux folders add <dir>` adds one,
+      `rakumux folders rm <dir>` removes it only once it has no sessions.
+- [ ] `rakumux attach demo` takes over the terminal; `Ctrl-\ d` detaches, `Ctrl-\ >`/`<`
       switch sessions, `Ctrl-\ n` creates one. Also try it over SSH.
-- [ ] `orchestra rename demo demo2`, `orchestra kill demo2`, `orchestra rm demo2` behave as named.
-- [ ] Inside a session: `orchestra session list`, `orchestra session read <id>` and
-      `orchestra session report --state working --text "running tests"` work; `orchestra kill`
+- [ ] `rakumux rename demo demo2`, `rakumux kill demo2`, `rakumux rm demo2` behave as named.
+- [ ] Inside a session: `rakumux session list`, `rakumux session read <id>` and
+      `rakumux session report --state working --text "running tests"` work; `rakumux kill`
       on another session is refused with a "later release" message.
 
 ## 7. Command history and AI naming
 
-- [ ] Add `source /path/to/orchestrator/shell/orchestra-command-hook.sh` to `~/.bashrc` or
+- [ ] Add `source /path/to/rakumux/shell/rakumux-command-hook.sh` to `~/.bashrc` or
       `~/.zshrc`. In a new session, run a few commands: they appear as `<timestamp>\t<command>`
-      lines in `$ORCHESTRA_HOME/history/<session id>.log`. Outside sessions nothing is logged.
-- [ ] `orchestra_rename_session my new name` inside a session renames it.
+      lines in `$RAKUMUX_HOME/history/<session id>.log`. Outside sessions nothing is logged.
+- [ ] `rakumux_rename_session my new name` inside a session renames it.
 - [ ] Configure an Anthropic or OpenAI key in the API keys dialog (or export `ANTHROPIC_API_KEY` /
       `OPENAI_API_KEY`). Create a session with a blank name, run something meaningful
       (e.g. `cargo test`), and let it go idle: the session gets a descriptive name
@@ -161,16 +161,16 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orch
 
 ## 8. Shell wrapper
 
-- [ ] With the `orchestra` wrapper function from `AGENTS.md` installed, quitting with a session
+- [ ] With the `rakumux` wrapper function from `AGENTS.md` installed, quitting with a session
       selected can `cd` the calling shell into that session's folder, and the wrapper never hangs
-      (`orchestra --help`, `orchestra --version`, quitting immediately).
+      (`rakumux --help`, `rakumux --version`, quitting immediately).
 
 ## 9. List order
 
 - [ ] Create three sessions with `n`: each new one appears at the bottom of its folder, just
       above "+ New session". Type in one, go in and out of the others, and let an agent work:
       no session moves. Tabs keep the same order.
-- [ ] In Orchestra mode `J` moves the selected session down one place and `K` up; it stops at
+- [ ] In Rakumux mode `J` moves the selected session down one place and `K` up; it stops at
       the ends of its folder, and a pinned session stays above the others (and an unpinned one
       below them). Inside a session `J` and `K` reach the program.
 - [ ] Press a session row, drag it up or down and release: it moves as the pointer crosses the
@@ -179,7 +179,7 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/orch
       session pane still goes in; the divider still resizes the list.
 - [ ] In the Tabs layout, drag a tab left or right: it moves the same way.
 - [ ] Quit and start again: the order is kept (`sessions.session_order` in
-      `$ORCHESTRA_HOME/config.json`). The first start still selects the most recently used session.
+      `$RAKUMUX_HOME/config.json`). The first start still selects the most recently used session.
 
 ## 10. Phone
 
@@ -188,14 +188,14 @@ portrait, 15–25 rows with the keyboard up, and send taps as clicks. Try it on 
 a desktop terminal (or `tmux new -x 45 -y 40`) and click instead of tapping. Use the Sidebar
 layout and create two or three sessions that print something.
 
-- [ ] At 45×40 (either layout), Orchestra mode shows only the list: the folder filter, the
+- [ ] At 45×40 (either layout), Rakumux mode shows only the list: the folder filter, the
       sessions and + New session, full screen. `j`/`k` move the selection; nothing else changes.
 - [ ] Tap a session row: you're in (SESSION badge), the session fills the screen under a row of
       tabs, sized to it. Tap another tab: that session, still in session mode.
 - [ ] `Ctrl-\`, or a tap on the SESSION badge: back to the list (not the session). Tap the
-      ORCHESTRA badge: back into the session you came from (nothing happens when there's none).
+      RAKUMUX badge: back into the session you came from (nothing happens when there's none).
       Tap `? help` and `, settings` in either mode; in session mode the footer shows
-      `Ctrl-\ orchestra  Ctrl-\ ? help`, and tapping `Ctrl-\ orchestra` switches like the badge.
+      `Ctrl-\ rakumux  Ctrl-\ ? help`, and tapping `Ctrl-\ rakumux` switches like the badge.
 - [ ] At 40×20 (the keyboard up) the same works.
 - [ ] At 90×40 (a narrow window, not a phone) the list is on top and the selected session below;
       drag the line between them up and down: the list grows and shrinks, keeping the folder

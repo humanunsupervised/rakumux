@@ -1,10 +1,10 @@
-//! The real `orchestra-api` binary against a real `orchestra-ptyd`, both in
-//! a temporary `ORCHESTRA_HOME`. The API spawns the daemon on the first user
+//! The real `rakumux-api` binary against a real `rakumux-ptyd`, both in
+//! a temporary `RAKUMUX_HOME`. The API spawns the daemon on the first user
 //! request (as the CLI does); every test stops both.
 
 mod support;
 
-use orchestra_api::discovery::{self, ApiInfo};
+use rakumux_api::discovery::{self, ApiInfo};
 use serde_json::{json, Value};
 use std::os::unix::fs::PermissionsExt;
 use std::process::Stdio;
@@ -117,10 +117,7 @@ fn requests_are_checked_before_they_reach_the_daemon() {
     let reply = api.raw(
         "GET",
         "/v1/sessions",
-        &[
-            ("Authorization", &bearer),
-            ("X-Orchestra-Session-Id", "01JX"),
-        ],
+        &[("Authorization", &bearer), ("X-Rakumux-Session-Id", "01JX")],
         None,
     );
     assert_eq!(reply.status, 400);
@@ -466,7 +463,7 @@ fn session_identity_applies_the_daemon_policy() {
         &api,
         &api.env.project,
         "agent",
-        &["echo TOKEN=$ORCHESTRA_SESSION_TOKEN"],
+        &["echo TOKEN=$RAKUMUX_SESSION_TOKEN"],
     );
     let other = create(&api, &api.env.project, "other", &[]);
     let elsewhere = create(&api, &api.env.other_project, "elsewhere", &[]);
@@ -585,7 +582,7 @@ fn agent_conversations_act_as_the_session_that_bound_them() {
         &api,
         &api.env.project,
         "opencode-tui",
-        &["echo TOKEN=$ORCHESTRA_SESSION_TOKEN"],
+        &["echo TOKEN=$RAKUMUX_SESSION_TOKEN"],
     );
     let id = agent["id"].as_str().unwrap().to_owned();
     let screen = wait_for_text(&api, &id, "TOKEN=");
@@ -600,8 +597,8 @@ fn agent_conversations_act_as_the_session_that_bound_them() {
         let body = body.map(|b| b.to_string());
         let mut headers = vec![
             ("Authorization", auth.as_str()),
-            ("X-Orchestra-Agent", "opencode"),
-            ("X-Orchestra-Agent-Conversation", conversation),
+            ("X-Rakumux-Agent", "opencode"),
+            ("X-Rakumux-Agent-Conversation", conversation),
         ];
         if body.is_some() {
             headers.push(("Content-Type", "application/json"));
@@ -677,7 +674,7 @@ fn api_json_tracks_the_running_api() {
     assert_eq!(api.info.token.len(), 64);
     assert!(api.info.url.starts_with("http://127.0.0.1:"));
     assert!(api.info.remote_urls.is_empty(), "remote access is off");
-    assert_eq!(api.info.version, orchestra_api::VERSION);
+    assert_eq!(api.info.version, rakumux_api::VERSION);
 
     // A second API for the same home refuses to start…
     let output = api
@@ -689,7 +686,7 @@ fn api_json_tracks_the_running_api() {
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("already running")
-            || String::from_utf8_lossy(&output.stderr).contains("another orchestra-api"),
+            || String::from_utf8_lossy(&output.stderr).contains("another rakumux-api"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -851,10 +848,10 @@ fn the_remote_listener_admits_the_remote_token_only() {
 
     // Identity headers are refused: remote callers are the user.
     for (name, value) in [
-        ("X-Orchestra-Session-Id", "01JX"),
-        ("X-Orchestra-Session-Token", "t"),
-        ("X-Orchestra-Agent", "opencode"),
-        ("X-Orchestra-Agent-Conversation", "ses_1"),
+        ("X-Rakumux-Session-Id", "01JX"),
+        ("X-Rakumux-Session-Token", "t"),
+        ("X-Rakumux-Agent", "opencode"),
+        ("X-Rakumux-Agent-Conversation", "ses_1"),
     ] {
         let reply = http(
             &remote,
@@ -905,7 +902,7 @@ fn remote_listen_needs_remote_access_on() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("orchestra remote on"), "{stderr}");
+    assert!(stderr.contains("rakumux remote on"), "{stderr}");
     assert!(!discovery::info_path(&env.layout).exists());
 
     // remote.json's `listen` binds without the flag.

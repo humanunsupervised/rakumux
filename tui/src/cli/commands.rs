@@ -50,8 +50,8 @@ fn new(
     // Check before creating, so a failed attach leaves nothing behind.
     if !args.detach && matches!(api.caller(), CallerInfo::Session { .. }) {
         return Err(CliError::invalid(
-            "inside an Orchestra session, new sessions start in the background: pass --detach \
-             (the session appears in the Orchestra list)",
+            "inside a Rakumux session, new sessions start in the background: pass --detach \
+             (the session appears in the Rakumux list)",
         ));
     }
     if !args.detach && !attach::is_terminal() {
@@ -189,8 +189,8 @@ fn rename(
             Some(id) => (id.clone(), name),
             None => {
                 return Err(CliError::Usage(
-                    "name the session to rename: `orchestra rename <name|id> <new name>` \
-                     (ORCHESTRA_SESSION_ID is not set)"
+                    "name the session to rename: `rakumux rename <name|id> <new name>` \
+                     (RAKUMUX_SESSION_ID is not set)"
                         .into(),
                 ))
             }

@@ -1,4 +1,4 @@
-//! `orchestra-ptyd serve` runs the daemon in the foreground. Clients spawn it
+//! `rakumux-ptyd serve` runs the daemon in the foreground. Clients spawn it
 //! detached (stdio on /dev/null, `setsid`); see `session_core::client`.
 
 fn main() {

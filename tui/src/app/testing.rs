@@ -794,21 +794,21 @@ impl Harness {
         self.key(KeyEvent::new(code, KeyModifiers::ALT)).await
     }
 
-    /// The Orchestra key as most terminals send it: 0x1C, which crossterm
+    /// The Rakumux key as most terminals send it: 0x1C, which crossterm
     /// reads as Ctrl-4.
-    pub async fn orchestra(&mut self) -> AppResult {
+    pub async fn rakumux(&mut self) -> AppResult {
         self.ctrl('4').await
     }
 
-    /// The Orchestra key, then Tab (the last session).
+    /// The Rakumux key, then Tab (the last session).
     pub async fn prefix_tab(&mut self) -> AppResult {
-        self.orchestra().await;
+        self.rakumux().await;
         self.press(KeyCode::Tab).await
     }
 
-    /// The Orchestra key, then `c`: an Orchestra mode key from a session.
+    /// The Rakumux key, then `c`: a Rakumux mode key from a session.
     pub async fn prefix(&mut self, c: char) -> AppResult {
-        self.orchestra().await;
+        self.rakumux().await;
         self.press(KeyCode::Char(c)).await
     }
 

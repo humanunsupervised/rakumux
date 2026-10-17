@@ -1,22 +1,22 @@
 [package]
-name = "orchestra-mcp"
+name = "rakumux-mcp"
 version = "0.1.0"
 edition = "2021"
-description = "Orchestra MCP server (stdio) for coding agents; drives the Orchestra external API"
+description = "Rakumux MCP server (stdio) for coding agents; drives the Rakumux external API"
 publish = false
 workspace = "../tui"
 
 [lib]
-name = "orchestra_mcp"
+name = "rakumux_mcp"
 path = "src/lib.rs"
 
 [[bin]]
-name = "orchestra-mcp"
+name = "rakumux-mcp"
 path = "src/main.rs"
 
 [dependencies]
-orchestra-api = { path = "../api" }
-orchestra-session-core = { path = "../tui/crates/session-core" }
+rakumux-api = { path = "../api" }
+rakumux-session-core = { path = "../tui/crates/session-core" }
 reqwest = { version = "=0.11.27", default-features = false, features = ["json"] }
 # Official MCP Rust SDK; all use is confined to src/server.rs.
 rmcp = { version = "=3.5.1", default-features = false, features = ["server", "transport-io"] }

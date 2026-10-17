@@ -1,16 +1,16 @@
-# Agent Control: Letting Coding Agents Create, See and Drive Orchestra Sessions
+# Agent Control: Letting Coding Agents Create, See and Drive Rakumux Sessions
 
 Status: stage A decided and in progress (rev 2) · Date: 2026-10-13 · Companion to
 `plans/sessions-refactor.md` (rev 7)
 
-Each Orchestra session is expected to run a coding agent (Claude Code, OpenCode, Codex, Pi, …).
+Each Rakumux session is expected to run a coding agent (Claude Code, OpenCode, Codex, Pi, …).
 This plan covers how those agents can **discover sessions, create new ones, prompt and read other
 sessions, wait on them, and report their own status**, safely, through one API that works for any
 agent. Stage A ships in 0.6.0 as part of the sessions refactor; later stages build on it without
 breaking changes. The MCP adapter has its own plan, `plans/agent-mcp.md` (in progress).
 
 Rev 2 records the decisions taken after rev 1 (`plans/parallel-execution.md` decisions 2, 3 and 6):
-the daemon owns the session API, Orchestra has no git, and stage A permissions are fixed. The
+the daemon owns the session API, Rakumux has no git, and stage A permissions are fixed. The
 session API is now defined in code: `tui/crates/session-core/src/{api.rs, model.rs, client.rs}`.
 
 ## Decisions at a glance
@@ -19,16 +19,16 @@ session API is now defined in code: `tui/crates/session-core/src/{api.rs, model.
 |---|---|---|
 | Core contract | One versioned **JSON session API** (`session_core::api`) with typed requests, errors and caller identity. Every surface (TUI, CLI, MCP, hooks) is a thin client of it. | §3 |
 | Where it runs | **The daemon owns the session API** (Option A, decided): registry, scope confinement, identity, permissions, waits, lifecycle, audit. | §3.2 |
-| Primary agent surface | **CLI with JSON output** (`orchestra session …`) plus an **agent skill / instructions file**. Works with every agent that has a shell tool and costs no context until used. Same approach as Herdr. | §2, §4 |
-| MCP | **Optional thin adapter** (`orchestra mcp`, stdio) over the same API, for hosts that prefer tools. Stage C; designed in `plans/agent-mcp.md` (in progress). | §2.2, §4.3 |
+| Primary agent surface | **CLI with JSON output** (`rakumux session …`) plus an **agent skill / instructions file**. Works with every agent that has a shell tool and costs no context until used. Same approach as Herdr. | §2, §4 |
+| MCP | **Optional thin adapter** (`rakumux mcp`, stdio) over the same API, for hosts that prefer tools. Stage C; designed in `plans/agent-mcp.md` (in progress). | §2.2, §4.3 |
 | Hooks / plugins | Opt-in **integration installers** per agent (stage B). Hooks report **agent session identity** (for resume) and attention hints; plugin-capable agents (OpenCode, Pi) may report lifecycle. | §2.3, §6 |
 | Agent state authority | **Screen detection** (daemon) for Claude Code / Codex-style agents; **plugin reports** for OpenCode / Pi; **self-reports** are a separate semantic field. Herdr learned this the hard way. | §6 |
-| Identity | Per-session **`ORCHESTRA_SESSION_ID` + `ORCHESTRA_SESSION_TOKEN`** in the environment; tokens live in daemon memory only. Calls are attributed to the calling session. | §5.1 |
+| Identity | Per-session **`RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN`** in the environment; tokens live in daemon memory only. Calls are attributed to the calling session. | §5.1 |
 | Permissions, stage A (0.6.0) | Session callers may **list/get/read/wait/subscribe within their own scope** and **report/touch/rename themselves**. Everything else is `permission_denied`. User callers may do everything. | §5.2 |
 | Permissions, stage B (0.7.0) | Create within limits; prompt/kill own descendants; **ask the user** (TUI approval) before acting on sessions the agent didn't create; never cross scope. | §5.2 |
-| No git | Orchestra has no worktree support. An agent that needs an isolated folder for a child creates it itself (e.g. `git worktree add` inside the scope) and passes it as the child's cwd. | §4.2, §5.4 |
+| No git | Rakumux has no worktree support. An agent that needs an isolated folder for a child creates it itself (e.g. `git worktree add` inside the scope) and passes it as the child's cwd. | §4.2, §5.4 |
 | Honesty about security | Agents run as the same OS user, so guardrails prevent **accidents**, not a hostile agent. Stated plainly in docs. | §5.4 |
-| Rollout | **Stage A in 0.6.0** (identity, schema, protocol, `orchestra session list/get/read/wait/report`). Stage B (control surface, policy, skill, integrations) in **0.7.0**; MCP in stage C; messaging later. | §8 |
+| Rollout | **Stage A in 0.6.0** (identity, schema, protocol, `rakumux session list/get/read/wait/report`). Stage B (control surface, policy, skill, integrations) in **0.7.0**; MCP in stage C; messaging later. | §8 |
 
 ---
 
@@ -43,7 +43,7 @@ Concrete scenarios this design must support:
    (working / blocked on approval / idle / done) before starting work that might conflict.
 3. **Driving**: an agent sends a follow-up prompt or a key (Esc, Ctrl-C) to a session it created.
 4. **Self-reporting**: an agent marks its own session `done` with a summary and changed files, and
-   records its native session id so Orchestra can resume it after a reboot (`sessions-refactor.md`
+   records its native session id so Rakumux can resume it after a reboot (`sessions-refactor.md`
    §5.9 `ReportedByAgent`).
 5. **Human in control**: the user sees who created what, can approve or deny risky actions, and can
    kill a whole tree of agent-created sessions.
@@ -51,7 +51,7 @@ Concrete scenarios this design must support:
 Stage A (0.6.0) delivers scenarios 2 and 4 and the identity needed for the rest.
 
 Why not just use each agent's native sub-agents? Claude Code and OpenCode sub-agents run inside one
-process, are invisible to the user, end with the parent, and are tied to one vendor. Orchestra
+process, are invisible to the user, end with the parent, and are tied to one vendor. Rakumux
 sessions are **durable, visible terminals** that a human can watch and take over and that can mix
 agent vendors. Agent control is about coordinating those.
 
@@ -76,8 +76,8 @@ in shape and maturity per agent and per release.
 
 | Surface | Strengths | Weaknesses | Role |
 |---|---|---|---|
-| **(a) CLI `orchestra session …`** | Works with every agent and with humans and scripts; no per-agent config; easy to debug; no context cost until used | Agent must learn commands (fixed by a skill); shell-tool timeouts and approval prompts are agent-specific | **Primary** (stage A) |
-| **(b) MCP server `orchestra mcp`** | Structured, discoverable tools; host shows per-tool approval UI | Per-agent registration; tool schemas sit in every session's context; client tool timeouts (Codex 60 s) make long waits awkward; MCP support uneven (Pi) | **Optional adapter** (stage C) |
+| **(a) CLI `rakumux session …`** | Works with every agent and with humans and scripts; no per-agent config; easy to debug; no context cost until used | Agent must learn commands (fixed by a skill); shell-tool timeouts and approval prompts are agent-specific | **Primary** (stage A) |
+| **(b) MCP server `rakumux mcp`** | Structured, discoverable tools; host shows per-tool approval UI | Per-agent registration; tool schemas sit in every session's context; client tool timeouts (Codex 60 s) make long waits awkward; MCP support uneven (Pi) | **Optional adapter** (stage C) |
 | **(c) Skill / instructions** | Teaches *when* and *how* to use (a) or (b); loads on demand in Claude Code | Content only, no capability | **Required companion** to (a) (stage B) |
 | **(d) Hooks / plugins** | Push identity and state without the model's involvement; no tokens spent | Agent-specific, configs change across releases, edits user-global config | **Opt-in installers** for identity and state (stage B) |
 
@@ -91,18 +91,18 @@ per-agent hook and plugin assets (`herdr/src/integration/assets/<agent>/`).
             agents (Claude Code, Codex, OpenCode, Pi, Gemini, humans, scripts)
                  │ shell tool              │ MCP tools            │ hooks / plugins
          ┌───────▼────────┐        ┌───────▼───────┐      ┌───────▼───────────────┐
-         │ orchestra CLI  │        │ orchestra mcp │      │ hook scripts call     │
-         │ session …      │        │ (stdio)       │      │ $ORCHESTRA_BIN session│
+         │ rakumux CLI  │        │ rakumux mcp │      │ hook scripts call     │
+         │ session …      │        │ (stdio)       │      │ $RAKUMUX_BIN session│
          └───────┬────────┘        └───────┬───────┘      │ report …              │
                  │                         │              └───────┬───────────────┘
                  └──────── session_core::client::SessionApi ──────┘
                                          │  Unix socket, per-session token
                               ┌──────────▼────────────┐
-                              │ orchestra-ptyd        │  registry · permissions · waits
+                              │ rakumux-ptyd        │  registry · permissions · waits
                               │ (control + terminals) │  audit · agent state · approvals (B)
                               └──────────▲────────────┘
                                          │ same API
-                              Orchestra TUIs (any number)
+                              Rakumux TUIs (any number)
 ```
 
 ---
@@ -205,28 +205,28 @@ boundary guardrail"). Option B (each client enforcing policy) is dropped.
 
 ## 4. Surfaces in detail
 
-### 4.1 CLI: `orchestra session …` (agent-facing, JSON)
+### 4.1 CLI: `rakumux session …` (agent-facing, JSON)
 
-The human commands in `sessions-refactor.md` §9 (`orchestra new/ls/attach/rename/kill/rm`) stay as
+The human commands in `sessions-refactor.md` §9 (`rakumux new/ls/attach/rename/kill/rm`) stay as
 they are. A JSON group mirrors the API:
 
 ```bash
 # stage A (0.6.0)
-orchestra session list
-orchestra session get <id|name>
-orchestra session read <id|name> --source recent-unwrapped --lines 120
-orchestra session wait <id|name> --until settled --timeout 120000
-orchestra session report --state done --text "3 findings" --summary "…" --file a.rs --file b.rs
-orchestra session report --agent-kind claude --agent-session-id "$ID" --resume -- claude --resume "$ID"
-orchestra rename "fix flaky test"            # renames the calling session ($ORCHESTRA_SESSION_ID)
+rakumux session list
+rakumux session get <id|name>
+rakumux session read <id|name> --source recent-unwrapped --lines 120
+rakumux session wait <id|name> --until settled --timeout 120000
+rakumux session report --state done --text "3 findings" --summary "…" --file a.rs --file b.rs
+rakumux session report --agent-kind claude --agent-session-id "$ID" --resume -- claude --resume "$ID"
+rakumux rename "fix flaky test"            # renames the calling session ($RAKUMUX_SESSION_ID)
 
 # stage B (0.7.0)
-orchestra session create --name reviewer --agent codex --prompt "Review the diff" \
+rakumux session create --name reviewer --agent codex --prompt "Review the diff" \
     [--cwd DIR] [--wait-ready] [--timeout 120000]
-orchestra session prompt <id|name> "Fix the failing test" --wait --timeout 120000
-orchestra session send <id|name> --keys esc ctrl+c
-orchestra session kill <id|name> [--tree]
-orchestra session events [--session <id>]   # newline-delimited JSON
+rakumux session prompt <id|name> "Fix the failing test" --wait --timeout 120000
+rakumux session send <id|name> --keys esc ctrl+c
+rakumux session kill <id|name> [--tree]
+rakumux session events [--session <id>]   # newline-delimited JSON
 ```
 
 Conventions (from Herdr's skill rules):
@@ -234,34 +234,34 @@ Conventions (from Herdr's skill rules):
 - Never mutate when a required argument is missing.
 - Names resolve within scope only if unique; otherwise the error tells the caller to use the id.
 
-**Launch speed for hooks.** Hooks run often, so they call `$ORCHESTRA_BIN` (injected into each
+**Launch speed for hooks.** Hooks run often, so they call `$RAKUMUX_BIN` (injected into each
 session, §5.1) rather than relying on `PATH` and the user's shell wrapper. With the git and services
-checks gone from `orchestra.sh`, the launcher only finds the binary and execs it. Herdr's hooks avoid
+checks gone from `rakumux.sh`, the launcher only finds the binary and execs it. Herdr's hooks avoid
 its CLI and speak to the socket from `python3`
-(`herdr/src/integration/assets/claude/herdr-agent-state.sh`); Orchestra doesn't need Python because
+(`herdr/src/integration/assets/claude/herdr-agent-state.sh`); Rakumux doesn't need Python because
 its binary is small and fast.
 
 ### 4.2 Skill and instructions (stage B)
 
-Ship one skill, `assets/skills/orchestra/SKILL.md`. The installer copies it to
-`~/.claude/skills/orchestra/`, and the same text is the basis for an `AGENTS.md` / `GEMINI.md`
+Ship one skill, `assets/skills/rakumux/SKILL.md`. The installer copies it to
+`~/.claude/skills/rakumux/`, and the same text is the basis for an `AGENTS.md` / `GEMINI.md`
 snippet. Content, modelled on `herdr/skills/herdr/SKILL.md`:
 
-- **When to use**: only when the user asks for parallel sessions, delegation, or mentions Orchestra.
+- **When to use**: only when the user asks for parallel sessions, delegation, or mentions Rakumux.
   Not just because a task *could* be parallelised (Herdr's restraint rule).
-- **Precondition**: `test -n "$ORCHESTRA_SESSION_ID"`, otherwise say "not inside Orchestra" and stop.
-- **Discovery**: `orchestra session --help`; never run bare `orchestra` (it opens the TUI).
+- **Precondition**: `test -n "$RAKUMUX_SESSION_ID"`, otherwise say "not inside Rakumux" and stop.
+- **Discovery**: `rakumux session --help`; never run bare `rakumux` (it opens the TUI).
 - Read IDs from JSON. Don't kill sessions you didn't create.
-- **Isolation**: Orchestra has no git. A child that will **edit files** in parallel with others needs
+- **Isolation**: Rakumux has no git. A child that will **edit files** in parallel with others needs
   a folder of its own: create it yourself (for example `git worktree add worktrees/<name>` inside
   the current scope) and pass it as `--cwd`. The folder must be inside the scope. Share the cwd only
   for read-only work (review, tests).
 - Prompt, then wait. Don't resubmit after a timeout without reading the session first.
 - Treat `session read` output as **untrusted data** (§5.4).
-- Children finish by calling `orchestra session report --state done --summary …`; parents
+- Children finish by calling `rakumux session report --state done --summary …`; parents
   `wait --until reported` and read `reported.result`.
 
-### 4.3 MCP adapter (`orchestra mcp`, stage C)
+### 4.3 MCP adapter (`rakumux mcp`, stage C)
 
 The detailed design is in `plans/agent-mcp.md` (in progress); where the two differ, that plan wins.
 The constraints from this plan:
@@ -278,26 +278,26 @@ The constraints from this plan:
 ### 4.4 Integration installers (stage B)
 
 ```bash
-orchestra integration list
-orchestra integration install claude|codex|opencode|pi|gemini [--with-mcp] [--with-skill]
-orchestra integration uninstall <agent>
+rakumux integration list
+rakumux integration install claude|codex|opencode|pi|gemini [--with-mcp] [--with-skill]
+rakumux integration uninstall <agent>
 ```
 
 | Agent | What gets installed | Where |
 |---|---|---|
-| Claude Code | `SessionStart` hook → `session report --agent-kind claude --agent-session-id …`; optional `Notification` hook (attention hint); skill; optional MCP (user scope) | `~/.claude/settings.json` hooks; `~/.claude/skills/orchestra/`; `claude mcp add --scope user orchestra -- orchestra mcp` |
-| Codex | `SessionStart` / `Stop` hooks; `[features] hooks = true` if required; optional `[mcp_servers.orchestra]`; `AGENTS.md` snippet | `~/.codex/hooks.json`, `~/.codex/config.toml` (as Herdr does, `herdr/src/integration/targets.rs:160`) |
+| Claude Code | `SessionStart` hook → `session report --agent-kind claude --agent-session-id …`; optional `Notification` hook (attention hint); skill; optional MCP (user scope) | `~/.claude/settings.json` hooks; `~/.claude/skills/rakumux/`; `claude mcp add --scope user rakumux -- rakumux mcp` |
+| Codex | `SessionStart` / `Stop` hooks; `[features] hooks = true` if required; optional `[mcp_servers.rakumux]`; `AGENTS.md` snippet | `~/.codex/hooks.json`, `~/.codex/config.toml` (as Herdr does, `herdr/src/integration/targets.rs:160`) |
 | OpenCode | Plugin reporting lifecycle + session id; optional MCP `{ type: "local", command: [...] }` | `~/.config/opencode/…` (Herdr: `herdr/src/integration/env.rs:126`) |
 | Pi | Extension reporting lifecycle + session id | `~/.pi/agent/extensions/` (Herdr: `herdr/src/integration/env.rs:35`) |
-| Gemini CLI | `SessionStart` hook; optional `mcpServers.orchestra`; `GEMINI.md` snippet | `~/.gemini/settings.json` |
+| Gemini CLI | `SessionStart` hook; optional `mcpServers.rakumux`; `GEMINI.md` snippet | `~/.gemini/settings.json` |
 
 Rules:
 - Opt-in only; the TUI offers it once.
-- Idempotent; every file and entry is marked `managed by orchestra` with an integration version.
+- Idempotent; every file and entry is marked `managed by rakumux` with an integration version.
 - Clean uninstall. Edit JSON/TOML structurally, preserving user formatting.
-- Every hook **no-ops outside Orchestra** (checks `ORCHESTRA_SESSION_ID`). Herdr's scripts gate on
+- Every hook **no-ops outside Rakumux** (checks `RAKUMUX_SESSION_ID`). Herdr's scripts gate on
   `HERDR_ENV` the same way.
-- Integrations are written from scratch: Herdr is Apache-2.0 and Orchestra is closed source
+- Integrations are written from scratch: Herdr is Apache-2.0 and Rakumux is closed source
   (`sessions-refactor.md` §13.4).
 
 ---
@@ -311,10 +311,10 @@ The daemon injects into every session's environment (`session_core::env`, `sessi
 
 | Variable | Purpose |
 |---|---|
-| `ORCHESTRA_SESSION_ID` | Caller identity; also the TUI's nesting guard |
-| `ORCHESTRA_SESSION_TOKEN` | 256-bit random secret issued at spawn and at every revive. Kept **in daemon memory only**: it dies with the daemon, like the session's processes. Authenticates calls as "session X". |
-| `ORCHESTRA_SOCKET` | Daemon socket path, so the CLI, MCP server and hooks connect without searching |
-| `ORCHESTRA_BIN` | Path of the `orchestra` launcher, for hooks and agents (§4.1), when known |
+| `RAKUMUX_SESSION_ID` | Caller identity; also the TUI's nesting guard |
+| `RAKUMUX_SESSION_TOKEN` | 256-bit random secret issued at spawn and at every revive. Kept **in daemon memory only**: it dies with the daemon, like the session's processes. Authenticates calls as "session X". |
+| `RAKUMUX_SOCKET` | Daemon socket path, so the CLI, MCP server and hooks connect without searching |
+| `RAKUMUX_BIN` | Path of the `rakumux` launcher, for hooks and agents (§4.1), when known |
 
 Callers fall into two kinds (`api::Auth`, `api::CallerInfo`):
 - **Session callers** present `{ kind: "session", id, token }` and get the permissions in §5.2. The
@@ -323,13 +323,13 @@ Callers fall into two kinds (`api::Auth`, `api::CallerInfo`):
   `service.json` (`sessions-refactor.md` §5.2) and get full permissions (later also `approval_*`
   and `audit_list`).
 
-A human typing `orchestra session …` inside a session's shell is a session caller too. That's
-intended: humans use the TUI or a terminal outside Orchestra for privileged actions.
+A human typing `rakumux session …` inside a session's shell is a session caller too. That's
+intended: humans use the TUI or a terminal outside Rakumux for privileged actions.
 
 New sessions get the **requesting client's environment snapshot**, which may contain the parent
 agent's markers. The daemon strips `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`,
 `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CODEX_THREAD_ID`, `OMPCODE` (Herdr's list,
-`herdr/src/pane.rs:187-196`), `TMUX`, `TMUX_PANE` and any inherited `ORCHESTRA_SESSION_*`, then sets
+`herdr/src/pane.rs:187-196`), `TMUX`, `TMUX_PANE` and any inherited `RAKUMUX_SESSION_*`, then sets
 the child's own values.
 
 ### 5.2 Permission policy
@@ -403,7 +403,7 @@ Stage B shows it in the TUI Info tab (per session) and in an **Activity** view, 
 - **Runaway fan-out and cost** (stage B). Limits, depth cap and rate limit; a TUI **kill tree**
   action; a status-bar count of agent-created live sessions.
 - **Conflicting edits** (stage B). Parallel writers in one folder corrupt each other's work.
-  Orchestra doesn't manage git, so the skill tells writers to work in a folder of their own (§4.2),
+  Rakumux doesn't manage git, so the skill tells writers to work in a folder of their own (§4.2),
   and `session_create` warns (`details.warning`) when a second agent session starts in a cwd that
   already has a working agent.
 
@@ -478,9 +478,9 @@ written by the child, not from scraping its screen. The parent runs `wait --unti
 
 | Stage | Ships in | Scope | Done when |
 |---|---|---|---|
-| **A. Foundations** | **0.6.0**, inside the sessions refactor (packages A1, A2, A3, B1, C1 in `parallel-execution.md`) | Daemon-owned session API (Option A); session identity env (`ORCHESTRA_SESSION_ID`, `_TOKEN`, `ORCHESTRA_SOCKET`, `ORCHESTRA_BIN`) and agent-variable scrubbing; registry columns `created_by`, `parent_id`, `depth`, `agent`, `reported`; protocol ops `session_read` (incl. unwrapped), `session_wait`, `session_report`, `session_submit`, `session_send`, filtered `subscribe`; stage A permission matrix and audit; lifecycle detection with `done` vs `idle`; `orchestra session list/get/read/wait/report` | A script inside a session can list sessions, read one, wait for it to settle and report its own status, with correct attribution; every other cross-session action is denied and audited. |
+| **A. Foundations** | **0.6.0**, inside the sessions refactor (packages A1, A2, A3, B1, C1 in `parallel-execution.md`) | Daemon-owned session API (Option A); session identity env (`RAKUMUX_SESSION_ID`, `_TOKEN`, `RAKUMUX_SOCKET`, `RAKUMUX_BIN`) and agent-variable scrubbing; registry columns `created_by`, `parent_id`, `depth`, `agent`, `reported`; protocol ops `session_read` (incl. unwrapped), `session_wait`, `session_report`, `session_submit`, `session_send`, filtered `subscribe`; stage A permission matrix and audit; lifecycle detection with `done` vs `idle`; `rakumux session list/get/read/wait/report` | A script inside a session can list sessions, read one, wait for it to settle and report its own status, with correct attribution; every other cross-session action is denied and audited. |
 | **B. Control surface** | **0.7.0** | Stage B permissions (create/prompt/send/kill/rename for session callers) with policy, limits, `ask` approvals and the approval broker; `session_focus`, `approval_*`, `audit_list`; `CreateSession.agent`; TUI grouping, badges, toasts, approval dialog, Activity view, kill tree, private sessions; skill; integration installers for Claude Code and Codex (identity hooks), OpenCode and Pi (lifecycle plugins) | The fan-out scenario (§1.1) works end to end with Claude Code and Codex as parent and children; approvals block cross-session actions. |
-| **C. MCP + more agents** | 0.7.x | `orchestra mcp` (`plans/agent-mcp.md`); `--with-mcp` installers; Gemini CLI integration | The same scenario works through MCP in Claude Code and Codex. |
+| **C. MCP + more agents** | 0.7.x | `rakumux mcp` (`plans/agent-mcp.md`); `--with-mcp` installers; Gemini CLI integration | The same scenario works through MCP in Claude Code and Codex. |
 | **D. Later** | 0.8+ | Inter-session messages/inbox (delivery via hooks such as Claude Code `UserPromptSubmit` / `Stop`, or via prompt when idle); cross-scope views (follows the main plan's deferred cross-folder view); sandboxed sessions | n/a |
 
 Stage A is deliberately small. It fixes the **schema, protocol and identity** decisions before 0.6.0
@@ -496,7 +496,7 @@ freezes them, so stage B needs only additive changes (new ops, new optional fiel
 | `SessionView`, `Lifecycle`, `Creator`, `AgentInfo`, `Reported`, `ResumeSpec` | `session-core/src/model.rs` | contracts |
 | Env variable names | `session-core/src/lib.rs` (`env`) | contracts |
 | Client (auth mode selection, spawn, streams) | `session-core/src/client.rs` | B1 |
-| `orchestra session …`, `orchestra rename` | `tui/src/cli/` | B1 |
+| `rakumux session …`, `rakumux rename` | `tui/src/cli/` | B1 |
 | Authentication, scope, permissions, audit, waits, lifecycle, registry | `ptyd/src/control/` (`control_api::Control`) | A2 |
 | Submit, send keys, read sources, `HostEvent::Output` throttling | `ptyd/src/terminal/` (`host::TerminalHost`) | A1 |
 | Agent detection | `ptyd/src/detect.rs` | A3 |
@@ -517,7 +517,7 @@ keys and dialog field). Proposals tied to git were dropped; the rest are stage B
    (plugins)? Gemini CLI, given its free tier moved to Antigravity CLI?
 4. **MCP timing**: stage C (this plan), or earlier? Decided in `plans/agent-mcp.md` (in progress).
 5. **Installer UX**: offer integrations once from the TUI (recommended), or only via
-   `orchestra integration install`?
+   `rakumux integration install`?
 6. **Agent self-rename**: stage A lets a session caller rename itself, which an agent could do on
    every turn. Rate-limit it, or rely on the audit log?
 

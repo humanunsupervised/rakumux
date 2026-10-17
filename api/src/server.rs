@@ -38,7 +38,7 @@ pub struct ServeOptions {
     pub layout: Layout,
     /// Port on 127.0.0.1; 0 picks a free one.
     pub port: u16,
-    /// `orchestra-ptyd` to start when the daemon isn't running.
+    /// `rakumux-ptyd` to start when the daemon isn't running.
     pub ptyd_path: Option<PathBuf>,
     /// `--remote-listen`: addresses for the remote listener instead of the
     /// Tailscale addresses (needs remote access on in `remote.json`).
@@ -143,7 +143,7 @@ pub async fn serve(
     // The sockets accept connections from here on, so publishing is safe.
     discovery::write(&options.layout, &info)?;
     log::info(format_args!(
-        "orchestra-api {VERSION} listening on {} (pid {}, home {})",
+        "rakumux-api {VERSION} listening on {} (pid {}, home {})",
         info.url,
         info.pid,
         options.layout.home.display()
@@ -172,7 +172,7 @@ pub async fn serve(
         log::warn(format_args!("cannot remove api.json: {error}"));
     }
     drop(instance);
-    log::info("orchestra-api stopped");
+    log::info("rakumux-api stopped");
     result
         .map(|_| ())
         .map_err(|e| ServeError::Io(io::Error::other(e.to_string())))

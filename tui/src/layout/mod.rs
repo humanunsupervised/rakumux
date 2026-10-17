@@ -5,18 +5,18 @@
 //!   one-column divider, the selected session's detail on the right. The
 //!   divider can be dragged; the chosen list width is a setting. Below
 //!   [`SINGLE_PANE_BELOW`] columns (phones, split windows) the panes are
-//!   stacked instead: in Orchestra mode ([`PaneFocus::List`]) the list
+//!   stacked instead: in Rakumux mode ([`PaneFocus::List`]) the list
 //!   sits on top, a one-row divider below it, and the detail fills the
 //!   rest, so the session stays in view while you pick one. That divider
 //!   can be dragged up and down; the chosen list height is a setting.
 //!   With a session focused ([`PaneFocus::Detail`]) the detail fills the
 //!   area. When the area is shorter than [`STACK_MIN_ROWS`] there's no
-//!   room for both, and Orchestra mode shows the list alone.
+//!   room for both, and Rakumux mode shows the list alone.
 //! - **Tabs**: one row of session tabs across the top; the selected tab's
 //!   detail fills the rest. Works at any width.
 //!
 //! The layout is a user setting (`sessions.layout` in
-//! `~/.orchestra/config.json`) and applies live. This module only computes
+//! `~/.rakumux/config.json`) and applies live. This module only computes
 //! rectangles and draws the tab bar; the caller owns state, key routing and
 //! the contents of each pane.
 
@@ -29,14 +29,14 @@ use serde::{Deserialize, Serialize};
 use crate::theme;
 
 /// Screens narrower than this are phones (about 40–60 columns in portrait,
-/// whatever the layout setting): one thing at a time. Orchestra mode shows
+/// whatever the layout setting): one thing at a time. Rakumux mode shows
 /// the session list alone; a session fills the screen under a row of tabs,
 /// one per session. `Ctrl-\` goes back to the list.
 pub const PHONE_BELOW: u16 = 80;
 
 /// Screens narrower than this (and at least [`PHONE_BELOW`]) don't put the
 /// Sidebar list beside the detail: the list is stacked above it in
-/// Orchestra mode, and a focused session fills the area.
+/// Rakumux mode, and a focused session fills the area.
 pub const SINGLE_PANE_BELOW: u16 = 100;
 
 /// Fewest rows a stacked list gets: the folder filter (three rows) and two
@@ -48,7 +48,7 @@ pub const PREVIEW_MIN_ROWS: u16 = 4;
 /// Shortest area that stacks the list above the detail on a narrow screen:
 /// 14 rows, the list's and the detail's minimums and the divider (a
 /// 15-row terminal, with the footer). Shorter ones show the list alone in
-/// Orchestra mode.
+/// Rakumux mode.
 pub const STACK_MIN_ROWS: u16 = LIST_MIN_ROWS + 1 + PREVIEW_MIN_ROWS;
 /// Share of the area a stacked list gets until its divider is dragged, in
 /// percent.
@@ -137,7 +137,7 @@ pub struct LayoutAreas {
     /// one column between them side by side, or one row between them when
     /// `stacked`.
     pub divider: Option<Rect>,
-    /// The list is above the detail (a narrow Sidebar screen in Orchestra
+    /// The list is above the detail (a narrow Sidebar screen in Rakumux
     /// mode), so the divider is a row, dragged up and down.
     pub stacked: bool,
     /// One-row tab bar (Tabs only).
@@ -172,7 +172,7 @@ pub fn is_single_pane(width: u16, layout: SessionLayout) -> bool {
 }
 
 /// True when a narrow Sidebar `area` is tall enough to stack the list
-/// above the detail in Orchestra mode.
+/// above the detail in Rakumux mode.
 pub fn can_stack(area: Rect) -> bool {
     area.height >= STACK_MIN_ROWS
 }
@@ -790,7 +790,7 @@ mod tests {
             for (width, height) in [(40, 19), (45, 39), (59, 52), (79, 30)] {
                 assert!(is_phone(width) && is_single_pane(width, layout));
                 let area = rect(0, 0, width, height);
-                // Orchestra mode: the list alone.
+                // Rakumux mode: the list alone.
                 let list = split(area, layout, PaneFocus::List);
                 assert_eq!(list.list, Some(area));
                 assert_eq!((list.divider, list.tabs, list.stacked), (None, None, false));

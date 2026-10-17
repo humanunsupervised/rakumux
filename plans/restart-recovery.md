@@ -6,25 +6,25 @@ On 2026-10-16 the user's sessions "lost their programs" when opened from Termius
 causes:
 
 1. **Two servers over one registry.** The runtime directory (and so `service.json`, the lock and the
-   socket) was `$XDG_RUNTIME_DIR/orchestra` when that variable was set, else `~/.orchestra/run`.
+   socket) was `$XDG_RUNTIME_DIR/rakumux` when that variable was set, else `~/.rakumux/run`.
    Tailscale SSH logins set it; mosh logins don't. The phone (SSH) and the Mac (mosh) each found no
-   daemon in "their" directory and started one. Both used `~/.orchestra/orchestra.sqlite3`, so each
+   daemon in "their" directory and started one. Both used `~/.rakumux/rakumux.sqlite3`, so each
    listed the other's sessions as dead, and Enter revived them as a second, empty shell: the same
    session ran twice, once per daemon.
 2. **Restarts ended every program.** Restarting the daemon (the TUI's "older server" offer, or
-   `orchestra daemon restart`) closed every PTY. Revive started the login shell, but no resume
+   `rakumux daemon restart`) closed every PTY. Revive started the login shell, but no resume
    command was known for Claude Code (only agents that report one themselves had any), so the user
    got a bare prompt.
 
 ## 2. Decisions
 
-1. **One daemon per Orchestra home, found the same way from every login.** The runtime directory is
-   `<home>/run`, nothing else. Clients still look in the legacy `$XDG_RUNTIME_DIR/orchestra` (and
-   `/run/user/<uid>/orchestra`) when no daemon answers in `<home>/run`, for daemons earlier builds
+1. **One daemon per Rakumux home, found the same way from every login.** The runtime directory is
+   `<home>/run`, nothing else. Clients still look in the legacy `$XDG_RUNTIME_DIR/rakumux` (and
+   `/run/user/<uid>/rakumux`) when no daemon answers in `<home>/run`, for daemons earlier builds
    started; a starting daemon refuses to run while a legacy one holds its lock.
 2. **Start only when none runs.** The TUI and CLI connect to the running daemon and spawn one only
-   when nothing answers. `orchestra --new-server` replaces the running daemon (in place, so sessions
-   keep running) or starts one. `orchestra daemon start` starts one if none runs.
+   when nothing answers. `rakumux --new-server` replaces the running daemon (in place, so sessions
+   keep running) or starts one. `rakumux daemon start` starts one if none runs.
 3. **Restart in place.** `daemon_restart {binary?}` (capability `daemon.restart`; also SIGUSR2 with
    the daemon's own executable): the daemon checks the target (`binary handoff-versions` must list
    the state version it writes), stops accepting, answers `ok`, hands over the control layer's
@@ -38,9 +38,9 @@ causes:
      the switch is reaped (with its exit code) by the new image.
    - Output written during the switch waits in the PTY.
    - Older daemons can't hand over: restarting them still ends their sessions (the CLI asks first).
-4. **Recovery after an unplanned end.** The daemon keeps `~/.orchestra/running.json` (the running
+4. **Recovery after an unplanned end.** The daemon keeps `~/.rakumux/running.json` (the running
    sessions) current. A start after a crash, a `kill -9`, a reboot or SIGTERM revives those sessions
-   with their resume commands. `orchestra daemon stop` (`daemon_shutdown`) removes the file: sessions
+   with their resume commands. `rakumux daemon stop` (`daemon_shutdown`) removes the file: sessions
    the user ended stay ended.
 5. **Resume commands kept current** (`ptyd/src/resume.rs`, every 5 s of output or when the
    foreground process changes):
@@ -60,7 +60,7 @@ Implemented (the three the user works with):
 |---|---|---|
 | Claude Code | `<CLAUDE_CONFIG_DIR or ~/.claude>/sessions/<pid>.json` (`sessionId`), written by the running process | `claude <flags> --resume <id>`; flags kept: permissions (`--dangerously-skip-permissions`, `--permission-mode`), `--model`, `--effort`, `--agent`, `--add-dir`, `--mcp-config`, `--settings`, `--allowedTools`, … |
 | Codex | the rollout file (`$CODEX_HOME/sessions/…/rollout-…-<id>.jsonl`) the process or its native child has open (Linux); else the newest `cli` thread of the folder in `$CODEX_HOME/state_<n>.sqlite` | `codex resume <flags> <id>`; flags kept: `--model`, `--profile`, `--sandbox`, `--ask-for-approval`, `--full-auto`, `--dangerously-bypass-approvals-and-sandbox`/`--yolo`, `--search`, `-c` |
-| OpenCode | the conversation its Orchestra plugin bound to the session (`session_bind`); else the newest top-level session of the folder in `<XDG_DATA_HOME>/opencode/opencode.db` | `opencode <flags> -s <id>`; flags kept: `--model`, `--agent` |
+| OpenCode | the conversation its Rakumux plugin bound to the session (`session_bind`); else the newest top-level session of the folder in `<XDG_DATA_HOME>/opencode/opencode.db` | `opencode <flags> -s <id>`; flags kept: `--model`, `--agent` |
 
 The database fallbacks read other programs' private schemas read-only; when they change, the
 lookup finds nothing and the agent's command line is recorded instead (typed, not run). Two Codex
@@ -79,12 +79,12 @@ Next, by how widely they're used (to verify against each CLI before building):
 | Aider | yes (`aider`) | `aider --restore-chat-history` (per folder, no ids) |
 
 A precise alternative for every agent with hooks (Claude Code, Codex, Gemini CLI): an opt-in
-`orchestra agents install-hooks` that reports `session report --resume` at session start. It edits
+`rakumux agents install-hooks` that reports `session report --resume` at session start. It edits
 the user's agent config, so it needs consent.
 
 ## 4. Status
 
 - rev 1 (2026-10-16): implemented: layout, legacy lookup and lock check; `daemon_restart`, handoff,
   SIGUSR2; `running.json` and revival; resume plans for Claude Code, Codex, OpenCode and the last
-  command; CLI `daemon start`, in-place `daemon restart`, `orchestra --new-server`; the TUI's restart
+  command; CLI `daemon start`, in-place `daemon restart`, `rakumux --new-server`; the TUI's restart
   offer in place, a faster first reconnect, and going back into the session being typed in.

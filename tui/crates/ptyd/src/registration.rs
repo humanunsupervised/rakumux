@@ -69,9 +69,9 @@ impl std::fmt::Display for ClaimError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ClaimError::AlreadyRunning(Some(reg)) => {
-                write!(f, "another orchestra-ptyd is running (pid {})", reg.pid)
+                write!(f, "another rakumux-ptyd is running (pid {})", reg.pid)
             }
-            ClaimError::AlreadyRunning(None) => write!(f, "another orchestra-ptyd is running"),
+            ClaimError::AlreadyRunning(None) => write!(f, "another rakumux-ptyd is running"),
             ClaimError::Io(e) => write!(f, "cannot claim the daemon slot: {e}"),
         }
     }
@@ -228,7 +228,7 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
 
 /// Make sure `dir` is a real directory owned by us with mode 0700, creating
 /// it if needed. Refuses symlinks and directories owned by someone else
-/// (another user could otherwise pre-create `/tmp/orchestra-<uid>`).
+/// (another user could otherwise pre-create `/tmp/rakumux-<uid>`).
 fn ensure_private_dir(dir: &Path) -> io::Result<()> {
     match std::fs::symlink_metadata(dir) {
         Ok(meta) => {

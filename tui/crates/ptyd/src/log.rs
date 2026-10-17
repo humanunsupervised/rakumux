@@ -1,5 +1,5 @@
-//! Minimal file logger: `~/.orchestra/logs/ptyd.log`, size-rotated, level
-//! from `ORCHESTRA_PTYD_LOG` (error|warn|info|debug; default info).
+//! Minimal file logger: `~/.rakumux/logs/ptyd.log`, size-rotated, level
+//! from `RAKUMUX_PTYD_LOG` (error|warn|info|debug; default info).
 //!
 //! Lines look like `2026-10-13T08:15:02.123Z INFO  [thread] message`. When
 //! the file would grow past 1 MiB it is renamed to `ptyd.log.1` (replacing
@@ -14,7 +14,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Environment variable selecting the log level.
-pub const LEVEL_ENV: &str = "ORCHESTRA_PTYD_LOG";
+pub const LEVEL_ENV: &str = "RAKUMUX_PTYD_LOG";
 
 /// Rotate when the file would grow past this size.
 pub const MAX_LOG_BYTES: u64 = 1024 * 1024;

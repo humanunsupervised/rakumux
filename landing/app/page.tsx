@@ -2,14 +2,14 @@ import CopyCommand from "@/components/CopyCommand";
 import InstallTabs from "@/components/InstallTabs";
 import TuiDemo from "@/components/TuiDemo";
 
-const RELEASES = "https://github.com/humanunsupervised/orchestra/releases";
-const NPM = "https://www.npmjs.com/package/@humanu/orchestra";
+const RELEASES = "https://github.com/humanunsupervised/rakumux/releases";
+const NPM = "https://www.npmjs.com/package/rakumux";
 
 const REASONS = [
   {
-    tag: "orchestra-ptyd",
+    tag: "rakumux-ptyd",
     title: "Sessions outlive the window",
-    body: "A background server owns every session. Quit Orchestra, close the terminal or drop your SSH connection and your agents keep working. After a reboot, Enter brings a session back, resuming the agent's conversation when it knows how.",
+    body: "A background server owns every session. Quit Rakumux, close the terminal or drop your SSH connection and your agents keep working. After a reboot, Enter brings a session back, resuming the agent's conversation when it knows how.",
   },
   {
     tag: "j / k",
@@ -19,10 +19,10 @@ const REASONS = [
   {
     tag: "Ctrl-\\",
     title: "One key, no collisions",
-    body: "Claude Code, Codex, OpenCode, Neovim and your shell keep every key but one. Ctrl-\\ is the key nothing else wants, so Orchestra never fights your tools for a shortcut.",
+    body: "Claude Code, Codex, OpenCode, Neovim and your shell keep every key but one. Ctrl-\\ is the key nothing else wants, so Rakumux never fights your tools for a shortcut.",
   },
   {
-    tag: "orchestra-mcp",
+    tag: "rakumux-mcp",
     title: "Agents can drive it too",
     body: "An MCP server lets agents list folders, start sessions in their own folder, read another session's screen and rename sessions. Fan out a refactor, then check on it.",
   },
@@ -32,14 +32,14 @@ const REASONS = [
     body: "Each session lives in a folder: a repository, a worktree or anything else. See every folder's sessions at once or filter to a few, order and pin the ones that matter, and see each session's git branch as it changes.",
   },
   {
-    tag: "orchestra ls",
+    tag: "rakumux ls",
     title: "Scriptable all the way down",
     body: "Everything on screen is a command too: new, ls, attach, rename, pin, kill. JSON output for scripts, and a token-protected local HTTP API on 127.0.0.1.",
   },
 ];
 
 const KEYS: { keys: string[]; action: string }[] = [
-  { keys: ["Ctrl", "\\"], action: "Switch between a session and Orchestra" },
+  { keys: ["Ctrl", "\\"], action: "Switch between a session and Rakumux" },
   { keys: ["j", "k"], action: "Move (the session previews live)" },
   { keys: ["Enter"], action: "Go into the selected session" },
   { keys: ["Esc"], action: "Back to the session you came from" },
@@ -73,8 +73,8 @@ export default function Home() {
     <>
       <header className="nav">
         <div className="container nav-inner">
-          <a href="#top" className="brand" aria-label="Orchestra home">
-            <span className="badge badge-orchestra">ORCHESTRA</span>
+          <a href="#top" className="brand" aria-label="Rakumux home">
+            <span className="badge badge-rakumux">RAKUMUX</span>
           </a>
           <nav className="nav-links" aria-label="Sections">
             <a href="#why">Why</a>
@@ -100,11 +100,11 @@ export default function Home() {
               <span className="accent">One terminal.</span>
             </h1>
             <p className="lede">
-              Orchestra keeps Claude Code, Codex, OpenCode, your dev server and your shells running in the background,
+              Rakumux keeps Claude Code, Codex, OpenCode, your dev server and your shells running in the background,
               and puts them side by side, live, one key apart. Built in Rust, driven from the keyboard.
             </p>
             <div className="hero-actions">
-              <CopyCommand command="npm install -g @humanu/orchestra" />
+              <CopyCommand command="npm install -g rakumux" />
               <a href="#install" className="link-arrow">
                 Homebrew and downloads →
               </a>
@@ -118,11 +118,11 @@ export default function Home() {
 
         <section id="why" className="section">
           <div className="container">
-            <p className="kicker">Why Orchestra</p>
+            <p className="kicker">Why Rakumux</p>
             <h2>Stop losing agents in terminal tabs.</h2>
             <p className="section-lede">
               Running three agents, a dev server and a test watcher means a dozen tabs, and the one waiting for your
-              answer is never the one you&apos;re looking at. Orchestra gives them one home.
+              answer is never the one you&apos;re looking at. Rakumux gives them one home.
             </p>
             <div className="grid">
               {REASONS.map((r) => (
@@ -143,7 +143,7 @@ export default function Home() {
               <h2>Your tools keep their keys.</h2>
               <p className="section-lede">
                 Inside a session, every key goes to the program. Press <kbd>Ctrl</kbd> <kbd>\</kbd> and your keys drive
-                Orchestra instead, with the Vim-style moves your fingers already know. The badge in the bottom-left
+                Rakumux instead, with the Vim-style moves your fingers already know. The badge in the bottom-left
                 corner always tells you which mode you&apos;re in.
               </p>
               <ul className="checks">
@@ -158,7 +158,7 @@ export default function Home() {
               <div className="mode">
                 <span className="badge badge-session">SESSION</span>
                 <p>
-                  <b>Work in the session.</b> Every key goes to Claude Code, Neovim, your shell. Orchestra stays out of
+                  <b>Work in the session.</b> Every key goes to Claude Code, Neovim, your shell. Rakumux stays out of
                   the way and blends into the background.
                 </p>
               </div>
@@ -171,9 +171,9 @@ export default function Home() {
                 </span>
               </div>
               <div className="mode mode-hot">
-                <span className="badge badge-orchestra">ORCHESTRA</span>
+                <span className="badge badge-rakumux">RAKUMUX</span>
                 <p>
-                  <b>Drive Orchestra.</b> <kbd>j</kbd>/<kbd>k</kbd> to look around while sessions preview live,{" "}
+                  <b>Drive Rakumux.</b> <kbd>j</kbd>/<kbd>k</kbd> to look around while sessions preview live,{" "}
                   <kbd>n</kbd> for a new one, <kbd>Esc</kbd> to go back where you were.
                 </p>
               </div>
@@ -187,8 +187,8 @@ export default function Home() {
               <p className="kicker">Built for agents</p>
               <h2>Let your agents start their own sessions.</h2>
               <p className="section-lede">
-                Orchestra recognises common coding agents and shows whether each one is working, waiting for you or
-                done. Its MCP server goes further: an agent running inside Orchestra can start sessions in its own
+                Rakumux recognises common coding agents and shows whether each one is working, waiting for you or
+                done. Its MCP server goes further: an agent running inside Rakumux can start sessions in its own
                 folder, read another session&apos;s screen and report back.
               </p>
               <ul className="checks">
@@ -204,19 +204,19 @@ export default function Home() {
                 <span className="dot" />
               </div>
               <pre>
-                <span className="t-muted"># Give Claude Code the Orchestra tools</span>
+                <span className="t-muted"># Give Claude Code the Rakumux tools</span>
                 {"\n"}
-                <span className="t-orange">$</span> claude mcp add --scope user orchestra -- orchestra-mcp
+                <span className="t-orange">$</span> claude mcp add --scope user rakumux -- rakumux-mcp
                 {"\n\n"}
                 <span className="t-muted"># OpenCode 2.x: tool calls act as the session they run in</span>
                 {"\n"}
-                <span className="t-orange">$</span> orchestra-mcp opencode-plugin --install
+                <span className="t-orange">$</span> rakumux-mcp opencode-plugin --install
                 {"\n\n"}
                 <span className="t-muted"># Or script it yourself</span>
                 {"\n"}
-                <span className="t-orange">$</span> orchestra new --name tests --detach -- npm test
+                <span className="t-orange">$</span> rakumux new --name tests --detach -- npm test
                 {"\n"}
-                <span className="t-orange">$</span> orchestra ls
+                <span className="t-orange">$</span> rakumux ls
                 {"\n"}
                 <span className="t-dim">{"  "}NAME{"           "}STATUS{"   "}AGENT{"   "}GIT{"              "}ACTIVE</span>
                 {"\n"}
@@ -235,7 +235,7 @@ export default function Home() {
             <p className="kicker">Keyboard first</p>
             <h2>The whole thing fits on one card.</h2>
             <p className="section-lede">
-              These are Orchestra mode&apos;s keys. Forget one? <kbd>?</kbd> opens Help, and a one-minute tour shows on
+              These are Rakumux mode&apos;s keys. Forget one? <kbd>?</kbd> opens Help, and a one-minute tour shows on
               first launch.
             </p>
             <dl className="keygrid">
@@ -268,8 +268,8 @@ export default function Home() {
                 <li>
                   <span className="step-n">1</span>
                   <div>
-                    <p>In a repository or any folder, open Orchestra.</p>
-                    <CopyCommand command="orchestra" />
+                    <p>In a repository or any folder, open Rakumux.</p>
+                    <CopyCommand command="rakumux" />
                   </div>
                 </li>
                 <li>
@@ -299,14 +299,14 @@ export default function Home() {
             <h2>
               Give your agents a <span className="accent">conductor</span>.
             </h2>
-            <CopyCommand command="npm install -g @humanu/orchestra" />
+            <CopyCommand command="npm install -g rakumux" />
           </div>
         </section>
       </main>
 
       <footer className="footer">
         <div className="container footer-inner">
-          <span className="badge badge-session">ORCHESTRA</span>
+          <span className="badge badge-session">RAKUMUX</span>
           <span className="t-muted">© {new Date().getFullYear()} Human Unsupervised</span>
           <span className="tui-spacer" />
           <a href={RELEASES}>Releases</a>

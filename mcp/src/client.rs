@@ -1,22 +1,22 @@
-//! Client for Orchestra's external API (`orchestra-api`).
+//! Client for Rakumux's external API (`rakumux-api`).
 //!
-//! Discovery: `<ORCHESTRA_HOME or ~/.orchestra>/api.json` names the API's URL,
+//! Discovery: `<RAKUMUX_HOME or ~/.rakumux>/api.json` names the API's URL,
 //! token and pid. A file whose process is gone, or whose API doesn't answer
-//! `/v1/health` with that pid, is ignored and `orchestra-api --detach` is
+//! `/v1/health` with that pid, is ignored and `rakumux-api --detach` is
 //! started (see `launch`). A request whose connection fails, or that is
 //! refused because the API restarted with a new token, is retried once after
 //! rediscovery.
 //!
-//! Identity: when `ORCHESTRA_SESSION_ID` and `ORCHESTRA_SESSION_TOKEN` are
-//! both set, they are sent as `X-Orchestra-Session-Id`/`-Token`, so the
+//! Identity: when `RAKUMUX_SESSION_ID` and `RAKUMUX_SESSION_TOKEN` are
+//! both set, they are sent as `X-Rakumux-Session-Id`/`-Token`, so the
 //! daemon treats calls as coming from that session. A call tagged with an
-//! agent conversation (OpenCode) is sent as `X-Orchestra-Agent`/`-Conversation`
+//! agent conversation (OpenCode) is sent as `X-Rakumux-Agent`/`-Conversation`
 //! instead: the daemon acts as the session that bound that conversation.
 
 use crate::launch::Launcher;
-use orchestra_api::discovery::ApiInfo;
-use orchestra_api::dto::Health;
-use orchestra_api::error::ErrorEnvelope;
+use rakumux_api::discovery::ApiInfo;
+use rakumux_api::dto::Health;
+use rakumux_api::error::ErrorEnvelope;
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -134,7 +134,7 @@ impl ApiClient {
             .no_proxy()
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
-            .user_agent(concat!("orchestra-mcp/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("rakumux-mcp/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|e| ToolError::new("internal", format!("cannot create HTTP client: {e}")))?;
         Ok(Self {
@@ -190,8 +190,8 @@ impl ApiClient {
                 self.launcher.start().await?;
                 self.healthy_from_file().await.ok_or_else(|| {
                     ToolError::api_unavailable(format!(
-                        "orchestra-api started but {} names no healthy API",
-                        orchestra_api::discovery::info_path(&self.layout).display()
+                        "rakumux-api started but {} names no healthy API",
+                        rakumux_api::discovery::info_path(&self.layout).display()
                     ))
                 })?
             }
@@ -283,8 +283,8 @@ impl Api<'_> {
                 Acting::Session => {
                     if let Some(identity) = &self.client.identity {
                         request = request
-                            .header(orchestra_api::headers::SESSION_ID, &identity.id)
-                            .header(orchestra_api::headers::SESSION_TOKEN, &identity.token);
+                            .header(rakumux_api::headers::SESSION_ID, &identity.id)
+                            .header(rakumux_api::headers::SESSION_TOKEN, &identity.token);
                     }
                 }
                 Acting::Conversation {
@@ -292,8 +292,8 @@ impl Api<'_> {
                     conversation,
                 } => {
                     request = request
-                        .header(orchestra_api::headers::AGENT, agent)
-                        .header(orchestra_api::headers::AGENT_CONVERSATION, conversation);
+                        .header(rakumux_api::headers::AGENT, agent)
+                        .header(rakumux_api::headers::AGENT_CONVERSATION, conversation);
                 }
             }
             if let Some(body) = body {
@@ -308,20 +308,20 @@ impl Api<'_> {
                 }
                 Err(error) => {
                     return Err(ToolError::api_unavailable(format!(
-                        "orchestra-api at {} did not answer: {error}",
+                        "rakumux-api at {} did not answer: {error}",
                         info.url
                     )))
                 }
             };
             let status = response.status();
             let bytes = response.bytes().await.map_err(|error| {
-                ToolError::api_unavailable(format!("reading the answer of orchestra-api: {error}"))
+                ToolError::api_unavailable(format!("reading the answer of rakumux-api: {error}"))
             })?;
             if status.is_success() {
                 return serde_json::from_slice(&bytes).map_err(|error| {
                     ToolError::new(
                         "internal",
-                        format!("unexpected answer from orchestra-api: {error}"),
+                        format!("unexpected answer from rakumux-api: {error}"),
                     )
                 });
             }
@@ -338,7 +338,7 @@ impl Api<'_> {
                 },
                 Err(_) => ToolError::new(
                     "internal",
-                    format!("orchestra-api answered {status} without an error body"),
+                    format!("rakumux-api answered {status} without an error body"),
                 ),
             });
         }

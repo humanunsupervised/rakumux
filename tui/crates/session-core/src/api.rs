@@ -27,8 +27,8 @@ pub enum Auth {
     /// A user client (TUI, CLI outside sessions). Token from the daemon's
     /// registration file.
     User { token: String },
-    /// A process inside a session. Values from `ORCHESTRA_SESSION_ID` and
-    /// `ORCHESTRA_SESSION_TOKEN`.
+    /// A process inside a session. Values from `RAKUMUX_SESSION_ID` and
+    /// `RAKUMUX_SESSION_TOKEN`.
     Session { id: SessionId, token: String },
     /// A user client acting for the session that bound an agent's
     /// conversation (`Request::SessionBind`; capability `auth.delegated`).

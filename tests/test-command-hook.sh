@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Tests for shell/orchestra-command-hook.sh: per-session history logging and
-# orchestra_rename_session. Runs interactive bash (and zsh when installed)
-# against a temporary ORCHESTRA_HOME; touches nothing else.
+# Tests for shell/rakumux-command-hook.sh: per-session history logging and
+# rakumux_rename_session. Runs interactive bash (and zsh when installed)
+# against a temporary RAKUMUX_HOME; touches nothing else.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOK="$(cd "$SCRIPT_DIR/.." && pwd)/shell/orchestra-command-hook.sh"
+HOOK="$(cd "$SCRIPT_DIR/.." && pwd)/shell/rakumux-command-hook.sh"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -21,9 +21,9 @@ fail() {
 # run_shell <shell> <session id or empty> <script>
 run_shell() {
   local shell="$1" id="$2" script="$3"
-  local -a env_args=(HOME="$TMP/home" ORCHESTRA_HOME="$TMP/orchestra" PATH="$PATH" ORCHESTRA_BIN="$TMP/fake-orchestra")
+  local -a env_args=(HOME="$TMP/home" RAKUMUX_HOME="$TMP/rakumux" PATH="$PATH" RAKUMUX_BIN="$TMP/fake-rakumux")
   if [[ -n "$id" ]]; then
-    env_args+=(ORCHESTRA_SESSION_ID="$id")
+    env_args+=(RAKUMUX_SESSION_ID="$id")
   fi
   case "$shell" in
     bash)
@@ -42,11 +42,11 @@ commands_logged() {
 }
 
 mkdir -p "$TMP/home"
-cat >"$TMP/fake-orchestra" <<EOF
+cat >"$TMP/fake-rakumux" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$@" >"$TMP/rename-args"
 EOF
-chmod +x "$TMP/fake-orchestra"
+chmod +x "$TMP/fake-rakumux"
 
 shells=(bash)
 if command -v zsh >/dev/null 2>&1; then
@@ -56,13 +56,13 @@ else
 fi
 
 for sh in "${shells[@]}"; do
-  rm -rf "$TMP/orchestra"
+  rm -rf "$TMP/rakumux"
   id="01TEST$(printf '%s' "$sh" | tr '[:lower:]' '[:upper:]')"
-  log="$TMP/orchestra/history/$id.log"
+  log="$TMP/rakumux/history/$id.log"
 
-  run_shell "$sh" "$id" $'true first\ntrue first\n: && true second\norchestra_rename_session ignored-by-log'
+  run_shell "$sh" "$id" $'true first\ntrue first\n: && true second\nrakumux_rename_session ignored-by-log'
   if [[ -f "$log" ]]; then
-    pass "$sh: history goes to \$ORCHESTRA_HOME/history/<id>.log"
+    pass "$sh: history goes to \$RAKUMUX_HOME/history/<id>.log"
   else
     fail "$sh: no history file at $log"
     continue
@@ -83,41 +83,41 @@ for sh in "${shells[@]}"; do
   else
     fail "$sh: duplicate commands logged: $logged"
   fi
-  if grep -q 'orchestra_rename_session' <<<"$logged"; then
+  if grep -q 'rakumux_rename_session' <<<"$logged"; then
     fail "$sh: hook's own functions were logged"
   else
     pass "$sh: hook's own functions are not logged"
   fi
 
-  rm -rf "$TMP/orchestra"
+  rm -rf "$TMP/rakumux"
   run_shell "$sh" "" 'true outside'
-  if [[ -d "$TMP/orchestra/history" ]]; then
-    fail "$sh: logged outside an Orchestra session"
+  if [[ -d "$TMP/rakumux/history" ]]; then
+    fail "$sh: logged outside a Rakumux session"
   else
-    pass "$sh: nothing logged outside an Orchestra session"
+    pass "$sh: nothing logged outside a Rakumux session"
   fi
 
   run_shell "$sh" "../escape" 'true bad-id'
-  if [[ -e "$TMP/orchestra/escape.log" || -d "$TMP/orchestra/history" ]]; then
+  if [[ -e "$TMP/rakumux/escape.log" || -d "$TMP/rakumux/history" ]]; then
     fail "$sh: unsafe session id was used as a path"
   else
     pass "$sh: unsafe session ids are ignored"
   fi
 
   rm -f "$TMP/rename-args"
-  run_shell "$sh" "$id" 'orchestra_rename_session fixing the auth bug'
+  run_shell "$sh" "$id" 'rakumux_rename_session fixing the auth bug'
   if [[ -f "$TMP/rename-args" && "$(cat "$TMP/rename-args")" == $'rename\nfixing the auth bug' ]]; then
-    pass "$sh: orchestra_rename_session calls \$ORCHESTRA_BIN rename \"<name>\""
+    pass "$sh: rakumux_rename_session calls \$RAKUMUX_BIN rename \"<name>\""
   else
     fail "$sh: unexpected rename call: $(cat "$TMP/rename-args" 2>/dev/null || echo none)"
   fi
 
   rm -f "$TMP/rename-args"
-  run_shell "$sh" "" 'orchestra_rename_session new name'
-  if [[ ! -f "$TMP/rename-args" ]] && grep -q 'inside an Orchestra session' "$TMP/err"; then
-    pass "$sh: orchestra_rename_session refuses outside a session"
+  run_shell "$sh" "" 'rakumux_rename_session new name'
+  if [[ ! -f "$TMP/rename-args" ]] && grep -q 'inside a Rakumux session' "$TMP/err"; then
+    pass "$sh: rakumux_rename_session refuses outside a session"
   else
-    fail "$sh: orchestra_rename_session ran outside a session"
+    fail "$sh: rakumux_rename_session ran outside a session"
   fi
 done
 

@@ -89,7 +89,7 @@ pub fn draw_new_session_dialog(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// ` in ▤ orchestrator   ~/repos/orchestrator`: where the session goes
+/// ` in ▤ rakumux   ~/repos/rakumux`: where the session goes
 /// and starts. The folder is left out when there's no room for it.
 fn folder_line(app: &App, dialog: &NewSessionDialog, width: usize) -> Line<'static> {
     let p = theme::palette();

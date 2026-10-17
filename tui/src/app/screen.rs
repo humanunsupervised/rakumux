@@ -7,10 +7,10 @@
 //! selection or a message changes.
 //!
 //! Phones (under [`layout::PHONE_BELOW`] columns) show one thing at a
-//! time: the list in Orchestra mode, the session under a row of tabs (no
+//! time: the list in Rakumux mode, the session under a row of tabs (no
 //! title row) in session mode. Narrow Sidebar screens up to
 //! [`layout::SINGLE_PANE_BELOW`] stack the list above the session in
-//! Orchestra mode, and give the session everything above the footer in
+//! Rakumux mode, and give the session everything above the footer in
 //! session mode; see [`crate::layout`].
 
 use ratatui::layout::Rect;
@@ -31,7 +31,7 @@ pub struct Screen {
     /// Draggable line between the list and the detail (Sidebar): a column
     /// side by side, a row when `stacked`.
     pub divider: Option<Rect>,
-    /// The list is above the detail (a narrow Sidebar screen in Orchestra
+    /// The list is above the detail (a narrow Sidebar screen in Rakumux
     /// mode).
     pub stacked: bool,
     /// Session tab bar (Tabs).
@@ -111,7 +111,7 @@ pub fn compute(
 }
 
 /// `(cols, rows)` of the terminal pane once a session has focus: the size
-/// to attach and resize with. A stacked preview in Orchestra mode is
+/// to attach and resize with. A stacked preview in Rakumux mode is
 /// shorter and shows a window of it.
 pub fn terminal_size(
     area: Rect,
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn a_phone_shows_the_list_or_the_session_under_tabs() {
         for layout in SessionLayout::ALL {
-            // A phone in portrait, Orchestra mode: the list, then the footer.
+            // A phone in portrait, Rakumux mode: the list, then the footer.
             let screen = at(45, 40, layout, Focus::List);
             assert_eq!(screen.list, Some(Rect::new(0, 0, 45, 39)));
             assert_eq!((screen.divider, screen.tabs), (None, None));
@@ -221,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn narrow_sidebar_stacks_the_list_over_the_session_in_orchestra_mode() {
+    fn narrow_sidebar_stacks_the_list_over_the_session_in_rakumux_mode() {
         // A narrow window: the list on top, a divider row, then the
         // session's title row and its terminal, then the footer.
         let screen = at(90, 40, SessionLayout::Sidebar, Focus::List);

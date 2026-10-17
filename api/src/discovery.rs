@@ -1,7 +1,7 @@
-//! `api.json`: how clients find and authenticate to a running `orchestra-api`.
+//! `api.json`: how clients find and authenticate to a running `rakumux-api`.
 //!
 //! ```text
-//! <ORCHESTRA_HOME or ~/.orchestra>/
+//! <RAKUMUX_HOME or ~/.rakumux>/
 //!   api.json    {url, token, pid, version, remote_urls?}, mode 0600, written
 //!               atomically
 //!   api.lock    flock held by the running API (see `instance`)

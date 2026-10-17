@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ###############################################################################
-# build.sh - Build script for Orchestra shell entrypoints and tui
+# build.sh - Build script for Rakumux shell entrypoints and tui
 ###############################################################################
 
 set -euo pipefail
@@ -70,11 +70,11 @@ build_main() {
   success "Build process completed!"
 
   info ""
-  info "You can now run Orchestra from this checkout:"
-  info "  ./orchestra.sh                       # TUI for the current folder"
-  info "  ./orchestra.sh ls                    # CLI subcommands"
-  info "  shell/orchestra-local.sh             # Same, from any folder (alias it as orchestra-local)"
-  info "  ./tui/target/<profile>/orchestra-mcp  # MCP server for agents (see mcp/README.md)"
+  info "You can now run Rakumux from this checkout:"
+  info "  ./rakumux.sh                       # TUI for the current folder"
+  info "  ./rakumux.sh ls                    # CLI subcommands"
+  info "  shell/rakumux-local.sh             # Same, from any folder (alias it as rakumux-local)"
+  info "  ./tui/target/<profile>/rakumux-mcp  # MCP server for agents (see mcp/README.md)"
 }
 
 build_main "$@"

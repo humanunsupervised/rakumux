@@ -3,15 +3,15 @@
 ###############################################################################
 # release-homebrew.sh - Render, verify and publish the Homebrew formula
 #
-# 1. Render install/homebrew/orchestra.rb.template with the version and the
+# 1. Render install/homebrew/rakumux.rb.template with the version and the
 #    SHA-256 of the three release tarballs (from release/checksums.txt, checked
-#    against the files) into install/homebrew/Formula/orchestra.rb. The repo copy
+#    against the files) into install/homebrew/Formula/rakumux.rb. The repo copy
 #    is the source of truth for the tap.
 # 2. Verify (needs brew; the GitHub release must already be published, since the
 #    formula downloads from it): copy the formula into a temporary local tap,
 #    `brew audit --strict --online`, `brew install` from that tap, `brew test`,
 #    then uninstall and remove the temporary tap.
-# 3. Push: copy the formula into a clone of humanunsupervised/homebrew-orchestra,
+# 3. Push: copy the formula into a clone of humanunsupervised/homebrew-rakumux,
 #    commit and push.
 #
 # Usage: release-homebrew.sh <version> [--render-only] [--no-verify] [--no-push] [--output FILE]
@@ -20,7 +20,7 @@
 #   --no-push       Skip step 3
 #   --output FILE   Render to FILE instead of the repo copy (dry runs; implies --no-push)
 # Environment:
-#   HOMEBREW_TAP_REPO   Tap clone (default: <repo>/../homebrew-orchestra; cloned if missing)
+#   HOMEBREW_TAP_REPO   Tap clone (default: <repo>/../homebrew-rakumux; cloned if missing)
 ###############################################################################
 
 set -euo pipefail
@@ -38,14 +38,14 @@ error() { printf "${RED}[HOMEBREW]${NC} %s\n" "$*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TEMPLATE="$PROJECT_ROOT/install/homebrew/orchestra.rb.template"
-REPO_FORMULA="$PROJECT_ROOT/install/homebrew/Formula/orchestra.rb"
+TEMPLATE="$PROJECT_ROOT/install/homebrew/rakumux.rb.template"
+REPO_FORMULA="$PROJECT_ROOT/install/homebrew/Formula/rakumux.rb"
 FORMULA="$REPO_FORMULA"
 RELEASE_DIR="$PROJECT_ROOT/release"
-TAP_REMOTE="git@github.com:humanunsupervised/homebrew-orchestra.git"
-DEFAULT_TAP_DIR="$(cd "$PROJECT_ROOT/.." && pwd)/homebrew-orchestra"
+TAP_REMOTE="git@github.com:humanunsupervised/homebrew-rakumux.git"
+DEFAULT_TAP_DIR="$(cd "$PROJECT_ROOT/.." && pwd)/homebrew-rakumux"
 HOMEBREW_TAP_REPO="${HOMEBREW_TAP_REPO:-$DEFAULT_TAP_DIR}"
-VERIFY_TAP="orchestra-release/verify"
+VERIFY_TAP="rakumux-release/verify"
 
 show_usage() {
     sed -n '/^# Usage:/,/^# *HOMEBREW_TAP_REPO/p' "$0" | sed 's/^# \{0,1\}//'
@@ -133,15 +133,15 @@ render_formula() {
         error "Missing $RELEASE_DIR/checksums.txt (run build-release.sh $VERSION)"
         exit 1
     fi
-    if ! grep -q "^# Orchestra v$VERSION\$" "$RELEASE_DIR/RELEASE_NOTES.md" 2>/dev/null; then
+    if ! grep -q "^# Rakumux v$VERSION\$" "$RELEASE_DIR/RELEASE_NOTES.md" 2>/dev/null; then
         error "release/ was not built for v$VERSION (see release/RELEASE_NOTES.md)"
         exit 1
     fi
 
     local intel arm64 linux
-    intel="$(release_sha orchestra-macos-intel.tar.gz)"
-    arm64="$(release_sha orchestra-macos-arm64.tar.gz)"
-    linux="$(release_sha orchestra-linux-x64.tar.gz)"
+    intel="$(release_sha rakumux-macos-intel.tar.gz)"
+    arm64="$(release_sha rakumux-macos-arm64.tar.gz)"
+    linux="$(release_sha rakumux-linux-x64.tar.gz)"
 
     local rendered
     rendered="$(mktemp)"
@@ -172,7 +172,7 @@ render_formula() {
 
 cleanup_verify_tap() {
     if brew tap 2>/dev/null | grep -qx "$VERIFY_TAP"; then
-        brew uninstall --formula "$VERIFY_TAP/orchestra" >/dev/null 2>&1 || true
+        brew uninstall --formula "$VERIFY_TAP/rakumux" >/dev/null 2>&1 || true
         brew untap "$VERIFY_TAP" >/dev/null 2>&1 || true
     fi
 }
@@ -182,9 +182,9 @@ verify_formula() {
         error "brew is required to verify the formula (or pass --no-verify)"
         exit 1
     fi
-    if brew list --formula orchestra >/dev/null 2>&1; then
-        error "orchestra is already installed; the verification installs it from a temporary tap."
-        error "Run 'brew uninstall orchestra' first (running sessions keep running), or pass --no-verify."
+    if brew list --formula rakumux >/dev/null 2>&1; then
+        error "rakumux is already installed; the verification installs it from a temporary tap."
+        error "Run 'brew uninstall rakumux' first (running sessions keep running), or pass --no-verify."
         exit 1
     fi
 
@@ -192,12 +192,12 @@ verify_formula() {
     trap cleanup_verify_tap EXIT
     cleanup_verify_tap
     brew tap-new --no-git "$VERIFY_TAP" >/dev/null
-    cp "$FORMULA" "$(brew --repository "$VERIFY_TAP")/Formula/orchestra.rb"
+    cp "$FORMULA" "$(brew --repository "$VERIFY_TAP")/Formula/rakumux.rb"
 
-    brew audit --strict --online --formula "$VERIFY_TAP/orchestra"
+    brew audit --strict --online --formula "$VERIFY_TAP/rakumux"
     success "brew audit --strict --online passed"
-    brew install --formula "$VERIFY_TAP/orchestra"
-    brew test "$VERIFY_TAP/orchestra"
+    brew install --formula "$VERIFY_TAP/rakumux"
+    brew test "$VERIFY_TAP/rakumux"
     success "brew install + brew test passed"
 
     cleanup_verify_tap
@@ -214,16 +214,16 @@ push_formula() {
     git -C "$HOMEBREW_TAP_REPO" checkout main
     git -C "$HOMEBREW_TAP_REPO" pull --ff-only origin main
     mkdir -p "$HOMEBREW_TAP_REPO/Formula"
-    cp "$FORMULA" "$HOMEBREW_TAP_REPO/Formula/orchestra.rb"
-    git -C "$HOMEBREW_TAP_REPO" add Formula/orchestra.rb
+    cp "$FORMULA" "$HOMEBREW_TAP_REPO/Formula/rakumux.rb"
+    git -C "$HOMEBREW_TAP_REPO" add Formula/rakumux.rb
 
     if git -C "$HOMEBREW_TAP_REPO" diff --cached --quiet; then
         warn "Tap already has this formula; nothing to push"
         return 0
     fi
-    git -C "$HOMEBREW_TAP_REPO" commit -m "orchestra $VERSION"
+    git -C "$HOMEBREW_TAP_REPO" commit -m "rakumux $VERSION"
     git -C "$HOMEBREW_TAP_REPO" push origin main
-    success "Pushed orchestra $VERSION to humanunsupervised/homebrew-orchestra"
+    success "Pushed rakumux $VERSION to humanunsupervised/homebrew-rakumux"
 }
 
 render_formula
@@ -239,5 +239,5 @@ else
 fi
 
 if [[ "$FORMULA" == "$REPO_FORMULA" ]]; then
-    info "Commit the rendered formula in this repo: git add install/homebrew/Formula/orchestra.rb"
+    info "Commit the rendered formula in this repo: git add install/homebrew/Formula/rakumux.rb"
 fi

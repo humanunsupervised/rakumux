@@ -70,7 +70,7 @@ pub fn detect(input: &DetectInput<'_>) -> Detection {
 // Agent profiles
 // ---------------------------------------------------------------------------
 
-/// What Orchestra knows about one agent.
+/// What Rakumux knows about one agent.
 struct Profile {
     /// Reported agent name.
     label: &'static str,
@@ -626,7 +626,7 @@ pub fn is_shell_command(argv: &[String]) -> bool {
             .all(|arg| arg.starts_with('-') && arg != "-c")
 }
 
-/// The coding agent `process` is ("claude", "codex", …), if Orchestra knows
+/// The coding agent `process` is ("claude", "codex", …), if Rakumux knows
 /// it.
 pub fn agent_label(process: &ProcessInfo) -> Option<&'static str> {
     match profile_for_process(process) {

@@ -1,8 +1,8 @@
 //! Filesystem layout shared by the daemon and its clients.
 //!
 //! ```text
-//! ~/.orchestra/                    (or $ORCHESTRA_HOME)
-//!   orchestra.sqlite3              session registry (daemon-owned)
+//! ~/.rakumux/                    (or $RAKUMUX_HOME)
+//!   rakumux.sqlite3              session registry (daemon-owned)
 //!   sessions/<id>/scrollback.ansi  saved scrollback for revive
 //!   sessions/<id>/meta.json
 //!   history/<id>.log               command history (shell hook)
@@ -11,12 +11,12 @@
 //!   run/                           runtime files, mode 0700
 //!     service.json                 registration: pid, socket, token (0600)
 //!     service.lock                 flock held by the running daemon
-//! /tmp/orchestra-<uid>/ptyd-<hash>.sock
+//! /tmp/rakumux-<uid>/ptyd-<hash>.sock
 //! ```
 //!
 //! The runtime directory depends on the home and nothing else, so every
 //! login finds the same daemon. Earlier builds used `$XDG_RUNTIME_DIR/
-//! orchestra` when that was set; SSH logins set it and mosh doesn't, so two
+//! rakumux` when that was set; SSH logins set it and mosh doesn't, so two
 //! logins could each start a daemon over one registry. Clients still look
 //! there ([`Layout::legacy`]) when no daemon answers in `run/`, so a daemon
 //! an earlier build started stays reachable.
@@ -33,7 +33,7 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// `$ORCHESTRA_HOME` or `~/.orchestra`, runtime files in its `run`
+    /// `$RAKUMUX_HOME` or `~/.rakumux`, runtime files in its `run`
     /// directory.
     pub fn from_env() -> io::Result<Self> {
         if let Some(home) = std::env::var_os(crate::env::HOME).filter(|h| !h.is_empty()) {
@@ -49,8 +49,8 @@ impl Layout {
     }
 
     /// Layouts earlier builds used for this home, where a daemon they
-    /// started may still run: `$XDG_RUNTIME_DIR/orchestra` (and, on Linux,
-    /// `/run/user/<uid>/orchestra`, for logins without the variable), for
+    /// started may still run: `$XDG_RUNTIME_DIR/rakumux` (and, on Linux,
+    /// `/run/user/<uid>/rakumux`, for logins without the variable), for
     /// the default home only. Empty for any other home.
     pub fn legacy(&self) -> Vec<Layout> {
         let is_default = default_home().is_ok_and(|home| same_dir(&home, &self.home));
@@ -59,11 +59,11 @@ impl Layout {
         }
         let mut dirs: Vec<PathBuf> = Vec::new();
         if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
-            dirs.push(PathBuf::from(dir).join("orchestra"));
+            dirs.push(PathBuf::from(dir).join("rakumux"));
         }
         if cfg!(target_os = "linux") {
             dirs.push(PathBuf::from(format!(
-                "/run/user/{}/orchestra",
+                "/run/user/{}/rakumux",
                 unsafe_free_uid()
             )));
         }
@@ -81,7 +81,7 @@ impl Layout {
     }
 
     pub fn registry_db(&self) -> PathBuf {
-        self.home.join("orchestra.sqlite3")
+        self.home.join("rakumux.sqlite3")
     }
 
     pub fn session_dir(&self, id: &SessionId) -> PathBuf {
@@ -116,18 +116,18 @@ impl Layout {
     /// get separate daemons.
     pub fn socket_path(&self) -> PathBuf {
         let uid = unsafe_free_uid();
-        PathBuf::from(format!("/tmp/orchestra-{uid}")).join(format!(
+        PathBuf::from(format!("/tmp/rakumux-{uid}")).join(format!(
             "ptyd-{:016x}.sock",
             fnv1a(self.run_dir.to_string_lossy().as_bytes())
         ))
     }
 }
 
-/// `~/.orchestra`.
+/// `~/.rakumux`.
 fn default_home() -> io::Result<PathBuf> {
     std::env::var_os("HOME")
         .filter(|home| !home.is_empty())
-        .map(|home| PathBuf::from(home).join(".orchestra"))
+        .map(|home| PathBuf::from(home).join(".rakumux"))
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))
 }
 
@@ -146,7 +146,7 @@ fn unsafe_free_uid() -> u32 {
     if let Ok(meta) = std::fs::metadata("/proc/self") {
         return meta.uid();
     }
-    let probe = std::env::temp_dir().join(format!("orchestra-uid-{}", std::process::id()));
+    let probe = std::env::temp_dir().join(format!("rakumux-uid-{}", std::process::id()));
     let uid = std::fs::File::create(&probe)
         .and_then(|_| std::fs::metadata(&probe))
         .map(|m| m.uid())
@@ -180,7 +180,7 @@ impl Registration {
     }
 }
 
-/// Locate `orchestra-ptyd`: explicit path, then `$ORCHESTRA_PTYD_BIN`, then
+/// Locate `rakumux-ptyd`: explicit path, then `$RAKUMUX_PTYD_BIN`, then
 /// next to the current executable, then `PATH`.
 pub fn find_ptyd_binary(explicit: Option<&Path>) -> Option<PathBuf> {
     let executable = |p: &Path| {
@@ -199,7 +199,7 @@ pub fn find_ptyd_binary(explicit: Option<&Path>) -> Option<PathBuf> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let sibling = dir.join("orchestra-ptyd");
+            let sibling = dir.join("rakumux-ptyd");
             if executable(&sibling) {
                 return Some(sibling);
             }
@@ -207,7 +207,7 @@ pub fn find_ptyd_binary(explicit: Option<&Path>) -> Option<PathBuf> {
     }
     std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths)
-            .map(|dir| dir.join("orchestra-ptyd"))
+            .map(|dir| dir.join("rakumux-ptyd"))
             .find(|p| executable(p))
     })
 }
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn other_homes_have_no_legacy_layouts() {
-        let layout = Layout::with_home("/tmp/orchestra-not-the-default-home".into());
+        let layout = Layout::with_home("/tmp/rakumux-not-the-default-home".into());
         assert!(layout.legacy().is_empty());
     }
 

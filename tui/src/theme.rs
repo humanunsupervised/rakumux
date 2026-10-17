@@ -44,7 +44,7 @@ impl Palette {
 
     /// `color` faded toward the background by `amount` (0 keeps it, 1 is the
     /// background) and partly greyed: how things look that are shown but
-    /// don't take input, like the session pane in Orchestra mode. `None`
+    /// don't take input, like the session pane in Rakumux mode. `None`
     /// when this palette can't fade (16 colours; use `Modifier::DIM`) or
     /// `color` is the terminal's default.
     pub fn faded(&self, color: Color, amount: f32) -> Option<Color> {
@@ -242,7 +242,7 @@ impl Theme {
                 "basic" | "ansi" | "fallback" | "low" => return Theme::basic(support),
                 "auto" => {} // fall through to detection
                 other => {
-                    if var("ORCHESTRA_DEBUG").is_some() {
+                    if var("RAKUMUX_DEBUG").is_some() {
                         eprintln!(
                             "DEBUG: Unknown GWR_THEME value '{}', falling back to auto",
                             other

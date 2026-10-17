@@ -34,7 +34,7 @@ narrow the list by folder.
      several and `Enter` shows the ticked ones; `Enter` on All folders clears the filter.
    - A typed path offers `+ Add folder …` with the folder autocomplete (`app/path_complete.rs`);
      choosing it shows that (empty) folder so new sessions can start there.
-   - `Ctrl-x` (forget) goes; `orchestra folders rm` keeps it on the command line.
+   - `Ctrl-x` (forget) goes; `rakumux folders rm` keeps it on the command line.
 5. **The filter isn't saved.** Every start shows All folders. `sessions.selected_projects` in
    config.json is ignored and dropped on the next save.
 6. **New sessions** go in the current folder: the selected session's folder; on a folder header,
@@ -46,8 +46,8 @@ narrow the list by folder.
    `SessionApi::list_all`. The TUI lists and subscribes with `all` so sessions in folders it has
    never seen (a new worktree, a session an agent started) appear live. With an older daemon the
    TUI uses `project_list` plus `list_in`/`subscribe(scopes)` and offers the usual restart notice.
-9. **CLI**: `orchestra folders [--json]`, `orchestra folders add|rm <dir>`, `orchestra ls
-   --folder DIR`; `projects` and `--project` stay as hidden aliases. `orchestra ls` still defaults
+9. **CLI**: `rakumux folders [--json]`, `rakumux folders add|rm <dir>`, `rakumux ls
+   --folder DIR`; `projects` and `--project` stay as hidden aliases. `rakumux ls` still defaults
    to the current folder (`--all` for every folder). Output says "folder".
 10. **API and MCP** (unreleased, so renamed now, with aliases where cheap):
     - MCP tool `list_folders` replaces `list_projects`.

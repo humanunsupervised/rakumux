@@ -72,7 +72,7 @@ pub fn resolve(api: &dyn SessionApi, input: &str) -> Result<ScopeRoot, HttpError
         Ok(folders) => folders,
         Err(error) if error.code == ErrorCode::Unsupported => {
             return Err(HttpError::invalid(format!(
-                "folder {input:?} is not an absolute directory, and this Orchestra daemon \
+                "folder {input:?} is not an absolute directory, and this Rakumux daemon \
                  can't look folders up by name yet; pass the folder's directory"
             )))
         }

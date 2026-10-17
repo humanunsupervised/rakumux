@@ -1,5 +1,5 @@
 //! The welcome tour: a short carousel shown on first start and from Help
-//! (`t`). Six cards: what Orchestra is and that it's keyboard driven,
+//! (`t`). Six cards: what Rakumux is and that it's keyboard driven,
 //! folders and sessions, the two modes, moving around, the main shortcuts,
 //! and where Help and Settings are. `←`/`→` move, Enter goes on (and finishes), Esc closes.
 //! Every card has the "Don't show this on startup" box (Space), so you can
@@ -23,12 +23,12 @@ pub const CARDS: usize = 6;
 
 /// One card: a title and paragraphs whose `backticked` words are keys.
 fn card(app: &App, index: usize) -> (&'static str, Vec<String>) {
-    let k = app.orchestra_key.label();
+    let k = app.rakumux_key.label();
     match index {
         0 => (
-            "Welcome to Orchestra",
+            "Welcome to Rakumux",
             vec![
-                "Orchestra runs your terminal sessions in the background and shows them side by \
+                "Rakumux runs your terminal sessions in the background and shows them side by \
                  side: shells, commands, and coding agents like Claude Code, Codex or OpenCode. \
                  They keep running when you quit."
                     .into(),
@@ -43,8 +43,7 @@ fn card(app: &App, index: usize) -> (&'static str, Vec<String>) {
                 "A session is a terminal in a folder, like a repo or a worktree: a shell, a dev \
                  server or a coding agent. The list shows each one's git branch."
                     .into(),
-                "The list starts on All folders: every session, under a header per folder."
-                    .into(),
+                "The list starts on All folders: every session, under a header per folder.".into(),
                 "`P` filters by folder: pick one, tick several with `Tab`, or add a folder. All \
                  folders shows everything again."
                     .into(),
@@ -56,18 +55,18 @@ fn card(app: &App, index: usize) -> (&'static str, Vec<String>) {
                 "SESSION mode: you're working in a session, and every key goes to its program."
                     .into(),
                 format!(
-                    "ORCHESTRA mode: your keys drive Orchestra. Press `{k}` in a session to switch; \
+                    "RAKUMUX mode: your keys drive Rakumux. Press `{k}` in a session to switch; \
                      it's the one key a program never gets."
                 ),
                 "The badge at the bottom left always shows which mode you're in: an orange \
-                 ORCHESTRA, or SESSION."
+                 RAKUMUX, or SESSION."
                     .into(),
             ],
         ),
         3 => (
             "Moving around",
             vec![
-                "In Orchestra mode, `↑` `↓` (or `j` `k`) pick a session; it shows live next to \
+                "In Rakumux mode, `↑` `↓` (or `j` `k`) pick a session; it shows live next to \
                  the list while you look."
                     .into(),
                 "`Enter` goes into the selected session. `Esc` goes back to the one you came \
@@ -87,7 +86,7 @@ fn card(app: &App, index: usize) -> (&'static str, Vec<String>) {
         _ => (
             "Help is always there",
             vec![
-                "`?` opens Help: how Orchestra works, every key, the command line.".into(),
+                "`?` opens Help: how Rakumux works, every key, the command line.".into(),
                 "`,` opens Settings: layout, icons, and a Keys tab that lists every action and \
                  runs the one you pick."
                     .into(),
@@ -242,7 +241,7 @@ pub fn draw_welcome(f: &mut Frame, app: &App, state: WelcomeState, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(p.accent_orange))
         .title(Span::styled(
-            " Orchestra tour ",
+            " Rakumux tour ",
             Style::default()
                 .fg(p.accent_orange)
                 .add_modifier(Modifier::BOLD),

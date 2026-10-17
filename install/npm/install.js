@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 
-// Postinstall setup and command runner for the @humanu/orchestra npm package.
+// Postinstall setup and command runner for the rakumux npm package.
 //
 // Package layout (staged by install/scripts/stage-npm-package.sh):
-//   resources/scripts/            orchestra.sh, orchestra-local.sh, shell/
-//   resources/prebuilt/<platform>/ orchestra (tui binary), orchestra-ptyd,
-//                                  orchestra-api, orchestra-mcp
+//   resources/scripts/            rakumux.sh, rakumux-local.sh, shell/
+//   resources/prebuilt/<platform>/ rakumux (tui binary), rakumux-ptyd,
+//                                  rakumux-api, rakumux-mcp
 // Postinstall copies the scripts and this platform's binaries into dist/, and
 // bin/*.js run `node install.js --invoke=<command> [args...]`, which execs the
-// matching script from dist/ (orchestra, orchestra-local) or the binary itself
-// (orchestra-mcp, orchestra-api: no launcher, and nothing but the binary may
+// matching script from dist/ (rakumux, rakumux-local) or the binary itself
+// (rakumux-mcp, rakumux-api: no launcher, and nothing but the binary may
 // write to stdout, which carries MCP messages).
 //
-// Inside a source checkout (install/npm in the orchestrator repo) the scripts
+// Inside a source checkout (install/npm in the rakumux repo) the scripts
 // come from the repo and the binaries are built with cargo.
 
 const { execSync, spawnSync } = require('child_process');
@@ -21,10 +21,10 @@ const path = require('path');
 
 const BINARIES = [
   // [name in dist/ and resources/prebuilt/<platform>/, cargo binary name]
-  ['orchestra', 'tui'],
-  ['orchestra-ptyd', 'orchestra-ptyd'],
-  ['orchestra-api', 'orchestra-api'],
-  ['orchestra-mcp', 'orchestra-mcp'],
+  ['rakumux', 'tui'],
+  ['rakumux-ptyd', 'rakumux-ptyd'],
+  ['rakumux-api', 'rakumux-api'],
+  ['rakumux-mcp', 'rakumux-mcp'],
 ];
 const SUPPORTED_PLATFORMS = {
   'darwin-x64': 'macos-intel',
@@ -32,13 +32,13 @@ const SUPPORTED_PLATFORMS = {
   'linux-x64': 'linux-x64',
 };
 const COMMANDS = {
-  orchestra: 'orchestra.sh',
-  'orchestra-local': 'orchestra-local.sh',
+  rakumux: 'rakumux.sh',
+  'rakumux-local': 'rakumux-local.sh',
 };
 // Commands that run a binary from dist/ directly.
 const BINARY_COMMANDS = {
-  'orchestra-mcp': 'orchestra-mcp',
-  'orchestra-api': 'orchestra-api',
+  'rakumux-mcp': 'rakumux-mcp',
+  'rakumux-api': 'rakumux-api',
 };
 
 // Progress messages. Binary commands send them to stderr: an MCP server's
@@ -53,7 +53,7 @@ const distDir = path.join(packageRoot, 'dist');
 const projectRoot = path.resolve(packageRoot, '..', '..');
 const hasLocalSource =
   fs.existsSync(path.join(projectRoot, 'tui', 'Cargo.toml')) &&
-  fs.existsSync(path.join(projectRoot, 'orchestra.sh'));
+  fs.existsSync(path.join(projectRoot, 'rakumux.sh'));
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -94,19 +94,19 @@ function copyExecutable(src, dest) {
 function scriptSources() {
   if (fs.existsSync(scriptsDir)) {
     return [
-      [path.join(scriptsDir, 'orchestra.sh'), 'orchestra.sh'],
-      [path.join(scriptsDir, 'orchestra-local.sh'), 'orchestra-local.sh'],
+      [path.join(scriptsDir, 'rakumux.sh'), 'rakumux.sh'],
+      [path.join(scriptsDir, 'rakumux-local.sh'), 'rakumux-local.sh'],
       [path.join(scriptsDir, 'shell'), 'shell'],
     ];
   }
   if (hasLocalSource) {
     return [
-      [path.join(projectRoot, 'orchestra.sh'), 'orchestra.sh'],
-      [path.join(projectRoot, 'shell', 'orchestra-local.sh'), 'orchestra-local.sh'],
+      [path.join(projectRoot, 'rakumux.sh'), 'rakumux.sh'],
+      [path.join(projectRoot, 'shell', 'rakumux-local.sh'), 'rakumux-local.sh'],
       [path.join(projectRoot, 'shell'), 'shell'],
     ];
   }
-  fail(['Orchestra launcher scripts are missing from the package (resources/scripts).']);
+  fail(['Rakumux launcher scripts are missing from the package (resources/scripts).']);
   return [];
 }
 
@@ -146,9 +146,9 @@ function buildFromSource() {
   }
 
   const tuiDir = path.join(projectRoot, 'tui');
-  log('🔨 Building orchestra, orchestra-ptyd, orchestra-api and orchestra-mcp from source...');
+  log('🔨 Building rakumux, rakumux-ptyd, rakumux-api and rakumux-mcp from source...');
   try {
-    execSync('cargo build --release -p tui -p orchestra-ptyd -p orchestra-api -p orchestra-mcp', {
+    execSync('cargo build --release -p tui -p rakumux-ptyd -p rakumux-api -p rakumux-mcp', {
       stdio: ['ignore', 2, 2],
       cwd: tuiDir,
     });
@@ -175,29 +175,29 @@ function installBinaries() {
     return;
   }
   fail([
-    `❌ Orchestra has no prebuilt binaries for ${platformKey()}.`,
+    `❌ Rakumux has no prebuilt binaries for ${platformKey()}.`,
     '   Supported: macOS (Apple Silicon, Intel) and Linux x64.',
-    '   Releases: https://github.com/humanunsupervised/orchestra/releases',
+    '   Releases: https://github.com/humanunsupervised/rakumux/releases',
   ]);
 }
 
 function assetsReady() {
   return (
     BINARIES.every(([name]) => fs.existsSync(path.join(distDir, name))) &&
-    fs.existsSync(path.join(distDir, 'orchestra.sh')) &&
+    fs.existsSync(path.join(distDir, 'rakumux.sh')) &&
     fs.existsSync(path.join(distDir, 'shell', 'gwr_load.sh'))
   );
 }
 
 function performSetup({ quiet = false } = {}) {
   if (!quiet) {
-    log('Installing Orchestra...');
+    log('Installing Rakumux...');
   }
   cleanDir(distDir);
   copyScripts();
   installBinaries();
   if (!quiet) {
-    log('✅ Orchestra installed. Run `orchestra` in any project folder.');
+    log('✅ Rakumux installed. Run `rakumux` in any project folder.');
   }
 }
 
@@ -210,11 +210,11 @@ function runBinary(command, args) {
   if (!fs.existsSync(binaryPath)) {
     fail([`Missing binary: ${binaryPath}`]);
   }
-  // Pin this package's binaries, as for the orchestra command.
+  // Pin this package's binaries, as for the rakumux command.
   const env = {
     ...process.env,
-    ORCHESTRA_API_BIN: path.join(distDir, 'orchestra-api'),
-    ORCHESTRA_PTYD_BIN: path.join(distDir, 'orchestra-ptyd'),
+    RAKUMUX_API_BIN: path.join(distDir, 'rakumux-api'),
+    RAKUMUX_PTYD_BIN: path.join(distDir, 'rakumux-ptyd'),
   };
   const result = spawnSync(binaryPath, args, { stdio: 'inherit', env });
   if (result.error) {
@@ -238,11 +238,11 @@ function runCommand(command, args) {
   }
 
   const env = { ...process.env };
-  if (command === 'orchestra') {
+  if (command === 'rakumux') {
     // Pin this package's binaries; values inherited from another install
-    // (e.g. a session started by a different Orchestra) must not win.
-    env.GW_TUI_BIN = path.join(distDir, 'orchestra');
-    env.GW_PTYD_BIN = path.join(distDir, 'orchestra-ptyd');
+    // (e.g. a session started by a different Rakumux) must not win.
+    env.GW_TUI_BIN = path.join(distDir, 'rakumux');
+    env.GW_PTYD_BIN = path.join(distDir, 'rakumux-ptyd');
   }
 
   const result = spawnSync('bash', [scriptPath, ...args], { stdio: 'inherit', env });

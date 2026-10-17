@@ -1,9 +1,9 @@
-# Orchestra: Terminal Sessions for Coding Agents
+# Rakumux: Terminal Sessions for Coding Agents
 
-Orchestra is a terminal-first manager for long-running terminal sessions, built for running coding
+Rakumux is a terminal-first manager for long-running terminal sessions, built for running coding
 agents (Claude Code, Codex, OpenCode, Pi, …) side by side. A **session** is a folder plus a
-terminal. One per-user daemon, **`orchestra-ptyd`**, owns every session; the **`orchestra`** TUI and
-CLI are clients of it, and so is **`orchestra-api`**, a local HTTP API that the **`orchestra-mcp`**
+terminal. One per-user daemon, **`rakumux-ptyd`**, owns every session; the **`rakumux`** TUI and
+CLI are clients of it, and so is **`rakumux-api`**, a local HTTP API that the **`rakumux-mcp`**
 server uses to let coding agents drive sessions (`plans/projects-api-mcp.md`).
 
 This file describes the architecture introduced by the sessions refactor (0.6.0, branch
@@ -13,13 +13,13 @@ being built: `plans/parallel-execution.md`.
 
 ## Architectural requirements
 
-1. **One server, many clients.** Exactly one `orchestra-ptyd` per user owns every session's
+1. **One server, many clients.** Exactly one `rakumux-ptyd` per user owns every session's
    terminal and the session registry. Any number of TUIs, CLI calls and agents connect at the same
    time. Several TUIs may watch the same session; at most one is its controller. No client is
    special and no client may assume it is the only one; closing every TUI leaves all sessions
    running.
 2. **No git operations.** No worktree creation, git status, merge helpers or env-copy, and no
-   `orchestra-cli`; the product never runs `git`. The one exception is read-only **git context**:
+   `rakumux-cli`; the product never runs `git`. The one exception is read-only **git context**:
    the daemon reads `.git` files to show a session's branch and linked worktree
    (`ptyd/src/git.rs`). Users run git inside a session like any other program.
 3. **Sessions belong to folders.** A folder is a directory (canonical path; the wire calls it a
@@ -33,7 +33,7 @@ being built: `plans/parallel-execution.md`.
    lifecycle and audit live in the daemon. TUI and CLI are thin clients of
    `session_core::client::SessionApi`.
 5. **No shell services layer.** All logic is Rust. Shell scripts only launch the binaries, set the
-   terminal title, check for updates and build. Runtime dependencies: none besides Orchestra's own
+   terminal title, check for updates and build. Runtime dependencies: none besides Rakumux's own
    binaries and bash (no `git`, `tmux`, `jq` or `python3`).
 6. **Contracts first.** The crates' public types and traits (below) are the architecture. Change
    them only additively, and keep the wire protocol backwards compatible.
@@ -54,7 +54,7 @@ being built: `plans/parallel-execution.md`.
   and framing (`server`, `session_core::frame`), the client transport (`session_core::client::Client`).
 - **Dependency direction**: `tui` → `session-core` + `vt`; `ptyd` → `session-core` + `vt`;
   `api` → `session-core`; `mcp` → `api` (its `discovery` and `dto` modules) + `session-core`;
-  `session-core` and `vt` depend on no Orchestra crate. `tui`, `api` and `mcp` never depend on
+  `session-core` and `vt` depend on no Rakumux crate. `tui`, `api` and `mcp` never depend on
   `ptyd`; `mcp` talks to the daemon only through the HTTP API. In the daemon,
   `server` → `Control` → `TerminalHost`; `terminal` knows nothing about scopes, callers or policy.
 - The UI never opens the socket itself, never reads the registry and never touches a PTY.
@@ -65,14 +65,14 @@ being built: `plans/parallel-execution.md`.
 
 ## Components
 
-1. **`orchestra.sh`**: launcher and primary entry point. Sources `shell/gwr_load.sh`, handles
-   `-h/--help` and `--check-updates`, resolves the `tui` and `orchestra-ptyd` binaries
-   (`GW_TUI_BIN`, `GW_PTYD_BIN` overrides), exports `ORCHESTRA_BIN`, sets the terminal title, starts
+1. **`rakumux.sh`**: launcher and primary entry point. Sources `shell/gwr_load.sh`, handles
+   `-h/--help` and `--check-updates`, resolves the `tui` and `rakumux-ptyd` binaries
+   (`GW_TUI_BIN`, `GW_PTYD_BIN` overrides), exports `RAKUMUX_BIN`, sets the terminal title, starts
    a silent background update check, then `exec tui --ptyd-path <path> "$@"`.
-2. **`tui` binary** (`tui/src`, installed as `orchestra`): `main.rs` first calls `cli::dispatch`; a
+2. **`tui` binary** (`tui/src`, installed as `rakumux`): `main.rs` first calls `cli::dispatch`; a
    recognised subcommand runs and exits, otherwise the TUI starts.
-3. **`orchestra-ptyd`** (`tui/crates/ptyd`): the daemon. One per user (per Orchestra home): every
-   client finds the running one through `~/.orchestra/run/service.json`, whatever the login (SSH,
+3. **`rakumux-ptyd`** (`tui/crates/ptyd`): the daemon. One per user (per Rakumux home): every
+   client finds the running one through `~/.rakumux/run/service.json`, whatever the login (SSH,
    mosh, a phone), and user clients spawn it only when none runs (detached: stdio on `/dev/null`,
    `setsid`); it stays up with zero clients. It **restarts in place** (`daemon_restart`, SIGUSR2):
    it `exec`s the new binary in the same process and hands over the PTYs, screens, tokens and
@@ -84,10 +84,10 @@ being built: `plans/parallel-execution.md`.
 5. **`vt`** (`tui/crates/vt`): terminal emulation on `vt100`, shared by daemon (responding emulator
    that answers terminal queries) and TUI (passive mirror), plus key/mouse/paste encoders.
 6. **`shell/`**: launcher helpers (`gwr_*.sh`, `gwr/check-updates.sh`), build helpers (`build/`),
-   `orchestra-local.sh` for running a local checkout, and `orchestra-command-hook.sh` (command
+   `rakumux-local.sh` for running a local checkout, and `rakumux-command-hook.sh` (command
    history for AI naming).
 7. **`install/`**: release and distribution (npm package, Homebrew formula, release scripts).
-8. **`orchestra-api`** (`api/`, workspace member through `package.workspace = "../tui"`): HTTP/1.1
+8. **`rakumux-api`** (`api/`, workspace member through `package.workspace = "../tui"`): HTTP/1.1
    and JSON on 127.0.0.1, a thin adapter over `session_core::client` (contract:
    `api/openapi.yaml`). Routes `/v1/health`, `/v1/folders`, `/v1/sessions[/{id}[/content]]`
    (`?all=true`: every folder), `POST /v1/sessions/{id}/revive|kill`, `DELETE /v1/sessions/{id}`,
@@ -97,7 +97,7 @@ being built: `plans/parallel-execution.md`.
    session's folder: the daemon's `scope`) and still accepts the deprecated `/v1/projects` and
    `project` names, returning `project` next to `folder`. Writes `api.json` (url, token, pid,
    version, `remote_urls`) while it runs; on loopback: bearer token, loopback `Host`, no browser
-   `Origin`; `X-Orchestra-Session-Id`/`-Token` make it act as that session. **Remote access**
+   `Origin`; `X-Rakumux-Session-Id`/`-Token` make it act as that session. **Remote access**
    (`plans/mobile-client.md`, `api/src/remote.rs`): while `remote.json` is enabled it adds a remote
    listener on every Tailscale address of the machine (`session_core::tailscale::addresses`: in
    `100.64.0.0/10` or `fd7a:115c:a1e0::/48` **and** on Tailscale's own interface, `tailscale*`, or
@@ -105,21 +105,21 @@ being built: `plans/parallel-execution.md`.
    `remote.json`'s port (7337), or on `listen` / `--remote-listen ADDR:PORT` instead; there the
    bearer is the remote token, `Host` isn't checked, `Origin` is allowed, identity headers are
    refused and the caller is the user. Runs in the foreground or with `--detach`; a user client of
-   the daemon (spawns it on demand), one API per Orchestra home. See `api/README.md`.
-9. **`orchestra-mcp`** (`mcp/`): MCP server on stdio for coding agents, built on `rmcp` (exact
+   the daemon (spawns it on demand), one API per Rakumux home. See `api/README.md`.
+9. **`rakumux-mcp`** (`mcp/`): MCP server on stdio for coding agents, built on `rmcp` (exact
    pinned, confined to `mcp/src/server.rs`). Tools: `list_folders`, `list_sessions`,
    `get_session`, `create_session`, `read_session`, `rename_session`; a `folder` argument (alias
    `project`, deprecated) narrows names or places new sessions. Finds the API through
-   `api.json` and starts `orchestra-api --detach` when needed; forwards `ORCHESTRA_SESSION_ID`/
-   `ORCHESTRA_SESSION_TOKEN` as identity headers; returns terminal text sanitized, capped and inside
+   `api.json` and starts `rakumux-api --detach` when needed; forwards `RAKUMUX_SESSION_ID`/
+   `RAKUMUX_SESSION_TOKEN` as identity headers; returns terminal text sanitized, capped and inside
    a nonce-delimited untrusted block. See `mcp/README.md`.
 
 ## File structure
 
 ```
-orchestra.sh                 # launcher (entry point)
+rakumux.sh                 # launcher (entry point)
 build.sh                     # local build
-api/                         # orchestra-api (external HTTP API), see api/README.md
+api/                         # rakumux-api (external HTTP API), see api/README.md
   openapi.yaml               # the API contract (OpenAPI 3.1)
   src/                       # main, server, instance (flock), discovery (api.json), remote
                              # (remote.json, Tailscale addresses), routes, guard (Host/Origin/
@@ -128,11 +128,11 @@ api/                         # orchestra-api (external HTTP API), see api/README
                              # error, detach, probe, log, time
   tests/                     # api_e2e (real binary + real daemon, remote listener on loopback,
                              # WebSocket clients), openapi_sync
-mcp/                         # orchestra-mcp (MCP server for agents), see mcp/README.md
+mcp/                         # rakumux-mcp (MCP server for agents), see mcp/README.md
   src/                       # main, server (rmcp adapter), tools, client (API, discovery, identity),
-                             # launch (orchestra-api --detach), render, untrusted, instructions
+                             # launch (rakumux-api --detach), render, untrusted, instructions
   tests/                     # mcp_stdio (stub API), full_stack (mcp → api → ptyd)
-mobile/                      # phone app: Expo (Expo Go), over orchestra-api's remote mode, see mobile/README.md
+mobile/                      # phone app: Expo (Expo Go), over rakumux-api's remote mode, see mobile/README.md
   src/                       # app (screens), api (JSON, events, attach clients), state, terminal (xterm in a WebView), ui
 shell/                       # launcher, build and hook scripts (see shell/AGENTS.md)
 install/                     # npm, Homebrew, release scripts (see install/AGENTS.md)
@@ -150,7 +150,7 @@ tui/
       ids.rs                 # SessionId (ULID), TerminalId, Token
       api.rs                 # Hello/Auth, Request, Response, errors, stream commands/events, events
       frame.rs               # [u32 len][u8 kind][payload] codec
-      paths.rs               # Layout (~/.orchestra, run dir, socket), Registration, find_ptyd_binary
+      paths.rs               # Layout (~/.rakumux, run dir, socket), Registration, find_ptyd_binary
       remote.rs              # RemoteConfig (remote.json), pairing token, is_tailscale (the ranges)
       tailscale.rs           # this machine's Tailscale addresses (ranges + Tailscale's interface, or
                              # `tailscale status`), MagicDNS name
@@ -160,7 +160,7 @@ tui/
       input.rs               # encode_key, encode_paste, encode_mouse
     vt/examples/             # spike.rs (fidelity), throughput.rs
     ptyd/src/
-      main.rs, server.rs     # `orchestra-ptyd serve | --version`; accept loop, hello, dispatch, streams
+      main.rs, server.rs     # `rakumux-ptyd serve | --version`; accept loop, hello, dispatch, streams
       registration.rs        # single-instance claim, socket, service.json
       control_api.rs         # Control trait (server ↔ control)
       control/               # ControlService: registry, scope, identity, permissions, waits, audit
@@ -171,13 +171,13 @@ tui/
       persist.rs             # ScrollbackStore: sessions/<id>/{scrollback.ansi, meta.json}
       procinfo/              # foreground process, cwd, RSS (Linux /proc, macOS libproc)
       detect.rs              # agent and lifecycle detection from screen + process
-      log.rs                 # ~/.orchestra/logs/ptyd.log
+      log.rs                 # ~/.rakumux/logs/ptyd.log
   src/
     main.rs                  # cli::dispatch, else the TUI event loop
     cli/                     # new, ls, attach, rename, kill, rm, daemon, remote, session (JSON)
-    remote_access.rs         # phone access: remote.json on/off/rotate, (re)starting orchestra-api, pairing
-                             # (URLs, token, orchestra://connect link), autostart; PhoneAccess (the TUI's port)
-    qr.rs                    # QR codes drawn with ▀ (pairing: `orchestra remote pair`, the pairing dialog)
+    remote_access.rs         # phone access: remote.json on/off/rotate, (re)starting rakumux-api, pairing
+                             # (URLs, token, rakumux://connect link), autostart; PhoneAccess (the TUI's port)
+    qr.rs                    # QR codes drawn with ▀ (pairing: `rakumux remote pair`, the pairing dialog)
     app.rs, app/             # TUI state, folders and the folder filter, handlers, session pipelines, config
                              # (see tui/src/app/AGENTS.md)
     ui.rs, components/       # rendering: session list, detail, Folders modal, dialogs, footer (mode badge,
@@ -189,7 +189,7 @@ tui/
     auth/                    # Clerk auth, deferred (feature flag off)
     escape_time.rs           # keys whose escape sequence arrives in pieces (phones over SSH): a lone
                              # Esc waits for the rest of an arrow, Home/End, PgUp/PgDn, F1-F4 or a focus
-                             # report: 300 ms in session mode, 800 ms in Orchestra mode
+                             # report: 300 ms in session mode, 800 ms in Rakumux mode
     updater.rs, version.rs, theme.rs, icons.rs (plain / emoji / Nerd Font marks)
 ```
 
@@ -220,9 +220,9 @@ What survives what (`plans/restart-recovery.md`):
 
 | Event | Running programs | How sessions come back |
 |---|---|---|
-| Restart in place (`orchestra daemon restart`, `orchestra --new-server`, the TUI's restart offer, SIGUSR2) | keep running (same pids) | nothing to do: the new image adopts the PTYs, screens, history, tokens and bindings; clients reconnect, a TUI in session mode goes back in |
-| Crash, `kill -9`, reboot, SIGTERM | end | the next daemon start revives every session listed in `~/.orchestra/running.json`, with its resume command |
-| `orchestra daemon stop` (`daemon_shutdown`) | end | not revived (the user ended them); Enter revives one |
+| Restart in place (`rakumux daemon restart`, `rakumux --new-server`, the TUI's restart offer, SIGUSR2) | keep running (same pids) | nothing to do: the new image adopts the PTYs, screens, history, tokens and bindings; clients reconnect, a TUI in session mode goes back in |
+| Crash, `kill -9`, reboot, SIGTERM | end | the next daemon start revives every session listed in `~/.rakumux/running.json`, with its resume command |
+| `rakumux daemon stop` (`daemon_shutdown`) | end | not revived (the user ended them); Enter revives one |
 
 The resume command (`SessionView.resume`, `ResumeSpec`) is kept current while a session runs: every
 few seconds, or when the foreground process changes, the control layer asks `resume::plan` about the
@@ -241,7 +241,7 @@ Startup commands always run on revive.
 Defined in `session-core/src/{api.rs, frame.rs}`; full description in `plans/sessions-refactor.md`
 §5.4.
 
-- Unix socket `/tmp/orchestra-<uid>/ptyd-<hash>.sock`; peers with another UID are rejected.
+- Unix socket `/tmp/rakumux-<uid>/ptyd-<hash>.sock`; peers with another UID are rejected.
 - Frames: `[u32 BE length][u8 kind][payload]`, max 8 MiB. Kind 0 = JSON control message; kind 1 =
   raw terminal bytes (output frames start with a `u64` offset).
 - First message `hello { protocol, client, version, auth }` with `auth` = user token (from
@@ -273,17 +273,17 @@ Defined in `session-core/src/{api.rs, frame.rs}`; full description in `plans/ses
 | Caller | How it authenticates | May |
 |---|---|---|
 | User (TUI, CLI outside any session) | token from `service.json` | everything |
-| Session (any process inside a session, e.g. an agent) | `ORCHESTRA_SESSION_ID` + `ORCHESTRA_SESSION_TOKEN` | list/get/read/wait/subscribe within its own folder (naming another, or `all`, → `out_of_scope`); create sessions in its own folder, within `control::Limits` (→ `limit_exceeded`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); everything else → `permission_denied` (agent control of other sessions is planned for 0.7.0) |
-| Delegated (the API for an agent conversation, e.g. OpenCode 2.x via `orchestra-mcp`) | user token + agent kind + conversation id | exactly what the session that bound the conversation may do; `unauthenticated` when no running session bound it |
+| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | list/get/read/wait/subscribe within its own folder (naming another, or `all`, → `out_of_scope`); create sessions in its own folder, within `control::Limits` (→ `limit_exceeded`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); everything else → `permission_denied` (agent control of other sessions is planned for 0.7.0) |
+| Delegated (the API for an agent conversation, e.g. OpenCode 2.x via `rakumux-mcp`) | user token + agent kind + conversation id | exactly what the session that bound the conversation may do; `unauthenticated` when no running session bound it |
 
 `control::Limits` apply only to sessions created by sessions: at most 4 running per creating session,
 depth 2 (a session the user created is depth 0), 8 running per folder and 10 creates per creating
-session per minute. `orchestra new` inside a session needs `--detach`, since sessions can't attach.
+session per minute. `rakumux new` inside a session needs `--detach`, since sessions can't attach.
 
 Conversation bindings (`session_bind`) live in daemon memory: the newest binding of a conversation
 wins, and a session's bindings end when it exits. OpenCode 2.x runs MCP servers in a service shared by
-every conversation, so the Orchestra plugin for its TUI (`mcp/opencode/orchestra-session/tui.js`,
-installed with `orchestra-mcp opencode-plugin --install`) binds the conversations it shows.
+every conversation, so the Rakumux plugin for its TUI (`mcp/opencode/rakumux-session/tui.js`,
+installed with `rakumux-mcp opencode-plugin --install`) binds the conversations it shows.
 
 Mutating requests and denials are written to the audit log. Tokens give attribution and prevent
 accidents; they don't stop a hostile process running as the same user.
@@ -291,29 +291,29 @@ accidents; they don't stop a hostile process running as the same user.
 ## Data layout and schema
 
 ```text
-~/.orchestra/                    ($ORCHESTRA_HOME overrides)
-  orchestra.sqlite3              registry, daemon only: sessions_v2, audit_log
+~/.rakumux/                    ($RAKUMUX_HOME overrides)
+  rakumux.sqlite3              registry, daemon only: sessions_v2, audit_log
   sessions/<id>/scrollback.ansi  saved scrollback (ANSI rows, oldest first)
   sessions/<id>/meta.json        SessionMeta {cwd, title, foreground_process, exit_code, updated_at}
-  history/<id>.log               command history written by shell/orchestra-command-hook.sh
-  logs/ptyd.log                  daemon log (1 MiB, rotated; level ORCHESTRA_PTYD_LOG)
-  logs/api.log                   log of a detached orchestra-api (ORCHESTRA_API_LOG=debug: every request)
+  history/<id>.log               command history written by shell/rakumux-command-hook.sh
+  logs/ptyd.log                  daemon log (1 MiB, rotated; level RAKUMUX_PTYD_LOG)
+  logs/api.log                   log of a detached rakumux-api (RAKUMUX_API_LOG=debug: every request)
   logs/tui-input.log             terminal events read and handled, with the app's state (session-mode keys
                                  not logged): the last 500 written on quit and on `kill -USR1 <tui pid>`,
                                  every one live with `--debug`; for terminal apps that send keys unusually
   api.json                       ApiInfo {url, token, pid, version, remote_urls?} of the running
-                                 orchestra-api, 0600; remote_urls: what its remote listener bound
+                                 rakumux-api, 0600; remote_urls: what its remote listener bound
                                  (only while one runs)
-  api.lock                       flock held by the running orchestra-api (one per home)
+  api.lock                       flock held by the running rakumux-api (one per home)
   remote.json                    RemoteConfig {enabled, port (7337), token (26 chars a-z2-7),
                                  listen: ["ADDR:PORT"]}, 0600: remote access, written by
-                                 `orchestra remote`, read by orchestra-api at start
+                                 `rakumux remote`, read by rakumux-api at start
   config.json                    Config (below)
   running.json                   {"sessions": [ids]}: sessions running now, revived by the next start
                                  after a crash or reboot; removed by `daemon stop`
   update_state.json              UpdateState {last_check, latest_version, pending_upgrade, install_method}
-  session.json                   auth SessionRecord {session_id, token, email} (Clerk; deferred, unrelated to Orchestra sessions)
-~/.orchestra/run/                ($ORCHESTRA_HOME/run), 0700: the same from every login
+  session.json                   auth SessionRecord {session_id, token, email} (Clerk; deferred, unrelated to Rakumux sessions)
+~/.rakumux/run/                ($RAKUMUX_HOME/run), 0700: the same from every login
   service.json                   Registration {instance_id, pid, protocol, version, socket, token}, 0600
   service.lock                   flock held by the running daemon (kept across a restart in place)
 ```
@@ -327,11 +327,11 @@ accidents; they don't stop a hostile process running as the same user.
   scopes); the 0.5.x `sessions` table is dropped on first open. Live
   state (terminal ids, session tokens) is in daemon memory only.
 - **Config** (`tui/src/app/config.rs`): `Config {anthropic_api_key, openai_api_key,
-  ai_primary_provider, openai_model}` plus `sessions {orchestra_key ("ctrl+\\"; an older
+  ai_primary_provider, openai_model}` plus `sessions {rakumux_key ("ctrl+\\"; an older
   `prefix_key` other than "ctrl+b" still counts), cycle_keys (["alt+up", "alt+down"]),
   cycle_keys_in_session (false), layout ("sidebar" | "tabs"), icons ("plain" | "emoji" | "nerd":
   the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
-  its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Orchestra from your
+  its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
   sidebar_width (dragged divider),
   stacked_list_percent (the list's share of the height on narrow screens, set by dragging the
@@ -339,11 +339,11 @@ accidents; they don't stop a hostile process running as the same user.
   left out until dragged), session_order ({folder path: [session ids]}: the list order set by
   dragging or `J`/`K`; left out when empty)}`. The folder filter isn't saved; the
   `selected_projects` of 0.6 previews is ignored and dropped on the next save.
-- **Environment** injected into every session: `ORCHESTRA_SESSION_ID`, `ORCHESTRA_SESSION_TOKEN`,
-  `ORCHESTRA_SOCKET`, `ORCHESTRA_BIN`, `TERM=xterm-256color`, `COLORTERM=truecolor`. Other variables:
-  `ORCHESTRA_HOME` (isolated data dir; tests), `ORCHESTRA_PTYD_BIN` (daemon binary),
-  `ORCHESTRA_PTYD_LOG` (log level), `ORCHESTRA_API_BIN` (the `orchestra-api` binary
-  `orchestra-mcp`, `orchestra remote` and the TUI start), `ORCHESTRA_API_LOG`, `GW_TUI_BIN` / `GW_PTYD_BIN` (launcher overrides),
+- **Environment** injected into every session: `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN`,
+  `RAKUMUX_SOCKET`, `RAKUMUX_BIN`, `TERM=xterm-256color`, `COLORTERM=truecolor`. Other variables:
+  `RAKUMUX_HOME` (isolated data dir; tests), `RAKUMUX_PTYD_BIN` (daemon binary),
+  `RAKUMUX_PTYD_LOG` (log level), `RAKUMUX_API_BIN` (the `rakumux-api` binary
+  `rakumux-mcp`, `rakumux remote` and the TUI start), `RAKUMUX_API_LOG`, `GW_TUI_BIN` / `GW_PTYD_BIN` (launcher overrides),
   `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (AI naming fallbacks), `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
   `XDG_DATA_HOME` (where the daemon looks for agents' conversations, `resume.rs`). Sessions the daemon
   revives by itself get the daemon's environment (the one the client that started it had).
@@ -352,14 +352,14 @@ accidents; they don't stop a hostile process running as the same user.
 
 ### Launching the TUI
 
-1. `orchestra.sh` (input: CLI args) resolves both binaries and execs `tui --ptyd-path <path>`.
+1. `rakumux.sh` (input: CLI args) resolves both binaries and execs `tui --ptyd-path <path>`.
 2. `tui/src/main.rs` → `cli::dispatch` returns `None`; with `--new-server`, `cli::new_server`
    replaces the running daemon first (in place; an older one is stopped after asking) or starts
    one → TUI setup (raw mode, alternate screen) and first paint.
 3. In the background: `Client::connect(ClientConfig { client_name: "tui", spawn: true, … })`. It
-   connects to the daemon registered in `~/.orchestra/run` (or, when none answers there, one an
-   earlier build registered under `$XDG_RUNTIME_DIR/orchestra`: `Layout::legacy`). Only if no daemon
-   answers does it spawn `orchestra-ptyd serve` detached, wait up to 2 s for `service.json` and the
+   connects to the daemon registered in `~/.rakumux/run` (or, when none answers there, one an
+   earlier build registered under `$XDG_RUNTIME_DIR/rakumux`: `Layout::legacy`). Only if no daemon
+   answers does it spawn `rakumux-ptyd serve` detached, wait up to 2 s for `service.json` and the
    socket, and complete the hello.
 4. `add_project(launch folder)`, `projects()`, then `subscribe { all: true }` and
    `list_all(include_dead)` (capability `sessions.all`); a daemon without it gets
@@ -380,12 +380,12 @@ accidents; they don't stop a hostile process running as the same user.
 2. Enter sends `StreamCommand::Promote`; the TUI becomes controller and resizes the PTY to its pane;
    other attached clients get `role_changed`.
 3. Session mode: keys pass through `terminal_view::key_to_bytes` (mode-aware) to
-   `AttachSender::input`, except the Orchestra key (`Ctrl-\`), which demotes and switches to
-   Orchestra mode (and the cycle keys when `cycle_keys_in_session` is on).
+   `AttachSender::input`, except the Rakumux key (`Ctrl-\`), which demotes and switches to
+   Rakumux mode (and the cycle keys when `cycle_keys_in_session` is on).
 
 ### A CLI command
 
-`orchestra ls` → `orchestra.sh` → `tui` → `cli::dispatch` → `Client::connect` (user auth, spawn on
+`rakumux ls` → `rakumux.sh` → `tui` → `cli::dispatch` → `Client::connect` (user auth, spawn on
 demand) → `SessionApi::list(ScopeRoot::resolve(cwd))` → text or JSON on stdout; exit code 0/1/2.
 
 ### Inside the daemon
@@ -401,32 +401,32 @@ demand) → `SessionApi::list(ScopeRoot::resolve(cwd))` → text or JSON on stdo
 
 ### An agent inside a session
 
-`orchestra session report --state done --text …` → `$ORCHESTRA_BIN` → `tui` → `cli` →
+`rakumux session report --state done --text …` → `$RAKUMUX_BIN` → `tui` → `cli` →
 `Client::connect` (`AuthMode::Auto` picks session auth from the environment and uses
-`ORCHESTRA_SOCKET`) → `session_report` → control layer checks "self only", stores `reported`,
+`RAKUMUX_SOCKET`) → `session_report` → control layer checks "self only", stores `reported`,
 writes the audit entry and publishes a `reported` event → every TUI watching the scope updates.
 
 ### An agent through MCP
 
-Agent → `orchestra-mcp` (stdio JSON-RPC, `tools/call read_session`) → `tools` resolves the
+Agent → `rakumux-mcp` (stdio JSON-RPC, `tools/call read_session`) → `tools` resolves the
 `session` argument (id, else name) → `client` reads `api.json` (health-checks the pid, or runs
-`orchestra-api --detach`) → `GET /v1/sessions/{id}/content` with the bearer token and, when the
-agent runs in a session, `X-Orchestra-Session-Id`/`-Token` → `orchestra-api` checks `Host`,
+`rakumux-api --detach`) → `GET /v1/sessions/{id}/content` with the bearer token and, when the
+agent runs in a session, `X-Rakumux-Session-Id`/`-Token` → `rakumux-api` checks `Host`,
 `Origin` and the token → `daemon` picks the client for that identity (`spawn_blocking`) →
 `SessionApi::read` → daemon policy and folder (scope) checks → `ReadResult` → JSON →
-`orchestra-mcp` sanitizes, caps and wraps the text in `<orchestra-output nonce=…>` → tool result
+`rakumux-mcp` sanitizes, caps and wraps the text in `<rakumux-output nonce=…>` → tool result
 (structured content + text).
 
 ### A phone through remote access
 
-`orchestra remote on` (`tui/src/cli/remote.rs`), or Settings → Phone access / the one-time offer in
+`rakumux remote on` (`tui/src/cli/remote.rs`), or Settings → Phone access / the one-time offer in
 the TUI (`app/phone_access.rs`, through `remote_access::PhoneAccess` off the UI thread) →
 `remote_access::enable` → `remote.json` `enabled` (new token if none) → SIGTERM to `api.json`'s pid
-if that process is `orchestra-api`, wait → `orchestra-api --detach` → `server::serve` →
+if that process is `rakumux-api`, wait → `rakumux-api --detach` → `server::serve` →
 `remote::plan` (`session_core::tailscale::addresses`: `getifaddrs`, the Tailscale ranges on
 Tailscale's interface; or `listen`) → binds the remote listener next to 127.0.0.1 → `api.json`
 `remote_urls` → the URLs (MagicDNS name first, from `tailscale status --json`), the token and
-`orchestra://connect?url=…&token=…`, shown as a QR code (`qr.rs`) by `orchestra remote pair` and
+`rakumux://connect?url=…&token=…`, shown as a QR code (`qr.rs`) by `rakumux remote pair` and
 the TUI's pairing dialog; the app scans it. (The TUI does the `--detach` at startup when remote
 access is on and no API runs; `remote_access::pairing` restarts an API that has no remote listener
 once Tailscale has an address.) The app → `GET /v1/sessions?all=true` with `Authorization: Bearer <remote
@@ -440,7 +440,7 @@ a channel; `attached` (checkpoint) first, output as binary frames, input and `re
 
 ### Restart in place
 
-`orchestra daemon restart` → `SessionApi::restart_daemon(binary)` → server: user only,
+`rakumux daemon restart` → `SessionApi::restart_daemon(binary)` → server: user only,
 `handoff::check_target` (`binary handoff-versions`), stop accepting, answer `ok` →
 `Control::handoff` (tokens, spawn environments, bindings; registry closed) → `TerminalHost::handoff`
 (each actor stops its reader, takes in what it read, and returns an inheritable PTY descriptor, its
@@ -454,7 +454,7 @@ new image because the socket stays bound throughout.
 ### Revive after a reboot or a crash
 
 The daemon starts with every stored session `dead`, then revives those `running.json` lists
-(`Control::revive_interrupted`, audited as `orchestra-ptyd`) with their resume commands. Others stay
+(`Control::revive_interrupted`, audited as `rakumux-ptyd`) with their resume commands. Others stay
 dead: selecting one shows its saved scrollback (`session_read`); Enter → `SessionApi::revive` → the
 control layer spawns a terminal with the same id, cwd and launch spec, a fresh environment snapshot
 and token, and the resume command as startup input → the TUI attaches.
@@ -462,12 +462,12 @@ and token, and the resume command as startup input → the TUI attaches.
 ### AI naming
 
 When a session with a generated name first goes `idle` or `done`, the TUI reads
-`~/.orchestra/history/<id>.log` and the visible screen (`session_read`), calls
+`~/.rakumux/history/<id>.log` and the visible screen (`session_read`), calls
 `naming::suggest_session_name`, and renames the session if a name comes back.
 
 ### Updates
 
-`orchestra.sh` runs `shell/gwr/check-updates.sh` silently in the background (at most daily);
+`rakumux.sh` runs `shell/gwr/check-updates.sh` silently in the background (at most daily);
 `tui/src/updater.rs` keeps `UpdateState`, shows the upgrade dialog and runs `npm`/`brew` when the
 user accepts, then restarts the TUI. Upgrading never stops the daemon; on a protocol mismatch the TUI
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
@@ -493,14 +493,14 @@ since running sessions end).
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
 - **Git context**: a session's branch and linked worktree, read from `.git` files (never `git`).
-- **Daemon** (`orchestra-ptyd`): the single per-user server owning every session.
-- **Client**: anything connected to the daemon (TUI, CLI call, agent, `orchestra-api`).
-- **External API**: `orchestra-api`, HTTP on 127.0.0.1 over the daemon; found through `api.json`.
+- **Daemon** (`rakumux-ptyd`): the single per-user server owning every session.
+- **Client**: anything connected to the daemon (TUI, CLI call, agent, `rakumux-api`).
+- **External API**: `rakumux-api`, HTTP on 127.0.0.1 over the daemon; found through `api.json`.
 - **Remote access** (phone access in the TUI): the API's remote listener (Tailscale addresses, port
-  7337) for the phone app, paired by scanning a QR code of the `orchestra://connect` link;
-  opt-in with `orchestra remote on` or Settings → Phone access (`remote.json`), admitted by the
+  7337) for the phone app, paired by scanning a QR code of the `rakumux://connect` link;
+  opt-in with `rakumux remote on` or Settings → Phone access (`remote.json`), admitted by the
   remote token, always the user.
-- **MCP server**: `orchestra-mcp`, the tools coding agents call; a client of the external API.
+- **MCP server**: `rakumux-mcp`, the tools coding agents call; a client of the external API.
 - **User caller / session caller**: a client authenticated with the daemon's user token, or with a
   session's own id + token (from inside that session).
 - **Controller / observer**: the one attachment that sends input / any other read-only attachment.
@@ -518,38 +518,38 @@ since running sessions end).
   without being stopped (`running.json`).
 - **Registry**: the daemon's SQLite database. **Registration**: `service.json`, how clients find
   and authenticate to the daemon.
-- **Orchestra key**: `Ctrl-\` by default; the one key a session never receives. It switches from
-  session mode (keys go to the program) to Orchestra mode (keys drive Orchestra; the session is
-  previewed). `orchestra attach` uses it as its prefix.
+- **Rakumux key**: `Ctrl-\` by default; the one key a session never receives. It switches from
+  session mode (keys go to the program) to Rakumux mode (keys drive Rakumux; the session is
+  previewed). `rakumux attach` uses it as its prefix.
 - **Layout**: Sidebar (list left, detail right; on narrow windows the list stacked above the
-  detail in Orchestra mode) or Tabs (tab bar on top); `sessions.layout`. Phones have their own:
+  detail in Rakumux mode) or Tabs (tab bar on top); `sessions.layout`. Phones have their own:
   the list, or a session under tabs.
 - **Contracts**: the crate types and traits that define the architecture (`plans/parallel-execution.md`).
 
-## Using Orchestra
+## Using Rakumux
 
 | Command | Purpose |
 |---|---|
-| `orchestra` | TUI for the current folder |
-| `orchestra new [--name N] [--cwd P] [--cmd C]... [--detach] [-- ARGV...]` | Create a session and attach |
-| `orchestra ls [--json] [--dead] [--folder DIR]... \| --all` | Sessions of this folder, of the given folders, or of every folder (`--dead` includes dead ones; `--project` is a hidden alias of `--folder`; `--json` gives each session `folder` next to `scope`) |
-| `orchestra attach <name\|id>` | Full-screen attach (prefix `d` detaches) |
-| `orchestra rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
-| `orchestra pin <name\|id>` / `orchestra unpin <name\|id>` | Pin first in its folder / unpin |
-| `orchestra kill <name\|id> [--tree]` / `orchestra rm <name\|id>` | Terminate / delete |
-| `orchestra folders [--json]` / `orchestra folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
-| `orchestra --new-server` | Replace the running daemon with this Orchestra's (in place: sessions keep running), or start one; then the TUI |
-| `orchestra daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
-| `orchestra session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
-| `orchestra remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (also Settings → Phone access in the TUI): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `orchestra://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
-| `orchestra-api [--port N] [--detach] [--remote-listen ADDR:PORT]...` | External HTTP API on 127.0.0.1, plus the remote listener when remote access is on (`api/README.md`) |
-| `orchestra-mcp` | MCP server for agents, e.g. `claude mcp add --scope user orchestra -- orchestra-mcp` (`mcp/README.md`) |
+| `rakumux` | TUI for the current folder |
+| `rakumux new [--name N] [--cwd P] [--cmd C]... [--detach] [-- ARGV...]` | Create a session and attach |
+| `rakumux ls [--json] [--dead] [--folder DIR]... \| --all` | Sessions of this folder, of the given folders, or of every folder (`--dead` includes dead ones; `--project` is a hidden alias of `--folder`; `--json` gives each session `folder` next to `scope`) |
+| `rakumux attach <name\|id>` | Full-screen attach (prefix `d` detaches) |
+| `rakumux rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
+| `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin first in its folder / unpin |
+| `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete |
+| `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
+| `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
+| `rakumux daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
+| `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
+| `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (also Settings → Phone access in the TUI): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
+| `rakumux-api [--port N] [--detach] [--remote-listen ADDR:PORT]...` | External HTTP API on 127.0.0.1, plus the remote listener when remote access is on (`api/README.md`) |
+| `rakumux-mcp` | MCP server for agents, e.g. `claude mcp add --scope user rakumux -- rakumux-mcp` (`mcp/README.md`) |
 
 TUI keys come in two modes. **Session mode**: everything goes to the program except `Ctrl-\`,
-which switches to **Orchestra mode** (and `Option`/`Alt`+`↑/↓` when `cycle_keys_in_session` is
-on). Orchestra mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
+which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_keys_in_session` is
+on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
 session is previewed, faded: the session pane fades whenever it doesn't take keys, in
-Orchestra mode or under a dialog, while the list never fades; the folder filter, a folder
+Rakumux mode or under a dialog, while the list never fades; the folder filter, a folder
 header and + New session keep the last session in view, one the filters show), `gg`/`G`,
 `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder) (a Ctrl or Alt that no shortcut uses is
 ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
@@ -561,36 +561,36 @@ PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o
 quit. There is no header: the panes start at the top row, and the folder filter (`▤ All folders
 ▾`, a folder's name and branch, or `▤ 3 folders ▾`) is the list's first row (Sidebar) or sits at
 the left of the tab bar (Tabs). The footer, always one row at the bottom (in zoom too), starts with the mode badge
-(orange ORCHESTRA / quiet SESSION), then messages and the daemon connection while it isn't up
+(orange RAKUMUX / quiet SESSION), then messages and the daemon connection while it isn't up
 (`⠋ connecting`, `✕ daemon unavailable`), and on the right the keys for Help and Settings
-(`? help  , settings`; in session mode `Ctrl-\ orchestra  Ctrl-\ ? help  Ctrl-\ , settings`); when
+(`? help  , settings`; in session mode `Ctrl-\ rakumux  Ctrl-\ ? help  Ctrl-\ , settings`); when
 the row is short the message is cut first, then hints go from the right (Settings, then Help).
 Help and Settings' Keys tab list every key; the Keys tab runs them. A welcome tour
 (`components/welcome.rs`, `AppMode::Welcome`) opens on startup until its "Don't show this on
 startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the list.
-When Tailscale runs on the machine and phone access was never set up (no `remote.json`), Orchestra
-asks once, in Orchestra mode with no other dialog open (so after the tour), "Use Orchestra from your
+When Tailscale runs on the machine and phone access was never set up (no `remote.json`), Rakumux
+asks once, in Rakumux mode with no other dialog open (so after the tour), "Use Rakumux from your
 phone?" (`AppMode::PhoneOffer`; `sessions.phone_offer_seen`): `y` turns it on and opens the pairing
-dialog (`AppMode::Pairing`: the QR code of the `orchestra://connect` link, the URL and the token;
+dialog (`AppMode::Pairing`: the QR code of the `rakumux://connect` link, the URL and the token;
 `x` turns phone access off), `n` leaves it off. Settings' General tab has the same switch (Phone
 access: Enter turns it on or shows the pairing dialog).
 
 Phones (under `layout::PHONE_BELOW` = 80 columns, whatever the layout setting; phone terminals
-are about 40–60 columns in portrait) show one thing at a time: Orchestra mode is the session list
+are about 40–60 columns in portrait) show one thing at a time: Rakumux mode is the session list
 alone, full screen; a tap on a session (or `Enter`) goes into it, and session mode gives it the
 screen under a row of tabs, one per session (no folder filter, no title row; a tap on a tab switches
 session and stays in session mode). `Ctrl-\` (or a tap on the SESSION badge) goes back to the list.
 Moving through the list on a phone doesn't resize anything: no session is on screen there.
 
-Narrow windows (Sidebar from 80 to `layout::SINGLE_PANE_BELOW` = 100 columns): in Orchestra mode
+Narrow windows (Sidebar from 80 to `layout::SINGLE_PANE_BELOW` = 100 columns): in Rakumux mode
 the list is stacked on top, a one-row divider under it, and the selected session's detail (title
 row and faded preview) below, so switching sessions shows them. The list gets 40% of the rows above
 the footer, at least `LIST_MIN_ROWS` (9: the folder filter and two sessions) and leaving the detail
 `PREVIEW_MIN_ROWS` (4); dragging the divider sets that share (`sessions.stacked_list_percent`).
-Below `STACK_MIN_ROWS` (14 rows above the footer, a 15-row screen) Orchestra mode shows the list
+Below `STACK_MIN_ROWS` (14 rows above the footer, a 15-row screen) Rakumux mode shows the list
 alone. Session mode fills everything above the footer. Taps arrive as clicks, so the footer is a
 tap target too (`Hit::ModeBadge`, `Hit::FooterKey`, recorded by `components/footer.rs`): the
-SESSION badge switches to Orchestra mode like `Ctrl-\`, the ORCHESTRA badge goes back to the
+SESSION badge switches to Rakumux mode like `Ctrl-\`, the RAKUMUX badge goes back to the
 session you came from like `Esc`, and each hint does what its keys do. Dialogs are at least
 min(screen width − 2, 48) columns (`components/utils.rs::popup_width`), wrap their key lines and
 grow to fit their text; the welcome tour tightens its spacing when it doesn't fit, and Settings'
@@ -621,7 +621,7 @@ session goes in the current folder (`App::current_folder`: the selected session'
 folder header, that folder; else the filter's only folder; else the launch folder), shown under
 the name (`in ▤ folder`), and runs the login shell there. A session made in a folder the filter
 hides adds that folder to the filter. Other folders, commands and startup commands are CLI-only:
-`orchestra new --cwd DIR --cmd C -- ARGV`.
+`rakumux new --cwd DIR --cmd C -- ARGV`.
 
 The Folders modal (`P`, Enter on or a click on the folder filter; `AppMode::Folders`,
 `app/folders.rs`) lists All folders (ticked when there's no filter), then every folder that has
@@ -633,33 +633,33 @@ clears the ticks). `Esc` closes without changes. A typed folder path (starting w
 with the folders that complete it listed below (`app/path_complete.rs`: folders only,
 dot-folders once the name starts with `.`, capped reads); `↑`/`↓` choose one, Tab (or `→` at the
 end of the query) completes the path with it, and Enter adds it (`add_project`) and shows it
-alone, ready for new sessions. Forgetting a folder is CLI-only (`orchestra folders rm`).
+alone, ready for new sessions. Forgetting a folder is CLI-only (`rakumux folders rm`).
 
 ## Shell wrapper integration
 
 A program can't change its parent shell's directory. When the TUI quits with a session selected it
-can print `cd "<session cwd>"`; a shell function around `orchestra` evals that line. The wrapper is
-documented at the top of `orchestra.sh`. The daemon is always spawned with its stdio detached, so a
-wrapper that captures Orchestra's output never waits on the daemon. (Whether `cd` on exit stays is
+can print `cd "<session cwd>"`; a shell function around `rakumux` evals that line. The wrapper is
+documented at the top of `rakumux.sh`. The daemon is always spawned with its stdio detached, so a
+wrapper that captures Rakumux's output never waits on the daemon. (Whether `cd` on exit stays is
 an open question in `plans/sessions-refactor.md` §17.)
 
 ## Local builds
 
 - Build: `./build.sh`, or `cd tui && cargo build --workspace --release` (binaries in
-  `tui/target/release/`: `tui`, `orchestra-ptyd`, `orchestra-api`, `orchestra-mcp`).
-- Run a checkout: `./orchestra.sh`, or `shell/orchestra-local.sh` (often aliased as
-  `orchestra-local`): default root `$HOME/repos/orchestrator` (override with `ORCHESTRA_LOCAL_ROOT` or
-  `--root`), `--worktree <name>` runs `<root>/worktrees/<name>/orchestra.sh`, and arguments after
-  `--` pass through (`orchestra-local -- --debug`).
+  `tui/target/release/`: `tui`, `rakumux-ptyd`, `rakumux-api`, `rakumux-mcp`).
+- Run a checkout: `./rakumux.sh`, or `shell/rakumux-local.sh` (often aliased as
+  `rakumux-local`): default root `$HOME/repos/rakumux` (override with `RAKUMUX_LOCAL_ROOT` or
+  `--root`), `--worktree <name>` runs `<root>/worktrees/<name>/rakumux.sh`, and arguments after
+  `--` pass through (`rakumux-local -- --debug`).
 - Run fully isolated from your real sessions:
-  `ORCHESTRA_HOME=$(mktemp -d) tui/target/debug/tui --ptyd-path tui/target/debug/orchestra-ptyd`.
-  `ORCHESTRA_HOME` gives a separate registry, run dir, socket and therefore a separate daemon.
+  `RAKUMUX_HOME=$(mktemp -d) tui/target/debug/tui --ptyd-path tui/target/debug/rakumux-ptyd`.
+  `RAKUMUX_HOME` gives a separate registry, run dir, socket and therefore a separate daemon.
 
 ## Development rules
 
 - Build and test from `tui/`: `cargo build --workspace`, `cargo test --workspace` (or
   `cargo test -p <crate>`), `cargo fmt --all --check`. No new warnings.
-- Tests never touch the real `~/.orchestra`: set `ORCHESTRA_HOME` to a temp dir.
+- Tests never touch the real `~/.rakumux`: set `RAKUMUX_HOME` to a temp dir.
 - Doc comments on public items, as in the contract files. Explicit errors; no `unwrap()`/`expect()`
   on daemon request paths (tests may).
 - Program the TUI and CLI against `SessionApi`, and test them with in-memory fakes
@@ -678,14 +678,14 @@ an open question in `plans/sessions-refactor.md` §17.)
 - `plans/agent-control.md`: agents inside sessions (rev 2): stage A in 0.6.0, stages B–D later.
 - `plans/agent-mcp.md`: MCP adapter for agents: OpenCode parity, tool set, identity, phasing.
 - `plans/projects-api-mcp.md`: projects, pinning, git context, the external API and the MCP server
-  (supersedes `agent-mcp.md` §3.1/§3.4: MCP is a separate binary over HTTP, not `orchestra mcp`).
+  (supersedes `agent-mcp.md` §3.1/§3.4: MCP is a separate binary over HTTP, not `rakumux mcp`).
 - `plans/restart-recovery.md`: one daemon per user from every login, restart in place, recovery
   after a crash or reboot, agent resume (Claude Code, Codex, OpenCode) and the last command.
 - `plans/folders.md`: folders instead of projects (rev 1): every folder's sessions by default, the
   folder filter and Folders modal, the new-session folder, CLI/API/MCP naming (supersedes the
   project selection and switcher of `projects-api-mcp.md`).
 - `plans/mobile-client.md`: the phone app (`mobile/`) and remote access (rev 1): `remote.json`,
-  `orchestra remote`, the API's remote listener over Tailscale, WebSocket attach and events.
+  `rakumux remote`, the API's remote listener over Tailscale, WebSocket attach and events.
 - `plans/parallel-execution.md`: work packages, contracts and file ownership for the refactor, and
   the integration log.
 - `plans/archive/`: historical notes from 0.5.x; they describe removed features.

@@ -1,5 +1,5 @@
-//! Phone access dialogs: the one-time offer ("Use Orchestra from your
-//! phone?") and the pairing dialog with the QR code the Orchestra app
+//! Phone access dialogs: the one-time offer ("Use Rakumux from your
+//! phone?") and the pairing dialog with the QR code the Rakumux app
 //! scans (`crate::qr`), the URL and the token.
 
 use ratatui::{
@@ -24,8 +24,8 @@ pub fn draw_phone_offer(f: &mut Frame, area: Rect) {
     let muted = Style::default().fg(p.text_muted);
     let lines = vec![
         Line::from(
-            "Tailscale is running on this machine. Orchestra can listen on your tailnet, so \
-             the Orchestra app on your phone can show your sessions and type into them.",
+            "Tailscale is running on this machine. Rakumux can listen on your tailnet, so \
+             the Rakumux app on your phone can show your sessions and type into them.",
         ),
         Line::from(""),
         Line::from(Span::styled(
@@ -43,7 +43,7 @@ pub fn draw_phone_offer(f: &mut Frame, area: Rect) {
     let width = popup_width(area.width, 50);
     let height = (text_rows(&lines, width.saturating_sub(2)) + key_rows(&keys, width) + 3).max(10);
     let popup = popup_area_fixed_height(area, 50, height);
-    let inner = dialog_frame(f, popup, "Use Orchestra from your phone?", p.accent_primary);
+    let inner = dialog_frame(f, popup, "Use Rakumux from your phone?", p.accent_primary);
     let above = draw_keys(f, inner, &keys);
     f.render_widget(
         Paragraph::new(lines)
@@ -99,7 +99,7 @@ pub fn draw_pairing(f: &mut Frame, dialog: &PairingDialog, area: Rect) {
                     vec![
                         Line::from(
                             "Open the link on your phone, or enter the URL and token in the \
-                             Orchestra app. A larger window shows a QR code to scan.",
+                             Rakumux app. A larger window shows a QR code to scan.",
                         ),
                         Line::from(""),
                         detail("URL", &url),
@@ -148,7 +148,7 @@ fn draw_with_qr(
     };
     let p = theme::palette();
     let intro = vec![Line::from(
-        "In the Orchestra app, tap Scan QR code, or point the phone's camera at the code.",
+        "In the Rakumux app, tap Scan QR code, or point the phone's camera at the code.",
     )];
     let details = vec![detail("URL", url), detail("Token", token)];
     let detail_cols = details.iter().map(Line::width).max().unwrap_or(0) as u16;

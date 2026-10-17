@@ -1,21 +1,21 @@
 #!/bin/bash
 
-# Find orchestrator root directory (parent of tests/)
+# Find rakumux root directory (parent of tests/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ORCHESTRATOR_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+RAKUMUX_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "=== TUI Debug Test ==="
-echo "Orchestrator root: $ORCHESTRATOR_ROOT"
+echo "Rakumux root: $RAKUMUX_ROOT"
 echo ""
 
 echo "1. Testing if TUI starts and exits properly:"
-echo "   Running: echo 'q' | orchestra"
+echo "   Running: echo 'q' | rakumux"
 echo "   (Should start TUI, send 'q' key, and exit)"
 echo ""
 
-# Run from the orchestrator directory to ensure proper context
-cd "$ORCHESTRATOR_ROOT"
-echo 'q' | "$ORCHESTRATOR_ROOT/orchestra.sh" 2>/dev/null
+# Run from the rakumux directory to ensure proper context
+cd "$RAKUMUX_ROOT"
+echo 'q' | "$RAKUMUX_ROOT/rakumux.sh" 2>/dev/null
 
 echo ""
 echo "2. Testing basic terminal capabilities:"

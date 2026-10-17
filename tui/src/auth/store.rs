@@ -15,7 +15,7 @@ pub struct FileStore;
 impl FileStore {
     fn path() -> Result<PathBuf> {
         let home = std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME not set"))?;
-        Ok(PathBuf::from(home).join(".orchestra").join("session.json"))
+        Ok(PathBuf::from(home).join(".rakumux").join("session.json"))
     }
 
     pub fn save(&self, rec: &SessionRecord) -> Result<()> {

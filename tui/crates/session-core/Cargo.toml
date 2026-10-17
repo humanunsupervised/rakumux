@@ -1,8 +1,8 @@
 [package]
-name = "orchestra-session-core"
+name = "rakumux-session-core"
 version = "0.1.0"
 edition = "2021"
-description = "Orchestra session model, wire protocol and client"
+description = "Rakumux session model, wire protocol and client"
 publish = false
 
 [lib]

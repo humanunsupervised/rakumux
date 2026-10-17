@@ -1,4 +1,4 @@
-//! Terminal emulation shared by the Orchestra daemon and TUI.
+//! Terminal emulation shared by the Rakumux daemon and TUI.
 //!
 //! [`Emulator`] wraps a `vt100::Parser`. The daemon owns the authoritative
 //! emulator for each terminal and runs it with the query responder enabled, so
@@ -12,7 +12,7 @@ pub mod input;
 
 pub use vt100;
 
-const VERSION_REPLY: &str = concat!("orchestra ", env!("CARGO_PKG_VERSION"));
+const VERSION_REPLY: &str = concat!("rakumux ", env!("CARGO_PKG_VERSION"));
 
 /// Side effects of terminal output that are not part of the screen itself.
 #[derive(Debug, Clone, PartialEq, Eq)]

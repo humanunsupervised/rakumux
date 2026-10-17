@@ -1,7 +1,7 @@
-//! Keys in Orchestra mode: the session list (Sidebar) or tab bar (Tabs)
+//! Keys in Rakumux mode: the session list (Sidebar) or tab bar (Tabs)
 //! has the keys, and the session is previewed. Arrows and Vim keys both
 //! move; Enter (or `i`) goes into a session; Esc cancels what's pending,
-//! then goes back to the session Orchestra mode was entered from.
+//! then goes back to the session Rakumux mode was entered from.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -32,7 +32,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
             _ => {}
         }
     }
-    if app.orchestra_key.matches(&key) {
+    if app.rakumux_key.matches(&key) {
         app.return_to_session();
         return AppResult::Continue;
     }
@@ -89,7 +89,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('x') => app.confirm_close(),
         KeyCode::Char('z') => app.zoom_into_selected(),
         KeyCode::Char('/') => app.list.filter_editing = true,
-        KeyCode::Char('\\') => app.send_orchestra_key(),
+        KeyCode::Char('\\') => app.send_rakumux_key(),
         // Cancel first (the filter), then back to the session.
         KeyCode::Esc => {
             if app.list.filter.is_empty() {

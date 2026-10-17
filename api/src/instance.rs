@@ -1,4 +1,4 @@
-//! One API per Orchestra home.
+//! One API per Rakumux home.
 //!
 //! The running API holds an exclusive `flock` on `<home>/api.lock`. While it
 //! is held, `api.json` belongs to the holder; when a new API gets the lock,
@@ -40,11 +40,11 @@ impl std::fmt::Display for ClaimError {
         match self {
             ClaimError::AlreadyRunning(Some(info)) => write!(
                 f,
-                "another orchestra-api is running (pid {}, {})",
+                "another rakumux-api is running (pid {}, {})",
                 info.pid, info.url
             ),
             ClaimError::AlreadyRunning(None) => {
-                write!(f, "another orchestra-api is running or starting")
+                write!(f, "another rakumux-api is running or starting")
             }
             ClaimError::Io(error) => write!(f, "cannot claim the API slot: {error}"),
         }

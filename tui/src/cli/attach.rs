@@ -1,4 +1,4 @@
-//! `orchestra attach`: a full-screen raw client.
+//! `rakumux attach`: a full-screen raw client.
 //!
 //! The user's terminal does the emulation: after the checkpoint, output
 //! bytes go straight to stdout and stdin bytes go straight to the session.
@@ -7,7 +7,7 @@
 //! alternate screen, so passing `?1049l` through would reveal the user's
 //! shell), after a resize, and after a notice.
 //!
-//! Prefix `Ctrl-\\` (the TUI's Orchestra key), then: `d` detach, `>`/`<`
+//! Prefix `Ctrl-\\` (the TUI's Rakumux key), then: `d` detach, `>`/`<`
 //! next/previous running session in scope by recency, `n` new session in the
 //! current directory, `Ctrl-\\` a literal `Ctrl-\\`.
 
@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-/// `Ctrl-\\` (0x1C), like the TUI's Orchestra key: coding agents and
+/// `Ctrl-\\` (0x1C), like the TUI's Rakumux key: coding agents and
 /// editors leave it alone (`Ctrl-b` is Claude Code's and OpenCode's
 /// "background" key).
 const PREFIX: u8 = 0x1c;
@@ -181,7 +181,7 @@ impl Drop for TerminalGuard {
 
 fn spawn_stdin_reader(tx: Sender<Msg>) -> io::Result<()> {
     std::thread::Builder::new()
-        .name("orchestra-stdin".into())
+        .name("rakumux-stdin".into())
         .spawn(move || {
             let mut stdin = io::stdin();
             let mut buf = vec![0u8; 16 * 1024];
@@ -441,7 +441,7 @@ impl<'a, W: Write, S: FnMut() -> (u16, u16)> AttachLoop<'a, W, S> {
         let _ = self.api.touch(&current.id);
         let tx = self.tx.clone();
         std::thread::Builder::new()
-            .name("orchestra-attach-fwd".into())
+            .name("rakumux-attach-fwd".into())
             .spawn(move || forward_stream(stream, generation, tx))?;
         Ok(current)
     }
@@ -584,7 +584,7 @@ impl<'a, W: Write, S: FnMut() -> (u16, u16)> AttachLoop<'a, W, S> {
     /// Show `message` on the bottom line for a moment.
     fn notice(&mut self, message: &str) -> io::Result<()> {
         let (cols, rows) = self.terminal_size;
-        let text: String = format!(" orchestra: {message} ")
+        let text: String = format!(" rakumux: {message} ")
             .chars()
             .take(cols as usize)
             .collect();

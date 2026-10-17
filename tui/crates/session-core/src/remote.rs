@@ -1,5 +1,5 @@
-//! Remote access settings: `<home>/remote.json`, shared by `orchestra-api`
-//! (which serves the remote listener) and the `orchestra remote` CLI (which
+//! Remote access settings: `<home>/remote.json`, shared by `rakumux-api`
+//! (which serves the remote listener) and the `rakumux remote` CLI (which
 //! turns it on and off). See `plans/mobile-client.md`.
 //!
 //! ```json

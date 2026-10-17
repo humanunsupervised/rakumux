@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 
-# Load the launcher modules used by orchestra.sh. Every module is self-contained:
-# no git, tmux, jq or services layer is needed to launch Orchestra.
+# Load the launcher modules used by rakumux.sh. Every module is self-contained:
+# no git, tmux, jq or services layer is needed to launch Rakumux.
 gwr_load_core() {
     source "$SCRIPT_DIR/shell/gwr_colors.sh"
     source "$SCRIPT_DIR/shell/gwr_logging.sh"

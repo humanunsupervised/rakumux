@@ -1,11 +1,11 @@
 # shellcheck shell=bash
 
-# Install `tui`, `orchestra-ptyd`, `orchestra-api` and `orchestra-mcp` into
-# ~/.cargo/bin. orchestra.sh finds the daemon next to the tui binary, and
-# orchestra-mcp and orchestra-api find each other and the daemon the same way,
+# Install `tui`, `rakumux-ptyd`, `rakumux-api` and `rakumux-mcp` into
+# ~/.cargo/bin. rakumux.sh finds the daemon next to the tui binary, and
+# rakumux-mcp and rakumux-api find each other and the daemon the same way,
 # so all four must land in the same directory.
 install_global() {
-  info "Installing tui, orchestra-ptyd, orchestra-api and orchestra-mcp with cargo install..."
+  info "Installing tui, rakumux-ptyd, rakumux-api and rakumux-mcp with cargo install..."
   (
     cd "$SCRIPT_DIR/tui" &&
       cargo install --locked --path . &&

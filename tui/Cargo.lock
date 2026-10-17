@@ -1091,76 +1091,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 
 [[package]]
-name = "orchestra-api"
-version = "0.1.0"
-dependencies = [
- "base64",
- "clap",
- "form_urlencoded",
- "futures-util",
- "hyper",
- "libc",
- "orchestra-session-core",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-tungstenite",
-]
-
-[[package]]
-name = "orchestra-mcp"
-version = "0.1.0"
-dependencies = [
- "form_urlencoded",
- "libc",
- "orchestra-api",
- "orchestra-session-core",
- "reqwest",
- "rmcp",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "orchestra-ptyd"
-version = "0.1.0"
-dependencies = [
- "base64",
- "libc",
- "orchestra-session-core",
- "orchestra-vt",
- "portable-pty",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "orchestra-session-core"
-version = "0.1.0"
-dependencies = [
- "base64",
- "getrandom 0.2.16",
- "libc",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "orchestra-vt"
-version = "0.1.0"
-dependencies = [
- "base64",
- "portable-pty",
- "vt100",
-]
-
-[[package]]
 name = "parking_lot"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1293,6 +1223,76 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "rakumux-api"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "clap",
+ "form_urlencoded",
+ "futures-util",
+ "hyper",
+ "libc",
+ "rakumux-session-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
+name = "rakumux-mcp"
+version = "0.1.0"
+dependencies = [
+ "form_urlencoded",
+ "libc",
+ "rakumux-api",
+ "rakumux-session-core",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "rakumux-ptyd"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "libc",
+ "portable-pty",
+ "rakumux-session-core",
+ "rakumux-vt",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "rakumux-session-core"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "getrandom 0.2.16",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "rakumux-vt"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "portable-pty",
+ "vt100",
+]
 
 [[package]]
 name = "rand"
@@ -2025,9 +2025,9 @@ dependencies = [
  "crossterm",
  "futures-util",
  "libc",
- "orchestra-session-core",
- "orchestra-vt",
  "qrcodegen",
+ "rakumux-session-core",
+ "rakumux-vt",
  "ratatui",
  "reqwest",
  "serde",

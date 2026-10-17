@@ -111,7 +111,7 @@ fn unsupported(what: &str) -> ApiError {
 /// How a client authenticates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthMode {
-    /// Session auth when `ORCHESTRA_SESSION_ID`/`ORCHESTRA_SESSION_TOKEN` are
+    /// Session auth when `RAKUMUX_SESSION_ID`/`RAKUMUX_SESSION_TOKEN` are
     /// set, otherwise user auth from the registration file.
     Auto,
     User,
@@ -487,10 +487,10 @@ impl SessionApi for Client {
         let (stream, AttachPeer { events, outgoing }) = AttachStream::pair(attached);
         let finished = Arc::new(AtomicBool::new(false));
         let reader_finished = finished.clone();
-        spawn_thread("orchestra-attach-rx", move || {
+        spawn_thread("rakumux-attach-rx", move || {
             attach_reader(reader, events, reader_finished)
         })?;
-        spawn_thread("orchestra-attach-tx", move || {
+        spawn_thread("rakumux-attach-tx", move || {
             attach_writer(socket, outgoing, finished)
         })?;
         Ok(stream)
@@ -502,7 +502,7 @@ impl SessionApi for Client {
             return Err(unexpected(&response));
         }
         let (tx, rx) = mpsc::channel();
-        spawn_thread("orchestra-events-rx", move || event_reader(socket, tx))?;
+        spawn_thread("rakumux-events-rx", move || event_reader(socket, tx))?;
         Ok(EventStream::from_receiver(rx))
     }
 }
@@ -518,7 +518,7 @@ enum Identity {
     Session {
         id: SessionId,
         token: String,
-        /// `ORCHESTRA_SOCKET`; otherwise the registration file's socket.
+        /// `RAKUMUX_SOCKET`; otherwise the registration file's socket.
         socket: Option<PathBuf>,
     },
     /// Like `User` for the token and socket.
@@ -594,7 +594,7 @@ fn wait_for_daemon(config: &ClientConfig, identity: &Identity) -> Result<(UnixSt
                 return Err(ApiError::new(
                     ErrorCode::DaemonUnavailable,
                     format!(
-                        "orchestra-ptyd did not start within {} s; see {}",
+                        "rakumux-ptyd did not start within {} s; see {}",
                         SPAWN_WAIT.as_secs(),
                         config.layout.log_file().display()
                     ),
@@ -693,7 +693,7 @@ fn load_registration(layout: &Layout) -> std::result::Result<Registration, OpenE
         if error.kind() == io::ErrorKind::NotFound {
             OpenError::NotRunning(ApiError::new(
                 ErrorCode::DaemonUnavailable,
-                format!("orchestra-ptyd is not running (no {})", path.display()),
+                format!("rakumux-ptyd is not running (no {})", path.display()),
             ))
         } else {
             OpenError::Other(ApiError::new(
@@ -720,7 +720,7 @@ fn hello(stream: &mut UnixStream, config: &ClientConfig, auth: Auth) -> Result<H
         Response::Hello(ok) => Err(ApiError::new(
             ErrorCode::ProtocolMismatch,
             format!(
-                "orchestra-ptyd {} speaks protocol {}, this client speaks {}",
+                "rakumux-ptyd {} speaks protocol {}, this client speaks {}",
                 ok.version,
                 ok.protocol,
                 crate::PROTOCOL_VERSION
@@ -732,13 +732,13 @@ fn hello(stream: &mut UnixStream, config: &ClientConfig, auth: Auth) -> Result<H
 
 // ---------------------------------------------------------------- spawning
 
-/// Start `orchestra-ptyd serve` fully detached from this process.
+/// Start `rakumux-ptyd serve` fully detached from this process.
 fn spawn_daemon(config: &ClientConfig) -> Result<()> {
     let binary = crate::paths::find_ptyd_binary(config.ptyd_path.as_deref()).ok_or_else(|| {
         let message = match &config.ptyd_path {
-            Some(path) => format!("orchestra-ptyd not found at {}", path.display()),
+            Some(path) => format!("rakumux-ptyd not found at {}", path.display()),
             None => format!(
-                "orchestra-ptyd not found (set {} or install it next to orchestra)",
+                "rakumux-ptyd not found (set {} or install it next to rakumux)",
                 crate::env::PTYD_BIN
             ),
         };
@@ -769,7 +769,7 @@ fn spawn_daemon(config: &ClientConfig) -> Result<()> {
 
 /// Spawn `command` with stdin, stdout and stderr on `/dev/null`, in a new
 /// session (`setsid`) with cwd `/`, and reap it in the background. Inherited
-/// stdio would keep a `$(orchestra …)` command substitution open until the
+/// stdio would keep a `$(rakumux …)` command substitution open until the
 /// child exits. Returns the child's pid.
 fn spawn_detached(mut command: Command) -> io::Result<u32> {
     use std::os::unix::process::CommandExt;
@@ -793,7 +793,7 @@ fn spawn_detached(mut command: Command) -> io::Result<u32> {
     // Reap the child when it exits so it never lingers as a zombie of a
     // long-running client.
     std::thread::Builder::new()
-        .name("orchestra-reaper".into())
+        .name("rakumux-reaper".into())
         .spawn(move || {
             let _ = child.wait();
         })?;
@@ -818,11 +818,11 @@ impl ExchangeError {
         match self {
             ExchangeError::NotSent(error) => ApiError::new(
                 ErrorCode::DaemonUnavailable,
-                format!("cannot reach orchestra-ptyd: {error}"),
+                format!("cannot reach rakumux-ptyd: {error}"),
             ),
             ExchangeError::Lost(error) => ApiError::new(
                 ErrorCode::DaemonUnavailable,
-                format!("connection to orchestra-ptyd lost: {error}"),
+                format!("connection to rakumux-ptyd lost: {error}"),
             ),
             ExchangeError::Failed(error) => error,
         }
@@ -851,13 +851,13 @@ fn exchange(
             frame::parse_control::<Response>(&payload).map_err(|error| {
                 ExchangeError::Failed(ApiError::new(
                     ErrorCode::Internal,
-                    format!("unreadable response from orchestra-ptyd: {error}"),
+                    format!("unreadable response from rakumux-ptyd: {error}"),
                 ))
             })
         }
         Ok(Some(Frame::Data(_))) => Err(ExchangeError::Failed(ApiError::new(
             ErrorCode::Internal,
-            "orchestra-ptyd sent terminal data instead of a response",
+            "rakumux-ptyd sent terminal data instead of a response",
         ))),
         Ok(None) => Err(ExchangeError::Lost(io::Error::new(
             io::ErrorKind::UnexpectedEof,
@@ -871,7 +871,7 @@ fn exchange(
                 Err(ExchangeError::Failed(ApiError::new(
                     ErrorCode::DaemonUnavailable,
                     format!(
-                        "orchestra-ptyd did not answer within {:.1} s",
+                        "rakumux-ptyd did not answer within {:.1} s",
                         timeout.as_secs_f32()
                     ),
                 )))
@@ -910,14 +910,14 @@ fn unexpected(response: &Response) -> ApiError {
         .unwrap_or_else(|| "unknown".into());
     ApiError::new(
         ErrorCode::Internal,
-        format!("unexpected `{kind}` response from orchestra-ptyd"),
+        format!("unexpected `{kind}` response from rakumux-ptyd"),
     )
 }
 
 fn unavailable_io(error: io::Error) -> ApiError {
     ApiError::new(
         ErrorCode::DaemonUnavailable,
-        format!("orchestra-ptyd connection failed: {error}"),
+        format!("rakumux-ptyd connection failed: {error}"),
     )
 }
 
@@ -1014,12 +1014,12 @@ fn event_reader(mut socket: UnixStream, tx: Sender<std::result::Result<EventEnve
                     Ok(envelope) => Ok(envelope),
                     Err(error) => match frame::parse_control::<Response>(&payload) {
                         Ok(Response::Error { error }) => Err(error.to_string()),
-                        _ => Err(format!("unreadable event from orchestra-ptyd: {error}")),
+                        _ => Err(format!("unreadable event from rakumux-ptyd: {error}")),
                     },
                 }
             }
             Ok(Some(Frame::Data(_))) => Err("unexpected terminal data on an event stream".into()),
-            Ok(None) => Err("event stream closed by orchestra-ptyd".into()),
+            Ok(None) => Err("event stream closed by rakumux-ptyd".into()),
             Err(error) => Err(format!("event stream failed: {error}")),
         };
         let last = item.is_err();
@@ -1262,7 +1262,7 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 
-    /// In-process stand-in for `orchestra-ptyd`: serves the frame protocol on
+    /// In-process stand-in for `rakumux-ptyd`: serves the frame protocol on
     /// a Unix socket with canned answers and records what it receives.
     struct FakeDaemon {
         layout: Layout,
@@ -1603,9 +1603,9 @@ mod tests {
             move |name: &str| map.get(name).map(|v| v.to_string())
         };
         let with_session = env(&[
-            ("ORCHESTRA_SESSION_ID", "S9"),
-            ("ORCHESTRA_SESSION_TOKEN", "tok"),
-            ("ORCHESTRA_SOCKET", "/tmp/x.sock"),
+            ("RAKUMUX_SESSION_ID", "S9"),
+            ("RAKUMUX_SESSION_TOKEN", "tok"),
+            ("RAKUMUX_SOCKET", "/tmp/x.sock"),
         ]);
         assert_eq!(
             resolve_identity(&AuthMode::Auto, &with_session),
@@ -1616,12 +1616,9 @@ mod tests {
             }
         );
         // An id without a token (or empty values) falls back to user auth.
-        let partial = env(&[("ORCHESTRA_SESSION_ID", "S9")]);
+        let partial = env(&[("RAKUMUX_SESSION_ID", "S9")]);
         assert_eq!(resolve_identity(&AuthMode::Auto, &partial), Identity::User);
-        let empty = env(&[
-            ("ORCHESTRA_SESSION_ID", ""),
-            ("ORCHESTRA_SESSION_TOKEN", ""),
-        ]);
+        let empty = env(&[("RAKUMUX_SESSION_ID", ""), ("RAKUMUX_SESSION_TOKEN", "")]);
         assert_eq!(resolve_identity(&AuthMode::Auto, &empty), Identity::User);
         // Explicit modes ignore the session variables.
         assert_eq!(
@@ -2171,7 +2168,7 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join(FAKE_PTYD_MARKER), b"").unwrap();
         let exe = std::env::current_exe().unwrap();
-        let script = dir.path().join("orchestra-ptyd");
+        let script = dir.path().join("rakumux-ptyd");
         std::fs::write(
             &script,
             format!(

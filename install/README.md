@@ -1,15 +1,15 @@
 # install/
 
-Distribution of Orchestra: release tarballs on GitHub, the Homebrew tap and the npm package. All
-three ship the same four binaries (`orchestra`, `orchestra-ptyd`, `orchestra-api`, `orchestra-mcp`), the `orchestra.sh` launcher,
-`LICENSE` and `THIRD_PARTY_NOTICES`, and all three run `orchestra.sh` for every argument.
+Distribution of Rakumux: release tarballs on GitHub, the Homebrew tap and the npm package. All
+three ship the same four binaries (`rakumux`, `rakumux-ptyd`, `rakumux-api`, `rakumux-mcp`), the `rakumux.sh` launcher,
+`LICENSE` and `THIRD_PARTY_NOTICES`, and all three run `rakumux.sh` for every argument.
 
 ## Users
 
 ```bash
-npm install -g @humanu/orchestra
+npm install -g rakumux
 # or
-brew install humanunsupervised/orchestra/orchestra
+brew install humanunsupervised/rakumux/rakumux
 ```
 
 See [INSTALL.md](INSTALL.md) for every option, upgrading from 0.5.x and troubleshooting.
@@ -27,7 +27,7 @@ See [INSTALL.md](INSTALL.md) for every option, upgrading from 0.5.x and troubles
 | Check packages | `SKIP_BUILD=1 scripts/test-install.sh <version>` |
 | Third-party notices | `scripts/generate-third-party-notices.sh [output]` |
 | GitHub release | `scripts/create-github-release.sh <version>` |
-| Homebrew formula | `scripts/release-homebrew.sh <version>` (edit `homebrew/orchestra.rb.template`) |
+| Homebrew formula | `scripts/release-homebrew.sh <version>` (edit `homebrew/rakumux.rb.template`) |
 | npm | `scripts/publish-npm.sh <version> [--dry-run]` |
 
 Details (package layout, launcher lookup, formula rules, licensing policy):

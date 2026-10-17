@@ -125,7 +125,7 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// "Use Orchestra from your phone?": `y`/Enter turns phone access on and
+/// "Use Rakumux from your phone?": `y`/Enter turns phone access on and
 /// shows how to pair, `n`/Esc declines (Settings can turn it on later).
 fn handle_phone_offer_key(app: &mut App, key: KeyEvent) {
     match key.code {
@@ -183,7 +183,7 @@ fn handle_daemon_restart_key(app: &mut App, key: KeyEvent) -> AppResult {
             app.mode = AppMode::Normal;
             app.set_status(
                 "Kept the older server: no git branches, folders, pins or new folders live \
-                 until `orchestra daemon restart`.",
+                 until `rakumux daemon restart`.",
             );
         }
         KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {

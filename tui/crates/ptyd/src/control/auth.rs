@@ -102,8 +102,8 @@ pub(crate) fn authenticate(
                 ApiError::new(
                     ErrorCode::Unauthenticated,
                     format!(
-                        "no running Orchestra session has bound {agent} conversation \
-                         {conversation} (`orchestra session bind`)"
+                        "no running Rakumux session has bound {agent} conversation \
+                         {conversation} (`rakumux session bind`)"
                     ),
                 )
             })?;

@@ -35,10 +35,10 @@ install/npm/resources/
 install/homebrew/Formula/*.bak
 
 # Old package directories (from testing/debugging)
-orchestra-macos-*/
+rakumux-macos-*/
 
 # Build artifacts and test packages
 test-package/
 
-# Orchestra configuration directory
-.orchestra/
+# Rakumux configuration directory
+.rakumux/

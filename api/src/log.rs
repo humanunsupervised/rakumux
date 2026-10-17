@@ -1,5 +1,5 @@
 //! Minimal logging to stderr (a detached API's stderr is `logs/api.log`).
-//! `ORCHESTRA_API_LOG=debug` adds one line per request. Tokens are never
+//! `RAKUMUX_API_LOG=debug` adds one line per request. Tokens are never
 //! logged.
 
 use crate::time::rfc3339;

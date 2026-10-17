@@ -1,7 +1,7 @@
 //! Right pane: the selected session's terminal (running, or its saved
 //! screen), with placeholders for no sessions, loading, the session
-//! Orchestra runs in, errors and the daemon being unreachable. While the
-//! pane doesn't take keys (Orchestra mode, a dialog open) it's faded: shown,
+//! Rakumux runs in, errors and the daemon being unreachable. While the
+//! pane doesn't take keys (Rakumux mode, a dialog open) it's faded: shown,
 //! but visibly not the thing you're typing into.
 
 use ratatui::{
@@ -82,10 +82,7 @@ pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<
                 }
                 Line::from(spans)
             }
-            None => Line::from(Span::styled(
-                " Orchestra",
-                Style::default().fg(p.text_muted),
-            )),
+            None => Line::from(Span::styled(" Rakumux", Style::default().fg(p.text_muted))),
         };
         let mut block = Block::default()
             .title(title)
@@ -147,7 +144,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                     f,
                     area,
                     vec![Line::from(Span::styled(
-                        format!("{} Connecting to the Orchestra daemon…", get_spinner_char()),
+                        format!("{} Connecting to the Rakumux daemon…", get_spinner_char()),
                         strong,
                     ))],
                 );
@@ -159,7 +156,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                     area,
                     vec![
                         Line::from(Span::styled(
-                            "Can't reach the Orchestra daemon",
+                            "Can't reach the Rakumux daemon",
                             Style::default()
                                 .fg(p.accent_pink)
                                 .add_modifier(Modifier::BOLD),
@@ -172,7 +169,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                             Span::styled(" retry · ", muted),
                             Span::styled("q", key),
                             Span::styled(" quit · ", muted),
-                            Span::styled("orchestra daemon logs", key),
+                            Span::styled("rakumux daemon logs", key),
                             Span::styled(" for details", muted),
                         ]),
                     ],
@@ -311,7 +308,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                 area,
                 vec![
                     Line::from(Span::styled(
-                        "This is the session Orchestra is running in",
+                        "This is the session Rakumux is running in",
                         strong,
                     )),
                     Line::from(""),

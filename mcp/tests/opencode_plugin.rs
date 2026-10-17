@@ -1,5 +1,5 @@
-//! The OpenCode plugin (`mcp/opencode/orchestra-session/tui.js`), run by Node
-//! against a fake OpenCode TUI API and a fake `orchestra` binary. Skipped when
+//! The OpenCode plugin (`mcp/opencode/rakumux-session/tui.js`), run by Node
+//! against a fake OpenCode TUI API and a fake `rakumux` binary. Skipped when
 //! `node` isn't installed.
 
 use std::os::unix::fs::PermissionsExt;
@@ -46,22 +46,22 @@ fn node() -> Option<String> {
         .map(|_| "node".to_owned())
 }
 
-/// Run the plugin with `env`; the fake `orchestra` logs its arguments.
+/// Run the plugin with `env`; the fake `rakumux` logs its arguments.
 fn run(dir: &Path, env: &[(&str, &str)]) -> Vec<String> {
     let log = dir.join("calls.log");
-    let bin = dir.join("orchestra");
+    let bin = dir.join("rakumux");
     std::fs::write(&bin, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$LOG\"\n").unwrap();
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
     let harness = dir.join("harness.mjs");
     std::fs::write(&harness, HARNESS).unwrap();
-    let plugin = Path::new(env!("CARGO_MANIFEST_DIR")).join("opencode/orchestra-session/tui.js");
+    let plugin = Path::new(env!("CARGO_MANIFEST_DIR")).join("opencode/rakumux-session/tui.js");
     let mut command = Command::new("node");
     command
         .arg(&harness)
         .arg(&plugin)
-        .env_remove("ORCHESTRA_SESSION_ID")
-        .env_remove("ORCHESTRA_SESSION_TOKEN")
-        .env("ORCHESTRA_BIN", &bin)
+        .env_remove("RAKUMUX_SESSION_ID")
+        .env_remove("RAKUMUX_SESSION_TOKEN")
+        .env("RAKUMUX_BIN", &bin)
         .env("LOG", &log);
     for (name, value) in env {
         command.env(name, value);
@@ -89,8 +89,8 @@ fn the_plugin_binds_the_open_conversation_and_its_subagents() {
     let calls = run(
         dir.path(),
         &[
-            ("ORCHESTRA_SESSION_ID", "01JSELF"),
-            ("ORCHESTRA_SESSION_TOKEN", "tok"),
+            ("RAKUMUX_SESSION_ID", "01JSELF"),
+            ("RAKUMUX_SESSION_TOKEN", "tok"),
         ],
     );
     assert_eq!(
@@ -103,7 +103,7 @@ fn the_plugin_binds_the_open_conversation_and_its_subagents() {
 }
 
 #[test]
-fn outside_an_orchestra_session_the_plugin_does_nothing() {
+fn outside_an_rakumux_session_the_plugin_does_nothing() {
     if node().is_none() {
         eprintln!("skipped: node is not installed");
         return;

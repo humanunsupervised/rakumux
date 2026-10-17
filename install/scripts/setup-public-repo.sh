@@ -15,7 +15,7 @@ if [[ ! -f "$LICENSE_SOURCE" ]]; then
     exit 1
 fi
 
-echo "🌟 Setting up minimal public repository for Orchestra..."
+echo "🌟 Setting up minimal public repository for Rakumux..."
 
 # Create temporary directory for public repo
 TEMP_DIR=$(mktemp -d)
@@ -29,42 +29,42 @@ git config user.name "$(git config --global user.name)"
 git config user.email "$(git config --global user.email)"
 
 cat > README.md << 'EOF'
-# Orchestra
+# Rakumux
 
 **Terminal sessions for coding agents, in one fast TUI.**
 
-Orchestra keeps all your terminal sessions, in every folder and worktree, in one place: a session
+Rakumux keeps all your terminal sessions, in every folder and worktree, in one place: a session
 list on the left, the live terminal on the right. Sessions run in a small background daemon
-(`orchestra-ptyd`), so they keep running when you close the TUI and come back exactly where you left
+(`rakumux-ptyd`), so they keep running when you close the TUI and come back exactly where you left
 them. Built for working with Claude Code, Codex, OpenCode and other coding agents in parallel.
 
 ## Install
 
 ### npm
 ```bash
-npm install -g @humanu/orchestra
+npm install -g rakumux
 ```
 
 ### Homebrew (macOS and Linux)
 ```bash
-brew install humanunsupervised/orchestra/orchestra
+brew install humanunsupervised/rakumux/rakumux
 ```
 
 ### Release tarball
 ```bash
-# macOS Apple Silicon: orchestra-macos-arm64 · macOS Intel: orchestra-macos-intel · Linux x64: orchestra-linux-x64
-curl -L https://github.com/humanunsupervised/orchestra/releases/latest/download/orchestra-macos-arm64.tar.gz | tar xz
-cd orchestra-macos-arm64 && ./install.sh
+# macOS Apple Silicon: rakumux-macos-arm64 · macOS Intel: rakumux-macos-intel · Linux x64: rakumux-linux-x64
+curl -L https://github.com/humanunsupervised/rakumux/releases/latest/download/rakumux-macos-arm64.tar.gz | tar xz
+cd rakumux-macos-arm64 && ./install.sh
 ```
 
 ## Usage
 
 ```bash
-orchestra                      # Open the TUI for the current folder
-orchestra new --name dev       # Create a session and attach to it
-orchestra ls                   # List sessions in this folder
-orchestra attach dev           # Full-screen attach (Ctrl-\ d to detach)
-orchestra --help               # All commands
+rakumux                      # Open the TUI for the current folder
+rakumux new --name dev       # Create a session and attach to it
+rakumux ls                   # List sessions in this folder
+rakumux attach dev           # Full-screen attach (Ctrl-\ d to detach)
+rakumux --help               # All commands
 ```
 
 Open Help inside the TUI for keys.
@@ -72,7 +72,7 @@ Open Help inside the TUI for keys.
 ## AI session names
 
 Set an Anthropic or OpenAI API key (inside the TUI, or `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`)
-and Orchestra names new sessions from what you run in them.
+and Rakumux names new sessions from what you run in them.
 
 ## Requirements
 
@@ -83,7 +83,7 @@ No git, tmux or other runtime dependencies.
 
 ## License
 
-Orchestra is proprietary software; see [LICENSE](LICENSE). Each package also contains
+Rakumux is proprietary software; see [LICENSE](LICENSE). Each package also contains
 `THIRD_PARTY_NOTICES` with the licenses of the open-source components it includes.
 
 ## Support
@@ -118,7 +118,7 @@ EOF
 git add .
 
 # Commit
-git commit -m "Initial public repository for Orchestra v$VERSION
+git commit -m "Initial public repository for Rakumux v$VERSION
 
 Closed-source distribution repository containing:
 - Installation instructions
@@ -136,7 +136,7 @@ echo ""
 echo "🔗 Next steps:"
 echo "1. Push to public repository:"
 echo "   cd $TEMP_DIR"
-echo "   git remote add origin git@github.com:humanunsupervised/orchestra.git"
+echo "   git remote add origin git@github.com:humanunsupervised/rakumux.git"
 echo "   git push -u origin main"
 echo ""
 echo "2. Build release packages:"

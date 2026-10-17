@@ -1,5 +1,5 @@
 //! Reading the per-session command history written by
-//! `shell/orchestra-command-hook.sh` (`session_core::paths::Layout::history_file`).
+//! `shell/rakumux-command-hook.sh` (`session_core::paths::Layout::history_file`).
 
 use super::prompt::HISTORY_LIMIT;
 use std::fs::File;

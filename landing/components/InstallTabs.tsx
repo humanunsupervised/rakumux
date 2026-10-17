@@ -3,12 +3,12 @@
 import { useState } from "react";
 import CopyCommand from "./CopyCommand";
 
-const RELEASES = "https://github.com/humanunsupervised/orchestra/releases";
+const RELEASES = "https://github.com/humanunsupervised/rakumux/releases";
 
 const TARBALLS = [
-  { label: "macOS · Apple Silicon", file: "orchestra-macos-arm64" },
-  { label: "macOS · Intel", file: "orchestra-macos-intel" },
-  { label: "Linux · x64", file: "orchestra-linux-x64" },
+  { label: "macOS · Apple Silicon", file: "rakumux-macos-arm64" },
+  { label: "macOS · Intel", file: "rakumux-macos-intel" },
+  { label: "Linux · x64", file: "rakumux-linux-x64" },
 ];
 
 type Tab = "npm" | "brew" | "download";
@@ -46,15 +46,15 @@ export default function InstallTabs() {
       <div className="install-panel" role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === "npm" && (
           <>
-            <CopyCommand command="npm install -g @humanu/orchestra" />
+            <CopyCommand command="npm install -g rakumux" />
             <p className="install-note">Node.js 14 or newer. The package carries prebuilt binaries for every platform.</p>
           </>
         )}
         {tab === "brew" && (
           <>
-            <CopyCommand command="brew install humanunsupervised/orchestra/orchestra" />
+            <CopyCommand command="brew install humanunsupervised/rakumux/rakumux" />
             <p className="install-note">
-              macOS and Linux. Update with <code>brew upgrade orchestra</code>.
+              macOS and Linux. Update with <code>brew upgrade rakumux</code>.
             </p>
           </>
         )}

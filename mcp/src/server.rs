@@ -19,20 +19,20 @@ use std::sync::Arc;
 /// OpenCode 2.x tags every tool call with the calling conversation. Its MCP
 /// servers run in a background service shared by every conversation, so
 /// the environment's session identity (if any) may belong to another
-/// session (`plans/agent-mcp.md` §3.2). The Orchestra plugin in OpenCode's
-/// TUI binds the conversations it shows to its Orchestra session, and calls
+/// session (`plans/agent-mcp.md` §3.2). The Rakumux plugin in OpenCode's
+/// TUI binds the conversations it shows to its Rakumux session, and calls
 /// act as that session.
 const OPENCODE_SESSION_META: &str = "ai.opencode/sessionID";
 
-/// The Orchestra MCP server.
-pub struct OrchestraServer {
+/// The Rakumux MCP server.
+pub struct RakumuxServer {
     api: Arc<ApiClient>,
     specs: Vec<ToolSpec>,
     tools: Vec<Tool>,
     version: String,
 }
 
-impl OrchestraServer {
+impl RakumuxServer {
     pub fn new(api: ApiClient, version: &str) -> Self {
         let specs = tools::catalogue();
         let tools = specs.iter().map(to_tool).collect();
@@ -76,34 +76,34 @@ impl OrchestraServer {
         let Some(conversation) = opencode_conversation else {
             return tools::call(&self.api.caller(true), spec.name, arguments).await;
         };
-        // Act as the Orchestra session that bound this conversation.
+        // Act as the Rakumux session that bound this conversation.
         let bound = self.api.for_conversation("opencode", &conversation);
         let outcome = tools::call(&bound, spec.name, arguments.clone()).await?;
         if !outcome.conversation_unbound() {
             return Some(outcome);
         }
-        // No session bound it: OpenCode runs outside Orchestra, or without
+        // No session bound it: OpenCode runs outside Rakumux, or without
         // the plugin. An environment identity then may be any session's:
         // act as the user for reads and refuse changes.
         let ambiguous = self.api.identity().is_some();
         if ambiguous && spec.mutating {
             return Some(ToolOutcome::error(&ToolError::new(
                 "permission_denied",
-                "this OpenCode conversation isn't linked to an Orchestra session, and this MCP \
+                "this OpenCode conversation isn't linked to a Rakumux session, and this MCP \
                  server is shared by every OpenCode conversation, so it can't tell which \
                  session is calling; tools that change sessions are disabled. Install the \
-                 Orchestra plugin for OpenCode (`orchestra-mcp opencode-plugin --install`, then \
-                 restart OpenCode), or run `orchestra new --detach` from the shell tool.",
+                 Rakumux plugin for OpenCode (`rakumux-mcp opencode-plugin --install`, then \
+                 restart OpenCode), or run `rakumux new --detach` from the shell tool.",
             )));
         }
         tools::call(&self.api.caller(false), spec.name, arguments).await
     }
 }
 
-impl ServerHandler for OrchestraServer {
+impl ServerHandler for RakumuxServer {
     fn get_info(&self) -> ServerConfig {
-        let mut implementation = Implementation::new("orchestra", self.version.clone());
-        implementation.title = Some("Orchestra".into());
+        let mut implementation = Implementation::new("rakumux", self.version.clone());
+        implementation.title = Some("Rakumux".into());
         InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(implementation)
             .with_instructions(INSTRUCTIONS)

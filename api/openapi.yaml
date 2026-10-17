@@ -1,16 +1,16 @@
 openapi: 3.1.0
 info:
-  title: Orchestra external API
+  title: Rakumux external API
   version: "1"
-  summary: Sessions and folders of the local Orchestra daemon, over HTTP.
+  summary: Sessions and folders of the local Rakumux daemon, over HTTP.
   description: |
-    `orchestra-api` exposes a subset of the session operations of the running
-    Orchestra daemon (`orchestra-ptyd`). It listens on **127.0.0.1** and, with
+    `rakumux-api` exposes a subset of the session operations of the running
+    Rakumux daemon (`rakumux-ptyd`). It listens on **127.0.0.1** and, with
     remote access on, on a **remote listener** too (see below). It is a thin
     adapter: the daemon decides permissions and folder confinement.
 
     **Discovery.** While it runs, the API writes
-    `<ORCHESTRA_HOME or ~/.orchestra>/api.json` (mode 0600):
+    `<RAKUMUX_HOME or ~/.rakumux>/api.json` (mode 0600):
     `{"url": "http://127.0.0.1:<port>", "token": "<64 hex>", "pid": <int>, "version": "<x.y.z>", "remote_urls": ["http://<addr>:<port>"]}`
     (`remote_urls` only while a remote listener runs). A file whose `pid` no
     longer exists is stale.
@@ -22,7 +22,7 @@ info:
     `Sec-Fetch-Site` header (browsers) are refused with 403. No CORS headers
     are ever sent.
 
-    **Remote access.** `orchestra remote on` writes
+    **Remote access.** `rakumux remote on` writes
     `<home>/remote.json` (mode 0600):
     `{"enabled": true, "port": 7337, "token": "<26 chars a-z2-7>", "listen": []}`.
     While it is enabled the API adds a remote listener on every Tailscale
@@ -43,15 +43,15 @@ info:
     previous ping; it closes the socket when the stream ends.
 
     **Identity.** Without identity headers the API acts as the user. With both
-    `X-Orchestra-Session-Id` and `X-Orchestra-Session-Token` (the
-    `ORCHESTRA_SESSION_ID` / `ORCHESTRA_SESSION_TOKEN` of a process running in
-    an Orchestra session) it acts as that session: the daemon confines it to
+    `X-Rakumux-Session-Id` and `X-Rakumux-Session-Token` (the
+    `RAKUMUX_SESSION_ID` / `RAKUMUX_SESSION_TOKEN` of a process running in
+    a Rakumux session) it acts as that session: the daemon confines it to
     its own folder and applies its agent policy (today: read anything in the
     folder, create sessions in it within limits, rename only itself). With
-    both `X-Orchestra-Agent` and `X-Orchestra-Agent-Conversation` instead
+    both `X-Rakumux-Agent` and `X-Rakumux-Agent-Conversation` instead
     (for agents whose tool calls don't carry the session's environment, such
     as OpenCode 2.x) it acts as the running session that bound that
-    conversation with `orchestra session bind`; 401 if none did. That needs
+    conversation with `rakumux session bind`; 401 if none did. That needs
     the daemon's `auth.delegated` capability (501 without it).
 
     **Folders.** A session's folder is the canonical directory it was started
@@ -512,7 +512,7 @@ components:
       scheme: bearer
       description: >
         The `token` from api.json on the loopback listener; the remote token from
-        remote.json (`orchestra remote token`) on the remote listener.
+        remote.json (`rakumux remote token`) on the remote listener.
   parameters:
     SessionId:
       name: id
@@ -521,28 +521,28 @@ components:
       description: Opaque session id (letters, digits, `-`, `_`). Never derive anything from it.
       schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$" }
     SessionIdentityId:
-      name: X-Orchestra-Session-Id
+      name: X-Rakumux-Session-Id
       in: header
       required: false
-      description: Act as this session (with X-Orchestra-Session-Token).
+      description: Act as this session (with X-Rakumux-Session-Token).
       schema: { type: string }
     SessionIdentityToken:
-      name: X-Orchestra-Session-Token
+      name: X-Rakumux-Session-Token
       in: header
       required: false
-      description: The session's ORCHESTRA_SESSION_TOKEN.
+      description: The session's RAKUMUX_SESSION_TOKEN.
       schema: { type: string }
     AgentIdentityKind:
-      name: X-Orchestra-Agent
+      name: X-Rakumux-Agent
       in: header
       required: false
       description: >
         Act for the session that bound this agent's conversation (with
-        X-Orchestra-Agent-Conversation), e.g. `opencode`. Not with the
+        X-Rakumux-Agent-Conversation), e.g. `opencode`. Not with the
         session headers.
       schema: { type: string, pattern: "^[a-z0-9_-]{1,32}$" }
     AgentIdentityConversation:
-      name: X-Orchestra-Agent-Conversation
+      name: X-Rakumux-Agent-Conversation
       in: header
       required: false
       description: The agent's conversation id, e.g. OpenCode's `ses_…`.
@@ -710,7 +710,7 @@ components:
           enum: [live, exited, dead, unknown]
           description: >
             `live`: terminal running. `exited`: process ended, final screen kept.
-            `dead`: record without terminal (after a crash, a reboot or `orchestra daemon stop`).
+            `dead`: record without terminal (after a crash, a reboot or `rakumux daemon stop`).
         exit_code: { type: integer }
         lifecycle:
           type: string
@@ -754,7 +754,7 @@ components:
         labels: { type: object, additionalProperties: { type: string } }
         private: { type: boolean }
         is_self: { type: boolean, description: The caller (identity headers) is this session. }
-        auto_named: { type: boolean, description: The name was generated by Orchestra. }
+        auto_named: { type: boolean, description: The name was generated by Rakumux. }
         created_at: { type: string, format: date-time }
         last_active_at: { type: string, format: date-time }
         terminal:

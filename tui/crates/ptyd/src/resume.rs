@@ -10,7 +10,7 @@
 //!   command again may not be safe;
 //! - a shell at its prompt: nothing (once it has stayed there a while).
 //!
-//! What an agent reports itself (`orchestra session report --resume`) wins
+//! What an agent reports itself (`rakumux session report --resume`) wins
 //! while that agent runs.
 //!
 //! Agents:
@@ -21,7 +21,7 @@
 //!   (`$CODEX_HOME/sessions/…/rollout-…-<id>.jsonl`; Linux reads the
 //!   process's descriptors); otherwise the newest interactive thread of the
 //!   folder in `state_<n>.sqlite`: `codex resume <flags> <id>`.
-//! - **OpenCode**: the conversation its Orchestra plugin bound to the
+//! - **OpenCode**: the conversation its Rakumux plugin bound to the
 //!   session (`session_bind`); otherwise the newest top-level session of the
 //!   folder in `opencode.db`: `opencode <flags> -s <id>`.
 //!

@@ -1,5 +1,5 @@
 //! This machine on Tailscale: the addresses Tailscale gave it, and its
-//! MagicDNS name. Used by `orchestra-api` (where the remote listener binds)
+//! MagicDNS name. Used by `rakumux-api` (where the remote listener binds)
 //! and by the TUI and CLI (whether to offer phone access, the pairing URL).
 //!
 //! An address counts only when it is in Tailscale's ranges

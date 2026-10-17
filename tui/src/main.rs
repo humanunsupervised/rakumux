@@ -75,7 +75,7 @@ async fn check_and_perform_update() -> Result<()> {
     if let (Some(version), Some(method_str)) =
         (state.latest_version.clone(), state.install_method.clone())
     {
-        eprintln!("🔄 Orchestra is upgrading to version {}...", version);
+        eprintln!("🔄 Rakumux is upgrading to version {}...", version);
 
         let method = match method_str.as_str() {
             "npm" => updater::InstallMethod::Npm,
@@ -86,7 +86,7 @@ async fn check_and_perform_update() -> Result<()> {
         match updater::perform_upgrade(method) {
             Ok(_) => {
                 eprintln!("✅ Upgrade initiated successfully!");
-                eprintln!("   Restarting Orchestra with the upgraded version...");
+                eprintln!("   Restarting Rakumux with the upgraded version...");
 
                 let mut new_state = state;
                 new_state.clear_pending_upgrade();
@@ -98,8 +98,8 @@ async fn check_and_perform_update() -> Result<()> {
                 eprintln!("❌ Upgrade failed: {}", e);
                 eprintln!("   You can manually upgrade using:");
                 match method {
-                    updater::InstallMethod::Npm => eprintln!("   npm install -g @humanu/orchestra"),
-                    updater::InstallMethod::Homebrew => eprintln!("   brew upgrade orchestra"),
+                    updater::InstallMethod::Npm => eprintln!("   npm install -g rakumux"),
+                    updater::InstallMethod::Homebrew => eprintln!("   brew upgrade rakumux"),
                     _ => {}
                 }
             }
@@ -123,12 +123,10 @@ async fn check_for_updates_background() -> Result<()> {
 }
 
 fn print_cli_help() {
-    println!("orchestra - terminal sessions for your folders");
+    println!("rakumux - terminal sessions for your folders");
     println!();
-    println!("Usage: orchestra [OPTIONS]            Open the session screen for this folder");
-    println!(
-        "       orchestra <COMMAND> [ARGS]     See `orchestra help`; commands: new, ls, attach,"
-    );
+    println!("Usage: rakumux [OPTIONS]            Open the session screen for this folder");
+    println!("       rakumux <COMMAND> [ARGS]     See `rakumux help`; commands: new, ls, attach,");
     println!("                                      rename, pin, unpin, kill, rm, folders, session, daemon,");
     println!("                                      remote");
     println!();
@@ -136,13 +134,13 @@ fn print_cli_help() {
     println!("  -d, --debug              Enable debug output");
     println!("      --new-server         Start a new server even if one is running: it takes over");
     println!("                           the running sessions, which keep running");
-    println!("      --ptyd-path <PATH>   Path to the orchestra-ptyd server binary");
+    println!("      --ptyd-path <PATH>   Path to the rakumux-ptyd server binary");
     println!("  -h, --help               Show this help and exit");
     println!("      --version            Show version and exit");
     println!();
     println!("The session screen lists the sessions of every folder, and P filters them by");
-    println!("folder. Sessions run in a background server (orchestra-ptyd), one per user on");
-    println!("this machine: Orchestra connects to it from any login, and starts it when none");
+    println!("folder. Sessions run in a background server (rakumux-ptyd), one per user on");
+    println!("this machine: Rakumux connects to it from any login, and starts it when none");
     println!("runs. Sessions keep running after you quit, and come back after a crash or a");
     println!("reboot (agents resume their conversation).");
     println!("The interactive screen must run in a terminal; it can't run when stdout");
@@ -150,14 +148,14 @@ fn print_cli_help() {
 }
 
 #[derive(Parser)]
-#[command(name = "orchestra")]
+#[command(name = "rakumux")]
 #[command(about = "Terminal sessions for your folders")]
 struct Cli {
     /// Enable debug output
     #[arg(short, long)]
     debug: bool,
 
-    /// Path to the orchestra-ptyd server binary
+    /// Path to the rakumux-ptyd server binary
     #[arg(long, value_name = "PATH")]
     ptyd_path: Option<PathBuf>,
 
@@ -174,7 +172,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // CLI subcommands (`orchestra new`, `ls`, `session …`) run without the TUI.
+    // CLI subcommands (`rakumux new`, `ls`, `session …`) run without the TUI.
     if let Some(code) = cli::dispatch(&std::env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }
@@ -185,9 +183,9 @@ async fn main() -> Result<()> {
     }
 
     let args: Vec<String> = std::env::args().collect();
-    let force_debug = std::env::var("ORCHESTRA_DEBUG").is_ok();
+    let force_debug = std::env::var("RAKUMUX_DEBUG").is_ok();
     if force_debug {
-        eprintln!("DEBUG: Orchestra starting up...");
+        eprintln!("DEBUG: Rakumux starting up...");
         eprintln!("DEBUG: Args: {:?}", args);
         eprintln!("DEBUG: Current dir: {:?}", std::env::current_dir());
         eprintln!("DEBUG: TERM: {:?}", std::env::var("TERM"));
@@ -199,15 +197,15 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         if arg == "--version" {
-            println!("orchestra {}", app_version());
+            println!("rakumux {}", app_version());
             return Ok(());
         }
     }
 
     if !atty::is(atty::Stream::Stdout) {
         eprintln!("Error: Cannot run the session screen when stdout is captured.");
-        eprintln!("Run `orchestra` directly in a terminal, or use a subcommand such as");
-        eprintln!("`orchestra ls` from scripts.");
+        eprintln!("Run `rakumux` directly in a terminal, or use a subcommand such as");
+        eprintln!("`rakumux ls` from scripts.");
         return Err(anyhow::anyhow!("Cannot run TUI with captured stdout"));
     }
 
@@ -225,7 +223,7 @@ async fn main() -> Result<()> {
         match cli::new_server(cli.ptyd_path.clone()) {
             Ok(message) => Some(message),
             Err(message) => {
-                eprintln!("orchestra: {message}");
+                eprintln!("rakumux: {message}");
                 return Err(anyhow::anyhow!("{message}"));
             }
         }
@@ -233,14 +231,14 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Scope = the canonical folder Orchestra was started from.
+    // Scope = the canonical folder Rakumux was started from.
     let cwd = std::env::current_dir()
         .map_err(|e| anyhow::anyhow!("Can't read the current directory: {e}"))?;
     let scope = ScopeRoot::resolve(&cwd)
         .map_err(|e| anyhow::anyhow!("Can't resolve {}: {e}", cwd.display()))?;
     let paths = Layout::from_env()
-        .map_err(|e| anyhow::anyhow!("Can't locate Orchestra's data directory: {e}"))?;
-    // Remote access on (`orchestra remote on`) and no API running, e.g.
+        .map_err(|e| anyhow::anyhow!("Can't locate Rakumux's data directory: {e}"))?;
+    // Remote access on (`rakumux remote on`) and no API running, e.g.
     // after a reboot: start one in the background.
     remote_access::autostart(&paths, cli.ptyd_path.clone());
     let phone_layout = paths.clone();
@@ -280,7 +278,7 @@ async fn main() -> Result<()> {
     }
     if let Some(error) = config_error {
         app.set_status(format!(
-            "Couldn't read ~/.orchestra/config.json ({error}); using defaults"
+            "Couldn't read ~/.rakumux/config.json ({error}); using defaults"
         ));
     }
 
@@ -344,10 +342,10 @@ async fn main() -> Result<()> {
     }
 }
 
-/// The terminal events Orchestra reads, and what it handles after joining
+/// The terminal events Rakumux reads, and what it handles after joining
 /// keys that came in pieces, with the state they found the app in: for
 /// terminal apps that send keys unusually (Termius on a phone). The last
-/// [`INPUT_LOG_LINES`] are kept in memory and written to `~/.orchestra/
+/// [`INPUT_LOG_LINES`] are kept in memory and written to `~/.rakumux/
 /// logs/tui-input.log` on quit; `--debug` writes every line as it happens.
 /// What's typed in session mode is the user's own: it's logged as
 /// "(session key)" only.
@@ -387,7 +385,7 @@ impl InputLog {
         };
         let size = app.area;
         log.line(format!(
-            "--- orchestra {} started, {}x{}, TERM={}",
+            "--- rakumux {} started, {}x{}, TERM={}",
             app_version(),
             size.width,
             size.height,
@@ -506,7 +504,7 @@ async fn run_app<B: ratatui::backend::Backend + Write>(
     // Keys whose escape sequence arrives in pieces (a phone over SSH).
     let mut escapes = escape_time::EscapeJoiner::default();
     let mut input_log = InputLog::open(app);
-    // `kill -USR1 <pid>` writes the input log now (a running Orchestra on
+    // `kill -USR1 <pid>` writes the input log now (a running Rakumux on
     // a phone, without quitting it).
     let mut dump_signal =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()).ok();
@@ -524,7 +522,7 @@ async fn run_app<B: ratatui::backend::Backend + Write>(
                     let wait = if app.keys_go_to_session() {
                         escape_time::ESCAPE_TIME
                     } else {
-                        escape_time::ESCAPE_TIME_ORCHESTRA
+                        escape_time::ESCAPE_TIME_RAKUMUX
                     };
                     escapes.feed(event, std::time::Instant::now(), wait)
                 }

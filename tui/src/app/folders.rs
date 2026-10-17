@@ -3,7 +3,7 @@
 //! watches the sessions of every folder (`sessions.all`), so sessions in a
 //! new worktree or started by an agent appear live, and the folder filter
 //! narrows the list locally: no filter shows All folders, and the filter
-//! isn't saved. The folder Orchestra starts in is added at startup; new
+//! isn't saved. The folder Rakumux starts in is added at startup; new
 //! sessions go in [`App::current_folder`].
 //!
 //! The Folders modal (Enter on the folder filter, `P`, a click) lists All
@@ -32,7 +32,7 @@ use super::App;
 
 /// Status shown when the user asks for folders from a daemon without them.
 pub const FOLDERS_UNSUPPORTED: &str =
-    "This Orchestra server doesn't support folders yet; showing this folder only.";
+    "This Rakumux server doesn't support folders yet; showing this folder only.";
 
 /// What the daemon can list and watch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -52,7 +52,7 @@ pub enum FolderSupport {
 /// session list's ([`super::SessionList::folder_filter`]).
 #[derive(Debug, Clone)]
 pub struct Folders {
-    /// The folder Orchestra started in.
+    /// The folder Rakumux started in.
     pub launch: ScopeRoot,
     /// Every folder the daemon knows, with counts and git context.
     pub known: Vec<ProjectView>,
