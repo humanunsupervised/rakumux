@@ -8,6 +8,10 @@ Codex and OpenCode side by side.
 
 楽 (*raku*) means easy, and read *gaku* it means music: tmux, made easy.
 
+[Website](https://rakumux.com) · [Issues](https://github.com/humanunsupervised/rakumux/issues)
+
+![Rakumux: a list of sessions on the left, the selected session live on the right](assets/rakumux-screenshot.png)
+
 **Status:** pre-release. 0.1.0 isn't published yet; build it from source in the meantime.
 
 ## Build from source
