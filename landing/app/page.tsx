@@ -1,9 +1,7 @@
 import CopyCommand from "@/components/CopyCommand";
-import InstallTabs from "@/components/InstallTabs";
 import TuiDemo from "@/components/TuiDemo";
 
 const RELEASES = "https://github.com/humanunsupervised/rakumux/releases";
-const NPM = "https://www.npmjs.com/package/rakumux";
 
 const REASONS = [
   {
@@ -104,9 +102,9 @@ export default function Home() {
               and puts them side by side, live, one key apart. Built in Rust, driven from the keyboard.
             </p>
             <div className="hero-actions">
-              <CopyCommand command="npm install -g rakumux" />
+              <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
               <a href="#install" className="link-arrow">
-                Homebrew and downloads →
+                How it installs →
               </a>
             </div>
             <p className="hero-meta">macOS and Linux · no tmux, git or other tools needed</p>
@@ -260,7 +258,15 @@ export default function Home() {
                 One package with everything in it: the app, its background server, the MCP server and the local API.
                 Runs on macOS (Apple Silicon and Intel) and Linux x64, and needs nothing but bash.
               </p>
-              <InstallTabs />
+              <div className="install">
+                <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
+                <p className="install-note">
+                  Downloads the latest release for your machine from GitHub, checks it against the release&apos;s
+                  checksums and installs to <code>/usr/local</code> (asking for sudo if needed). For another prefix: 
+                  <code>curl -fsSL https://rakumux.com/install.sh | PREFIX=&quot;$HOME/.local&quot; bash</code>. Read the 
+                  <a href="/install.sh">script</a> first if you like.
+                </p>
+              </div>
             </div>
             <div className="firstrun">
               <h3>Then, in any folder</h3>
@@ -299,7 +305,7 @@ export default function Home() {
             <h2>
               Give your agents a <span className="accent">conductor</span>.
             </h2>
-            <CopyCommand command="npm install -g rakumux" />
+            <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
           </div>
         </section>
       </main>
@@ -310,7 +316,6 @@ export default function Home() {
           <span className="t-muted">© {new Date().getFullYear()} Human Unsupervised</span>
           <span className="tui-spacer" />
           <a href={RELEASES}>Releases</a>
-          <a href={NPM}>npm</a>
           <a href="#install">Install</a>
         </div>
       </footer>
