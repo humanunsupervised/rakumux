@@ -1,0 +1,15 @@
+# Aider asking whether to add a file it wants to edit. Hand-written.
+agent: aider
+expect: blocked
+process: python3
+cmdline: python3 -m aider
+alternate_screen: false
+ms_since_output: 1200
+---
+> fix the failing parser tests
+
+The failures come from the lexer splitting `1_000` into two tokens. I need
+to edit src/lexer.rs.
+
+Tokens: 4.2k sent, 312 received. Cost: $0.02 message, $0.02 session.
+Add src/lexer.rs to the chat? (Y)es/(N)o/(D)on't ask again [Yes]:

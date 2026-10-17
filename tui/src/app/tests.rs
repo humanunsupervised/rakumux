@@ -1,0 +1,3131 @@
+//! App-level tests against the in-memory `FakeApi` with the inline
+//! executor: startup, live list, key routing, focus, dialogs, layouts.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use session_core::api::{ApiError, ErrorCode, Role, SessionEvent, StreamCommand, StreamEvent};
+use session_core::client::{AttachEvent, AttachOutgoing, SessionApi};
+use session_core::ids::SessionId;
+use session_core::model::{Lifecycle, ScopeRoot, SessionStatus};
+
+use super::testing::{
+    aged, folder, harness, harness_with_folders, on_branch, options, scope, start, view, view_in,
+    FakeApi, Harness,
+};
+use super::types::{
+    AppMode, AppResult, ConfirmAction, DaemonRestartDialog, Focus, NewFolder, PickerRow,
+    PickerStage, SettingsItem,
+};
+use super::*;
+use crate::help::ModalTab;
+use crate::layout::SessionLayout;
+
+fn id(s: &str) -> SessionId {
+    SessionId::from_string(s)
+}
+
+// ---------------------------------------------------------------- startup
+
+#[tokio::test]
+async fn startup_selects_the_most_recent_session_and_observes_it() {
+    let h = harness(vec![view("A", "older", 10), view("B", "newer", 30)]);
+    assert!(h.app.connection.is_connected());
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    // The launch folder is registered, then every folder is watched and
+    // listed.
+    let calls = h.fake.calls();
+    assert_eq!(
+        calls[..4],
+        [
+            "add_project /repo",
+            "projects",
+            "subscribe all",
+            "list_all dead=true"
+        ],
+        "{calls:?}"
+    );
+    let (_, request) = h.last_attach();
+    assert_eq!(request.id, id("B"));
+    assert_eq!(request.role, Role::Observer);
+    assert_eq!((request.cols, request.rows), h.app.terminal_size());
+    assert_eq!(h.app.detail.view, DetailView::Live(id("B")));
+    assert_eq!(h.app.focus, Focus::List);
+}
+
+#[tokio::test]
+async fn empty_scope_shows_the_new_session_row() {
+    let h = harness(vec![]);
+    assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
+    assert_eq!(h.app.detail.view, DetailView::Empty);
+    assert_eq!(h.fake.attach_count(), 0);
+}
+
+#[tokio::test]
+async fn failed_connect_shows_the_error_and_ctrl_r_retries() {
+    let fake = FakeApi::new(vec![view("A", "a", 1)]);
+    let dir = tempfile::tempdir().unwrap();
+    let mut options = options(&fake, scope(), &dir);
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let api: Arc<dyn SessionApi> = fake.clone();
+    let counter = attempts.clone();
+    options.connector = Arc::new(move || {
+        if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+            Err(ApiError::new(ErrorCode::DaemonUnavailable, "no daemon"))
+        } else {
+            Ok(api.clone())
+        }
+    });
+    let mut h = start(options, fake, dir);
+    assert!(matches!(h.app.connection, Connection::Failed(_)));
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.ctrl('r').await;
+    assert!(h.app.connection.is_connected());
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+}
+
+#[tokio::test]
+async fn protocol_mismatch_asks_before_restarting_the_daemon() {
+    let fake = FakeApi::new(vec![]);
+    let dir = tempfile::tempdir().unwrap();
+    let mut options = options(&fake, scope(), &dir);
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let api: Arc<dyn SessionApi> = fake.clone();
+    let counter = attempts.clone();
+    options.connector = Arc::new(move || {
+        if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+            Err(ApiError::new(
+                ErrorCode::ProtocolMismatch,
+                "daemon speaks v0",
+            ))
+        } else {
+            Ok(api.clone())
+        }
+    });
+    let mut h = start(options, fake, dir);
+    assert!(matches!(h.app.mode, AppMode::DaemonRestart(_)));
+    // Declining keeps the error state.
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(matches!(h.app.connection, Connection::Failed(_)));
+    // Retrying offers the restart again; consenting stops the (absent)
+    // daemon and reconnects.
+    h.app.connection = Connection::Failed(ApiError::new(ErrorCode::ProtocolMismatch, "v0"));
+    h.app.mode = AppMode::DaemonRestart(DaemonRestartDialog {
+        daemon_version: None,
+        in_place: false,
+        detail: String::new(),
+        missing: Vec::new(),
+        restarting: false,
+        error: None,
+    });
+    h.press(KeyCode::Char('y')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.connection.is_connected());
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert!(h
+        .app
+        .status()
+        .unwrap()
+        .starts_with("Restarted the Orchestra server"));
+}
+
+// ---------------------------------------------------------------- live list
+
+#[tokio::test]
+async fn events_from_other_clients_keep_the_list_live() {
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
+    h.event(
+        "C",
+        SessionEvent::Created {
+            session: view("C", "from-cli", 5),
+        },
+    );
+    assert!(h.app.list.get(&id("C")).is_some());
+    let mut renamed = view("A", "renamed-elsewhere", 10);
+    renamed.lifecycle = Lifecycle::Working;
+    h.event("A", SessionEvent::Updated { session: renamed });
+    assert_eq!(h.app.list.get(&id("A")).unwrap().name, "renamed-elsewhere");
+
+    // The selected session (B) is deleted elsewhere: the next one is shown.
+    let attaches = h.fake.attach_count();
+    h.event("B", SessionEvent::Removed);
+    assert!(h.app.list.get(&id("B")).is_none());
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(h.fake.attach_count(), attaches + 1);
+    assert_eq!(h.app.detail.view, DetailView::Live(id("A")));
+}
+
+#[tokio::test]
+async fn lost_subscription_reconnects_and_resyncs() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    h.fake.clear_calls();
+    h.fake.drop_subscribers();
+    h.app.process_pending();
+    assert!(matches!(h.app.connection, Connection::Failed(_)));
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    h.app.on_tick(later);
+    h.app.process_pending();
+    assert!(h.app.connection.is_connected());
+    assert!(h.fake.calls().contains(&"list_all dead=true".to_string()));
+}
+
+#[tokio::test]
+async fn reconnecting_keeps_a_focused_session_in_control() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    h.press(KeyCode::Enter).await;
+    let before = h.fake.attach_count();
+    h.fake.drop_subscribers();
+    h.app.process_pending();
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    h.app.on_tick(later);
+    h.app.process_pending();
+    assert_eq!(h.fake.attach_count(), before + 1);
+    assert_eq!(h.last_attach().1.role, Role::Controller);
+    assert_eq!(h.app.focus, Focus::Session);
+}
+
+#[tokio::test]
+async fn a_restart_goes_back_into_the_session_being_typed_in() {
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    let shown = h.app.detail.session_id().cloned().unwrap();
+    // The server restarts: the attach stream ends, then the subscription.
+    let (index, _) = h.last_attach();
+    h.attach_event(index, AttachEvent::Closed(None));
+    assert_eq!(h.app.focus, Focus::List);
+    h.fake.drop_subscribers();
+    h.app.process_pending();
+    let soon = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    h.app.on_tick(soon);
+    h.app.process_pending();
+    assert!(h.app.connection.is_connected());
+    assert_eq!(h.last_attach().1.role, Role::Controller);
+    assert_eq!(h.last_attach().1.id, shown);
+    assert_eq!(h.app.focus, Focus::Session);
+}
+
+#[tokio::test]
+async fn an_older_server_that_restarts_in_place_is_restarted_with_enter() {
+    let fake = FakeApi::without_all(vec![view("A", "a", 10)]);
+    fake.state.lock().unwrap().restarts_in_place = true;
+    let dir = tempfile::tempdir().unwrap();
+    let options = options(&fake, scope(), &dir);
+    let mut h = start(options, fake, dir);
+    match &h.app.mode {
+        AppMode::DaemonRestart(dialog) => assert!(dialog.in_place),
+        mode => panic!("no restart offer: {mode:?}"),
+    }
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("keep running"), "{text}");
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    assert!(
+        h.fake
+            .calls()
+            .iter()
+            .any(|c| c.starts_with("restart_daemon")),
+        "{:?}",
+        h.fake.calls()
+    );
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.connection.is_connected());
+    assert_eq!(
+        h.app.status(),
+        Some("Restarted the Orchestra server; your sessions kept running.")
+    );
+}
+
+#[test]
+fn a_panicking_client_ends_in_a_visible_error() {
+    let fake = FakeApi::new(vec![]);
+    let dir = tempfile::tempdir().unwrap();
+    let mut options = options(&fake, scope(), &dir);
+    options.connector = Arc::new(|| panic!("client bug"));
+    let h = start(options, fake, dir);
+    match &h.app.connection {
+        Connection::Failed(error) => assert_eq!(error.code, ErrorCode::Internal),
+        _ => panic!("expected a failed connection"),
+    }
+}
+
+// ---------------------------------------------------------------- focus and keys
+
+#[tokio::test]
+async fn an_observer_does_not_fit_back_after_another_window_resizes() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    // Another window fitted the uncontrolled session to its own pane.
+    h.attach_event(
+        index,
+        AttachEvent::Event(StreamEvent::Resized {
+            cols: 71,
+            rows: 27,
+            checkpoint: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"x"),
+            offset: 0,
+        }),
+    );
+    // Session updates used to make this window fit it back, and the two
+    // windows resized it back and forth.
+    h.event(
+        "A",
+        SessionEvent::Updated {
+            session: view("A", "a", 20),
+        },
+    );
+    assert_eq!(h.fake.outgoing(index), vec![]);
+    // Our own pane changing still fits it.
+    h.app.resize(150, 45);
+    let (cols, rows) = h.app.terminal_size();
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Command(StreamCommand::Fit { cols, rows })]
+    );
+}
+
+#[tokio::test]
+async fn the_window_being_used_takes_the_session_size_back() {
+    use crossterm::event::{Event, MouseEvent, MouseEventKind};
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    // The phone fitted the session to itself.
+    h.attach_event(
+        index,
+        AttachEvent::Event(StreamEvent::Resized {
+            cols: 45,
+            rows: 38,
+            checkpoint: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"x"),
+            offset: 0,
+        }),
+    );
+    // A mouse merely passing over this window doesn't take it back…
+    let moved = Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: 1,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    });
+    h.app.handle_terminal_event(moved).await;
+    assert_eq!(h.fake.outgoing(index), vec![]);
+    // …but the window coming to the front does, once.
+    let (cols, rows) = h.app.terminal_size();
+    h.app.handle_terminal_event(Event::FocusGained).await;
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Command(StreamCommand::Fit { cols, rows })]
+    );
+    h.app.handle_terminal_event(Event::FocusGained).await;
+    assert_eq!(h.fake.outgoing(index), vec![]);
+}
+
+#[tokio::test]
+async fn keys_with_a_stray_ctrl_or_alt_act_as_the_plain_key_in_orchestra_mode() {
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
+    let selected = h.selected();
+    // Ctrl-↓ (a phone key bar's ctrl, a held modifier): moves like ↓.
+    h.key(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL))
+        .await;
+    assert_ne!(h.selected(), selected);
+    let moved = h.selected();
+    h.key(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL))
+        .await;
+    assert_eq!(h.selected(), selected);
+    h.key(KeyEvent::new(
+        KeyCode::Down,
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ))
+    .await;
+    assert_eq!(h.selected(), moved);
+    // Shortcuts keep their meaning: Ctrl-c quits, Alt-↑ cycles.
+    assert!(matches!(
+        h.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::ALT))
+            .await,
+        AppResult::Exit
+    ));
+    assert!(matches!(
+        h.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL))
+            .await,
+        AppResult::Exit
+    ));
+    assert!(matches!(
+        h.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+            .await,
+        AppResult::Exit
+    ));
+}
+
+#[tokio::test]
+async fn enter_promotes_and_the_orchestra_key_demotes() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    let (cols, rows) = h.app.terminal_size();
+    // Observing a session nobody controls fits it to this pane.
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Command(StreamCommand::Fit { cols, rows })]
+    );
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Command(StreamCommand::Promote {
+            cols,
+            rows
+        })]
+    );
+    assert!(h.fake.calls().contains(&"touch A".to_string()));
+
+    // Plain keys, even Orchestra mode keys, go to the session.
+    h.press(KeyCode::Char('l')).await;
+    h.press(KeyCode::Char('q')).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![
+            AttachOutgoing::Input(b"l".to_vec()),
+            AttachOutgoing::Input(b"q".to_vec()),
+            AttachOutgoing::Input(b"\r".to_vec()),
+        ]
+    );
+    assert_eq!(h.app.focus, Focus::Session);
+
+    h.orchestra().await;
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Command(StreamCommand::Demote)]
+    );
+}
+
+#[tokio::test]
+async fn esc_and_the_orchestra_key_go_back_to_the_session_you_came_from() {
+    let mut h = harness(vec![aged("A", "a", 1, 30), aged("B", "b", 2, 20)]);
+    let (index, _) = h.last_attach();
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    h.fake.outgoing(index);
+    // Inside the session Tab and Esc belong to the program.
+    h.press(KeyCode::Tab).await;
+    h.press(KeyCode::Esc).await;
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![
+            AttachOutgoing::Input(b"\t".to_vec()),
+            AttachOutgoing::Input(b"\x1b".to_vec())
+        ]
+    );
+    // Orchestra mode, look at B, then Esc: back in A, not B.
+    h.orchestra().await;
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(h.app.came_from, Some(id("A")));
+    h.press(KeyCode::Char('j')).await;
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(h.app.came_from, None);
+    // The Orchestra key goes back too, even with a filter typed.
+    // A filter hiding it is cleared on the way.
+    h.orchestra().await;
+    h.press(KeyCode::Char('/')).await;
+    h.type_text("b").await;
+    h.press(KeyCode::Enter).await;
+    h.orchestra().await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert!(h.app.list.filter.is_empty());
+    // Esc cancels first: a filter is cleared, then Esc goes back.
+    h.orchestra().await;
+    h.press(KeyCode::Char('/')).await;
+    h.type_text("b").await;
+    h.press(KeyCode::Enter).await;
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::List);
+    assert!(h.app.list.filter.is_empty());
+    // ... and a pending `g` or `d`.
+    h.press(KeyCode::Char('g')).await;
+    assert_eq!(h.app.pending_key, Some('g'));
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.pending_key, None);
+    assert_eq!(h.app.focus, Focus::List);
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    // Started in Orchestra mode, Esc has nowhere to go back to.
+    let mut fresh = harness(vec![view("A", "a", 30)]);
+    fresh.press(KeyCode::Esc).await;
+    assert_eq!(fresh.app.focus, Focus::List);
+}
+
+#[tokio::test]
+async fn tab_numbers_and_enter_go_into_sessions() {
+    let mut h = harness(vec![
+        aged("A", "a", 1, 30),
+        aged("B", "b", 2, 20),
+        aged("C", "c", 3, 10),
+    ]);
+    h.press(KeyCode::Tab).await;
+    assert!(h.app.status().unwrap().contains("No other session"));
+    h.press(KeyCode::Char('i')).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.last_attach().1.id, id("A"));
+    // 3 goes straight into the third session.
+    h.prefix('3').await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.last_attach().1.id, id("C"));
+    assert_eq!(h.last_attach().1.role, Role::Controller);
+    // Tab: the session before that.
+    h.prefix_tab().await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    h.prefix_tab().await;
+    assert_eq!(h.selected().as_deref(), Some("C"));
+}
+
+#[tokio::test]
+async fn orchestra_mode_shows_only_help_and_settings_and_the_mode_in_the_footer() {
+    let mut h = harness(vec![view("A", "a", 30)]);
+    h.press(KeyCode::Enter).await;
+    h.orchestra().await;
+    h.app
+        .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(5));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let footer: String = (0..120)
+        .map(|x| buffer.get(x, 39).symbol().to_string())
+        .collect();
+    assert!(footer.starts_with(" ORCHESTRA "), "the mode: {footer:?}");
+    assert_eq!(
+        footer.trim_start_matches(" ORCHESTRA ").trim(),
+        "? help  , settings",
+        "{footer:?}"
+    );
+    let screen: String = buffer.content().iter().map(|c| c.symbol()).collect();
+    for hint in ["go in", "Esc back", "last session"] {
+        assert!(!screen.contains(hint), "{hint}");
+    }
+}
+
+#[tokio::test]
+async fn option_arrows_in_sessions_is_a_general_setting() {
+    let mut h = harness(vec![view("A", "a", 30)]);
+    assert_eq!(h.app.modal_context(false).general[2].value, "On [Off]");
+    h.press(KeyCode::Char(',')).await;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.settings.sessions.cycle_keys_in_session);
+    assert_eq!(h.app.modal_context(false).general[2].value, "[On] Off");
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert!(saved.sessions.cycle_keys_in_session);
+}
+
+#[tokio::test]
+async fn vim_keys_move_and_dd_deletes_after_asking() {
+    let mut h = harness(vec![
+        aged("A", "a", 1, 30),
+        aged("B", "b", 2, 20),
+        aged("C", "c", 3, 10),
+    ]);
+    h.press(KeyCode::Char('G')).await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
+    h.press(KeyCode::Char('g')).await;
+    h.press(KeyCode::Char('g')).await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
+    // Half a page is more than these three sessions.
+    h.ctrl('d').await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
+    h.ctrl('u').await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
+    h.press(KeyCode::Char('j')).await;
+    h.press(KeyCode::Char('j')).await;
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    // One d waits for the second; another key drops it.
+    h.press(KeyCode::Char('d')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.press(KeyCode::Char('k')).await;
+    assert_eq!(h.app.pending_key, None);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    h.press(KeyCode::Char('d')).await;
+    h.press(KeyCode::Char('d')).await;
+    assert!(matches!(h.app.mode, AppMode::Confirm(_)));
+}
+
+#[tokio::test]
+async fn dragging_the_divider_resizes_the_list_and_saves_the_width() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    h.app.resize(160, 48);
+    let divider = h.app.screen().divider.unwrap();
+    let mouse = |kind, column| MouseEvent {
+        kind,
+        column,
+        row: divider.y + 3,
+        modifiers: KeyModifiers::NONE,
+    };
+    h.app.handle_mouse(mouse(MouseEventKind::Moved, divider.x));
+    assert!(h.app.divider.hover);
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), divider.x));
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 70));
+    assert_eq!(h.app.screen().list.unwrap().width, 70);
+    assert_eq!(h.app.screen().divider.unwrap().x, 70);
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 70));
+    assert!(!h.app.divider.dragging);
+    let saved = std::fs::read_to_string(h.home.path().join("config.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(saved["sessions"]["sidebar_width"], 70);
+    // A drag far past the edge leaves the detail its minimum.
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 70));
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 159));
+    assert_eq!(
+        h.app.screen().detail.unwrap().width,
+        crate::layout::DETAIL_MIN_COLS
+    );
+}
+
+#[tokio::test]
+async fn dragging_the_stacked_divider_resizes_the_list_and_saves_its_height() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    // A narrow window: the list above the session.
+    h.app.resize(90, 40);
+    let screen = h.app.screen();
+    assert!(screen.stacked);
+    let divider = screen.divider.unwrap();
+    assert_eq!((divider.y, divider.height, divider.width), (15, 1, 90));
+    let size = h.app.terminal_size();
+    let mouse = |kind, row| MouseEvent {
+        kind,
+        column: 20,
+        row,
+        modifiers: KeyModifiers::NONE,
+    };
+    h.app.handle_mouse(mouse(MouseEventKind::Moved, divider.y));
+    assert!(h.app.divider.hover);
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), divider.y));
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 25));
+    let screen = h.app.screen();
+    assert_eq!(screen.list.unwrap().height, 25);
+    assert_eq!(screen.divider.unwrap().y, 25);
+    assert_eq!(screen.detail.unwrap().y, 26);
+    // The session-mode pane, and so the terminal's size, stays.
+    assert_eq!(h.app.terminal_size(), size);
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 25));
+    assert!(!h.app.divider.dragging);
+    let saved = std::fs::read_to_string(h.home.path().join("config.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(saved["sessions"]["stacked_list_percent"], 64);
+    assert!(saved["sessions"].get("sidebar_width").is_none(), "{saved}");
+    // Past either end, both panes keep their minimum.
+    for (row, list, preview) in [(38, 34, 4), (1, 9, 29)] {
+        let divider = h.app.screen().divider.unwrap().y;
+        h.app
+            .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), divider));
+        h.app
+            .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), row));
+        h.app
+            .handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), row));
+        let screen = h.app.screen();
+        assert_eq!(screen.list.unwrap().height, list, "row {row}");
+        assert_eq!(screen.detail.unwrap().height, preview, "row {row}");
+    }
+    // The setting comes back on the next start.
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    // Dragged past the top: the share of the smallest list.
+    assert_eq!(saved.sessions.stacked_list_percent, Some(23));
+    // Wide screens ignore it.
+    h.app.resize(160, 48);
+    assert_eq!(h.app.screen().list.unwrap().height, 47);
+}
+
+#[tokio::test]
+async fn from_a_session_the_orchestra_key_then_one_key_does_everything() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    h.press(KeyCode::Enter).await;
+    h.fake.outgoing(index);
+
+    // Ctrl-b, the old prefix, is the program's now.
+    h.ctrl('b').await;
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Input(vec![0x02])]
+    );
+    // Kitty-protocol terminals report Ctrl-\ as itself.
+    h.ctrl('\\').await;
+    assert_eq!(h.app.focus, Focus::List);
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    h.fake.outgoing(index);
+
+    // `\` sends the Orchestra key itself and goes back in.
+    h.prefix('\\').await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(h
+        .fake
+        .outgoing(index)
+        .contains(&AttachOutgoing::Input(vec![0x1c])));
+
+    // z: work in the session full screen; the Orchestra key brings the
+    // list back.
+    h.prefix('z').await;
+    assert!(h.app.zoomed);
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.app.terminal_size(), (160, 47));
+    h.orchestra().await;
+    assert!(!h.app.zoomed);
+    assert_eq!(h.app.focus, Focus::List);
+    h.press(KeyCode::Esc).await;
+
+    // Help and Settings.
+    h.prefix('?').await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::Overview));
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.focus, Focus::List);
+    h.press(KeyCode::Char(',')).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    h.press(KeyCode::Char(',')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::Session);
+
+    // Rename and new-session dialogs.
+    h.prefix('r').await;
+    assert!(matches!(h.app.mode, AppMode::Renaming(_)));
+    h.press(KeyCode::Esc).await;
+    h.press(KeyCode::Char('n')).await;
+    assert!(matches!(h.app.mode, AppMode::NewSession(_)));
+    h.press(KeyCode::Esc).await;
+
+    // Close asks first, then kills.
+    h.press(KeyCode::Char('x')).await;
+    match &h.app.mode {
+        AppMode::Confirm(dialog) => assert_eq!(
+            dialog.action,
+            ConfirmAction::CloseSession {
+                id: id("A"),
+                name: "a".into()
+            }
+        ),
+        _ => panic!("expected a confirmation"),
+    }
+    h.press(KeyCode::Char('y')).await;
+    assert!(h.fake.calls().contains(&"kill A tree=false".to_string()));
+    // Nothing but the literal key reached the program.
+    assert!(h
+        .fake
+        .outgoing(index)
+        .iter()
+        .all(|m| !matches!(m, AttachOutgoing::Input(_))));
+}
+
+#[tokio::test]
+async fn cycle_keys_move_in_orchestra_mode_and_only_on_request_in_sessions() {
+    let mut h = harness(vec![
+        aged("A", "a", 1, 30),
+        aged("B", "b", 2, 20),
+        aged("C", "c", 3, 10),
+    ]);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    h.alt(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    assert_eq!(h.last_attach().1.role, Role::Observer);
+    h.alt(KeyCode::Up).await;
+    h.alt(KeyCode::Up).await;
+    assert_eq!(h.selected().as_deref(), Some("C"), "wraps around");
+    h.alt(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("A"));
+
+    // In a session they go to the program by default (OpenCode, Pi and
+    // Claude Code use them).
+    h.press(KeyCode::Enter).await;
+    let (a_index, _) = h.last_attach();
+    h.fake.outgoing(a_index);
+    h.alt(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(
+        h.fake.outgoing(a_index),
+        vec![AttachOutgoing::Input(b"\x1b[1;3B".to_vec())]
+    );
+
+    // Turned on, they switch sessions from inside one, and never reach the
+    // program.
+    h.app.settings.sessions.cycle_keys_in_session = true;
+    h.alt(KeyCode::Down).await;
+    assert!(h
+        .fake
+        .outgoing(a_index)
+        .iter()
+        .all(|m| !matches!(m, AttachOutgoing::Input(_))));
+    let (_, request) = h.last_attach();
+    assert_eq!((request.id.as_str(), request.role), ("B", Role::Controller));
+    assert_eq!(h.app.focus, Focus::Session);
+    // Going in touches B, which moves nothing: the next step goes on to C,
+    // and the order is the same back in Orchestra mode.
+    h.event(
+        "B",
+        SessionEvent::Updated {
+            session: aged("B", "b", 2, 99),
+        },
+    );
+    h.alt(KeyCode::Down).await;
+    assert_eq!(h.last_attach().1.id, id("C"));
+    h.orchestra().await;
+    assert_eq!(visible_ids(&h), ["A", "B", "C"]);
+}
+
+#[tokio::test]
+async fn cycle_keys_can_be_turned_off() {
+    let fake = FakeApi::new(vec![view("A", "a", 30), view("B", "b", 20)]);
+    let dir = tempfile::tempdir().unwrap();
+    let mut options = options(&fake, scope(), &dir);
+    options.settings.sessions.cycle_keys.previous.clear();
+    options.settings.sessions.cycle_keys.next.clear();
+    let mut h = start(options, fake, dir);
+    assert!(h.app.cycle_keys.is_none());
+    assert_eq!(h.app.modal_context(false).cycle_keys, "");
+    // Inside a session the key now reaches the program.
+    h.press(KeyCode::Enter).await;
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    h.alt(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Input(b"\x1b[1;3B".to_vec())]
+    );
+}
+
+#[tokio::test]
+async fn nesting_guard_never_attaches_the_session_we_run_in() {
+    let fake = FakeApi::new(vec![aged("A", "self", 1, 30), aged("B", "other", 2, 20)]);
+    let dir = tempfile::tempdir().unwrap();
+    let mut options = options(&fake, scope(), &dir);
+    options.self_session = Some(id("A"));
+    let mut h = start(options, fake, dir);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(h.app.detail.view, DetailView::SelfSession(id("A")));
+    assert_eq!(h.fake.attach_count(), 0);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(h.fake.attach_count(), 0);
+    assert!(h.app.status().unwrap().contains("runs in"));
+    // Cycling from inside another session skips into Orchestra mode, not
+    // into the guarded session.
+    h.app.settings.sessions.cycle_keys_in_session = true;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    h.alt(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(h.app.focus, Focus::List);
+    assert!(h.fake.calls().iter().all(|c| !c.starts_with("attach A")));
+}
+
+#[tokio::test]
+async fn another_client_taking_control_returns_focus_to_the_list() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    h.press(KeyCode::Enter).await;
+    h.attach_event(
+        index,
+        AttachEvent::Event(StreamEvent::RoleChanged {
+            role: Role::Observer,
+        }),
+    );
+    assert_eq!(h.app.focus, Focus::List);
+    assert!(h.app.status().unwrap().contains("took control"));
+    assert_eq!(
+        h.app.detail.attachment.as_ref().unwrap().role,
+        Role::Observer
+    );
+}
+
+#[tokio::test]
+async fn going_straight_back_in_isnt_mistaken_for_another_client() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    // Promote, Demote, Promote before the daemon's answers arrive.
+    h.press(KeyCode::Enter).await;
+    h.orchestra().await;
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    for role in [Role::Controller, Role::Observer, Role::Controller] {
+        h.attach_event(index, AttachEvent::Event(StreamEvent::RoleChanged { role }));
+    }
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(h.app.status().is_none(), "{:?}", h.app.status());
+    assert_eq!(
+        h.app.detail.attachment.as_ref().unwrap().role,
+        Role::Controller
+    );
+    // A change nobody here asked for is still another client's.
+    h.attach_event(
+        index,
+        AttachEvent::Event(StreamEvent::RoleChanged {
+            role: Role::Observer,
+        }),
+    );
+    assert_eq!(h.app.focus, Focus::List);
+    assert!(h.app.status().unwrap().contains("took control"));
+}
+
+#[tokio::test]
+async fn output_is_fed_in_order_and_gaps_reattach() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    // The fake's checkpoint ends at offset 100.
+    h.attach_event(
+        index,
+        AttachEvent::Output {
+            offset: 100,
+            bytes: b" more".to_vec(),
+        },
+    );
+    h.attach_event(
+        index,
+        AttachEvent::Output {
+            offset: 98,
+            bytes: b"re".to_vec(),
+        },
+    );
+    let attachment = h.app.detail.attachment.as_ref().unwrap();
+    assert_eq!(attachment.offset, 105);
+    let attaches = h.fake.attach_count();
+    h.attach_event(
+        index,
+        AttachEvent::Output {
+            offset: 200,
+            bytes: b"x".to_vec(),
+        },
+    );
+    assert_eq!(h.fake.attach_count(), attaches + 1, "a gap re-attaches");
+}
+
+/// The style of the first cell of `text` on the screen drawn at 120×40.
+fn cell_of(h: &mut Harness, text: &str) -> ratatui::buffer::Cell {
+    cell_within(h, text, 120)
+}
+
+/// The style of the first cell of `text` within the first `columns`
+/// columns of the screen drawn at 120×40 (e.g. only the session list).
+fn cell_within(h: &mut Harness, text: &str, columns: u16) -> ratatui::buffer::Cell {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let buffer = terminal.backend().buffer().clone();
+    for y in 0..40 {
+        let row: String = (0..columns)
+            .map(|x| buffer.get(x, y).symbol().to_string())
+            .collect();
+        if let Some(x) = row.find(text) {
+            let x = row[..x].chars().count() as u16;
+            return buffer.get(x, y).clone();
+        }
+    }
+    panic!("{text:?} isn't on the screen");
+}
+
+#[tokio::test]
+async fn the_session_list_is_never_faded() {
+    // Only the session pane fades (in Orchestra mode); the list looks the
+    // same in session mode.
+    let mut h = harness(vec![view("A", "zebra", 10)]);
+    let width = h.app.screen().list.unwrap().width;
+    let orchestra = cell_within(&mut h, "zebra", width);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(cell_within(&mut h, "zebra", width), orchestra);
+}
+
+#[tokio::test]
+async fn the_session_pane_is_faded_while_it_doesnt_take_keys() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    h.attach_event(
+        index,
+        AttachEvent::Output {
+            offset: 100,
+            bytes: b"hello".to_vec(),
+        },
+    );
+    let p = crate::theme::palette();
+    // Orchestra mode: shown, faded.
+    let cell = cell_of(&mut h, "hello");
+    match p.faded(p.text_primary, crate::components::utils::FADE_TEXT) {
+        Some(faded) => assert_eq!(cell.fg, faded),
+        None => assert!(cell.modifier.contains(ratatui::style::Modifier::DIM)),
+    }
+    // Session mode: as the program drew it.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    let cell = cell_of(&mut h, "hello");
+    assert_eq!(cell.fg, p.text_primary);
+    assert!(!cell.modifier.contains(ratatui::style::Modifier::DIM));
+    // A dialog over it: faded again.
+    h.prefix('?').await;
+    let cell = cell_of(&mut h, "hello");
+    assert_ne!(cell.fg, p.text_primary);
+}
+
+#[tokio::test]
+async fn the_folder_filter_and_new_session_keep_the_session_in_view() {
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
+    let shown = h.app.detail.view.session_id().cloned();
+    assert!(shown.is_some());
+    let attaches = h.fake.attach_count();
+    // + New session at the bottom, then the folder filter at the top.
+    h.press(KeyCode::Char('G')).await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
+    assert_eq!(h.app.detail.view.session_id(), shown.as_ref());
+    h.press(KeyCode::Char('g')).await;
+    h.press(KeyCode::Char('g')).await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
+    // The pane went A → (last session) → … but never empty, and moving
+    // between rows that aren't sessions doesn't attach again.
+    assert!(h.app.detail.view.session_id().is_some());
+    let before = h.fake.attach_count();
+    h.press(KeyCode::Char('G')).await;
+    h.press(KeyCode::Char('g')).await;
+    h.press(KeyCode::Char('g')).await;
+    assert_eq!(h.fake.attach_count(), before);
+    assert!(h.fake.attach_count() >= attaches);
+}
+
+// ---------------------------------------------------------------- exited and dead
+
+#[tokio::test]
+async fn exit_returns_focus_and_enter_restarts() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    h.press(KeyCode::Enter).await;
+    h.attach_event(
+        index,
+        AttachEvent::Event(StreamEvent::Exited { code: Some(3) }),
+    );
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(
+        h.app.detail.view,
+        DetailView::Saved {
+            id: id("A"),
+            status: SessionStatus::Exited,
+            exit_code: Some(3)
+        }
+    );
+    assert!(h.app.detail.terminal.is_some(), "final screen kept");
+    h.press(KeyCode::Enter).await;
+    assert!(h
+        .fake
+        .calls()
+        .iter()
+        .any(|c| c.starts_with("revive A resume=false")));
+    let (_, request) = h.last_attach();
+    assert_eq!((request.id.as_str(), request.role), ("A", Role::Controller));
+    assert_eq!(h.app.focus, Focus::Session);
+}
+
+#[tokio::test]
+async fn dead_session_shows_saved_output_and_enter_revives() {
+    let mut dead = view("D", "dead-one", 10);
+    dead.status = SessionStatus::Dead;
+    dead.terminal = None;
+    let fake = FakeApi::new(vec![dead]);
+    fake.set_read("D", "line one\nline two");
+    let dir = tempfile::tempdir().unwrap();
+    let options = options(&fake, scope(), &dir);
+    let mut h = start(options, fake, dir);
+    assert!(h
+        .fake
+        .calls()
+        .iter()
+        .any(|c| c.starts_with("read D Recent")));
+    assert!(matches!(
+        h.app.detail.view,
+        DetailView::Saved {
+            status: SessionStatus::Dead,
+            ..
+        }
+    ));
+    assert_eq!(h.fake.attach_count(), 0);
+    h.press(KeyCode::Enter).await;
+    assert!(h
+        .fake
+        .calls()
+        .iter()
+        .any(|c| c.starts_with("revive D resume=true")));
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.app.detail.view, DetailView::Live(id("D")));
+}
+
+// ---------------------------------------------------------------- dialogs
+
+#[tokio::test]
+async fn new_session_dialog_creates_and_focuses_the_session() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(dialog_folder(&h), scope());
+    // Only the name: Tab and arrows don't move anywhere or type anything.
+    h.type_text("api work").await;
+    for code in [KeyCode::Tab, KeyCode::BackTab, KeyCode::Up, KeyCode::Down] {
+        h.press(code).await;
+    }
+    match &h.app.mode {
+        AppMode::NewSession(dialog) => assert_eq!(dialog.name.value(), "api work"),
+        _ => panic!("dialog closed"),
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+
+    // The folder and the login shell: no command, no startup input.
+    let creates = h.fake.creates();
+    assert_eq!(creates.len(), 1);
+    let create = &creates[0];
+    assert_eq!(create.scope, Some(scope()));
+    assert_eq!(create.name.as_deref(), Some("api work"));
+    assert_eq!(create.cwd.as_deref(), Some(scope().path()));
+    assert_eq!(create.argv, None);
+    assert!(create.startup_cmds.is_empty());
+    assert_eq!((create.cols, create.rows), h.app.terminal_size());
+
+    let new_id = h.app.list.selected_id().cloned().unwrap();
+    assert_eq!(new_id.as_str(), "N1");
+    assert_eq!(h.app.list.get(&new_id).unwrap().name, "api work");
+    let (_, request) = h.last_attach();
+    assert_eq!(
+        (request.id.clone(), request.role),
+        (new_id, Role::Controller)
+    );
+    assert_eq!(h.app.focus, Focus::Session);
+}
+
+#[tokio::test]
+async fn a_blank_name_lets_orchestra_pick_one() {
+    let mut h = harness(vec![]);
+    h.press(KeyCode::Char('n')).await;
+    h.type_text("   ").await;
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    let create = h.fake.creates().pop().unwrap();
+    assert_eq!(create.name, None);
+    assert_eq!(create.cwd.as_deref(), Some(scope().path()));
+    let new_id = h.app.list.selected_id().cloned().unwrap();
+    assert!(h.app.list.get(&new_id).unwrap().auto_named);
+
+    // Esc cancels without creating anything.
+    h.orchestra().await;
+    h.press(KeyCode::Char('n')).await;
+    h.type_text("never").await;
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.fake.creates().len(), 1);
+}
+
+#[tokio::test]
+async fn create_errors_from_the_daemon_stay_in_the_dialog() {
+    let dir = tempfile::tempdir().unwrap();
+    let scope = ScopeRoot::resolve(dir.path()).unwrap();
+    let fake = FakeApi::new(vec![]);
+    fake.fail_next(
+        "create",
+        ApiError::new(ErrorCode::InvalidArgument, "name taken"),
+    );
+    let home = tempfile::tempdir().unwrap();
+    let options = options(&fake, scope, &home);
+    let mut h = start(options, fake, home);
+    h.press(KeyCode::Enter).await; // "+ New session" row
+    h.type_text("dup").await;
+    h.press(KeyCode::Enter).await;
+    match &h.app.mode {
+        AppMode::NewSession(dialog) => {
+            assert!(dialog.error.as_deref().unwrap().contains("name taken"));
+            assert!(!dialog.busy);
+        }
+        _ => panic!("dialog closed"),
+    }
+}
+
+#[tokio::test]
+async fn rename_dialog_renames_and_reports_errors() {
+    let mut h = harness(vec![view("A", "old", 10)]);
+    h.press(KeyCode::Char('r')).await;
+    match &h.app.mode {
+        AppMode::Renaming(dialog) => assert_eq!(dialog.input.value(), "old"),
+        _ => panic!("no rename dialog"),
+    }
+    h.fake.fail_next(
+        "rename",
+        ApiError::new(ErrorCode::InvalidArgument, "name taken"),
+    );
+    h.ctrl('u').await;
+    h.type_text("api work").await;
+    h.press(KeyCode::Enter).await;
+    match &h.app.mode {
+        AppMode::Renaming(dialog) => {
+            assert!(dialog
+                .error_message
+                .as_deref()
+                .unwrap()
+                .contains("name taken"))
+        }
+        _ => panic!("dialog closed on error"),
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.fake.calls().contains(&"rename A api work".to_string()));
+    assert_eq!(h.app.list.get(&id("A")).unwrap().name, "api work");
+}
+
+#[tokio::test]
+async fn delete_asks_first() {
+    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
+    h.type_text("dd").await;
+    assert!(matches!(h.app.mode, AppMode::Confirm(_)));
+    h.press(KeyCode::Char('n')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(!h.fake.calls().iter().any(|c| c.starts_with("delete")));
+    h.type_text("dd").await;
+    h.press(KeyCode::Enter).await;
+    assert!(h.fake.calls().contains(&"delete A".to_string()));
+    assert!(h.app.list.get(&id("A")).is_none());
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    assert_eq!(h.app.detail.view, DetailView::Live(id("B")));
+}
+
+/// The open modal's tab (Settings or Help), or `None` when none is open.
+fn settings_tab(h: &Harness) -> Option<ModalTab> {
+    match &h.app.mode {
+        AppMode::Modal { state, .. } => Some(state.tab),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn help_opens_closes_and_lets_cycle_keys_through() {
+    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
+    h.press(KeyCode::Char('?')).await;
+    assert!(matches!(
+        h.app.mode,
+        AppMode::Modal {
+            in_session: false,
+            ..
+        }
+    ));
+    assert_eq!(settings_tab(&h), Some(ModalTab::Overview));
+    h.press(KeyCode::Tab).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::Sessions));
+    h.alt(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
+    h.press(KeyCode::Char('q')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    // q in the list quits.
+    assert_eq!(h.press(KeyCode::Char('q')).await, AppResult::Exit);
+}
+
+#[tokio::test]
+async fn settings_and_help_open_from_the_list_with_their_keys() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    h.press(KeyCode::Char('o')).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    // The key that opened it closes it.
+    h.press(KeyCode::Char('o')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.press(KeyCode::Char('?')).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::Overview));
+    h.press(KeyCode::Char('5')).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::License));
+    h.press(KeyCode::Char('?')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    // `,` opens Settings too; the Orchestra key closes a modal.
+    h.press(KeyCode::Char(',')).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    h.press(KeyCode::Char('2')).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::Keys));
+    h.orchestra().await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.focus, Focus::List);
+}
+
+#[tokio::test]
+async fn the_keys_tab_runs_the_selected_action() {
+    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
+    let open_keys = |h: &mut Harness| {
+        h.app.mode = AppMode::modal(ModalTab::Keys, h.app.focus == Focus::Session);
+    };
+    let row = |action: crate::help::KeyAction| {
+        crate::help::KeyAction::ALL
+            .iter()
+            .position(|a| *a == action)
+            .unwrap()
+    };
+    // New session.
+    open_keys(&mut h);
+    for _ in 0..row(crate::help::KeyAction::NewSession) {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::NewSession(_)));
+    h.press(KeyCode::Esc).await;
+    // Next session, from Orchestra mode.
+    open_keys(&mut h);
+    for _ in 0..row(crate::help::KeyAction::NextSession) {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    // Help opens Help; Quit quits.
+    open_keys(&mut h);
+    for _ in 0..row(crate::help::KeyAction::Help) {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::Overview));
+    h.press(KeyCode::Esc).await;
+    open_keys(&mut h);
+    h.press(KeyCode::End).await;
+    assert_eq!(h.press(KeyCode::Enter).await, AppResult::Exit);
+    // From a session: "Orchestra mode" leaves it, "Back to the session"
+    // returns.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    open_keys(&mut h);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::List);
+    open_keys(&mut h);
+    for _ in 0..row(crate::help::KeyAction::BackToSession) {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+}
+
+#[tokio::test]
+async fn filter_narrows_the_list() {
+    let mut h = harness(vec![view("A", "api", 20), view("B", "docs", 10)]);
+    h.press(KeyCode::Char('/')).await;
+    h.type_text("doc").await;
+    assert_eq!(h.app.list.visible().len(), 1);
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    h.press(KeyCode::Enter).await;
+    assert!(!h.app.list.filter_editing);
+    assert_eq!(h.app.list.filter.value(), "doc");
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.list.visible().len(), 2);
+}
+
+#[tokio::test]
+async fn settings_switch_layout_live_and_save_it() {
+    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
+    h.press(KeyCode::Char('o')).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    h.press(KeyCode::Enter).await; // Layout is the first entry
+    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    assert_eq!(h.app.session_layout(), SessionLayout::Tabs);
+    // Tabs keep creation order: B (created at 10) is tab 1.
+    assert_eq!(h.app.list.visible()[0].id, id("B"));
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert_eq!(saved.sessions.layout, SessionLayout::Tabs);
+    h.press(KeyCode::Esc).await;
+    // Number keys go into that tab's session.
+    h.press(KeyCode::Char('1')).await;
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    assert_eq!(h.app.focus, Focus::Session);
+    h.prefix('2').await;
+    assert_eq!(h.selected().as_deref(), Some("A"));
+}
+
+#[tokio::test]
+async fn api_key_dialog_validates_and_saves() {
+    let mut h = harness(vec![]);
+    h.press(KeyCode::Char('o')).await;
+    for _ in 0..SettingsItem::AnthropicKey.index() {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::ConfiguringApiKey(_)));
+    h.type_text("bad").await;
+    h.press(KeyCode::Enter).await;
+    match &h.app.mode {
+        AppMode::ConfiguringApiKey(dialog) => assert!(dialog.error_message.is_some()),
+        _ => panic!("dialog closed"),
+    }
+    h.ctrl('u').await;
+    h.type_text("sk-ant-123").await;
+    h.press(KeyCode::Enter).await;
+    // Back on the General tab, on the same row.
+    match &h.app.mode {
+        AppMode::Modal { state, .. } => {
+            assert_eq!(state.tab, ModalTab::General);
+            assert_eq!(state.selected, SettingsItem::AnthropicKey.index());
+        }
+        mode => panic!("not back in Settings: {mode:?}"),
+    }
+    assert_eq!(
+        h.app.settings.ai.anthropic_api_key.as_deref(),
+        Some("sk-ant-123")
+    );
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert_eq!(saved.ai.anthropic_api_key.as_deref(), Some("sk-ant-123"));
+    assert_eq!(
+        h.app.modal_context(false).general[SettingsItem::AnthropicKey.index()].value,
+        "set",
+        "the General tab shows the key as set"
+    );
+}
+
+#[tokio::test]
+async fn typing_an_api_key_never_switches_tabs_or_closes() {
+    let mut h = harness(vec![]);
+    h.press(KeyCode::Char('o')).await;
+    for _ in 0..SettingsItem::OpenAiKey.index() {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::ConfiguringApiKey(_)));
+    // Tab, close and number keys of the modal are text here.
+    h.type_text("sk-q?o1hl ").await;
+    h.press(KeyCode::Tab).await;
+    match &h.app.mode {
+        AppMode::ConfiguringApiKey(dialog) => assert_eq!(dialog.input.value(), "sk-q?o1hl "),
+        mode => panic!("dialog closed: {mode:?}"),
+    }
+    // Esc cancels: back to Settings, the OpenAI row selected, nothing saved.
+    h.press(KeyCode::Esc).await;
+    match &h.app.mode {
+        AppMode::Modal { state, .. } => {
+            assert_eq!(state.tab, ModalTab::General);
+            assert_eq!(state.selected, SettingsItem::OpenAiKey.index());
+        }
+        mode => panic!("not back in Settings: {mode:?}"),
+    }
+    assert!(h.app.settings.ai.openai_api_key.is_none());
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+}
+
+#[tokio::test]
+async fn provider_and_model_dialogs_return_to_settings() {
+    let mut h = harness(vec![]);
+    h.press(KeyCode::Char('o')).await;
+    for _ in 0..SettingsItem::PrimaryAiProvider.index() {
+        h.press(KeyCode::Char('j')).await;
+    }
+    h.press(KeyCode::Char(' ')).await;
+    assert!(matches!(h.app.mode, AppMode::AiProvider(_)));
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        h.app.settings.ai.ai_primary_provider.as_deref(),
+        Some("openai")
+    );
+    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    assert_eq!(
+        h.app.modal_context(false).general[SettingsItem::PrimaryAiProvider.index()].value,
+        "OpenAI"
+    );
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::OpenAiModel(_)));
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        h.app.settings.ai.openai_model.as_deref(),
+        Some("gpt-4.1-mini")
+    );
+    match &h.app.mode {
+        AppMode::Modal { state, .. } => {
+            assert_eq!(state.selected, SettingsItem::OpenAiModel.index())
+        }
+        mode => panic!("not back in Settings: {mode:?}"),
+    }
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert_eq!(saved.ai.openai_model.as_deref(), Some("gpt-4.1-mini"));
+}
+
+// ---------------------------------------------------------------- AI naming
+
+#[tokio::test]
+async fn auto_named_sessions_are_named_when_they_settle() {
+    let dir = tempfile::tempdir().unwrap();
+    let scope = ScopeRoot::resolve(dir.path()).unwrap();
+    let fake = FakeApi::new(vec![view_in(&scope, "A", "user-named", 10)]);
+    fake.set_read("N1", "$ cargo test\nok");
+    let home = tempfile::tempdir().unwrap();
+    let options = options(&fake, scope.clone(), &home);
+    let mut h = start(options, fake, home);
+    h.press(KeyCode::Char('n')).await;
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.list.get(&id("N1")).unwrap().auto_named);
+
+    // Working: nothing yet.
+    h.fake.emit_in(
+        &scope,
+        "N1",
+        SessionEvent::Lifecycle {
+            lifecycle: Lifecycle::Working,
+        },
+    );
+    h.app.process_pending();
+    assert!(!h.fake.calls().iter().any(|c| c.starts_with("rename")));
+    // Idle: named once.
+    h.fake.emit_in(
+        &scope,
+        "N1",
+        SessionEvent::Lifecycle {
+            lifecycle: Lifecycle::Idle,
+        },
+    );
+    h.app.process_pending();
+    assert!(h.fake.calls().contains(&"rename N1 fixed_name".to_string()));
+    assert_eq!(h.app.list.get(&id("N1")).unwrap().name, "fixed_name");
+    h.fake.clear_calls();
+    h.fake.emit_in(
+        &scope,
+        "N1",
+        SessionEvent::Lifecycle {
+            lifecycle: Lifecycle::Done,
+        },
+    );
+    h.app.process_pending();
+    assert!(!h.fake.calls().iter().any(|c| c.starts_with("rename")));
+
+    // Sessions the user named are never touched.
+    h.fake.emit_in(
+        &scope,
+        "A",
+        SessionEvent::Lifecycle {
+            lifecycle: Lifecycle::Idle,
+        },
+    );
+    h.app.process_pending();
+    assert!(!h.fake.calls().iter().any(|c| c.starts_with("rename A")));
+}
+
+#[test]
+fn naming_input_reads_history_and_the_visible_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let layout = Layout::with_home(dir.path().to_path_buf());
+    let session = id("S1");
+    let history = layout.history_file(&session);
+    std::fs::create_dir_all(history.parent().unwrap()).unwrap();
+    std::fs::write(&history, "1\tcargo build\n2\tcargo test\n").unwrap();
+    let fake = FakeApi::new(vec![view("S1", "s", 1)]);
+    fake.set_read("S1", "test result: ok");
+    let input = auto_name::gather_input(fake.as_ref(), Some(&history), &session);
+    assert_eq!(input.history, ["cargo build", "cargo test"]);
+    assert_eq!(input.screen, "test result: ok");
+    assert!(fake
+        .calls()
+        .iter()
+        .any(|c| c.starts_with("read S1 Visible")));
+    // A missing history file is no history.
+    let input = auto_name::gather_input(fake.as_ref(), Some(&dir.path().join("nope")), &session);
+    assert!(input.history.is_empty());
+}
+
+// ---------------------------------------------------------------- mouse and paste
+
+#[tokio::test]
+async fn clicking_a_row_selects_it_and_paste_goes_to_the_focused_session() {
+    let mut h = harness(vec![aged("A", "a", 1, 20), aged("B", "b", 2, 10)]);
+    let backend = ratatui::backend::TestBackend::new(160, 48);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let (row_area, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::ListRow(2))
+        .unwrap();
+    h.app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: row_area.x + 2,
+        row: row_area.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    h.app.process_pending();
+    assert_eq!(h.selected().as_deref(), Some("B"));
+
+    h.press(KeyCode::Enter).await;
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    h.app.handle_paste("echo hi");
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Input(b"echo hi".to_vec())]
+    );
+
+    // A click on the list from inside B switches to Orchestra mode like
+    // the Orchestra key: Esc goes back into B.
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let row_of = |h: &Harness, id: &str| {
+        let row = h
+            .app
+            .list
+            .rows()
+            .iter()
+            .position(|r| matches!(r, ListRow::Session(s) if s.id.as_str() == id))
+            .unwrap();
+        h.app
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == Hit::ListRow(row))
+            .map(|(area, _)| *area)
+            .unwrap()
+    };
+    let a = row_of(&h, "A");
+    h.app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: a.x + 2,
+        row: a.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    h.app.process_pending();
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(h.app.came_from, Some(id("B")));
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.selected().as_deref(), Some("B"));
+}
+
+// ---------------------------------------------------------------- order
+
+/// Draw at the harness's 160×48, as the event loop does after each input,
+/// so the click targets are current.
+fn draw(h: &mut Harness) -> ratatui::buffer::Buffer {
+    let backend = ratatui::backend::TestBackend::new(160, 48);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    terminal.backend().buffer().clone()
+}
+
+/// The list row of session `id`, from the last draw.
+fn list_row(h: &Harness, id: &str) -> ratatui::layout::Rect {
+    let row = h
+        .app
+        .list
+        .rows()
+        .iter()
+        .position(|r| matches!(r, ListRow::Session(s) if s.id.as_str() == id))
+        .unwrap();
+    h.app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::ListRow(row))
+        .map(|(area, _)| *area)
+        .unwrap()
+}
+
+/// The left button pressed, dragged or released at `column`, `row`.
+fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+/// Press the left button at `(column, row)`, drag through `path` (drawing
+/// after each step) and release at its end.
+fn drag(h: &mut Harness, (column, row): (u16, u16), path: &[(u16, u16)]) {
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), column, row));
+    h.app.process_pending();
+    draw(h);
+    let mut end = (column, row);
+    for &(column, row) in path {
+        h.app
+            .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), column, row));
+        draw(h);
+        end = (column, row);
+    }
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1));
+}
+
+/// `sessions.session_order` in the saved config.json.
+fn saved_order(h: &Harness) -> serde_json::Value {
+    let saved = std::fs::read_to_string(h.home.path().join("config.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    saved["sessions"]["session_order"].clone()
+}
+
+async fn shift(h: &mut Harness, c: char) {
+    h.key(crossterm::event::KeyEvent::new(
+        KeyCode::Char(c),
+        KeyModifiers::SHIFT,
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn dragging_a_session_moves_it_live_and_saves_the_order_on_release() {
+    let mut h = harness(vec![
+        view("A", "alpha", 10),
+        view("B", "bravo", 20),
+        view("C", "charlie", 30),
+    ]);
+    draw(&mut h);
+    let (a, b, c) = (list_row(&h, "A"), list_row(&h, "B"), list_row(&h, "C"));
+    let x = a.x + 4;
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, a.y + 1));
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    // Not dragged yet: no mark.
+    let buffer = draw(&mut h);
+    assert_eq!(buffer.get(a.x + 1, a.y + 1).symbol(), " ");
+    // Over B: A takes its place, marked as dragged, still selected.
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x, b.y + 1));
+    assert_eq!(visible_ids(&h), ["B", "A", "C"]);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    let buffer = draw(&mut h);
+    let mark = buffer.get(b.x + 1, b.y + 1);
+    assert_eq!(mark.symbol(), "▎");
+    assert_eq!(mark.fg, crate::theme::palette().accent_primary);
+    assert_eq!(buffer.get(b.x + 1, b.y + 2).symbol(), "▎");
+    // Nothing is saved while it's held.
+    assert!(!h.home.path().join("config.json").exists());
+    // Over C, then back up past the top: clamped to the first place.
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x, c.y + 2));
+    assert_eq!(visible_ids(&h), ["B", "C", "A"]);
+    draw(&mut h);
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x, 0));
+    assert_eq!(visible_ids(&h), ["A", "B", "C"]);
+    draw(&mut h);
+    // Down past the bottom: the last place. Released: saved, mark gone.
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x, 46));
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x, 46));
+    assert_eq!(visible_ids(&h), ["B", "C", "A"]);
+    assert_eq!(
+        saved_order(&h),
+        serde_json::json!({"/repo": ["B", "C", "A"]})
+    );
+    assert_eq!(h.app.drag, None);
+    let buffer = draw(&mut h);
+    let a = list_row(&h, "A");
+    assert_eq!(buffer.get(a.x + 1, a.y + 1).symbol(), " ");
+    // Activity doesn't undo it.
+    h.event(
+        "B",
+        SessionEvent::Updated {
+            session: view("B", "bravo", 99),
+        },
+    );
+    assert_eq!(visible_ids(&h), ["B", "C", "A"]);
+}
+
+#[tokio::test]
+async fn a_click_without_moving_still_selects_and_goes_in() {
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
+    draw(&mut h);
+    let a = list_row(&h, "A");
+    // Pressed and released on the same row (jitter within it included).
+    drag(&mut h, (a.x + 4, a.y + 1), &[(a.x + 6, a.y + 2)]);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(visible_ids(&h), ["A", "B"]);
+    assert!(!h.home.path().join("config.json").exists());
+    // A click on the session works in it.
+    let pane = h.app.screen().terminal.unwrap();
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        pane.x + 2,
+        pane.y + 2,
+    ));
+    h.app.process_pending();
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.last_attach().1.id, id("A"));
+    // The divider still drags.
+    let divider = h.app.screen().divider.unwrap();
+    drag(&mut h, (divider.x, divider.y + 3), &[(70, divider.y + 3)]);
+    assert_eq!(h.app.screen().list.unwrap().width, 70);
+    assert_eq!(visible_ids(&h), ["A", "B"]);
+}
+
+#[tokio::test]
+async fn a_drag_stays_in_its_folder_group() {
+    let mut h = folders_harness();
+    assert_eq!(visible_ids(&h), ["R1", "R2", "A1", "W1"]);
+    draw(&mut h);
+    let (r1, a1) = (list_row(&h, "R1"), list_row(&h, "A1"));
+    let x = r1.x + 4;
+    // Down into /api: R1 stops at the bottom of /repo.
+    drag(
+        &mut h,
+        (x, r1.y + 1),
+        &[(x, a1.y + 1), (x, a1.y + 2), (x, 46)],
+    );
+    assert_eq!(visible_ids(&h), ["R2", "R1", "A1", "W1"]);
+    assert_eq!(saved_order(&h), serde_json::json!({"/repo": ["R2", "R1"]}));
+    // A1 dragged up over /repo stays the first (and only) of /api.
+    draw(&mut h);
+    let (r2, a1) = (list_row(&h, "R2"), list_row(&h, "A1"));
+    drag(&mut h, (x, a1.y + 1), &[(x, r2.y + 1), (x, 0)]);
+    assert_eq!(visible_ids(&h), ["R2", "R1", "A1", "W1"]);
+}
+
+#[tokio::test]
+async fn dragging_a_tab_reorders_the_tabs() {
+    let mut h = harness_with_folders(
+        vec![
+            view("A", "alpha", 10),
+            view("B", "bravo", 20),
+            view("C", "charlie", 30),
+        ],
+        &[],
+        SessionLayout::Tabs,
+    );
+    draw(&mut h);
+    let tab = |h: &Harness, index: usize| {
+        h.app
+            .tab_hits
+            .iter()
+            .find(|(i, _)| *i == index)
+            .map(|(_, area)| *area)
+            .unwrap()
+    };
+    let (first, third) = (tab(&h, 0), tab(&h, 2));
+    let y = first.y;
+    // alpha onto charlie, through bravo: it ends last.
+    let path: Vec<(u16, u16)> = (first.x + 1..third.x + 2).map(|x| (x, y)).collect();
+    drag(&mut h, (first.x + 1, y), &path);
+    assert_eq!(visible_ids(&h), ["B", "C", "A"]);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(
+        saved_order(&h),
+        serde_json::json!({"/repo": ["B", "C", "A"]})
+    );
+    // Left of every tab (over the folder filter): the first place.
+    draw(&mut h);
+    let last = tab(&h, 2);
+    drag(&mut h, (last.x + 1, y), &[(last.x, y), (1, y)]);
+    assert_eq!(visible_ids(&h), ["A", "B", "C"]);
+}
+
+#[tokio::test]
+async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restart() {
+    let mut h = harness(vec![
+        view("A", "a", 10),
+        view("B", "b", 20),
+        view("C", "c", 30),
+    ]);
+    // The newest is last and selected (most recently used).
+    assert_eq!(h.selected().as_deref(), Some("C"));
+    shift(&mut h, 'K').await;
+    assert_eq!(visible_ids(&h), ["A", "C", "B"]);
+    assert_eq!(
+        saved_order(&h),
+        serde_json::json!({"/repo": ["A", "C", "B"]})
+    );
+    shift(&mut h, 'K').await;
+    shift(&mut h, 'K').await;
+    assert_eq!(visible_ids(&h), ["C", "A", "B"], "stops at the top");
+    shift(&mut h, 'J').await;
+    assert_eq!(visible_ids(&h), ["A", "C", "B"]);
+    assert_eq!(h.selected().as_deref(), Some("C"));
+    // Pinned sessions stay above the others.
+    h.press(KeyCode::Char('k')).await;
+    h.press(KeyCode::Char('p')).await;
+    assert_eq!(visible_ids(&h), ["A", "C", "B"]);
+    h.press(KeyCode::Char('j')).await;
+    shift(&mut h, 'K').await;
+    assert_eq!(visible_ids(&h), ["A", "C", "B"]);
+    assert_eq!(h.selected().as_deref(), Some("C"));
+    // On the folder filter there's nothing to move.
+    h.press(KeyCode::Home).await;
+    shift(&mut h, 'J').await;
+    assert_eq!(h.app.status(), Some("Select a session to move."));
+    // Inside a session J is the program's.
+    h.press(KeyCode::Char('j')).await;
+    h.press(KeyCode::Enter).await;
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    shift(&mut h, 'J').await;
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Input(b"J".to_vec())]
+    );
+    assert_eq!(visible_ids(&h), ["A", "C", "B"]);
+
+    // The next start reads it back; a session made since goes last.
+    let Harness { fake, home, .. } = h;
+    fake.state.lock().unwrap().sessions.push(view("D", "d", 1));
+    let mut options = options(&fake, scope(), &home);
+    options.settings = Settings::load_from(&home.path().join("config.json")).unwrap();
+    let h = start(options, fake, home);
+    assert_eq!(visible_ids(&h), ["A", "C", "B", "D"]);
+}
+
+#[tokio::test]
+async fn the_keys_tab_lists_and_runs_the_move_actions() {
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
+    let row = |action: crate::help::KeyAction| {
+        crate::help::KeyAction::ALL
+            .iter()
+            .position(|a| *a == action)
+            .unwrap()
+    };
+    let up = row(crate::help::KeyAction::MoveUp);
+    assert_eq!(row(crate::help::KeyAction::MoveDown) + 1, up);
+    assert_eq!(
+        crate::help::KeyAction::MoveUp.section(),
+        "Sessions and folders"
+    );
+    // From a session too: it moves in Orchestra mode.
+    h.press(KeyCode::Enter).await;
+    h.app.mode = AppMode::modal(ModalTab::Keys, true);
+    for _ in 0..up {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(visible_ids(&h), ["B", "A"]);
+    assert_eq!(saved_order(&h), serde_json::json!({"/repo": ["B", "A"]}));
+}
+
+// ---------------------------------------------------------------- folders
+
+/// `/repo` (launch) with two sessions, `/web` with one, `/api` with one;
+/// `/empty` is known but has none.
+fn folders_harness() -> Harness {
+    harness_with_folders(
+        vec![
+            view("R1", "repo-old", 10),
+            view("R2", "repo-new", 20),
+            view_in(&folder("/web"), "W1", "web-one", 50),
+            view_in(&folder("/api"), "A1", "api-one", 40),
+        ],
+        &[("/web", on_branch("main")), ("/empty", None)],
+        SessionLayout::Sidebar,
+    )
+}
+
+fn picker(h: &Harness) -> &types::FolderPicker {
+    match &h.app.mode {
+        AppMode::Folders(picker) => picker,
+        _ => panic!("the Folders modal is closed"),
+    }
+}
+
+/// The modal's rows: `all`, folder paths, `+ path` for a folder to add,
+/// `+new path` for one to create, `> value` for a folder completing the
+/// typed path.
+fn picker_rows(h: &Harness) -> Vec<String> {
+    picker(h)
+        .rows
+        .iter()
+        .map(|row| match row {
+            PickerRow::All => "all".to_string(),
+            PickerRow::Folder(p) => p.path().display().to_string(),
+            PickerRow::Add(NewFolder::Existing(p)) => format!("+ {}", p.display()),
+            PickerRow::Add(NewFolder::Create(p)) => format!("+new {}", p.display()),
+            PickerRow::Suggestion(folder) => format!("> {}", folder.value),
+        })
+        .collect()
+}
+
+/// Put the modal's cursor on the row for `path`.
+fn cursor_to(h: &mut Harness, path: &str) {
+    let row = picker(h)
+        .rows
+        .iter()
+        .position(|r| matches!(r, PickerRow::Folder(p) if p == &folder(path)))
+        .unwrap_or_else(|| panic!("no {path} row"));
+    if let AppMode::Folders(picker) = &mut h.app.mode {
+        picker.cursor = row;
+    }
+}
+
+fn visible_ids(h: &Harness) -> Vec<String> {
+    h.app
+        .list
+        .visible()
+        .iter()
+        .map(|s| s.id.to_string())
+        .collect()
+}
+
+/// Calls that list sessions or open a subscription.
+fn list_calls(h: &Harness) -> Vec<String> {
+    h.fake
+        .calls()
+        .into_iter()
+        .filter(|c| c.starts_with("list") || c.starts_with("subscribe"))
+        .collect()
+}
+
+#[tokio::test]
+async fn every_folder_is_listed_and_watched_from_the_start() {
+    let mut h = folders_harness();
+    let calls = h.fake.calls();
+    assert_eq!(
+        calls[..4],
+        [
+            "add_project /repo",
+            "projects",
+            "subscribe all",
+            "list_all dead=true"
+        ],
+        "{calls:?}"
+    );
+    assert!(!calls.iter().any(|c| c.starts_with("list_in")), "{calls:?}");
+    // All folders, under headers: the launch folder first, then by name.
+    assert!(h.app.list.folder_filter().is_empty());
+    assert_eq!(h.app.folder_label(), "All folders");
+    assert!(h.app.list.is_grouped());
+    assert_eq!(
+        h.app.list.groups(),
+        [scope(), folder("/api"), folder("/web")]
+    );
+    assert_eq!(visible_ids(&h), ["R1", "R2", "A1", "W1"]);
+    // A session another client starts in a folder never seen before (a new
+    // worktree) appears live, and the TUI asks about the folder.
+    let fresh = folder("/repo-wt");
+    h.fake.clear_calls();
+    h.fake.emit_in(
+        &fresh,
+        "N1",
+        SessionEvent::Created {
+            session: view_in(&fresh, "N1", "worktree", 60),
+        },
+    );
+    h.app.process_pending();
+    assert!(h.app.list.get(&id("N1")).is_some());
+    assert_eq!(
+        h.app.list.groups(),
+        [scope(), folder("/api"), folder("/repo-wt"), folder("/web")]
+    );
+    assert!(h.fake.calls().contains(&"projects".to_string()));
+    assert!(list_calls(&h).is_empty(), "no resubscribe");
+}
+
+#[tokio::test]
+async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
+    let fake = FakeApi::without_all(vec![
+        view("R1", "repo-old", 10),
+        view_in(&folder("/web"), "W1", "web-one", 50),
+    ]);
+    fake.add_known_folder(&folder("/empty"), None);
+    let dir = tempfile::tempdir().unwrap();
+    let options = options(&fake, scope(), &dir);
+    let mut h = start(options, fake, dir);
+    let calls = h.fake.calls();
+    assert!(
+        calls.contains(&"subscribe /repo,/web,/empty".to_string()),
+        "{calls:?}"
+    );
+    assert!(
+        calls.contains(&"list_in /repo,/web,/empty dead=true".to_string()),
+        "{calls:?}"
+    );
+    assert!(!calls.iter().any(|c| c.contains("all")), "{calls:?}");
+    assert_eq!(h.app.folders.support, folders::FolderSupport::Known);
+    assert_eq!(visible_ids(&h), ["R1", "W1"]);
+    // The restart notice says what's missing.
+    match &h.app.mode {
+        AppMode::DaemonRestart(dialog) => assert_eq!(dialog.missing, ["new folders live"]),
+        mode => panic!("no restart offer: {mode:?}"),
+    }
+    h.press(KeyCode::Char('n')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    // Filtering is local here too.
+    h.fake.clear_calls();
+    h.app.show_folders(vec![folder("/web")]);
+    assert_eq!(visible_ids(&h), ["W1"]);
+    assert!(list_calls(&h).is_empty());
+    // A folder it isn't watching yet (added since) is listed and watched
+    // on demand.
+    h.fake.add_known_folder(&folder("/new"), None);
+    h.app.show_folders(vec![folder("/new")]);
+    assert_eq!(
+        list_calls(&h),
+        [
+            "subscribe /repo,/web,/empty,/new",
+            "list_in /repo,/web,/empty,/new dead=true"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn cycling_and_movement_run_across_folder_groups() {
+    let mut h = folders_harness();
+    // The most recent session overall is selected first: web-one.
+    assert_eq!(h.selected().as_deref(), Some("W1"));
+    h.alt(KeyCode::Down).await;
+    assert_eq!(
+        h.selected().as_deref(),
+        Some("R1"),
+        "wraps to the first group"
+    );
+    h.alt(KeyCode::Up).await;
+    assert_eq!(h.selected().as_deref(), Some("W1"));
+    // Arrow keys stop on the headers; the folder filter is first and
+    // "+ New session" last.
+    h.press(KeyCode::Home).await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
+    h.press(KeyCode::Down).await;
+    assert_eq!(
+        h.app.list.selection(),
+        &session_list::Selection::FolderHeader(scope())
+    );
+    h.press(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("R1"));
+    h.press(KeyCode::End).await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
+    h.press(KeyCode::Up).await;
+    h.press(KeyCode::Up).await;
+    assert_eq!(
+        h.app.list.selection(),
+        &session_list::Selection::FolderHeader(folder("/web"))
+    );
+    // `{` and `}` jump between folders.
+    h.press(KeyCode::Char('{')).await;
+    assert_eq!(h.selected().as_deref(), Some("A1"));
+    h.press(KeyCode::Char('{')).await;
+    assert_eq!(h.selected().as_deref(), Some("R1"));
+    h.press(KeyCode::Char('}')).await;
+    assert_eq!(h.selected().as_deref(), Some("A1"));
+}
+
+#[tokio::test]
+async fn enter_on_the_folder_filter_opens_the_modal_and_enter_shows_one_folder() {
+    let mut h = folders_harness();
+    let shown = h.app.detail.view.session_id().cloned();
+    assert_eq!(shown, Some(id("W1")));
+    // The folder filter keeps the session in view; Enter opens the modal.
+    h.press(KeyCode::Home).await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
+    assert_eq!(h.app.detail.view.session_id(), shown.as_ref());
+    h.press(KeyCode::Enter).await;
+    // All folders (ticked: there's no filter), then every folder with
+    // sessions; /empty has none, so it isn't listed.
+    assert_eq!(picker_rows(&h), ["all", "/repo", "/api", "/web"]);
+    assert!(picker(&h).is_ticked(&PickerRow::All));
+    assert_eq!(picker(&h).cursor, 0);
+    assert!(h.fake.calls().iter().filter(|c| *c == "projects").count() >= 2);
+    // Typing filters by name, path or branch.
+    h.type_text("we").await;
+    assert_eq!(picker_rows(&h), ["/web"]);
+    h.ctrl('u').await;
+    h.type_text("main").await;
+    assert_eq!(picker_rows(&h), ["/web"]);
+    h.ctrl('u').await;
+    h.type_text("all").await;
+    assert_eq!(picker_rows(&h), ["all"]);
+    h.ctrl('u').await;
+    h.type_text("zzz").await;
+    assert!(picker_rows(&h).is_empty());
+    h.press(KeyCode::Enter).await;
+    assert!(picker(&h).error.as_deref().unwrap().contains("No folder"));
+    h.ctrl('u').await;
+    assert_eq!(picker_rows(&h).len(), 4);
+    // Enter shows the folder under the cursor alone, without listing or
+    // subscribing again.
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Down).await;
+    h.fake.clear_calls();
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.list.folder_filter(), [folder("/api")]);
+    assert_eq!(h.app.folder_label(), "api");
+    assert!(list_calls(&h).is_empty(), "{:?}", h.fake.calls());
+    assert_eq!(visible_ids(&h), ["A1"]);
+    assert!(!h.app.list.is_grouped());
+    // The cursor leaves the folder filter for the folder's session.
+    assert_eq!(h.selected().as_deref(), Some("A1"));
+    assert_eq!(h.app.detail.view.session_id(), Some(&id("A1")));
+    assert_eq!(h.app.status(), Some("Showing api"));
+    // Enter on All folders shows every folder again.
+    h.press(KeyCode::Char('P')).await;
+    assert_eq!(picker(&h).cursor, 2, "on the filter's folder");
+    h.press(KeyCode::Up).await;
+    h.press(KeyCode::Up).await;
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.list.folder_filter().is_empty());
+    assert_eq!(visible_ids(&h), ["R1", "R2", "A1", "W1"]);
+    assert_eq!(h.app.status(), Some("Showing all folders"));
+    assert!(list_calls(&h).is_empty());
+}
+
+#[tokio::test]
+async fn the_modal_ticks_folders_and_enter_shows_them() {
+    let mut h = folders_harness();
+    h.press(KeyCode::Char('P')).await;
+    // All folders is ticked while nothing else is; Tab there changes
+    // nothing.
+    h.press(KeyCode::Tab).await;
+    assert!(picker(&h).checked.is_empty());
+    assert!(!picker(&h).ticks_changed);
+    // Tick /repo (Tab) and /api (Space), then untick /repo.
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Tab).await;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Char(' ')).await;
+    assert_eq!(picker(&h).checked, [scope(), folder("/api")]);
+    assert!(!picker(&h).is_ticked(&PickerRow::All));
+    h.press(KeyCode::Up).await;
+    h.press(KeyCode::Tab).await;
+    assert_eq!(picker(&h).checked, [folder("/api")]);
+    assert!(picker(&h).ticks_changed);
+    // Nothing changes until Enter. Enter on a folder that isn't ticked
+    // shows it with the ticked ones.
+    assert!(h.app.list.folder_filter().is_empty());
+    cursor_to(&mut h, "/web");
+    h.fake.clear_calls();
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.list.folder_filter(), [folder("/api"), folder("/web")]);
+    assert_eq!(h.app.folder_label(), "2 folders");
+    assert!(list_calls(&h).is_empty());
+    assert_eq!(visible_ids(&h), ["A1", "W1"]);
+    assert!(h.app.list.is_grouped());
+    assert_eq!(h.selected().as_deref(), Some("W1"));
+    assert_eq!(h.app.status(), Some("Showing 2 folders"));
+
+    // Opened again, it's ticked like the filter; Space on All folders
+    // clears the ticks, and Enter shows every folder.
+    h.press(KeyCode::Char('P')).await;
+    assert_eq!(picker(&h).checked, [folder("/api"), folder("/web")]);
+    assert_eq!(picker(&h).cursor, 2, "on the filter's first folder");
+    if let AppMode::Folders(picker) = &mut h.app.mode {
+        picker.cursor = 0;
+    }
+    h.press(KeyCode::Char(' ')).await;
+    assert!(picker(&h).checked.is_empty());
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.list.folder_filter().is_empty());
+
+    // The filter isn't saved: the next start shows All folders.
+    h.app.show_folders(vec![folder("/web")]);
+    let fake = h.fake.clone();
+    let mut options = options(&fake, scope(), &h.home);
+    options.settings = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    let mut app = App::new(options);
+    app.start();
+    app.process_pending();
+    assert!(app.list.folder_filter().is_empty());
+    assert_eq!(app.folder_label(), "All folders");
+}
+
+#[tokio::test]
+async fn an_old_config_with_selected_projects_starts_on_all_folders_and_drops_it() {
+    let fake = FakeApi::new(vec![
+        view("R1", "repo-old", 10),
+        view_in(&folder("/web"), "W1", "web-one", 50),
+    ]);
+    let home = tempfile::tempdir().unwrap();
+    let config = home.path().join("config.json");
+    std::fs::write(
+        &config,
+        r#"{"sessions":{"selected_projects":["/web"],"layout":"sidebar"}}"#,
+    )
+    .unwrap();
+    let mut options = options(&fake, scope(), &home);
+    options.settings = Settings::load_from(&config).unwrap();
+    let h = start(options, fake, home);
+    assert!(h.app.list.folder_filter().is_empty());
+    assert_eq!(visible_ids(&h), ["R1", "W1"]);
+    // The next save leaves it out.
+    h.app.save_settings().unwrap();
+    let raw: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    assert!(raw["sessions"].get("selected_projects").is_none(), "{raw}");
+}
+
+#[tokio::test]
+async fn esc_closes_the_modal_without_changes() {
+    let mut h = folders_harness();
+    h.press(KeyCode::Char('P')).await;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Tab).await;
+    // Letters are typed, not commands.
+    h.type_text("Pq").await;
+    assert!(matches!(h.app.mode, AppMode::Folders(_)));
+    assert_eq!(picker(&h).query.value(), "Pq");
+    h.fake.clear_calls();
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.list.folder_filter().is_empty());
+    assert_eq!(h.app.status(), None);
+    // Enter on All folders, already shown, changes nothing either.
+    h.press(KeyCode::Char('P')).await;
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.list.folder_filter().is_empty());
+    assert_eq!(h.app.status(), None);
+    assert!(list_calls(&h).is_empty());
+}
+
+#[tokio::test]
+async fn typing_a_folder_adds_or_creates_it_and_shows_it() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("other")).unwrap();
+    std::fs::write(dir.path().join("file"), "x").unwrap();
+    let launch = ScopeRoot::resolve(dir.path()).unwrap();
+    let fake = FakeApi::new(vec![
+        view_in(&launch, "L1", "here", 10),
+        view_in(&folder("/busy"), "B1", "busy", 5),
+    ]);
+    let home = tempfile::tempdir().unwrap();
+    let options = options(&fake, launch.clone(), &home);
+    let mut h = start(options, fake, home);
+    let other = ScopeRoot::from_canonical(launch.path().join("other"));
+    let fresh = launch.path().join("fresh");
+
+    h.press(KeyCode::Char('P')).await;
+    // Not a folder: no row to add, and Enter says why.
+    h.type_text("./file").await;
+    assert!(picker_rows(&h).is_empty());
+    assert!(picker(&h)
+        .folder_note
+        .as_deref()
+        .unwrap()
+        .contains("not a folder"));
+    h.press(KeyCode::Enter).await;
+    assert!(picker(&h)
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("not a folder"));
+    // A folder relative to the launch folder, completed with Tab: the
+    // typed name doesn't exist, so the folder it completes to is chosen.
+    h.ctrl('u').await;
+    h.type_text("./oth").await;
+    assert_eq!(
+        picker_rows(&h),
+        [
+            format!("+new {}", launch.path().join("oth").display()),
+            "> ./other/".into()
+        ]
+    );
+    assert_eq!(picker(&h).cursor, 1);
+    h.press(KeyCode::Tab).await;
+    assert_eq!(picker(&h).query.value(), "./other/");
+    assert_eq!(picker_rows(&h), [format!("+ {}", other.path().display())]);
+    // Enter adds it and shows it alone: an empty folder to start in.
+    h.fake.clear_calls();
+    h.press(KeyCode::Enter).await;
+    assert!(h
+        .fake
+        .calls()
+        .contains(&format!("add_project {}", other.path().display())));
+    assert!(list_calls(&h).is_empty());
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.list.folder_filter(), std::slice::from_ref(&other));
+    assert!(h.app.list.visible().is_empty());
+    assert_eq!(h.app.detail.view, DetailView::Empty);
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(dialog_folder(&h), other);
+    h.press(KeyCode::Esc).await;
+
+    // A folder that doesn't exist is created after `y`, added and shown.
+    h.press(KeyCode::Char('P')).await;
+    h.type_text("./fresh").await;
+    assert_eq!(picker_rows(&h), [format!("+new {}", fresh.display())]);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(picker(&h).stage, PickerStage::Creating(fresh.clone()));
+    h.press(KeyCode::Enter).await;
+    h.press(KeyCode::Esc).await;
+    assert_eq!(picker(&h).stage, PickerStage::Browse);
+    assert!(!fresh.exists());
+    h.press(KeyCode::Enter).await;
+    h.press(KeyCode::Char('y')).await;
+    assert!(fresh.is_dir());
+    assert!(h
+        .fake
+        .calls()
+        .contains(&format!("add_project {}", fresh.display())));
+    assert_eq!(
+        h.app.list.folder_filter(),
+        [ScopeRoot::from_canonical(fresh.clone())]
+    );
+    // Typed again, it's known: listed, not offered.
+    h.press(KeyCode::Char('P')).await;
+    h.type_text("./fresh").await;
+    assert_eq!(picker_rows(&h), [fresh.display().to_string()]);
+    // Forgetting a folder is for the command line now.
+    h.ctrl('x').await;
+    assert!(matches!(h.app.mode, AppMode::Folders(_)));
+    assert!(!h.fake.calls().iter().any(|c| c.starts_with("remove")));
+}
+
+#[tokio::test]
+async fn typing_a_path_offers_the_folders_that_complete_it() {
+    // The launch folder holds code/{alpha, beta, .hidden, web} and a file;
+    // the daemon knows code/web already.
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["code/alpha", "code/beta", "code/.hidden", "code/web"] {
+        std::fs::create_dir_all(dir.path().join(name)).unwrap();
+    }
+    std::fs::write(dir.path().join("code/afile"), "x").unwrap();
+    let launch = ScopeRoot::resolve(dir.path()).unwrap();
+    let code = launch.path().join("code");
+    let alpha = ScopeRoot::from_canonical(code.join("alpha"));
+    let web = ScopeRoot::from_canonical(code.join("web"));
+    let fake = FakeApi::new(vec![view_in(&launch, "L1", "here", 10)]);
+    fake.add_known_folder(&web, None);
+    let home = tempfile::tempdir().unwrap();
+    let options = options(&fake, launch.clone(), &home);
+    let mut h = start(options, fake, home);
+
+    h.press(KeyCode::Char('P')).await;
+    h.type_text("./code/").await;
+    // The typed folder, then the folders in it (no files, no dot-folders);
+    // web is listed once, as a folder.
+    assert_eq!(
+        picker_rows(&h),
+        [
+            format!("+ {}", code.display()),
+            "> ./code/alpha/".into(),
+            "> ./code/beta/".into(),
+            "> ./code/web/".into(),
+        ]
+    );
+    assert_eq!(picker(&h).cursor, 0);
+    // The folders share no more of their names: Tab chooses the first,
+    // and puts the chosen one in.
+    h.press(KeyCode::Tab).await;
+    assert_eq!(picker(&h).query.value(), "./code/");
+    assert_eq!(picker(&h).cursor, 1);
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Tab).await;
+    assert_eq!(picker(&h).query.value(), "./code/beta/");
+    assert_eq!(
+        picker_rows(&h),
+        [format!("+ {}", code.join("beta").display())]
+    );
+    // Dot-folders once the name starts with a dot.
+    h.ctrl('u').await;
+    h.type_text("./code/.").await;
+    assert_eq!(picker_rows(&h)[1], "> ./code/.hidden/");
+
+    // A name that doesn't exist yet: the folder it completes to is chosen.
+    h.ctrl('u').await;
+    h.type_text("./code/al").await;
+    assert_eq!(
+        picker_rows(&h),
+        [
+            format!("+new {}", code.join("al").display()),
+            "> ./code/alpha/".into()
+        ]
+    );
+    assert_eq!(picker(&h).cursor, 1);
+    // Tab on "+ Create folder" completes the typed name; → at the end of
+    // the query does too. Space types in a path.
+    h.press(KeyCode::Up).await;
+    h.press(KeyCode::Tab).await;
+    assert_eq!(picker(&h).query.value(), "./code/alpha/");
+    h.ctrl('u').await;
+    h.type_text("./code/b").await;
+    h.press(KeyCode::Right).await;
+    assert_eq!(picker(&h).query.value(), "./code/beta/");
+    h.press(KeyCode::Char(' ')).await;
+    assert_eq!(picker(&h).query.value(), "./code/beta/ ");
+    // A path without a leading `.` or `/` starts at the launch folder.
+    h.ctrl('u').await;
+    h.type_text("code/al").await;
+    assert_eq!(picker_rows(&h)[1..], ["> code/alpha/".to_string()]);
+
+    // Enter on a chosen folder adds it and shows it.
+    h.ctrl('u').await;
+    h.type_text("./code/al").await;
+    h.press(KeyCode::Enter).await;
+    assert!(h
+        .fake
+        .calls()
+        .contains(&format!("add_project {}", alpha.path().display())));
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.list.folder_filter(), std::slice::from_ref(&alpha));
+
+    // A folder the daemon knows already is shown, not added.
+    h.press(KeyCode::Char('P')).await;
+    h.type_text("./code/w").await;
+    assert_eq!(picker_rows(&h)[1..], ["> ./code/web/".to_string()]);
+    h.fake.clear_calls();
+    h.press(KeyCode::Enter).await;
+    assert!(!h
+        .fake
+        .calls()
+        .contains(&format!("add_project {}", web.path().display())));
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.list.folder_filter(), std::slice::from_ref(&web));
+
+    // A click on a folder puts it in the query.
+    h.press(KeyCode::Char('P')).await;
+    h.type_text("./code/").await;
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 48)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let area = h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::FolderRow(2))
+        .map(|(area, _)| *area)
+        .unwrap();
+    h.app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: area.x + 1,
+        row: area.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert_eq!(picker(&h).query.value(), "./code/beta/");
+    // Esc closes, as ever.
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+}
+
+#[tokio::test]
+async fn p_pins_and_unpins_and_pinned_sessions_lead_their_folder() {
+    let mut h = harness(vec![
+        view("A", "newest", 30),
+        view("B", "middle", 20),
+        view("C", "oldest", 10),
+    ]);
+    // The newest session sits last, just above "+ New session".
+    assert_eq!(visible_ids(&h), ["C", "B", "A"]);
+    h.press(KeyCode::End).await;
+    h.press(KeyCode::Up).await;
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    h.press(KeyCode::Char('p')).await;
+    assert!(h.fake.calls().contains(&"pin A true".to_string()));
+    assert!(h.app.list.get(&id("A")).unwrap().pinned);
+    assert_eq!(visible_ids(&h), ["A", "C", "B"]);
+    assert_eq!(h.selected().as_deref(), Some("A"), "the selection follows");
+    assert_eq!(h.app.status(), Some("Pinned newest"));
+    h.press(KeyCode::Char('p')).await;
+    assert!(h.fake.calls().contains(&"pin A false".to_string()));
+    assert_eq!(visible_ids(&h), ["C", "B", "A"]);
+    // A pin made elsewhere arrives as an update.
+    let mut pinned = view("B", "middle", 20);
+    pinned.pinned = true;
+    h.event("B", SessionEvent::Updated { session: pinned });
+    assert_eq!(visible_ids(&h), ["B", "C", "A"]);
+    // "+ New session" selected: nothing to pin.
+    h.press(KeyCode::End).await;
+    h.fake.clear_calls();
+    h.press(KeyCode::Char('p')).await;
+    assert!(h.fake.calls().is_empty());
+}
+
+#[tokio::test]
+async fn an_older_daemon_falls_back_to_the_launch_folder() {
+    let fake = FakeApi::without_folders(vec![
+        view("A", "a", 10),
+        view_in(&folder("/web"), "W1", "w", 20),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let options = options(&fake, scope(), &dir);
+    let mut h = start(options, fake, dir);
+    let calls = h.fake.calls();
+    assert!(calls.contains(&"subscribe /repo".to_string()), "{calls:?}");
+    assert!(calls.contains(&"list dead=true".to_string()), "{calls:?}");
+    assert!(!calls.iter().any(|c| c.starts_with("list_")), "{calls:?}");
+    assert_eq!(h.app.folders.support, folders::FolderSupport::LaunchOnly);
+    assert!(h.app.list.folder_filter().is_empty());
+    assert_eq!(visible_ids(&h), ["A"]);
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    // The older daemon is explained, with an offer to restart it that a
+    // stray Enter doesn't take.
+    match &h.app.mode {
+        AppMode::DaemonRestart(dialog) => assert_eq!(
+            dialog.missing,
+            [
+                "git branches and worktrees",
+                "folders",
+                "pins",
+                "new folders live"
+            ]
+        ),
+        mode => panic!("no restart offer: {mode:?}"),
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::DaemonRestart(_)));
+    h.press(KeyCode::Char('n')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.status().unwrap().contains("Kept the older server"));
+    // Asking for folders or a pin explains, and nothing else happens.
+    h.press(KeyCode::Char('P')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.status().unwrap().contains("doesn't support folders"));
+    h.press(KeyCode::Char('p')).await;
+    assert!(h.app.status().unwrap().contains("doesn't support pinning"));
+    assert!(!h.app.list.get(&id("A")).unwrap().pinned);
+    assert!(!h.home.path().join("config.json").exists());
+    // A refresh against an upgraded daemon shows every folder.
+    {
+        let mut state = h.fake.state.lock().unwrap();
+        state.folders_unsupported = false;
+        state.all_unsupported = false;
+    }
+    h.ctrl('r').await;
+    assert_eq!(h.app.folders.support, folders::FolderSupport::All);
+    assert_eq!(visible_ids(&h), ["A", "W1"]);
+}
+
+/// The new-session dialog's folder.
+fn dialog_folder(h: &Harness) -> ScopeRoot {
+    match &h.app.mode {
+        AppMode::NewSession(dialog) => dialog.folder.clone(),
+        _ => panic!("no new-session dialog"),
+    }
+}
+
+#[tokio::test]
+async fn new_sessions_go_in_the_current_folder() {
+    let mut h = folders_harness();
+    let (web, api) = (folder("/web"), folder("/api"));
+    // 1. The selected session's folder: web-one is the most recent.
+    assert_eq!(h.selected().as_deref(), Some("W1"));
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(dialog_folder(&h), web);
+    h.type_text("frontend").await;
+    h.press(KeyCode::Enter).await;
+    let create = h.fake.creates().pop().unwrap();
+    assert_eq!(create.scope, Some(web.clone()));
+    assert_eq!(create.cwd.as_deref(), Some(web.path()));
+    assert_eq!(create.argv, None);
+    assert!(create.startup_cmds.is_empty());
+    let new_id = h.app.list.selected_id().cloned().unwrap();
+    assert_eq!(h.app.list.get(&new_id).unwrap().scope, web);
+    assert_eq!(h.app.focus, Focus::Session);
+    h.orchestra().await;
+
+    // A session of the launch folder: that folder.
+    h.press(KeyCode::Home).await;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("R1"));
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(dialog_folder(&h), scope());
+    h.press(KeyCode::Esc).await;
+    // 2. On a folder's header, that folder: `n` or Enter.
+    h.app
+        .list
+        .select(session_list::Selection::FolderHeader(api.clone()));
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(dialog_folder(&h), api);
+    h.press(KeyCode::Esc).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(dialog_folder(&h), api);
+    h.press(KeyCode::Esc).await;
+    // 4. All folders, on the folder filter or "+ New session": the launch
+    // folder.
+    h.press(KeyCode::Home).await;
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(dialog_folder(&h), scope());
+    h.press(KeyCode::Esc).await;
+    h.press(KeyCode::End).await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(dialog_folder(&h), scope());
+    h.press(KeyCode::Esc).await;
+
+    // 3. The filter's only folder.
+    h.app.show_folders(vec![web.clone()]);
+    h.press(KeyCode::End).await;
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(dialog_folder(&h), web);
+    h.press(KeyCode::Esc).await;
+    // Several folders shown: the launch folder, even when the filter hides
+    // it; the new session's folder is then shown too.
+    h.app.show_folders(vec![api.clone(), web.clone()]);
+    h.press(KeyCode::End).await;
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(dialog_folder(&h), scope());
+    h.press(KeyCode::Enter).await;
+    let new_id = h.app.list.selected_id().cloned().unwrap();
+    assert_eq!(h.app.list.get(&new_id).unwrap().scope, scope());
+    assert_eq!(
+        h.app.list.folder_filter(),
+        [api.clone(), web.clone(), scope()]
+    );
+    assert!(h.app.list.visible_position(&new_id).is_some());
+}
+
+#[tokio::test]
+async fn the_session_pane_keeps_only_a_session_the_filter_shows_in_view() {
+    let mut h = folders_harness();
+    // Work in web-one, then back to Orchestra mode on the folder filter.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.detail.view, DetailView::Live(id("W1")));
+    h.orchestra().await;
+    assert_eq!(h.app.came_from, Some(id("W1")));
+    h.press(KeyCode::Home).await;
+    assert_eq!(h.app.detail.view.session_id(), Some(&id("W1")));
+    // Showing /api: the pane moves to a session it shows.
+    h.app.show_folders(vec![folder("/api")]);
+    assert_eq!(h.app.detail.view.session_id(), Some(&id("A1")));
+    h.press(KeyCode::Home).await;
+    assert_eq!(h.app.detail.view.session_id(), Some(&id("A1")));
+    // A folder without sessions: nothing in view.
+    h.app.show_folders(vec![folder("/empty")]);
+    assert_eq!(h.app.detail.view, DetailView::Empty);
+    // Esc goes back to web-one, and shows its folder again.
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.selected().as_deref(), Some("W1"));
+    assert_eq!(
+        h.app.list.folder_filter(),
+        [folder("/empty"), folder("/web")]
+    );
+}
+
+#[tokio::test]
+async fn clicks_open_the_modal_pick_rows_and_close_it() {
+    let mut h = folders_harness();
+    let backend = ratatui::backend::TestBackend::new(160, 48);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let click = |area: ratatui::layout::Rect| MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: area.x + 1,
+        row: area.y,
+        modifiers: KeyModifiers::NONE,
+    };
+    let target = |h: &Harness, wanted: Hit| {
+        h.app
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == wanted)
+            .map(|(area, _)| *area)
+            .unwrap()
+    };
+    h.app.handle_mouse(click(target(&h, Hit::FolderSelector)));
+    h.app.process_pending();
+    assert!(matches!(h.app.mode, AppMode::Folders(_)));
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    // Outside the modal: closed, nothing applied.
+    h.app
+        .handle_mouse(click(ratatui::layout::Rect::new(1, 46, 1, 1)));
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.list.folder_filter().is_empty());
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    // A click on a folder shows it alone (rows: All, /repo, /api, /web).
+    h.app.handle_mouse(click(target(&h, Hit::FolderSelector)));
+    h.app.process_pending();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    h.app.handle_mouse(click(target(&h, Hit::FolderRow(2))));
+    h.app.process_pending();
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.list.folder_filter(), [folder("/api")]);
+    // A click on All folders clears the filter.
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    h.app.handle_mouse(click(target(&h, Hit::FolderSelector)));
+    h.app.process_pending();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    h.app.handle_mouse(click(target(&h, Hit::FolderRow(0))));
+    h.app.process_pending();
+    assert!(h.app.list.folder_filter().is_empty());
+}
+
+/// The welcome tour's card and box, or `None` when it isn't open.
+fn welcome(h: &Harness) -> Option<(usize, bool)> {
+    match h.app.mode {
+        AppMode::Welcome(state) => Some((state.card, state.dont_show)),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn the_welcome_tour_opens_from_help_and_can_stop_showing_on_startup() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    assert!(!h.app.settings.sessions.welcome_seen);
+    // `t` in Help opens it from the first card.
+    h.press(KeyCode::Char('?')).await;
+    h.press(KeyCode::Char('t')).await;
+    assert_eq!(welcome(&h), Some((0, false)));
+    h.press(KeyCode::Right).await;
+    h.press(KeyCode::Enter).await;
+    h.press(KeyCode::Left).await;
+    assert_eq!(welcome(&h), Some((1, false)));
+    // Space ticks the box on any card, and Esc there keeps it: you can opt
+    // out without reading to the end.
+    h.press(KeyCode::Char(' ')).await;
+    assert_eq!(welcome(&h), Some((1, true)));
+    h.press(KeyCode::Char(' ')).await;
+    assert_eq!(welcome(&h), Some((1, false)));
+    for _ in 0..10 {
+        h.press(KeyCode::Right).await;
+    }
+    let last = crate::components::welcome::CARDS - 1;
+    assert_eq!(welcome(&h), Some((last, false)));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(
+        screen.contains("[ ] Don't show this on startup"),
+        "{screen}"
+    );
+    h.press(KeyCode::Char(' ')).await;
+    assert_eq!(welcome(&h), Some((last, true)));
+    // Enter on the last card finishes and saves the box.
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.settings.sessions.welcome_seen);
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert!(saved.sessions.welcome_seen);
+
+    // Opened again, the box starts ticked; Esc without changing it keeps it.
+    h.app.open_welcome();
+    assert_eq!(welcome(&h), Some((0, true)));
+    h.press(KeyCode::Esc).await;
+    assert!(h.app.settings.sessions.welcome_seen);
+    // Unticking it shows the tour on startup again.
+    h.app.open_welcome();
+    for _ in 0..10 {
+        h.press(KeyCode::Char('l')).await;
+    }
+    h.press(KeyCode::Char('d')).await;
+    h.press(KeyCode::Esc).await;
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert!(!saved.sessions.welcome_seen);
+}
+
+/// Every card of the welcome tour, in order, drawn at 80×24: which known
+/// title it shows and whether it fits (the opt-out box and the keys row
+/// shown, nothing cut off).
+async fn welcome_cards_at_80x24(h: &mut Harness) -> Vec<(String, bool)> {
+    welcome_cards_at(h, 80, 24).await
+}
+
+/// [`welcome_cards_at_80x24`] at `width`×`height`. A card fits when both
+/// borders show, its last words, the opt-out box and the keys.
+async fn welcome_cards_at(h: &mut Harness, width: u16, height: u16) -> Vec<(String, bool)> {
+    // The last word of each card's text.
+    const ENDS: [&str; crate::components::welcome::CARDS] =
+        ["minute.", "again.", "SESSION.", "one.", "key.", "again."];
+    h.app.open_welcome();
+    let mut cards = Vec::new();
+    for last_word in ENDS {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+        terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+        let rows: Vec<String> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(usize::from(width))
+            .map(|row| row.iter().map(|c| c.symbol()).collect())
+            .collect();
+        let title = rows
+            .iter()
+            .find_map(|row| {
+                [
+                    "Welcome to Orchestra",
+                    "Folders and sessions",
+                    "Two modes",
+                    "Moving around",
+                    "The main shortcuts",
+                    "Help is always there",
+                ]
+                .into_iter()
+                .find(|t| row.contains(t))
+            })
+            .unwrap_or_default()
+            .to_string();
+        // The popup grows to the tallest card (tighter when that doesn't
+        // fit); both its borders show unless it's cut off.
+        let top = rows.iter().any(|row| row.contains("╭ Orchestra tour"));
+        let bottom = rows.iter().any(|row| row.contains("╰──"));
+        let end = rows.iter().any(|row| row.contains(last_word));
+        let keys = rows.iter().any(|row| row.contains("Esc close"));
+        let opt_out = rows.iter().any(|row| row.contains("[ ] Don't show"));
+        cards.push((title, keys && opt_out && top && bottom && end));
+        h.press(KeyCode::Right).await;
+    }
+    cards
+}
+
+#[tokio::test]
+async fn the_welcome_tour_fits_a_phone() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    for (width, height) in [(45, 40), (40, 20)] {
+        let cards = welcome_cards_at(&mut h, width, height).await;
+        assert_eq!(cards.len(), crate::components::welcome::CARDS);
+        assert!(
+            cards.iter().all(|(title, fits)| !title.is_empty() && *fits),
+            "{width}x{height}: {cards:?}"
+        );
+        h.press(KeyCode::Esc).await;
+    }
+}
+
+#[tokio::test]
+async fn the_welcome_tour_explains_folders_and_sessions_before_the_modes() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    let cards = welcome_cards_at_80x24(&mut h).await;
+    let titles: Vec<&str> = cards.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(
+        titles,
+        [
+            "Welcome to Orchestra",
+            "Folders and sessions",
+            "Two modes",
+            "Moving around",
+            "The main shortcuts",
+            "Help is always there",
+        ]
+    );
+    assert!(cards.iter().all(|(_, keys)| *keys), "{cards:?}");
+}
+
+#[tokio::test]
+async fn the_welcome_tour_can_be_turned_off_from_its_first_card() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    h.app.open_welcome();
+    h.press(KeyCode::Char(' ')).await;
+    assert_eq!(welcome(&h), Some((0, true)));
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert!(saved.sessions.welcome_seen);
+}
+
+#[tokio::test]
+async fn closing_the_welcome_tour_early_shows_it_again_next_start() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    h.app.open_welcome();
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(!h.app.settings.sessions.welcome_seen);
+}
+
+#[tokio::test]
+async fn the_keys_tab_lists_and_runs_the_welcome_tour() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    let row = crate::help::KeyAction::ALL
+        .iter()
+        .position(|a| *a == crate::help::KeyAction::Tour)
+        .unwrap();
+    assert_eq!(crate::help::KeyAction::Tour.section(), "Help and app");
+    h.press(KeyCode::Char(',')).await;
+    h.press(KeyCode::Tab).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::Keys));
+    for _ in 0..row {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert_eq!(welcome(&h), Some((0, false)));
+}
+
+// ---------------------------------------------------------------- phone access
+
+/// Started with a [`FakePhone`](super::testing::FakePhone) that offers phone
+/// access (Tailscale here, never set up) unless `offer` is false.
+fn phone_harness(offer: bool, seen: bool) -> (Harness, Arc<super::testing::FakePhone>) {
+    let fake = FakeApi::new(vec![view("A", "a", 20)]);
+    let dir = tempfile::tempdir().unwrap();
+    let phone = Arc::new(super::testing::FakePhone {
+        offer,
+        ..Default::default()
+    });
+    let mut options = options(&fake, scope(), &dir);
+    options.phone = phone.clone();
+    options.settings.sessions.phone_offer_seen = seen;
+    (start(options, fake, dir), phone)
+}
+
+fn pairing_state(h: &Harness) -> Option<super::types::PairingState> {
+    match &h.app.mode {
+        AppMode::Pairing(dialog) => Some(dialog.state.clone()),
+        _ => None,
+    }
+}
+
+/// The screen drawn at `width`×`height`, one string per row.
+fn screen_rows(h: &mut Harness, width: u16, height: u16) -> Vec<String> {
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .chunks(usize::from(width))
+        .map(|row| row.iter().map(|c| c.symbol()).collect())
+        .collect()
+}
+
+#[tokio::test]
+async fn phone_access_is_offered_once_and_pairs_with_a_qr_code() {
+    let (mut h, phone) = phone_harness(true, false);
+    assert!(matches!(h.app.mode, AppMode::PhoneOffer));
+    assert_eq!(h.app.phone_enabled, Some(false));
+    // Recorded as offered as it opens: it never comes back.
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert!(saved.sessions.phone_offer_seen);
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("Use Orchestra from your phone?"), "{rows}");
+    assert!(rows.contains("Turn on and pair"), "{rows}");
+
+    h.press(KeyCode::Char('y')).await;
+    assert_eq!(phone.calls(), vec!["worth_offering", "enable"]);
+    assert_eq!(h.app.phone_enabled, Some(true));
+    assert_eq!(
+        pairing_state(&h),
+        Some(super::types::PairingState::Ready(
+            super::testing::FakePhone::pairing()
+        ))
+    );
+    let rows = screen_rows(&mut h, 160, 48);
+    let text = rows.join("\n");
+    assert!(text.contains("Pair your phone"), "{text}");
+    assert!(text.contains("http://box.tail1234.ts.net:7337"), "{text}");
+    assert!(text.contains("abcdefghijklmnopqrstuvwx27"), "{text}");
+    // The QR code of the link: its rows of `▀`, whole.
+    let link = super::testing::FakePhone::pairing().link().unwrap();
+    let code = crate::qr::Qr::encode(&link).unwrap();
+    let code_rows: Vec<&String> = rows.iter().filter(|r| r.contains("▀▀▀▀▀▀▀▀▀▀")).collect();
+    assert_eq!(code_rows.len(), usize::from(code.height()), "{text}");
+    assert!(code_rows
+        .iter()
+        .all(|r| r.chars().filter(|c| *c == '▀').count() == usize::from(code.width())));
+
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+}
+
+#[tokio::test]
+async fn the_phone_offer_waits_for_the_welcome_tour_and_session_mode() {
+    let fake = FakeApi::new(vec![view("A", "a", 20)]);
+    let dir = tempfile::tempdir().unwrap();
+    let phone = Arc::new(super::testing::FakePhone {
+        offer: true,
+        ..Default::default()
+    });
+    let mut options = options(&fake, scope(), &dir);
+    options.phone = phone.clone();
+    let mut app = App::new(options);
+    app.resize(160, 48);
+    app.open_welcome();
+    app.start();
+    app.process_pending();
+    let mut h = super::testing::Harness {
+        app,
+        fake,
+        home: dir,
+    };
+    assert!(matches!(h.app.mode, AppMode::Welcome(_)));
+    h.press(KeyCode::Esc).await;
+    // In a session: keys go to the program, so no dialog takes them.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(!h.app.on_tick(std::time::Instant::now()));
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.orchestra().await;
+    assert!(h.app.on_tick(std::time::Instant::now()));
+    assert!(matches!(h.app.mode, AppMode::PhoneOffer));
+    // Declined: off, said where to turn it on, never offered again.
+    h.press(KeyCode::Char('n')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(phone.calls().iter().all(|c| *c != "enable"));
+    assert!(h.app.settings.sessions.phone_offer_seen);
+    assert!(!h.app.on_tick(std::time::Instant::now()));
+}
+
+#[tokio::test]
+async fn phone_access_is_not_offered_twice_or_without_tailscale() {
+    let (h, phone) = phone_harness(true, true);
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(phone.calls().is_empty(), "not even checked once offered");
+    let (h, phone) = phone_harness(false, false);
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(phone.calls(), vec!["worth_offering"]);
+    assert!(!h.app.settings.sessions.phone_offer_seen);
+}
+
+#[tokio::test]
+async fn settings_turns_phone_access_on_shows_the_code_and_turns_it_off() {
+    let (mut h, phone) = phone_harness(false, false);
+    let row = SettingsItem::PhoneAccess.index();
+    assert_eq!(h.app.modal_context(false).general[row].value, "On [Off]");
+    h.press(KeyCode::Char(',')).await;
+    for _ in 0..row {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(
+        pairing_state(&h),
+        Some(super::types::PairingState::Ready(_))
+    ));
+    assert_eq!(h.app.modal_context(false).general[row].value, "[On] Off");
+    // Closing goes back to Settings, on the row.
+    h.press(KeyCode::Esc).await;
+    match &h.app.mode {
+        AppMode::Modal { state, .. } => assert_eq!(state.selected, row),
+        mode => panic!("not back in Settings: {mode:?}"),
+    }
+    // On: Enter shows the code again without turning anything on.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(phone.calls(), vec!["worth_offering", "enable", "pairing"]);
+    h.press(KeyCode::Char('x')).await;
+    assert_eq!(phone.calls().last(), Some(&"disable"));
+    assert_eq!(h.app.phone_enabled, Some(false));
+    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
+    assert_eq!(h.app.modal_context(false).general[row].value, "On [Off]");
+}
+
+#[tokio::test]
+async fn phone_access_errors_stay_in_the_dialog() {
+    let (mut h, phone) = phone_harness(false, false);
+    *phone.fail_enable.lock().unwrap() = Some("orchestra-api not found".into());
+    h.app.turn_phone_access_on(false);
+    h.app.process_pending();
+    assert_eq!(
+        pairing_state(&h),
+        Some(super::types::PairingState::Failed(
+            "orchestra-api not found".into()
+        ))
+    );
+    let text = screen_rows(&mut h, 120, 40).join("\n");
+    assert!(text.contains("✕ orchestra-api not found"), "{text}");
+    assert_eq!(h.app.phone_enabled, Some(false));
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+}
+
+#[tokio::test]
+async fn a_small_window_shows_the_link_instead_of_the_code() {
+    let (mut h, _phone) = phone_harness(true, false);
+    h.press(KeyCode::Enter).await;
+    let text = screen_rows(&mut h, 70, 24).join("\n");
+    assert!(!text.contains('▀'), "{text}");
+    assert!(text.contains("window shows a QR code"), "{text}");
+    assert!(text.contains("orchestra://connect?url="), "{text}");
+    assert!(text.contains("abcdefghijklmnopqrstuvwx27"), "{text}");
+}

@@ -1,0 +1,19 @@
+# Claude Code up to 2.1.227 marked a busy turn with a braille spinner in
+# the title. The screen alone looks idle (prompt box, no hint in the
+# footer); the title decides. Hand-written.
+agent: claude
+expect: working
+process: claude
+cmdline: claude
+title: ⠐ Fix parser tests
+alternate_screen: false
+ms_since_output: 120
+---
+⏺ Task(Investigate failing parser tests)
+  ⎿  Read 3 files
+     Bash(cargo test -p parser -- --nocapture)
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)

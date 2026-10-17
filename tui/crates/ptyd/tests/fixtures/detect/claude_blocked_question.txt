@@ -1,0 +1,23 @@
+# Claude Code asking the user a multiple-choice question: a form below the
+# last rule with "Enter to select" and "Esc to cancel". Hand-written.
+agent: claude
+expect: blocked
+process: claude
+cmdline: claude
+alternate_screen: true
+ms_since_output: 900
+---
+⏺ Before adding tests I need one decision from you.
+
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Test runner
+
+Which test runner should the new tests use?
+
+❯ 1. cargo test
+     The built-in harness, no new dependencies
+  2. cargo nextest
+     Faster, needs cargo-nextest installed
+  3. Type something.
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

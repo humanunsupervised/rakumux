@@ -1,0 +1,16 @@
+[package]
+name = "orchestra-vt"
+version = "0.1.0"
+edition = "2021"
+description = "Terminal emulation shared by the Orchestra daemon and TUI"
+publish = false
+
+[lib]
+name = "vt"
+
+[dependencies]
+vt100 = "0.16.2"
+base64 = "0.21"
+
+[dev-dependencies]
+portable-pty = "0.9.0"

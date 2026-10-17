@@ -1,0 +1,15 @@
+# Aider streaming a reply: no marker on screen, output arriving now.
+# Hand-written.
+agent: aider
+expect: working
+process: aider
+cmdline: aider
+alternate_screen: false
+ms_since_output: 40
+---
+> fix the failing parser tests
+
+The two failures come from `parse_number` rejecting underscores in numeric
+literals. Here's the fix:
+
+src/parser.rs

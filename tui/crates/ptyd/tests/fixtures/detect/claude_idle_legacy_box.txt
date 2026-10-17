@@ -1,0 +1,26 @@
+# Older Claude Code layout at rest: rounded input box with "│ >". The
+# finished turn's summary line has no ellipsis. Hand-written.
+agent: claude
+expect: idle
+process: claude
+cmdline: claude
+title: ✳ Claude Code
+alternate_screen: false
+ms_since_output: 3000
+---
+> fix the failing parser tests
+
+● I'll run the tests first.
+
+● Bash(cargo test -p parser)
+  ⎿  test result: ok. 43 passed; 0 failed; 0 ignored
+
+● Both failures came from parse_number rejecting underscores; fixed and
+  all 43 tests pass now.
+
+✻ Worked for 1m 12s
+
+╭───────────────────────────────────────────────────╮
+│ >                                                 │
+╰───────────────────────────────────────────────────╯
+  ? for shortcuts

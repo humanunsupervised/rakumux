@@ -1,0 +1,17 @@
+# Codex CLI's first-run trust question. Hand-written.
+agent: codex
+expect: blocked
+process: codex
+cmdline: codex
+alternate_screen: false
+ms_since_output: 5000
+---
+> You are in /home/me/demo
+
+  Do you trust the contents of this directory? Working with untrusted
+  contents comes with higher risk of prompt injection.
+
+› 1. Yes, continue
+  2. No, quit
+
+  Press enter to continue

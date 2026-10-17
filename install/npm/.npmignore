@@ -1,0 +1,32 @@
+# Source files (only ship built binaries)
+tui/src/
+tui/target/debug/
+tui/Cargo.lock
+
+# Test files
+tests/
+*.test.sh
+
+# Development files
+.git/
+.gitignore
+*.swp
+*.swo
+.DS_Store
+
+# Documentation source
+docs/
+*.md
+!README.md
+
+# CI/CD
+.github/
+.travis.yml
+.circleci/
+
+# Build artifacts not needed
+build.sh
+Makefile
+
+# Worktrees directory
+worktrees/

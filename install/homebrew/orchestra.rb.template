@@ -1,0 +1,69 @@
+class Orchestra < Formula
+  desc "Terminal session manager for coding agents with a fast TUI"
+  homepage "https://github.com/humanunsupervised/orchestra"
+  # Rendered by install/scripts/release-homebrew.sh; edit the template, not Formula/orchestra.rb.
+  #
+  # Binary-only distribution: pre-built packages from GitHub Releases.
+  # `version` is stated only where Homebrew can't parse it from the URL: it reads the
+  # trailing "arm64"/"x64" as version 64. For the Intel URL it is parsed from
+  # "/v@VERSION@/", and stating it there fails `brew audit` as redundant.
+  if OS.mac? && Hardware::CPU.intel?
+    url "https://github.com/humanunsupervised/orchestra/releases/download/v@VERSION@/orchestra-macos-intel.tar.gz"
+    sha256 "@SHA256_MACOS_INTEL@"
+  elsif OS.mac? && Hardware::CPU.arm?
+    url "https://github.com/humanunsupervised/orchestra/releases/download/v@VERSION@/orchestra-macos-arm64.tar.gz"
+    version "@VERSION@"
+    sha256 "@SHA256_MACOS_ARM64@"
+  elsif OS.linux? && Hardware::CPU.intel?
+    url "https://github.com/humanunsupervised/orchestra/releases/download/v@VERSION@/orchestra-linux-x64.tar.gz"
+    version "@VERSION@"
+    sha256 "@SHA256_LINUX_X64@"
+  else
+    odie "Orchestra is not available for #{OS.kernel_name} #{Hardware::CPU.arch}"
+  end
+  # Proprietary (LICENSE in the package); SPDX can't express it.
+  license :cannot_represent
+
+  def install
+    libexec.install "orchestra", "orchestra-ptyd", "orchestra-api", "orchestra-mcp",
+                    "orchestra.sh", "orchestra-local.sh", "shell"
+    doc.install "LICENSE", "THIRD_PARTY_NOTICES"
+
+    # Every argument goes to orchestra.sh, as with npm: no command opens the TUI,
+    # anything else is a CLI subcommand. opt paths stay valid across upgrades.
+    (bin/"orchestra").write_env_script opt_libexec/"orchestra.sh",
+                                       GW_TUI_BIN:  opt_libexec/"orchestra",
+                                       GW_PTYD_BIN: opt_libexec/"orchestra-ptyd"
+    (bin/"orchestra-local").write_env_script opt_libexec/"orchestra-local.sh", {}
+    # The MCP server and the API run directly (MCP needs a clean stdout).
+    (bin/"orchestra-mcp").write_env_script opt_libexec/"orchestra-mcp",
+                                           ORCHESTRA_API_BIN:  opt_libexec/"orchestra-api",
+                                           ORCHESTRA_PTYD_BIN: opt_libexec/"orchestra-ptyd"
+    (bin/"orchestra-api").write_env_script opt_libexec/"orchestra-api",
+                                           ORCHESTRA_PTYD_BIN: opt_libexec/"orchestra-ptyd"
+  end
+
+  def caveats
+    <<~EOS
+      Type `orchestra` in any project folder to start.
+
+      Sessions run in the orchestra-ptyd daemon and survive closing the TUI.
+      After an upgrade, `orchestra daemon restart` switches to the new daemon
+      (running sessions end; they can be revived).
+
+      Coding agents can drive sessions through the MCP server, e.g.:
+        claude mcp add --scope user orchestra -- #{opt_bin}/orchestra-mcp
+    EOS
+  end
+
+  test do
+    # --version never starts the daemon.
+    assert_match version.to_s, shell_output("#{bin}/orchestra --version")
+    assert_match(/\d+\.\d+\.\d+/, shell_output("#{libexec}/orchestra-ptyd --version"))
+    # --version starts no API, daemon or MCP session.
+    assert_match "orchestra-api #{version}", shell_output("#{bin}/orchestra-api --version")
+    assert_match "orchestra-mcp #{version}", shell_output("#{bin}/orchestra-mcp --version")
+    assert_path_exists doc/"LICENSE"
+    assert_path_exists doc/"THIRD_PARTY_NOTICES"
+  end
+end

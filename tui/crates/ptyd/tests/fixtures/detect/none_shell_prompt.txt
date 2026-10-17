@@ -1,0 +1,14 @@
+# A plain login shell: no agent, no lifecycle.
+agent: none
+expect: none
+process: bash
+cmdline: -bash
+alternate_screen: false
+ms_since_output: 300
+---
+me@box:~/demo$ cargo test -q
+running 43 tests
+...........................................
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+me@box:~/demo$

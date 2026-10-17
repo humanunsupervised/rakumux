@@ -1,0 +1,16 @@
+# Cursor's agent CLI at rest: no busy or approval markers. Hand-written.
+agent: cursor-agent
+expect: idle
+process: cursor-agent
+cmdline: cursor-agent
+alternate_screen: false
+ms_since_output: 7000
+---
+  Cursor Agent
+  ~/demo · main
+
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ → Plan, search, build anything                                           │
+ └──────────────────────────────────────────────────────────────────────────┘
+  Auto
+  / commands · @ files · ! shell

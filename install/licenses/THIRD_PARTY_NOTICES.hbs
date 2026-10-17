@@ -1,0 +1,32 @@
+THIRD-PARTY SOFTWARE NOTICES
+============================
+
+Orchestra (the `orchestra`, `orchestra-ptyd`, `orchestra-api` and
+`orchestra-mcp` programs) is proprietary software; see LICENSE. It includes the
+open-source components listed below, each used under its own license,
+reproduced in full in this file.
+
+Components under the Mozilla Public License 2.0 are used unmodified; their
+source code is available from the crates.io page and repository listed for
+each component.
+
+SQLite, compiled into both programs through rusqlite / libsqlite3-sys, is in
+the public domain.
+
+Licenses
+--------
+{{#each overview}}
+{{{name}}} ({{{id}}}): {{count}} component(s)
+{{/each}}
+{{#each licenses}}
+
+===============================================================================
+{{{name}}} ({{{id}}})
+
+Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}: https://crates.io/crates/{{{crate.name}}}/{{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

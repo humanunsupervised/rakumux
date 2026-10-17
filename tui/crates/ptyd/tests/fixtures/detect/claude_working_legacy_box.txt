@@ -1,0 +1,28 @@
+# Older Claude Code layout (rounded input box, no rules): the activity line
+# carries the interrupt hint. Hand-written.
+agent: claude
+expect: working
+process: claude
+cmdline: claude
+alternate_screen: false
+ms_since_output: 60
+---
+╭───────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Code!                         │
+│                                                   │
+│   cwd: /home/me/demo                              │
+╰───────────────────────────────────────────────────╯
+
+> fix the failing parser tests
+
+● I'll run the tests first.
+
+● Bash(cargo test -p parser)
+  ⎿  test result: FAILED. 41 passed; 2 failed; 0 ignored
+
+✻ Thinking… (12s · esc to interrupt)
+
+╭───────────────────────────────────────────────────╮
+│ >                                                 │
+╰───────────────────────────────────────────────────╯
+  ? for shortcuts

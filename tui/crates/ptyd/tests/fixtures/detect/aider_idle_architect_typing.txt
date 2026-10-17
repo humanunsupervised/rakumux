@@ -1,0 +1,13 @@
+# Aider in architect mode while the user types: output is recent (echo),
+# but the prompt is the bottom line. Hand-written.
+agent: aider
+expect: idle
+process: aider
+cmdline: aider --architect
+alternate_screen: false
+ms_since_output: 20
+---
+Tokens: 6.1k sent, 512 received. Cost: $0.03 message, $0.05 session.
+────────────────────────────────────────────────────────────────────────────────
+src/parser.rs
+architect> add tests for underscores in number lit

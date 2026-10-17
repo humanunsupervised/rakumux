@@ -1,0 +1,17 @@
+# Cursor's agent CLI asking to run a command. Hand-written.
+agent: cursor-agent
+expect: blocked
+process: cursor-agent
+cmdline: cursor-agent
+alternate_screen: false
+ms_since_output: 2600
+---
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ $ rm -rf target in ~/demo                                                │
+ └──────────────────────────────────────────────────────────────────────────┘
+  Run this command?
+  Not in allowlist: rm
+  → Run (once) (y)
+    Skip (esc or n)
+    Add Shell(rm) to allowlist? (tab)
+    Auto-run everything (shift+tab)

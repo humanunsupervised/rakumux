@@ -1,0 +1,18 @@
+# Aider waiting at its prompt; installed as a python entry point (the
+# foreground process is python3). Hand-written.
+agent: aider
+expect: idle
+process: python3
+cmdline: /usr/bin/python3 /home/me/.local/bin/aider
+alternate_screen: false
+ms_since_output: 8000
+---
+Aider v0.86.1
+Main model: anthropic/claude-sonnet-4-20250514 with diff edit format, infinite output
+Weak model: anthropic/claude-3-5-haiku-20241022
+Git repo: .git with 42 files
+Repo-map: using 4096 tokens, auto refresh
+Added src/parser.rs to the chat.
+────────────────────────────────────────────────────────────────────────────────
+src/parser.rs
+>

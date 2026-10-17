@@ -1,0 +1,925 @@
+openapi: 3.1.0
+info:
+  title: Orchestra external API
+  version: "1"
+  summary: Sessions and folders of the local Orchestra daemon, over HTTP.
+  description: |
+    `orchestra-api` exposes a subset of the session operations of the running
+    Orchestra daemon (`orchestra-ptyd`). It listens on **127.0.0.1** and, with
+    remote access on, on a **remote listener** too (see below). It is a thin
+    adapter: the daemon decides permissions and folder confinement.
+
+    **Discovery.** While it runs, the API writes
+    `<ORCHESTRA_HOME or ~/.orchestra>/api.json` (mode 0600):
+    `{"url": "http://127.0.0.1:<port>", "token": "<64 hex>", "pid": <int>, "version": "<x.y.z>", "remote_urls": ["http://<addr>:<port>"]}`
+    (`remote_urls` only while a remote listener runs). A file whose `pid` no
+    longer exists is stale.
+
+    **Authentication.** Every route except `GET /v1/health` needs
+    `Authorization: Bearer <token>`. On the loopback listener the token is
+    api.json's; requests whose `Host` is not a loopback name (`127.0.0.1`,
+    `localhost`, `[::1]`, any port) and requests carrying an `Origin` or
+    `Sec-Fetch-Site` header (browsers) are refused with 403. No CORS headers
+    are ever sent.
+
+    **Remote access.** `orchestra remote on` writes
+    `<home>/remote.json` (mode 0600):
+    `{"enabled": true, "port": 7337, "token": "<26 chars a-z2-7>", "listen": []}`.
+    While it is enabled the API adds a remote listener on every Tailscale
+    address of the machine (IPv4 in `100.64.0.0/10`, IPv6 in
+    `fd7a:115c:a1e0::/48`) at `port`, or on `remote.json`'s `listen` /
+    `--remote-listen ADDR:PORT` addresses instead. There the bearer is the
+    remote token (constant-time compared); `Host` isn't checked and `Origin`
+    is allowed; the caller is always the user, so the identity headers below
+    are refused (403 `permission_denied`). The loopback listener keeps its
+    rules. Same routes on both.
+
+    **Streams.** `GET /v1/events` and `GET /v1/sessions/{id}/attach` are
+    WebSockets (RFC 6455, version 13) on the same port, with the same checks;
+    errors before the upgrade are ordinary JSON answers, and a request
+    without the upgrade headers gets 426 `upgrade_required`. Their messages
+    are the `EventMessage`, `AttachMessage` and `AttachCommand` schemas. The
+    server pings every 30 s and drops a client that didn't answer the
+    previous ping; it closes the socket when the stream ends.
+
+    **Identity.** Without identity headers the API acts as the user. With both
+    `X-Orchestra-Session-Id` and `X-Orchestra-Session-Token` (the
+    `ORCHESTRA_SESSION_ID` / `ORCHESTRA_SESSION_TOKEN` of a process running in
+    an Orchestra session) it acts as that session: the daemon confines it to
+    its own folder and applies its agent policy (today: read anything in the
+    folder, create sessions in it within limits, rename only itself). With
+    both `X-Orchestra-Agent` and `X-Orchestra-Agent-Conversation` instead
+    (for agents whose tool calls don't carry the session's environment, such
+    as OpenCode 2.x) it acts as the running session that bound that
+    conversation with `orchestra session bind`; 401 if none did. That needs
+    the daemon's `auth.delegated` capability (501 without it).
+
+    **Folders.** A session's folder is the canonical directory it was started
+    in (the daemon's protocol calls it `scope`, and its folder operations
+    `project_*`). Wherever a `folder` is accepted it may be an absolute
+    directory (`~/` is expanded) or the name of a known folder; names and
+    listing every folder need the daemon's `projects` capability (see
+    `GET /v1/health`), and answer 501 / 400 until it has it.
+
+    **Deprecated `project` names.** Earlier builds said "project": they are
+    still accepted and returned. `GET /v1/projects` is an alias of
+    `GET /v1/folders`; the `project` query parameter and body field are
+    aliases of `folder` (`folder` wins; both given and naming different
+    folders is a 400); responses carry `project` next to `folder` and
+    `projects` next to `folders`, with the same values.
+
+    **Errors** use one envelope, `{"error": {"code", "message", "details"?}}`.
+    Daemon error codes map to statuses: `not_found` 404, `invalid_argument`
+    400, `unauthenticated` 401, `out_of_scope` and `permission_denied` 403,
+    `session_not_live` and `session_in_use` 409, `limit_exceeded` 429,
+    `timeout` 504,
+    `daemon_unavailable` 503, `unsupported` 501, anything else 500. The API's
+    own codes: `method_not_allowed` 405, `payload_too_large` 413,
+    `unsupported_media_type` 415, `upgrade_required` 426.
+
+    **Compatibility.** Fields may be added to responses; clients must ignore
+    unknown fields. Request bodies reject unknown fields, and routes reject
+    unknown query parameters (400), so typos never pass silently.
+servers:
+  - url: http://127.0.0.1:{port}
+    variables:
+      port:
+        default: "0"
+        description: The port in api.json.
+  - url: http://{host}:{port}
+    description: The remote listener (remote access on); see api.json `remote_urls`.
+    variables:
+      host:
+        default: machine.tailnet.ts.net
+        description: The machine's MagicDNS name or Tailscale address.
+      port:
+        default: "7337"
+        description: remote.json `port`.
+security:
+  - bearer: []
+tags:
+  - name: health
+  - name: folders
+  - name: sessions
+  - name: streams
+paths:
+  /v1/health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: API version and daemon reachability.
+      description: >
+        The only route without authentication. Never starts the daemon. On the remote
+        listener, without the remote token, `daemon.error` is a generic "the daemon is
+        not reachable".
+      security: []
+      responses:
+        "200":
+          description: The API answers.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/folders:
+    get:
+      tags: [folders]
+      operationId: listFolders
+      summary: The folders the caller can see.
+      description: >
+        A folder is a directory sessions were started in. User callers: every
+        folder the daemon knows. Session callers: their own. Needs the daemon's
+        `projects` capability (501 `unsupported` without it).
+      parameters:
+        - $ref: "#/components/parameters/SessionIdentityId"
+        - $ref: "#/components/parameters/SessionIdentityToken"
+        - $ref: "#/components/parameters/AgentIdentityKind"
+        - $ref: "#/components/parameters/AgentIdentityConversation"
+      responses:
+        "200":
+          description: Folders.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FolderList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "501": { $ref: "#/components/responses/Unsupported" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/projects:
+    get:
+      tags: [folders]
+      operationId: listProjects
+      deprecated: true
+      summary: Deprecated alias of GET /v1/folders.
+      description: The same handler and answer as `GET /v1/folders`.
+      parameters:
+        - $ref: "#/components/parameters/SessionIdentityId"
+        - $ref: "#/components/parameters/SessionIdentityToken"
+        - $ref: "#/components/parameters/AgentIdentityKind"
+        - $ref: "#/components/parameters/AgentIdentityConversation"
+      responses:
+        "200":
+          description: Folders.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FolderList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "501": { $ref: "#/components/responses/Unsupported" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/sessions:
+    parameters:
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    get:
+      tags: [sessions]
+      operationId: listSessions
+      summary: List sessions, optionally filtered.
+      description: >
+        Without `folder`, session callers get their own folder and user callers
+        every folder (needs the daemon's `projects` capability; until then the
+        answer is 400 asking for `folder`, with `details.missing = "folder"`).
+        Several `folder` parameters list the union, most recently active first.
+        `all=true` lists every folder's sessions (the daemon's own list of every
+        folder when it has the `sessions.all` capability, else as without
+        `folder`), most recently active first.
+      parameters:
+        - name: all
+          in: query
+          description: >
+            Every folder's sessions (user callers; session callers get 403
+            `out_of_scope`). Not with `folder` (400).
+          schema: { type: boolean, default: false }
+        - name: folder
+          in: query
+          description: Folder directory or name. Repeatable.
+          schema:
+            type: array
+            items: { type: string }
+          style: form
+          explode: true
+        - name: project
+          in: query
+          deprecated: true
+          description: >
+            Deprecated alias of `folder`. With both, they must name the same
+            folders (400 otherwise).
+          schema:
+            type: array
+            items: { type: string }
+          style: form
+          explode: true
+        - name: name
+          in: query
+          description: Exact session name.
+          schema: { type: string }
+        - name: q
+          in: query
+          description: Case-insensitive substring of the session name.
+          schema: { type: string }
+        - name: include_dead
+          in: query
+          description: Include sessions whose terminal is gone (status `dead`).
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Matching sessions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+    post:
+      tags: [sessions]
+      operationId: createSession
+      summary: Create a session (a terminal in a folder).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSession" }
+            examples:
+              agent:
+                value: { folder: /home/me/repo, name: reviewer, command: [claude] }
+              shell:
+                value: { folder: /home/me/repo, cwd: src, startup_commands: [cargo test] }
+      responses:
+        "201":
+          description: Created and running.
+          headers:
+            Location:
+              description: /v1/sessions/{id}
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "429": { $ref: "#/components/responses/LimitExceeded" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/sessions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    get:
+      tags: [sessions]
+      operationId: getSession
+      summary: One session by id.
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+    patch:
+      tags: [sessions]
+      operationId: updateSession
+      summary: Change a session. v1 supports renaming.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateSession" }
+      responses:
+        "200":
+          description: The updated session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+    delete:
+      tags: [sessions]
+      operationId: deleteSession
+      summary: Delete a session.
+      description: >
+        Ends its program (if it runs) and removes the session, its saved
+        scrollback and history. Sessions it created stay (without a parent).
+        User callers only (session callers get 403).
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/sessions/{id}/revive:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    post:
+      tags: [sessions]
+      operationId: reviveSession
+      summary: Revive a dead or exited session.
+      description: >
+        Starts a new terminal for the session (same id, cwd and command) and runs
+        its resume command (a known agent resumes its conversation). The body is
+        optional; without one the terminal gets the daemon's default size (an
+        attaching controller resizes it). Answers `{"session": Session}`, the
+        same envelope as the other session routes. A live session is a 400.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviveSession" }
+      responses:
+        "200":
+          description: The session, live again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/sessions/{id}/kill:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    post:
+      tags: [sessions]
+      operationId: killSession
+      summary: End a session's program.
+      description: >
+        Terminates the program (not the sessions it created). The session stays,
+        and becomes `exited` once the program is gone; revive brings it back.
+      responses:
+        "204": { description: The program was told to end. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/NotLive" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/sessions/{id}/attach:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    get:
+      tags: [streams]
+      operationId: attachSession
+      summary: The live terminal (WebSocket).
+      description: |
+        A WebSocket. Server → client: first a text `attached` message
+        (`AttachMessage`) with a base64 `checkpoint`: fed to a fresh terminal of
+        `cols`×`rows` it shows the current screen. Then binary frames carry the
+        terminal output, in order from `offset`, and text messages the events
+        `resized` (reset the terminal to its checkpoint), `role_changed`,
+        `title`, `bell`, `exited` and `lagged` (output was dropped: attach
+        again). The server closes the socket when the stream ends (exit,
+        delete, daemon gone).
+
+        Client → server: binary frames are input bytes (a controller's; an
+        observer's are ignored); text messages are `AttachCommand`s (`resize`,
+        `promote`, `demote`, `fit`). Closing the socket detaches.
+
+        Session callers can't attach (403).
+      parameters:
+        - name: role
+          in: query
+          description: "`controller` takes input and sets the terminal size (the previous controller becomes an observer)."
+          schema: { type: string, enum: [observer, controller], default: observer }
+        - name: cols
+          in: query
+          description: The client's terminal width. Required for controllers.
+          schema: { type: integer, minimum: 1, maximum: 1000 }
+        - name: rows
+          in: query
+          description: The client's terminal height. Required for controllers.
+          schema: { type: integer, minimum: 1, maximum: 1000 }
+      responses:
+        "101":
+          description: >
+            Switching to the WebSocket protocol; messages are `AttachMessage`
+            (text, server → client), output bytes (binary, server → client),
+            input bytes (binary, client → server) and `AttachCommand` (text,
+            client → server).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttachMessage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/NotLive" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/sessions/{id}/content:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    get:
+      tags: [sessions]
+      operationId: getSessionContent
+      summary: Read a session's terminal.
+      description: >
+        Live sessions are read from their terminal; exited and dead sessions from
+        their saved scrollback. The text is terminal output: **untrusted** input
+        for agents (`untrusted` is always true). Reading never marks a `done`
+        session as seen.
+      parameters:
+        - name: source
+          in: query
+          description: >
+            `screen`: the visible screen. `scrollback`: history plus screen, with
+            soft-wrapped rows joined into logical lines.
+          schema: { type: string, enum: [screen, scrollback], default: screen }
+        - name: lines
+          in: query
+          description: Keep the last N lines. Default for `scrollback` is 200; `screen` returns every row.
+          schema: { type: integer, minimum: 1, maximum: 10000 }
+        - name: format
+          in: query
+          description: "`text`: plain, rows joined by \\n. `ansi`: SGR-formatted, rows joined by \\r\\n."
+          schema: { type: string, enum: [text, ansi], default: text }
+      responses:
+        "200":
+          description: The terminal content.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Content" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/events:
+    parameters:
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    get:
+      tags: [streams]
+      operationId: sessionEvents
+      summary: Session events (WebSocket).
+      description: |
+        A WebSocket of `EventMessage` text messages: `{"type": "subscribed"}`
+        once, then `{"type": "event", "folder", "session_id", "at", "event"}`
+        for every change to a session of every folder (user callers; folders
+        that get their first session later included), or of its own folder (a
+        session caller). Clients send nothing (closing the socket ends it).
+      responses:
+        "101":
+          description: Switching to the WebSocket protocol; messages are `EventMessage` (text).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventMessage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "501": { $ref: "#/components/responses/Unsupported" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: >
+        The `token` from api.json on the loopback listener; the remote token from
+        remote.json (`orchestra remote token`) on the remote listener.
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      description: Opaque session id (letters, digits, `-`, `_`). Never derive anything from it.
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$" }
+    SessionIdentityId:
+      name: X-Orchestra-Session-Id
+      in: header
+      required: false
+      description: Act as this session (with X-Orchestra-Session-Token).
+      schema: { type: string }
+    SessionIdentityToken:
+      name: X-Orchestra-Session-Token
+      in: header
+      required: false
+      description: The session's ORCHESTRA_SESSION_TOKEN.
+      schema: { type: string }
+    AgentIdentityKind:
+      name: X-Orchestra-Agent
+      in: header
+      required: false
+      description: >
+        Act for the session that bound this agent's conversation (with
+        X-Orchestra-Agent-Conversation), e.g. `opencode`. Not with the
+        session headers.
+      schema: { type: string, pattern: "^[a-z0-9_-]{1,32}$" }
+    AgentIdentityConversation:
+      name: X-Orchestra-Agent-Conversation
+      in: header
+      required: false
+      description: The agent's conversation id, e.g. OpenCode's `ses_…`.
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: "`invalid_argument`: bad parameters or body, or a half-sent identity."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthenticated:
+      description: "`unauthenticated`: missing or wrong API token, or a session identity the daemon rejects."
+      headers:
+        WWW-Authenticate:
+          schema: { type: string, const: Bearer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: >
+        `permission_denied` (non-loopback Host, browser request, or the daemon's
+        policy) or `out_of_scope` (a session acting outside its folder).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: "`not_found`: no such session, folder or route."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PayloadTooLarge:
+      description: "`payload_too_large`: the body is larger than 64 KiB."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    UnsupportedMediaType:
+      description: "`unsupported_media_type`: the body is not `application/json`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    LimitExceeded:
+      description: >
+        `limit_exceeded`: a session creating sessions reached one of the
+        daemon's limits; `details.limit` names it (`max_children_per_parent`,
+        `max_depth`, `max_live_per_scope` or `max_creates_per_minute`) and
+        `details.max` gives its value.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unsupported:
+      description: "`unsupported`: the daemon does not support this yet."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    DaemonUnavailable:
+      description: "`daemon_unavailable`: the daemon is not running and could not be started."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotLive:
+      description: "`session_not_live`: the session has no running terminal (it is `exited` or `dead`)."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    UpgradeRequired:
+      description: >
+        `upgrade_required`: the route is a WebSocket; send `Connection: Upgrade`,
+        `Upgrade: websocket`, `Sec-WebSocket-Version: 13` and a `Sec-WebSocket-Key`.
+      headers:
+        Sec-WebSocket-Version:
+          schema: { type: string, const: "13" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              examples: [not_found, invalid_argument, unauthenticated, out_of_scope, unsupported]
+            message: { type: string }
+            details: {}
+    Health:
+      type: object
+      required: [status, version, pid, daemon]
+      properties:
+        status: { type: string, const: ok }
+        version: { type: string, description: The API's version. }
+        pid: { type: integer, description: The API process. }
+        daemon:
+          type: object
+          required: [reachable, capabilities]
+          properties:
+            reachable: { type: boolean }
+            version: { type: string }
+            capabilities:
+              type: array
+              items: { type: string }
+              description: Optional daemon features, e.g. `projects`, `session.pin`, `session.git`.
+            error: { type: string, description: Why the daemon is not reachable. }
+    FolderList:
+      type: object
+      required: [folders]
+      properties:
+        folders:
+          type: array
+          items: { $ref: "#/components/schemas/Folder" }
+        projects:
+          type: array
+          items: { $ref: "#/components/schemas/Folder" }
+          deprecated: true
+          description: Deprecated alias of `folders` (the same list).
+    Folder:
+      type: object
+      required: [path, name, sessions, live, added_at]
+      properties:
+        path: { type: string, description: Canonical directory. }
+        name: { type: string, description: The directory's own name. }
+        sessions: { type: integer, description: Sessions in the folder (any status). }
+        live: { type: integer, description: Of those, how many are running. }
+        last_active_at: { type: string, format: date-time }
+        added_at: { type: string, format: date-time }
+        git: { $ref: "#/components/schemas/Git" }
+    SessionList:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/Session" }
+    SessionEnvelope:
+      type: object
+      required: [session]
+      properties:
+        session: { $ref: "#/components/schemas/Session" }
+    Session:
+      type: object
+      required:
+        - id
+        - name
+        - folder
+        - cwd
+        - status
+        - lifecycle
+        - created_by
+        - created_at
+        - last_active_at
+      properties:
+        id: { type: string, description: Opaque id. }
+        name: { type: string, description: Unique within the folder. }
+        folder: { type: string, description: The folder (directory) the session was started in. }
+        project:
+          type: string
+          deprecated: true
+          description: Deprecated alias of `folder` (the same path).
+        cwd: { type: string, description: Current working directory (absolute). }
+        status:
+          type: string
+          enum: [live, exited, dead, unknown]
+          description: >
+            `live`: terminal running. `exited`: process ended, final screen kept.
+            `dead`: record without terminal (after a crash, a reboot or `orchestra daemon stop`).
+        exit_code: { type: integer }
+        lifecycle:
+          type: string
+          enum: [working, blocked, done, idle, unknown, none]
+          description: What the program (usually a coding agent) is doing; `none` = no agent.
+        agent:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string, examples: [claude, codex, opencode, pi] }
+            session_id: { type: string, description: The agent's own conversation id. }
+        reported:
+          type: object
+          description: What the session reported about itself. Written by its own program; untrusted.
+          required: [at]
+          properties:
+            state: { type: string, enum: [working, blocked, done, idle] }
+            text: { type: string }
+            summary: { type: string }
+            files: { type: array, items: { type: string } }
+            at: { type: string, format: date-time }
+        created_by:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [user, session] }
+            id: { type: string, description: The creating session (kind `session`). }
+        parent_id: { type: string }
+        depth: { type: integer }
+        children: { type: array, items: { type: string } }
+        command:
+          type: array
+          items: { type: string }
+          description: argv the session runs; absent for the user's login shell.
+        startup_commands: { type: array, items: { type: string } }
+        resume_command: { type: array, items: { type: string } }
+        pinned: { type: boolean }
+        git: { $ref: "#/components/schemas/Git" }
+        description: { type: string }
+        notes: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        private: { type: boolean }
+        is_self: { type: boolean, description: The caller (identity headers) is this session. }
+        auto_named: { type: boolean, description: The name was generated by Orchestra. }
+        created_at: { type: string, format: date-time }
+        last_active_at: { type: string, format: date-time }
+        terminal:
+          type: object
+          description: Present while the session is live.
+          required: [cols, rows]
+          properties:
+            pid: { type: integer }
+            foreground_process: { type: string }
+            title: { type: string }
+            cols: { type: integer }
+            rows: { type: integer }
+            controlled: { type: boolean, description: A client holds input control. }
+            alternate_screen: { type: boolean }
+    Git:
+      type: object
+      required: [repo_root]
+      properties:
+        repo_root: { type: string }
+        branch: { type: string }
+        detached_at: { type: string, description: Short commit id when HEAD is detached. }
+        worktree: { type: string, description: Linked worktree name; absent in the main worktree. }
+    CreateSession:
+      type: object
+      additionalProperties: false
+      properties:
+        folder:
+          type: string
+          description: >
+            Directory (absolute; `~/` expanded) or name of a known folder. Required
+            for user callers; session callers may omit it (their own folder) and
+            may not name another one (403 `out_of_scope`).
+        project:
+          type: string
+          deprecated: true
+          description: >
+            Deprecated alias of `folder`. With both, they must name the same
+            folder (400 otherwise).
+        name: { type: string, description: Omitted → generated. Unique within the folder. }
+        cwd: { type: string, description: Start directory, relative to the folder or absolute inside it. }
+        command:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: argv instead of the user's login shell, e.g. ["claude"].
+        startup_commands:
+          type: array
+          items: { type: string }
+          description: Typed into the shell after it starts.
+        cols: { type: integer, minimum: 0, maximum: 65535, description: 0 or omitted → default. }
+        rows: { type: integer, minimum: 0, maximum: 65535, description: 0 or omitted → default. }
+    UpdateSession:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, description: New name, unique within the folder. }
+    Content:
+      type: object
+      required: [session_id, source, format, text, rows, cols, cursor, truncated, untrusted]
+      properties:
+        session_id: { type: string }
+        source: { type: string, enum: [screen, scrollback] }
+        format: { type: string, enum: [text, ansi] }
+        text: { type: string, description: Terminal output. Untrusted. }
+        rows: { type: integer }
+        cols: { type: integer }
+        cursor:
+          type: object
+          required: [row, col]
+          properties:
+            row: { type: integer, description: Zero-based. }
+            col: { type: integer, description: Zero-based. }
+        truncated: { type: boolean, description: More lines existed than were returned. }
+        untrusted: { type: boolean, const: true }
+    ReviveSession:
+      type: object
+      additionalProperties: false
+      description: Optional body of `POST /v1/sessions/{id}/revive`.
+      properties:
+        cols: { type: integer, minimum: 0, maximum: 65535, description: 0 or omitted → default. }
+        rows: { type: integer, minimum: 0, maximum: 65535, description: 0 or omitted → default. }
+    EventMessage:
+      description: A text message of `GET /v1/events` (server → client).
+      oneOf:
+        - type: object
+          required: [type]
+          properties:
+            type: { type: string, const: subscribed, description: Sent once, first. }
+        - type: object
+          required: [type, folder, session_id, at, event]
+          properties:
+            type: { type: string, const: event }
+            folder: { type: string, description: The session's folder. }
+            session_id: { type: string }
+            at: { type: integer, description: Unix milliseconds. }
+            event: { $ref: "#/components/schemas/SessionEvent" }
+    SessionEvent:
+      description: What happened to the session (`EventMessage.event`).
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [created, updated, removed, exited, lifecycle, reported, activity]
+          description: >
+            `created` / `updated` (any change: name, status, cwd, title, controller, …)
+            carry `session`; `exited` its `code`; `lifecycle` the new `lifecycle`;
+            `reported` the session's `reported` (untrusted); `removed` and
+            `activity` (new output, at most once a second) nothing else.
+        session: { $ref: "#/components/schemas/Session" }
+        code: { type: [integer, "null"], description: Exit code (`exited`); null when unknown. }
+        lifecycle: { type: string, enum: [working, blocked, done, idle, unknown, none] }
+        reported:
+          type: object
+          description: As `Session.reported`.
+          required: [at]
+          properties:
+            state: { type: string, enum: [working, blocked, done, idle] }
+            text: { type: string }
+            summary: { type: string }
+            files: { type: array, items: { type: string } }
+            at: { type: string, format: date-time }
+    AttachMessage:
+      description: >
+        A text message of `GET /v1/sessions/{id}/attach` (server → client).
+        Terminal output travels in binary frames.
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [attached, resized, role_changed, title, bell, exited, lagged]
+          description: >
+            `attached` (first, once): `session`, `role`, `cols`, `rows`, `checkpoint`,
+            `offset`. `resized`: `cols`, `rows`, `checkpoint`, `offset`: reset the
+            terminal to the checkpoint. `role_changed`: `role`. `title`: `title`.
+            `bell`. `exited`: `code`; the socket closes next. `lagged`: output was
+            dropped because the client fell behind; attach again.
+        session: { $ref: "#/components/schemas/Session" }
+        role: { type: string, enum: [observer, controller] }
+        cols: { type: integer }
+        rows: { type: integer }
+        checkpoint:
+          type: string
+          description: >
+            Base64 of bytes that bring a fresh terminal of `cols`×`rows` to the
+            current screen.
+        offset: { type: integer, description: Output offset the checkpoint corresponds to. }
+        title: { type: string }
+        code: { type: [integer, "null"], description: Exit code; null when unknown. }
+    AttachCommand:
+      description: >
+        A text message of `GET /v1/sessions/{id}/attach` (client → server). Input
+        bytes travel in binary frames.
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [resize, promote, demote, fit]
+          description: >
+            `resize` (controller): resize the terminal. `promote`: become
+            controller at `cols`×`rows`. `demote`: become observer. `fit`
+            (observer): take this size unless the controller typed in the last
+            few seconds.
+        cols: { type: integer, minimum: 1, description: "`resize`, `promote`, `fit`." }
+        rows: { type: integer, minimum: 1, description: "`resize`, `promote`, `fit`." }

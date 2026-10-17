@@ -1,0 +1,28 @@
+# Claude Code asking to run a command: question with numbered Yes/No
+# options replaces the prompt box. The title already shows idle, the
+# blocker wins. Hand-written from Claude's permission dialog layout.
+agent: claude
+expect: blocked
+process: claude
+cmdline: claude
+title: ✳ Claude Code
+alternate_screen: true
+ms_since_output: 2500
+---
+⏺ I'll clear the stale build directory and rerun the tests.
+
+⏺ Bash(rm -rf target && cargo test)
+  ⎿  Running…
+
+────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   rm -rf target && cargo test
+   Clean build artefacts and rerun the tests
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for cargo test commands in /home/me/demo
+   3. No, and tell Claude what to do differently (esc)
+
+ Esc to cancel · Tab to amend · ctrl+e to explain

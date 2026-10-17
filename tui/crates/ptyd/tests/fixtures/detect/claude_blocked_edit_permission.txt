@@ -1,0 +1,21 @@
+# Claude Code asking to apply an edit. Hand-written.
+agent: claude
+expect: blocked
+process: claude
+cmdline: claude
+alternate_screen: true
+ms_since_output: 1800
+---
+────────────────────────────────────────────────────────────────────────────────
+ Edit file
+ src/parser.rs
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 118      fn parse_number(&mut self) -> Result<Token> {                       │
+│ 119 -        let digits = self.take_while(|c| c.is_digit(10));              │
+│ 119 +        let digits = self.take_while(|c| c.is_ascii_digit() || c == '_');│
+│ 120          digits.parse()                                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ Do you want to make this edit to parser.rs?
+ ❯ 1. Yes
+   2. Yes, allow all edits during this session (shift+tab)
+   3. No, and tell Claude what to do differently (esc)

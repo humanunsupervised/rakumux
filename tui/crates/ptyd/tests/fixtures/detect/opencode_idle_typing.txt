@@ -1,0 +1,37 @@
+# OpenCode 1.18.16 with typed, unsubmitted input. Captured (100x30).
+agent: opencode
+expect: idle
+process: opencode
+cmdline: opencode
+title: OpenCode
+alternate_screen: true
+ms_since_output: 1483
+---
+
+
+
+
+
+
+
+                                                                ▄
+                               █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+                               █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+                               ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+
+             ┃
+             ┃  fix the tests
+             ┃
+             ┃  Build · Big Pickle OpenCode
+             ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+             tab agents  ctrl+p commands
+
+
+
+                      ● Tip Run /connect to add an AI provider and start coding
+
+
+
+
+  /home/me/demo                                                                             1.18.16

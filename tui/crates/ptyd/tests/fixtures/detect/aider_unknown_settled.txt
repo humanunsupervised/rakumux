@@ -1,0 +1,15 @@
+# The same aider screen once output has stopped without a prompt: not
+# recognisable. Hand-written.
+agent: aider
+expect: unknown
+process: aider
+cmdline: aider
+alternate_screen: false
+ms_since_output: 6000
+---
+> fix the failing parser tests
+
+The two failures come from `parse_number` rejecting underscores in numeric
+literals. Here's the fix:
+
+src/parser.rs

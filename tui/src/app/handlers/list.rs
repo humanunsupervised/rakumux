@@ -1,0 +1,139 @@
+//! Keys in Orchestra mode: the session list (Sidebar) or tab bar (Tabs)
+//! has the keys, and the session is previewed. Arrows and Vim keys both
+//! move; Enter (or `i`) goes into a session; Esc cancels what's pending,
+//! then goes back to the session Orchestra mode was entered from.
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use super::settings::{open_help, open_settings};
+use crate::app::types::{AppMode, AppResult, AuthMenu};
+use crate::app::App;
+
+pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
+    if app.list.filter_editing {
+        handle_filter_key(app, key);
+        return AppResult::Continue;
+    }
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    // The second key of `gg` / `dd`; anything else drops the first.
+    if let Some(first) = app.pending_key.take() {
+        match (first, key.code) {
+            ('g', KeyCode::Char('g')) if !ctrl && !alt => {
+                app.move_selection(-(app.list.row_count() as isize));
+                return AppResult::Continue;
+            }
+            ('d', KeyCode::Char('d')) if !ctrl && !alt => {
+                app.confirm_delete();
+                return AppResult::Continue;
+            }
+            // Esc only cancels the pending key.
+            (_, KeyCode::Esc) => return AppResult::Continue,
+            _ => {}
+        }
+    }
+    if app.orchestra_key.matches(&key) {
+        app.return_to_session();
+        return AppResult::Continue;
+    }
+    if let Some(delta) = app.cycle_direction(&key) {
+        app.cycle_session(delta);
+        return AppResult::Continue;
+    }
+    match key.code {
+        KeyCode::Char('c') if ctrl => return AppResult::Exit,
+        KeyCode::Char('r') if ctrl => app.refresh(),
+        KeyCode::Char('d') if ctrl => app.move_half_page(1),
+        KeyCode::Char('u') if ctrl => app.move_half_page(-1),
+        KeyCode::Char('e') if ctrl => app.scroll_preview(-1),
+        KeyCode::Char('y') if ctrl => app.scroll_preview(1),
+        // No shortcut uses this Ctrl or Alt: it's the plain key. A phone's
+        // key bar (Termius' ctrl and alt) or a held modifier on a hardware
+        // keyboard sends them with keys the user means plainly: Ctrl-↑ moves,
+        // Alt-q quits.
+        _ if ctrl || alt => {
+            let plain = KeyEvent::new(
+                key.code,
+                key.modifiers - (KeyModifiers::CONTROL | KeyModifiers::ALT),
+            );
+            return handle_list_key(app, plain);
+        }
+        KeyCode::Char('q') => return AppResult::Exit,
+        KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
+        KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
+        KeyCode::Home => app.move_selection(-(app.list.row_count() as isize)),
+        KeyCode::End | KeyCode::Char('G') => app.move_selection(app.list.row_count() as isize),
+        KeyCode::Char('g') => app.pending_key = Some('g'),
+        KeyCode::Char('{') => app.move_to_folder_group(-1),
+        KeyCode::Char('}') => app.move_to_folder_group(1),
+        KeyCode::PageUp => {
+            let page = app.preview_page();
+            app.scroll_preview(page);
+        }
+        KeyCode::PageDown => {
+            let page = app.preview_page();
+            app.scroll_preview(-page);
+        }
+        KeyCode::Enter | KeyCode::Right | KeyCode::Char('i') | KeyCode::Char('l') => {
+            app.activate_selected()
+        }
+        KeyCode::Tab => app.go_to_last_session(),
+        KeyCode::Char(digit @ '1'..='9') => app.go_into_nth(digit as usize - '0' as usize),
+        KeyCode::Char('n') => app.open_new_session(),
+        KeyCode::Char('p') => app.toggle_pin(),
+        KeyCode::Char('J') => app.move_selected_session(1),
+        KeyCode::Char('K') => app.move_selected_session(-1),
+        KeyCode::Char('P') => app.open_folder_picker(),
+        KeyCode::Char('r') => app.open_rename(),
+        KeyCode::Char('d') => app.pending_key = Some('d'),
+        KeyCode::Char('x') => app.confirm_close(),
+        KeyCode::Char('z') => app.zoom_into_selected(),
+        KeyCode::Char('/') => app.list.filter_editing = true,
+        KeyCode::Char('\\') => app.send_orchestra_key(),
+        // Cancel first (the filter), then back to the session.
+        KeyCode::Esc => {
+            if app.list.filter.is_empty() {
+                app.return_to_session();
+            } else {
+                app.list.filter.set("");
+                app.reconcile_detail();
+            }
+        }
+        KeyCode::Char('?') => open_help(app),
+        KeyCode::Char(',') | KeyCode::Char('o') => open_settings(app),
+        KeyCode::Char('u') => app.open_upgrade_dialog(),
+        KeyCode::Char('a') if app.flags.auth => {
+            let items = if app.auth.has_session() {
+                vec!["Manage subscription", "View account", "Sign out"]
+            } else {
+                vec!["Sign in", "Sign up"]
+            };
+            app.mode = AppMode::Auth(AuthMenu { items, selected: 0 });
+        }
+        KeyCode::Char('c') => match app.selected_cwd() {
+            Some(cwd) => return AppResult::SwitchDirectory(cwd),
+            None => app.set_status("Select a session to cd into its folder."),
+        },
+        _ => {}
+    }
+    AppResult::Continue
+}
+
+/// `/` filter: typing narrows the list; Enter keeps the filter, Esc
+/// clears it.
+fn handle_filter_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => app.list.filter_editing = false,
+        KeyCode::Esc => {
+            app.list.filter_editing = false;
+            app.list.filter.set("");
+        }
+        KeyCode::Up => app.move_selection(-1),
+        KeyCode::Down => app.move_selection(1),
+        _ => {
+            app.list.filter.handle_key(&key);
+        }
+    }
+    app.list.ensure_selection_visible();
+    app.reconcile_detail();
+}

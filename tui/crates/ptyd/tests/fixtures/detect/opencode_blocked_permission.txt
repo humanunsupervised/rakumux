@@ -1,0 +1,19 @@
+# OpenCode asking for permission (△ Permission required; Allow once /
+# Allow always / Reject). Hand-written from OpenCode's UI strings.
+agent: opencode
+expect: blocked
+process: opencode
+cmdline: opencode
+title: OpenCode
+alternate_screen: true
+ms_since_output: 3000
+---
+  ┃  fix the failing parser tests
+  ┃
+
+     I'll clean the build directory first.
+
+  △ Permission required
+    $ rm -rf target
+
+    Allow once   Allow always   Reject                          ⇆ select  enter confirm

@@ -1,0 +1,28 @@
+# Gemini CLI asking to run a shell command. Hand-written.
+agent: gemini
+expect: blocked
+process: node
+cmdline: node /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js
+alternate_screen: false
+ms_since_output: 2000
+---
+╭──────────────────────────────────────╮
+│ > fix the failing parser tests       │
+╰──────────────────────────────────────╯
+
+╭──────────────────────────────────────────────────────────────────────────╮
+│ ?  Shell cargo test -p parser [current working directory /home/me/demo]  │
+│                                                                          │
+│ cargo test -p parser                                                     │
+│                                                                          │
+│ Allow execution of: 'cargo'?                                             │
+│                                                                          │
+│ ● 1. Yes, allow once                                                     │
+│   2. Yes, allow always ...                                               │
+│   3. No, suggest changes (esc)                                           │
+│                                                                          │
+╰──────────────────────────────────────────────────────────────────────────╯
+
+⠏ Waiting for user confirmation...
+
+~/demo                  no sandbox (see /docs)        gemini-2.5-pro (98% context left)

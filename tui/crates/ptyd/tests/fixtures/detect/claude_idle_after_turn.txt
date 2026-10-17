@@ -1,0 +1,34 @@
+# Claude Code 2.1.296 after a finished turn: "✻ Cogitated for 0s · done"
+# has the activity glyph but no ellipsis, so it is not working. Captured (80x24).
+agent: claude
+expect: idle
+process: claude
+cmdline: claude
+title: ✳ Claude Code
+alternate_screen: true
+ms_since_output: 2460
+---
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   ~/demo
+
+⚠ Remote managed settings failed to load (authentication rejected (401)) · no
+  remote policy applied · /status for details
+
+! echo all tests passed
+  ⎿  all tests passed
+  ⎿  Invalid API key · Fix external API key
+
+✻ Cogitated for 0s · done 12:53 PM
+
+
+
+
+
+
+                                                            ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← for agents

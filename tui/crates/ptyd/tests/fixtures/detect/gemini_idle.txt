@@ -1,0 +1,19 @@
+# Gemini CLI at rest (input placeholder visible). Hand-written.
+agent: gemini
+expect: idle
+process: node
+cmdline: node /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js
+title: Gemini - demo
+alternate_screen: false
+ms_since_output: 6000
+---
+Tips for getting started:
+1. Ask questions, edit files, or run commands.
+2. Be specific for the best results.
+3. Create GEMINI.md files to customize your interactions with Gemini.
+4. /help for more information.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ >   Type your message or @path/to/file                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+~/demo                  no sandbox (see /docs)       gemini-2.5-pro (100% context left)

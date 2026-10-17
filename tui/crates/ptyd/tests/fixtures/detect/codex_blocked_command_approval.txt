@@ -1,0 +1,21 @@
+# Codex CLI asking to run a command. Hand-written.
+agent: codex
+expect: blocked
+process: node
+cmdline: node /usr/lib/node_modules/@openai/codex/bin/codex.js
+alternate_screen: false
+ms_since_output: 1500
+---
+• I need to clear the build cache before rerunning the tests.
+
+  Would you like to run the following command?
+
+  Reason: clean stale build artefacts
+
+  $ rm -rf target
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for this command (a)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

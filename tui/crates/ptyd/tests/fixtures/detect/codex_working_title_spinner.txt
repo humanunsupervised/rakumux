@@ -1,0 +1,14 @@
+# Codex CLI with a braille spinner in the title while a command runs; the
+# status line is off screen. Hand-written.
+agent: codex
+expect: working
+process: codex
+cmdline: codex
+title: ⠹ demo
+alternate_screen: false
+ms_since_output: 70
+---
+• Running cargo test -p parser
+  └ Compiling parser v0.3.1 (/home/me/demo/parser)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.21s
+    Running unittests src/lib.rs

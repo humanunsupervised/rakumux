@@ -1,0 +1,19 @@
+# Claude Code running on another machine over ssh: the local foreground is
+# ssh, the title (relayed by the remote) identifies a busy Claude. Screen
+# from the captured 2.1.296 working capture (trimmed).
+agent: claude
+expect: working
+process: ssh
+cmdline: ssh devbox
+title: ◑ Claude Code
+alternate_screen: true
+ms_since_output: 100
+---
+! sleep 6
+  ⎿  Running…
+
+                                                                                ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · esc to interrupt · ← for agents

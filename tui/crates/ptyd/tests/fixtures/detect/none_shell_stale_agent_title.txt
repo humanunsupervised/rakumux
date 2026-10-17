@@ -1,0 +1,14 @@
+# Claude Code exited; zsh is in the foreground but the title it left
+# behind still says Claude. The shell wins.
+agent: none
+expect: none
+process: zsh
+cmdline: -zsh
+title: ✳ Claude Code
+alternate_screen: false
+ms_since_output: 9000
+---
+me@box ~/demo % claude
+Resume this session with:
+claude --resume 4d1f6c0e-8a2b-4c3d-9e5f-0a1b2c3d4e5f
+me@box ~/demo %

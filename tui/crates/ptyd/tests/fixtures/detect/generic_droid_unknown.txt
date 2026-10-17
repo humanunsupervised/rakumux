@@ -1,0 +1,12 @@
+# An agent known by name only with a settled screen and no markers:
+# running, state unknown. Hand-written.
+agent: droid
+expect: unknown
+process: droid
+cmdline: droid
+alternate_screen: true
+ms_since_output: 5000
+---
+  Droid ready in ~/demo
+
+  > _

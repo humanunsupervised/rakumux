@@ -1,0 +1,40 @@
+# Claude Code 2.1.296 while the user types (not submitted): output is
+# recent, but the prompt box says idle. Captured (100x30).
+agent: claude
+expect: idle
+process: claude
+cmdline: claude
+title: ✳ Claude Code
+alternate_screen: true
+ms_since_output: 1492
+---
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   ~/demo
+
+⚠ Remote managed settings failed to load (authentication rejected (401)) · no remote policy applied
+  · /status for details
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ fix the tests
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on

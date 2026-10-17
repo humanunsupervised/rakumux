@@ -1,0 +1,22 @@
+# Claude Code finished a turn with a question in prose: the user's move,
+# but not a blocking prompt (no options), so idle. Hand-written from the
+# captured 2.1.296 chrome.
+agent: claude
+expect: idle
+process: claude
+cmdline: claude
+title: ✳ Claude Code
+alternate_screen: true
+ms_since_output: 4000
+---
+⏺ Fixed parse_number to accept underscores; all 43 tests pass.
+
+  Do you want me to also update the grammar notes in docs/syntax.md? Would
+  you like to keep the old error message for invalid literals?
+
+✻ Brewed for 48s
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← for agents

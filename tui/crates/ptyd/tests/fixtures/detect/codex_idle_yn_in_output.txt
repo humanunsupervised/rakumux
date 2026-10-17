@@ -1,0 +1,17 @@
+# Codex CLI at rest after a command whose output contained "[y/n]": the
+# composer is ready, not a prompt. Hand-written.
+agent: codex
+expect: idle
+process: codex
+cmdline: codex
+alternate_screen: false
+ms_since_output: 3500
+---
+• Ran ./scripts/clean.sh --dry-run
+  └ Would remove target/ (1.2 GB). Proceed? [y/n] (dry run, skipped)
+
+• The clean script only prompts in interactive mode; nothing was removed.
+
+› Ask Codex to do anything
+
+  96% context left · ? for shortcuts

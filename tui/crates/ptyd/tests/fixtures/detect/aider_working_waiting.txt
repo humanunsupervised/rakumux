@@ -1,0 +1,13 @@
+# Aider waiting for the model's first token (spinner line). Hand-written.
+agent: aider
+expect: working
+process: aider
+cmdline: aider
+alternate_screen: false
+ms_since_output: 90
+---
+────────────────────────────────────────────────────────────────────────────────
+src/parser.rs
+> fix the failing parser tests
+
+░█        Waiting for anthropic/claude-sonnet-4-20250514

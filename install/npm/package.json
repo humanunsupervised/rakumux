@@ -1,0 +1,58 @@
+{
+  "name": "@humanu/orchestra",
+  "version": "0.6.0",
+  "description": "Terminal session manager for coding agents, with a fast TUI, a background session daemon and an MCP server",
+  "keywords": [
+    "terminal",
+    "sessions",
+    "tui",
+    "pty",
+    "ai",
+    "agents",
+    "orchestrator",
+    "cli",
+    "claude",
+    "codex",
+    "opencode",
+    "mcp"
+  ],
+  "homepage": "https://github.com/humanunsupervised/orchestra",
+  "bugs": {
+    "url": "https://github.com/humanunsupervised/orchestra/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/humanunsupervised/orchestra.git"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Human Unsupervised",
+  "main": "install.js",
+  "bin": {
+    "orchestra": "bin/orchestra.js",
+    "orchestra-local": "bin/orchestra-local.js",
+    "orchestra-mcp": "bin/orchestra-mcp.js",
+    "orchestra-api": "bin/orchestra-api.js"
+  },
+  "files": [
+    "bin/",
+    "resources/",
+    "install.js",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

@@ -1,0 +1,36 @@
+# Pi 0.75.5 with typed, unsubmitted input. Captured (100x30).
+agent: pi
+expect: idle
+process: pi
+cmdline: pi
+title: π - proj
+alternate_screen: false
+ms_since_output: 1497
+---
+
+ pi v0.75.5
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+
+ Warning: No models available. Use /login to log into a provider via OAuth or API key. See:
+
+ /home/me/.nvm/versions/node/v22.20.0/lib/node_modules/@earendil-works/pi-coding-agent/docs/p
+ roviders.md
+
+ /home/me/.nvm/versions/node/v22.20.0/lib/node_modules/@earendil-works/pi-coding-agent/docs/m
+ odels.md
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available
+ New version 1.2.0 is available. Run pi update
+ Changelog: https://pi.dev/changelog
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+fix the tests
+────────────────────────────────────────────────────────────────────────────────────────────────────
+~/demo
+0.0%/0 (auto)                                                                                unknown

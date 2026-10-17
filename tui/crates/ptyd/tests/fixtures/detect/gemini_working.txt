@@ -1,0 +1,25 @@
+# Gemini CLI mid-turn: the loading line "(esc to cancel, 14s)" above the
+# input box. Hand-written.
+agent: gemini
+expect: working
+process: gemini
+cmdline: gemini
+alternate_screen: false
+ms_since_output: 60
+---
+╭──────────────────────────────────────╮
+│ > fix the failing parser tests       │
+╰──────────────────────────────────────╯
+
+✦ I'll start by reading the parser module and its tests.
+
+╭──────────────────────────────────────────╮
+│ ✓  ReadFile src/parser.rs                │
+╰──────────────────────────────────────────╯
+
+⠏ Untangling the token stream (esc to cancel, 14s)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ >   Type your message or @path/to/file                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+~/demo                  no sandbox (see /docs)        gemini-2.5-pro (97% context left)

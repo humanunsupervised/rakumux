@@ -1,0 +1,27 @@
+# Claude Code 2.1.296, folder trust dialog on first start in a folder.
+# Captured (100x30, vt spike emulator); paths sanitised.
+agent: claude
+expect: blocked
+process: claude
+cmdline: claude
+alternate_screen: false
+ms_since_output: 4650
+---
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Accessing workspace:
+
+ /home/me/demo
+
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a
+ well-known open source project, or work from your team). If not, take a moment to review what's in
+ this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel

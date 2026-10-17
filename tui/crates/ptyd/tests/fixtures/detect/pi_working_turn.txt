@@ -1,0 +1,27 @@
+# Pi during a model turn, launched as a node script: the loader line
+# "⠼ Working... (escape to interrupt)" above the editor. Hand-written from
+# the captured 0.75.5 layout and pi's loader messages.
+agent: pi
+expect: working
+process: node
+cmdline: node /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js
+title: π - demo
+alternate_screen: false
+ms_since_output: 40
+---
+ pi v0.75.5
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+
+ fix the failing parser tests
+
+ I'll run the parser tests first.
+
+ $ cargo test -p parser
+ test result: FAILED. 41 passed; 2 failed; 0 ignored
+
+ ⠼ Working... (escape to interrupt)
+────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────
+~/demo
+↑12k ↓1.4k $0.031 8.2%/200k (auto)                            claude-sonnet-4-5

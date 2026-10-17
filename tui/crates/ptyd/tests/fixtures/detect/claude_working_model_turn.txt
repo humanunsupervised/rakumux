@@ -1,0 +1,30 @@
+# Claude Code 2.x during a model turn, no title available: activity line
+# (glyph, verb with ellipsis, timer) above the prompt box and "esc to
+# interrupt" in the footer. Hand-written from the captured 2.1.296 chrome.
+agent: claude
+expect: working
+process: claude
+cmdline: claude
+alternate_screen: true
+ms_since_output: 80
+---
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/demo
+
+❯ fix the failing parser tests
+
+⏺ I'll start by running the test suite to see what fails.
+
+⏺ Bash(cargo test -p parser)
+  ⎿  test result: FAILED. 41 passed; 2 failed; 0 ignored
+     … +18 lines (ctrl+o to expand)
+
+✶ Pondering… (34s · ↓ 1.8k tokens)
+
+                                                            ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · esc to interrupt · ← for agents

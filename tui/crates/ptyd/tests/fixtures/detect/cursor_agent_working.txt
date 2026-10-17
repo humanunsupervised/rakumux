@@ -1,0 +1,22 @@
+# Cursor's agent CLI generating; runs on its bundled node, identified from
+# the install path. Hand-written.
+agent: cursor-agent
+expect: working
+process: node
+cmdline: /home/me/.local/share/cursor-agent/versions/2025.09.18-7ae6800/node /home/me/.local/share/cursor-agent/versions/2025.09.18-7ae6800/index.js
+alternate_screen: false
+ms_since_output: 30
+---
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ fix the failing parser tests                                             │
+ └──────────────────────────────────────────────────────────────────────────┘
+
+  ⬢ Read src/parser.rs
+
+  ⬡ Generating..
+
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ → Add a follow-up                                                        │
+ └──────────────────────────────────────────────────────────────────────────┘
+  Auto · 12.4%
+  ctrl+c to stop

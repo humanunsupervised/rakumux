@@ -1,0 +1,190 @@
+# tui: the `orchestra` binary and the session daemon
+
+This Cargo workspace builds Orchestra's two binaries:
+
+- **`tui`** (installed as `orchestra`): the terminal UI and the CLI subcommands.
+- **`orchestra-ptyd`**: the per-user session daemon that owns every session's terminal and the
+  session registry.
+
+A **session** is a folder plus a terminal. Exactly one daemon runs per user; any number of TUIs, CLI
+calls and agents connect to it at once, and sessions keep running when every TUI is closed. The TUI
+shows the sessions of every folder (narrowed with its folder filter); the CLI shows the folder it
+was started from. Architecture: `../AGENTS.md`; design: `../plans/sessions-refactor.md` and
+`../plans/folders.md`.
+
+## Workspace
+
+| Package | Path | Builds |
+|---|---|---|
+| `tui` | `.` (`src/`) | bin `tui`: TUI (`app`, `components`, `terminal_view`, `layout`, `help`), CLI (`cli`), AI naming (`naming`), updater |
+| `orchestra-ptyd` | `crates/ptyd` | lib `ptyd` + bin `orchestra-ptyd`: socket server, session control, terminals |
+| `orchestra-session-core` | `crates/session-core` | lib `session_core`: session model, wire protocol, frame codec, filesystem layout, client |
+| `orchestra-vt` | `crates/vt` | lib `vt`: terminal emulation on `vt100`, query responder, key/mouse encoders |
+
+`tui` depends on `session-core` and `vt`, never on `ptyd`; it reaches the daemon only through
+`session_core::client::SessionApi`.
+
+## Prerequisites
+
+- Rust (stable) and a C compiler (bundled SQLite).
+- Runtime: nothing else. Orchestra doesn't use git, tmux, jq or python3.
+- Linux or macOS.
+
+## Building
+
+```bash
+cargo build --workspace              # debug: target/debug/{tui,orchestra-ptyd}
+cargo build --workspace --release    # release: target/release/{tui,orchestra-ptyd}
+```
+
+Plain `cargo build` in this directory builds only the `tui` package; use `--workspace` (or
+`-p orchestra-ptyd`) to get the daemon too.
+
+## Running
+
+Through the launcher (finds both binaries, passes `--ptyd-path`):
+
+```bash
+./orchestra.sh                       # from the repo root: TUI for the current folder
+./orchestra.sh ls                    # any CLI subcommand
+```
+
+Directly, isolated from your real sessions (separate registry, socket and daemon):
+
+```bash
+export ORCHESTRA_HOME=$(mktemp -d)
+target/debug/tui --ptyd-path target/debug/orchestra-ptyd
+target/debug/tui --ptyd-path target/debug/orchestra-ptyd new --detach -- bash
+target/debug/tui --ptyd-path target/debug/orchestra-ptyd ls --json
+target/debug/tui daemon stop
+```
+
+The first client that needs the daemon starts it in the background (`orchestra-ptyd serve`, stdio
+detached). `orchestra-ptyd serve` also runs it in the foreground for debugging; its log is
+`$ORCHESTRA_HOME/logs/ptyd.log` (level via `ORCHESTRA_PTYD_LOG=debug`).
+
+## CLI
+
+| Command | Purpose |
+|---|---|
+| `orchestra` | TUI |
+| `orchestra new [--name N] [--cwd P] [--cmd C]... [--detach] [-- ARGV...]` | Create a session, then attach |
+| `orchestra ls [--json] [--dead] [--folder DIR]... \| --all` | Sessions of the current folder, of the given folders, or of every folder (`--dead` includes dead ones) |
+| `orchestra attach <name\|id>` | Full-screen attach; `Ctrl-\ d` detaches |
+| `orchestra rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
+| `orchestra pin <name\|id>`, `orchestra unpin <name\|id>` | Pin a session first in its folder / unpin it |
+| `orchestra kill <name\|id> [--tree]`, `orchestra rm <name\|id>` | Terminate / delete |
+| `orchestra folders [--json]`, `orchestra folders add\|rm <dir>` | List folders / add one / forget one without sessions |
+| `orchestra --new-server` | Replace the running server (sessions keep running), or start one, then open the TUI |
+| `orchestra daemon start\|status\|stop\|restart\|logs` | Daemon management: `restart` keeps sessions running; `stop` ends them |
+| `orchestra session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
+
+Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit codes: 0 ok, 1 error,
+2 usage.
+
+## TUI
+
+```
+                                  │ ● api-refactor · working
+   ▤ All folders               ▾  │ $ cargo test
+                                  │ running 42 tests ...
+                                  │
+ orchestrator  ⎇ main ── 1/1 live │
+   ● api-refactor            2m   │
+     ⎇ main · claude · working    │
+                                  │
+ wt-docs  ⎇ docs ─────── 1/2 live │
+   ◐ docs-pass               1h   │
+     ⎇ docs · waiting for you     │
+                                  │
+   ○ old-spike               3d   │
+     ⎇ docs · dead · ⏎ revive     │
+                                  │
+   + New session                  │
+ SESSION                                              Ctrl-\ orchestra
+```
+
+- **Layouts**: Sidebar (above, default) or Tabs (a tab bar of sessions on top, the selected session
+  below); switch in Settings (`,` or `o` in Orchestra mode, General tab), saved as `sessions.layout` in
+  `~/.orchestra/config.json`.
+- **Narrow screens and phones** (Sidebar, under 100 columns; e.g. Blink, Termius or a web
+  terminal): in Orchestra mode the list sits on top and the selected session below it, so you see
+  it while you pick one. The list takes 40% of the height (at least the folder filter and two
+  sessions); drag the line between them up or down to change it (saved as
+  `sessions.stacked_list_percent`). In session mode the session fills the screen. Under 15 rows only
+  the list shows in Orchestra mode. Dialogs keep at least 48 columns (or the screen less two).
+- **Selecting** a session shows it live (observer). **Enter** takes control: keys go to the program
+  and the terminal is sized to the pane. Other TUIs on the same session keep watching.
+- **Two modes.** In **session mode** everything you type goes to the program except `Ctrl-\`,
+  which switches to **Orchestra mode**. There, `↑/↓`, `j/k` or `Option`/`Alt`+`↑/↓` select (the
+  session shows live, faded until you go in; on the folder filter, a folder header or + New
+  session the last session stays in view), `gg`/`G` top/bottom, `Ctrl-d`/`Ctrl-u` half a page,
+  `{`/`}` previous/next folder; `Enter` or `i` goes in (reviving a dead session, restarting an
+  exited one; on a folder header, a new session there), `Esc` (once it has
+  cancelled a pending key or the filter) or `Ctrl-\` goes back to the session you came from,
+  `Tab` to the one before, `1`-`9` into that session. `n` new, `r` rename, `p` pin, `J`/`K` move
+  the session down/up, `x` close, `dd` delete, `z` full screen, `P` folders, `/` filter, `\`
+  sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `q` quit. The badge at the bottom left of the footer shows the mode
+  (orange ORCHESTRA, quiet SESSION), in zoom too; Help and Settings' Keys tab list the keys, and
+  the Keys tab runs any of them.
+- **Folders**: a session belongs to the folder it was started in (a repo, a worktree, any
+  folder). The list shows All folders, live: sessions another window, the CLI or an agent start
+  in any folder (a new worktree too) appear as they start. With more than one folder shown, each
+  has a header row (name, branch, live/total).
+- **Order**: the list never reorders by itself; using a session doesn't move it. The folder you
+  started in leads, then the others by name. A new session goes last in its folder, and pinned
+  sessions come first. Drag a session (or a tab) up and down to move it, or press `J`/`K`; it
+  stays in its folder, among the pinned sessions or the others. The order is saved as
+  `sessions.session_order` in `~/.orchestra/config.json`.
+- **New session** (`n`, or "+ New session"): asks only for a name (leave it blank and one is
+  picked). The session goes in the current folder, shown under the name: the selected session's,
+  the selected header's, the one folder the filter shows, or else the folder you started in. It
+  runs your login shell there. For another folder or a command, use
+  `orchestra new --cwd DIR --cmd C -- ARGV`.
+- **Folder filter** (`▤ All folders ▾` at the top; `P`, or Enter on it): the Folders modal lists
+  All folders and every folder with sessions. Type to filter; `Enter` shows the folder under the
+  cursor alone (All folders: every folder); `Tab`/`Space` tick several, then `Enter` shows them
+  together. Type a folder path (`/`, `~`, `.`, or with a `/` in it) to add a folder and show it:
+  the folders that complete it are listed as you type (dot-folders once you type the `.`).
+  `↑`/`↓` choose one, `Tab` (or `→` at the end) completes the path with it and adds a `/` so its
+  folders come next, and `Enter` adds it. A folder that doesn't exist is created after you
+  confirm with `y`. The filter isn't saved: every start shows All folders.
+- **Welcome tour**: a six-card carousel on first start (folders and sessions, the two modes,
+  moving around, the main shortcuts, Help and Settings). Every card has "Don't show this on
+  startup" (Space; `sessions.welcome_seen`), so you can opt out at any point; until it's ticked
+  the tour shows on every start. `t` in Help replays it.
+- **Icons** (Settings, General): the marks for folders and branches, Plain (`▤`, `⎇`, any font),
+  Emoji (📁, 🌿) or Nerd Font icons, whichever your terminal shows. A TUI can't pick the
+  terminal's font, so the choice is yours.
+- **Option/Alt+↑/↓** go to the program inside a session unless Settings, General, "Option+↑/↓ in
+  sessions" is on (OpenCode, Pi and Claude Code use them). Terminal.app needs "Use Option as Meta
+  key".
+- Mouse: click a session to show it, click the session pane to go in, drag a session to move
+  it, drag the line beside (or under) the list to resize it. Click the mode badge: SESSION
+  switches to Orchestra mode, ORCHESTRA goes back to the session you came from. Click a footer
+  key (`? help`, `, settings`, `Ctrl-\ orchestra`) to do what it says. Phone terminals send taps
+  as clicks, so you can get around without `Ctrl-\`. Text selection: Shift+drag (the TUI
+  captures the mouse).
+
+## Development
+
+```bash
+cargo test --workspace               # or: cargo test -p tui / -p orchestra-ptyd / ...
+cargo fmt --all --check
+cargo clippy --workspace
+```
+
+- Tests must not touch the real `~/.orchestra`: set `ORCHESTRA_HOME` to a temp dir.
+- Program UI and CLI code against `SessionApi` and test it with fakes (`AttachStream::pair`,
+  `EventStream::from_receiver`); test the daemon's control layer with a fake `TerminalHost`.
+- Emulator fidelity spike and throughput check:
+
+  ```bash
+  cargo run --release -p orchestra-vt --example spike -- 80 24 'w:500|t:ls\r|w:300' -- bash --norc
+  cargo run --release -p orchestra-vt --example throughput -- some-output.log
+  ```
+
+- Where to change what: the TUI's state and keys in `src/app` (see `src/app/AGENTS.md`), rendering
+  in `src/ui.rs` and `src/components`, the live pane in `src/terminal_view`, layouts in
+  `src/layout`, the Settings and Help modals in `src/help`, CLI in `src/cli`, the wire protocol in
+  `crates/session-core/src/api.rs` (additive changes only), daemon behaviour in `crates/ptyd`.

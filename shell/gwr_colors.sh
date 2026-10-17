@@ -1,0 +1,7 @@
+# shellcheck shell=bash
+
+GW_COLOR_RED='\033[0;31m'
+GW_COLOR_GREEN='\033[0;32m'
+GW_COLOR_YELLOW='\033[1;33m'
+GW_COLOR_BLUE='\033[0;34m'
+GW_COLOR_RESET='\033[0m'

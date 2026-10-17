@@ -1,0 +1,197 @@
+//! Keys while a dialog is open.
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use crate::app::types::{AppMode, AppResult, PairingState};
+use crate::app::App;
+
+pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        // Ctrl-c always closes the dialog (it never quits from one).
+        if !dialog_busy(&app.mode) {
+            app.mode = AppMode::Normal;
+        }
+        return AppResult::Continue;
+    }
+    match &app.mode {
+        AppMode::Normal => {}
+        AppMode::NewSession(_) => handle_new_session_key(app, key),
+        AppMode::Folders(_) => super::folders::handle_folder_picker_key(app, key),
+        AppMode::Renaming(_) => handle_rename_key(app, key),
+        AppMode::Confirm(_) => handle_confirm_key(app, key),
+        AppMode::DaemonRestart(_) => return handle_daemon_restart_key(app, key),
+        AppMode::Modal { .. }
+        | AppMode::ConfiguringApiKey(_)
+        | AppMode::AiProvider(_)
+        | AppMode::OpenAiModel(_)
+        | AppMode::Upgrade(_) => return super::settings::handle_settings_key(app, key),
+        AppMode::Welcome(_) => handle_welcome_key(app, key),
+        AppMode::PhoneOffer => handle_phone_offer_key(app, key),
+        AppMode::Pairing(_) => handle_pairing_key(app, key),
+        AppMode::Auth(_) | AppMode::AuthEmail(_) | AppMode::AuthCode(_) => {
+            super::auth::handle_auth_key(app, key).await
+        }
+    }
+    AppResult::Continue
+}
+
+/// The welcome tour: `←`/`→` (`h`/`l`, Tab) move, Enter goes on and
+/// finishes on the last card, Space (`d`) on any card ticks "Don't show
+/// this on startup", Esc (`q`) closes.
+fn handle_welcome_key(app: &mut App, key: KeyEvent) {
+    let AppMode::Welcome(mut state) = app.mode else {
+        return;
+    };
+    let last = crate::components::welcome::CARDS - 1;
+    match key.code {
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => {
+            state.card = (state.card + 1).min(last)
+        }
+        KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => {
+            state.card = state.card.saturating_sub(1)
+        }
+        KeyCode::Enter if state.card < last => state.card += 1,
+        KeyCode::Char(' ') | KeyCode::Char('d') => state.dont_show = !state.dont_show,
+        KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
+            return app.close_welcome(state.dont_show)
+        }
+        _ => return,
+    }
+    app.mode = AppMode::Welcome(state);
+}
+
+fn dialog_busy(mode: &AppMode) -> bool {
+    match mode {
+        AppMode::NewSession(d) => d.busy,
+        AppMode::Folders(d) => d.busy,
+        AppMode::Renaming(d) => d.busy,
+        AppMode::DaemonRestart(d) => d.restarting,
+        AppMode::Upgrade(d) => d.installing,
+        _ => false,
+    }
+}
+
+/// The new-session dialog has one field, the name: Enter creates, Esc
+/// cancels, everything else edits it.
+fn handle_new_session_key(app: &mut App, key: KeyEvent) {
+    let AppMode::NewSession(dialog) = &mut app.mode else {
+        return;
+    };
+    if dialog.busy {
+        return;
+    }
+    match key.code {
+        KeyCode::Esc => app.mode = AppMode::Normal,
+        KeyCode::Enter => app.submit_new_session(),
+        _ => {
+            if dialog.name.handle_key(&key) {
+                dialog.error = None;
+            }
+        }
+    }
+}
+
+fn handle_rename_key(app: &mut App, key: KeyEvent) {
+    let AppMode::Renaming(dialog) = &mut app.mode else {
+        return;
+    };
+    if dialog.busy {
+        return;
+    }
+    match key.code {
+        KeyCode::Esc => app.mode = AppMode::Normal,
+        KeyCode::Enter => app.submit_rename(),
+        _ => {
+            if dialog.input.handle_key(&key) {
+                dialog.error_message = None;
+            }
+        }
+    }
+}
+
+fn handle_confirm_key(app: &mut App, key: KeyEvent) {
+    let AppMode::Confirm(dialog) = &app.mode else {
+        return;
+    };
+    match key.code {
+        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+            let action = dialog.action.clone();
+            app.run_confirmed(action);
+        }
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') => {
+            app.mode = AppMode::Normal
+        }
+        _ => {}
+    }
+}
+
+/// "Use Orchestra from your phone?": `y`/Enter turns phone access on and
+/// shows how to pair, `n`/Esc declines (Settings can turn it on later).
+fn handle_phone_offer_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => app.turn_phone_access_on(false),
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') => {
+            app.decline_phone_access()
+        }
+        _ => {}
+    }
+}
+
+/// The pairing dialog: Esc (Enter, `q`) closes it, `x` turns phone access
+/// off; when it's off, `y`/Enter turns it on. Nothing while waiting for the
+/// server.
+fn handle_pairing_key(app: &mut App, key: KeyEvent) {
+    let AppMode::Pairing(dialog) = &app.mode else {
+        return;
+    };
+    if dialog.busy() {
+        return;
+    }
+    let from_settings = dialog.from_settings;
+    match (&dialog.state, key.code) {
+        (PairingState::Off, KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y')) => {
+            app.turn_phone_access_on(from_settings)
+        }
+        (_, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) => app.close_pairing(),
+        (PairingState::Ready(_), KeyCode::Char('x') | KeyCode::Char('X')) => {
+            app.turn_phone_access_off()
+        }
+        (PairingState::Failed(_), KeyCode::Char('x') | KeyCode::Char('X'))
+            if app.phone_enabled == Some(true) =>
+        {
+            app.turn_phone_access_off()
+        }
+        _ => {}
+    }
+}
+
+fn handle_daemon_restart_key(app: &mut App, key: KeyEvent) -> AppResult {
+    let AppMode::DaemonRestart(dialog) = &app.mode else {
+        return AppResult::Continue;
+    };
+    if dialog.restarting {
+        return AppResult::Continue;
+    }
+    // An older daemon still works: restarting it ends the running sessions
+    // unless it restarts in place, so then only `y` does, never a stray
+    // Enter.
+    let outdated = !dialog.missing.is_empty();
+    match key.code {
+        KeyCode::Enter if outdated && !dialog.in_place => {}
+        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => app.restart_daemon(),
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') if outdated => {
+            app.mode = AppMode::Normal;
+            app.set_status(
+                "Kept the older server: no git branches, folders, pins or new folders live \
+                 until `orchestra daemon restart`.",
+            );
+        }
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+            app.mode = AppMode::Normal;
+            app.set_status("Daemon restart declined. Ctrl-r to try again, q to quit.");
+        }
+        KeyCode::Char('q') => return AppResult::Exit,
+        _ => {}
+    }
+    AppResult::Continue
+}

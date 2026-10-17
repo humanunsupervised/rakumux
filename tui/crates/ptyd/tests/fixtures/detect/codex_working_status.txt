@@ -1,0 +1,22 @@
+# Codex CLI mid-turn: the status line with timer and interrupt hint sits
+# above the composer. Hand-written.
+agent: codex
+expect: working
+process: node
+cmdline: node /usr/lib/node_modules/@openai/codex/bin/codex.js
+alternate_screen: false
+ms_since_output: 90
+---
+› fix the failing parser tests
+
+• I'll run the parser tests first to see what fails.
+
+• Ran cargo test -p parser
+  └ running 43 tests
+    test result: FAILED. 41 passed; 2 failed; 0 ignored
+
+• Working (18s • esc to interrupt)
+
+› Summarize recent commits
+
+  97% context left · ? for shortcuts

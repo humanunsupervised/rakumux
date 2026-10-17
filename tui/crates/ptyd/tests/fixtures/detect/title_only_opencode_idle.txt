@@ -1,0 +1,14 @@
+# No foreground process information: the title identifies the agent.
+# Screen from the captured OpenCode 1.18.16 home (trimmed).
+agent: opencode
+expect: idle
+title: OpenCode
+alternate_screen: true
+ms_since_output: 5000
+---
+             ┃
+             ┃  Ask anything... "Fix a TODO in the codebase"
+             ┃
+             ┃  Build · Big Pickle OpenCode
+             ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+             tab agents  ctrl+p commands
