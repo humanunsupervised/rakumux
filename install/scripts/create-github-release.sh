@@ -63,7 +63,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
   echo "🔎 DRY RUN: Would create release with the following notes:\n" 
   sed 's/^/    /' "$TEMP_NOTES" | head -200
   echo ""
-  echo "🔎 DRY RUN: Would run: gh release create v$VERSION --repo $REPO --title 'Rakumux v$VERSION' --notes-file <notes> --latest"
+  echo "🔎 DRY RUN: Would run: gh release create v$VERSION --repo $REPO --verify-tag --title 'Rakumux v$VERSION' --notes-file <notes> --latest"
   [[ -n "$NOTES_LAST_COMMITS" ]] && echo "  + notes generated from last $NOTES_LAST_COMMITS commits"
   [[ "$DRAFT" == "true" ]] && echo "  + with --draft"
   [[ "$PRERELEASE" == "true" ]] && echo "  + with --prerelease"
@@ -101,6 +101,7 @@ echo "📝 Creating release v$VERSION..."
 
 gh release create "v$VERSION" \
     --repo "$REPO" \
+    --verify-tag \
     --title "Rakumux v$VERSION" \
     --notes-file "$TEMP_NOTES" \
     --latest \

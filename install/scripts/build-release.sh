@@ -1,10 +1,10 @@
 #!/bin/bash
 
 ###############################################################################
-# build-release.sh - Closed-source release builder
+# build-release.sh - Native binary release builder
 #
 # Builds the Rakumux binaries for every release platform and packages them
-# with the launcher scripts, LICENSE and THIRD_PARTY_NOTICES (no source):
+# with the launcher scripts, LICENSE and THIRD_PARTY_NOTICES:
 #
 #   release/rakumux-<platform>/          staged package (for inspection)
 #     rakumux                            tui binary (the rakumux program)
@@ -27,7 +27,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RELEASE_DIR="$PROJECT_ROOT/release"
-LICENSE_FILE="$PROJECT_ROOT/install/npm/LICENSE"
+LICENSE_FILE="$PROJECT_ROOT/LICENSE"
 
 show_usage() {
     cat << EOF
@@ -369,7 +369,7 @@ rakumux --help             # All commands
 - \`rakumux-mcp\`: the MCP server for coding agents (Claude Code, Codex, OpenCode)
 - \`rakumux.sh\`, \`shell/\`: launcher
 - \`rakumux-local.sh\`: launches a local source checkout (development)
-- \`LICENSE\`: Rakumux license (proprietary)
+- \`LICENSE\`: Apache License 2.0
 - \`THIRD_PARTY_NOTICES\`: licenses of the open-source components included
 
 Built from commit $(git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -419,7 +419,7 @@ EOF
 # Main
 ###############################################################################
 
-echo "🏗️  Building Rakumux v$VERSION for closed-source distribution..."
+echo "🏗️  Building Rakumux v$VERSION for distribution..."
 
 if ! platform_list="$(release_platforms)"; then
     exit 1

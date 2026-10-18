@@ -13,11 +13,12 @@ npm run typecheck
 
 ## Deploying to Vercel
 
-The Vercel project is `rakumux` in the `adeperios-projects` team, served at
-<https://rakumux.com> (and `www.rakumux.com`). Deploy from this folder with the Vercel CLI:
+The production domain is <https://rakumux.com>. Link this folder to the intended Vercel project
+under an account you control, then configure that domain in Vercel and your DNS provider.
+Deploy from this folder with the Vercel CLI:
 
 ```bash
-vercel link --yes --project rakumux --scope adeperios-projects   # once per clone
+vercel link            # select your team and project; once per clone
 vercel deploy --prod
 ```
 
@@ -38,8 +39,9 @@ Any static host works too: serve `out/` after `npm run build`.
 - `components/TuiDemo.tsx`: a working copy of the TUI's screen in the hero. It plays by itself
   until clicked, then takes `j`/`k`, `gg`/`G`, `Enter`, `Esc`, `1`-`5` and `Ctrl-\`. Tab is left
   to the browser so keyboard users can leave it; autoplay is off under reduced motion.
-- `components/InstallTabs.tsx`, `components/CopyCommand.tsx`: install commands with copy buttons.
+- `components/CopyCommand.tsx`: install commands with copy buttons.
+- `public/install.sh`: checksum-verifying installer served at <https://rakumux.com/install.sh>.
 
-Install commands and links follow `install/INSTALL.md` (npm `rakumux`, the
-`humanunsupervised/rakumux` Homebrew tap and GitHub releases); change them together. The copy
-describes Rakumux 0.6 (sessions, two modes, MCP), so publish it with that release.
+Install commands and links follow `install/INSTALL.md`. The website promotes the curl installer;
+maintainer packaging also supports npm `rakumux` and the `humanunsupervised/rakumux` Homebrew tap.
+Keep the installer, release links, and documentation consistent.

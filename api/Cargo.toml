@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Rakumux external API: HTTP/1.1 + JSON (and WebSocket streams) over the session daemon"
 publish = false
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 workspace = "../tui"
 
 [lib]

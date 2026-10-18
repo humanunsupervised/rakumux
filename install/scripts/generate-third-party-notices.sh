@@ -25,10 +25,6 @@ CONFIG="$PROJECT_ROOT/install/licenses/about.toml"
 TEMPLATE="$PROJECT_ROOT/install/licenses/THIRD_PARTY_NOTICES.hbs"
 MANIFEST="$PROJECT_ROOT/tui/Cargo.toml"
 
-# Workspace crates without `publish = false` (cargo-about's private filter misses
-# them). They're Rakumux's own code, so a missing license is expected.
-OWN_CRATES_PATTERN="^(tui)$"
-
 # Crates that must appear: one dependency of each shipped binary, so a change
 # that drops a binary from the scan fails loudly.
 # rakumux-api links only crates the others link too (hyper, tokio, serde).
@@ -63,9 +59,7 @@ fi
 unresolved=()
 while IFS= read -r crate; do
     [[ -z "$crate" ]] && continue
-    if [[ ! "$crate" =~ $OWN_CRATES_PATTERN ]]; then
-        unresolved+=("$crate")
-    fi
+    unresolved+=("$crate")
 done < <(grep "unable to synthesize license expression for '" "$log_file" |
     sed "s/.*license expression for '\([^ ']*\) .*/\1/" | sort -u)
 

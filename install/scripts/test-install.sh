@@ -113,8 +113,8 @@ verify_package() {
             return 1
         fi
     done
-    if ! cmp -s "$package_dir/LICENSE" "$REPO_ROOT/install/npm/LICENSE"; then
-        error "✗ rakumux-$1: LICENSE differs from install/npm/LICENSE"
+    if ! cmp -s "$package_dir/LICENSE" "$REPO_ROOT/LICENSE"; then
+        error "✗ rakumux-$1: LICENSE differs from the root LICENSE"
         return 1
     fi
     success "✓ rakumux-$1 contents"

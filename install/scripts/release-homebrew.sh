@@ -6,7 +6,7 @@
 # 1. Render install/homebrew/rakumux.rb.template with the version and the
 #    SHA-256 of the three release tarballs (from release/checksums.txt, checked
 #    against the files) into install/homebrew/Formula/rakumux.rb. The repo copy
-#    is the source of truth for the tap.
+#    is generated; the template is the source of truth.
 # 2. Verify (needs brew; the GitHub release must already be published, since the
 #    formula downloads from it): copy the formula into a temporary local tap,
 #    `brew audit --strict --online`, `brew install` from that tap, `brew test`,
@@ -162,6 +162,7 @@ render_formula() {
         exit 1
     fi
 
+    mkdir -p "$(dirname "$FORMULA")"
     mv "$rendered" "$FORMULA"
     chmod 644 "$FORMULA"
     success "Rendered $FORMULA for v$VERSION"
@@ -239,5 +240,5 @@ else
 fi
 
 if [[ "$FORMULA" == "$REPO_FORMULA" ]]; then
-    info "Commit the rendered formula in this repo: git add install/homebrew/Formula/rakumux.rb"
+    info "The rendered formula is generated; publish it to the tap, not this source repo."
 fi

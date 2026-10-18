@@ -48,7 +48,7 @@ const KEYS: { keys: string[]; action: string }[] = [
   { keys: ["n"], action: "New session" },
   { keys: ["r"], action: "Rename" },
   { keys: ["p"], action: "Pin" },
-  { keys: ["dd"], action: "Delete" },
+  { keys: ["d", "dd"], action: "Delete" },
   { keys: ["J", "K"], action: "Move a session down or up" },
   { keys: ["P"], action: "Filter by folder" },
   { keys: ["/"], action: "Filter" },
@@ -262,8 +262,8 @@ export default function Home() {
                 <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
                 <p className="install-note">
                   Downloads the latest release for your machine from GitHub, checks it against the release&apos;s
-                  checksums and installs to <code>/usr/local</code> (asking for sudo if needed). For another prefix: 
-                  <code>curl -fsSL https://rakumux.com/install.sh | PREFIX=&quot;$HOME/.local&quot; bash</code>. Read the 
+                  checksums and installs to <code>/usr/local</code> (asking for sudo if needed). For another prefix:
+                  <code>curl -fsSL https://rakumux.com/install.sh | PREFIX=&quot;$HOME/.local&quot; bash</code>. Read the
                   <a href="/install.sh">script</a> first if you like.
                 </p>
               </div>
@@ -315,6 +315,7 @@ export default function Home() {
           <span className="badge badge-session">RAKUMUX</span>
           <span className="t-muted">© {new Date().getFullYear()} Human Unsupervised</span>
           <span className="tui-spacer" />
+          <a href="https://github.com/humanunsupervised/rakumux">Source · Apache-2.0</a>
           <a href={RELEASES}>Releases</a>
           <a href="#install">Install</a>
         </div>

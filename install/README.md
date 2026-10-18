@@ -12,7 +12,7 @@ npm install -g rakumux
 brew install humanunsupervised/rakumux/rakumux
 ```
 
-See [INSTALL.md](INSTALL.md) for every option, upgrading from 0.5.x and troubleshooting.
+See [INSTALL.md](INSTALL.md) for every option and troubleshooting.
 
 ## Maintainers
 

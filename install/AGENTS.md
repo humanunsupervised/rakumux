@@ -1,15 +1,15 @@
-# install/ - Closed-source distribution of Rakumux
+# install/ - Open-source distribution of Rakumux
 
 Rakumux ships as four native binaries plus a small bash launcher, through three channels (npm,
-Homebrew, release tarballs) that all behave the same way. Source code never leaves the private
-repository.
+Homebrew, release tarballs) that all behave the same way. The source and releases live together
+in `humanunsupervised/rakumux`. The website is <https://rakumux.com>.
 
 ## Repositories
 
 | Repository | Visibility | Contents |
 |---|---|---|
-| `humanunsupervised/rakumux` | private | Source, build and release scripts (this repo) |
-| `humanunsupervised/rakumux` | public | README, `LICENSE`, GitHub Releases (tarballs + `checksums.txt`) |
+| `humanunsupervised/rakumux` | public | Source, docs, build scripts, Apache-2.0 `LICENSE`, GitHub Releases |
+| `humanunsupervised/rakumux-mobile` | separate, proprietary | Mobile app; never stage its source here |
 | `humanunsupervised/homebrew-rakumux` | public | `Formula/rakumux.rb` (the tap) |
 | npm `rakumux` | public | Package staged from the release tarballs |
 
@@ -28,7 +28,7 @@ contains `rakumux-<platform>/`:
 | `shell/gwr_*.sh`, `shell/gwr/check-updates.sh` | Launcher modules |
 | `shell/rakumux-command-hook.sh` | Command-history hook for sessions (AI naming input) |
 | `rakumux-local.sh` | Launches a local source checkout (development) |
-| `LICENSE` | Rakumux license (proprietary), from `install/npm/LICENSE` |
+| `LICENSE` | Apache License 2.0, from the repository root `LICENSE` |
 | `THIRD_PARTY_NOTICES` | Licenses of every crate linked into the binaries |
 | `install.sh`, `README.md` | Tarball installer and package readme |
 
@@ -77,11 +77,11 @@ install/
 │   └── THIRD_PARTY_NOTICES.hbs    # cargo-about template (plain text)
 ├── homebrew/
 │   ├── rakumux.rb.template      # Formula source (edit this)
-│   └── Formula/rakumux.rb       # Rendered formula = what the tap serves
+│   └── Formula/rakumux.rb       # Generated and ignored; what the tap serves
 ├── npm/
-│   ├── package.json, install.js, README.md, LICENSE (canonical license text)
+│   ├── package.json, install.js, README.md
 │   ├── bin/rakumux.js, bin/rakumux-local.js
-│   └── resources/, dist/, THIRD_PARTY_NOTICES   # generated, git-ignored
+│   └── resources/, dist/, LICENSE, THIRD_PARTY_NOTICES   # generated, git-ignored
 ├── release-notes/<version>.md     # GitHub release notes for that version
 └── scripts/
     ├── full-release-automation.sh # Whole release, in order
@@ -95,7 +95,6 @@ install/
     ├── release-homebrew.sh        # Render, verify (brew), push the formula
     ├── stage-npm-package.sh       # Fill install/npm from the tarballs
     ├── publish-npm.sh             # Stage, check packed files, npm publish
-    ├── setup-public-repo.sh       # One-time public repo scaffold (README + LICENSE)
     └── check-github-auth.sh
 ```
 
@@ -105,13 +104,16 @@ Run on macOS (it builds all three platforms):
 
 ```bash
 ./install/scripts/full-release-automation.sh              # next patch version
-./install/scripts/full-release-automation.sh 0.6.0        # explicit version
+./install/scripts/full-release-automation.sh 0.1.0        # explicit version
 ./install/scripts/full-release-automation.sh --dry-run    # build, test, render, pack; publish nothing
 ```
 
 Steps: `build-release.sh` → `test-install.sh` (`SKIP_BUILD=1`) → `create-github-release.sh` →
-tracking tag `private-release/v<version>` → `release-homebrew.sh` → `publish-npm.sh`. Afterwards
-commit `install/homebrew/Formula/rakumux.rb` (and `install/npm/package.json`).
+tracking tag `release/v<version>` → `release-homebrew.sh` → `publish-npm.sh`.
+Commit version changes to `install/npm/package.json`; the rendered formula is generated and ignored.
+Before publishing, create and push the reviewed source's `v<version>` tag. The GitHub release
+step uses `--verify-tag` so an absent tag cannot silently target the default branch.
+Follow `PUBLISHING.md` before the first public source release.
 
 Prerequisites: Rust with targets `x86_64-apple-darwin`, `aarch64-apple-darwin`,
 `x86_64-unknown-linux-musl`; `cargo-zigbuild` + `zig` (Linux build);
@@ -142,7 +144,7 @@ Prerequisites: Rust with targets `x86_64-apple-darwin`, `aarch64-apple-darwin`,
    `rakumux <version>`, pushes.
 
 Formula rules:
-- `license :cannot_represent` (a proprietary license has no SPDX id; `"Proprietary"` fails audit).
+- `license "Apache-2.0"`.
 - URLs/SHAs live in `if OS.mac? && Hardware::CPU…` branches (taps may use OS conditionals; formula
   level `on_macos` blocks may not contain `url`). `version` is stated only in the arm64 and Linux
   branches: Homebrew parses `64` from `…-arm64.tar.gz`/`…-x64.tar.gz`, while for the Intel URL it
@@ -160,7 +162,7 @@ Formula rules:
 
 `stage-npm-package.sh <version> [--allow-partial]` sets `package.json` `version`, extracts each
 tarball into `resources/prebuilt/<platform>/{rakumux,rakumux-ptyd,rakumux-api,rakumux-mcp}`,
-copies the launcher
+copies the root `LICENSE` and the launcher
 (`rakumux.sh`, `rakumux-local.sh`, `shell/`) from one tarball into `resources/scripts/`, and
 `release/THIRD_PARTY_NOTICES` into `install/npm/`. `publish-npm.sh <version> [--dry-run]` stages,
 checks `npm pack --dry-run --json` for every required file and for removed ones, then publishes.
@@ -176,12 +178,10 @@ fails there with a clear message.
 
 ## Licensing
 
-- Rakumux is proprietary (Antonio de Perio and Human Unsupervised Pty Ltd).
-  `install/npm/LICENSE` is the one canonical copy: it matches the public repository's `LICENSE`
-  and is what `setup-public-repo.sh`, the tarballs, the npm package and Homebrew ship. The in-app
-  Help → License tab shows the same terms.
-- npm: `"license": "SEE LICENSE IN LICENSE"`. Versions up to 0.5.81 were published with `MIT`
-  metadata and can't be changed.
+- Rakumux core is Apache-2.0 (Antonio de Perio and Human Unsupervised Pty Ltd).
+  The root `LICENSE` is canonical. The tarballs, staged npm package, Homebrew, and in-app
+  Help → License tab use this text. The mobile app is separate and is not covered by this grant.
+- npm and every Cargo workspace member declare `Apache-2.0`.
 - `generate-third-party-notices.sh [OUTPUT]` runs `cargo about generate --workspace --locked`
   with `licenses/about.toml` and `licenses/THIRD_PARTY_NOTICES.hbs`: all crates linked into `tui`,
   `rakumux-ptyd`, `rakumux-api` and `rakumux-mcp` for the four release targets, without
@@ -196,10 +196,10 @@ fails there with a clear message.
 ## Testing without publishing
 
 ```bash
-./install/scripts/build-release.sh 0.6.0 --no-clean        # Linux: linux-x64 only
-SKIP_BUILD=1 ./install/scripts/test-install.sh 0.6.0
-./install/scripts/publish-npm.sh 0.6.0 --dry-run           # changes install/npm/package.json
-./install/scripts/release-homebrew.sh 0.6.0 --render-only --output /tmp/rakumux.rb   # needs all 3 tarballs
+./install/scripts/build-release.sh 0.1.0 --no-clean        # Linux: linux-x64 only
+SKIP_BUILD=1 ./install/scripts/test-install.sh 0.1.0
+./install/scripts/publish-npm.sh 0.1.0 --dry-run           # changes install/npm/package.json
+./install/scripts/release-homebrew.sh 0.1.0 --render-only --output /tmp/rakumux.rb   # needs all 3 tarballs
 ```
 
 Manual checks before announcing a release (macOS arm64, macOS Intel, Linux x64 via Linuxbrew):

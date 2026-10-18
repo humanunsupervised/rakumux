@@ -43,7 +43,7 @@ Create an `app/` module directory and split responsibilities. Keep `pub` re-expo
 
 ```
 src/app/
-  mod.rs                # Public facade: re-exports, App orchestrator glue
+  mod.rs                # Public facade: re-exports, App coordination glue
   types.rs              # AppResult, Selection, DisplayItem, AppMode, Dialog structs, GitStatusResult, MergeTaskResult, RefreshSnapshot
   config.rs             # Config load/save
   session_name.rs       # All session naming/formatting/parsing utilities

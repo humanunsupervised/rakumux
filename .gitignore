@@ -10,10 +10,16 @@
 *.swo
 *~
 
-# Environment files (keep .env.example)
-.env
-.env.local
-.env.*.local
+# Environment files (keep explicit examples and the harmless test fixture)
+.env*
+!.env.example
+!.env.test
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.mobileprovision
 
 # Logs
 *.log
@@ -42,3 +48,6 @@ test-package/
 
 # Rakumux configuration directory
 .rakumux/
+
+# The proprietary mobile app belongs in its own repository
+/mobile/

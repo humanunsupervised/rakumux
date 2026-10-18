@@ -1,5 +1,5 @@
 //! Output hygiene for text that came from terminals or that sessions wrote
-//! about themselves (`plans/agent-mcp.md` §4.8). Such text is data for the
+//! about themselves. Such text is data for the
 //! model, never instructions:
 //!
 //! - escape sequences (CSI, OSC, DCS, …), C0/C1 controls except newline and

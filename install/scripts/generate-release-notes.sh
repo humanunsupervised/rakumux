@@ -114,7 +114,7 @@ latest_local_semver_tag() {
 
 # Tracking tags are created by full-release-automation.sh after successful releases.
 latest_tracking_tag() {
-  git tag -l 'private-release/v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n1
+  git tag -l 'release/v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n1
 }
 
 # Get commit subjects since a given ref or date

@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -14,15 +13,11 @@ concurrency:
 
 jobs:
   rust:
-    name: Rust (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: tui
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -31,18 +26,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: tui
-      - name: Format
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo fmt --all --check
-      - name: Build
-        run: cargo build --workspace --locked
-      - name: Test
-        run: cargo test --workspace --locked
+      - run: cargo fmt --all --check
+        working-directory: tui
+      - run: cargo build --workspace --locked
+        working-directory: tui
+      - run: cargo test --workspace --locked
+        working-directory: tui
         env:
           RAKUMUX_HOME: ${{ runner.temp }}/rakumux-home
+      - run: bash tests/test-repository.sh
+      - run: bash tests/test-command-hook.sh
 
-  landing:
-    name: Landing site
+  website:
     runs-on: ubuntu-latest
     defaults:
       run:

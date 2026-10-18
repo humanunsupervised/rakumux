@@ -2591,7 +2591,7 @@ mod tests {
 
     #[test]
     fn project_views_combine_sessions_and_usage() {
-        let path = ScopeRoot::from_canonical("/work/orchestrator".into());
+        let path = ScopeRoot::from_canonical("/work/rakumux".into());
         let record = ProjectRecord {
             path: path.clone(),
             added_at_ms: 1_000,
@@ -2606,7 +2606,7 @@ mod tests {
             }),
             &live,
         );
-        assert_eq!(view.name, "orchestrator");
+        assert_eq!(view.name, "rakumux");
         assert_eq!((view.sessions, view.live), (3, 2));
         assert_eq!(view.last_active_at, Some(9));
         assert_eq!(view.added_at, 1);

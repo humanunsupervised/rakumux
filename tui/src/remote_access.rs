@@ -1,4 +1,4 @@
-//! Remote access for the Rakumux app on a phone (`plans/mobile-client.md`),
+//! Remote access for the Rakumux app on a phone (see `api/README.md`),
 //! shared by the `rakumux remote` CLI and the TUI (the one-time offer and
 //! Settings' Phone access row).
 //!

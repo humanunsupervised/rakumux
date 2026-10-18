@@ -9,14 +9,14 @@
     "pty",
     "ai",
     "agents",
-    "orchestrator",
+    "multiplexer",
     "cli",
     "claude",
     "codex",
     "opencode",
     "mcp"
   ],
-  "homepage": "https://github.com/humanunsupervised/rakumux",
+  "homepage": "https://rakumux.com",
   "bugs": {
     "url": "https://github.com/humanunsupervised/rakumux/issues"
   },
@@ -24,7 +24,7 @@
     "type": "git",
     "url": "git+https://github.com/humanunsupervised/rakumux.git"
   },
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "Apache-2.0",
   "author": "Human Unsupervised",
   "main": "install.js",
   "bin": {

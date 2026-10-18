@@ -1657,65 +1657,15 @@ fn agents_and_cli(doc: &mut Doc) {
 
 fn license(doc: &mut Doc) {
     doc.heading("Rakumux License");
-    doc.text("Copyright (c) 2024 Antonio de Perio and Human Unsupervised Pty Ltd");
-    doc.text("All rights reserved.");
-    doc.text(
-        "This software and associated documentation files (the \"Software\") are proprietary \
-         and confidential to Antonio de Perio and Human Unsupervised Pty Ltd.",
-    );
-    doc.text("The Software is distributed under the following terms:");
-
-    doc.heading("Permitted Use");
-    doc.dash("Personal use for software development workflows");
-    doc.dash("Commercial use within your organization");
-    doc.dash("Distribution of the binary packages as obtained from official releases");
-
-    doc.heading("Restrictions");
-    doc.dash("No redistribution of modified versions");
-    doc.dash("No reverse engineering or decompilation");
-    doc.dash("No creation of derivative works");
-    doc.dash("Source code is not provided and remains proprietary");
-
-    doc.heading("Commercial Use Disclaimer");
-    doc.heading("BY USING THIS SOFTWARE FOR COMMERCIAL PURPOSES, YOU ACKNOWLEDGE AND AGREE THAT:");
-    doc.dash(
-        "The Software is provided without any guarantees of reliability, availability, or \
-         fitness for commercial purposes",
-    );
-    doc.dash("You assume all risks associated with using the Software in a commercial environment");
-    doc.dash(
-        "Neither Antonio de Perio nor Human Unsupervised Pty Ltd are responsible for any \
-         business losses, data corruption, or operational failures",
-    );
-    doc.dash(
-        "You are solely responsible for evaluating whether the Software meets your \
-         commercial needs",
-    );
-    doc.dash("You should maintain appropriate backups and have contingency plans");
-
-    doc.heading("Limitation of Liability");
-    doc.strong(
-        "IN NO EVENT SHALL ANTONIO DE PERIO, HUMAN UNSUPERVISED PTY LTD, OR THEIR CONTRIBUTORS \
-         BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL \
-         DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; \
-         LOSS OF USE, DATA, OR PROFITS; BUSINESS INTERRUPTION; LOST REVENUE; OR ANY COMMERCIAL \
-         DAMAGES OR LOSSES) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, \
-         STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF \
-         THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.",
-    );
-    doc.text(
-        "THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH YOU. SHOULD \
-         THE SOFTWARE PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY SERVICING, REPAIR, \
-         OR CORRECTION.",
-    );
-
-    doc.heading("Disclaimer of Warranty");
-    doc.strong(
-        "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, \
-         INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A \
-         PARTICULAR PURPOSE AND NONINFRINGEMENT.",
-    );
-    doc.text("For commercial licensing or questions, contact: tony@humanunsupervised.com");
+    doc.text("Copyright 2024–2026 Antonio de Perio and Human Unsupervised Pty Ltd");
+    doc.strong("Rakumux is open-source software, licensed under Apache-2.0.");
+    doc.dash("Source: https://github.com/humanunsupervised/rakumux · https://rakumux.com");
+    for paragraph in include_str!("../../../LICENSE").split("\n\n") {
+        let paragraph = paragraph.trim();
+        if !paragraph.is_empty() {
+            doc.text(paragraph);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2738,7 +2688,7 @@ mod tests {
         state.scroll = u16::MAX;
         let buf = draw(80, 24, &state, &context);
         let text = buffer_text(&buf);
-        assert!(text.contains("tony@humanunsupervised.com"), "{text}");
+        assert!(text.contains("under the License."), "{text}");
         let total = body_lines(
             ModalTab::License,
             &context,
@@ -3019,9 +2969,9 @@ mod tests {
             "In Help and Settings",
             "Click a session in the list",
             "Drag the line between the list and the session",
-            "All rights reserved.",
-            "proprietary",
-            "tony@humanunsupervised.com",
+            "Apache-2.0",
+            "Grant of Patent License",
+            "https://github.com/humanunsupervised/rakumux",
         ] {
             assert!(
                 all.contains(topic),

@@ -1,16 +1,17 @@
 # tui: the `rakumux` binary and the session daemon
 
-This Cargo workspace builds Rakumux's two binaries:
+This Cargo workspace builds Rakumux's four binaries:
 
 - **`tui`** (installed as `rakumux`): the terminal UI and the CLI subcommands.
 - **`rakumux-ptyd`**: the per-user session daemon that owns every session's terminal and the
   session registry.
+- **`rakumux-api`**: the local HTTP API and optional remote listener.
+- **`rakumux-mcp`**: the MCP server for coding agents.
 
 A **session** is a folder plus a terminal. Exactly one daemon runs per user; any number of TUIs, CLI
 calls and agents connect to it at once, and sessions keep running when every TUI is closed. The TUI
 shows the sessions of every folder (narrowed with its folder filter); the CLI shows the folder it
-was started from. Architecture: `../AGENTS.md`; design: `../plans/sessions-refactor.md` and
-`../plans/folders.md`.
+was started from. Architecture: [`../AGENTS.md`](../AGENTS.md).
 
 ## Workspace
 
@@ -89,7 +90,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
    ▤ All folders               ▾  │ $ cargo test
                                   │ running 42 tests ...
                                   │
- orchestrator  ⎇ main ── 1/1 live │
+ rakumux       ⎇ main ── 1/1 live │
    ● api-refactor            2m   │
      ⎇ main · claude · working    │
                                   │

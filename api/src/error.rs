@@ -102,7 +102,7 @@ impl From<ApiError> for HttpError {
     }
 }
 
-/// HTTP status for a daemon error code (`plans/projects-api-mcp.md`).
+/// HTTP status for a daemon error code (see `api/openapi.yaml`).
 pub fn status_for(code: ErrorCode) -> StatusCode {
     match code {
         ErrorCode::NotFound => StatusCode::NOT_FOUND,

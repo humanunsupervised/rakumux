@@ -19,7 +19,7 @@ use std::sync::Arc;
 /// OpenCode 2.x tags every tool call with the calling conversation. Its MCP
 /// servers run in a background service shared by every conversation, so
 /// the environment's session identity (if any) may belong to another
-/// session (`plans/agent-mcp.md` §3.2). The Rakumux plugin in OpenCode's
+/// session. The Rakumux plugin in OpenCode's
 /// TUI binds the conversations it shows to its Rakumux session, and calls
 /// act as that session.
 const OPENCODE_SESSION_META: &str = "ai.opencode/sessionID";

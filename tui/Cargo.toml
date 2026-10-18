@@ -5,9 +5,17 @@ edition = "2021"
 description = "Rakumux: terminal sessions for coding agents (TUI and CLI)"
 authors = ["Rakumux contributors"]
 publish = false
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [workspace]
 members = [".", "crates/vt", "crates/session-core", "crates/ptyd", "../api", "../mcp"]
+
+[workspace.package]
+license = "Apache-2.0"
+repository = "https://github.com/humanunsupervised/rakumux"
+homepage = "https://rakumux.com"
 
 [dependencies]
 ratatui = "0.25"

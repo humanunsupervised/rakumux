@@ -1,3 +1,5 @@
 # Generated at release time by scripts/generate-third-party-notices.sh and
 # staged into the npm package by scripts/stage-npm-package.sh.
 /npm/THIRD_PARTY_NOTICES
+/npm/LICENSE
+/homebrew/Formula/*.rb

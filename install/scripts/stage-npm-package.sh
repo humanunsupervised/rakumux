@@ -8,7 +8,7 @@
 #   resources/prebuilt/<platform>/{rakumux,rakumux-ptyd,rakumux-api,rakumux-mcp}  per tarball
 #   resources/scripts/{rakumux.sh,rakumux-local.sh,shell/}  from one tarball
 #   THIRD_PARTY_NOTICES                                         from release/
-# and sets package.json "version". LICENSE is committed in install/npm.
+# and sets package.json "version". LICENSE is copied from the repository root.
 #
 # Usage: stage-npm-package.sh <version> [--allow-partial]
 #   --allow-partial   Don't require all three platforms (local dry runs)
@@ -52,8 +52,8 @@ if [[ ! -f "$RELEASE_DIR/THIRD_PARTY_NOTICES" ]]; then
     error "Missing $RELEASE_DIR/THIRD_PARTY_NOTICES"
     exit 1
 fi
-if [[ ! -f "$NPM_DIR/LICENSE" ]]; then
-    error "Missing $NPM_DIR/LICENSE"
+if [[ ! -f "$PROJECT_ROOT/LICENSE" ]]; then
+    error "Missing $PROJECT_ROOT/LICENSE"
     exit 1
 fi
 
@@ -114,6 +114,7 @@ if [[ "$scripts_staged" == "false" ]]; then
 fi
 
 cp "$RELEASE_DIR/THIRD_PARTY_NOTICES" "$NPM_DIR/THIRD_PARTY_NOTICES"
-chmod 644 "$NPM_DIR/THIRD_PARTY_NOTICES"
+cp "$PROJECT_ROOT/LICENSE" "$NPM_DIR/LICENSE"
+chmod 644 "$NPM_DIR/THIRD_PARTY_NOTICES" "$NPM_DIR/LICENSE"
 
 info "Staged rakumux@$VERSION with binaries for: ${staged[*]}"

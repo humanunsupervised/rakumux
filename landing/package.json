@@ -2,6 +2,8 @@
   "name": "rakumux-landing",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
+  "homepage": "https://rakumux.com",
   "description": "Marketing site for Rakumux, a terminal session manager for coding agents",
   "scripts": {
     "dev": "next dev",

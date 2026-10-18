@@ -53,7 +53,18 @@ fn terminal_query_replies_reach_the_program() {
         r#"printf '\e[6n'; read -s -d R pos; echo "POS=${pos#*[}=END""#,
     )
     .unwrap();
-    let screen = wait_for_screen(&*host, info.id, "=END");
+    // The echoed command also contains "=END". Wait for the complete reply,
+    // not the command being echoed before the shell has run it.
+    let mut screen = String::new();
+    assert!(
+        wait_until(TIMEOUT, || {
+            screen = visible_text(&*host, info.id);
+            screen
+                .lines()
+                .any(|line| line.starts_with("POS=") && line.ends_with("=END"))
+        }),
+        "terminal query reply missing; screen:\n{screen}"
+    );
     let line = screen.lines().find(|l| l.starts_with("POS=")).unwrap();
     let (row, col) = line["POS=".len()..line.len() - "=END".len()]
         .split_once(';')

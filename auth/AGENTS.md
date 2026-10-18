@@ -1,7 +1,7 @@
 # Rakumux Auth & Billing — Technical Plan (Clerk)
 
 Status: **deferred.** Auth is out of scope for the sessions refactor (0.6.0) and is the next round
-after it (`plans/sessions-refactor.md` §18). The partial implementation in `tui/src/auth/` is
+after it. The partial implementation in `tui/src/auth/` is
 compiled but switched off (`FeatureFlags { auth: false }` in `tui/src/app/feature_flags.rs`), and no
 key opens the auth menu.
 
@@ -87,7 +87,7 @@ HTTP defaults:
 - Base URL: `https://{CLERK_FRONTEND_API}`
 - Headers: 
   - `Content-Type: application/x-www-form-urlencoded`
-  - `Origin: https://rakumux.cli` (stable pseudo-origin)
+   - `Origin: https://rakumux.com`
   - `Clerk-Publishable-Key: {CLERK_PUBLISHABLE_KEY}` (helps with rate-limit/classification)
 
 Client lifecycle (first call):

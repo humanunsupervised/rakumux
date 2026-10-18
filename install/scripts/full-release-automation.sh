@@ -3,7 +3,7 @@
 ###############################################################################
 # full-release-automation.sh - Complete Release Automation
 #
-# Handles the entire closed-source release workflow with automatic version
+# Handles the native binary release workflow with automatic version
 # management and pre-deployment testing.
 ###############################################################################
 
@@ -194,7 +194,7 @@ preflight_npm_auth() {
 
 record_release_tracking_tag() {
     local version="$1"
-    local tracking_tag="private-release/v$version"
+    local tracking_tag="release/v$version"
 
     if git rev-parse -q --verify "refs/tags/$tracking_tag" >/dev/null 2>&1; then
         warn "Tracking tag already exists: $tracking_tag"
@@ -289,7 +289,7 @@ if ! "$SCRIPT_DIR/release-homebrew.sh" "$VERSION" ${HOMEBREW_FLAGS+"${HOMEBREW_F
     error "Rerun after fixing: ./install/scripts/release-homebrew.sh $VERSION"
     exit 1
 fi
-success "Homebrew formula released (commit install/homebrew/Formula/rakumux.rb)"
+success "Homebrew formula rendered for the tap (generated file; do not commit here)"
 
 # Step 6: Publish to npm
 NPM_FLAGS=()

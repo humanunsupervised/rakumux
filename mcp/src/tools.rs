@@ -2,12 +2,12 @@
 //! and what each call does against the external API. Nothing here depends
 //! on the MCP SDK; `server` adapts it.
 //!
-//! Conventions (`plans/agent-mcp.md` §2.1): a `session` argument takes an id
+//! Conventions: a `session` argument takes an id
 //! or a name; results carry structured content plus a short text rendering;
 //! API errors come back as error results (`{"error": {code, message}}`), not
 //! protocol errors; terminal text is untrusted (§4.8). A `folder` argument
 //! (a session's folder: the directory it was started in) also accepts its
-//! deprecated alias `project` (`plans/folders.md`).
+//! deprecated alias `project`.
 
 use crate::client::{Api, ToolError};
 use crate::render;

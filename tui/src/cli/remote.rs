@@ -1,6 +1,6 @@
 //! `rakumux remote on [--port N] | off | pair | status [--json] | token
 //! [--rotate]`: remote access for the Rakumux app on a phone
-//! (`plans/mobile-client.md`). The work is in `crate::remote_access`, which
+//! (see `api/README.md`). The work is in `crate::remote_access`, which
 //! the TUI shares.
 
 use super::args::RemoteCommand;

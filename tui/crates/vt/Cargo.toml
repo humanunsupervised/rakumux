@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Terminal emulation shared by the Rakumux daemon and TUI"
 publish = false
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [lib]
 name = "vt"

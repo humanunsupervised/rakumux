@@ -13,11 +13,13 @@ This directory holds the shell-level and manual checks.
 
 ## Automated
 
+- **`test-repository.sh`** - Branding, license metadata, mobile separation, and script syntax.
 - **`test-command-hook.sh`** - `shell/rakumux-command-hook.sh`: per-session history logging and
   `rakumux_rename_session`, in bash (and zsh when installed), against a temporary
   `RAKUMUX_HOME`.
 
 ```bash
+bash tests/test-repository.sh
 ./tests/test-command-hook.sh
 ```
 

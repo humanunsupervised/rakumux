@@ -1,6 +1,6 @@
 class Rakumux < Formula
   desc "Terminal session manager for coding agents with a fast TUI"
-  homepage "https://github.com/humanunsupervised/rakumux"
+  homepage "https://rakumux.com"
   # Rendered by install/scripts/release-homebrew.sh; edit the template, not Formula/rakumux.rb.
   #
   # Binary-only distribution: pre-built packages from GitHub Releases.
@@ -21,8 +21,7 @@ class Rakumux < Formula
   else
     odie "Rakumux is not available for #{OS.kernel_name} #{Hardware::CPU.arch}"
   end
-  # Proprietary (LICENSE in the package); SPDX can't express it.
-  license :cannot_represent
+  license "Apache-2.0"
 
   def install
     libexec.install "rakumux", "rakumux-ptyd", "rakumux-api", "rakumux-mcp",
@@ -49,7 +48,7 @@ class Rakumux < Formula
 
       Sessions run in the rakumux-ptyd daemon and survive closing the TUI.
       After an upgrade, `rakumux daemon restart` switches to the new daemon
-      (running sessions end; they can be revived).
+      (running sessions keep running).
 
       Coding agents can drive sessions through the MCP server, e.g.:
         claude mcp add --scope user rakumux -- #{opt_bin}/rakumux-mcp

@@ -7,8 +7,7 @@ clients of that daemon. There is no tmux, no git integration and no shell servic
 
 Every session belongs to the folder it was started in (its scope). The TUI shows the sessions of
 all folders, narrowed by its folder filter (`P`); `rakumux ls` shows the folder it's run in.
-Key bindings and layout are specified in `plans/sessions-refactor.md` §6–§9 and
-`plans/folders.md`.
+Key bindings and layout are documented in [AGENTS.md](../AGENTS.md) and the in-app Help.
 
 Use a throwaway Rakumux home so these tests don't touch your real sessions:
 
@@ -98,7 +97,8 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
       the same conversation with the same flags, and `npm run dev` waits at the prompt, not run.
 - [ ] Log in another way (SSH and mosh, or Termius on a phone): `rakumux daemon status` shows the
       same pid from both.
-- [ ] `r` renames (names are unique per scope); `d` deletes after confirmation.
+- [ ] `r` renames (names are unique per scope); `d` and `dd` both open delete confirmation.
+      A second `d` never confirms; `y` or Enter confirms, `n` or Esc cancels.
 
 ## 5. Several clients and folders
 

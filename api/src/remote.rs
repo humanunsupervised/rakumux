@@ -1,4 +1,4 @@
-//! Remote access (`plans/mobile-client.md`): the listener that serves the
+//! Remote access: the listener that serves the
 //! user's phone over the network, normally a tailnet.
 //!
 //! When `remote.json` is enabled the API keeps its 127.0.0.1 listener and

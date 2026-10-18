@@ -1026,7 +1026,7 @@ mod tests {
     #[test]
     fn schema_2_migrates_keeping_sessions_and_backfilling_projects() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("orchestrator.sqlite3");
+        let path = dir.path().join("rakumux.sqlite3");
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(SCHEMA_V2).unwrap();

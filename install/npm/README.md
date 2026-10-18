@@ -27,7 +27,7 @@ rakumux --check-updates   # Check for a newer release
 
 ## License
 
-See `LICENSE`. `THIRD_PARTY_NOTICES` lists the open-source
+Rakumux is licensed under Apache-2.0; see `LICENSE`. `THIRD_PARTY_NOTICES` lists the open-source
 components it includes and their licenses.
 
 For release notes, visit https://github.com/humanunsupervised/rakumux

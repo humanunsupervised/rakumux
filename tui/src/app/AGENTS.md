@@ -6,9 +6,8 @@ one client of the `rakumux-ptyd` daemon: everything it knows about sessions come
 sessions at any time. Rendering lives in `tui/src/ui.rs`, `components/`, `terminal_view/`, `layout/`
 and `help/`; nothing here draws.
 
-Design: `plans/sessions-refactor.md` §6–§8 (screen, layouts, keys, new-session flow) and §12
-(code layout). The module names below follow that plan; check them against the code after the C1
-work package merges.
+Architecture: the root `AGENTS.md`. The module map below describes the screen, layouts, keys,
+new-session flow, and code boundaries.
 
 ## Module map
 
@@ -21,7 +20,7 @@ work package merges.
   stacked_list_percent,
   session_order }`. Retired
   keys (`selected_projects`) are dropped on load, so the next save leaves them out.
-- `folders.rs` (`plans/folders.md`): the folders the daemon knows (`Folders`: `known`
+- `folders.rs`: the folders the daemon knows (`Folders`: `known`
   `ProjectView`s, the launch folder, `FolderSupport`), the sync loader (`add_project` the launch
   folder, `projects`, then `subscribe { all }` + `list_all` with `sessions.all`; else
   `subscribe { scopes }` + `list_in` of the known folders; else `list(Some(launch))` on

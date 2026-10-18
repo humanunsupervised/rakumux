@@ -1,47 +1,96 @@
 # Rakumux
 
-A terminal multiplexer for coding agents. Rakumux keeps all your terminal sessions, in every
-folder and worktree, in one fast TUI: a session list on the left, the live terminal on the right.
-Sessions run in a small background daemon (`rakumux-ptyd`), so they keep running when you close
-the TUI, and Rakumux shows which agent is working, blocked or done. Built for running Claude Code,
-Codex and OpenCode side by side.
+**Terminal sessions for coding agents, in one fast terminal UI.**
+
+[rakumux.com](https://rakumux.com) · [Source](https://github.com/humanunsupervised/rakumux) · [Releases](https://github.com/humanunsupervised/rakumux/releases)
 
 楽 (*raku*) means easy, and read *gaku* it means music: tmux, made easy.
 
-[Website](https://rakumux.com) · [Issues](https://github.com/humanunsupervised/rakumux/issues)
+![Rakumux session list and live terminal](assets/rakumux-screenshot.png)
 
-![Rakumux: a list of sessions on the left, the selected session live on the right](assets/rakumux-screenshot.png)
+**Status:** pre-release. Build from source until the first Rakumux release is published.
 
-**Status:** pre-release. 0.1.0 isn't published yet; build it from source in the meantime.
+Run Claude Code, Codex, OpenCode, Pi, dev servers, and shells side by side. A small background
+daemon owns your terminals, so sessions keep running when you close the UI or lose an SSH
+connection.
 
-## Build from source
+- See every folder's sessions, with live previews and agent status.
+- Filter, rename, reorder, and pin sessions without managing worktrees.
+- Switch between your program and Rakumux with `Ctrl-\`.
+- Use the CLI, local HTTP API, or Model Context Protocol (MCP) server to drive sessions.
+- Pair a separate mobile client over opt-in Tailscale access.
 
-Needs a Rust toolchain (stable) and bash. Linux and macOS.
+## Build and run
+
+Requires a stable Rust toolchain, a C compiler, and bash on macOS or Linux. SQLite is bundled.
+Git and tmux are not runtime dependencies.
 
 ```bash
-./build.sh                      # or: cd tui && cargo build --workspace --release
-./rakumux.sh                    # run this checkout
+git clone https://github.com/humanunsupervised/rakumux.git
+cd rakumux
+./build.sh
+./rakumux.sh
 ```
 
-The binaries land in `tui/target/release/`: `tui` (the `rakumux` TUI and CLI), `rakumux-ptyd`
-(the session daemon), `rakumux-api` (local HTTP API) and `rakumux-mcp` (MCP server for agents).
-
-## Usage
+Once releases are published, the recommended installer is:
 
 ```bash
-rakumux                   # Open the TUI
-rakumux new --name dev    # Create a session and attach to it
-rakumux ls                # List sessions in this folder
-rakumux attach dev        # Full-screen attach (Ctrl-\ d to detach)
-rakumux --help            # All commands
+curl -fsSL https://rakumux.com/install.sh | bash
 ```
 
-`AGENTS.md` describes the architecture, `api/README.md` the HTTP API and `mcp/README.md` the MCP
-server.
+The installer verifies the release checksum before running the tarball's installer.
+Packages use `rakumux` on npm and
+`humanunsupervised/rakumux/rakumux` on Homebrew. See the [installation guide](install/INSTALL.md)
+for package and release-tarball instructions. These channels require a Rakumux release to be
+published first.
 
-## Licence
+## Quick start
 
-Rakumux is going to be open source; the licence is still being chosen. Until it's added, see
-`LICENSE`.
+In the UI, press `n` to create a session. Run an agent or any command in its shell.
+Press `Ctrl-\` to return to Rakumux mode. Use `j`/`k` or the arrow keys to select a session,
+`Enter` to work in it, and `?` for Help. Quitting the UI does not stop sessions.
 
-Website: <https://rakumux.com>
+```bash
+rakumux new --name dev          # Create and attach
+rakumux ls --all                # List sessions across folders
+rakumux attach dev              # Full-screen attach; Ctrl-\ then d detaches
+rakumux daemon status
+rakumux --help
+```
+
+From a checkout, use `./rakumux.sh` instead of `rakumux`.
+
+## Agent integration
+
+```bash
+claude mcp add --scope user rakumux -- rakumux-mcp
+```
+
+See the [MCP guide](mcp/README.md) for Codex, OpenCode, tool permissions, and session identity.
+The [HTTP API guide](api/README.md) describes local automation and remote access.
+
+Sessions and settings live in `~/.rakumux`. Set `RAKUMUX_HOME` to use an isolated data directory.
+Optional AI naming uses your own Anthropic or OpenAI key; no account or key is needed for terminal
+sessions. Remote access is off until explicitly enabled.
+
+## Development
+
+```bash
+cd tui
+cargo build --workspace --locked
+cargo test --workspace --locked
+cargo fmt --all --check
+```
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for checks and the
+[architecture](AGENTS.md) for module boundaries. The website lives in [`landing/`](landing/README.md).
+The mobile app is maintained separately in `humanunsupervised/rakumux-mobile`; its source is not
+part of this repository or this repository's license grant.
+
+## License
+
+Copyright 2024–2026 Antonio de Perio and Human Unsupervised Pty Ltd.
+
+Rakumux is licensed under [Apache-2.0](LICENSE). Dependencies retain their own licenses;
+binary releases include `THIRD_PARTY_NOTICES`. The license does not grant rights to Rakumux
+trademarks. See [SECURITY.md](SECURITY.md) to report a vulnerability privately.

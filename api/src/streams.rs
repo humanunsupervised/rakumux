@@ -1,4 +1,4 @@
-//! Live streams over WebSocket (`plans/mobile-client.md` §3), on both
+//! Live streams over WebSocket (see `api/openapi.yaml`), on both
 //! listeners with the same checks as every other route:
 //!
 //! - `GET /v1/sessions/{id}/attach`: a session's terminal. Text messages

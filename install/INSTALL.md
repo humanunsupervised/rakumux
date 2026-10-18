@@ -3,6 +3,17 @@
 Rakumux runs on macOS (Apple Silicon or Intel) and Linux x64. It needs only bash: no git, tmux
 or other tools.
 
+**Pre-release:** build from source until Rakumux release assets and packages are available.
+
+## Installer
+
+```bash
+curl -fsSL https://rakumux.com/install.sh | bash
+```
+
+The installer checks the archive against the release's `checksums.txt`, then runs its installer.
+Use `PREFIX="$HOME/.local" bash` in place of `bash` for a user-local installation.
+
 ## npm
 
 ```bash
@@ -77,7 +88,7 @@ and rename your sessions, and `rakumux-api`, the local HTTP API it uses (started
 claude mcp add --scope user rakumux -- rakumux-mcp
 ```
 
-Codex (`~/.codex/config.toml`; forwarding the session variables lets an agent running inside an
+Codex (`~/.codex/config.toml`; forwarding the session variables lets an agent running inside a
 Rakumux session act as that session):
 
 ```toml
@@ -95,19 +106,11 @@ OpenCode (`~/.config/opencode/opencode.json`):
 Terminal output the tools return is marked untrusted, and agents running inside a session can only
 see their own folder and rename themselves.
 
-## Upgrading from 0.5.x
+## Upgrading
 
-0.6.0 replaces tmux and git worktrees with Rakumux's own sessions:
-
-- **Remove the old shell functions.** Earlier versions asked you to add `rakumux()` and
-  `rakumux-cli()` functions to `~/.bashrc` / `~/.zshrc` for directory switching. Delete them:
-  `rakumux-cli` no longer exists, and the old `rakumux()` function sends subcommands such as
-  `rakumux ls` to it. Then open a new shell (or `unset -f rakumux rakumux-cli`).
-- tmux sessions from 0.5.x are not imported; they keep running in tmux until you close them.
-- The `GW_ENV_COPY_BIN` and `GW_ORCHESTRATOR_ROOT` variables are no longer used.
-- After a later upgrade, `rakumux daemon restart` (or the TUI's offer) switches to the new
-  daemon in place: running sessions keep running. A daemon from a 0.6 preview build can't hand
-  its sessions over; restarting it ends them once (Enter brings one back).
+Update through the channel you installed from, then use `rakumux daemon restart` (or the TUI's
+offer) to switch to the new daemon in place. Running sessions keep running when the daemon
+supports restart-in-place handoff. The UI asks before a restart that would end sessions.
 
 ## Uninstall
 
@@ -130,6 +133,6 @@ Your sessions and settings live in `~/.rakumux`; remove it to start fresh.
 
 ## License
 
-Rakumux is proprietary software; see `LICENSE` in the package (Homebrew:
+Rakumux is licensed under Apache-2.0; see `LICENSE` in the package (Homebrew:
 `$(brew --prefix)/share/doc/rakumux/LICENSE`). `THIRD_PARTY_NOTICES` lists the open-source
 components it includes and their licenses.

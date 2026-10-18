@@ -4,12 +4,10 @@ Rakumux is a terminal-first manager for long-running terminal sessions, built fo
 agents (Claude Code, Codex, OpenCode, Pi, …) side by side. A **session** is a folder plus a
 terminal. One per-user daemon, **`rakumux-ptyd`**, owns every session; the **`rakumux`** TUI and
 CLI are clients of it, and so is **`rakumux-api`**, a local HTTP API that the **`rakumux-mcp`**
-server uses to let coding agents drive sessions (`plans/projects-api-mcp.md`).
-
-This file describes the architecture introduced by the sessions refactor (0.6.0, branch
-`sessions-refactor`). Design and rationale: `plans/sessions-refactor.md` (rev 7). Agents inside
-sessions: `plans/agent-control.md` (rev 2) and `plans/agent-mcp.md`. How the refactor is
-being built: `plans/parallel-execution.md`.
+server uses to let coding agents drive sessions. Source: `humanunsupervised/rakumux`;
+website: <https://rakumux.com>. The core is licensed under Apache-2.0 (`LICENSE`).
+The mobile app is maintained separately in `humanunsupervised/rakumux-mobile` and is not included
+in this repository's license grant. Public preparation and release checks: `PUBLISHING.md`.
 
 ## Architectural requirements
 
@@ -28,7 +26,7 @@ being built: `plans/parallel-execution.md`.
    sessions of all folders by default, live (sessions in a new folder appear as they start), and
    narrows them with a folder filter (one folder or several; not saved); the CLI defaults to the
    current folder (`--folder`, `--all`). Agents (session callers) only ever see their own folder.
-   See `plans/folders.md`.
+   See `tui/src/app/folders.rs` and `api/README.md`.
 4. **The daemon owns the session API.** Registry, scope confinement, identity, permissions, waits,
    lifecycle and audit live in the daemon. TUI and CLI are thin clients of
    `session_core::client::SessionApi`.
@@ -98,7 +96,7 @@ being built: `plans/parallel-execution.md`.
    `project` names, returning `project` next to `folder`. Writes `api.json` (url, token, pid,
    version, `remote_urls`) while it runs; on loopback: bearer token, loopback `Host`, no browser
    `Origin`; `X-Rakumux-Session-Id`/`-Token` make it act as that session. **Remote access**
-   (`plans/mobile-client.md`, `api/src/remote.rs`): while `remote.json` is enabled it adds a remote
+   (`api/src/remote.rs`): while `remote.json` is enabled it adds a remote
    listener on every Tailscale address of the machine (`session_core::tailscale::addresses`: in
    `100.64.0.0/10` or `fd7a:115c:a1e0::/48` **and** on Tailscale's own interface, `tailscale*`, or
    listed by `tailscale status`; the ranges alone also catch ISP carrier-grade NAT and other VPNs) at
@@ -132,12 +130,9 @@ mcp/                         # rakumux-mcp (MCP server for agents), see mcp/READ
   src/                       # main, server (rmcp adapter), tools, client (API, discovery, identity),
                              # launch (rakumux-api --detach), render, untrusted, instructions
   tests/                     # mcp_stdio (stub API), full_stack (mcp → api → ptyd)
-mobile/                      # phone app: Expo (Expo Go), over rakumux-api's remote mode, see mobile/README.md
-  src/                       # app (screens), api (JSON, events, attach clients), state, terminal (xterm in a WebView), ui
 shell/                       # launcher, build and hook scripts (see shell/AGENTS.md)
 install/                     # npm, Homebrew, release scripts (see install/AGENTS.md)
 landing/                     # marketing site: standalone Next.js static export for Vercel (landing/README.md)
-plans/                       # design plans
 auth/AGENTS.md               # deferred auth design notes
 tests/                       # manual test instructions and remaining shell tests
 tui/
@@ -216,7 +211,7 @@ last_active_at, added_at, git}` on the wire.
 
 ### Recovery
 
-What survives what (`plans/restart-recovery.md`):
+What survives what (`ptyd/src/handoff.rs` and `ptyd/src/resume.rs`):
 
 | Event | Running programs | How sessions come back |
 |---|---|---|
@@ -238,8 +233,7 @@ Startup commands always run on revive.
 
 ## Protocol (v1)
 
-Defined in `session-core/src/{api.rs, frame.rs}`; full description in `plans/sessions-refactor.md`
-§5.4.
+Defined in `session-core/src/{api.rs, frame.rs}`.
 
 - Unix socket `/tmp/rakumux-<uid>/ptyd-<hash>.sock`; peers with another UID are rejected.
 - Frames: `[u32 BE length][u8 kind][payload]`, max 8 MiB. Kind 0 = JSON control message; kind 1 =
@@ -318,7 +312,7 @@ accidents; they don't stop a hostile process running as the same user.
   service.lock                   flock held by the running daemon (kept across a restart in place)
 ```
 
-- **Registry** (`plans/sessions-refactor.md` §11): `sessions_v2(id, scope_root, name, cwd,
+- **Registry** (`ptyd/src/control/registry.rs`): `sessions_v2(id, scope_root, name, cwd,
   launch_json, resume_json, created_by_json, parent_id, depth, agent_json, reported_json, exit_code,
   created_at, last_active_at, ended_at)`, index `(scope_root, last_active_at DESC)`;
   `audit_log(id, ts, scope_root, caller, method, target_session_id, decision, detail)`, pruned to
@@ -524,7 +518,7 @@ since running sessions end).
 - **Layout**: Sidebar (list left, detail right; on narrow windows the list stacked above the
   detail in Rakumux mode) or Tabs (tab bar on top); `sessions.layout`. Phones have their own:
   the list, or a session under tabs.
-- **Contracts**: the crate types and traits that define the architecture (`plans/parallel-execution.md`).
+- **Contracts**: the crate types and traits that define the architecture.
 
 ## Using Rakumux
 
@@ -640,8 +634,7 @@ alone, ready for new sessions. Forgetting a folder is CLI-only (`rakumux folders
 A program can't change its parent shell's directory. When the TUI quits with a session selected it
 can print `cd "<session cwd>"`; a shell function around `rakumux` evals that line. The wrapper is
 documented at the top of `rakumux.sh`. The daemon is always spawned with its stdio detached, so a
-wrapper that captures Rakumux's output never waits on the daemon. (Whether `cd` on exit stays is
-an open question in `plans/sessions-refactor.md` §17.)
+wrapper that captures Rakumux's output never waits on the daemon.
 
 ## Local builds
 
@@ -666,26 +659,16 @@ an open question in `plans/sessions-refactor.md` §17.)
   (`AttachStream::pair`, `EventStream::from_receiver`). Test the control layer with a fake
   `TerminalHost`, and the server with a fake `Control`.
 - Only the daemon answers terminal queries; client emulators are always `vt::Emulator::passive`.
-- Contract changes are additive only (new optional field, new method with a default, new variant)
-  and go through the coordinator while the refactor is in flight (`plans/parallel-execution.md`).
+- Contract changes are additive only (new optional field, new method with a default, new variant).
 - Never run `git`, tmux or shell services from the product; git context comes from reading `.git`
   files only.
 
-## Plans
+## Contributor documentation
 
-- `plans/sessions-refactor.md`: the sessions refactor (rev 7): decisions, daemon, protocol, layout,
-  keys, distribution, phases.
-- `plans/agent-control.md`: agents inside sessions (rev 2): stage A in 0.6.0, stages B–D later.
-- `plans/agent-mcp.md`: MCP adapter for agents: OpenCode parity, tool set, identity, phasing.
-- `plans/projects-api-mcp.md`: projects, pinning, git context, the external API and the MCP server
-  (supersedes `agent-mcp.md` §3.1/§3.4: MCP is a separate binary over HTTP, not `rakumux mcp`).
-- `plans/restart-recovery.md`: one daemon per user from every login, restart in place, recovery
-  after a crash or reboot, agent resume (Claude Code, Codex, OpenCode) and the last command.
-- `plans/folders.md`: folders instead of projects (rev 1): every folder's sessions by default, the
-  folder filter and Folders modal, the new-session folder, CLI/API/MCP naming (supersedes the
-  project selection and switcher of `projects-api-mcp.md`).
-- `plans/mobile-client.md`: the phone app (`mobile/`) and remote access (rev 1): `remote.json`,
-  `rakumux remote`, the API's remote listener over Tailscale, WebSocket attach and events.
-- `plans/parallel-execution.md`: work packages, contracts and file ownership for the refactor, and
-  the integration log.
-- `plans/archive/`: historical notes from 0.5.x; they describe removed features.
+- `README.md`: installation, usage, and project links.
+- `CONTRIBUTING.md`: development workflow and verification.
+- `SECURITY.md`: private vulnerability reporting and trust boundaries.
+- `PUBLISHING.md`: source-publication boundaries and release checklist.
+- `api/README.md` and `api/openapi.yaml`: HTTP and WebSocket contracts.
+- `mcp/README.md`: coding-agent tools and identity.
+- `install/AGENTS.md`: packaging and release commands.

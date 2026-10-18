@@ -1,6 +1,6 @@
 //! Remote access settings: `<home>/remote.json`, shared by `rakumux-api`
 //! (which serves the remote listener) and the `rakumux remote` CLI (which
-//! turns it on and off). See `plans/mobile-client.md`.
+//! turns it on and off). See `api/README.md`.
 //!
 //! ```json
 //! { "enabled": true, "port": 7337, "token": "<26 chars a-z2-7>", "listen": [] }

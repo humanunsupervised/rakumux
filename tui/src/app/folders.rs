@@ -1,4 +1,4 @@
-//! Folders (`plans/folders.md`): the directories sessions belong to (the
+//! Folders: the directories sessions belong to (the
 //! wire calls them scopes, and its requests `project_*`). The TUI lists and
 //! watches the sessions of every folder (`sessions.all`), so sessions in a
 //! new worktree or started by an agent appear live, and the folder filter
