@@ -38,7 +38,7 @@ main() {
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
 
-    echo "Downloading $package…"
+    echo "Downloading ${package}..."
     curl -fsSL "$base/$package.tar.gz" -o "$tmp/$package.tar.gz" ||
         fail "couldn't download $package for this release; check its available targets at https://github.com/$REPO/releases"
     curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt" || fail "couldn't download checksums.txt"

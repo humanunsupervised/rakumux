@@ -1,0 +1,56 @@
+name: macOS public installer
+
+on:
+  push:
+    paths:
+      - landing/public/install.sh
+      - tests/test-public-installer.sh
+      - .github/workflows/installer.yml
+  workflow_dispatch:
+    inputs:
+      installer_url:
+        description: Optional deployed installer URL to verify
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    env:
+      LC_ALL: en_US.UTF-8
+      LANG: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify Apple's shell and reproduce the reported parsing error
+        shell: /bin/bash --noprofile --norc -e {0}
+        run: |
+          /bin/bash --version
+          locale
+          if /bin/bash -c 'set -u; package=rakumux-macos; echo "Downloading $package…"'; then
+            echo 'This shell does not exhibit the unbraced Unicode parsing bug.'
+          else
+            echo 'Confirmed: unbraced Unicode interpolation fails on this native Mac.'
+          fi
+      - name: Select candidate or deployed installer
+        env:
+          INSTALLER_URL: ${{ inputs.installer_url }}
+        shell: /bin/bash --noprofile --norc -e {0}
+        run: |
+          if [[ -n "$INSTALLER_URL" ]]; then
+            case "$INSTALLER_URL" in
+              https://rakumux.com/install.sh|https://rakumux.com/install.sh\?*) ;;
+              *) echo 'Only the production Rakumux installer may be tested.' >&2; exit 1 ;;
+            esac
+            curl -fsSL "$INSTALLER_URL" -o "$RUNNER_TEMP/public-install.sh"
+            echo "INSTALLER_SCRIPT=$RUNNER_TEMP/public-install.sh" >> "$GITHUB_ENV"
+          fi
+      - name: Test piped installer and native installed binaries
+        shell: /bin/bash --noprofile --norc -e {0}
+        run: /bin/bash tests/test-public-installer.sh
