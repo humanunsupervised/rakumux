@@ -2,7 +2,7 @@
 //! from `ai_choose_provider` and the `curl` calls of the shell
 //! `ai-generate-name-from-base64` service.
 
-use crate::app::Config;
+use crate::Config;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::fmt;
@@ -27,13 +27,14 @@ const OPENAI_TEMPERATURE: f64 = 0.2;
 const OPENAI_MAX_TOKENS: u32 = 100;
 /// Whole-request timeout (the shell service used `curl --max-time 20`).
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const RESPONSE_LIMIT: usize = 64 * 1024;
 
 /// Environment variables consulted when the config has no key.
 pub(crate) const ANTHROPIC_KEY_ENV: &str = "ANTHROPIC_API_KEY";
 pub(crate) const OPENAI_KEY_ENV: &str = "OPENAI_API_KEY";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProviderKind {
+pub enum ProviderKind {
     Anthropic,
     OpenAi,
 }
@@ -49,7 +50,7 @@ impl ProviderKind {
 
 /// A provider with a usable API key.
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct Provider {
+pub struct Provider {
     pub kind: ProviderKind,
     pub api_key: String,
     pub model: String,
@@ -70,10 +71,7 @@ impl fmt::Debug for Provider {
 /// otherwise the other one. Keys come from the config, then from
 /// `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` via `env`; blank keys don't count.
 /// `None` when neither provider has a key.
-pub(crate) fn choose_provider(
-    config: &Config,
-    env: &dyn Fn(&str) -> Option<String>,
-) -> Option<Provider> {
+pub fn choose_provider(config: &Config, env: &dyn Fn(&str) -> Option<String>) -> Option<Provider> {
     let anthropic = || {
         api_key(config.anthropic_api_key.as_deref(), ANTHROPIC_KEY_ENV, env).map(|api_key| {
             Provider {
@@ -122,7 +120,7 @@ fn api_key(
         .or_else(|| env(env_var).as_deref().and_then(non_blank))
 }
 
-/// The naming request for `provider`, ready to send.
+/// The text-generation request for `provider`, ready to send.
 pub(crate) fn build_request(
     client: &reqwest::Client,
     provider: &Provider,
@@ -154,19 +152,30 @@ pub(crate) fn build_request(
     }
 }
 
-/// Send the naming request and return the model's raw reply text.
-pub(crate) async fn request_name(provider: &Provider, prompt: &str) -> Result<String> {
+/// Send a bounded text request and return the model's raw reply text.
+pub async fn request_text(provider: &Provider, prompt: &str) -> Result<String> {
     let label = provider.kind.label();
-    let client = reqwest::Client::new();
-    let response = build_request(&client, provider, prompt)
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("could not create AI provider client")?;
+    let mut response = build_request(&client, provider, prompt)
         .send()
         .await
-        .with_context(|| format!("{label} naming request failed"))?;
+        .with_context(|| format!("{label} AI request failed"))?;
     let status = response.status();
-    let body = response
-        .text()
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .with_context(|| format!("failed to read the {label} response"))?;
+        .with_context(|| format!("failed to read the {label} response"))?
+    {
+        if body.len().saturating_add(chunk.len()) > RESPONSE_LIMIT {
+            bail!("{label} response exceeds its size limit");
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let body = String::from_utf8(body).with_context(|| format!("{label} response is not UTF-8"))?;
     let parsed: Option<Value> = serde_json::from_str(&body).ok();
 
     if !status.is_success() {

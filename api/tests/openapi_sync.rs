@@ -139,6 +139,11 @@ fn every_json_field_is_documented() {
         private: true,
         is_self: true,
         auto_named: true,
+        activity_summary: Some(ActivitySummary {
+            text: "Fixed login; verifying tests.".into(),
+            updated_at: "2026-10-19T00:00:00Z".into(),
+            error: Some("Could not refresh summary".into()),
+        }),
         created_at: "c".into(),
         last_active_at: "l".into(),
         terminal: Some(Terminal {
@@ -264,6 +269,7 @@ fn every_stream_message_is_documented() {
         launch: LaunchSpec::default(),
         resume: None,
         auto_named: false,
+        activity_summary: None,
         description: None,
         notes: None,
         labels: BTreeMap::new(),

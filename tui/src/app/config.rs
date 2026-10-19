@@ -3,6 +3,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use session_core::ids::SessionId;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::icons::Icons;
@@ -12,16 +14,7 @@ use crate::layout::SessionLayout;
 /// first to last.
 pub type SessionOrder = BTreeMap<PathBuf, Vec<SessionId>>;
 
-/// AI provider settings (API keys, provider, model). Also read by
-/// `crate::naming`. Stored at the top level of `config.json`.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct Config {
-    pub anthropic_api_key: Option<String>,
-    pub openai_api_key: Option<String>,
-    pub ai_primary_provider: Option<String>,
-    pub openai_model: Option<String>,
-}
+pub use rakumux_ai::Config;
 
 /// Everything in `~/.rakumux/config.json` (`$RAKUMUX_HOME` respected):
 /// the AI settings at the top level plus the `"sessions"` section. Load
@@ -67,6 +60,9 @@ pub struct SessionsConfig {
     /// row turns it on any time.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub phone_offer_seen: bool,
+    /// Explicit consent to send bounded, redacted session output to the AI provider.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub ai_activity_summaries: bool,
     /// Sidebar (list + detail) or Tabs (tab bar + detail). A value this
     /// version doesn't know (e.g. written by a newer one) reads as the
     /// default instead of breaking the whole config.
@@ -114,6 +110,7 @@ impl Default for SessionsConfig {
             cycle_keys_in_session: false,
             welcome_seen: false,
             phone_offer_seen: false,
+            ai_activity_summaries: false,
             layout: SessionLayout::default(),
             icons: Icons::default(),
             sidebar_width: None,
@@ -202,12 +199,42 @@ impl Settings {
     }
 
     pub fn save_to(&self, path: &Path) -> Result<()> {
+        with_config_lock(path, || self.write_to(path))
+    }
+
+    /// Serialize a read-modify-write across windows, including consent changes.
+    pub fn update_at(path: &Path, update: impl FnOnce(&mut Self)) -> Result<()> {
+        with_config_lock(path, || {
+            let mut settings = Self::load_from(path)?;
+            update(&mut settings);
+            settings.write_to(path)
+        })
+    }
+
+    fn write_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let content = serde_json::to_string_pretty(self)?;
-        fs::write(path, content)?;
-        Ok(())
+        let content = serde_json::to_vec_pretty(self)?;
+        static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let temporary =
+            path.with_file_name(format!(".config.{}.{}.tmp", std::process::id(), sequence));
+        let result = (|| -> Result<()> {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temporary)?;
+            file.write_all(&content)?;
+            file.sync_all()?;
+            fs::rename(&temporary, path)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
     }
 
     pub fn config_file_path() -> Result<PathBuf> {
@@ -220,9 +247,100 @@ impl Settings {
     }
 }
 
+fn with_config_lock<T>(path: &Path, operation: impl FnOnce() -> Result<T>) -> Result<T> {
+    use std::os::fd::AsRawFd;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("configuration path has no filename"))?;
+    let lock_path = path.with_file_name(format!("{}.lock", name.to_string_lossy()));
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(lock_path)?;
+    loop {
+        // SAFETY: lock is an open descriptor borrowed for this flock call.
+        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            break;
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error.into());
+        }
+    }
+    // Closing the descriptor releases the lock, including on an error or panic.
+    operation()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activity_summary_consent_is_off_by_default_and_saved_privately() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.json");
+        let mut settings = Settings::default();
+        assert!(!settings.sessions.ai_activity_summaries);
+        settings.sessions.ai_activity_summaries = true;
+        settings.save_to(&path).unwrap();
+        assert!(
+            Settings::load_from(&path)
+                .unwrap()
+                .sessions
+                .ai_activity_summaries
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(
+            fs::read_dir(directory.path()).unwrap().all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")),
+            "atomic save leaves no temporary file"
+        );
+    }
+
+    #[test]
+    fn config_updates_from_multiple_windows_are_serialized() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.json");
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    Settings::update_at(&path, |settings| {
+                        let count = settings
+                            .sessions
+                            .other
+                            .get("writes")
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0);
+                        settings
+                            .sessions
+                            .other
+                            .insert("writes".into(), serde_json::json!(count + 1));
+                    })
+                    .unwrap()
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(
+            Settings::load_from(&path).unwrap().sessions.other["writes"],
+            8
+        );
+    }
 
     #[test]
     fn config_roundtrip_works() {

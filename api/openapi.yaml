@@ -732,6 +732,17 @@ components:
             summary: { type: string }
             files: { type: array, items: { type: string } }
             at: { type: string, format: date-time }
+        activity_summary:
+          type: object
+          description: >
+            Opt-in, daemon-cached AI activity from recent reports and terminal output.
+            Untrusted and potentially stale. Absent for private sessions or when disabled.
+            Empty text means no summary is available yet; errors preserve previous text.
+          required: [text, updated_at]
+          properties:
+            text: { type: string }
+            updated_at: { type: string, format: date-time, description: When the summarized activity was captured. }
+            error: { type: string, description: Why the last refresh failed, when known. }
         created_by:
           type: object
           required: [kind]

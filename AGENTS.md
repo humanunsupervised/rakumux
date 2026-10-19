@@ -50,7 +50,7 @@ in this repository's license grant. Public preparation and release checks: `PUBL
 - **Infrastructure**: PTYs and emulators (`ptyd/src/terminal`, behind `host::TerminalHost`), the
   SQLite registry, scrollback files (`persist`), process inspection (`procinfo`), the socket server
   and framing (`server`, `session_core::frame`), the client transport (`session_core::client::Client`).
-- **Dependency direction**: `tui` → `session-core` + `vt`; `ptyd` → `session-core` + `vt`;
+- **Dependency direction**: `tui` → `session-core` + `vt` + `ai`; `ptyd` → `session-core` + `vt` + `ai`;
   `api` → `session-core`; `mcp` → `api` (its `discovery` and `dto` modules) + `session-core`;
   `session-core` and `vt` depend on no Rakumux crate. `tui`, `api` and `mcp` never depend on
   `ptyd`; `mcp` talks to the daemon only through the HTTP API. In the daemon,
@@ -137,8 +137,9 @@ landing/                     # marketing site: standalone Next.js static export 
 auth/AGENTS.md               # deferred auth design notes
 tests/                       # manual test instructions and remaining shell tests
 tui/
-  Cargo.toml                 # workspace: ".", crates/vt, crates/session-core, crates/ptyd, ../api, ../mcp
+  Cargo.toml                 # workspace: ".", crates/vt, crates/session-core, crates/ptyd, crates/ai, ../api, ../mcp
   crates/
+    ai/src/                  # shared provider configuration/HTTPS adapters; bounded, redacted activity prompts
     session-core/src/
       lib.rs                 # PROTOCOL_VERSION, env variable names
       model.rs               # ScopeRoot, SessionView, SessionStatus, Lifecycle, Creator, AgentInfo,
@@ -160,6 +161,7 @@ tui/
       registration.rs        # single-instance claim, socket, service.json
       control_api.rs         # Control trait (server ↔ control)
       control/               # ControlService: registry, scope, identity, permissions, waits, audit
+                             # summaries: one opt-in background worker; cached activity for every client
       host.rs                # TerminalHost trait (control ↔ terminals), SpawnSpec, HostEvent
       terminal/              # Host: PTY actors, emulators, replay ring, attach fan-out, adopt/handoff
       handoff.rs             # restart in place: HandoffState across exec, target check
@@ -299,6 +301,7 @@ accidents; they don't stop a hostile process running as the same user.
   rakumux.sqlite3              registry, daemon only: sessions_v2, audit_log
   sessions/<id>/scrollback.ansi  saved scrollback (ANSI rows, oldest first)
   sessions/<id>/meta.json        SessionMeta {cwd, title, foreground_process, exit_code, updated_at}
+  sessions/<id>/activity-summary.json  cached AI ActivitySummary {text, updated_at, error?}, 0600
   history/<id>.log               command history written by shell/rakumux-command-hook.sh
   logs/ptyd.log                  daemon log (1 MiB, rotated; level RAKUMUX_PTYD_LOG)
   logs/api.log                   log of a detached rakumux-api (RAKUMUX_API_LOG=debug: every request)
@@ -313,6 +316,7 @@ accidents; they don't stop a hostile process running as the same user.
                                  listen: ["ADDR:PORT"]}, 0600: remote access, written by
                                  `rakumux remote`, read by rakumux-api at start
   config.json                    Config (below)
+  config.json.lock               serializes configuration writes and shared summary consent
   running.json                   {"sessions": [ids]}: sessions running now, revived by the next start
                                  after a crash or reboot; removed by `daemon stop`
   update_state.json              UpdateState {last_check, latest_version, pending_upgrade, install_method}
@@ -468,6 +472,23 @@ and token, and the resume command as startup input → the TUI attaches.
 When a session with a generated name first goes `idle` or `done`, the TUI reads
 `~/.rakumux/history/<id>.log` and the visible screen (`session_read`), calls
 `naming::suggest_session_name`, and renames the session if a name comes back.
+
+### AI activity summaries
+
+`sessions.ai_activity_summaries` is off by default. Settings → General → Activity summaries
+requires explicit consent before sharing recent output with the configured Anthropic/OpenAI
+provider. Private sessions are excluded; secret filtering is best-effort, not a guarantee.
+Configuration updates are atomic and private; stale windows cannot re-enable sharing by
+saving an unrelated setting after another window opts out.
+The daemon's `control::summaries` worker reloads settings, reads bounded recent output and fresh
+agent reports, and generates one cached status line for every client. Normal refreshes are limited
+to once a minute per active session, with blocked/done transitions allowed sooner; unchanged
+input is skipped. Network calls never hold the registry lock. Results are discarded after opt-out,
+provider changes, a newer report, a lifecycle change, exit or replacement of the terminal.
+`SessionView.activity_summary` is optional (`session.activity_summary` capability); it is distinct
+from names/descriptions and carries text, capture time and an optional refresh error. The TUI
+adds a third content line, and full text/age above the preview only in Rakumux mode, without
+resizing the controlled terminal. The cache survives daemon restarts in `activity-summary.json`.
 
 ### Updates
 

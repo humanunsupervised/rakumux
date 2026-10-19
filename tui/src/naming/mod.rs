@@ -5,7 +5,7 @@
 
 mod history;
 mod prompt;
-mod provider;
+use rakumux_ai::provider;
 
 use crate::app::Config;
 
@@ -44,7 +44,7 @@ async fn suggest_with_env(
     let Some(provider) = provider::choose_provider(config, env) else {
         return Ok(None);
     };
-    let reply = provider::request_name(&provider, &prompt::build_prompt(&content)).await?;
+    let reply = provider::request_text(&provider, &prompt::build_prompt(&content)).await?;
     prompt::clean_name(&reply)
         .map(Some)
         .ok_or_else(|| anyhow::anyhow!("the AI reply contained no usable session name"))

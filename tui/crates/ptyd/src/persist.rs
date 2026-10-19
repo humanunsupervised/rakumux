@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use session_core::ids::SessionId;
+use session_core::model::ActivitySummary;
 use session_core::paths::Layout;
 use std::fs::{self, DirBuilder, OpenOptions, Permissions};
 use std::io::{self, Write};
@@ -58,6 +59,39 @@ pub struct ScrollbackStore {
 impl ScrollbackStore {
     pub fn new(layout: Layout) -> Self {
         Self { layout }
+    }
+
+    /// Persist generated activity separately from descriptions and scrollback.
+    pub fn save_activity_summary(
+        &self,
+        id: &SessionId,
+        summary: &ActivitySummary,
+    ) -> io::Result<()> {
+        let dir = self.dir_for(id)?;
+        if let Some(parent) = dir.parent() {
+            ensure_private_dir(parent)?;
+        }
+        ensure_private_dir(&dir)?;
+        let bytes = serde_json::to_vec(summary)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        write_atomic(&dir.join("activity-summary.json"), &bytes)
+    }
+
+    /// Read the previous status line after a daemon restart, if one exists.
+    pub fn load_activity_summary(&self, id: &SessionId) -> io::Result<Option<ActivitySummary>> {
+        let path = self.dir_for(id)?.join("activity-summary.json");
+        let Some(bytes) = read_optional(&path)? else {
+            return Ok(None);
+        };
+        if bytes.len() > 4096 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "activity summary exceeds its limit",
+            ));
+        }
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
     /// Replace the session's saved scrollback and metadata. Each file is
@@ -193,6 +227,33 @@ fn read_optional(path: &Path) -> io::Result<Option<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activity_summary_cache_is_private_and_independent_of_scrollback() {
+        let (home, store) = store();
+        let id = SessionId::from_string("summary-session");
+        let summary = ActivitySummary {
+            text: "Fixed login; verifying tests.".into(),
+            updated_at: 123,
+            error: None,
+        };
+        assert_eq!(store.load_activity_summary(&id).unwrap(), None);
+        store.save_activity_summary(&id, &summary).unwrap();
+        assert_eq!(store.load_activity_summary(&id).unwrap(), Some(summary));
+        let path = home
+            .path()
+            .join("rakumux/sessions/summary-session/activity-summary.json");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(
+            store.load(&id).unwrap().is_none(),
+            "summary does not create fake terminal scrollback"
+        );
+        store.remove(&id).unwrap();
+        assert!(!path.exists());
+    }
 
     fn store() -> (tempfile::TempDir, ScrollbackStore) {
         let home = tempfile::tempdir().unwrap();

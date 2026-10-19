@@ -102,6 +102,18 @@ pub struct ReportResult {
     pub files: Vec<String>,
 }
 
+/// Cached, AI-generated activity; distinct from a session's description.
+/// Model output is untrusted plain text and may be stale.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivitySummary {
+    pub text: String,
+    /// Unix seconds when the summarized activity was captured.
+    pub updated_at: i64,
+    /// A refresh failed; the last successful text remains available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// How to bring a session's program back after its terminal is lost.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResumeSpec {
@@ -161,6 +173,8 @@ pub struct SessionView {
     pub agent: Option<AgentInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reported: Option<Reported>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_summary: Option<ActivitySummary>,
     pub created_by: Creator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<SessionId>,
@@ -274,6 +288,7 @@ mod tests {
             pinned: false,
             git: None,
             auto_named: false,
+            activity_summary: None,
             description: None,
             notes: None,
             labels: Default::default(),

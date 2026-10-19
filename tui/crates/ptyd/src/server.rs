@@ -80,6 +80,7 @@ pub const CAPABILITIES: &[&str] = &[
     "auth.delegated",
     session_core::api::CAPABILITY_SESSIONS_ALL,
     session_core::api::CAPABILITY_DAEMON_RESTART,
+    session_core::api::CAPABILITY_ACTIVITY_SUMMARY,
 ];
 
 /// Every `op` tag of `api::Request`; anything else is `unsupported`.

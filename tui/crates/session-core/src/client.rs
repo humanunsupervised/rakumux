@@ -1232,6 +1232,7 @@ mod tests {
             pinned: false,
             git: None,
             auto_named: false,
+            activity_summary: None,
             description: None,
             notes: None,
             labels: Default::default(),

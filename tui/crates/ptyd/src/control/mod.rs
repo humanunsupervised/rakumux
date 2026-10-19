@@ -26,6 +26,7 @@ mod policy;
 mod registry;
 mod saved;
 mod service;
+mod summaries;
 mod waits;
 
 use crate::control_api::{Caller, Control};
@@ -130,6 +131,7 @@ impl ControlService {
         let inner = Arc::new(service::Inner::new(config, host, registry, detector));
         inner.adopt_host_terminals(handed);
         host_events::start(&inner, host_events)?;
+        summaries::start(&inner)?;
         Ok(Self { inner })
     }
 }

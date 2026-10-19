@@ -40,6 +40,8 @@ pub struct Screen {
     pub detail: Option<Rect>,
     /// Top row of the detail: session name, status, controlling/observing.
     pub detail_title: Option<Rect>,
+    /// Cached activity and freshness, visible only while browsing sessions.
+    pub activity_summary: Option<Rect>,
     /// Where the terminal view draws.
     pub terminal: Option<Rect>,
     /// The last row: mode badge, messages, keys. Shown in zoom too.
@@ -152,6 +154,7 @@ mod tests {
             screen.divider,
             screen.tabs,
             screen.detail_title,
+            screen.activity_summary,
             screen.terminal,
         ]
         .into_iter()

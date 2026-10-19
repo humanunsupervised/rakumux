@@ -321,7 +321,9 @@ pub fn draw_api_key_dialog(f: &mut Frame, dialog: &ApiKeyDialog, area: Rect) {
         Some(error) => vec![error_line(error), Line::from("")],
         None => Vec::new(),
     };
-    lines.push(Line::from("Used for AI session naming."));
+    lines.push(Line::from(
+        "Used for AI naming and optional activity summaries.",
+    ));
     for step in steps {
         lines.push(Line::from(vec![
             Span::styled("• ", Style::default().fg(p.accent_green)),
@@ -415,7 +417,7 @@ pub fn draw_ai_provider_dialog(f: &mut Frame, dialog: &AiProviderDialog, area: R
             )
         })
         .collect::<Vec<_>>();
-    choice_list(f, area, "AI naming provider", &options, dialog.selected);
+    choice_list(f, area, "AI provider", &options, dialog.selected);
 }
 
 pub fn draw_openai_model_dialog(f: &mut Frame, dialog: &OpenAiModelDialog, area: Rect) {

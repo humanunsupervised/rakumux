@@ -36,6 +36,7 @@ pub fn view(id: &str, name: &str, last_active_at: i64) -> SessionView {
         pinned: false,
         git: None,
         auto_named: false,
+        activity_summary: None,
         description: None,
         notes: None,
         labels: Default::default(),
@@ -347,6 +348,7 @@ impl SessionApi for FakeApi {
         let mut capabilities = vec!["attach"];
         if !state.folders_unsupported {
             capabilities.extend(["projects", "session.pin", "session.git"]);
+            capabilities.push(session_core::api::CAPABILITY_ACTIVITY_SUMMARY);
         }
         if !state.all_unsupported {
             capabilities.push(session_core::api::CAPABILITY_SESSIONS_ALL);

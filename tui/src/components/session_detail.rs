@@ -105,6 +105,22 @@ pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<
             fade_preview(f.buffer_mut(), title_area);
         }
     }
+    if let (Some(area), Some(summary)) = (
+        screen.activity_summary,
+        session.and_then(|session| session.activity_summary.as_ref()),
+    ) {
+        let text = super::format::activity_summary_details(summary, super::format::now_secs());
+        f.render_widget(
+            Paragraph::new(text)
+                .wrap(Wrap { trim: true })
+                .style(Style::default().fg(p.text_muted)),
+            Rect {
+                x: area.x + 1,
+                width: area.width.saturating_sub(2),
+                ..area
+            },
+        );
+    }
     let area = screen.terminal?;
     draw_terminal(f, app, area, focused)
 }

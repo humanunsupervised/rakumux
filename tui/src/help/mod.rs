@@ -1460,8 +1460,22 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
         "It uses Anthropic or OpenAI with the API key from the General tab here \
          (`{SETTINGS_KEY}` in the list opens it) or the ANTHROPIC_API_KEY or OPENAI_API_KEY \
          environment variable. Without a key, sessions keep their generated names. Names you \
-         choose are never replaced."
+          choose are never replaced."
     ));
+    doc.heading("AI activity summaries");
+    doc.text(
+        "Settings, General, Activity summaries is off by default. Enabling it asks for consent \
+         to share bounded recent terminal output and agent reports with your configured AI provider. \
+         Secret filtering is best-effort, not a guarantee; private sessions are excluded. Requests \
+         may incur charges, and a request already sent may finish after you turn it off.",
+    );
+    doc.text(
+        "The daemon generates one short status line for all clients, no more than once a minute \
+         per active session plus blocked/done transitions. Unchanged output is not sent again. \
+         The list shows a third content line; while browsing, the detail pane shows its full text, \
+         capture age and refresh errors. Cached text can be stale and never replaces the session's \
+         name or description. No AI call runs during drawing or blocks terminal input.",
+    );
 }
 
 fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {

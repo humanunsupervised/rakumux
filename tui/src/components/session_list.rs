@@ -32,7 +32,13 @@ fn row_height(row: &ListRow) -> u16 {
     match row {
         ListRow::Folders => 0,
         ListRow::NewSession | ListRow::FolderHeader(_) => 2,
-        ListRow::Session(_) => 3,
+        ListRow::Session(session) => {
+            if session.activity_summary.is_some() {
+                4
+            } else {
+                3
+            }
+        }
     }
 }
 
@@ -192,7 +198,22 @@ fn session_content(
         )
         .spans,
     );
-    vec![first, second]
+    let mut lines = vec![first, second];
+    if let Some(summary) = &session.activity_summary {
+        let text = super::format::activity_summary_line(summary);
+        lines.push(vec![
+            Span::raw("  "),
+            Span::styled(
+                truncate(&text, width.saturating_sub(2)),
+                Style::default().fg(if selected {
+                    p.text_primary
+                } else {
+                    p.text_muted
+                }),
+            ),
+        ]);
+    }
+    lines
 }
 
 /// The folder filter: `▤ All folders`, `▤ name  branch` or `▤ 3 folders`
@@ -427,6 +448,26 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn activity_summaries_add_one_stable_truncated_content_line() {
+        let h = crate::app::testing::harness(vec![]);
+        let mut session = crate::app::testing::view("A", "a", 1);
+        session.activity_summary = Some(session_core::model::ActivitySummary {
+            text: "Fixed login; verifying integration tests across both Mac architectures.".into(),
+            updated_at: 1,
+            error: None,
+        });
+        assert_eq!(row_height(&ListRow::Session(&session)), 4);
+        for width in [12, 35, 80] {
+            let lines = session_content(&h.app, &session, width, true, 1);
+            assert_eq!(lines.len(), 3);
+            assert!(Line::from(lines[2].clone()).width() <= width);
+            assert!(lines[2][1].content.starts_with("Fixed"));
+        }
+        session.activity_summary.as_mut().unwrap().text.clear();
+        assert_eq!(row_height(&ListRow::Session(&session)), 4);
     }
 
     #[test]

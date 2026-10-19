@@ -434,6 +434,29 @@ mod tests {
     }
 
     #[test]
+    fn activity_summaries_render_in_the_list_and_details_without_resizing_the_terminal() {
+        let mut session = view("A", "work", 10);
+        session.activity_summary = Some(session_core::model::ActivitySummary {
+            text: "Fixed login; verifying tests.".into(),
+            updated_at: crate::components::format::now_secs(),
+            error: None,
+        });
+        let mut h = harness(vec![session.clone()]);
+        for (width, height) in [(40, 20), (90, 40), (160, 48)] {
+            let screen = render(&mut h.app, width, height);
+            assert!(screen.contains("Fixed login; verifying tests."), "{screen}");
+        }
+        render(&mut h.app, 160, 48);
+        assert!(h.app.screen().activity_summary.is_some());
+        let terminal_size = h.app.terminal_size();
+        session.activity_summary = None;
+        h.event("A", session_core::api::SessionEvent::Updated { session });
+        render(&mut h.app, 160, 48);
+        assert!(h.app.screen().activity_summary.is_none());
+        assert_eq!(h.app.terminal_size(), terminal_size);
+    }
+
+    #[test]
     fn dead_session_shows_dimmed_saved_output() {
         let fake = FakeApi::new(vec![dead("D", "old-spike")]);
         fake.set_read("D", "saved line one\nsaved line two");

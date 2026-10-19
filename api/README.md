@@ -133,6 +133,13 @@ without the upgrade).
 
 ## Streams (WebSocket)
 
+Sessions may include `activity_summary: {text, updated_at, error?}` when the user enabled AI
+activity summaries in Rakumux Settings. `updated_at` is RFC 3339; text is AI-generated,
+untrusted and potentially stale. An empty text means no summary is available yet. Refresh
+failures preserve the last text and set `error`. The field is absent for private sessions or
+when summaries are disabled. Updates arrive through the existing `updated` session event;
+clients never need to request or generate summaries themselves.
+
 `GET /v1/events` and `GET /v1/sessions/{id}/attach` are WebSockets (RFC 6455, version 13) on the
 same port as everything else, with the same checks (bearer token, identity headers on loopback).
 The daemon stream is opened before the upgrade, so its errors are ordinary JSON answers: 404 for

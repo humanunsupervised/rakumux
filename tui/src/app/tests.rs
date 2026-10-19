@@ -919,6 +919,47 @@ async fn output_is_fed_in_order_and_gaps_reattach() {
     assert_eq!(h.fake.attach_count(), attaches + 1, "a gap re-attaches");
 }
 
+#[tokio::test]
+async fn activity_summaries_require_consent_and_can_be_disabled_without_confirmation() {
+    let mut h = harness(vec![view("A", "a", 1)]);
+    assert!(!h.app.settings.sessions.ai_activity_summaries);
+    h.press(KeyCode::Char('o')).await;
+    for _ in 0..SettingsItem::ActivitySummaries.index() {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(
+        matches!(&h.app.mode, AppMode::Confirm(dialog) if dialog.message.contains("Send recent output") && dialog.message.contains("best-effort"))
+    );
+    assert!(!h.app.settings.sessions.ai_activity_summaries);
+    h.press(KeyCode::Char('y')).await;
+    assert!(h.app.settings.sessions.ai_activity_summaries);
+    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
+    h.press(KeyCode::Enter).await;
+    assert!(!h.app.settings.sessions.ai_activity_summaries);
+    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
+}
+
+#[tokio::test]
+async fn stale_windows_cannot_reenable_activity_summary_sharing_by_saving_another_setting() {
+    let mut h = harness(vec![view("A", "a", 1)]);
+    h.app.settings.sessions.ai_activity_summaries = true;
+    h.app.save_summary_consent(true).unwrap();
+    let path = h.app.config_path.clone().unwrap();
+    let mut other_window = config::Settings::load_from(&path).unwrap();
+    other_window.sessions.ai_activity_summaries = false;
+    other_window.save_to(&path).unwrap();
+    h.app.save_settings().unwrap();
+    assert!(
+        !config::Settings::load_from(&path)
+            .unwrap()
+            .sessions
+            .ai_activity_summaries
+    );
+    h.press(KeyCode::Char('o')).await;
+    assert!(!h.app.settings.sessions.ai_activity_summaries);
+}
+
 /// The style of the first cell of `text` on the screen drawn at 120×40.
 fn cell_of(h: &mut Harness, text: &str) -> ratatui::buffer::Cell {
     cell_within(h, text, 120)
