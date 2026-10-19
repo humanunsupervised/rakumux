@@ -38,6 +38,25 @@ fn wait_for_text(api: &Api, id: &str, needle: &str) -> String {
     text
 }
 
+/// Wait for the token value, not the shell's echo of the startup command.
+fn wait_for_session_token(api: &Api, id: &str) -> String {
+    let mut token = None;
+    let found = wait_until(TIMEOUT, || {
+        let reply = api.call("GET", &format!("/v1/sessions/{id}/content"), None);
+        token = reply.body["text"].as_str().and_then(|text| {
+            text.lines()
+                .filter_map(|line| line.strip_prefix("TOKEN="))
+                .find(|value| {
+                    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+                .map(str::to_owned)
+        });
+        token.is_some()
+    });
+    assert!(found, "session token output never arrived");
+    token.unwrap()
+}
+
 #[test]
 fn requests_are_checked_before_they_reach_the_daemon() {
     let api = Api::start();
@@ -468,13 +487,7 @@ fn session_identity_applies_the_daemon_policy() {
     let other = create(&api, &api.env.project, "other", &[]);
     let elsewhere = create(&api, &api.env.other_project, "elsewhere", &[]);
     let id = agent["id"].as_str().unwrap().to_owned();
-    let screen = wait_for_text(&api, &id, "TOKEN=");
-    let token = screen
-        .lines()
-        .filter_map(|line| line.strip_prefix("TOKEN="))
-        .find(|token| token.len() == 64)
-        .expect("session token on screen")
-        .to_owned();
+    let token = wait_for_session_token(&api, &id);
 
     // Without a folder, a session sees its own folder only.
     let reply = api.call_as(&id, &token, "GET", "/v1/sessions", None);
@@ -585,13 +598,7 @@ fn agent_conversations_act_as_the_session_that_bound_them() {
         &["echo TOKEN=$RAKUMUX_SESSION_TOKEN"],
     );
     let id = agent["id"].as_str().unwrap().to_owned();
-    let screen = wait_for_text(&api, &id, "TOKEN=");
-    let token = screen
-        .lines()
-        .filter_map(|line| line.strip_prefix("TOKEN="))
-        .find(|token| token.len() == 64)
-        .expect("session token on screen")
-        .to_owned();
+    let token = wait_for_session_token(&api, &id);
     let auth = format!("Bearer {}", api.info.token);
     let as_conversation = |conversation: &str, method: &str, path: &str, body: Option<Value>| {
         let body = body.map(|b| b.to_string());

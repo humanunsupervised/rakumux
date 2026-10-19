@@ -183,9 +183,13 @@ fn send_keys_validates_everything_before_writing() {
     assert!(!screen.contains("ebogus"), "{screen}");
 
     // ctrl+c interrupts a running command.
-    host.submit(info.id, "sleep 30; echo NOT_INTERRUPTED")
+    host.submit(info.id, "sleep 30 && echo NOT_INTERRUPTED")
         .unwrap();
-    std::thread::sleep(Duration::from_millis(300));
+    assert!(wait_until(TIMEOUT, || host
+        .info(info.id)
+        .unwrap()
+        .foreground
+        .is_some_and(|process| process.name == "sleep")));
     host.send_keys(info.id, &keys(&["ctrl+c"]), None).unwrap();
     host.submit(info.id, "echo AFTER_$((2+2))").unwrap();
     let screen = wait_for_screen(&*host, info.id, "AFTER_4");
@@ -197,31 +201,49 @@ fn send_keys_validates_everything_before_writing() {
 fn submit_strips_paste_markers_from_the_text() {
     let home = TestHome::new();
     let host = home.host();
-    let info = host.spawn(home.bash_spec(80, 24, b"")).unwrap();
-    wait_for_prompt(&*host, info.id);
+    // Control the mode ourselves: macOS's Bash 3.2 readline has no bracketed
+    // paste support. Check the exact bytes received in both modes instead.
+    let program = r#"
+stty -echo
+printf '\033[?2004hPASTE_ON\n'
+IFS= read -r line
+if [[ "$line" != $'\033[200~SAFE_A; SAFE_B\033[201~' ]]; then
+    printf 'Unexpected pasted bytes: %q\n' "$line"
+    exit 1
+fi
+echo PASTE_ON_OK
+printf '\033[?2004lPASTE_OFF\n'
+IFS= read -r line
+if [[ "$line" != XYZ ]]; then
+    printf 'Unexpected plain bytes: %q\n' "$line"
+    exit 1
+fi
+echo PASTE_OFF_OK
+"#;
+    let mut argv = bash_argv();
+    argv.extend(["-c".into(), program.into()]);
+    let info = host.spawn(home.spec(argv, 80, 24, b"")).unwrap();
+    wait_for_screen(&*host, info.id, "PASTE_ON");
     assert!(wait_until(TIMEOUT, || host
         .info(info.id)
         .unwrap()
         .bracketed_paste));
-    // Bracketed paste on (readline): a text trying to close the paste early.
-    host.submit(info.id, "echo SAFE_A\x1b[201~; echo SAFE_B\x1b[200~")
+    // Text must not be able to close the paste early or start a second one.
+    host.submit(info.id, "SAFE_A\x1b[201~; SAFE_B\x1b[200~")
         .unwrap();
-    wait_for_screen(&*host, info.id, "\nSAFE_A\nSAFE_B\n");
+    wait_for_screen(&*host, info.id, "PASTE_ON_OK");
 
-    // Bracketed paste off (cat): unstripped markers would show up as text.
-    host.submit(info.id, "cat").unwrap();
+    wait_for_screen(&*host, info.id, "PASTE_OFF");
     assert!(wait_until(TIMEOUT, || !host
         .info(info.id)
         .unwrap()
         .bracketed_paste));
     host.submit(info.id, "X\x1b[201~Y\x1b[200~Z").unwrap();
-    let screen = wait_for_screen(&*host, info.id, "XYZ\nXYZ");
-    assert!(
-        !screen.contains("201~") && !screen.contains("200~"),
-        "{screen}"
+    wait_for_screen(&*host, info.id, "PASTE_OFF_OK");
+    assert_eq!(
+        wait_for_state(&*host, info.id, TIMEOUT),
+        TerminalState::Exited { code: Some(0) }
     );
-    host.send_keys(info.id, &["ctrl+d".to_string()], None)
-        .unwrap();
     host.shutdown();
 }
 
