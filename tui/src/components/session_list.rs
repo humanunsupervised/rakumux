@@ -3,8 +3,8 @@
 //! Folders modal), then the sessions of the folders shown, under a header
 //! row per folder when there are several, and "+ New session" last.
 //! Each session is a compact cell after a blank row: glyph, name (with a
-//! pin mark) and age; then its git branch, worktree, program and state. The
-//! selected item's text is white and the others' muted; nothing has a
+//! pin mark) and age; then its colour-coded program, git branch and state.
+//! The selected item's text is white and the others' muted; nothing has a
 //! background except the folder filter. A session being dragged has a blue
 //! bar on its left.
 
@@ -18,7 +18,7 @@ use ratatui::{
 use session_core::model::{ScopeRoot, SessionView};
 
 use super::folder_picker::{count_label, folder_branch};
-use super::format::{now_secs, relative_time, secondary_text, status_glyph, truncate, PIN_MARK};
+use super::format::{now_secs, relative_time, secondary_line, status_glyph, truncate, PIN_MARK};
 use super::utils::get_spinner_char;
 use crate::app::types::AppMode;
 use crate::app::{App, Connection, Hit, ListRow};
@@ -182,16 +182,17 @@ fn session_content(
     }
     first.push(Span::raw(" ".repeat(pad)));
     first.push(Span::styled(age, Style::default().fg(age_color)));
-    vec![
-        first,
-        vec![
-            Span::raw("  "),
-            Span::styled(
-                secondary_text(session, width.saturating_sub(2), app.icons()),
-                Style::default().fg(detail_color),
-            ),
-        ],
-    ]
+    let mut second = vec![Span::raw("  ")];
+    second.extend(
+        secondary_line(
+            session,
+            width.saturating_sub(2),
+            app.icons(),
+            Style::default().fg(detail_color),
+        )
+        .spans,
+    );
+    vec![first, second]
 }
 
 /// The folder filter: `▤ All folders`, `▤ name  branch` or `▤ 3 folders`
@@ -398,6 +399,35 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_colours_stay_visible_in_selected_and_unselected_session_items() {
+        use crate::app::testing::{harness, on_branch, view};
+
+        let h = harness(vec![]);
+        let mut session = view("A", "a", 0);
+        session.git = on_branch("main");
+        session.agent = Some(session_core::model::AgentInfo {
+            kind: "opencode".into(),
+            ..Default::default()
+        });
+        let p = theme::palette();
+        for selected in [false, true] {
+            let lines = session_content(&h.app, &session, 40, selected, 0);
+            let second = &lines[1];
+            assert_eq!(second[1].content, "opencode");
+            assert_eq!(second[1].style.fg, Some(p.accent_purple));
+            assert_eq!(second[2].content, " · ⎇ main");
+            assert_eq!(
+                second[2].style.fg,
+                Some(if selected {
+                    p.text_primary
+                } else {
+                    p.text_muted
+                })
+            );
+        }
+    }
 
     #[test]
     fn scrolls_to_keep_the_selection_visible() {

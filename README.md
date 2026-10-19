@@ -8,8 +8,6 @@
 
 ![Rakumux session list and live terminal](assets/rakumux-screenshot.png)
 
-**Status:** pre-release. Build from source until the first Rakumux release is published.
-
 Run Claude Code, Codex, OpenCode, Pi, dev servers, and shells side by side. A small background
 daemon owns your terminals, so sessions keep running when you close the UI or lose an SSH
 connection.
@@ -32,17 +30,15 @@ cd rakumux
 ./rakumux.sh
 ```
 
-Once releases are published, the recommended installer is:
+The recommended binary installer is:
 
 ```bash
 curl -fsSL https://rakumux.com/install.sh | bash
 ```
 
-The installer verifies the release checksum before running the tarball's installer.
-Packages use `rakumux` on npm and
-`humanunsupervised/rakumux/rakumux` on Homebrew. See the [installation guide](install/INSTALL.md)
-for package and release-tarball instructions. These channels require a Rakumux release to be
-published first.
+The installer verifies the release checksum before running the tarball's installer. Re-run it
+to upgrade. npm and Homebrew publishing are not enabled. See the
+[installation guide](install/INSTALL.md) for binary and release-tarball instructions.
 
 ## Quick start
 

@@ -29,6 +29,7 @@ From the repository root:
 ```bash
 bash tests/test-repository.sh
 bash tests/test-command-hook.sh
+bash tests/test-release.sh
 ```
 
 For website changes, run `npm ci`, `npm run typecheck`, and `npm run build` in `landing/`.

@@ -159,6 +159,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         KeyAction::Tour => app.open_welcome(),
         KeyAction::CheckForUpdate => app.open_upgrade_dialog(),
         KeyAction::Reload => app.refresh(),
+        KeyAction::Restart => app.request_restart(),
         KeyAction::QuitAndCd => match app.selected_cwd() {
             Some(cwd) => return AppResult::SwitchDirectory(cwd),
             None => app.set_status("Select a session to cd into its folder."),

@@ -39,6 +39,8 @@ Any static host works too: serve `out/` after `npm run build`.
 - `components/TuiDemo.tsx`: a working copy of the TUI's screen in the hero. It plays by itself
   until clicked, then takes `j`/`k`, `gg`/`G`, `Enter`, `Esc`, `1`-`5` and `Ctrl-\`. Tab is left
   to the browser so keyboard users can leave it; autoplay is off under reduced motion.
+  Descriptions put the colour-coded app first, then its branch and state. App colours and status
+  marks match `tui/src/components/format.rs`; previews stay full-colour in both modes.
 - `components/CopyCommand.tsx`: install commands with copy buttons.
 - `public/install.sh`: checksum-verifying installer served at <https://rakumux.com/install.sh>.
 

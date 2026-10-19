@@ -117,6 +117,7 @@ in this repository's license grant. Public preparation and release checks: `PUBL
 ```
 rakumux.sh                 # launcher (entry point)
 build.sh                     # local build
+release.sh                   # binary-only GitHub release entry point (macOS + Linux)
 api/                         # rakumux-api (external HTTP API), see api/README.md
   openapi.yaml               # the API contract (OpenAPI 3.1)
   src/                       # main, server, instance (flock), discovery (api.json), remote
@@ -254,6 +255,15 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   their first session after a `subscribe`; `scope`/`scopes` are then ignored). Capabilities
   `projects`, `session.pin`, `session.git`, `auth.delegated`, `sessions.all` and `daemon.restart`
   advertise the additions.
+- `session_import {source}` (user only, capability `session.import`) restores an archive directory
+  containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.
+  The daemon preserves ids and metadata, refuses existing ids or names, stages files privately,
+  and inserts the records in one transaction. It publishes `created` events but starts no programs.
+  Stop the source daemon before reviving imported sessions to avoid duplicate agent conversations.
+- `project_relocate {from,to}` (user only, capability `projects.relocate`) updates saved folder
+  and cwd prefixes after a directory move, in one transaction. Existing sessions and their
+  programs stay running; an unrelated existing source folder is refused. Reconnect clients
+  afterwards (an in-place daemon restart preserves programs and refreshes authenticated scopes).
 - Attach stream: checkpoint (base64 screen state) + offset, then output frames and stream events
   (`resized`, `role_changed`, `title`, `cwd`, `bell`, `clipboard`, `exited`, `lagged`); the client
   sends input frames and `resize` / `promote` / `demote` / `detach`.
@@ -542,16 +552,18 @@ since running sessions end).
 TUI keys come in two modes. **Session mode**: everything goes to the program except `Ctrl-\`,
 which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_keys_in_session` is
 on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
-session is previewed, faded: the session pane fades whenever it doesn't take keys, in
-Rakumux mode or under a dialog, while the list never fades; the folder filter, a folder
+session is previewed in full colour: live previews don't fade in Rakumux mode, but the
+session pane still fades under a dialog and for saved output, while the list never fades; the folder filter, a folder
 header and + New session keep the last session in view, one the filters show), `gg`/`G`,
 `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder) (a Ctrl or Alt that no shortcut uses is
 ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
 `Ctrl-\` back to the session you came from, `Tab` last session, `1`-`9` go into that session,
-`n` new, `r` rename, `p` pin, `J`/`K` move the session down/up, `x` close, `dd` delete, `z` full
+`n` new, `r` rename, `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
 screen, `P` (or Enter on the folder filter) the Folders modal, `/` filter, `Ctrl-y`/`Ctrl-e`/
-PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `q`
+PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `R`
+ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
+build; daemon and sessions stay up), `q`
 quit. There is no header: the panes start at the top row, and the folder filter (`▤ All folders
 ▾`, a folder's name and branch, or `▤ 3 folders ▾`) is the list's first row (Sidebar) or sits at
 the left of the tab bar (Tabs). The footer, always one row at the bottom (in zoom too), starts with the mode badge
@@ -578,7 +590,7 @@ Moving through the list on a phone doesn't resize anything: no session is on scr
 
 Narrow windows (Sidebar from 80 to `layout::SINGLE_PANE_BELOW` = 100 columns): in Rakumux mode
 the list is stacked on top, a one-row divider under it, and the selected session's detail (title
-row and faded preview) below, so switching sessions shows them. The list gets 40% of the rows above
+row and full-colour preview) below, so switching sessions shows them. The list gets 40% of the rows above
 the footer, at least `LIST_MIN_ROWS` (9: the folder filter and two sessions) and leaving the detail
 `PREVIEW_MIN_ROWS` (4); dragging the divider sets that share (`sessions.stacked_list_percent`).
 Below `STACK_MIN_ROWS` (14 rows above the footer, a 15-row screen) Rakumux mode shows the list
@@ -611,8 +623,9 @@ part, and are saved as `sessions.session_order`. A click without movement still 
 The first load still selects the most recently used session.
 
 The new-session dialog (`n`, "+ New session") asks only for a name (blank: a generated one). The
-session goes in the current folder (`App::current_folder`: the selected session's folder; on a
-folder header, that folder; else the filter's only folder; else the launch folder), shown under
+session goes in the current folder (`App::current_folder`: the selected session's or header's
+folder, retained on the folder filter and "+ New session" rows; a single-folder filter takes
+precedence; without folder context, the launch folder), shown under
 the name (`in ▤ folder`), and runs the login shell there. A session made in a folder the filter
 hides adds that folder to the filter. Other folders, commands and startup commands are CLI-only:
 `rakumux new --cwd DIR --cmd C -- ARGV`.

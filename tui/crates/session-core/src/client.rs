@@ -36,6 +36,12 @@ pub trait SessionApi: Send + Sync {
     fn list(&self, scope: Option<&ScopeRoot>, include_dead: bool) -> Result<Vec<SessionView>>;
     fn get(&self, id: &SessionId) -> Result<SessionView>;
     fn create(&self, request: CreateSession) -> Result<SessionView>;
+    /// Restore saved sessions without starting their programs (user only,
+    /// daemon capability `session.import`). Conflicts are never overwritten.
+    fn import_sessions(&self, source: &Path) -> Result<Vec<SessionView>> {
+        let _ = source;
+        Err(unsupported("importing saved sessions"))
+    }
     fn rename(&self, id: &SessionId, name: &str) -> Result<SessionView>;
     fn kill(&self, id: &SessionId, tree: bool) -> Result<Vec<SessionId>>;
     fn delete(&self, id: &SessionId) -> Result<()>;
@@ -84,6 +90,11 @@ pub trait SessionApi: Send + Sync {
     fn remove_project(&self, path: &ScopeRoot) -> Result<()> {
         let _ = path;
         Err(unsupported("projects"))
+    }
+    /// Update saved folder references after a move (user only).
+    fn relocate_project(&self, from: &ScopeRoot, to: &ScopeRoot) -> Result<()> {
+        let _ = (from, to);
+        Err(unsupported("relocating a folder"))
     }
     fn pin(&self, id: &SessionId, pinned: bool) -> Result<SessionView> {
         let _ = (id, pinned);
@@ -277,6 +288,22 @@ impl Client {
 impl SessionApi for Client {
     fn caller(&self) -> &CallerInfo {
         &self.caller
+    }
+
+    fn relocate_project(&self, from: &ScopeRoot, to: &ScopeRoot) -> Result<()> {
+        self.expect_ok(&Request::ProjectRelocate {
+            from: from.clone(),
+            to: to.clone(),
+        })
+    }
+
+    fn import_sessions(&self, source: &Path) -> Result<Vec<SessionView>> {
+        match self.request(&Request::SessionImport {
+            source: source.to_path_buf(),
+        })? {
+            Response::Sessions { sessions } => Ok(sessions),
+            other => Err(unexpected(&other)),
+        }
     }
 
     fn list(&self, scope: Option<&ScopeRoot>, include_dead: bool) -> Result<Vec<SessionView>> {
@@ -1508,6 +1535,8 @@ mod tests {
                     return;
                 }
                 Request::Subscribe(_) => return serve_events(stream),
+                Request::SessionImport { .. } => Response::Sessions { sessions: vec![] },
+                Request::ProjectRelocate { .. } => Response::Ok,
                 Request::Hello(_) => Response::Error {
                     error: ApiError::new(ErrorCode::InvalidArgument, "hello twice"),
                 },

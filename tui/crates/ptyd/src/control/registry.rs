@@ -253,48 +253,124 @@ impl Registry {
 
     /// Insert a session and record its project as used when it was created.
     pub fn insert(&self, record: &SessionRecord) -> Result<()> {
+        self.insert_many(std::slice::from_ref(record))
+    }
+
+    /// Insert a batch atomically, leaving existing records untouched on any
+    /// duplicate id, duplicate name or invalid record.
+    pub fn insert_many(&self, records: &[SessionRecord]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
-        tx.execute(
-            &format!(
-                "INSERT INTO sessions_v2 ({COLUMNS}) \
+        for record in records {
+            tx.execute(
+                &format!(
+                    "INSERT INTO sessions_v2 ({COLUMNS}) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
                  ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"
-            ),
-            params![
-                record.id.as_str(),
-                path_text(record.scope.path())?,
-                record.name,
-                path_text(&record.cwd)?,
-                to_json(&record.launch)?,
-                opt_json(record.resume.as_ref())?,
-                to_json(&record.created_by)?,
-                record.parent_id.as_ref().map(SessionId::as_str),
-                record.depth as i64,
-                opt_json(record.agent.as_ref())?,
-                opt_json(record.reported.as_ref())?,
-                record.exit_code,
-                record.created_at_ms,
-                record.last_active_at_ms,
-                record.ended_at_ms,
-                record.description,
-                record.notes,
-                labels_json(&record.labels)?,
-                record.private,
-                record.auto_named,
-                record.agent.as_ref().map(|a| a.kind.as_str()),
-                record
-                    .agent
-                    .as_ref()
-                    .and_then(|a| a.agent_session_id.as_deref()),
-                record.pinned,
-            ],
-        )?;
-        tx.execute(
-            USE_PROJECT,
-            params![path_text(record.scope.path())?, record.created_at_ms],
-        )?;
+                ),
+                params![
+                    record.id.as_str(),
+                    path_text(record.scope.path())?,
+                    record.name,
+                    path_text(&record.cwd)?,
+                    to_json(&record.launch)?,
+                    opt_json(record.resume.as_ref())?,
+                    to_json(&record.created_by)?,
+                    record.parent_id.as_ref().map(SessionId::as_str),
+                    record.depth as i64,
+                    opt_json(record.agent.as_ref())?,
+                    opt_json(record.reported.as_ref())?,
+                    record.exit_code,
+                    record.created_at_ms,
+                    record.last_active_at_ms,
+                    record.ended_at_ms,
+                    record.description,
+                    record.notes,
+                    labels_json(&record.labels)?,
+                    record.private,
+                    record.auto_named,
+                    record.agent.as_ref().map(|a| a.kind.as_str()),
+                    record
+                        .agent
+                        .as_ref()
+                        .and_then(|a| a.agent_session_id.as_deref()),
+                    record.pinned,
+                ],
+            )?;
+            tx.execute(
+                USE_PROJECT,
+                params![path_text(record.scope.path())?, record.created_at_ms],
+            )?;
+        }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Read an archive without creating, migrating or modifying its database.
+    pub fn read_archive(path: &Path) -> Result<Vec<SessionRecord>> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version != SCHEMA_VERSION {
+            return Err(RegistryError::Corrupt(format!(
+                "archive schema {version}; expected {SCHEMA_VERSION}"
+            )));
+        }
+        let archive = Self { conn };
+        let (records, bad) = archive.list_all()?;
+        if let Some(error) = bad.into_iter().next() {
+            return Err(error);
+        }
+        Ok(records)
+    }
+
+    /// Move a folder's saved references atomically. Current working
+    /// directories in that tree also move, even for sessions of other scopes.
+    pub fn relocate_project(&self, from: &ScopeRoot, to: &ScopeRoot) -> Result<Vec<SessionId>> {
+        let (records, bad) = self.list_all()?;
+        if let Some(error) = bad.into_iter().next() {
+            return Err(error);
+        }
+        let transaction = self.conn.unchecked_transaction()?;
+        let mut changed = Vec::new();
+        for mut record in records {
+            let moved_scope = record.scope == *from;
+            let moved_cwd = record
+                .cwd
+                .strip_prefix(from.path())
+                .ok()
+                .map(|rest| to.path().join(rest));
+            if !moved_scope && moved_cwd.is_none() {
+                continue;
+            }
+            if moved_scope {
+                record.scope = to.clone();
+            }
+            if let Some(cwd) = moved_cwd {
+                record.cwd = cwd;
+            }
+            transaction.execute(
+                "UPDATE sessions_v2 SET scope_root = ?2, cwd = ?3 WHERE id = ?1",
+                params![
+                    record.id.as_str(),
+                    path_text(record.scope.path())?,
+                    path_text(&record.cwd)?
+                ],
+            )?;
+            changed.push(record.id);
+        }
+        transaction.execute(
+            "INSERT INTO projects (path, added_at, last_used_at) \
+             SELECT ?2, added_at, last_used_at FROM projects WHERE path = ?1 \
+             ON CONFLICT(path) DO UPDATE SET \
+             added_at = MIN(projects.added_at, excluded.added_at), \
+             last_used_at = MAX(COALESCE(projects.last_used_at, 0), COALESCE(excluded.last_used_at, 0))",
+            params![path_text(from.path())?, path_text(to.path())?],
+        )?;
+        transaction.execute(
+            "DELETE FROM projects WHERE path = ?1",
+            [path_text(from.path())?],
+        )?;
+        transaction.commit()?;
+        Ok(changed)
     }
 
     pub fn get(&self, id: &SessionId) -> Result<Option<SessionRecord>> {
@@ -925,6 +1001,35 @@ mod tests {
         assert!(!reg
             .name_taken(&scope, "alpha", Some(&SessionId::from_string("A")))
             .unwrap());
+    }
+
+    #[test]
+    fn a_failed_batch_import_rolls_back_all_new_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = open(&dir);
+        registry.insert(&record("A", "/s", "taken", 1)).unwrap();
+        let records = [record("B", "/new", "new", 2), record("C", "/s", "taken", 3)];
+        assert!(matches!(
+            registry.insert_many(&records),
+            Err(RegistryError::NameTaken)
+        ));
+        assert_eq!(registry.count().unwrap(), 1);
+        assert_eq!(registry.get(&SessionId::from_string("B")).unwrap(), None);
+    }
+
+    #[test]
+    fn relocation_name_conflicts_roll_back_the_folder_and_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = open(&dir);
+        let original = record("A", "/before", "same", 1);
+        registry.insert(&original).unwrap();
+        registry.insert(&record("B", "/after", "same", 2)).unwrap();
+        assert!(matches!(
+            registry.relocate_project(&original.scope, &ScopeRoot::from_canonical("/after".into())),
+            Err(RegistryError::NameTaken)
+        ));
+        assert_eq!(registry.get(&original.id).unwrap(), Some(original));
+        assert_eq!(registry.count().unwrap(), 2);
     }
 
     #[test]

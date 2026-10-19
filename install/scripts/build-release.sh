@@ -31,12 +31,13 @@ LICENSE_FILE="$PROJECT_ROOT/LICENSE"
 
 show_usage() {
     cat << EOF
-Usage: $0 [VERSION] [INCREMENT_TYPE] [--no-clean]
+Usage: $0 [VERSION] [INCREMENT_TYPE] [--no-clean] [--platform=PLATFORM]
 
 Arguments:
   VERSION             Specific version to build (optional)
   INCREMENT_TYPE      Version increment: major, minor, patch (default: patch)
   --no-clean          Skip 'cargo clean' (faster local dry-runs)
+  --platform=PLATFORM Build only macos-arm64, macos-intel or linux-x64 (CI)
 
 Examples:
   $0                    # Auto-increment patch version
@@ -48,12 +49,14 @@ If VERSION is not provided, determines the next version from GitHub releases.
 Requires cargo-about (THIRD_PARTY_NOTICES); on macOS also cargo-zigbuild + zig
 (Linux build) and the rustup targets x86_64-apple-darwin, aarch64-apple-darwin
 and x86_64-unknown-linux-musl.
+Linux can select the static target with RAKUMUX_LINUX_TARGET=x86_64-unknown-linux-musl.
 EOF
 }
 
 VERSION=""
 INCREMENT_TYPE="patch"
 CLEAN_BUILD=true
+ONLY_PLATFORM=""
 positional_count=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -63,6 +66,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-clean)
             CLEAN_BUILD=false
+            shift
+            ;;
+        --platform=*)
+            ONLY_PLATFORM="${1#*=}"
             shift
             ;;
         --)
@@ -115,6 +122,19 @@ RUNTIME_SCRIPTS=(
 
 # Release platforms for this host: "platform:target-triple:cargo-subcommand".
 release_platforms() {
+    if [[ -n "$ONLY_PLATFORM" ]]; then
+        case "$(uname -s):$ONLY_PLATFORM" in
+            Darwin:macos-intel) echo "macos-intel:x86_64-apple-darwin:build" ;;
+            Darwin:macos-arm64) echo "macos-arm64:aarch64-apple-darwin:build" ;;
+            Linux:linux-x64)
+                local target="${RAKUMUX_LINUX_TARGET:-x86_64-unknown-linux-gnu}"
+                case "$target" in x86_64-unknown-linux-gnu|x86_64-unknown-linux-musl) ;; *) echo "Unsupported Linux target: $target" >&2; return 1 ;; esac
+                echo "linux-x64:$target:build"
+                ;;
+            *) echo "Unsupported platform for this host: $ONLY_PLATFORM" >&2; return 1 ;;
+        esac
+        return
+    fi
     case "$(uname -s)-$(uname -m)" in
         Darwin-*)
             echo "macos-intel:x86_64-apple-darwin:build"
@@ -385,9 +405,7 @@ Terminal sessions for coding agents, in one fast TUI.
 ## Installation
 
 \`\`\`bash
-npm install -g rakumux
-# or
-brew install humanunsupervised/rakumux/rakumux
+curl -fsSL https://rakumux.com/install.sh | bash
 \`\`\`
 
 ### Release tarballs
@@ -471,8 +489,6 @@ echo ""
 echo "🔐 SHA256 Checksums:"
 cat "$RELEASE_DIR/checksums.txt"
 echo ""
-echo "📝 Next steps (full-release-automation.sh runs them):"
+echo "📝 Production release entry point: ./release.sh $VERSION"
 echo "1. ./install/scripts/test-install.sh $VERSION        # with SKIP_BUILD=1"
 echo "2. ./install/scripts/create-github-release.sh $VERSION"
-echo "3. ./install/scripts/release-homebrew.sh $VERSION"
-echo "4. ./install/scripts/publish-npm.sh $VERSION"

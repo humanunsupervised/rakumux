@@ -3,8 +3,6 @@
 Rakumux runs on macOS (Apple Silicon or Intel) and Linux x64. It needs only bash: no git, tmux
 or other tools.
 
-**Pre-release:** build from source until Rakumux release assets and packages are available.
-
 ## Installer
 
 ```bash
@@ -14,21 +12,8 @@ curl -fsSL https://rakumux.com/install.sh | bash
 The installer checks the archive against the release's `checksums.txt`, then runs its installer.
 Use `PREFIX="$HOME/.local" bash` in place of `bash` for a user-local installation.
 
-## npm
-
-```bash
-npm install -g rakumux
-```
-
-Requires Node.js 14 or newer. The package contains prebuilt binaries for every supported platform.
-
-## Homebrew (macOS and Linux)
-
-```bash
-brew install humanunsupervised/rakumux/rakumux
-```
-
-Update with `brew upgrade rakumux`.
+Re-run the same installer to upgrade. npm and Homebrew publishing are not enabled; use the
+binary installer or a release tarball.
 
 ## Release tarball
 

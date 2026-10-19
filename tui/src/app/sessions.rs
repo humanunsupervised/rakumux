@@ -1550,12 +1550,13 @@ impl App {
 
     pub(super) fn run_confirmed(&mut self, action: ConfirmAction) {
         self.mode = AppMode::Normal;
-        let Some(api) = self.api() else {
-            self.set_status("Not connected to the daemon.");
-            return;
-        };
         match action {
+            ConfirmAction::RestartUi => self.restart_requested = true,
             ConfirmAction::DeleteSession { id, name } => {
+                let Some(api) = self.api() else {
+                    self.set_status("Not connected to the daemon.");
+                    return;
+                };
                 self.set_status(format!("Deleting {name}…"));
                 self.exec.job(move || AppEvent::Deleted {
                     result: api.delete(&id),
@@ -1563,6 +1564,10 @@ impl App {
                 });
             }
             ConfirmAction::CloseSession { id, name } => {
+                let Some(api) = self.api() else {
+                    self.set_status("Not connected to the daemon.");
+                    return;
+                };
                 self.set_status(format!("Closing {name}…"));
                 self.exec.job(move || AppEvent::Killed {
                     result: api.kill(&id, false),

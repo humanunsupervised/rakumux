@@ -26,7 +26,7 @@ use session_core::model::{ProjectView, ScopeRoot, SessionView};
 
 use super::path_complete::{self, expand, home_dir, MAX_SUGGESTIONS};
 use super::runtime::AppEvent;
-use super::session_list::{Listed, Selection};
+use super::session_list::Listed;
 use super::types::{AppMode, FolderPicker, NewFolder, PickerRow, PickerStage};
 use super::App;
 
@@ -299,20 +299,13 @@ impl App {
             .unwrap_or((0, 0))
     }
 
-    /// Where new sessions go: the selected session's folder; on a folder
-    /// header, that folder; else the filter's only folder; else the launch
-    /// folder.
+    /// Where new sessions go: the current folder section, retained on the
+    /// folder filter and "+ New session" rows; the filter's only folder
+    /// takes precedence. Without folder context, use the launch folder.
     pub fn current_folder(&self) -> ScopeRoot {
-        let selected = match self.list.selection() {
-            Selection::Session(_) => self.list.selected_session().map(|s| s.scope.clone()),
-            Selection::FolderHeader(folder) => Some(folder.clone()),
-            Selection::Folders | Selection::NewSession => None,
-        };
-        selected
-            .or_else(|| match self.list.folder_filter() {
-                [only] => Some(only.clone()),
-                _ => None,
-            })
+        self.list
+            .current_folder()
+            .cloned()
             .unwrap_or_else(|| self.folders.launch.clone())
     }
 

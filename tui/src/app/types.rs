@@ -45,6 +45,8 @@ pub struct RenameDialog {
 /// Actions that need a yes/no confirmation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfirmAction {
+    /// Reload only this UI, leaving the daemon and sessions running.
+    RestartUi,
     /// Terminate, then remove the record and its scrollback.
     DeleteSession { id: SessionId, name: String },
     /// Terminate the process; the record stays (Exited, restartable).

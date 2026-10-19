@@ -36,6 +36,7 @@ jobs:
           RAKUMUX_HOME: ${{ runner.temp }}/rakumux-home
       - run: bash tests/test-repository.sh
       - run: bash tests/test-command-hook.sh
+      - run: bash tests/test-release.sh
 
   website:
     runs-on: ubuntu-latest

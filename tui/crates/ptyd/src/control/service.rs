@@ -360,6 +360,7 @@ impl Inner {
             } => self.list(caller, scope, scopes, all, include_dead),
             Request::SessionGet { id } => self.get(caller, &id),
             Request::SessionCreate(request) => self.create(caller, request),
+            Request::SessionImport { source } => self.import_sessions(caller, &source),
             Request::SessionRename { id, name } => self.rename(caller, &id, &name),
             Request::SessionKill { id, tree } => self.kill(caller, &id, tree),
             Request::SessionDelete { id } => self.delete(caller, &id),
@@ -378,6 +379,7 @@ impl Inner {
             Request::ProjectList => self.projects(caller),
             Request::ProjectAdd { path } => self.add_project(caller, &path),
             Request::ProjectRemove { path } => self.remove_project(caller, &path),
+            Request::ProjectRelocate { from, to } => self.relocate_project(caller, &from, &to),
             Request::Hello(_)
             | Request::Attach(_)
             | Request::Subscribe(_)
@@ -521,6 +523,72 @@ impl Inner {
         Ok(Response::Session {
             session: self.view(&state, &record, children, caller.session_id()),
         })
+    }
+
+    fn import_sessions(&self, caller: &Caller, source: &Path) -> Result<Response, ApiError> {
+        let mut state = self.lock();
+        let result = policy::authorize(caller, Op::Import, None)
+            .and_then(|()| self.restore_archive(&mut state, source));
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::Import,
+            None,
+            None,
+            Some(audit::clip(&source.display().to_string())),
+            &result,
+        );
+        result.map(|sessions| Response::Sessions { sessions })
+    }
+
+    fn restore_archive(
+        &self,
+        state: &mut State,
+        source: &Path,
+    ) -> Result<Vec<SessionView>, ApiError> {
+        if !source.is_absolute() {
+            return Err(invalid("archive directory must be absolute"));
+        }
+        let records = Registry::read_archive(&source.join("registry.sqlite3"))?;
+        let registry = registry(&state.registry)?;
+        for record in &records {
+            if registry.get(&record.id)?.is_some() {
+                return Err(invalid(format!("session {} already exists", record.id)));
+            }
+            if registry.name_taken(&record.scope, &record.name, None)? {
+                return Err(name_taken(&record.name));
+            }
+            names::validate(&record.name)?;
+            // Existing sessions may have cd'd outside their original folder;
+            // restoring isn't creating a session in a different scope.
+            if !record.cwd.is_absolute() {
+                return Err(invalid(format!("session {} has a relative cwd", record.id)));
+            }
+        }
+        let staged = super::import::StagedFiles::copy(source, &self.config.layout, &records)
+            .map_err(|error| invalid(format!("copying archive files: {error}")))?;
+        registry.insert_many(&records)?;
+        staged.commit();
+        let mut sessions = Vec::with_capacity(records.len());
+        for record in &records {
+            let children = records
+                .iter()
+                .filter(|child| child.parent_id.as_ref() == Some(&record.id))
+                .map(|child| child.id.clone())
+                .collect();
+            let view = self.view(state, record, children, None);
+            state.views.insert(record.id.clone(), view.clone());
+            self.publish(
+                &record.scope,
+                &record.id,
+                SessionEvent::Created {
+                    session: view.clone(),
+                },
+            );
+            sessions.push(view);
+        }
+        self.changed.notify_all();
+        Ok(sessions)
     }
 
     fn create(&self, caller: &Caller, request: CreateSession) -> Result<Response, ApiError> {
@@ -1320,6 +1388,58 @@ impl Inner {
     }
 
     /// Every project for user callers; a session caller's own for sessions.
+    fn relocate_project(
+        &self,
+        caller: &Caller,
+        from: &ScopeRoot,
+        to: &ScopeRoot,
+    ) -> Result<Response, ApiError> {
+        let mut state = self.lock();
+        let result = policy::authorize(caller, Op::ProjectRelocate, None).and_then(|()| {
+            validate_scope(Some(to.clone()))?;
+            if !from.path().is_absolute() || from == to {
+                return Err(invalid("source must be a different absolute folder"));
+            }
+            if from.path().exists()
+                && from
+                    .path()
+                    .canonicalize()
+                    .map_err(|error| invalid(error.to_string()))?
+                    != to.path()
+            {
+                return Err(invalid(
+                    "source still exists and does not point to the moved folder",
+                ));
+            }
+            let changed = registry(&state.registry)?.relocate_project(from, to)?;
+            for live in state.live.values_mut() {
+                if live.scope == *from {
+                    live.scope = to.clone();
+                }
+            }
+            for id in changed {
+                state.git.remove(&id);
+                self.refresh(&mut state, &id);
+            }
+            self.changed.notify_all();
+            Ok(())
+        });
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::ProjectRelocate,
+            Some(to),
+            None,
+            Some(audit::clip(&format!(
+                "{} -> {}",
+                from.path().display(),
+                to.path().display()
+            ))),
+            &result,
+        );
+        result.map(|()| Response::Ok)
+    }
+
     fn projects(&self, caller: &Caller) -> Result<Response, ApiError> {
         let mut projects = {
             let state = self.lock();

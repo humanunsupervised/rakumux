@@ -84,6 +84,9 @@ pub struct SessionList {
     /// What the last snapshot brought in full.
     listed: Listed,
     selection: Selection,
+    /// Last selected section or single-folder filter. Neutral rows keep
+    /// this context so "+ New session" targets the folder the user visited.
+    folder_context: Option<ScopeRoot>,
     pub filter: TextInput,
     /// `/` was pressed and keys go to the filter.
     pub filter_editing: bool,
@@ -104,6 +107,7 @@ impl SessionList {
             order: HashMap::new(),
             listed: Listed::Folders(Vec::new()),
             selection: Selection::NewSession,
+            folder_context: None,
             filter: TextInput::default(),
             filter_editing: false,
             loaded: false,
@@ -137,11 +141,24 @@ impl SessionList {
             self.selection = self.default_selection();
             self.reselect = self.selection == Selection::NewSession;
         }
+        self.remember_selected_folder();
     }
 
     /// The folder filter: the folders shown, or none for all folders.
     pub fn folder_filter(&self) -> &[ScopeRoot] {
         &self.folders
+    }
+
+    /// Folder for new sessions: the filter's only folder, otherwise the
+    /// last selected section when the folder filter still includes it.
+    pub fn current_folder(&self) -> Option<&ScopeRoot> {
+        match self.folders.as_slice() {
+            [only] => Some(only),
+            _ => self
+                .folder_context
+                .as_ref()
+                .filter(|folder| self.folders.is_empty() || self.folders.contains(folder)),
+        }
     }
 
     /// Several folders are shown, under header rows.
@@ -320,11 +337,12 @@ impl SessionList {
         if self.selection == Selection::Session(id.clone()) {
             let row = visible_before.iter().position(|v| v == id).unwrap_or(0);
             let visible = self.visible();
-            self.selection = visible
+            let selection = visible
                 .get(row)
                 .or_else(|| row.checked_sub(1).and_then(|r| visible.get(r)))
                 .map(|s| Selection::Session(s.id.clone()))
                 .unwrap_or(Selection::NewSession);
+            self.select(selection);
             return Some(ListChange::SelectedRemoved(id.clone()));
         }
         self.ensure_selection_visible();
@@ -534,6 +552,21 @@ impl SessionList {
     pub fn select(&mut self, selection: Selection) {
         self.selection = selection;
         self.reselect = false;
+        self.remember_selected_folder();
+    }
+
+    fn remember_selected_folder(&mut self) {
+        let folder = match &self.selection {
+            Selection::Session(_) => self.selected_session().map(|session| session.scope.clone()),
+            Selection::FolderHeader(folder) => Some(folder.clone()),
+            Selection::Folders | Selection::NewSession => match self.folders.as_slice() {
+                [only] => Some(only.clone()),
+                _ => None,
+            },
+        };
+        if let Some(folder) = folder {
+            self.folder_context = Some(folder);
+        }
     }
 
     /// Re-apply the filters: keep the selection when it's still shown,
@@ -551,6 +584,7 @@ impl SessionList {
                 .map(|s| Selection::Session(s.id.clone()))
                 .unwrap_or(Selection::NewSession);
         }
+        self.remember_selected_folder();
     }
 
     /// The most recently active visible session, whatever the order.
@@ -1175,6 +1209,66 @@ mod tests {
         list.filter.set("");
         let ids: Vec<&str> = list.visible().iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["R1", "W1"]);
+    }
+
+    #[test]
+    fn new_sessions_keep_the_last_selected_section_on_neutral_rows() {
+        let web = folder("/web");
+        let mut list = loaded(vec![view("R1", "r", 10), view_in(&web, "W1", "w", 50)]);
+        assert_eq!(list.current_folder(), Some(&web));
+        for selection in [Selection::NewSession, Selection::Folders] {
+            list.select(selection);
+            assert_eq!(list.current_folder(), Some(&web));
+        }
+        list.select(Selection::FolderHeader(scope()));
+        assert_eq!(list.current_folder(), Some(&scope()));
+        list.select(Selection::NewSession);
+        assert_eq!(list.current_folder(), Some(&scope()));
+        // Row clicks and keyboard navigation update the same folder context.
+        list.select_row(3);
+        assert_eq!(list.selection(), &Selection::FolderHeader(web.clone()));
+        list.move_selection(2);
+        assert_eq!(list.selection(), &Selection::NewSession);
+        assert_eq!(list.current_folder(), Some(&web));
+    }
+
+    #[test]
+    fn folder_context_follows_filters_and_empty_folder_headers() {
+        let (web, empty) = (folder("/web"), folder("/empty"));
+        let mut list = loaded(vec![view("R1", "r", 10), view_in(&web, "W1", "w", 50)]);
+        list.set_folder_filter(vec![scope(), empty.clone()]);
+        assert_eq!(list.current_folder(), Some(&scope()));
+        list.select(Selection::FolderHeader(empty.clone()));
+        list.select(Selection::NewSession);
+        assert_eq!(list.current_folder(), Some(&empty));
+        // A new filter takes precedence over the old section, even empty.
+        list.set_folder_filter(vec![web.clone()]);
+        list.select(Selection::Folders);
+        assert_eq!(list.current_folder(), Some(&web));
+        list.set_folder_filter(vec![empty.clone()]);
+        assert_eq!(list.current_folder(), Some(&empty));
+        // Expanding the filter keeps its current folder when still included.
+        list.set_folder_filter(vec![empty.clone(), folder("/other-empty")]);
+        assert_eq!(list.current_folder(), Some(&empty));
+        // Don't reuse a remembered section excluded by a multi-folder filter.
+        list.set_folder_filter(vec![folder("/other-empty"), folder("/third-empty")]);
+        assert_eq!(list.current_folder(), None);
+    }
+
+    #[test]
+    fn refreshes_and_removing_the_last_session_preserve_folder_context() {
+        let web = folder("/web");
+        let sessions = vec![view_in(&web, "W1", "w", 50)];
+        let mut list = loaded(sessions.clone());
+        list.select(Selection::NewSession);
+        list.replace_all(sessions, Listed::All);
+        assert_eq!(list.current_folder(), Some(&web));
+        list.select(Selection::Session(SessionId::from_string("W1")));
+        list.remove(&SessionId::from_string("W1"));
+        assert_eq!(list.selection(), &Selection::NewSession);
+        assert_eq!(list.current_folder(), Some(&web));
+        list.replace_all(vec![], Listed::All);
+        assert_eq!(list.current_folder(), Some(&web));
     }
 
     #[test]

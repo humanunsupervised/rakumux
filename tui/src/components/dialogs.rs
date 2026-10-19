@@ -11,8 +11,8 @@ use ratatui::{
 };
 
 use crate::app::types::{
-    AiProviderDialog, ApiKeyDialog, ApiProvider, AuthCodeDialog, AuthEmailDialog, ConfirmDialog,
-    DaemonRestartDialog, OpenAiModelDialog, RenameDialog, UpgradeDialog,
+    AiProviderDialog, ApiKeyDialog, ApiProvider, AuthCodeDialog, AuthEmailDialog, ConfirmAction,
+    ConfirmDialog, DaemonRestartDialog, OpenAiModelDialog, RenameDialog, UpgradeDialog,
 };
 use crate::components::utils::{
     draw_text_input, get_spinner_char, popup_area, popup_area_fixed_height, popup_width,
@@ -133,7 +133,10 @@ pub(crate) fn error_line(message: &str) -> Line<'static> {
 }
 
 pub fn draw_confirm_dialog(f: &mut Frame, dialog: &ConfirmDialog, area: Rect) {
-    let keys = [("y/Enter", "Yes"), ("n/Esc", "No")];
+    let keys = match &dialog.action {
+        ConfirmAction::RestartUi => [("y/Enter", "Restart"), ("n/Esc", "Cancel")],
+        _ => [("y/Enter", "Yes"), ("n/Esc", "No")],
+    };
     let width = popup_width(area.width, 60);
     let message = [Line::from(dialog.message.clone())];
     // The message, a blank row and the keys: 8 rows unless the message

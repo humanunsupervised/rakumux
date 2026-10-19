@@ -1,8 +1,8 @@
 //! Right pane: the selected session's terminal (running, or its saved
 //! screen), with placeholders for no sessions, loading, the session
-//! Rakumux runs in, errors and the daemon being unreachable. While the
-//! pane doesn't take keys (Rakumux mode, a dialog open) it's faded: shown,
-//! but visibly not the thing you're typing into.
+//! Rakumux runs in, errors and the daemon being unreachable. Live previews
+//! keep their colours in Rakumux mode; only dialogs and saved output fade
+//! the pane. The cursor appears only while the session takes keys.
 
 use ratatui::{
     layout::{Alignment, Rect},
@@ -97,7 +97,9 @@ pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<
             );
         }
         f.render_widget(block, title_area);
-        if !focused {
+        if !matches!(app.mode, AppMode::Normal)
+            || matches!(app.detail.view, DetailView::Saved { .. })
+        {
             fade(f.buffer_mut(), title_area);
         }
     }
@@ -259,7 +261,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
         DetailView::Live(_) => {
             let terminal = app.detail.terminal.as_ref()?;
             let cursor = terminal.render(area, f.buffer_mut(), focused, colors);
-            if !focused {
+            if !matches!(app.mode, AppMode::Normal) {
                 fade(f.buffer_mut(), area);
             }
             cursor

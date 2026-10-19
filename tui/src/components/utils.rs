@@ -4,14 +4,13 @@ use ratatui::style::Modifier;
 
 use crate::theme;
 
-/// How far a faded area's text and backgrounds move toward the app
-/// background.
-pub(crate) const FADE_TEXT: f32 = 0.5;
-const FADE_BACKGROUND: f32 = 0.5;
+/// Keep three quarters of the contrast in saved output or under a dialog.
+pub(crate) const FADE_TEXT: f32 = 0.25;
+const FADE_BACKGROUND: f32 = 0.25;
 
-/// Fade every cell of `area`: shown, but not taking keys (the session pane
-/// in Rakumux mode or under a dialog). Palettes that can't fade colours
-/// (16 colours) dim the text instead.
+/// Fade saved output or the session pane under a dialog. Live previews in
+/// Rakumux mode stay unchanged. Palettes that can't fade colours (16
+/// colours) dim the text instead.
 pub fn fade(buf: &mut Buffer, area: Rect) {
     let p = theme::palette();
     let area = area.intersection(buf.area);
@@ -176,6 +175,30 @@ pub fn popup_area_fixed_height(area: Rect, percent_x: u16, height: u16) -> Rect 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fading_keeps_three_quarters_of_the_contrast_and_stays_within_the_pane() {
+        let p = theme::palette();
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 2, 1));
+        buffer
+            .get_mut(0, 0)
+            .set_style(p.base().bg(p.selection).add_modifier(Modifier::BOLD));
+        let outside = buffer.get(1, 0).clone();
+
+        fade(&mut buffer, Rect::new(0, 0, 1, 1));
+
+        let cell = buffer.get(0, 0);
+        match p.faded(p.text_primary, 0.25) {
+            Some(fg) => {
+                assert_eq!(cell.fg, fg);
+                assert!(!cell.modifier.contains(Modifier::DIM));
+            }
+            None => assert!(cell.modifier.contains(Modifier::DIM)),
+        }
+        assert_eq!(cell.bg, p.faded(p.selection, 0.25).unwrap_or(p.selection));
+        assert!(cell.modifier.contains(Modifier::BOLD));
+        assert_eq!(buffer.get(1, 0), &outside);
+    }
 
     #[test]
     fn dialogs_keep_a_usable_width_on_narrow_screens() {

@@ -73,8 +73,10 @@ pub const CAPABILITIES: &[&str] = &[
     "status",
     "shutdown",
     "projects",
+    "projects.relocate",
     "session.pin",
     "session.git",
+    "session.import",
     "auth.delegated",
     session_core::api::CAPABILITY_SESSIONS_ALL,
     session_core::api::CAPABILITY_DAEMON_RESTART,
@@ -87,6 +89,7 @@ const KNOWN_OPS: &[&str] = &[
     "session_list",
     "session_get",
     "session_create",
+    "session_import",
     "session_rename",
     "session_kill",
     "session_delete",
@@ -102,6 +105,7 @@ const KNOWN_OPS: &[&str] = &[
     "project_list",
     "project_add",
     "project_remove",
+    "project_relocate",
     "attach",
     "subscribe",
     "daemon_status",
@@ -1510,6 +1514,9 @@ mod tests {
                 all: false,
             },
             Request::SessionGet { id: id.clone() },
+            Request::SessionImport {
+                source: "/archive".into(),
+            },
             Request::SessionCreate(CreateSession {
                 scope: None,
                 name: None,
@@ -1571,6 +1578,10 @@ mod tests {
             Request::ProjectAdd { path: "/p".into() },
             Request::ProjectRemove {
                 path: session_core::model::ScopeRoot::from_canonical("/p".into()),
+            },
+            Request::ProjectRelocate {
+                from: session_core::model::ScopeRoot::from_canonical("/before".into()),
+                to: session_core::model::ScopeRoot::from_canonical("/after".into()),
             },
             Request::Attach(AttachRequest {
                 id: id.clone(),

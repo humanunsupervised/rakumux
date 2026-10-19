@@ -216,7 +216,7 @@ pub struct App {
     pub rakumux_key: KeyBinding,
     /// `None` when cycling is turned off in the config.
     pub cycle_keys: Option<CycleKeys>,
-    /// Rakumux mode: the first key of `gg` or `dd` was pressed.
+    /// Rakumux mode: the first key of `gg` was pressed.
     pub pending_key: Option<char>,
     /// The session Rakumux mode was entered from: Esc and the Rakumux
     /// key go back to it.
@@ -277,6 +277,8 @@ pub struct App {
 
     pub pending_update_version: Option<String>,
     pub update_install_method: Option<crate::updater::InstallMethod>,
+    /// Reload this UI after detaching and restoring the terminal. Does not
+    /// stop or restart the daemon.
     pub restart_requested: bool,
     pub auth: AuthService,
 }
@@ -348,6 +350,16 @@ impl App {
             app.set_status(warnings.join("; "));
         }
         app
+    }
+
+    /// Ask before reloading this UI. Confirming leaves the daemon and all
+    /// session programs running; cancelling leaves this window unchanged.
+    pub fn request_restart(&mut self) {
+        self.mode = AppMode::Confirm(ConfirmDialog {
+            title: "Restart Rakumux?".into(),
+            message: "This will reload this UI with the latest build. The daemon and all running sessions will keep running.".into(),
+            action: ConfirmAction::RestartUi,
+        });
     }
 
     /// Start connecting to the daemon (call after the first paint).

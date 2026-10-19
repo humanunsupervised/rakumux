@@ -255,6 +255,4 @@ echo
 success "🚀 Release v$VERSION is ready for deployment!"
 echo
 info "To deploy this release:"
-info "  1. ./install/scripts/create-github-release.sh $VERSION"
-info "  2. ./install/scripts/release-homebrew.sh $VERSION"
-info "  3. ./install/scripts/publish-npm.sh $VERSION"
+info "  ./release.sh $VERSION  # complete macOS/Linux binary release through GitHub Actions"

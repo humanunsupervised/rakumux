@@ -78,7 +78,7 @@ fn card(app: &App, index: usize) -> (&'static str, Vec<String>) {
         4 => (
             "The main shortcuts",
             vec![
-                "`n` new   `r` rename   `p` pin   `x` close   `dd` delete".into(),
+                "`n` new   `r` rename   `p` pin   `x` close   `d`/`dd` delete".into(),
                 "`P` folders   `/` filter   `z` full screen   `q` quit".into(),
                 format!("From inside a session, press `{k}` first, then the key."),
             ],

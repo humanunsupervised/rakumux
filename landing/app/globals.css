@@ -532,7 +532,6 @@ h3 {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  opacity: 0.85;
 }
 
 .tui-item.is-selected .tui-item-name {
@@ -541,7 +540,7 @@ h3 {
 }
 
 .tui-item.is-selected .tui-item-sub {
-  color: var(--text-dim);
+  color: var(--text);
 }
 
 .tui-item.is-selected .tui-item-age {
@@ -556,20 +555,38 @@ h3 {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: #16161e;
-  transition: background 0.2s;
-}
-
-.tui-pane.is-live {
   background: var(--surface);
 }
 
+.tui-pane.is-live .tui-pane-name {
+  color: var(--blue);
+}
+
 .tui-pane-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tui-pane-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tui-pane-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tui-pane-role {
+  flex: none;
 }
 
 .tui-screen {
@@ -694,6 +711,10 @@ h3 {
 }
 
 @media (max-width: 720px) {
+  .tui-footer-secondary {
+    display: none;
+  }
+
   .tui-body {
     grid-template-columns: 1fr;
     grid-template-rows: auto 220px;

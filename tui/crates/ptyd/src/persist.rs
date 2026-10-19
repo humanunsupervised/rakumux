@@ -121,7 +121,7 @@ impl ScrollbackStore {
 
 /// Ids are opaque, but they become directory names: allow only characters
 /// that can't form a path separator or `..`.
-fn validate_id(id: &SessionId) -> io::Result<()> {
+pub(crate) fn validate_id(id: &SessionId) -> io::Result<()> {
     let value = id.as_str();
     let valid = !value.is_empty()
         && value.len() <= MAX_ID_LEN

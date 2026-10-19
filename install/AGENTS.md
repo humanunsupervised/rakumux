@@ -84,7 +84,6 @@ install/
 │   └── resources/, dist/, LICENSE, THIRD_PARTY_NOTICES   # generated, git-ignored
 ├── release-notes/<version>.md     # GitHub release notes for that version
 └── scripts/
-    ├── full-release-automation.sh # Whole release, in order
     ├── get-next-version.sh        # Next version from GitHub releases
     ├── build-release.sh           # Build binaries, packages, checksums, notes
     ├── generate-third-party-notices.sh
@@ -100,30 +99,31 @@ install/
 
 ## Release process
 
-Run on macOS (it builds all three platforms):
+The binary-only entry point is `release.sh` at the repository root. Run from a clean,
+reviewed public checkout after pushing its source commit to `main`:
 
 ```bash
-./install/scripts/full-release-automation.sh              # next patch version
-./install/scripts/full-release-automation.sh 0.1.0        # explicit version
-./install/scripts/full-release-automation.sh --dry-run    # build, test, render, pack; publish nothing
+./release.sh                  # next published patch version (first release: 0.1.0)
+./release.sh 0.1.0             # explicit version
+./release.sh 0.1.0 --dry-run   # validate and preview; create/push nothing
 ```
 
-Steps: `build-release.sh` → `test-install.sh` (`SKIP_BUILD=1`) → `create-github-release.sh` →
-tracking tag `release/v<version>` → `release-homebrew.sh` → `publish-npm.sh`.
-Commit version changes to `install/npm/package.json`; the rendered formula is generated and ignored.
-Before publishing, create and push the reviewed source's `v<version>` tag. The GitHub release
-step uses `--verify-tag` so an absent tag cannot silently target the default branch.
-Follow `PUBLISHING.md` before the first public source release.
+The script verifies that HEAD equals public `main`, then creates and pushes an annotated
+`v<version>` tag. `.github/workflows/release.yml` tests the source and builds one package on
+each native runner: macOS Apple Silicon, macOS Intel and Linux x64 (static musl). Every package
+passes `test-install.sh` with an isolated install prefix. The publish job verifies all three
+tarballs and combines their checksums before uploading a draft, then makes the complete release
+public. `--draft` leaves it unpublished; `--prerelease` does not replace the latest stable release.
+Nothing publishes to npm or Homebrew. The public installer downloads these GitHub release assets.
 
-Prerequisites: Rust with targets `x86_64-apple-darwin`, `aarch64-apple-darwin`,
-`x86_64-unknown-linux-musl`; `cargo-zigbuild` + `zig` (Linux build);
-`cargo install cargo-about --locked --features cli`; `gh auth login`; npm credentials
-(`NPM_TOKEN`, `.env` or `npm login`); Homebrew, with `rakumux` not installed while
-`release-homebrew.sh` verifies (it installs from a temporary tap).
+Local prerequisites: git push access to the public repository; curl for automatic version
+selection. No local GitHub CLI, npm or Homebrew login is needed. Actions uses its scoped
+`GITHUB_TOKEN`. For manual package builds, install Rust and cargo-about; cross-building Linux
+from macOS also needs cargo-zigbuild and zig. Follow `PUBLISHING.md` before publishing source.
 
 ### build-release.sh
 
-`build-release.sh [VERSION] [INCREMENT] [--no-clean]`. Builds `-p tui -p rakumux-ptyd
+`build-release.sh [VERSION] [INCREMENT] [--no-clean] [--platform=PLATFORM]`. Builds `-p tui -p rakumux-ptyd
 -p rakumux-api -p rakumux-mcp` with
 `--locked` and an explicit `--target` per platform (`RAKUMUX_VERSION` is embedded by
 `tui/build.rs`), checks each binary's architecture with `file`, generates

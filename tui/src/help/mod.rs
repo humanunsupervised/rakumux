@@ -215,6 +215,8 @@ pub enum KeyAction {
     Tour,
     CheckForUpdate,
     Reload,
+    /// Reload only this UI, leaving the daemon and sessions running.
+    Restart,
     QuitAndCd,
     Quit,
     /// Into the session and send it the Rakumux key itself.
@@ -223,7 +225,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The rows of the Keys tab, in order.
-    pub const ALL: [KeyAction; 33] = [
+    pub const ALL: [KeyAction; 34] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -255,6 +257,7 @@ impl KeyAction {
         KeyAction::Tour,
         KeyAction::CheckForUpdate,
         KeyAction::Reload,
+        KeyAction::Restart,
         KeyAction::QuitAndCd,
         KeyAction::Quit,
     ];
@@ -293,6 +296,7 @@ impl KeyAction {
             | KeyAction::Tour
             | KeyAction::CheckForUpdate
             | KeyAction::Reload
+            | KeyAction::Restart
             | KeyAction::QuitAndCd
             | KeyAction::Quit => "Help and app",
         }
@@ -331,6 +335,7 @@ impl KeyAction {
             KeyAction::Tour => "Welcome tour",
             KeyAction::CheckForUpdate => "Check for updates",
             KeyAction::Reload => "Reconnect or reload the list",
+            KeyAction::Restart => "Restart Rakumux (sessions keep running)",
             KeyAction::QuitAndCd => "Quit and cd to the session's folder",
             KeyAction::Quit => "Quit Rakumux (sessions keep running)",
             KeyAction::SendRakumuxKey => "Send the Rakumux key to the session",
@@ -371,7 +376,7 @@ impl KeyAction {
             KeyAction::MoveDown => plain(&["J"]),
             KeyAction::MoveUp => plain(&["K"]),
             KeyAction::Close => plain(&["x"]),
-            KeyAction::Delete => plain(&["dd"]),
+            KeyAction::Delete => plain(&["d", "dd"]),
             KeyAction::Zoom => plain(&["z"]),
             KeyAction::Filter => plain(&["/"]),
             KeyAction::Help => plain(&["?"]),
@@ -379,6 +384,7 @@ impl KeyAction {
             KeyAction::Tour => "t (in Help)".into(),
             KeyAction::CheckForUpdate => plain(&["u"]),
             KeyAction::Reload => plain(&["Ctrl-r"]),
+            KeyAction::Restart => plain(&["R"]),
             KeyAction::QuitAndCd => plain(&["c"]),
             KeyAction::Quit => plain(&["q"]),
             KeyAction::SendRakumuxKey => plain(&["\\"]),
@@ -396,7 +402,7 @@ impl KeyAction {
                  a Rakumux mode key."
             ),
             KeyAction::BackToSession => format!(
-                "Esc first cancels what's pending (the second key of `gg` or `dd`, then the \
+                "Esc first cancels what's pending (the second key of `gg`, then the \
                  filter); with nothing to cancel it goes back. `{p}` goes back at once."
             ),
             KeyAction::GoIn => "A dead session is revived, an exited one restarted. On the \
@@ -438,7 +444,15 @@ impl KeyAction {
                  the mouse does the same. The order is kept until you change it."
                     .into()
             }
-            KeyAction::Delete => "Press d twice; it asks before deleting.".into(),
+            KeyAction::Delete => {
+                "Press d or dd; both ask before deleting. Confirm with y or Enter.".into()
+            }
+            KeyAction::Restart => {
+                "Asks before reloading this UI through its launcher to pick up the latest build. \
+                 Confirm with y or Enter; Esc cancels. The daemon and sessions stay up. \
+                 Ctrl-r only reconnects or reloads the list."
+                    .into()
+            }
             KeyAction::Zoom => {
                 format!("The list or tab bar hides until you press `{p}`.")
             }
@@ -1056,7 +1070,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
          drive Rakumux: the list, new sessions, folders, Help and Settings. The session \
          keeps showing beside the list (below it on a narrow screen; on a phone you see the \
          list alone) while you look around, \
-         faded: it's live, but your keys \
+         in full colour: it's live, but your keys \
          don't reach it. On the folder filter, a folder's header or + New session it keeps \
          the last session in view."
     ));
@@ -1080,7 +1094,8 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         SessionLayout::Sidebar => doc.bullet(format!(
             "Session list, on the left: the folder filter on top ({} All folders), then the \
              sessions in the order you keep them (a new one goes at the bottom), each with a \
-             status mark and its git branch; the selected one is white, the others dimmed. With \
+             status mark, its colour-coded app name first, then its git branch; the selected \
+             name is white, the others dimmed. With \
              several folders, each has a header row; pinned sessions (★) lead their folder.",
             ctx.icons.folder()
         )),
@@ -1113,7 +1128,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         2,
         format!(
             "Press `{p}` for Rakumux mode. Move between sessions with `↑`/`↓` or `j`/`k`; the \
-             right side shows each one live, faded until you go in."
+             right side shows each one live, in full colour."
         ),
     );
     doc.step(
@@ -1293,9 +1308,10 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     ));
     doc.text(
         "`n` (or + New session) asks only for a name. The session goes in the current folder, \
-         shown under the name, and starts your login shell there: the selected session's \
-         folder, the folder whose header is selected, the folder the filter shows, or else the \
-         folder you started Rakumux in. For another folder, a command or startup commands, \
+         shown under the name, and starts your login shell there. Selecting a session or \
+         folder header sets this folder; moving to + New session or the folder filter keeps \
+         it. A single-folder filter takes precedence. Without folder context, the launch \
+         folder is used. For another folder, a command or startup commands, \
          use the command line: `rakumux new --cwd DIR --cmd C -- ARGV`.",
     );
 
@@ -2780,13 +2796,14 @@ mod tests {
             ("Move session down", "J"),
             ("Move session up", "K"),
             ("Close session", "x"),
-            ("Delete session", "dd"),
+            ("Delete session", "d, dd"),
             ("Work in the session full screen", "z"),
             ("Filter sessions", "/"),
             ("Help", "?"),
             ("Settings", "comma (,), o"),
             ("Check for updates", "u"),
             ("Reconnect or reload the list", "Ctrl-r"),
+            ("Restart Rakumux", "R"),
             ("Quit and cd", "c"),
             ("Quit Rakumux", "q"),
             ("Send the Rakumux key", "\\"),

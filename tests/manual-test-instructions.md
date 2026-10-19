@@ -68,13 +68,13 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
       `Option+↑`) except `Ctrl-\`, which switches to Rakumux mode (the footer's bottom-left
       badge: orange RAKUMUX, SESSION in a session; on its right `? help  , settings`, after
       `Ctrl-\` in a session; switching modes, moving the selection or a message appearing never
-      moves the panes). There: `j`/`k` preview other sessions, faded (colours toward the
-      background, live output still moving; full colour again once you go in, faded under Help or
+      moves the panes). There: `j`/`k` preview other sessions in full colour (live output still
+      moving; no colour or contrast change when you go in, faded only under Help or
       Settings); on the folder filter, a folder header and + New session the last session stays
-      in view, faded (never one the folder filter hides);
+      in view, in full colour (never one the folder filter hides);
       the list is never faded; `Esc` returns to the
-      one you came from (after clearing a filter or a pending `g`/`d`), `Enter` goes into the
-      selected one, `Tab` the one before, `1`-`9`, `z` full screen, `dd` delete (confirm), `x`
+      one you came from (after clearing a filter or a pending `g`), `Enter` goes into the
+      selected one, `Tab` the one before, `1`-`9`, `z` full screen, `d` or `dd` delete (confirm), `x`
       close (confirm), `\` sends `Ctrl-\` to the session. Quick `Ctrl-\ Esc` never reports
       "Another client took control".
 - [ ] Below 100 columns (Sidebar) Rakumux mode stacks the list above the selected session; in
@@ -84,6 +84,9 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
 
 - [ ] Quit the TUI (`q`) and reopen it: sessions are still running and output produced meanwhile
       is visible.
+- [ ] `R` in Rakumux mode (also Settings → Keys → Restart Rakumux) shows a restart warning that
+      sessions keep running. `y`/Enter reloads the UI and latest build; `n`/Esc cancels. Repeating
+      `R` doesn't confirm. Daemon and session PIDs stay unchanged. `R` still types in sessions and filters.
 - [ ] A session whose program exits shows the exit code and "Enter to restart".
 - [ ] `rakumux daemon stop`, then reopen: sessions show as dead with their saved scrollback;
       `Enter` revives them in the same folder.
@@ -99,6 +102,11 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
       same pid from both.
 - [ ] `r` renames (names are unique per scope); `d` and `dd` both open delete confirmation.
       A second `d` never confirms; `y` or Enter confirms, `n` or Esc cancels.
+- [ ] Session descriptions show the app name before the branch. App colours stay consistent
+      when selecting another session or switching modes; branch and state keep their usual colours.
+- [ ] Navigate to another folder's session or header, then to "+ New session": the dialog's folder
+      and the created session stay in that section's folder, not the launch folder. Check `n`, Enter,
+      mouse selection, empty folder headers, and single- and multi-folder filters.
 
 ## 5. Several clients and folders
 

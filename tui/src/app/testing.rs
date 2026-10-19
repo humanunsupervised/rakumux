@@ -515,6 +515,7 @@ impl SessionApi for FakeApi {
     }
 
     fn shutdown(&self) -> Result<()> {
+        self.record("shutdown".into());
         Ok(())
     }
 

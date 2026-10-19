@@ -44,7 +44,7 @@ impl Palette {
 
     /// `color` faded toward the background by `amount` (0 keeps it, 1 is the
     /// background) and partly greyed: how things look that are shown but
-    /// don't take input, like the session pane in Rakumux mode. `None`
+    /// don't take input, like saved output or the pane under a dialog. `None`
     /// when this palette can't fade (16 colours; use `Modifier::DIM`) or
     /// `color` is the terminal's default.
     pub fn faded(&self, color: Color, amount: f32) -> Option<Color> {
@@ -73,7 +73,7 @@ impl Palette {
 }
 
 /// How much [`Palette::faded`] greys a colour before fading it.
-const FADE_GREY: f32 = 0.35;
+const FADE_GREY: f32 = 0.15;
 
 /// Tokyo Night's terminal colours, standing in for the 16 ANSI colours,
 /// which the terminal defines.
@@ -490,6 +490,19 @@ mod tests {
             ansi.faded(Color::White, 0.5),
             None,
             "16 colours dim instead"
+        );
+    }
+
+    #[test]
+    fn dialog_fading_keeps_text_bright_and_preserves_colour() {
+        let p = Theme::tokyo_night().palette;
+        assert_eq!(
+            p.faded(p.text_primary, 0.25),
+            Some(Color::Rgb(152, 158, 190))
+        );
+        assert_eq!(
+            p.faded(Color::Rgb(200, 120, 80), 0.25),
+            Some(Color::Rgb(149, 99, 77))
         );
     }
 

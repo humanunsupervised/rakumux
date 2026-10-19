@@ -16,15 +16,11 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
     }
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
-    // The second key of `gg` / `dd`; anything else drops the first.
+    // The second key of `gg`; anything else drops the first.
     if let Some(first) = app.pending_key.take() {
         match (first, key.code) {
             ('g', KeyCode::Char('g')) if !ctrl && !alt => {
                 app.move_selection(-(app.list.row_count() as isize));
-                return AppResult::Continue;
-            }
-            ('d', KeyCode::Char('d')) if !ctrl && !alt => {
-                app.confirm_delete();
                 return AppResult::Continue;
             }
             // Esc only cancels the pending key.
@@ -85,7 +81,10 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('K') => app.move_selected_session(-1),
         KeyCode::Char('P') => app.open_folder_picker(),
         KeyCode::Char('r') => app.open_rename(),
-        KeyCode::Char('d') => app.pending_key = Some('d'),
+        KeyCode::Char('R') => app.request_restart(),
+        // A second `d` is ignored by the dialog, so `dd` works too without
+        // bypassing the explicit deletion confirmation.
+        KeyCode::Char('d') => app.confirm_delete(),
         KeyCode::Char('x') => app.confirm_close(),
         KeyCode::Char('z') => app.zoom_into_selected(),
         KeyCode::Char('/') => app.list.filter_editing = true,

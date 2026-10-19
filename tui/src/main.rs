@@ -9,6 +9,7 @@ mod layout;
 mod naming;
 mod qr;
 mod remote_access;
+mod restart;
 mod terminal_view;
 mod theme;
 mod ui;
@@ -16,7 +17,6 @@ mod updater;
 
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -55,14 +55,7 @@ enum RunOutcome {
 }
 
 fn restart_current_process() -> Result<()> {
-    use std::os::unix::process::CommandExt;
-
-    let current_exe = std::env::current_exe()?;
-    let args: Vec<String> = std::env::args().collect();
-    let mut command = Command::new(current_exe);
-    command.args(&args[1..]);
-    let error = command.exec();
-    Err(error.into())
+    restart::current_process().map_err(Into::into)
 }
 
 async fn check_and_perform_update() -> Result<()> {

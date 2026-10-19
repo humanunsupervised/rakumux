@@ -22,6 +22,7 @@ pub(crate) enum Op {
     List,
     Get,
     Create,
+    Import,
     Rename,
     Kill,
     Delete,
@@ -39,6 +40,7 @@ pub(crate) enum Op {
     ProjectList,
     ProjectAdd,
     ProjectRemove,
+    ProjectRelocate,
 }
 
 impl Op {
@@ -48,6 +50,7 @@ impl Op {
             Op::List => "session.list",
             Op::Get => "session.get",
             Op::Create => "session.create",
+            Op::Import => "session.import",
             Op::Rename => "session.rename",
             Op::Kill => "session.kill",
             Op::Delete => "session.delete",
@@ -65,6 +68,7 @@ impl Op {
             Op::ProjectList => "project.list",
             Op::ProjectAdd => "project.add",
             Op::ProjectRemove => "project.remove",
+            Op::ProjectRelocate => "project.relocate",
         }
     }
 
@@ -73,6 +77,7 @@ impl Op {
         matches!(
             self,
             Op::Create
+                | Op::Import
                 | Op::Rename
                 | Op::Kill
                 | Op::Delete
@@ -85,6 +90,7 @@ impl Op {
                 | Op::Bind
                 | Op::ProjectAdd
                 | Op::ProjectRemove
+                | Op::ProjectRelocate
         )
     }
 }
@@ -125,7 +131,10 @@ pub(crate) fn authorize(
             Some(target) if target.id == self_id => Ok(()),
             _ => Err(denied(op, "a session may only do this to itself")),
         },
-        Op::ProjectAdd | Op::ProjectRemove => Err(denied(op, "folders are managed by the user")),
+        Op::Import => Err(denied(op, "importing saved sessions is for user clients")),
+        Op::ProjectAdd | Op::ProjectRemove | Op::ProjectRelocate => {
+            Err(denied(op, "folders are managed by the user"))
+        }
         Op::Kill | Op::Delete | Op::Revive | Op::Send | Op::Submit | Op::Attach => Err(denied(
             op,
             "agent control of other sessions arrives in a later release",
@@ -186,10 +195,11 @@ mod tests {
         }
     }
 
-    const ALL: [Op; 20] = [
+    const ALL: [Op; 22] = [
         Op::List,
         Op::Get,
         Op::Create,
+        Op::Import,
         Op::Rename,
         Op::Kill,
         Op::Delete,
@@ -207,6 +217,7 @@ mod tests {
         Op::ProjectList,
         Op::ProjectAdd,
         Op::ProjectRemove,
+        Op::ProjectRelocate,
     ];
 
     #[test]

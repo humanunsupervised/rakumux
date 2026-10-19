@@ -1,15 +1,14 @@
 # install/
 
-Distribution of Rakumux: release tarballs on GitHub, the Homebrew tap and the npm package. All
-three ship the same four binaries (`rakumux`, `rakumux-ptyd`, `rakumux-api`, `rakumux-mcp`), the `rakumux.sh` launcher,
-`LICENSE` and `THIRD_PARTY_NOTICES`, and all three run `rakumux.sh` for every argument.
+Production distribution is native release tarballs on GitHub, installed with the curl command
+below. They ship four binaries (`rakumux`, `rakumux-ptyd`, `rakumux-api`, `rakumux-mcp`), the
+`rakumux.sh` launcher, `LICENSE` and `THIRD_PARTY_NOTICES`. npm and Homebrew helpers remain for
+future channel setup; those registries are not part of the current production release.
 
 ## Users
 
 ```bash
-npm install -g rakumux
-# or
-brew install humanunsupervised/rakumux/rakumux
+curl -fsSL https://rakumux.com/install.sh | bash
 ```
 
 See [INSTALL.md](INSTALL.md) for every option and troubleshooting.
@@ -17,8 +16,8 @@ See [INSTALL.md](INSTALL.md) for every option and troubleshooting.
 ## Maintainers
 
 ```bash
-./install/scripts/full-release-automation.sh            # release the next patch version (macOS)
-./install/scripts/full-release-automation.sh --dry-run  # build, test, render, pack; publish nothing
+./release.sh                  # next binary release, built and tested by GitHub Actions
+./release.sh 0.1.0 --dry-run   # validate the source and preview; publish nothing
 ```
 
 | Task | Script |

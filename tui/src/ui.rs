@@ -241,8 +241,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_footer_badge_shows_the_mode() {
-        let mut h = harness(vec![view("A", "api", 10)]);
+    async fn the_footer_badge_uses_the_rakumux_name_in_both_layouts() {
         let badge = |h: &mut Harness, width: u16, height: u16| {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|f| draw(f, &mut h.app)).unwrap();
@@ -254,21 +253,32 @@ mod tests {
             (text, buffer.get(1, row).fg, buffer.get(1, row).bg)
         };
         let p = theme::palette();
-        for (width, height) in [(120, 30), (60, 20)] {
-            // Rakumux mode: bright orange, bottom left.
-            if h.app.focus == Focus::Session {
-                h.rakumux().await;
+        for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
+            let mut h = with_layout(vec![view("A", "api", 10)], layout);
+            for (width, height) in [(160, 48), (120, 30), (90, 24), (60, 20), (40, 20)] {
+                // Rakumux mode: bright orange, bottom left.
+                if h.app.focus == Focus::Session {
+                    h.rakumux().await;
+                }
+                assert_eq!(h.app.focus, Focus::List);
+                let (text, fg, bg) = badge(&mut h, width, height);
+                assert!(text.starts_with(" RAKUMUX "), "{text:?}");
+                assert_eq!((fg, bg), (p.background, p.accent_orange));
+                // Dialogs keep the same mode label, even when a small screen
+                // lets the modal cover the footer.
+                h.press(KeyCode::Char('?')).await;
+                let mode = crate::components::footer::mode_badge(&h.app);
+                assert_eq!(mode.content, " RAKUMUX ");
+                assert_eq!(mode.style.fg, Some(p.background));
+                assert_eq!(mode.style.bg, Some(p.accent_orange));
+                h.press(KeyCode::Esc).await;
+                // A session: a quiet badge that blends in.
+                h.press(KeyCode::Enter).await;
+                assert_eq!(h.app.focus, Focus::Session);
+                let (text, fg, bg) = badge(&mut h, width, height);
+                assert!(text.starts_with(" SESSION "), "{text:?}");
+                assert_eq!((fg, bg), (p.neutral_gray, p.selection));
             }
-            assert_eq!(h.app.focus, Focus::List);
-            let (text, fg, bg) = badge(&mut h, width, height);
-            assert!(text.starts_with(" RAKUMUX "), "{text:?}");
-            assert_eq!((fg, bg), (p.background, p.accent_orange));
-            // A session: a quiet badge that blends in.
-            h.press(KeyCode::Enter).await;
-            assert_eq!(h.app.focus, Focus::Session);
-            let (text, fg, bg) = badge(&mut h, width, height);
-            assert!(text.starts_with(" SESSION "), "{text:?}");
-            assert_eq!((fg, bg), (p.neutral_gray, p.selection));
         }
     }
 
@@ -401,6 +411,19 @@ mod tests {
         assert!(screen.contains("1 General"), "{screen}");
         assert!(screen.contains("API key"), "{screen}");
         assert!(screen.contains("console.anthropic.com"), "{screen}");
+    }
+
+    #[test]
+    fn live_preview_title_is_not_faded_in_rakumux_mode() {
+        let mut h = harness(vec![view("A", "color-check", 10)]);
+        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
+        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+        let title = h.app.screen().detail_title.unwrap();
+        let name = terminal.backend().buffer().get(title.x + 3, title.y);
+        assert_eq!(name.symbol(), "c");
+        assert_eq!(name.fg, theme::palette().text_primary);
+        assert_eq!(name.bg, theme::palette().panel);
+        assert!(!name.modifier.contains(ratatui::style::Modifier::DIM));
     }
 
     #[test]
@@ -601,6 +624,23 @@ mod tests {
         assert!(dialog[5].contains("✕ name taken"), "{dialog:?}");
     }
 
+    #[tokio::test]
+    async fn the_new_session_dialog_shows_the_last_visited_folder_section() {
+        let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
+        h.app
+            .list
+            .select(crate::app::Selection::FolderHeader(folder("/code/api")));
+        h.press(KeyCode::End).await;
+        h.press(KeyCode::Enter).await;
+        for (width, height) in SIZES {
+            let dialog = new_session_dialog(&render(&mut h.app, width, height));
+            assert!(
+                dialog[4].starts_with("│ in ▤ api   /code/api"),
+                "{dialog:?}"
+            );
+        }
+    }
+
     #[test]
     fn unreachable_daemon_is_explained() {
         let fake = FakeApi::new(vec![]);
@@ -734,7 +774,7 @@ mod tests {
         // Folders modal.
         assert!(list[1].starts_with("   ▤ All folders"), "{wide}");
         assert!(list[1].ends_with('▾'), "{wide}");
-        // Pinned first, with its mark; subtext is git, then program.
+        // Pinned first, with its mark; subtext is program, then git.
         let docs = list.iter().position(|l| l.contains("docs")).unwrap();
         let refactor = list
             .iter()
@@ -744,7 +784,7 @@ mod tests {
         assert!(list[docs].contains("docs ★"), "{wide}");
         assert!(list[docs + 1].contains("⎇ main"), "{wide}");
         assert!(
-            list[refactor + 1].contains("⎇ sessions-refactor · claude"),
+            list[refactor + 1].contains("claude · ⎇ sessions-refactor"),
             "{wide}"
         );
         assert!(!wide.contains("worktree"), "branch only: {wide}");
@@ -855,7 +895,7 @@ mod tests {
             "{wide}"
         );
         assert!(
-            list[at("frontend") + 1].contains("⎇ feature/login · codex"),
+            list[at("frontend") + 1].contains("codex · ⎇ feature/login"),
             "{wide}"
         );
         assert!(
@@ -863,7 +903,7 @@ mod tests {
             "{wide}"
         );
         assert!(
-            list[at("server") + 1].contains("⎇ @1a2b3c4 · cargo"),
+            list[at("server") + 1].contains("cargo · ⎇ @1a2b3c4"),
             "{wide}"
         );
         // A selected header stands out: its rule turns blue.
@@ -1081,6 +1121,10 @@ mod tests {
     /// Open dialog `which` on `h` (the Settings dialogs draw over the
     /// Settings modal).
     fn open_dialog(h: &mut Harness, which: &str) {
+        if which == "ui restart" {
+            h.app.request_restart();
+            return;
+        }
         use crate::app::types::{
             AiProviderDialog, ApiKeyDialog, ApiProvider, ConfirmAction, ConfirmDialog,
             DaemonRestartDialog, OpenAiModelDialog, RenameDialog, UpgradeDialog,
@@ -1149,11 +1193,21 @@ mod tests {
     #[tokio::test]
     async fn dialogs_fit_a_phone() {
         let mut h = harness(vec![view("A", "api", 10), view("B", "docs", 20)]);
-        let expected: [(&str, &[&str]); 8] = [
+        let expected: [(&str, &[&str]); 9] = [
             ("new", &["Enter create  Esc cancel", "in ▤ repo"]),
             ("rename", &["Current: api", "[Enter] Rename • [Esc] Cancel"]),
             ("delete", &["output removed.", "[y/Enter] Yes • [n/Esc] No"]),
             ("restart", &["them.", "are.", "[y] Restart", "[q] Quit"]),
+            (
+                "ui restart",
+                &[
+                    "Restart Rakumux?",
+                    "daemon",
+                    "sessions",
+                    "[y/Enter] Restart",
+                    "[n/Esc] Cancel",
+                ],
+            ),
             (
                 "upgrade",
                 &[

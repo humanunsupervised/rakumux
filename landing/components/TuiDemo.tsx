@@ -114,12 +114,25 @@ const STATE_LABEL: Record<State, string> = {
 };
 
 const STATE_DOT: Record<State, [string, string]> = {
-  working: ["●", "green"],
-  waiting: ["◐", "yellow"],
-  done: ["●", "blue"],
-  running: ["●", "dim"],
-  idle: ["○", "muted"],
+  working: ["●", "blue"],
+  waiting: ["◐", "orange"],
+  done: ["●", "yellow"],
+  running: ["●", "green"],
+  idle: ["●", "green"],
 };
+
+// Match the stable app colours in tui/src/components/format.rs.
+const PROGRAM_TONE: Record<string, string> = {
+  claude: "orange",
+  codex: "green",
+  opencode: "purple",
+  pi: "yellow",
+  gemini: "blue",
+};
+
+const SHELLS = new Set([
+  "sh", "bash", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh", "nu", "xonsh", "elvish",
+]);
 
 type Mode = "rakumux" | "session";
 
@@ -357,7 +370,10 @@ export default function TuiDemo() {
                       <span className="tui-item-age">{s.age}</span>
                     </span>
                     <span className="tui-item-sub">
-                      ⎇ {s.branch} · {s.program}
+                      {!SHELLS.has(s.program) && (
+                        <><span className={`t-${PROGRAM_TONE[s.program] ?? "red"}`}>{s.program}</span>{" · "}</>
+                      )}
+                      ⎇ {s.branch}
                       {label ? ` · ${label}` : ""}
                     </span>
                   </button>
@@ -368,12 +384,15 @@ export default function TuiDemo() {
 
             <div className={`tui-pane ${inSession ? "is-live" : ""}`}>
               <div className="tui-pane-title">
-                <span className={`t-${STATE_DOT[current.state][1]}`}>{STATE_DOT[current.state][0]}</span>{" "}
-                <span className="t-bright">{current.name}</span>
-                <span className="t-muted">
-                  {" "}
-                  · {current.program}
-                  {STATE_LABEL[current.state] ? ` · ${STATE_LABEL[current.state]}` : ""}
+                <span className="tui-pane-summary">
+                  <span className={`t-${STATE_DOT[current.state][1]}`}>{STATE_DOT[current.state][0]}</span>{" "}
+                  <span className="tui-pane-name">{current.name}</span>
+                  <span className="t-muted">
+                    {STATE_LABEL[current.state] ? ` · ${STATE_LABEL[current.state]}` : ""}
+                  </span>
+                </span>
+                <span className={`tui-pane-role ${inSession ? "t-green" : "t-muted"}`}>
+                  {inSession ? "● controlling" : "observing"}
                 </span>
               </div>
               <div className="tui-screen">
@@ -414,6 +433,7 @@ export default function TuiDemo() {
             {inSession ? (
               <span className="tui-footer-keys">
                 <b>Ctrl-\</b> rakumux
+                <span className="tui-footer-secondary"> <b>Ctrl-\ ?</b> help <b>Ctrl-\ ,</b> settings</span>
               </span>
             ) : (
               <span className="tui-footer-keys">

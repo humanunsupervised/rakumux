@@ -109,6 +109,12 @@ pub enum Request {
         id: SessionId,
     },
     SessionCreate(CreateSession),
+    /// User-only restore of saved sessions from a private archive directory
+    /// containing `registry.sqlite3`, `sessions/` and optional `history/`.
+    /// Preserves ids and metadata, refuses conflicts, and starts no programs.
+    SessionImport {
+        source: PathBuf,
+    },
     SessionRename {
         id: SessionId,
         name: String,
@@ -171,6 +177,12 @@ pub enum Request {
     /// User only: forget a project. Fails while it still has sessions.
     ProjectRemove {
         path: ScopeRoot,
+    },
+    /// User-only update after a folder was moved. Changes saved scope/cwd
+    /// prefixes without restarting session programs. Capability `projects.relocate`.
+    ProjectRelocate {
+        from: ScopeRoot,
+        to: ScopeRoot,
     },
 
     /// Stream the terminal. Turns the connection into an attach stream.

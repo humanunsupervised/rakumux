@@ -25,7 +25,7 @@ error() { printf "${RED}[VERSION]${NC} %s\n" "$*" >&2; }
 INCREMENT_TYPE="${1:-patch}"
 
 # GitHub repository (from humanunsupervised org)
-GITHUB_REPO="humanunsupervised/rakumux"
+GITHUB_REPO="${GITHUB_REPO:-humanunsupervised/rakumux}"
 
 # Function to validate increment type
 validate_increment_type() {
@@ -43,62 +43,26 @@ validate_increment_type() {
 
 # Function to get latest version from GitHub releases
 get_latest_version() {
-    if ! command -v gh >/dev/null 2>&1; then
-        error "GitHub CLI (gh) is not installed"
-        error "Please install with: brew install gh"
-        exit 1
+    command -v curl >/dev/null 2>&1 || { error "curl is required"; return 1; }
+    local body status latest_version
+    body="$(mktemp)"
+    if status="$(curl -sS -L --connect-timeout 10 --max-time 30 --output "$body" --write-out '%{http_code}' \
+        "https://api.github.com/repos/$GITHUB_REPO/releases/latest")"; then
+        case "$status" in
+            404) rm -f "$body"; printf 'none\n'; return 0 ;;
+            200) ;;
+            *) rm -f "$body"; error "GitHub returned HTTP $status"; return 1 ;;
+        esac
+    else
+        rm -f "$body"
+        error "could not read GitHub releases"
+        return 1
     fi
-    
-    # Check if gh is authenticated
-    if ! gh auth status >/dev/null 2>&1; then
-        error "GitHub CLI is not authenticated"
-        error "Please run: gh auth login"
-        exit 1
-    fi
-    
-    info "Fetching latest release from $GITHUB_REPO..."
-    
-    # Get the latest release version
-    local latest_version
-    latest_version=$(gh release list --repo "$GITHUB_REPO" --limit 10 --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
-    
-    if [[ -z "$latest_version" ]]; then
-        warn "No releases found on GitHub"
-        echo "0.0.0"
-        return
-    fi
-    
-    # Remove 'v' prefix if present
+    latest_version="$(sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' "$body" | head -1)"
+    rm -f "$body"
     latest_version="${latest_version#v}"
-    
-    # Validate version format and find first valid one if current is invalid
-    if [[ ! "$latest_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        warn "Latest release has invalid version format: $latest_version"
-        info "Searching for most recent valid version..."
-        
-        # Get more releases and find first valid one
-        local releases
-        releases=$(gh release list --repo "$GITHUB_REPO" --limit 20 --json tagName --jq '.[].tagName' 2>/dev/null || echo "")
-        
-        while IFS= read -r version; do
-            local clean_version="${version#v}"
-            if [[ "$clean_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                latest_version="$clean_version"
-                info "Found valid version: $latest_version"
-                break
-            fi
-        done <<< "$releases"
-        
-        # If no valid version found, start from 0.0.0
-        if [[ ! "$latest_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            warn "No valid versions found, starting from 0.0.0"
-            echo "0.0.0"
-            return
-        fi
-    fi
-    
-    info "Latest version found: $latest_version"
-    echo "$latest_version"
+    [[ "$latest_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { error "invalid stable release version"; return 1; }
+    printf '%s\n' "$latest_version"
 }
 
 # Function to increment version
@@ -157,8 +121,8 @@ Environment Variables:
   GITHUB_REPO     GitHub repository (default: $GITHUB_REPO)
   
 Requirements:
-  - GitHub CLI (gh) installed and authenticated
-  - Access to read releases from $GITHUB_REPO
+  - curl
+  - Public read access to releases from $GITHUB_REPO (no login needed)
 EOF
 }
 
@@ -172,6 +136,10 @@ fi
 validate_increment_type
 
 latest_version=$(get_latest_version)
+if [[ "$latest_version" == "none" ]]; then
+    printf '0.1.0\n'
+    exit 0
+fi
 next_version=$(increment_version "$latest_version" "$INCREMENT_TYPE")
 
 success "Version increment: $latest_version → $next_version (${INCREMENT_TYPE})"

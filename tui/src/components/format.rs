@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
 use session_core::model::{GitInfo, Lifecycle, SessionStatus, SessionView};
 
 use crate::icons::Icons;
@@ -109,11 +110,45 @@ pub fn abbreviate_home(path: &Path) -> String {
 /// Columns the reported text needs before it's worth adding to a row.
 const REPORT_MIN: usize = 12;
 
-/// Second line of a list row, fitted to `width` columns: the git branch
-/// (`⎇ main`, `⎇ @1a2b3c4`) and worktree (`worktree login`), the agent or
-/// running program and its state, then what the session reported when
-/// there's room. A plain shell with nothing to say shows "shell".
-pub fn secondary_text(session: &SessionView, width: usize, icons: Icons) -> String {
+/// Second line of a list row: the colour-coded app first, then its git
+/// branch, state and report. Only the app name gets its identifying colour.
+pub fn secondary_line(
+    session: &SessionView,
+    width: usize,
+    icons: Icons,
+    detail_style: Style,
+) -> Line<'static> {
+    let text = secondary_text(session, width, icons);
+    let Some(program) = session_program(session) else {
+        return Line::styled(text, detail_style);
+    };
+    let program_style = detail_style.fg(program_color(program));
+    match text.strip_prefix(program) {
+        Some(rest) => Line::from(vec![
+            Span::styled(program.to_string(), program_style),
+            Span::styled(rest.to_string(), detail_style),
+        ]),
+        // The app is first, so a line cut before its name ends is all app.
+        None => Line::from(Span::styled(text, program_style)),
+    }
+}
+
+/// Stable app colours from the active terminal palette, not its lifecycle.
+fn program_color(program: &str) -> Color {
+    let p = theme::palette();
+    match program.to_ascii_lowercase().as_str() {
+        "claude" => p.accent_orange,
+        "codex" => p.accent_green,
+        "opencode" => p.accent_purple,
+        "pi" => p.accent_gold,
+        "gemini" => p.accent_primary,
+        _ => p.accent_pink,
+    }
+}
+
+/// Description fitted to `width` columns. A plain shell with nothing to
+/// say shows "shell"; reports are included only when there's room.
+fn secondary_text(session: &SessionView, width: usize, icons: Icons) -> String {
     let base = session_facts(session, icons);
     let report = session
         .reported
@@ -138,9 +173,12 @@ pub fn secondary_text(session: &SessionView, width: usize, icons: Icons) -> Stri
     truncate(&line, width)
 }
 
-/// Branch, agent or program, state. (The worktree isn't shown for now.)
+/// Agent or program, branch, state. (The worktree isn't shown for now.)
 fn session_facts(session: &SessionView, icons: Icons) -> Vec<String> {
     let mut parts = Vec::new();
+    if let Some(program) = session_program(session) {
+        parts.push(program.to_string());
+    }
     if let Some(git) = &session.git {
         parts.extend(branch_label(git, icons));
     }
@@ -148,22 +186,32 @@ fn session_facts(session: &SessionView, icons: Icons) -> Vec<String> {
         SessionStatus::Dead => parts.push("dead · ⏎ revive".into()),
         SessionStatus::Exited => parts.push("exited · ⏎ restart".into()),
         _ => {
-            let process = session
-                .terminal
-                .as_ref()
-                .and_then(|t| t.foreground_process.as_deref())
-                .filter(|p| !p.is_empty() && !SHELLS.contains(p));
-            match (&session.agent, process) {
-                (Some(agent), _) => parts.push(agent.kind.clone()),
-                (None, Some(process)) => parts.push(process.to_string()),
-                (None, None) => {}
-            }
             if let Some(label) = lifecycle_label(session.lifecycle) {
                 parts.push(label.into());
             }
         }
     }
     parts
+}
+
+/// Prefer a detected agent over its host process. Ended sessions don't
+/// advertise a stale running app, and ordinary shells need no app label.
+fn session_program(session: &SessionView) -> Option<&str> {
+    if matches!(session.status, SessionStatus::Dead | SessionStatus::Exited) {
+        return None;
+    }
+    session
+        .agent
+        .as_ref()
+        .map(|agent| agent.kind.as_str())
+        .filter(|kind| !kind.is_empty())
+        .or_else(|| {
+            session
+                .terminal
+                .as_ref()
+                .and_then(|terminal| terminal.foreground_process.as_deref())
+                .filter(|process| !process.is_empty() && !SHELLS.contains(process))
+        })
 }
 
 /// Shells, which the list shows as nothing more than "shell".
@@ -266,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn secondary_text_shows_git_then_program_then_state_and_never_the_folder() {
+    fn secondary_text_shows_program_then_git_then_state_and_never_the_folder() {
         let mut session = view("A", "a", 0);
         session.cwd = "/repo/docs".into();
         session.lifecycle = Lifecycle::Working;
@@ -284,13 +332,58 @@ mod tests {
         });
         assert_eq!(
             secondary_text(&session, 80, Icons::Plain),
-            "⎇ @1a2b3c4 · claude · working"
+            "claude · ⎇ @1a2b3c4 · working"
         );
         session.status = SessionStatus::Dead;
         assert_eq!(
             secondary_text(&session, 80, Icons::Plain),
             "⎇ @1a2b3c4 · dead · ⏎ revive"
         );
+    }
+
+    #[test]
+    fn app_names_are_colour_coded_without_colouring_the_branch_or_state() {
+        let p = theme::palette();
+        let detail_style = Style::default().fg(p.text_muted);
+        let mut session = view("A", "a", 0);
+        session.git = Some(git(Some("main"), None, None));
+        session.lifecycle = Lifecycle::Working;
+        for (program, color) in [
+            ("claude", p.accent_orange),
+            ("codex", p.accent_green),
+            ("opencode", p.accent_purple),
+            ("pi", p.accent_gold),
+            ("gemini", p.accent_primary),
+            ("cargo", p.accent_pink),
+            ("OpenCode", p.accent_purple),
+        ] {
+            session.terminal.as_mut().unwrap().foreground_process = Some(program.into());
+            let line = secondary_line(&session, 80, Icons::Plain, detail_style);
+            assert_eq!(line.spans[0].content, program);
+            assert_eq!(line.spans[0].style.fg, Some(color));
+            assert_eq!(line.spans[1].content, " · ⎇ main · working");
+            assert_eq!(line.spans[1].style, detail_style);
+        }
+    }
+
+    #[test]
+    fn app_first_descriptions_fit_even_when_the_app_name_is_truncated() {
+        let mut session = view("A", "a", 0);
+        session.git = Some(git(Some("長い-branch-name"), None, None));
+        session.agent = Some(session_core::model::AgentInfo {
+            kind: "opencode".into(),
+            ..Default::default()
+        });
+        let style = Style::default().fg(theme::palette().text_muted);
+        for icons in Icons::ALL {
+            for width in 0..80 {
+                let line = secondary_line(&session, width, icons, style);
+                assert!(line.width() <= width);
+                assert_eq!(line.spans[0].style.fg, Some(theme::palette().accent_purple));
+            }
+        }
+        let line = secondary_line(&session, 5, Icons::Plain, style);
+        assert_eq!(line.spans[0].content, "open…");
     }
 
     #[test]

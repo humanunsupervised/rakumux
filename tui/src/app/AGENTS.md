@@ -25,8 +25,9 @@ new-session flow, and code boundaries.
   folder, `projects`, then `subscribe { all }` + `list_all` with `sessions.all`; else
   `subscribe { scopes }` + `list_in` of the known folders; else `list(Some(launch))` on
   `unsupported`), `compare_folders` (launch folder first, then name, then path),
-  `App::folder_label`, `App::current_folder` (the selected session's folder, a selected header's,
-  the filter's only folder, else the launch folder), `App::show_folders` (sets the filter; an
+  `App::folder_label`, `App::current_folder` (the current section, retained on the folder filter
+  and "+ New session" rows; a single-folder filter takes precedence; without folder context,
+  the launch folder), `App::show_folders` (sets the filter; an
   older daemon resyncs for a folder it isn't watching) and the Folders modal's actions (filter
   rows, All folders, show one, tick and show several, add or create a typed folder).
   `handlers/folders.rs` routes its keys.
@@ -70,7 +71,7 @@ new-session flow, and code boundaries.
 - `constants.rs`: timings and UI constants. `feature_flags.rs`: code-only flags (`auth: false`).
 - State slices (`state/`):
   - session list: every folder's `SessionView`s in the user's order, the folder filter, the
-    text filter, selection, the nesting-guard session;
+    text filter, selection, the last selected folder section, the nesting-guard session;
   - detail: the active attach stream, its `TerminalView`, current role (observer/controller),
     detail tab (Terminal / Info), saved scrollback for dead sessions;
   - focus: list (or tab bar) / session / dialog, zoom, layout (`layout::SessionLayout`).
@@ -80,9 +81,11 @@ new-session flow, and code boundaries.
 - `handlers/`: key handling by mode (`Focus::List` = Rakumux mode, `Focus::Session` = session
   mode):
   - Rakumux mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
-    `{`/`}` folders), `gg`/`dd` via `App::pending_key`, Enter/`i` go in, Esc (cancel first) or the
+    `{`/`}` folders), `gg` via `App::pending_key`, `d`/`dd` opens delete confirmation, Enter/`i`
+    go in, Esc (cancel first) or the
     Rakumux key back to `App::came_from`, Tab to `App::recent.previous`, `1`-`9`, and the action
-    letters (`n`, `r`, `p`, `J`/`K` move, `x`, `z`, `P`, `/`, `?`, `,`, `q`, `\`);
+    letters (`n`, `r`, `p`, `J`/`K` move, `x`, `z`, `P`, `/`, `?`, `,`, `R` confirms a UI restart,
+    `q`, `\`);
   - session mode (`handlers/session.rs`): the Rakumux key enters Rakumux mode
     (`App::enter_rakumux_mode`), the cycle keys only with `cycle_keys_in_session`, then
     `terminal_view::key_to_bytes` / `mouse_to_bytes` / `paste_to_bytes` to the attach stream;

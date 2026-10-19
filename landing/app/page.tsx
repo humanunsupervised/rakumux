@@ -54,6 +54,7 @@ const KEYS: { keys: string[]; action: string }[] = [
   { keys: ["/"], action: "Filter" },
   { keys: ["z"], action: "Full screen" },
   { keys: ["?", ","], action: "Help and Settings" },
+  { keys: ["R"], action: "Restart the UI (asks first; sessions keep running)" },
 ];
 
 function Keys({ keys }: { keys: string[] }) {

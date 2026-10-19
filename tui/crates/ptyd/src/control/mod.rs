@@ -19,6 +19,7 @@ mod env;
 mod events;
 mod git_context;
 mod host_events;
+mod import;
 mod lifecycle;
 mod names;
 mod policy;

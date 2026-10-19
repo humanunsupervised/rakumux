@@ -22,6 +22,73 @@ fn projects(h: &Harness, caller: &ptyd::control_api::Caller) -> Vec<ProjectView>
     }
 }
 
+#[test]
+fn relocating_a_moved_folder_preserves_live_sessions_and_updates_working_directories() {
+    let h = Harness::new();
+    let original = h.create(Some("original"));
+    let other = h.create_in(&h.other_scope(), Some("other"));
+    let nested_cwd = h.scope.path().join("sub");
+    h.db()
+        .execute(
+            "UPDATE sessions_v2 SET cwd = ?2 WHERE id = ?1",
+            [other.id.as_str(), nested_cwd.to_str().unwrap()],
+        )
+        .unwrap();
+    let moved = h.root().join("renamed");
+    std::fs::rename(h.scope.path(), &moved).unwrap();
+    std::os::unix::fs::symlink(&moved, h.scope.path()).unwrap();
+    let to = ScopeRoot::resolve(&moved).unwrap();
+    assert_eq!(
+        h.handle(
+            &h.user,
+            Request::ProjectRelocate {
+                from: h.scope.clone(),
+                to: to.clone()
+            }
+        ),
+        Response::Ok
+    );
+    let relocated = h.get(&original.id);
+    assert_eq!(relocated.scope, to);
+    assert_eq!(relocated.cwd, moved);
+    assert_eq!(relocated.terminal, original.terminal);
+    assert_eq!(relocated.status, SessionStatus::Live);
+    assert_eq!(h.get(&other.id).scope, h.other_scope());
+    assert_eq!(h.get(&other.id).cwd, moved.join("sub"));
+    let caller = h.session_caller(&original.id);
+    assert!(
+        matches!(caller.info, session_core::api::CallerInfo::Session { scope, .. } if scope == to)
+    );
+    let folders = projects(&h, &h.user);
+    assert!(folders.iter().any(|folder| folder.path == to));
+    assert!(!folders.iter().any(|folder| folder.path == h.scope));
+    assert!(h
+        .audit()
+        .iter()
+        .any(|entry| entry.method == "project.relocate" && entry.decision == "allowed"));
+}
+
+#[test]
+fn relocation_is_user_only_and_cannot_replace_a_different_existing_folder() {
+    let h = Harness::new();
+    let session = h.create(None);
+    let request = Request::ProjectRelocate {
+        from: h.scope.clone(),
+        to: h.other_scope(),
+    };
+    let caller = h.session_caller(&session.id);
+    assert_eq!(
+        error(h.handle(&caller, request.clone())).code,
+        ErrorCode::PermissionDenied
+    );
+    assert_eq!(
+        error(h.handle(&h.user, request)).code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(h.get(&session.id).scope, h.scope);
+    assert_eq!(h.get(&session.id).terminal, session.terminal);
+}
+
 fn add_project(h: &Harness, path: &Path) -> Response {
     h.handle(
         &h.user,

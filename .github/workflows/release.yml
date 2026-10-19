@@ -1,0 +1,115 @@
+name: Binary release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binary-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+            target: x86_64-unknown-linux-musl
+          - os: macos-15
+            platform: macos-arm64
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            platform: macos-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate version tag
+        shell: bash
+        run: '[[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tui
+      - name: Install Linux static-linking tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Check and test source
+        working-directory: tui
+        env:
+          RAKUMUX_HOME: ${{ runner.temp }}/rakumux-test-home
+        run: |
+          cargo fmt --all --check
+          cargo test --workspace --locked
+      - name: Install license-notice generator
+        run: cargo install cargo-about --version 0.9.2 --locked --features cli
+      - name: Build release package
+        env:
+          RAKUMUX_LINUX_TARGET: x86_64-unknown-linux-musl
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: ./install/scripts/build-release.sh "${GITHUB_REF_NAME#v}" --no-clean --platform=${{ matrix.platform }}
+      - name: Verify package and isolated install
+        env:
+          SKIP_BUILD: '1'
+          RAKUMUX_HOME: ${{ runner.temp }}/rakumux-install-home
+        run: ./install/scripts/test-install.sh "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: |
+            release/rakumux-${{ matrix.platform }}.tar.gz
+            release/checksums.txt
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: release-artifacts
+      - name: Verify complete release asset set
+        shell: bash
+        run: |
+          mkdir release-upload
+          for platform in macos-arm64 macos-intel linux-x64; do
+            directory="release-artifacts/binary-$platform"
+            (cd "$directory" && sha256sum -c checksums.txt)
+            cp "$directory/rakumux-$platform.tar.gz" release-upload/
+            cat "$directory/checksums.txt" >> release-upload/checksums.txt
+          done
+          (cd release-upload && sha256sum -c checksums.txt)
+      - name: Publish binary-only release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="$GITHUB_REF_NAME"
+          mode="$(git for-each-ref --format='%(contents)' "refs/tags/$tag" | sed -n 's/^Release-Mode: //p' | head -1)"
+          case "$mode" in stable|draft|prerelease) ;; *) echo 'Missing release-mode annotation' >&2; exit 1 ;; esac
+          notes="install/release-notes/${tag#v}.md"
+          if [[ -f "$notes" ]]; then
+            gh release create "$tag" --verify-tag --draft --title "Rakumux $tag" --notes-file "$notes" release-upload/*
+          else
+            gh release create "$tag" --verify-tag --draft --title "Rakumux $tag" --generate-notes release-upload/*
+          fi
+          case "$mode" in
+            stable) gh release edit "$tag" --draft=false --latest ;;
+            prerelease) gh release edit "$tag" --draft=false --prerelease --latest=false ;;
+            draft) echo 'All binary assets uploaded; release remains a draft.' ;;
+          esac

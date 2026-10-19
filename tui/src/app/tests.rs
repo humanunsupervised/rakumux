@@ -455,7 +455,7 @@ async fn esc_and_the_rakumux_key_go_back_to_the_session_you_came_from() {
     h.press(KeyCode::Esc).await;
     assert_eq!(h.app.focus, Focus::List);
     assert!(h.app.list.filter.is_empty());
-    // ... and a pending `g` or `d`.
+    // ... and a pending `g`.
     h.press(KeyCode::Char('g')).await;
     assert_eq!(h.app.pending_key, Some('g'));
     h.press(KeyCode::Esc).await;
@@ -534,7 +534,7 @@ async fn option_arrows_in_sessions_is_a_general_setting() {
 }
 
 #[tokio::test]
-async fn vim_keys_move_and_dd_deletes_after_asking() {
+async fn vim_keys_move_and_gg_goes_to_the_top() {
     let mut h = harness(vec![
         aged("A", "a", 1, 30),
         aged("B", "b", 2, 20),
@@ -553,15 +553,12 @@ async fn vim_keys_move_and_dd_deletes_after_asking() {
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     assert_eq!(h.selected().as_deref(), Some("B"));
-    // One d waits for the second; another key drops it.
-    h.press(KeyCode::Char('d')).await;
+    // One g waits for the second; another key drops it.
+    h.press(KeyCode::Char('g')).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
     h.press(KeyCode::Char('k')).await;
     assert_eq!(h.app.pending_key, None);
     assert_eq!(h.selected().as_deref(), Some("A"));
-    h.press(KeyCode::Char('d')).await;
-    h.press(KeyCode::Char('d')).await;
-    assert!(matches!(h.app.mode, AppMode::Confirm(_)));
 }
 
 #[tokio::test]
@@ -947,8 +944,7 @@ fn cell_within(h: &mut Harness, text: &str, columns: u16) -> ratatui::buffer::Ce
 
 #[tokio::test]
 async fn the_session_list_is_never_faded() {
-    // Only the session pane fades (in Rakumux mode); the list looks the
-    // same in session mode.
+    // Switching input focus never changes the session list's styling.
     let mut h = harness(vec![view("A", "zebra", 10)]);
     let width = h.app.screen().list.unwrap().width;
     let rakumux = cell_within(&mut h, "zebra", width);
@@ -958,33 +954,44 @@ async fn the_session_list_is_never_faded() {
 }
 
 #[tokio::test]
-async fn the_session_pane_is_faded_while_it_doesnt_take_keys() {
-    let mut h = harness(vec![view("A", "a", 10)]);
-    let (index, _) = h.last_attach();
-    h.attach_event(
-        index,
-        AttachEvent::Output {
-            offset: 100,
-            bytes: b"hello".to_vec(),
-        },
-    );
-    let p = crate::theme::palette();
-    // Rakumux mode: shown, faded.
-    let cell = cell_of(&mut h, "hello");
-    match p.faded(p.text_primary, crate::components::utils::FADE_TEXT) {
-        Some(faded) => assert_eq!(cell.fg, faded),
-        None => assert!(cell.modifier.contains(ratatui::style::Modifier::DIM)),
+async fn live_previews_keep_their_colours_in_rakumux_mode_but_fade_under_dialogs() {
+    use ratatui::style::{Color, Modifier};
+
+    for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
+        let mut h = harness(vec![view("A", "a", 10)]);
+        h.app.set_layout(layout);
+        let (index, _) = h.last_attach();
+        h.attach_event(
+            index,
+            AttachEvent::Output {
+                offset: 100,
+                bytes: b"\r\n\x1b[1;38;2;200;120;80;48;2;40;50;60mpreview-color\x1b[0m".to_vec(),
+            },
+        );
+        let p = crate::theme::palette();
+        // Rakumux mode preserves the program's text, background and boldness.
+        assert_eq!(h.app.focus, Focus::List);
+        let preview = cell_of(&mut h, "preview-color");
+        assert_eq!(preview.fg, Color::Rgb(200, 120, 80));
+        assert_eq!(preview.bg, Color::Rgb(40, 50, 60));
+        assert!(preview.modifier.contains(Modifier::BOLD));
+        assert!(!preview.modifier.contains(Modifier::DIM));
+        // Enter changes input focus, not the terminal's colours.
+        h.press(KeyCode::Enter).await;
+        assert_eq!(h.app.focus, Focus::Session);
+        assert_eq!(cell_of(&mut h, "preview-color"), preview);
+        h.rakumux().await;
+        assert_eq!(cell_of(&mut h, "preview-color"), preview);
+        // Dialogs still fade the terminal behind them.
+        h.press(KeyCode::Char('?')).await;
+        let obscured = cell_of(&mut h, "preview-color");
+        match p.faded(preview.fg, crate::components::utils::FADE_TEXT) {
+            Some(faded) => assert_eq!(obscured.fg, faded),
+            None => assert!(obscured.modifier.contains(Modifier::DIM)),
+        }
+        h.press(KeyCode::Esc).await;
+        assert_eq!(cell_of(&mut h, "preview-color"), preview);
     }
-    // Session mode: as the program drew it.
-    h.press(KeyCode::Enter).await;
-    assert_eq!(h.app.focus, Focus::Session);
-    let cell = cell_of(&mut h, "hello");
-    assert_eq!(cell.fg, p.text_primary);
-    assert!(!cell.modifier.contains(ratatui::style::Modifier::DIM));
-    // A dialog over it: faded again.
-    h.prefix('?').await;
-    let cell = cell_of(&mut h, "hello");
-    assert_ne!(cell.fg, p.text_primary);
 }
 
 #[tokio::test]
@@ -1196,19 +1203,60 @@ async fn rename_dialog_renames_and_reports_errors() {
 }
 
 #[tokio::test]
-async fn delete_asks_first() {
-    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
-    h.type_text("dd").await;
-    assert!(matches!(h.app.mode, AppMode::Confirm(_)));
-    h.press(KeyCode::Char('n')).await;
+async fn d_and_dd_delete_only_after_confirmation_in_both_layouts() {
+    for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
+        for keys in ["d", "dd"] {
+            for confirm in [KeyCode::Enter, KeyCode::Char('y')] {
+                let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
+                h.app.settings.sessions.layout = layout;
+                for cancel in [KeyCode::Char('n'), KeyCode::Esc] {
+                    h.type_text(keys).await;
+                    assert!(matches!(
+                        &h.app.mode,
+                        AppMode::Confirm(dialog)
+                            if matches!(&dialog.action, ConfirmAction::DeleteSession { id: target, .. } if *target == id("A"))
+                    ));
+                    assert_eq!(h.app.pending_key, None);
+                    assert!(!h.fake.calls().iter().any(|c| c.starts_with("delete")));
+                    h.press(cancel).await;
+                    assert!(matches!(h.app.mode, AppMode::Normal));
+                }
+                h.type_text(keys).await;
+                h.press(confirm).await;
+                assert_eq!(
+                    h.fake.calls().iter().filter(|c| *c == "delete A").count(),
+                    1
+                );
+                assert!(h.app.list.get(&id("A")).is_none());
+                assert_eq!(h.selected().as_deref(), Some("B"));
+                assert_eq!(h.app.detail.view, DetailView::Live(id("B")));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn d_types_in_filters_and_sessions_without_opening_delete_confirmation() {
+    let mut h = harness(vec![view("A", "dialog", 10)]);
+    h.press(KeyCode::Char('/')).await;
+    h.press(KeyCode::Char('d')).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
-    assert!(!h.fake.calls().iter().any(|c| c.starts_with("delete")));
-    h.type_text("dd").await;
+    assert_eq!(h.app.list.filter.value(), "d");
+    h.press(KeyCode::Esc).await;
     h.press(KeyCode::Enter).await;
-    assert!(h.fake.calls().contains(&"delete A".to_string()));
-    assert!(h.app.list.get(&id("A")).is_none());
-    assert_eq!(h.selected().as_deref(), Some("B"));
-    assert_eq!(h.app.detail.view, DetailView::Live(id("B")));
+    assert_eq!(h.app.focus, Focus::Session);
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    h.type_text("dd").await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![
+            AttachOutgoing::Input(b"d".to_vec()),
+            AttachOutgoing::Input(b"d".to_vec()),
+        ]
+    );
+    assert!(!h.fake.calls().iter().any(|c| c.starts_with("delete")));
 }
 
 /// The open modal's tab (Settings or Help), or `None` when none is open.
@@ -1318,6 +1366,108 @@ async fn the_keys_tab_runs_the_selected_action() {
     }
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
+}
+
+#[tokio::test]
+async fn shift_r_asks_before_restarting_only_the_ui() {
+    for confirm in [KeyCode::Enter, KeyCode::Char('y')] {
+        let mut h = harness(vec![view("A", "a", 20)]);
+        let (index, _) = h.last_attach();
+        h.fake.outgoing(index);
+        h.fake.clear_calls();
+        // Repeating the shortcut must not confirm the restart.
+        h.type_text("RR").await;
+        assert!(!h.app.restart_requested);
+        let AppMode::Confirm(dialog) = &h.app.mode else {
+            panic!("no restart warning")
+        };
+        assert_eq!(dialog.action, ConfirmAction::RestartUi);
+        assert_eq!(dialog.title, "Restart Rakumux?");
+        assert!(dialog
+            .message
+            .contains("all running sessions will keep running"));
+        h.press(confirm).await;
+        assert!(h.app.restart_requested);
+        assert!(h.fake.calls().is_empty());
+        assert!(h.fake.outgoing(index).is_empty());
+        assert_eq!(
+            h.app.list.get(&id("A")).unwrap().status,
+            SessionStatus::Live
+        );
+    }
+}
+
+#[tokio::test]
+async fn restart_confirmation_can_be_cancelled_without_affecting_sessions() {
+    for cancel in [KeyCode::Esc, KeyCode::Char('n'), KeyCode::Char('q')] {
+        let mut h = harness(vec![view("A", "a", 20)]);
+        h.fake.clear_calls();
+        h.press(KeyCode::Char('R')).await;
+        h.press(cancel).await;
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        assert!(!h.app.restart_requested);
+        assert!(h.fake.calls().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn a_ui_restart_does_not_require_a_daemon_connection() {
+    let mut h = harness(vec![]);
+    h.app.connection = Connection::Connecting;
+    h.press(KeyCode::Char('R')).await;
+    assert!(!h.app.restart_requested);
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.restart_requested);
+}
+
+#[tokio::test]
+async fn shift_r_still_types_in_a_session_and_in_the_list_filter() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    h.press(KeyCode::Enter).await;
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    h.press(KeyCode::Char('R')).await;
+    assert!(!h.app.restart_requested);
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Input(b"R".to_vec())]
+    );
+    h.rakumux().await;
+    h.press(KeyCode::Char('/')).await;
+    h.press(KeyCode::Char('R')).await;
+    assert!(!h.app.restart_requested);
+    assert_eq!(h.app.list.filter.value(), "R");
+}
+
+#[tokio::test]
+async fn the_keys_tab_can_restart_only_the_ui_from_either_focus() {
+    for focus_session in [false, true] {
+        let mut h = harness(vec![view("A", "a", 20)]);
+        if focus_session {
+            h.press(KeyCode::Enter).await;
+        }
+        h.app.mode = AppMode::modal(ModalTab::Keys, focus_session);
+        let AppMode::Modal { state, .. } = &mut h.app.mode else {
+            unreachable!();
+        };
+        state.action = crate::help::KeyAction::ALL
+            .iter()
+            .position(|action| *action == crate::help::KeyAction::Restart)
+            .unwrap();
+        h.fake.clear_calls();
+        h.press(KeyCode::Enter).await;
+        assert!(
+            matches!(&h.app.mode, AppMode::Confirm(dialog) if dialog.action == ConfirmAction::RestartUi)
+        );
+        assert!(!h.app.restart_requested);
+        h.press(KeyCode::Enter).await;
+        assert!(h.app.restart_requested);
+        assert!(h.fake.calls().is_empty());
+        assert_eq!(
+            h.app.list.get(&id("A")).unwrap().status,
+            SessionStatus::Live
+        );
+    }
 }
 
 #[tokio::test]
@@ -2637,16 +2787,15 @@ async fn new_sessions_go_in_the_current_folder() {
     h.press(KeyCode::Enter).await;
     assert_eq!(dialog_folder(&h), api);
     h.press(KeyCode::Esc).await;
-    // 4. All folders, on the folder filter or "+ New session": the launch
-    // folder.
+    // 4. Neutral rows retain the last selected section, not the launch folder.
     h.press(KeyCode::Home).await;
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), scope());
+    assert_eq!(dialog_folder(&h), api);
     h.press(KeyCode::Esc).await;
     h.press(KeyCode::End).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
     h.press(KeyCode::Enter).await;
-    assert_eq!(dialog_folder(&h), scope());
+    assert_eq!(dialog_folder(&h), api);
     h.press(KeyCode::Esc).await;
 
     // 3. The filter's only folder.
@@ -2655,20 +2804,102 @@ async fn new_sessions_go_in_the_current_folder() {
     h.press(KeyCode::Char('n')).await;
     assert_eq!(dialog_folder(&h), web);
     h.press(KeyCode::Esc).await;
-    // Several folders shown: the launch folder, even when the filter hides
-    // it; the new session's folder is then shown too.
+    // Several folders shown: keep the current section, not the hidden launch folder.
     h.app.show_folders(vec![api.clone(), web.clone()]);
     h.press(KeyCode::End).await;
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), scope());
+    assert_eq!(dialog_folder(&h), web);
     h.press(KeyCode::Enter).await;
     let new_id = h.app.list.selected_id().cloned().unwrap();
-    assert_eq!(h.app.list.get(&new_id).unwrap().scope, scope());
-    assert_eq!(
-        h.app.list.folder_filter(),
-        [api.clone(), web.clone(), scope()]
-    );
+    assert_eq!(h.app.list.get(&new_id).unwrap().scope, web);
+    assert_eq!(h.app.list.folder_filter(), [api, web]);
     assert!(h.app.list.visible_position(&new_id).is_some());
+}
+
+#[tokio::test]
+async fn new_session_folder_follows_keyboard_navigation_in_both_layouts() {
+    for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
+        let mut h = folders_harness();
+        h.app.set_layout(layout);
+        // Starting on web, cycle through repo's sessions, api, and back to web.
+        for expected in [scope(), scope(), folder("/api"), folder("/web")] {
+            h.alt(KeyCode::Down).await;
+            assert_eq!(h.app.current_folder(), expected);
+            h.press(KeyCode::Char('n')).await;
+            assert_eq!(dialog_folder(&h), expected);
+            h.press(KeyCode::Esc).await;
+        }
+        if layout == SessionLayout::Sidebar {
+            h.press(KeyCode::Down).await;
+            assert_eq!(h.app.list.selection(), &Selection::NewSession);
+            h.press(KeyCode::Enter).await;
+        } else {
+            h.press(KeyCode::Char('n')).await;
+        }
+        h.press(KeyCode::Enter).await;
+        let create = h.fake.creates().pop().unwrap();
+        assert_eq!(create.scope, Some(folder("/web")));
+        assert_eq!(create.cwd.as_deref(), Some(folder("/web").path()));
+    }
+}
+
+#[tokio::test]
+async fn clicking_new_session_keeps_the_clicked_sections_folder() {
+    let mut h = folders_harness();
+    draw(&mut h);
+    let area = list_row(&h, "A1");
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        h.app.handle_mouse(mouse(kind, area.x + 3, area.y + 1));
+        h.app.process_pending();
+    }
+    assert_eq!(h.app.current_folder(), folder("/api"));
+    draw(&mut h);
+    let row = h.app.list.row_count() - 1;
+    let area = h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::ListRow(row))
+        .map(|(area, _)| *area)
+        .unwrap();
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        area.x + 3,
+        area.y + 1,
+    ));
+    h.app.process_pending();
+    assert_eq!(h.app.list.selection(), &Selection::NewSession);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(dialog_folder(&h), folder("/api"));
+    h.press(KeyCode::Enter).await;
+    let create = h.fake.creates().pop().unwrap();
+    assert_eq!(create.scope, Some(folder("/api")));
+    assert_eq!(create.cwd.as_deref(), Some(folder("/api").path()));
+}
+
+#[tokio::test]
+async fn empty_folder_header_sets_new_session_target_without_changing_the_preview() {
+    let mut h = folders_harness();
+    let empty = folder("/empty");
+    h.app.show_folders(vec![folder("/web"), empty.clone()]);
+    let shown = h.app.detail.session_id().cloned();
+    h.press(KeyCode::Home).await;
+    h.press(KeyCode::Down).await;
+    assert_eq!(
+        h.app.list.selection(),
+        &Selection::FolderHeader(empty.clone())
+    );
+    assert_eq!(h.app.detail.session_id(), shown.as_ref());
+    h.press(KeyCode::End).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(dialog_folder(&h), empty);
+    h.press(KeyCode::Enter).await;
+    let create = h.fake.creates().pop().unwrap();
+    assert_eq!(create.scope, Some(empty.clone()));
+    assert_eq!(create.cwd.as_deref(), Some(empty.path()));
 }
 
 #[tokio::test]

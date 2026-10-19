@@ -92,7 +92,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
                                   │
  rakumux       ⎇ main ── 1/1 live │
    ● api-refactor            2m   │
-     ⎇ main · claude · working    │
+     claude · ⎇ main · working    │
                                   │
  wt-docs  ⎇ docs ─────── 1/2 live │
    ◐ docs-pass               1h   │
@@ -116,16 +116,17 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   the list shows in Rakumux mode. Dialogs keep at least 48 columns (or the screen less two).
 - **Selecting** a session shows it live (observer). **Enter** takes control: keys go to the program
   and the terminal is sized to the pane. Other TUIs on the same session keep watching.
+- **Session descriptions** show the app name first, colour-coded by app, then the branch and state.
 - **Two modes.** In **session mode** everything you type goes to the program except `Ctrl-\`,
   which switches to **Rakumux mode**. There, `↑/↓`, `j/k` or `Option`/`Alt`+`↑/↓` select (the
-  session shows live, faded until you go in; on the folder filter, a folder header or + New
+  session shows live, in full colour; on the folder filter, a folder header or + New
   session the last session stays in view), `gg`/`G` top/bottom, `Ctrl-d`/`Ctrl-u` half a page,
   `{`/`}` previous/next folder; `Enter` or `i` goes in (reviving a dead session, restarting an
   exited one; on a folder header, a new session there), `Esc` (once it has
   cancelled a pending key or the filter) or `Ctrl-\` goes back to the session you came from,
   `Tab` to the one before, `1`-`9` into that session. `n` new, `r` rename, `p` pin, `J`/`K` move
-  the session down/up, `x` close, `dd` delete, `z` full screen, `P` folders, `/` filter, `\`
-  sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `q` quit. The badge at the bottom left of the footer shows the mode
+  the session down/up, `x` close, `d`/`dd` delete, `z` full screen, `P` folders, `/` filter, `\`
+  sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `R` restart the UI, `q` quit. The badge at the bottom left of the footer shows the mode
   (orange RAKUMUX, quiet SESSION), in zoom too; Help and Settings' Keys tab list the keys, and
   the Keys tab runs any of them.
 - **Folders**: a session belongs to the folder it was started in (a repo, a worktree, any
@@ -138,10 +139,15 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   stays in its folder, among the pinned sessions or the others. The order is saved as
   `sessions.session_order` in `~/.rakumux/config.json`.
 - **New session** (`n`, or "+ New session"): asks only for a name (leave it blank and one is
-  picked). The session goes in the current folder, shown under the name: the selected session's,
-  the selected header's, the one folder the filter shows, or else the folder you started in. It
-  runs your login shell there. For another folder or a command, use
+  picked). The session goes in the selected session's or header's folder, shown under the name.
+  Moving to "+ New session" or the folder filter keeps that folder. A single-folder filter
+  takes precedence; without folder context, the launch folder is used. The session runs your
+  login shell there. For another folder or a command, use
   `rakumux new --cwd DIR --cmd C -- ARGV`.
+- **Restart the UI**: press `R` in Rakumux mode, or run Restart Rakumux from Settings → Keys.
+  A confirmation explains that sessions stay running: `y`/Enter restarts, `n`/Esc cancels.
+  This reloads the UI through its launcher, picking up the latest local build. The daemon and
+  session programs keep running. `Ctrl-r` only reconnects or reloads the list.
 - **Folder filter** (`▤ All folders ▾` at the top; `P`, or Enter on it): the Folders modal lists
   All folders and every folder with sessions. Type to filter; `Enter` shows the folder under the
   cursor alone (All folders: every folder); `Tab`/`Space` tick several, then `Enter` shows them
