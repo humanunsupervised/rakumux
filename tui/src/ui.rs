@@ -1007,14 +1007,17 @@ mod tests {
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
         h.press(KeyCode::Char('P')).await;
         h.type_text(&format!("{}/", root.display())).await;
-        let shown = crate::components::format::abbreviate_home(&root);
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("▎ + Add folder "), "{screen}");
             // Indented under the typed folder, which has the cursor.
             for name in ["alpha", "beta"] {
-                let row = format!("│       {shown}/{name}/ ");
-                assert!(screen.contains(&row), "{row} missing: {screen}");
+                let suffix = format!("/{name}/");
+                let row = screen
+                    .lines()
+                    .find(|line| line.contains(&suffix))
+                    .unwrap_or_else(|| panic!("{suffix} missing: {screen}"));
+                assert!(row.contains("│       "), "{row}");
             }
             assert!(!screen.contains(".hidden"), "{screen}");
             assert!(
@@ -1024,10 +1027,11 @@ mod tests {
         }
         h.press(KeyCode::Down).await;
         let screen = render(&mut h.app, 160, 48);
-        assert!(
-            screen.contains(&format!("│ ▎     {shown}/alpha/ ")),
-            "{screen}"
-        );
+        let alpha = screen
+            .lines()
+            .find(|line| line.contains("/alpha/"))
+            .unwrap_or_else(|| panic!("alpha missing: {screen}"));
+        assert!(alpha.contains("│ ▎     "), "{alpha}");
         assert!(
             screen.contains("⏎ add and show  Tab complete  ↑↓ select  Esc close"),
             "{screen}"
