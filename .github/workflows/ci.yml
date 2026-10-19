@@ -39,6 +39,7 @@ jobs:
       - run: bash tests/test-repository.sh
       - run: bash tests/test-command-hook.sh
       - run: bash tests/test-release.sh
+      - run: bash tests/test-release-tag.sh
 
   website:
     runs-on: ubuntu-latest
