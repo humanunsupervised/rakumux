@@ -38,7 +38,8 @@ done
 printf '%s\n' "${RELEASE_TEST_BODY:-{\"tag_name\":\"v0.1.4\"}}" > "$output"
 printf '%s' "${RELEASE_TEST_HTTP:-200}"
 EOF
-for name in npm brew gh; do
+# The default target set must not depend on the initiating machine either.
+for name in npm brew gh uname; do
     printf '#!/bin/bash\nexit 99\n' > "$TEMP/bin/$name"
 done
 chmod +x "$TEMP/bin/"*
@@ -53,6 +54,7 @@ expect_failure() {
 bash "$ROOT/release.sh" 0.1.0 --dry-run >"$TEMP/output"
 [[ ! -e "$RELEASE_TEST_LOG" ]]
 grep -q 'Dry run' "$TEMP/output"
+grep -q 'Targets: macos-intel,macos-arm64,linux-x64' "$TEMP/output"
 
 expect_failure env RELEASE_TEST_STATUS=' M source.rs' bash "$ROOT/release.sh" 0.1.0
 expect_failure env RELEASE_TEST_REMOTE='git@github.com:private/internal.git' bash "$ROOT/release.sh" 0.1.0
@@ -69,6 +71,7 @@ expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=linux-x64,
 
 bash "$ROOT/release.sh" 0.1.0 --draft >"$TEMP/output"
 grep -q 'Release-Mode: draft' "$RELEASE_TEST_LOG"
+grep -q 'Release-Targets: macos-intel,macos-arm64,linux-x64' "$RELEASE_TEST_LOG"
 grep -q 'push origin refs/tags/v0.1.0' "$RELEASE_TEST_LOG"
 
 bash "$ROOT/release.sh" 0.1.1 --target=linux-x64 --dry-run >"$TEMP/output"

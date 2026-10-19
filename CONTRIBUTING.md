@@ -36,8 +36,8 @@ bash tests/test-release-tag.sh
 For website changes, run `npm ci`, `npm run typecheck`, and `npm run build` in `landing/`.
 Node 22 or later is recommended. Release tooling has additional requirements in
 [install/AGENTS.md](install/AGENTS.md).
-Default CI covers Linux, the currently published binary platform. A release selecting macOS
-targets runs their native checks before those packages can be published.
+Default CI and releases cover Linux x64, macOS Apple Silicon and macOS Intel on native runners.
+Every selected platform must pass its native checks before its package can be published.
 
 ## Pull requests
 

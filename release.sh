@@ -8,7 +8,7 @@ VERSION=""
 INCREMENT="patch"
 MODE="stable"
 DRY_RUN=false
-TARGETS=""
+TARGETS="macos-intel,macos-arm64,linux-x64"
 
 fail() { printf 'release: %s\n' "$*" >&2; exit 1; }
 
@@ -22,7 +22,7 @@ publishes the binary release used by https://rakumux.com/install.sh.
 
   VERSION          Version without v; defaults to the next published patch
   --targets=LIST   One target or comma-separated targets (alias: --target)
-                   linux-x64, macos-arm64, macos-intel; defaults to this host
+                   Defaults: macos-intel,macos-arm64,linux-x64 (native CI runners)
   --increment=TYPE Auto-version increment (default: patch)
   --draft          Upload all assets but leave the GitHub release unpublished
   --prerelease     Publish a prerelease, without changing the latest stable release
@@ -32,8 +32,9 @@ Run from a clean public checkout whose HEAD has already been pushed to main.
 Git SSH/HTTPS push access is required; local gh, npm and Homebrew logins are not.
 
 Examples:
-  ./release.sh 0.1.1 --targets=linux-x64
-  ./release.sh 0.1.2 --targets=linux-x64,macos-arm64,macos-intel
+  ./release.sh                              # all three platforms
+  ./release.sh --targets=linux-x64          # Linux-only override
+  ./release.sh --targets=macos-intel,macos-arm64 --draft
 EOF
 }
 
@@ -54,14 +55,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$INCREMENT" in major|minor|patch) ;; *) fail "invalid increment: $INCREMENT" ;; esac
-if [[ -z "$TARGETS" ]]; then
-    case "$(uname -s)-$(uname -m)" in
-        Linux-x86_64|Linux-amd64) TARGETS="linux-x64" ;;
-        Darwin-arm64) TARGETS="macos-arm64" ;;
-        Darwin-x86_64) TARGETS="macos-intel" ;;
-        *) fail 'select release targets explicitly with --targets' ;;
-    esac
-fi
 "$ROOT/install/scripts/release-targets.sh" "$TARGETS" >/dev/null
 cd "$ROOT"
 command -v git >/dev/null 2>&1 || fail "git is required"

@@ -430,6 +430,41 @@ mod tests {
     }
 
     #[test]
+    fn claude_launched_as_a_shell_script_keeps_its_conversation_and_flags() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("sessions")).unwrap();
+        std::fs::write(
+            directory.path().join("sessions/42.json"),
+            r#"{"pid":42,"sessionId":"conv-123"}"#,
+        )
+        .unwrap();
+        let process = ProcessInfo {
+            pid: 42,
+            name: "sh".into(),
+            cmdline: args(&[
+                "/bin/sh",
+                "/var/folders/tmp/bin/claude",
+                "--dangerously-skip-permissions",
+                "--model",
+                "opus",
+                "fix the bug",
+            ]),
+        };
+        assert_eq!(crate::detect::agent_label(&process), Some("claude"));
+        assert_eq!(
+            claude_resume(&process, directory.path()),
+            Some(args(&[
+                "claude",
+                "--dangerously-skip-permissions",
+                "--model",
+                "opus",
+                "--resume",
+                "conv-123"
+            ]))
+        );
+    }
+
+    #[test]
     fn session_flags_are_kept_and_the_rest_dropped() {
         assert_eq!(
             claude_flags(&args(&[

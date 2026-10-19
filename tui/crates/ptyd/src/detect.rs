@@ -704,10 +704,22 @@ fn is_python(name: &str) -> bool {
 /// was asked to run.
 fn launched_target<'a>(runtime: &str, args: &'a [String]) -> Option<&'a str> {
     if SHELLS.contains(&runtime) {
-        let at = args
-            .iter()
-            .position(|a| a == "-c" || a == "-lc" || a == "-ic")?;
-        return first_command_word(args.get(at + 1)?);
+        // macOS exposes a shebang script as its interpreter plus script
+        // path, rather than naming the process after the script as Linux does.
+        let mut words = args.iter().map(String::as_str);
+        while let Some(word) = words.next() {
+            match word {
+                "-c" | "-lc" | "-ic" => return first_command_word(words.next()?),
+                "--" => return words.next(),
+                "-" | "-s" | "--stdin" => return None,
+                "--rcfile" | "--init-file" | "-o" | "+o" | "-O" | "+O" => {
+                    words.next();
+                }
+                flag if flag.starts_with('-') || flag.starts_with('+') => {}
+                script => return Some(script),
+            }
+        }
+        return None;
     }
     let mut iter = args.iter().map(String::as_str);
     while let Some(arg) = iter.next() {
@@ -1025,6 +1037,21 @@ mod tests {
             ("uvx", &["uvx", "--from", "aider-chat", "aider"], "aider"),
             ("sh", &["sh", "-c", "exec claude --continue"], "claude"),
             (
+                "sh",
+                &["/bin/sh", "/var/folders/tmp/bin/claude", "--model", "opus"],
+                "claude",
+            ),
+            (
+                "bash",
+                &["bash", "-e", "/opt/bin/codex", "-c", "model=test"],
+                "codex",
+            ),
+            (
+                "bash",
+                &["bash", "--rcfile", "/tmp/profile", "--", "/opt/bin/claude"],
+                "claude",
+            ),
+            (
                 "bash",
                 &["bash", "-lc", "FOO=1 /usr/local/bin/pi --model x"],
                 "pi",
@@ -1080,6 +1107,9 @@ mod tests {
             ("zsh", &["/bin/zsh", "-l"]),
             ("fish", &["fish"]),
             ("sh", &["sh", "-c", "make test"]),
+            ("sh", &["sh", "/tmp/maintenance.sh", "claude"]),
+            ("sh", &["sh", "-s", "claude"]),
+            ("bash", &["bash", "--rcfile", "/tmp/claude"]),
             ("nvim", &["nvim", "claude.md"]),
             ("cargo", &["cargo", "test"]),
             ("node", &["node", "server.js"]),

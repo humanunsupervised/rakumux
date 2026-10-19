@@ -16,9 +16,9 @@ See [INSTALL.md](INSTALL.md) for every option and troubleshooting.
 ## Maintainers
 
 ```bash
-./release.sh --targets=linux-x64             # next Linux binary release through Actions
-./release.sh 0.1.1 --targets=linux-x64        # explicit Linux-only release
-./release.sh --targets=linux-x64 --dry-run  # validate and preview; publish nothing
+./release.sh                               # macOS Intel + Apple Silicon + Linux x64
+./release.sh --targets=linux-x64            # Linux-only override
+./release.sh --dry-run                     # validate all targets; publish nothing
 ```
 
 | Task | Script |
