@@ -249,12 +249,23 @@ impl Inner {
             return;
         }
         state.summaries_enabled = enabled;
-        let ids: HashSet<_> = state
+        let mut ids: HashSet<_> = state
             .summaries
             .keys()
             .chain(state.live.keys())
             .cloned()
             .collect();
+        if let Some(registry) = state.registry.as_ref() {
+            match registry.list_all() {
+                Ok((records, errors)) => {
+                    ids.extend(records.into_iter().map(|record| record.id));
+                    for error in errors {
+                        crate::log_warn!("control: summary views: {error}");
+                    }
+                }
+                Err(error) => crate::log_warn!("control: summary views: {error}"),
+            }
+        }
         for id in ids {
             self.refresh(&mut state, &id);
         }
@@ -266,26 +277,40 @@ impl Inner {
         let state = self.lock();
         let registry = registry(&state.registry)?;
         let mut targets = Vec::new();
-        for (id, live) in &state.live {
-            let Some(record) = registry.get(id)? else {
-                continue;
-            };
+        let (records, errors) = registry.list_all()?;
+        for error in errors {
+            crate::log_warn!("control: summary candidates: {error}");
+        }
+        for record in records {
+            let id = &record.id;
             if record.private {
                 continue;
             }
-            let Some(info) = self.host.info(live.terminal) else {
-                continue;
-            };
-            if info.state != TerminalState::Running {
+            let revision = self.summary_revision(&state, &record);
+            if revision.status != SessionStatus::Live
+                && state.summaries.get(id).is_some_and(|summary| {
+                    !summary.text.is_empty()
+                        && summary.error.is_none()
+                        && summary.updated_at.saturating_mul(1000)
+                            >= record
+                                .last_active_at_ms
+                                .max(record.ended_at_ms.unwrap_or(0))
+                })
+            {
                 continue;
             }
-            let lifecycle = live.tracker.current();
+            let info = revision
+                .terminal
+                .and_then(|terminal| self.host.info(terminal));
             let report = record
                 .reported
                 .as_ref()
                 .filter(|report| {
-                    report.at >= info.started_ms / 1000
-                        && now_ms().saturating_sub(report.at.saturating_mul(1000)) <= 60_000
+                    revision.status != SessionStatus::Live
+                        || (info
+                            .as_ref()
+                            .is_some_and(|info| report.at >= info.started_ms / 1000)
+                            && now_ms().saturating_sub(report.at.saturating_mul(1000)) <= 60_000)
                 })
                 .map(|report| {
                     let result = report
@@ -321,14 +346,8 @@ impl Inner {
             }
             targets.push(SummaryTarget {
                 id: id.clone(),
-                revision: SummaryRevision {
-                    terminal: live.terminal,
-                    output_offset: info.output_offset,
-                    report_seq: *state.report_seq.get(id).unwrap_or(&0),
-                    lifecycle,
-                    foreground_pid: info.foreground.as_ref().map(|process| process.pid),
-                },
-                last_output_ms: info.last_output_ms,
+                last_output_ms: info.as_ref().and_then(|info| info.last_output_ms),
+                revision,
                 report,
                 secrets,
             });
@@ -336,15 +355,50 @@ impl Inner {
         Ok(targets)
     }
 
+    fn summary_revision(&self, state: &State, record: &SessionRecord) -> SummaryRevision {
+        let runtime = self.runtime(state, record);
+        let info = runtime
+            .terminal
+            .and_then(|terminal| self.host.info(terminal));
+        SummaryRevision {
+            terminal: runtime.terminal,
+            status: runtime.status,
+            changed_at_ms: record
+                .last_active_at_ms
+                .max(record.ended_at_ms.unwrap_or(0)),
+            output_offset: info.as_ref().map_or(0, |info| info.output_offset),
+            report_seq: *state.report_seq.get(&record.id).unwrap_or(&0),
+            lifecycle: self.lifecycle(state, &record.id, runtime.status),
+            foreground_pid: info
+                .as_ref()
+                .and_then(|info| info.foreground.as_ref())
+                .map(|process| process.pid),
+        }
+    }
+
     pub(super) fn summary_output(&self, target: &SummaryTarget) -> Result<String, HostError> {
-        self.host
-            .read(
-                target.revision.terminal,
-                ReadSource::Recent,
-                Some(60),
-                TextFormat::Text,
-            )
-            .map(|read| read.text)
+        if let Some(terminal) = target.revision.terminal {
+            match self
+                .host
+                .read(terminal, ReadSource::Recent, Some(60), TextFormat::Text)
+            {
+                Ok(read) => return Ok(read.text),
+                Err(HostError::NotFound | HostError::NotRunning)
+                    if target.revision.status != SessionStatus::Live => {}
+                Err(error) => return Err(error),
+            }
+        }
+        let saved = self
+            .store
+            .load(&target.id)
+            .map_err(|error| HostError::Io(error.to_string()))?;
+        Ok(saved::read(
+            saved.as_ref(),
+            ReadSource::Recent,
+            Some(60),
+            TextFormat::Text,
+        )
+        .text)
     }
 
     pub(super) fn apply_summary(
@@ -355,39 +409,20 @@ impl Inner {
         captured_ms: i64,
     ) -> bool {
         let mut state = self.lock();
-        if self.stopping()
-            || !state.summaries_enabled
-            || !state.is_current(&target.id, target.revision.terminal)
-        {
+        if self.stopping() || !state.summaries_enabled {
             return false;
         }
-        match registry(&state.registry)
+        let record = match registry(&state.registry)
             .and_then(|registry| registry.get(&target.id).map_err(ApiError::from))
         {
-            Ok(Some(record)) if !record.private => {}
+            Ok(Some(record)) if !record.private => record,
             Ok(_) => return false,
             Err(error) => {
                 crate::log_warn!("control: checking activity summary {}: {error}", target.id);
                 return false;
             }
-        }
-        let current_lifecycle = state
-            .live
-            .get(&target.id)
-            .map(|live| live.tracker.current());
-        let current_report = *state.report_seq.get(&target.id).unwrap_or(&0);
-        let Some(info) = self
-            .host
-            .info(target.revision.terminal)
-            .filter(|info| info.state == TerminalState::Running)
-        else {
-            return false;
         };
-        let current_pid = info.foreground.map(|process| process.pid);
-        if current_lifecycle != Some(target.revision.lifecycle)
-            || current_report != target.revision.report_seq
-            || current_pid != target.revision.foreground_pid
-        {
+        if self.summary_revision(&state, &record) != target.revision {
             return false;
         }
         let mut summary = state
@@ -2334,7 +2369,7 @@ impl Inner {
             activity_summary: (state.summaries_enabled && !record.private)
                 .then(|| {
                     state.summaries.get(&record.id).cloned().or_else(|| {
-                        (runtime.status == SessionStatus::Live).then_some(ActivitySummary {
+                        Some(ActivitySummary {
                             text: String::new(),
                             updated_at: 0,
                             error: None,

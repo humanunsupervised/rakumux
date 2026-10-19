@@ -407,7 +407,7 @@ impl KeyAction {
             ),
             KeyAction::GoIn => "A dead session is revived, an exited one restarted. On the \
                  folder filter it opens the Folders modal; on a folder's header or + New \
-                 session, the new-session dialog."
+                  session, creates a generated-name session and enters its shell immediately."
                 .into(),
             KeyAction::LastSession => {
                 "Into the session you worked in before the current one.".into()
@@ -1303,12 +1303,12 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          command, and it can type startup commands into the shell once it's ready.",
     );
     doc.text(format!(
-        "Every session has a name. Leave it empty when you create a session and Rakumux picks \
-         one; rename it any time with `r` in Rakumux mode (`{p} r` from inside it)."
+        "Every session has a name. Rakumux picks one when you create a session in the TUI; \
+         rename it any time with `r` in Rakumux mode (`{p} r` from inside it)."
     ));
     doc.text(
-        "`n` (or + New session) asks only for a name. The session goes in the current folder, \
-         shown under the name, and starts your login shell there. Selecting a session or \
+        "`n` (or + New session) creates immediately, selects the new session and enters its \
+         login-shell prompt without a naming dialog. It goes in the current folder. Selecting a session or \
          folder header sets this folder; moving to + New session or the folder filter keeps \
          it. A single-folder filter takes precedence. Without folder context, the launch \
          folder is used. For another folder, a command or startup commands, \
@@ -1465,13 +1465,14 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     doc.heading("AI activity summaries");
     doc.text(
         "Settings, General, Activity summaries is off by default. Enabling it asks for consent \
-         to share bounded recent terminal output and agent reports with your configured AI provider. \
+         to share bounded recent or saved terminal output and agent reports with your own AI provider. \
          Secret filtering is best-effort, not a guarantee; private sessions are excluded. Requests \
          may incur charges, and a request already sent may finish after you turn it off.",
     );
     doc.text(
-        "The daemon generates one short status line for all clients, no more than once a minute \
-         per active session plus blocked/done transitions. Unchanged output is not sent again. \
+        "The daemon generates one short status line for all clients after 10 seconds without \
+         session updates. Each new update resets that timer. Existing sessions with saved output \
+         are included, and unchanged output is not sent again. Failed requests retry after a minute. \
          The list shows a third content line; while browsing, the detail pane shows its full text, \
          capture age and refresh errors. Cached text can be stale and never replaces the session's \
          name or description. No AI call runs during drawing or blocks terminal input.",
@@ -2971,7 +2972,7 @@ mod tests {
             "it never runs git",
             "isn't saved",
             "Folders (Enter on the folder filter, or P)",
-            "asks only for a name",
+            "without a naming dialog",
             "rakumux new --cwd DIR --cmd C -- ARGV",
             "rakumux folders",
             "--folder DIR",

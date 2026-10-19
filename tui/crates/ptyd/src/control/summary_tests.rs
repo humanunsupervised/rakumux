@@ -98,6 +98,11 @@ impl Context {
     }
 }
 
+fn settled_tick(worker: &mut SummaryService, inner: &Inner, config: &SummarySettings, now: i64) {
+    worker.tick(inner, config, now - QUIET_MS).unwrap();
+    worker.tick(inner, config, now).unwrap();
+}
+
 #[test]
 fn activity_summary_is_shared_cached_persisted_and_deduplicated() {
     let context = Context::new();
@@ -141,7 +146,7 @@ fn activity_summary_is_shared_cached_persisted_and_deduplicated() {
     };
     context.host.show(&context.id, "Fixed the login flow; running the integration suite. CUSTOM_TOKEN=private-env-token private-user-token sk-private-provider-key");
     let now = now_ms() + 10_000;
-    worker.tick(&context.inner, &config, now).unwrap();
+    settled_tick(&mut worker, &context.inner, &config, now);
     let summary = context.view().activity_summary.unwrap();
     assert_eq!(summary.text, "Fixed login; verifying tests.");
     assert_eq!(context.view().name, "my-session");
@@ -187,9 +192,7 @@ fn private_sessions_never_reach_the_summary_provider() {
         attempts: HashMap::new(),
         model: Box::new(|_, _| panic!("private session reached AI provider")),
     };
-    worker
-        .tick(&context.inner, &config, now_ms() + 10_000)
-        .unwrap();
+    settled_tick(&mut worker, &context.inner, &config, now_ms() + 10_000);
     assert!(context.view().activity_summary.is_none());
 }
 
@@ -209,9 +212,7 @@ fn a_summary_result_after_opt_out_is_discarded() {
             Ok("This late result must not be stored.".into())
         }),
     };
-    worker
-        .tick(&context.inner, &config, now_ms() + 10_000)
-        .unwrap();
+    settled_tick(&mut worker, &context.inner, &config, now_ms() + 10_000);
     assert!(context.view().activity_summary.is_none());
     assert!(crate::persist::ScrollbackStore::new(context.layout.clone())
         .load_activity_summary(&context.id)
@@ -253,9 +254,7 @@ fn a_summary_result_after_a_new_agent_report_is_discarded() {
             Ok("This predates the new blocker and must be dropped.".into())
         }),
     };
-    worker
-        .tick(&context.inner, &config, now_ms() + 10_000)
-        .unwrap();
+    settled_tick(&mut worker, &context.inner, &config, now_ms() + 10_000);
     assert!(context.view().activity_summary.unwrap().text.is_empty());
     assert!(crate::persist::ScrollbackStore::new(context.layout.clone())
         .load_activity_summary(&context.id)
@@ -276,15 +275,148 @@ fn summary_refresh_errors_keep_the_last_successful_text() {
         model: Box::new(|_, _| Ok("Fixed login; verifying tests.".into())),
     };
     let now = now_ms() + 10_000;
-    worker.tick(&context.inner, &config, now).unwrap();
+    settled_tick(&mut worker, &context.inner, &config, now);
     worker.model = Box::new(|_, _| Err("provider unavailable".into()));
     context.host.show(
         &context.id,
         "Now investigating a newly exposed test failure in the login flow.",
     );
-    worker.tick(&context.inner, &config, now + 60_000).unwrap();
+    settled_tick(&mut worker, &context.inner, &config, now + 60_000);
     let summary = context.view().activity_summary.unwrap();
     assert_eq!(summary.text, "Fixed login; verifying tests.");
     assert!(summary.error.is_some());
     assert_eq!(summary.updated_at, now / 1000);
+}
+
+#[test]
+fn every_session_update_refreshes_after_ten_idle_seconds_without_a_minute_delay() {
+    let context = Context::new();
+    let config = context.configure(true);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let mut worker = SummaryService {
+        attempts: HashMap::new(),
+        model: Box::new(move |_, _| {
+            count.fetch_add(1, Ordering::SeqCst);
+            Ok("Investigated login; verifying the next step.".into())
+        }),
+    };
+    context.host.show(
+        &context.id,
+        "Investigating the initial login failure in the authentication code.",
+    );
+    let start = now_ms() + 100;
+    worker.tick(&context.inner, &config, start).unwrap();
+    worker.tick(&context.inner, &config, start + 9_999).unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    worker
+        .tick(&context.inner, &config, start + 10_000)
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    context.host.show(
+        &context.id,
+        "Fixed the login failure; now checking integration coverage and final tests.",
+    );
+    worker
+        .tick(&context.inner, &config, start + 12_000)
+        .unwrap();
+    worker
+        .tick(&context.inner, &config, start + 21_999)
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    worker
+        .tick(&context.inner, &config, start + 22_000)
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn existing_dead_sessions_receive_a_summary_from_saved_output_without_being_recreated() {
+    let context = Context::new();
+    let config = context.configure(true);
+    crate::persist::ScrollbackStore::new(context.layout.clone())
+        .save(
+            &context.id,
+            b"Fixed the migration; verifying the final integration checks.\r\n",
+            &crate::persist::SessionMeta::default(),
+        )
+        .unwrap();
+    let host = FakeHost::new();
+    let restored = Inner::new(
+        ControlConfig {
+            layout: context.layout.clone(),
+            user_token: Token::from_string("restored-user-token"),
+            socket: context.layout.home.join("socket"),
+            rakumux_bin: None,
+            version: "test".into(),
+            limits: Limits::default(),
+        },
+        host.clone(),
+        Registry::open(&context.layout.registry_db(), now_ms()).unwrap(),
+        crate::detect::detect,
+    );
+    restored.enable_summaries(true);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let mut worker = SummaryService {
+        attempts: HashMap::new(),
+        model: Box::new(move |_, prompt| {
+            assert!(prompt.contains("Session status: Dead"));
+            assert!(prompt.contains("Fixed the migration"));
+            count.fetch_add(1, Ordering::SeqCst);
+            Ok("Fixed the migration; last checked integration coverage.".into())
+        }),
+    };
+    let now = now_ms() + QUIET_MS;
+    settled_tick(&mut worker, &restored, &config, now);
+    let response = restored.handle(
+        &context.caller,
+        Request::SessionGet {
+            id: context.id.clone(),
+        },
+    );
+    let Response::Session { session } = response else {
+        panic!("{response:?}");
+    };
+    assert_eq!(session.id, context.id);
+    assert_eq!(session.status, SessionStatus::Dead);
+    assert!(session.activity_summary.unwrap().text.contains("migration"));
+    assert!(
+        host.spawns().is_empty(),
+        "backfilling never starts or recreates a terminal"
+    );
+    worker.tick(&restored, &config, now + 60_000).unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "unchanged archived output is not regenerated"
+    );
+}
+
+#[test]
+fn output_arriving_during_a_summary_request_invalidates_that_reply() {
+    let context = Context::new();
+    let config = context.configure(true);
+    context.host.show(
+        &context.id,
+        "Investigating the parser failure before the next update.",
+    );
+    let host = context.host.clone();
+    let id = context.id.clone();
+    let mut worker = SummaryService {
+        attempts: HashMap::new(),
+        model: Box::new(move |_, _| {
+            host.show(
+                &id,
+                "New output: the parser is fixed and integration checks have started.",
+            );
+            Ok("An obsolete description which must not overwrite newer activity.".into())
+        }),
+    };
+    settled_tick(&mut worker, &context.inner, &config, now_ms() + QUIET_MS);
+    assert!(context.view().activity_summary.unwrap().text.is_empty());
+    assert!(
+        !worker.attempts[&context.id].failed,
+        "obsolete replies do not trigger a network-error backoff"
+    );
 }

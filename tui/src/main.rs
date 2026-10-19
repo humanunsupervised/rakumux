@@ -388,13 +388,13 @@ impl InputLog {
     }
 
     fn record(&mut self, what: &str, event: &crossterm::event::Event, app: &App) {
-        let private = app.keys_go_to_session()
+        let private = app.input_is_private()
             && matches!(
                 event,
                 crossterm::event::Event::Key(_) | crossterm::event::Event::Paste(_)
             );
         let text = match event {
-            _ if private => "(session key)".to_string(),
+            _ if private => "(private input)".to_string(),
             crossterm::event::Event::Paste(text) => {
                 format!("Paste({} chars)", text.chars().count())
             }
@@ -442,6 +442,38 @@ impl Drop for InputLog {
     /// Without `--debug`, the last lines replace the log on quit.
     fn drop(&mut self) {
         self.write();
+    }
+}
+
+#[cfg(test)]
+mod input_log_tests {
+    use super::*;
+
+    #[test]
+    fn api_key_input_never_appears_in_debug_logs() {
+        let mut harness = crate::app::testing::harness(vec![]);
+        harness.app.mode =
+            crate::app::types::AppMode::ConfiguringApiKey(crate::app::types::ApiKeyDialog {
+                provider: crate::app::types::ApiProvider::OpenAI,
+                input: crate::app::TextInput::new("sk-private-example-key"),
+                error_message: None,
+            });
+        let mut log = InputLog {
+            path: None,
+            live: None,
+            recent: std::collections::VecDeque::new(),
+            started: std::time::Instant::now(),
+        };
+        let event = crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        log.record("read", &event, &harness.app);
+        let line = log.recent.back().unwrap();
+        assert!(line.contains("(private input)"));
+        assert!(!line.contains("Char("));
+        assert!(!line.contains("sk-private-example-key"));
+        assert!(!format!("{:?}", harness.app.mode).contains("sk-private-example-key"));
     }
 }
 

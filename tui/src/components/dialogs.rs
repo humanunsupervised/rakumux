@@ -322,7 +322,7 @@ pub fn draw_api_key_dialog(f: &mut Frame, dialog: &ApiKeyDialog, area: Rect) {
         None => Vec::new(),
     };
     lines.push(Line::from(
-        "Used for AI naming and optional activity summaries.",
+        "Your own key, used for AI naming and optional activity summaries.",
     ));
     for step in steps {
         lines.push(Line::from(vec![
@@ -331,7 +331,7 @@ pub fn draw_api_key_dialog(f: &mut Frame, dialog: &ApiKeyDialog, area: Rect) {
         ]));
     }
     lines.push(Line::from(Span::styled(
-        "Saved to ~/.rakumux/config.json. Leave empty to remove the key.",
+        "Saved locally to ~/.rakumux/config.json with owner-only permissions. Leave empty to remove the key.",
         Style::default().fg(p.text_muted),
     )));
     let keys = [("Enter", "Save"), ("Esc", "Cancel")];

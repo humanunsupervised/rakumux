@@ -706,14 +706,10 @@ async fn from_a_session_the_rakumux_key_then_one_key_does_everything() {
     h.press(KeyCode::Esc).await;
     assert_eq!(h.app.focus, Focus::Session);
 
-    // Rename and new-session dialogs.
+    // Rename still uses a dialog.
     h.prefix('r').await;
     assert!(matches!(h.app.mode, AppMode::Renaming(_)));
     h.press(KeyCode::Esc).await;
-    h.press(KeyCode::Char('n')).await;
-    assert!(matches!(h.app.mode, AppMode::NewSession(_)));
-    h.press(KeyCode::Esc).await;
-
     // Close asks first, then kills.
     h.press(KeyCode::Char('x')).await;
     match &h.app.mode {
@@ -995,6 +991,41 @@ async fn the_session_list_is_never_faded() {
 }
 
 #[tokio::test]
+async fn activity_summary_detail_uses_the_same_inactive_styling_as_the_preview() {
+    use ratatui::style::Modifier;
+
+    for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
+        let mut session = view("A", "summary-session", 10);
+        session.activity_summary = Some(session_core::model::ActivitySummary {
+            text: "Fixed login; verifying tests.".into(),
+            updated_at: 1,
+            error: None,
+        });
+        let mut h = harness(vec![session]);
+        h.app.set_layout(layout);
+        let palette = crate::theme::palette();
+        let inactive = cell_of(&mut h, "AI activity");
+        match palette.faded(palette.text_muted, crate::components::utils::PREVIEW_FADE) {
+            Some(color) => {
+                assert_eq!(inactive.fg, color);
+                assert!(!inactive.modifier.contains(Modifier::DIM));
+            }
+            None => assert!(inactive.modifier.contains(Modifier::DIM)),
+        }
+        h.press(KeyCode::Char('?')).await;
+        let under_dialog = cell_of(&mut h, "AI activity");
+        match palette.faded(palette.text_muted, crate::components::utils::FADE_TEXT) {
+            Some(color) => assert_eq!(under_dialog.fg, color),
+            None => assert!(under_dialog.modifier.contains(Modifier::DIM)),
+        }
+        h.press(KeyCode::Esc).await;
+        assert_eq!(cell_of(&mut h, "AI activity"), inactive);
+        h.press(KeyCode::Enter).await;
+        assert!(h.app.screen().activity_summary.is_none());
+    }
+}
+
+#[tokio::test]
 async fn live_previews_fade_lightly_in_rakumux_mode_and_more_under_dialogs() {
     use ratatui::style::{Color, Modifier};
 
@@ -1163,21 +1194,10 @@ async fn dead_session_shows_saved_output_and_enter_revives() {
 // ---------------------------------------------------------------- dialogs
 
 #[tokio::test]
-async fn new_session_dialog_creates_and_focuses_the_session() {
+async fn new_session_creates_immediately_and_focuses_the_shell_without_a_dialog() {
     let mut h = harness(vec![view("A", "a", 10)]);
 
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), scope());
-    // Only the name: Tab and arrows don't move anywhere or type anything.
-    h.type_text("api work").await;
-    for code in [KeyCode::Tab, KeyCode::BackTab, KeyCode::Up, KeyCode::Down] {
-        h.press(code).await;
-    }
-    match &h.app.mode {
-        AppMode::NewSession(dialog) => assert_eq!(dialog.name.value(), "api work"),
-        _ => panic!("dialog closed"),
-    }
-    h.press(KeyCode::Enter).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
 
     // The folder and the login shell: no command, no startup input.
@@ -1185,7 +1205,7 @@ async fn new_session_dialog_creates_and_focuses_the_session() {
     assert_eq!(creates.len(), 1);
     let create = &creates[0];
     assert_eq!(create.scope, Some(scope()));
-    assert_eq!(create.name.as_deref(), Some("api work"));
+    assert_eq!(create.name, None);
     assert_eq!(create.cwd.as_deref(), Some(scope().path()));
     assert_eq!(create.argv, None);
     assert!(create.startup_cmds.is_empty());
@@ -1193,7 +1213,7 @@ async fn new_session_dialog_creates_and_focuses_the_session() {
 
     let new_id = h.app.list.selected_id().cloned().unwrap();
     assert_eq!(new_id.as_str(), "N1");
-    assert_eq!(h.app.list.get(&new_id).unwrap().name, "api work");
+    assert!(h.app.list.get(&new_id).unwrap().auto_named);
     let (_, request) = h.last_attach();
     assert_eq!(
         (request.id.clone(), request.role),
@@ -1203,10 +1223,8 @@ async fn new_session_dialog_creates_and_focuses_the_session() {
 }
 
 #[tokio::test]
-async fn a_blank_name_lets_rakumux_pick_one() {
+async fn enter_on_new_session_generates_a_name_and_goes_straight_into_session_mode() {
     let mut h = harness(vec![]);
-    h.press(KeyCode::Char('n')).await;
-    h.type_text("   ").await;
     h.press(KeyCode::Enter).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
     let create = h.fake.creates().pop().unwrap();
@@ -1215,17 +1233,41 @@ async fn a_blank_name_lets_rakumux_pick_one() {
     let new_id = h.app.list.selected_id().cloned().unwrap();
     assert!(h.app.list.get(&new_id).unwrap().auto_named);
 
-    // Esc cancels without creating anything.
+    assert_eq!(h.app.focus, Focus::Session);
+    // Names remain editable after creation with the existing rename action.
     h.rakumux().await;
-    h.press(KeyCode::Char('n')).await;
-    h.type_text("never").await;
-    h.press(KeyCode::Esc).await;
-    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.press(KeyCode::Char('r')).await;
+    assert!(matches!(h.app.mode, AppMode::Renaming(_)));
     assert_eq!(h.fake.creates().len(), 1);
 }
 
 #[tokio::test]
-async fn create_errors_from_the_daemon_stay_in_the_dialog() {
+async fn pending_session_creation_cannot_duplicate_creates_or_send_input_to_the_previous_session() {
+    let mut h = harness(vec![view("A", "a", 1)]);
+    h.press(KeyCode::Enter).await;
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    h.fake.clear_calls();
+    h.app.creating_session = true;
+    h.app.phone_offer_pending = true;
+    h.app.focus = Focus::List;
+    assert!(
+        !h.app.offer_phone_access(),
+        "onboarding must not interrupt immediate session creation"
+    );
+    h.app.focus = Focus::Session;
+    for key in ['n', 'x', 'q'] {
+        assert_eq!(h.press(KeyCode::Char(key)).await, AppResult::Continue);
+    }
+    h.app.handle_paste("must not reach the old shell");
+    assert!(h.fake.creates().is_empty());
+    assert!(h.fake.outgoing(index).is_empty());
+    assert!(h.app.input_is_private());
+    h.app.creating_session = false;
+}
+
+#[tokio::test]
+async fn create_errors_are_shown_without_a_modal_and_allow_retry() {
     let dir = tempfile::tempdir().unwrap();
     let scope = ScopeRoot::resolve(dir.path()).unwrap();
     let fake = FakeApi::new(vec![]);
@@ -1237,15 +1279,11 @@ async fn create_errors_from_the_daemon_stay_in_the_dialog() {
     let options = options(&fake, scope, &home);
     let mut h = start(options, fake, home);
     h.press(KeyCode::Enter).await; // "+ New session" row
-    h.type_text("dup").await;
-    h.press(KeyCode::Enter).await;
-    match &h.app.mode {
-        AppMode::NewSession(dialog) => {
-            assert!(dialog.error.as_deref().unwrap().contains("name taken"));
-            assert!(!dialog.busy);
-        }
-        _ => panic!("dialog closed"),
-    }
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.status().unwrap().contains("name taken"));
+    assert!(!h.app.creating_session);
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(h.app.focus, Focus::Session);
 }
 
 #[tokio::test]
@@ -1409,8 +1447,9 @@ async fn the_keys_tab_runs_the_selected_action() {
         h.press(KeyCode::Down).await;
     }
     h.press(KeyCode::Enter).await;
-    assert!(matches!(h.app.mode, AppMode::NewSession(_)));
-    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.focus, Focus::Session);
+    h.rakumux().await;
     // Next session, from Rakumux mode.
     open_keys(&mut h);
     for _ in 0..row(crate::help::KeyAction::NextSession) {
@@ -1649,6 +1688,33 @@ async fn typing_an_api_key_never_switches_tabs_or_closes() {
     assert!(h.app.settings.ai.openai_api_key.is_none());
     h.press(KeyCode::Esc).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
+}
+
+#[tokio::test]
+async fn a_users_first_api_key_selects_its_provider_without_overriding_an_explicit_choice() {
+    for primary in [None, Some("anthropic")] {
+        let mut h = harness(vec![]);
+        h.app.settings.ai.ai_primary_provider = primary.map(str::to_owned);
+        h.press(KeyCode::Char('o')).await;
+        for _ in 0..SettingsItem::OpenAiKey.index() {
+            h.press(KeyCode::Down).await;
+        }
+        h.press(KeyCode::Enter).await;
+        h.type_text("sk-user-supplied-example").await;
+        h.press(KeyCode::Enter).await;
+        assert_eq!(
+            h.app.settings.ai.openai_api_key.as_deref(),
+            Some("sk-user-supplied-example")
+        );
+        assert_eq!(
+            h.app.settings.ai.ai_primary_provider.as_deref(),
+            Some(primary.unwrap_or("openai"))
+        );
+        assert!(
+            !h.app.settings.sessions.ai_activity_summaries,
+            "saving a key must not enable output sharing"
+        );
+    }
 }
 
 #[tokio::test]
@@ -2571,8 +2637,8 @@ async fn typing_a_folder_adds_or_creates_it_and_shows_it() {
     assert!(h.app.list.visible().is_empty());
     assert_eq!(h.app.detail.view, DetailView::Empty);
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), other);
-    h.press(KeyCode::Esc).await;
+    assert_eq!(created_folder(&h), other);
+    h.rakumux().await;
 
     // A folder that doesn't exist is created after `y`, added and shown.
     h.press(KeyCode::Char('P')).await;
@@ -2818,12 +2884,9 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
     assert_eq!(visible_ids(&h), ["A", "W1"]);
 }
 
-/// The new-session dialog's folder.
-fn dialog_folder(h: &Harness) -> ScopeRoot {
-    match &h.app.mode {
-        AppMode::NewSession(dialog) => dialog.folder.clone(),
-        _ => panic!("no new-session dialog"),
-    }
+/// The folder used by the last immediate creation request.
+fn created_folder(h: &Harness) -> ScopeRoot {
+    h.fake.creates().last().unwrap().scope.clone().unwrap()
 }
 
 #[tokio::test]
@@ -2833,9 +2896,7 @@ async fn new_sessions_go_in_the_current_folder() {
     // 1. The selected session's folder: web-one is the most recent.
     assert_eq!(h.selected().as_deref(), Some("W1"));
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), web);
-    h.type_text("frontend").await;
-    h.press(KeyCode::Enter).await;
+    assert_eq!(created_folder(&h), web);
     let create = h.fake.creates().pop().unwrap();
     assert_eq!(create.scope, Some(web.clone()));
     assert_eq!(create.cwd.as_deref(), Some(web.path()));
@@ -2852,41 +2913,43 @@ async fn new_sessions_go_in_the_current_folder() {
     h.press(KeyCode::Down).await;
     assert_eq!(h.selected().as_deref(), Some("R1"));
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), scope());
-    h.press(KeyCode::Esc).await;
+    assert_eq!(created_folder(&h), scope());
+    h.rakumux().await;
     // 2. On a folder's header, that folder: `n` or Enter.
     h.app
         .list
         .select(session_list::Selection::FolderHeader(api.clone()));
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), api);
-    h.press(KeyCode::Esc).await;
+    assert_eq!(created_folder(&h), api);
+    h.rakumux().await;
+    h.app
+        .list
+        .select(session_list::Selection::FolderHeader(api.clone()));
     h.press(KeyCode::Enter).await;
-    assert_eq!(dialog_folder(&h), api);
-    h.press(KeyCode::Esc).await;
+    assert_eq!(created_folder(&h), api);
+    h.rakumux().await;
     // 4. Neutral rows retain the last selected section, not the launch folder.
     h.press(KeyCode::Home).await;
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), api);
-    h.press(KeyCode::Esc).await;
+    assert_eq!(created_folder(&h), api);
+    h.rakumux().await;
     h.press(KeyCode::End).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
     h.press(KeyCode::Enter).await;
-    assert_eq!(dialog_folder(&h), api);
-    h.press(KeyCode::Esc).await;
+    assert_eq!(created_folder(&h), api);
+    h.rakumux().await;
 
     // 3. The filter's only folder.
     h.app.show_folders(vec![web.clone()]);
     h.press(KeyCode::End).await;
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), web);
-    h.press(KeyCode::Esc).await;
+    assert_eq!(created_folder(&h), web);
+    h.rakumux().await;
     // Several folders shown: keep the current section, not the hidden launch folder.
     h.app.show_folders(vec![api.clone(), web.clone()]);
     h.press(KeyCode::End).await;
     h.press(KeyCode::Char('n')).await;
-    assert_eq!(dialog_folder(&h), web);
-    h.press(KeyCode::Enter).await;
+    assert_eq!(created_folder(&h), web);
     let new_id = h.app.list.selected_id().cloned().unwrap();
     assert_eq!(h.app.list.get(&new_id).unwrap().scope, web);
     assert_eq!(h.app.list.folder_filter(), [api, web]);
@@ -2896,16 +2959,23 @@ async fn new_sessions_go_in_the_current_folder() {
 #[tokio::test]
 async fn new_session_folder_follows_keyboard_navigation_in_both_layouts() {
     for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
-        let mut h = folders_harness();
-        h.app.set_layout(layout);
         // Starting on web, cycle through repo's sessions, api, and back to web.
-        for expected in [scope(), scope(), folder("/api"), folder("/web")] {
-            h.alt(KeyCode::Down).await;
+        for (index, expected) in [scope(), scope(), folder("/api"), folder("/web")]
+            .into_iter()
+            .enumerate()
+        {
+            let mut h = folders_harness();
+            h.app.set_layout(layout);
+            for _ in 0..=index {
+                h.alt(KeyCode::Down).await;
+            }
             assert_eq!(h.app.current_folder(), expected);
             h.press(KeyCode::Char('n')).await;
-            assert_eq!(dialog_folder(&h), expected);
-            h.press(KeyCode::Esc).await;
+            assert_eq!(created_folder(&h), expected);
+            assert_eq!(h.app.focus, Focus::Session);
         }
+        let mut h = folders_harness();
+        h.app.set_layout(layout);
         if layout == SessionLayout::Sidebar {
             h.press(KeyCode::Down).await;
             assert_eq!(h.app.list.selection(), &Selection::NewSession);
@@ -2913,7 +2983,6 @@ async fn new_session_folder_follows_keyboard_navigation_in_both_layouts() {
         } else {
             h.press(KeyCode::Char('n')).await;
         }
-        h.press(KeyCode::Enter).await;
         let create = h.fake.creates().pop().unwrap();
         assert_eq!(create.scope, Some(folder("/web")));
         assert_eq!(create.cwd.as_deref(), Some(folder("/web").path()));
@@ -2950,8 +3019,7 @@ async fn clicking_new_session_keeps_the_clicked_sections_folder() {
     h.app.process_pending();
     assert_eq!(h.app.list.selection(), &Selection::NewSession);
     h.press(KeyCode::Enter).await;
-    assert_eq!(dialog_folder(&h), folder("/api"));
-    h.press(KeyCode::Enter).await;
+    assert_eq!(created_folder(&h), folder("/api"));
     let create = h.fake.creates().pop().unwrap();
     assert_eq!(create.scope, Some(folder("/api")));
     assert_eq!(create.cwd.as_deref(), Some(folder("/api").path()));
@@ -2972,8 +3040,7 @@ async fn empty_folder_header_sets_new_session_target_without_changing_the_previe
     assert_eq!(h.app.detail.session_id(), shown.as_ref());
     h.press(KeyCode::End).await;
     h.press(KeyCode::Enter).await;
-    assert_eq!(dialog_folder(&h), empty);
-    h.press(KeyCode::Enter).await;
+    assert_eq!(created_folder(&h), empty);
     let create = h.fake.creates().pop().unwrap();
     assert_eq!(create.scope, Some(empty.clone()));
     assert_eq!(create.cwd.as_deref(), Some(empty.path()));

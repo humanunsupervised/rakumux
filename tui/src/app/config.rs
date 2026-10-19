@@ -198,6 +198,8 @@ impl Settings {
         Ok(settings)
     }
 
+    /// Replace a fixture; production changes use the locked update method.
+    #[cfg(test)]
     pub fn save_to(&self, path: &Path) -> Result<()> {
         with_config_lock(path, || self.write_to(path))
     }

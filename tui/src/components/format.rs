@@ -193,7 +193,7 @@ pub fn activity_summary_line(summary: &session_core::model::ActivitySummary) -> 
     } else if summary.error.is_some() {
         "Summary unavailable".into()
     } else {
-        "Waiting for activity".into()
+        "Summary pending".into()
     }
 }
 

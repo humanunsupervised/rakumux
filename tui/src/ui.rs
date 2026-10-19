@@ -21,7 +21,6 @@ use crate::components::{
     },
     folder_picker::draw_folder_picker,
     footer::draw_footer,
-    new_session_dialog::draw_new_session_dialog,
     session_detail::draw_session_detail,
     session_list::draw_session_list,
     session_tabs::draw_session_tabs,
@@ -95,7 +94,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let mut menu_hits = Vec::new();
     match &app.mode {
         AppMode::Normal => {}
-        AppMode::NewSession(_) => draw_new_session_dialog(f, app, area),
         AppMode::Folders(picker) => draw_folder_picker(f, app, picker, area, &mut menu_hits),
         AppMode::Renaming(dialog) => draw_rename_dialog(f, dialog, area),
         AppMode::Confirm(dialog) => draw_confirm_dialog(f, dialog, area),
@@ -578,11 +576,6 @@ mod tests {
             assert!(screen.contains("What Rakumux is"), "{screen}");
         }
         h.press(KeyCode::Esc).await;
-        h.press(KeyCode::Char('n')).await;
-        let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("New session"), "{screen}");
-        assert!(screen.contains("a name is picked for you"), "{screen}");
-        h.press(KeyCode::Esc).await;
         h.press(KeyCode::Char('o')).await;
         let screen = render(&mut h.app, 80, 24);
         assert!(screen.contains("Settings"), "{screen}");
@@ -593,82 +586,36 @@ mod tests {
         assert!(screen.contains("Delete session"), "{screen}");
     }
 
-    /// The rows of the new-session dialog, from its top border to its
-    /// bottom one, trimmed.
-    fn new_session_dialog(screen: &str) -> Vec<String> {
-        // One char per cell, so char positions are columns.
-        let lines: Vec<Vec<char>> = screen.lines().map(|l| l.chars().collect()).collect();
-        let top = screen
-            .lines()
-            .position(|l| l.contains("┌ New session "))
-            .unwrap_or_else(|| panic!("no dialog: {screen}"));
-        let left = lines[top].iter().position(|c| *c == '┌').unwrap();
-        let right = left + lines[top][left..].iter().position(|c| *c == '┐').unwrap();
-        let bottom = (top + 1..lines.len())
-            .find(|&y| lines[y].get(left) == Some(&'└'))
-            .unwrap();
-        lines[top..=bottom]
-            .iter()
-            .map(|l| l[left..=right].iter().collect())
-            .collect()
-    }
-
     #[tokio::test]
-    async fn the_new_session_dialog_asks_only_for_a_name() {
+    async fn new_sessions_show_the_terminal_immediately_without_a_name_modal() {
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
         // The most recent session is frontend, in /code/web.
         h.press(KeyCode::Char('n')).await;
-        for (width, height) in SIZES {
+        assert_eq!(h.app.focus, Focus::Session);
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        for (width, height) in [(40, 20), (80, 24), (160, 48)] {
             let screen = render(&mut h.app, width, height);
-            let dialog = new_session_dialog(&screen);
-            let text = dialog.join("\n");
-            // A border, the name field (3 rows), the folder, a message row
-            // and the keys.
-            assert_eq!(dialog.len(), 8, "{text}");
-            assert!(dialog[1].contains("┌ Name "), "{text}");
-            assert!(
-                dialog[2].contains("blank: a name is picked for you"),
-                "{text}"
-            );
-            assert!(dialog[4].starts_with("│ in ▤ web   /code/web"), "{text}");
-            assert!(dialog[6].contains("Enter create  Esc cancel"), "{text}");
-            for gone in ["Directory", "Command", "Startup", "Project", "Tab", "←"] {
-                assert!(!text.contains(gone), "{gone}: {text}");
-            }
+            assert!(!screen.contains("┌ New session "), "{screen}");
+            assert!(!screen.contains("┌ Name "), "{screen}");
+            assert!(screen.contains("hello from the fake"), "{screen}");
+            assert!(screen.contains("SESSION"), "{screen}");
         }
-        // The folder follows the icon setting.
-        h.app.settings.sessions.icons = crate::icons::Icons::Emoji;
-        let dialog = new_session_dialog(&render(&mut h.app, 160, 48));
-        // (The emoji's second cell renders as a space here.)
-        assert!(
-            dialog[4].starts_with("│ in 📁  web   /code/web"),
-            "{dialog:?}"
-        );
-        // What's typed shows in the field; errors under the folder.
-        h.type_text("api work").await;
-        if let AppMode::NewSession(dialog) = &mut h.app.mode {
-            dialog.error = Some("name taken".into());
-        }
-        let dialog = new_session_dialog(&render(&mut h.app, 160, 48));
-        assert!(dialog[2].contains("api work"), "{dialog:?}");
-        assert!(dialog[5].contains("✕ name taken"), "{dialog:?}");
+        assert_eq!(h.fake.creates().last().unwrap().name, None);
     }
 
     #[tokio::test]
-    async fn the_new_session_dialog_shows_the_last_visited_folder_section() {
+    async fn immediate_creation_uses_the_last_visited_folder_section() {
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
         h.app
             .list
             .select(crate::app::Selection::FolderHeader(folder("/code/api")));
         h.press(KeyCode::End).await;
         h.press(KeyCode::Enter).await;
-        for (width, height) in SIZES {
-            let dialog = new_session_dialog(&render(&mut h.app, width, height));
-            assert!(
-                dialog[4].starts_with("│ in ▤ api   /code/api"),
-                "{dialog:?}"
-            );
-        }
+        assert_eq!(
+            h.fake.creates().last().unwrap().scope,
+            Some(folder("/code/api"))
+        );
+        assert_eq!(h.app.focus, Focus::Session);
     }
 
     #[test]
@@ -1163,10 +1110,9 @@ mod tests {
             AiProviderDialog, ApiKeyDialog, ApiProvider, ConfirmAction, ConfirmDialog,
             DaemonRestartDialog, OpenAiModelDialog, RenameDialog, UpgradeDialog,
         };
-        use crate::app::{NewSessionDialog, TextInput};
+        use crate::app::TextInput;
         let id = session_core::ids::SessionId::from_string("A");
         h.app.mode = match which {
-            "new" => AppMode::NewSession(NewSessionDialog::new(scope())),
             "rename" => AppMode::Renaming(RenameDialog {
                 session_id: id,
                 current_name: "api".into(),
@@ -1227,8 +1173,7 @@ mod tests {
     #[tokio::test]
     async fn dialogs_fit_a_phone() {
         let mut h = harness(vec![view("A", "api", 10), view("B", "docs", 20)]);
-        let expected: [(&str, &[&str]); 9] = [
-            ("new", &["Enter create  Esc cancel", "in ▤ repo"]),
+        let expected: [(&str, &[&str]); 8] = [
             ("rename", &["Current: api", "[Enter] Rename • [Esc] Cancel"]),
             ("delete", &["output removed.", "[y/Enter] Yes • [n/Esc] No"]),
             ("restart", &["them.", "are.", "[y] Restart", "[q] Quit"]),
@@ -1272,13 +1217,6 @@ mod tests {
                     assert!(screen.contains(text), "{which} {width}x{height}: {screen}");
                 }
             }
-            // The name field's hint is whole.
-            open_dialog(&mut h, "new");
-            let dialog = new_session_dialog(&render(&mut h.app, width, height));
-            assert!(
-                dialog[2].contains("blank: a name is picked for you"),
-                "{dialog:?}"
-            );
             h.app.mode = AppMode::Normal;
             // Settings shows every choice; Help and the Folders modal open.
             h.press(KeyCode::Char(',')).await;
@@ -1507,7 +1445,7 @@ mod tests {
         h.press(KeyCode::Esc).await;
 
         // While a dialog is open the footer isn't a target.
-        h.press(KeyCode::Char('n')).await;
+        h.press(KeyCode::Char('r')).await;
         render(&mut h.app, width, height);
         assert!(!h.app.hits.iter().any(|(_, hit)| *hit == Hit::ModeBadge));
     }

@@ -6,7 +6,7 @@ use crate::host::HostError;
 use rakumux_ai::{provider, summary, Config};
 use serde::Deserialize;
 use session_core::ids::{SessionId, TerminalId};
-use session_core::model::Lifecycle;
+use session_core::model::{Lifecycle, SessionStatus};
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read};
@@ -15,13 +15,14 @@ use std::sync::{atomic::Ordering, Arc, Weak};
 use std::time::Duration;
 
 const POLL: Duration = Duration::from_secs(2);
-const INTERVAL_MS: i64 = 60_000;
-const QUIET_MS: i64 = 2_000;
-const MAX_WAIT_MS: i64 = 10_000;
+const RETRY_MS: i64 = 60_000;
+const QUIET_MS: i64 = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SummaryRevision {
-    pub terminal: TerminalId,
+    pub terminal: Option<TerminalId>,
+    pub status: SessionStatus,
+    pub changed_at_ms: i64,
     pub output_offset: u64,
     pub report_seq: u64,
     pub lifecycle: Lifecycle,
@@ -87,7 +88,7 @@ fn ai_summary(config: &Config, prompt: &str) -> Result<String, String> {
 #[derive(Default)]
 struct Attempt {
     first_seen_ms: i64,
-    waiting_for_settle: bool,
+    observed: Option<SummaryRevision>,
     last_request_ms: Option<i64>,
     revision: Option<SummaryRevision>,
     input_hash: Option<u64>,
@@ -95,27 +96,36 @@ struct Attempt {
 }
 
 impl Attempt {
+    fn observe(&mut self, target: &SummaryTarget, now: i64) {
+        if self.observed.as_ref() == Some(&target.revision) {
+            return;
+        }
+        if self
+            .observed
+            .as_ref()
+            .is_some_and(|revision| revision.terminal != target.revision.terminal)
+        {
+            *self = Self::default();
+        }
+        self.observed = Some(target.revision.clone());
+        self.first_seen_ms = now;
+    }
+
     fn due(&self, target: &SummaryTarget, now: i64) -> bool {
-        let critical = matches!(
-            target.revision.lifecycle,
-            Lifecycle::Blocked | Lifecycle::Done
-        ) && self.revision.as_ref().map(|revision| revision.lifecycle)
-            != Some(target.revision.lifecycle);
-        if !critical
+        if self.failed
             && self
                 .last_request_ms
-                .is_some_and(|last| now.saturating_sub(last) < INTERVAL_MS)
+                .is_some_and(|last| now.saturating_sub(last) < RETRY_MS)
         {
             return false;
         }
         if !self.failed && self.revision.as_ref() == Some(&target.revision) {
             return false;
         }
-        critical
-            || target
+        now.saturating_sub(self.first_seen_ms) >= QUIET_MS
+            && target
                 .last_output_ms
                 .is_none_or(|last| now.saturating_sub(last) >= QUIET_MS)
-            || now.saturating_sub(self.first_seen_ms) >= MAX_WAIT_MS
     }
 }
 
@@ -151,29 +161,8 @@ impl SummaryService {
             )
         });
         for mut target in targets {
-            let attempt = self
-                .attempts
-                .entry(target.id.clone())
-                .or_insert_with(|| Attempt {
-                    first_seen_ms: now,
-                    waiting_for_settle: true,
-                    ..Attempt::default()
-                });
-            if attempt
-                .revision
-                .as_ref()
-                .is_some_and(|revision| revision.terminal != target.revision.terminal)
-            {
-                *attempt = Attempt {
-                    first_seen_ms: now,
-                    waiting_for_settle: true,
-                    ..Attempt::default()
-                };
-            }
-            if !attempt.waiting_for_settle && attempt.revision.as_ref() != Some(&target.revision) {
-                attempt.first_seen_ms = now;
-                attempt.waiting_for_settle = true;
-            }
+            let attempt = self.attempts.entry(target.id.clone()).or_default();
+            attempt.observe(&target, now);
             if !attempt.due(&target, now) {
                 continue;
             }
@@ -197,19 +186,31 @@ impl SummaryService {
             let mut hasher = DefaultHasher::new();
             evidence.hash(&mut hasher);
             format!("{:?}", target.revision.lifecycle).hash(&mut hasher);
+            format!("{:?}", target.revision.status).hash(&mut hasher);
             let input_hash = hasher.finish();
             attempt.revision = Some(target.revision.clone());
-            attempt.waiting_for_settle = false;
-            if (attempt.input_hash == Some(input_hash) && !attempt.failed)
-                || (target.report.trim().is_empty() && output.trim().chars().count() < 24)
-            {
+            if attempt.input_hash == Some(input_hash) && !attempt.failed {
                 continue;
             }
             attempt.input_hash = Some(input_hash);
+            if target.report.trim().is_empty() && output.trim().chars().count() < 24 {
+                let applied = inner.apply_summary(
+                    &target,
+                    Some("No recent activity to summarize.".into()),
+                    None,
+                    now,
+                );
+                attempt.failed = false;
+                if !applied {
+                    attempt.revision = None;
+                    attempt.input_hash = None;
+                }
+                continue;
+            }
             attempt.last_request_ms = Some(now);
             let prompt = summary::prompt(&format!(
-                "Lifecycle: {:?}\n{evidence}",
-                target.revision.lifecycle
+                "Session status: {:?}\nLifecycle: {:?}\n{evidence}",
+                target.revision.status, target.revision.lifecycle
             ));
             let result = (self.model)(&config.ai, &prompt).and_then(|reply| {
                 summary::clean_reply(&reply, &target.secrets).map_err(|error| error.to_string())
@@ -224,7 +225,12 @@ impl SummaryService {
             }
             match result {
                 Ok(text) => {
-                    attempt.failed = !inner.apply_summary(&target, text, None, now);
+                    let applied = inner.apply_summary(&target, text, None, now);
+                    attempt.failed = false;
+                    if !applied {
+                        attempt.revision = None;
+                        attempt.input_hash = None;
+                    }
                 }
                 Err(error) => {
                     attempt.failed = true;
@@ -316,7 +322,9 @@ mod tests {
         SummaryTarget {
             id: SessionId::from_string("test"),
             revision: SummaryRevision {
-                terminal: TerminalId(1),
+                terminal: Some(TerminalId(1)),
+                status: SessionStatus::Live,
+                changed_at_ms: 0,
                 output_offset: 100,
                 report_seq: 1,
                 lifecycle,
@@ -329,32 +337,46 @@ mod tests {
     }
 
     #[test]
-    fn summaries_debounce_rate_limit_deduplicate_and_refresh_on_blockers() {
+    fn summaries_wait_ten_seconds_after_each_update_and_deduplicate() {
         let mut target = target(Lifecycle::Working);
         target.last_output_ms = Some(1_000);
-        let mut attempt = Attempt {
-            first_seen_ms: 1_000,
-            ..Attempt::default()
-        };
+        let mut attempt = Attempt::default();
+        attempt.observe(&target, 1_000);
         assert!(!attempt.due(&target, 1_500));
-        assert!(attempt.due(&target, 3_000));
-        attempt.last_request_ms = Some(3_000);
+        assert!(!attempt.due(&target, 10_999));
+        assert!(attempt.due(&target, 11_000));
+        attempt.last_request_ms = Some(11_000);
         attempt.revision = Some(target.revision.clone());
+        assert!(!attempt.due(&target, 100_000));
         target.revision.output_offset += 1;
-        assert!(!attempt.due(&target, 10_000));
-        assert!(attempt.due(&target, 63_000));
+        attempt.observe(&target, 12_000);
+        assert!(!attempt.due(&target, 21_999));
+        assert!(
+            attempt.due(&target, 22_000),
+            "fresh activity need not wait a full minute"
+        );
         attempt.revision = Some(target.revision.clone());
         assert!(!attempt.due(&target, 100_000));
         target.revision.lifecycle = Lifecycle::Blocked;
-        assert!(attempt.due(&target, 5_000));
+        attempt.observe(&target, 30_000);
+        assert!(!attempt.due(&target, 39_999));
+        assert!(attempt.due(&target, 40_000));
         target.last_output_ms = Some(200_000);
-        target.revision.lifecycle = Lifecycle::Working;
-        attempt.revision = None;
-        attempt.last_request_ms = None;
         assert!(
-            attempt.due(&target, 200_000),
-            "continuous output cannot postpone the first summary forever"
+            !attempt.due(&target, 200_000),
+            "busy output postpones generation until idle"
         );
+    }
+
+    #[test]
+    fn failed_summary_requests_back_off_without_changing_the_idle_debounce() {
+        let target = target(Lifecycle::Idle);
+        let mut attempt = Attempt::default();
+        attempt.observe(&target, 0);
+        attempt.failed = true;
+        attempt.last_request_ms = Some(10_000);
+        assert!(!attempt.due(&target, 69_999));
+        assert!(attempt.due(&target, 70_000));
     }
 
     #[test]

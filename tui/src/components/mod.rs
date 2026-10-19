@@ -6,7 +6,6 @@ pub mod dialogs;
 pub mod folder_picker;
 pub mod footer;
 pub mod format;
-pub mod new_session_dialog;
 pub mod phone_access;
 pub mod session_detail;
 pub mod session_list;

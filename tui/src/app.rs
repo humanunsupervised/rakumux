@@ -55,7 +55,6 @@ pub use detail::{Detail, DetailView};
 pub use feature_flags::FeatureFlags;
 pub use folders::Folders;
 pub use keys::{CycleKeys, KeyBinding};
-pub use new_session::NewSessionDialog;
 pub use runtime::{AppEvent, ExecMode};
 pub use session_list::{ListRow, Selection, SessionList};
 pub use text_input::TextInput;
@@ -270,6 +269,8 @@ pub struct App {
     pub tab_hits: Vec<(usize, Rect)>,
     /// Detail generation whose attach should take focus when it completes.
     pending_focus: Option<u64>,
+    /// Prevent duplicate creates and misrouted input before the new session attaches.
+    creating_session: bool,
     status: Option<(String, Instant)>,
     naming_started: HashSet<SessionId>,
     /// Bytes to write to the real terminal (OSC 52 clipboard).
@@ -336,6 +337,7 @@ impl App {
             hits: Vec::new(),
             tab_hits: Vec::new(),
             pending_focus: None,
+            creating_session: false,
             status: None,
             naming_started: HashSet::new(),
             terminal_output: Vec::new(),
@@ -440,6 +442,18 @@ impl App {
     /// dialog): what's typed there is the user's own and is never logged.
     pub fn keys_go_to_session(&self) -> bool {
         self.focus == Focus::Session && matches!(self.mode, AppMode::Normal)
+    }
+
+    /// Session input, pending shell input and credential dialogs must never
+    /// expose typed characters in the input-debug log.
+    pub fn input_is_private(&self) -> bool {
+        self.keys_go_to_session()
+            || self.creating_session
+            || self.pending_focus.is_some()
+            || matches!(
+                self.mode,
+                AppMode::ConfiguringApiKey(_) | AppMode::AuthEmail(_) | AppMode::AuthCode(_)
+            )
     }
 
     /// Where keys go and what's open, for the input log: `session` or
@@ -611,7 +625,7 @@ impl App {
                 "not set".to_string()
             }
         };
-        let naming = "Used for AI session naming and optional activity summaries";
+        let naming = "Uses your own API key for AI session naming and optional activity summaries. No key is bundled with Rakumux; keys are stored locally with owner-only permissions.";
         let (label, value, note) = match item {
             SettingsItem::Layout => {
                 let layout = self.session_layout();
@@ -717,7 +731,7 @@ impl App {
             SettingsItem::ActivitySummaries => (
                 "Activity summaries",
                 if self.settings.sessions.ai_activity_summaries { "[On] Off" } else { "On [Off]" }.to_string(),
-                "Opt-in: shares bounded, best-effort-redacted output from non-private sessions with your AI provider. Adds a short current-activity line below each session. Generated once by the daemon for every client; may incur charges. Enter enables with confirmation or disables immediately.",
+                "Add your own API key above, then opt in. Shares bounded, best-effort-redacted recent or saved output from non-private sessions with your AI provider. Existing sessions are included; each update resets a 10-second idle timer. Requests may incur charges. Enter enables with confirmation or disables.",
             ),
         };
         SettingRow {
@@ -736,9 +750,9 @@ impl App {
     /// Whether something animates (spinners) and wants frequent ticks.
     pub fn is_animating(&self) -> bool {
         matches!(self.connection, Connection::Connecting)
+            || self.creating_session
             || matches!(self.detail.view, DetailView::Loading(_))
             || match &self.mode {
-                AppMode::NewSession(d) => d.busy,
                 AppMode::Folders(d) => d.busy,
                 AppMode::Renaming(d) => d.busy,
                 AppMode::DaemonRestart(d) => d.restarting,
@@ -860,6 +874,9 @@ impl App {
 
     pub async fn handle_key(&mut self, key: KeyEvent) -> AppResult {
         if key.kind == KeyEventKind::Release {
+            return AppResult::Continue;
+        }
+        if self.creating_session || self.pending_focus.is_some() {
             return AppResult::Continue;
         }
         if !self.flags.auth

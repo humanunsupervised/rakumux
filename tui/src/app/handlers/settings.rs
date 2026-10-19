@@ -261,7 +261,7 @@ fn open_item(app: &mut App, item: SettingsItem) {
             }
             app.mode = AppMode::Confirm(crate::app::types::ConfirmDialog {
                 title: "Enable AI activity summaries?".into(),
-                message: "Send recent output and agent reports from non-private sessions to your configured AI provider? Secret filtering is best-effort, not a guarantee. Requests may incur charges. Private sessions are excluded. The daemon refreshes summaries at most once a minute, plus blocked/done transitions.".into(),
+                message: "Send recent output, saved screens and agent reports from non-private sessions to your own AI provider? Secret filtering is best-effort, not a guarantee. Requests may incur charges. Existing sessions are included. Summaries refresh after 10 seconds without updates.".into(),
                 action: crate::app::types::ConfirmAction::EnableActivitySummaries,
             });
         }
@@ -310,6 +310,15 @@ fn handle_api_key_key(app: &mut App, key: KeyEvent) {
                 return;
             }
             let value = (!value.is_empty()).then_some(value);
+            if value.is_some() && app.settings.ai.ai_primary_provider.is_none() {
+                app.settings.ai.ai_primary_provider = Some(
+                    match dialog.provider {
+                        ApiProvider::Anthropic => "anthropic",
+                        ApiProvider::OpenAI => "openai",
+                    }
+                    .into(),
+                );
+            }
             match dialog.provider {
                 ApiProvider::Anthropic => app.settings.ai.anthropic_api_key = value,
                 ApiProvider::OpenAI => app.settings.ai.openai_api_key = value,

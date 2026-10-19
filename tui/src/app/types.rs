@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use session_core::ids::SessionId;
 use session_core::model::ScopeRoot;
 
-use super::new_session::NewSessionDialog;
 use super::path_complete::DirSuggestion;
 use super::text_input::TextInput;
 use crate::help::{ModalState, ModalTab};
@@ -277,11 +276,22 @@ pub enum ApiProvider {
     OpenAI,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ApiKeyDialog {
     pub provider: ApiProvider,
     pub input: TextInput,
     pub error_message: Option<String>,
+}
+
+impl std::fmt::Debug for ApiKeyDialog {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ApiKeyDialog")
+            .field("provider", &self.provider)
+            .field("input", &"<redacted>")
+            .field("error_message", &self.error_message)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -393,7 +403,6 @@ pub struct WelcomeState {
 #[derive(Debug, Clone)]
 pub enum AppMode {
     Normal,
-    NewSession(NewSessionDialog),
     /// The Folders modal: the folder filter.
     Folders(FolderPicker),
     Renaming(RenameDialog),

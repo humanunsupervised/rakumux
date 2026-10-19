@@ -93,9 +93,10 @@ new-session flow, and code boundaries.
     `terminal_view::key_to_bytes` / `mouse_to_bytes` / `paste_to_bytes` to the attach stream;
   - own Promote/Demote go through `Attachment::change_role`, so their `RoleChanged` answers aren't
     taken for another client's takeover;
-  - dialogs: new session (`new_session.rs`: a name only; the session goes in
-    `App::current_folder`, with the login shell; one made in a folder the filter hides adds that
-    folder to the filter), the Folders modal (`AppMode::Folders`, `handlers/folders.rs`), rename, delete confirmation, upgrade, daemon-restart consent,
+  - new session (`new_session.rs`) creates immediately with a generated name in
+    `App::current_folder`, selects it and enters its login shell. There is no naming dialog.
+    A hidden destination folder is added to the filter; input cannot reach the old session while creation/attach is pending.
+  - dialogs: the Folders modal (`AppMode::Folders`, `handlers/folders.rs`), rename, delete confirmation, upgrade, daemon-restart consent,
     and the Settings and Help modals (`AppMode::Modal`, `help::ModalState::handle_key`; `,` or `o`
     opens Settings, `?` Help, in Rakumux mode). Settings' Keys tab runs the selected
     `help::KeyAction` (`handlers/settings.rs::run_action`); the General tab's API key, provider and

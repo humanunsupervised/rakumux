@@ -18,7 +18,6 @@ use session_core::model::{SessionStatus, SessionView};
 
 use super::detail::{classify_output, Attachment, DetailView, OutputAction};
 use super::folders::{self, SyncResult};
-use super::new_session::NewSessionDialog;
 use super::runtime::{cancel_flag, AppEvent};
 use super::screen::Screen;
 use super::session_list::{ListChange, ListRow, Selection};
@@ -940,6 +939,9 @@ impl App {
     }
 
     pub fn handle_paste(&mut self, text: &str) {
+        if self.creating_session || self.pending_focus.is_some() {
+            return;
+        }
         if let AppMode::Folders(picker) = &mut self.mode {
             if picker.stage == super::types::PickerStage::Browse && !picker.busy {
                 picker.query.insert_str(text);
@@ -948,7 +950,6 @@ impl App {
             return;
         }
         match &mut self.mode {
-            AppMode::NewSession(dialog) => dialog.name.insert_str(text),
             AppMode::Renaming(dialog) => dialog.input.insert_str(text),
             AppMode::ConfiguringApiKey(dialog) => dialog.input.insert_str(text),
             AppMode::AuthEmail(dialog) => dialog.input.insert_str(text),
@@ -977,6 +978,9 @@ impl App {
     }
 
     pub fn handle_mouse(&mut self, event: MouseEvent) {
+        if self.creating_session || self.pending_focus.is_some() {
+            return;
+        }
         if !matches!(self.mode, AppMode::Normal) {
             // A dialog opened: a held session is let go.
             self.end_session_drag();
@@ -1324,42 +1328,42 @@ impl App {
 
     // ------------------------------------------------------------ actions
 
-    /// The new-session dialog: a name, for a session in the current
-    /// folder.
+    /// Create immediately in the current folder, then enter its shell.
     pub fn open_new_session(&mut self) {
+        if self.creating_session {
+            return;
+        }
         if !self.connection.is_connected() {
             self.set_status("Not connected to the daemon yet.");
             return;
         }
-        self.mode = AppMode::NewSession(NewSessionDialog::new(self.current_folder()));
-    }
-
-    pub(super) fn submit_new_session(&mut self) {
-        let size = self.terminal_size();
-        let AppMode::NewSession(dialog) = &mut self.mode else {
-            return;
-        };
-        if dialog.busy {
-            return;
-        }
         let Some(api) = self.connection.api() else {
-            dialog.error = Some("Not connected to the daemon.".into());
+            self.set_status("Not connected to the daemon.");
             return;
         };
-        let request = dialog.build_request(env_snapshot(), size);
-        dialog.busy = true;
-        dialog.error = None;
+        let request = super::new_session::request(
+            self.current_folder(),
+            env_snapshot(),
+            self.terminal_size(),
+        );
+        self.creating_session = true;
+        self.mode = AppMode::Normal;
+        self.set_status("Creating session...");
         self.exec.job(move || AppEvent::Created {
-            result: api.create(request),
+            result: std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| api.create(request)))
+                .unwrap_or_else(|_| {
+                    Err(ApiError::new(
+                        ErrorCode::Internal,
+                        "session creation failed unexpectedly",
+                    ))
+                }),
         });
     }
 
     pub(super) fn on_created(&mut self, result: Result<SessionView, ApiError>) {
+        self.creating_session = false;
         match result {
             Ok(session) => {
-                if matches!(self.mode, AppMode::NewSession(_)) {
-                    self.mode = AppMode::Normal;
-                }
                 let id = session.id.clone();
                 self.learn_folder(&session.scope);
                 if !self.list.is_listed(&session.scope) {
@@ -1374,13 +1378,7 @@ impl App {
                 self.list.select(Selection::Session(id.clone()));
                 self.show_session(&session, Role::Controller);
             }
-            Err(error) => match &mut self.mode {
-                AppMode::NewSession(dialog) => {
-                    dialog.busy = false;
-                    dialog.error = Some(error.to_string());
-                }
-                _ => self.set_status(format!("Create failed: {error}")),
-            },
+            Err(error) => self.set_status(format!("Create failed: {error}")),
         }
     }
 

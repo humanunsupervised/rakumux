@@ -15,7 +15,6 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
     }
     match &app.mode {
         AppMode::Normal => {}
-        AppMode::NewSession(_) => handle_new_session_key(app, key),
         AppMode::Folders(_) => super::folders::handle_folder_picker_key(app, key),
         AppMode::Renaming(_) => handle_rename_key(app, key),
         AppMode::Confirm(_) => handle_confirm_key(app, key),
@@ -62,32 +61,11 @@ fn handle_welcome_key(app: &mut App, key: KeyEvent) {
 
 fn dialog_busy(mode: &AppMode) -> bool {
     match mode {
-        AppMode::NewSession(d) => d.busy,
         AppMode::Folders(d) => d.busy,
         AppMode::Renaming(d) => d.busy,
         AppMode::DaemonRestart(d) => d.restarting,
         AppMode::Upgrade(d) => d.installing,
         _ => false,
-    }
-}
-
-/// The new-session dialog has one field, the name: Enter creates, Esc
-/// cancels, everything else edits it.
-fn handle_new_session_key(app: &mut App, key: KeyEvent) {
-    let AppMode::NewSession(dialog) = &mut app.mode else {
-        return;
-    };
-    if dialog.busy {
-        return;
-    }
-    match key.code {
-        KeyCode::Esc => app.mode = AppMode::Normal,
-        KeyCode::Enter => app.submit_new_session(),
-        _ => {
-            if dialog.name.handle_key(&key) {
-                dialog.error = None;
-            }
-        }
     }
 }
 

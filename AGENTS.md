@@ -481,9 +481,10 @@ provider. Private sessions are excluded; secret filtering is best-effort, not a 
 Configuration updates are atomic and private; stale windows cannot re-enable sharing by
 saving an unrelated setting after another window opts out.
 The daemon's `control::summaries` worker reloads settings, reads bounded recent output and fresh
-agent reports, and generates one cached status line for every client. Normal refreshes are limited
-to once a minute per active session, with blocked/done transitions allowed sooner; unchanged
-input is skipped. Network calls never hold the registry lock. Results are discarded after opt-out,
+agent reports, and generates one cached status line for every client after 10 seconds without
+session updates. Every new source revision resets the idle timer; unchanged input is skipped.
+Existing live, exited and dead sessions are backfilled from available output. Failed provider
+requests back off for a minute. Network calls never hold the registry lock. Results are discarded after opt-out,
 provider changes, a newer report, a lifecycle change, exit or replacement of the terminal.
 `SessionView.activity_summary` is optional (`session.activity_summary` capability); it is distinct
 from names/descriptions and carries text, capture time and an optional refresh error. The TUI
@@ -643,11 +644,11 @@ held); `J`/`K` move it one place. Moves stay in the session's folder and its pin
 part, and are saved as `sessions.session_order`. A click without movement still just selects.
 The first load still selects the most recently used session.
 
-The new-session dialog (`n`, "+ New session") asks only for a name (blank: a generated one). The
+New session (`n`, "+ New session", Enter on a folder header) creates immediately with a generated name,
+selects the new session and enters session mode at its login-shell prompt, without a naming modal. The
 session goes in the current folder (`App::current_folder`: the selected session's or header's
 folder, retained on the folder filter and "+ New session" rows; a single-folder filter takes
-precedence; without folder context, the launch folder), shown under
-the name (`in ▤ folder`), and runs the login shell there. A session made in a folder the filter
+precedence; without folder context, the launch folder). A session made in a folder the filter
 hides adds that folder to the filter. Other folders, commands and startup commands are CLI-only:
 `rakumux new --cwd DIR --cmd C -- ARGV`.
 

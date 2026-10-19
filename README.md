@@ -72,8 +72,8 @@ sessions. Remote access is off until explicitly enabled.
 
 **Activity summaries** are also opt-in under Settings → General. They add a third line under
 each session with recent progress and current work. The daemon shares a single cached result
-with every client and normally refreshes at most once a minute per active session. Recent
-output and agent reports go to your configured AI provider; secret filtering is best-effort,
+with every client and refreshes after 10 seconds without session updates. Existing sessions,
+including saved output, are included. Output and agent reports go to your own AI provider; secret filtering is best-effort,
 private sessions are excluded, and requests may incur charges. Full text, age and refresh errors
 appear above the session preview. Names and descriptions are never overwritten.
 
