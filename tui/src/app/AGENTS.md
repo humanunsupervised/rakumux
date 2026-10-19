@@ -20,8 +20,6 @@ new-session flow, and code boundaries.
   stacked_list_percent,
   session_order }`. Retired
   keys (`selected_projects`) are dropped on load, so the next save leaves them out.
-  `sessions.ai_activity_summaries` defaults off; enabling it requires privacy confirmation.
-  The daemon owns generation and caching. Clients only render `SessionView.activity_summary`.
 - `folders.rs`: the folders the daemon knows (`Folders`: `known`
   `ProjectView`s, the launch folder, `FolderSupport`), the sync loader (`add_project` the launch
   folder, `projects`, then `subscribe { all }` + `list_all` with `sessions.all`; else

@@ -296,7 +296,6 @@ mod tests {
             private: false,
             is_self: false,
             auto_named: false,
-            activity_summary: None,
             created_at: "2026-10-13T00:00:00Z".into(),
             last_active_at: "2026-10-13T00:00:00Z".into(),
             terminal: None,

@@ -915,47 +915,6 @@ async fn output_is_fed_in_order_and_gaps_reattach() {
     assert_eq!(h.fake.attach_count(), attaches + 1, "a gap re-attaches");
 }
 
-#[tokio::test]
-async fn activity_summaries_require_consent_and_can_be_disabled_without_confirmation() {
-    let mut h = harness(vec![view("A", "a", 1)]);
-    assert!(!h.app.settings.sessions.ai_activity_summaries);
-    h.press(KeyCode::Char('o')).await;
-    for _ in 0..SettingsItem::ActivitySummaries.index() {
-        h.press(KeyCode::Down).await;
-    }
-    h.press(KeyCode::Enter).await;
-    assert!(
-        matches!(&h.app.mode, AppMode::Confirm(dialog) if dialog.message.contains("Send recent output") && dialog.message.contains("best-effort"))
-    );
-    assert!(!h.app.settings.sessions.ai_activity_summaries);
-    h.press(KeyCode::Char('y')).await;
-    assert!(h.app.settings.sessions.ai_activity_summaries);
-    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
-    h.press(KeyCode::Enter).await;
-    assert!(!h.app.settings.sessions.ai_activity_summaries);
-    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
-}
-
-#[tokio::test]
-async fn stale_windows_cannot_reenable_activity_summary_sharing_by_saving_another_setting() {
-    let mut h = harness(vec![view("A", "a", 1)]);
-    h.app.settings.sessions.ai_activity_summaries = true;
-    h.app.save_summary_consent(true).unwrap();
-    let path = h.app.config_path.clone().unwrap();
-    let mut other_window = config::Settings::load_from(&path).unwrap();
-    other_window.sessions.ai_activity_summaries = false;
-    other_window.save_to(&path).unwrap();
-    h.app.save_settings().unwrap();
-    assert!(
-        !config::Settings::load_from(&path)
-            .unwrap()
-            .sessions
-            .ai_activity_summaries
-    );
-    h.press(KeyCode::Char('o')).await;
-    assert!(!h.app.settings.sessions.ai_activity_summaries);
-}
-
 /// The style of the first cell of `text` on the screen drawn at 120×40.
 fn cell_of(h: &mut Harness, text: &str) -> ratatui::buffer::Cell {
     cell_within(h, text, 120)
@@ -988,41 +947,6 @@ async fn the_session_list_is_never_faded() {
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
     assert_eq!(cell_within(&mut h, "zebra", width), rakumux);
-}
-
-#[tokio::test]
-async fn activity_summary_detail_uses_the_same_inactive_styling_as_the_preview() {
-    use ratatui::style::Modifier;
-
-    for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
-        let mut session = view("A", "summary-session", 10);
-        session.activity_summary = Some(session_core::model::ActivitySummary {
-            text: "Fixed login; verifying tests.".into(),
-            updated_at: 1,
-            error: None,
-        });
-        let mut h = harness(vec![session]);
-        h.app.set_layout(layout);
-        let palette = crate::theme::palette();
-        let inactive = cell_of(&mut h, "AI activity");
-        match palette.faded(palette.text_muted, crate::components::utils::PREVIEW_FADE) {
-            Some(color) => {
-                assert_eq!(inactive.fg, color);
-                assert!(!inactive.modifier.contains(Modifier::DIM));
-            }
-            None => assert!(inactive.modifier.contains(Modifier::DIM)),
-        }
-        h.press(KeyCode::Char('?')).await;
-        let under_dialog = cell_of(&mut h, "AI activity");
-        match palette.faded(palette.text_muted, crate::components::utils::FADE_TEXT) {
-            Some(color) => assert_eq!(under_dialog.fg, color),
-            None => assert!(under_dialog.modifier.contains(Modifier::DIM)),
-        }
-        h.press(KeyCode::Esc).await;
-        assert_eq!(cell_of(&mut h, "AI activity"), inactive);
-        h.press(KeyCode::Enter).await;
-        assert!(h.app.screen().activity_summary.is_none());
-    }
 }
 
 #[tokio::test]
@@ -1688,33 +1612,6 @@ async fn typing_an_api_key_never_switches_tabs_or_closes() {
     assert!(h.app.settings.ai.openai_api_key.is_none());
     h.press(KeyCode::Esc).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
-}
-
-#[tokio::test]
-async fn a_users_first_api_key_selects_its_provider_without_overriding_an_explicit_choice() {
-    for primary in [None, Some("anthropic")] {
-        let mut h = harness(vec![]);
-        h.app.settings.ai.ai_primary_provider = primary.map(str::to_owned);
-        h.press(KeyCode::Char('o')).await;
-        for _ in 0..SettingsItem::OpenAiKey.index() {
-            h.press(KeyCode::Down).await;
-        }
-        h.press(KeyCode::Enter).await;
-        h.type_text("sk-user-supplied-example").await;
-        h.press(KeyCode::Enter).await;
-        assert_eq!(
-            h.app.settings.ai.openai_api_key.as_deref(),
-            Some("sk-user-supplied-example")
-        );
-        assert_eq!(
-            h.app.settings.ai.ai_primary_provider.as_deref(),
-            Some(primary.unwrap_or("openai"))
-        );
-        assert!(
-            !h.app.settings.sessions.ai_activity_summaries,
-            "saving a key must not enable output sharing"
-        );
-    }
 }
 
 #[tokio::test]

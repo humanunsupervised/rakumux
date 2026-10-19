@@ -388,9 +388,6 @@ pub const CAPABILITY_SESSIONS_ALL: &str = "sessions.all";
 /// it restarts in place and running sessions keep running.
 pub const CAPABILITY_DAEMON_RESTART: &str = "daemon.restart";
 
-/// Daemon-owned, opt-in AI activity summaries in session views.
-pub const CAPABILITY_ACTIVITY_SUMMARY: &str = "session.activity_summary";
-
 fn is_false(value: &bool) -> bool {
     !*value
 }

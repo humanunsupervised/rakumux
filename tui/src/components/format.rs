@@ -173,61 +173,6 @@ fn secondary_text(session: &SessionView, width: usize, icons: Icons) -> String {
     truncate(&line, width)
 }
 
-/// A short, plain-text status suitable for a list row. Cached failures keep
-/// the last successful text; details expose the refresh error and age.
-pub fn activity_summary_line(summary: &session_core::model::ActivitySummary) -> String {
-    let text: String = summary
-        .text
-        .chars()
-        .map(|character| {
-            if character.is_control() {
-                ' '
-            } else {
-                character
-            }
-        })
-        .collect();
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if !text.is_empty() {
-        text
-    } else if summary.error.is_some() {
-        "Summary unavailable".into()
-    } else {
-        "Summary pending".into()
-    }
-}
-
-/// Full cached status and freshness, shown above the preview rather than
-/// taking any rows from an actively controlled terminal.
-pub fn activity_summary_details(
-    summary: &session_core::model::ActivitySummary,
-    now: i64,
-) -> String {
-    let mut text = format!("AI activity · {}", activity_summary_line(summary));
-    if summary.updated_at > 0 && !summary.text.trim().is_empty() {
-        let age = relative_time(now, summary.updated_at);
-        if age == "now" {
-            text.push_str(" · updated now");
-        } else {
-            text.push_str(&format!(" · updated {age} ago"));
-        }
-    }
-    if let Some(error) = &summary.error {
-        let error: String = error
-            .chars()
-            .map(|character| {
-                if character.is_control() {
-                    ' '
-                } else {
-                    character
-                }
-            })
-            .collect();
-        text.push_str(&format!(" · {error}"));
-    }
-    text
-}
-
 /// Agent or program, branch, state. (The worktree isn't shown for now.)
 fn session_facts(session: &SessionView, icons: Icons) -> Vec<String> {
     let mut parts = Vec::new();

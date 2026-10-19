@@ -23,15 +23,6 @@ pub fn open_modal(app: &mut App, tab: ModalTab) {
 
 /// Open the Settings modal on its first tab.
 pub fn open_settings(app: &mut App) {
-    if let Some(path) = &app.config_path {
-        match crate::app::config::Settings::load_from(path) {
-            Ok(settings) => {
-                app.settings.sessions.ai_activity_summaries =
-                    settings.sessions.ai_activity_summaries
-            }
-            Err(error) => app.set_status(format!("Could not read summary consent: {error}")),
-        }
-    }
     open_modal(app, Modal::Settings.first_tab());
 }
 
@@ -241,48 +232,6 @@ fn open_item(app: &mut App, item: SettingsItem) {
                 options,
             });
         }
-        SettingsItem::ActivitySummaries => {
-            if app.settings.sessions.ai_activity_summaries {
-                set_activity_summaries(app, false);
-                return;
-            }
-            let supported = app
-                .connection
-                .api()
-                .and_then(|api| api.daemon_capabilities())
-                .is_some_and(|capabilities| {
-                    capabilities.iter().any(|capability| {
-                        capability == session_core::api::CAPABILITY_ACTIVITY_SUMMARY
-                    })
-                });
-            if !supported {
-                app.set_status("Activity summaries need an updated daemon. Run `rakumux daemon restart` first.");
-                return;
-            }
-            app.mode = AppMode::Confirm(crate::app::types::ConfirmDialog {
-                title: "Enable AI activity summaries?".into(),
-                message: "Send recent output, saved screens and agent reports from non-private sessions to your own AI provider? Secret filtering is best-effort, not a guarantee. Requests may incur charges. Existing sessions are included. Summaries refresh after 10 seconds without updates.".into(),
-                action: crate::app::types::ConfirmAction::EnableActivitySummaries,
-            });
-        }
-    }
-}
-
-/// Persist consent before the daemon may act on it; a failed write leaves the
-/// previous choice intact. The daemon reloads the shared configuration.
-pub(in crate::app) fn set_activity_summaries(app: &mut App, enabled: bool) {
-    let previous = app.settings.sessions.ai_activity_summaries;
-    app.settings.sessions.ai_activity_summaries = enabled;
-    match app.save_summary_consent(enabled) {
-        Ok(()) => app.set_status(if enabled {
-            "AI activity summaries enabled. Recent output is shared with your AI provider."
-        } else {
-            "AI activity summaries disabled."
-        }),
-        Err(error) => {
-            app.settings.sessions.ai_activity_summaries = previous;
-            app.set_status(format!("Could not save summary settings: {error}"));
-        }
     }
 }
 
@@ -310,15 +259,6 @@ fn handle_api_key_key(app: &mut App, key: KeyEvent) {
                 return;
             }
             let value = (!value.is_empty()).then_some(value);
-            if value.is_some() && app.settings.ai.ai_primary_provider.is_none() {
-                app.settings.ai.ai_primary_provider = Some(
-                    match dialog.provider {
-                        ApiProvider::Anthropic => "anthropic",
-                        ApiProvider::OpenAI => "openai",
-                    }
-                    .into(),
-                );
-            }
             match dialog.provider {
                 ApiProvider::Anthropic => app.settings.ai.anthropic_api_key = value,
                 ApiProvider::OpenAI => app.settings.ai.openai_api_key = value,

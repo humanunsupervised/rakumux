@@ -279,7 +279,6 @@ mod tests {
             launch: LaunchSpec::default(),
             resume: None,
             auto_named: false,
-            activity_summary: None,
             description: None,
             notes: None,
             labels: Default::default(),

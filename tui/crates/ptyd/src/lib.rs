@@ -28,9 +28,3 @@ pub mod registration;
 pub mod resume;
 pub mod server;
 pub mod terminal;
-
-#[cfg(test)]
-extern crate self as ptyd;
-#[cfg(test)]
-#[path = "../tests/control_common/mod.rs"]
-mod control_test_support;

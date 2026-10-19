@@ -44,8 +44,6 @@ pub struct RenameDialog {
 /// Actions that need a yes/no confirmation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfirmAction {
-    /// Allow sharing bounded session output with the configured AI provider.
-    EnableActivitySummaries,
     /// Reload only this UI, leaving the daemon and sessions running.
     RestartUi,
     /// Terminate, then remove the record and its scrollback.
@@ -234,11 +232,10 @@ pub enum SettingsItem {
     OpenAiKey,
     PrimaryAiProvider,
     OpenAiModel,
-    ActivitySummaries,
 }
 
 impl SettingsItem {
-    pub const ALL: [SettingsItem; 9] = [
+    pub const ALL: [SettingsItem; 8] = [
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
@@ -247,7 +244,6 @@ impl SettingsItem {
         SettingsItem::OpenAiKey,
         SettingsItem::PrimaryAiProvider,
         SettingsItem::OpenAiModel,
-        SettingsItem::ActivitySummaries,
     ];
 
     /// The General tab heading it's listed under.
@@ -259,8 +255,7 @@ impl SettingsItem {
             SettingsItem::AnthropicKey
             | SettingsItem::OpenAiKey
             | SettingsItem::PrimaryAiProvider
-            | SettingsItem::OpenAiModel
-            | SettingsItem::ActivitySummaries => "AI",
+            | SettingsItem::OpenAiModel => "AI session naming",
         }
     }
 
@@ -445,10 +440,6 @@ impl AppMode {
     /// tab's dialogs.
     pub fn editing_setting(&self) -> Option<SettingsItem> {
         match self {
-            AppMode::Confirm(ConfirmDialog {
-                action: ConfirmAction::EnableActivitySummaries,
-                ..
-            }) => Some(SettingsItem::ActivitySummaries),
             AppMode::ConfiguringApiKey(dialog) => Some(match dialog.provider {
                 ApiProvider::Anthropic => SettingsItem::AnthropicKey,
                 ApiProvider::OpenAI => SettingsItem::OpenAiKey,

@@ -5,7 +5,7 @@
 
 mod history;
 mod prompt;
-use rakumux_ai::provider;
+mod provider;
 
 use crate::app::Config;
 

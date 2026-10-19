@@ -1,9 +1,9 @@
 //! Right pane: the selected session's terminal (running, or its saved
 //! screen), with placeholders for no sessions, loading, the session
 //! Rakumux runs in, errors and the daemon being unreachable. Live previews
-//! and their title/summary areas fade lightly in Rakumux mode; dialogs and
-//! saved output use a stronger fade. The cursor appears only while the
-//! session takes keys.
+//! and their title areas fade lightly in Rakumux mode; dialogs and saved
+//! output use a stronger fade. The cursor appears only while the session
+//! takes keys.
 
 use ratatui::{
     layout::{Alignment, Rect},
@@ -100,28 +100,11 @@ pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<
         f.render_widget(block, title_area);
         fade_inactive_detail(f, app, title_area, focused);
     }
-    if let (Some(area), Some(summary)) = (
-        screen.activity_summary,
-        session.and_then(|session| session.activity_summary.as_ref()),
-    ) {
-        let text = super::format::activity_summary_details(summary, super::format::now_secs());
-        f.render_widget(
-            Paragraph::new(text)
-                .wrap(Wrap { trim: true })
-                .style(Style::default().fg(p.text_muted)),
-            Rect {
-                x: area.x + 1,
-                width: area.width.saturating_sub(2),
-                ..area
-            },
-        );
-        fade_inactive_detail(f, app, area, focused);
-    }
     let area = screen.terminal?;
     draw_terminal(f, app, area, focused)
 }
 
-/// Apply one consistent inactive treatment to terminal, title and summary.
+/// Apply one consistent inactive treatment to the terminal and title.
 /// Each freshly rendered area is faded once, never layered on a prior fade.
 fn fade_inactive_detail(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     if !matches!(app.mode, AppMode::Normal) || matches!(app.detail.view, DetailView::Saved { .. }) {

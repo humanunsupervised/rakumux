@@ -1549,17 +1549,6 @@ impl App {
     pub(super) fn run_confirmed(&mut self, action: ConfirmAction) {
         self.mode = AppMode::Normal;
         match action {
-            ConfirmAction::EnableActivitySummaries => {
-                super::handlers::settings::set_activity_summaries(self, true);
-                self.mode = AppMode::Modal {
-                    state: crate::help::ModalState::new(
-                        crate::help::ModalTab::General,
-                        SettingsItem::ALL.len(),
-                    )
-                    .with_selected(SettingsItem::ActivitySummaries.index()),
-                    in_session: self.focus == Focus::Session,
-                };
-            }
             ConfirmAction::RestartUi => self.restart_requested = true,
             ConfirmAction::DeleteSession { id, name } => {
                 let Some(api) = self.api() else {

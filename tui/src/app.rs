@@ -397,29 +397,9 @@ impl App {
     /// Write the settings to `config.json`.
     pub fn save_settings(&self) -> anyhow::Result<()> {
         match &self.config_path {
-            Some(path) => {
-                // An unrelated setting saved by a stale window must never
-                // re-enable output sharing after another window opted out.
-                Settings::update_at(path, |current| {
-                    let consent = current.sessions.ai_activity_summaries;
-                    *current = self.settings.clone();
-                    current.sessions.ai_activity_summaries = consent;
-                })
-            }
+            Some(path) => self.settings.save_to(path),
             None => Err(anyhow::anyhow!("no config file location (HOME unset)")),
         }
-    }
-
-    /// Only the explicit summary confirmation/toggle may change this shared
-    /// consent value. Preserve settings written by another window meanwhile.
-    pub(super) fn save_summary_consent(&self, enabled: bool) -> anyhow::Result<()> {
-        let path = self
-            .config_path
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no config file location (HOME unset)"))?;
-        Settings::update_at(path, |settings| {
-            settings.sessions.ai_activity_summaries = enabled
-        })
     }
 
     // ------------------------------------------------------------ status
@@ -515,45 +495,13 @@ impl App {
     }
 
     pub fn screen(&self) -> screen::Screen {
-        let mut screen = screen::compute(
+        screen::compute(
             self.area,
             self.session_layout(),
             self.focus,
             self.zoomed,
             self.pane_sizes(),
-        );
-        if self.focus == Focus::List {
-            if let (Some(terminal), Some(summary)) = (
-                screen.terminal,
-                self.detail
-                    .session_id()
-                    .and_then(|id| self.list.get(id))
-                    .and_then(|session| session.activity_summary.as_ref()),
-            ) {
-                let text = crate::components::format::activity_summary_details(
-                    summary,
-                    crate::components::format::now_secs(),
-                );
-                let rows = crate::components::utils::wrapped_rows(
-                    &text,
-                    usize::from(terminal.width.saturating_sub(2)),
-                )
-                .min(usize::from(terminal.height.saturating_sub(4)))
-                    as u16;
-                if rows > 0 {
-                    screen.activity_summary = Some(ratatui::layout::Rect {
-                        height: rows,
-                        ..terminal
-                    });
-                    screen.terminal = Some(ratatui::layout::Rect {
-                        y: terminal.y + rows,
-                        height: terminal.height - rows,
-                        ..terminal
-                    });
-                }
-            }
-        }
-        screen
+        )
     }
 
     /// `(cols, rows)` for attaching/resizing.
@@ -625,7 +573,7 @@ impl App {
                 "not set".to_string()
             }
         };
-        let naming = "Uses your own API key for AI session naming and optional activity summaries. No key is bundled with Rakumux; keys are stored locally with owner-only permissions.";
+        let naming = "Used for AI session naming";
         let (label, value, note) = match item {
             SettingsItem::Layout => {
                 let layout = self.session_layout();
@@ -721,17 +669,12 @@ impl App {
                     "openai" => "OpenAI",
                     _ => "Anthropic",
                 };
-                ("AI provider", value.to_string(), naming)
+                ("AI naming provider", value.to_string(), naming)
             }
             SettingsItem::OpenAiModel => (
                 "OpenAI model",
                 effective_openai_model(ai.openai_model.as_deref()),
                 naming,
-            ),
-            SettingsItem::ActivitySummaries => (
-                "Activity summaries",
-                if self.settings.sessions.ai_activity_summaries { "[On] Off" } else { "On [Off]" }.to_string(),
-                "Add your own API key above, then opt in. Shares bounded, best-effort-redacted recent or saved output from non-private sessions with your AI provider. Existing sessions are included; each update resets a 10-second idle timer. Requests may incur charges. Enter enables with confirmation or disables.",
             ),
         };
         SettingRow {

@@ -14,7 +14,33 @@ use crate::layout::SessionLayout;
 /// first to last.
 pub type SessionOrder = BTreeMap<PathBuf, Vec<SessionId>>;
 
-pub use rakumux_ai::Config;
+/// Optional provider settings for the pre-existing AI session naming feature.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct Config {
+    pub anthropic_api_key: Option<String>,
+    pub openai_api_key: Option<String>,
+    pub ai_primary_provider: Option<String>,
+    pub openai_model: Option<String>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Config")
+            .field(
+                "anthropic_api_key",
+                &self.anthropic_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "openai_api_key",
+                &self.openai_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("ai_primary_provider", &self.ai_primary_provider)
+            .field("openai_model", &self.openai_model)
+            .finish()
+    }
+}
 
 /// Everything in `~/.rakumux/config.json` (`$RAKUMUX_HOME` respected):
 /// the AI settings at the top level plus the `"sessions"` section. Load
@@ -60,9 +86,6 @@ pub struct SessionsConfig {
     /// row turns it on any time.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub phone_offer_seen: bool,
-    /// Explicit consent to send bounded, redacted session output to the AI provider.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub ai_activity_summaries: bool,
     /// Sidebar (list + detail) or Tabs (tab bar + detail). A value this
     /// version doesn't know (e.g. written by a newer one) reads as the
     /// default instead of breaking the whole config.
@@ -110,7 +133,6 @@ impl Default for SessionsConfig {
             cycle_keys_in_session: false,
             welcome_seen: false,
             phone_offer_seen: false,
-            ai_activity_summaries: false,
             layout: SessionLayout::default(),
             icons: Icons::default(),
             sidebar_width: None,
@@ -198,19 +220,8 @@ impl Settings {
         Ok(settings)
     }
 
-    /// Replace a fixture; production changes use the locked update method.
-    #[cfg(test)]
     pub fn save_to(&self, path: &Path) -> Result<()> {
         with_config_lock(path, || self.write_to(path))
-    }
-
-    /// Serialize a read-modify-write across windows, including consent changes.
-    pub fn update_at(path: &Path, update: impl FnOnce(&mut Self)) -> Result<()> {
-        with_config_lock(path, || {
-            let mut settings = Self::load_from(path)?;
-            update(&mut settings);
-            settings.write_to(path)
-        })
     }
 
     fn write_to(&self, path: &Path) -> Result<()> {
@@ -283,19 +294,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn activity_summary_consent_is_off_by_default_and_saved_privately() {
+    fn naming_keys_are_saved_privately_and_atomically() {
         use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.json");
         let mut settings = Settings::default();
-        assert!(!settings.sessions.ai_activity_summaries);
-        settings.sessions.ai_activity_summaries = true;
+        settings.ai.openai_api_key = Some("sk-test-naming-key".into());
         settings.save_to(&path).unwrap();
-        assert!(
+        assert_eq!(
             Settings::load_from(&path)
                 .unwrap()
-                .sessions
-                .ai_activity_summaries
+                .ai
+                .openai_api_key
+                .as_deref(),
+            Some("sk-test-naming-key")
         );
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
@@ -308,39 +320,6 @@ mod tests {
                 .to_string_lossy()
                 .ends_with(".tmp")),
             "atomic save leaves no temporary file"
-        );
-    }
-
-    #[test]
-    fn config_updates_from_multiple_windows_are_serialized() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("config.json");
-        let threads: Vec<_> = (0..8)
-            .map(|_| {
-                let path = path.clone();
-                std::thread::spawn(move || {
-                    Settings::update_at(&path, |settings| {
-                        let count = settings
-                            .sessions
-                            .other
-                            .get("writes")
-                            .and_then(|value| value.as_u64())
-                            .unwrap_or(0);
-                        settings
-                            .sessions
-                            .other
-                            .insert("writes".into(), serde_json::json!(count + 1));
-                    })
-                    .unwrap()
-                })
-            })
-            .collect();
-        for thread in threads {
-            thread.join().unwrap();
-        }
-        assert_eq!(
-            Settings::load_from(&path).unwrap().sessions.other["writes"],
-            8
         );
     }
 

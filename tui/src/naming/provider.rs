@@ -2,7 +2,7 @@
 //! from `ai_choose_provider` and the `curl` calls of the shell
 //! `ai-generate-name-from-base64` service.
 
-use crate::Config;
+use crate::app::Config;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::fmt;

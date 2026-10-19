@@ -43,9 +43,6 @@ pub struct Session {
     /// program: untrusted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reported: Option<Reported>,
-    /// AI-generated activity; untrusted and potentially stale.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub activity_summary: Option<ActivitySummary>,
     pub created_by: Creator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
@@ -85,15 +82,6 @@ pub struct Session {
     /// Present while the session is live.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<Terminal>,
-}
-
-/// Cached AI activity; generated once by the daemon for all clients.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActivitySummary {
-    pub text: String,
-    pub updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
 }
 
 /// The coding agent detected or reported in a session.
@@ -154,11 +142,6 @@ impl From<SessionView> for Session {
                 session_id: agent.agent_session_id,
             }),
             reported: view.reported.map(Reported::from),
-            activity_summary: view.activity_summary.map(|summary| ActivitySummary {
-                text: summary.text,
-                updated_at: rfc3339(summary.updated_at),
-                error: summary.error,
-            }),
             created_by: view.created_by,
             parent_id: view.parent_id.map(|id| id.as_str().to_owned()),
             depth: view.depth,
@@ -690,7 +673,6 @@ mod tests {
                 source: ResumeSource::KnownAgent,
             }),
             auto_named: false,
-            activity_summary: None,
             description: None,
             notes: None,
             labels: BTreeMap::new(),

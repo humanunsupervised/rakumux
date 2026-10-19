@@ -23,7 +23,6 @@ use super::registry::{
     self, ProjectRecord, ProjectRemoval, ProjectSessions, Registry, SessionRecord,
 };
 use super::saved;
-use super::summaries::{SummaryRevision, SummaryTarget};
 use super::waits::{self, Observed, Outcome};
 use super::{ControlConfig, Detector};
 use crate::control_api::Caller;
@@ -39,8 +38,8 @@ use session_core::api::{
 };
 use session_core::ids::{SessionId, TerminalId, Token};
 use session_core::model::{
-    ActivitySummary, AgentInfo, Creator, LaunchSpec, Lifecycle, ProjectView, Reported,
-    ResumeSource, ResumeSpec, ScopeRoot, SessionStatus, SessionView, TerminalView,
+    AgentInfo, Creator, LaunchSpec, Lifecycle, ProjectView, Reported, ResumeSource, ResumeSpec,
+    ScopeRoot, SessionStatus, SessionView, TerminalView,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -134,8 +133,6 @@ struct State {
     /// session with the newest binding of a conversation.
     bindings: HashMap<SessionId, VecDeque<Binding>>,
     binding_seq: u64,
-    summaries_enabled: bool,
-    summaries: HashMap<SessionId, ActivitySummary>,
 }
 
 struct Binding {
@@ -182,29 +179,8 @@ impl Inner {
         registry: Registry,
         detector: Detector,
     ) -> Self {
-        let store = ScrollbackStore::new(config.layout.clone());
-        let mut summaries = HashMap::new();
-        match registry.list_all() {
-            Ok((records, errors)) => {
-                for error in errors {
-                    crate::log_warn!("control: summary cache: {error}");
-                }
-                for record in records.into_iter().filter(|record| !record.private) {
-                    match store.load_activity_summary(&record.id) {
-                        Ok(Some(summary)) => {
-                            summaries.insert(record.id, summary);
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            crate::log_warn!("control: summary cache {}: {error}", record.id)
-                        }
-                    }
-                }
-            }
-            Err(error) => crate::log_warn!("control: loading summary cache: {error}"),
-        }
         Self {
-            store,
+            store: ScrollbackStore::new(config.layout.clone()),
             config,
             host,
             detector,
@@ -219,8 +195,6 @@ impl Inner {
                 binding_seq: 0,
                 views: HashMap::new(),
                 git: GitContexts::default(),
-                summaries_enabled: false,
-                summaries,
             }),
             changed: Condvar::new(),
             events: EventBus::default(),
@@ -237,220 +211,6 @@ impl Inner {
 
     fn stopping(&self) -> bool {
         self.stop.load(Ordering::SeqCst)
-    }
-
-    pub(super) fn summary_config_path(&self) -> PathBuf {
-        self.config.layout.home.join("config.json")
-    }
-
-    pub(super) fn enable_summaries(&self, enabled: bool) {
-        let mut state = self.lock();
-        if state.summaries_enabled == enabled {
-            return;
-        }
-        state.summaries_enabled = enabled;
-        let mut ids: HashSet<_> = state
-            .summaries
-            .keys()
-            .chain(state.live.keys())
-            .cloned()
-            .collect();
-        if let Some(registry) = state.registry.as_ref() {
-            match registry.list_all() {
-                Ok((records, errors)) => {
-                    ids.extend(records.into_iter().map(|record| record.id));
-                    for error in errors {
-                        crate::log_warn!("control: summary views: {error}");
-                    }
-                }
-                Err(error) => crate::log_warn!("control: summary views: {error}"),
-            }
-        }
-        for id in ids {
-            self.refresh(&mut state, &id);
-        }
-    }
-
-    /// Snapshot only metadata under the registry lock; terminal reads and all
-    /// provider work happen later without holding it.
-    pub(super) fn summary_targets(&self) -> Result<Vec<SummaryTarget>, ApiError> {
-        let state = self.lock();
-        let registry = registry(&state.registry)?;
-        let mut targets = Vec::new();
-        let (records, errors) = registry.list_all()?;
-        for error in errors {
-            crate::log_warn!("control: summary candidates: {error}");
-        }
-        for record in records {
-            let id = &record.id;
-            if record.private {
-                continue;
-            }
-            let revision = self.summary_revision(&state, &record);
-            if revision.status != SessionStatus::Live
-                && state.summaries.get(id).is_some_and(|summary| {
-                    !summary.text.is_empty()
-                        && summary.error.is_none()
-                        && summary.updated_at.saturating_mul(1000)
-                            >= record
-                                .last_active_at_ms
-                                .max(record.ended_at_ms.unwrap_or(0))
-                })
-            {
-                continue;
-            }
-            let info = revision
-                .terminal
-                .and_then(|terminal| self.host.info(terminal));
-            let report = record
-                .reported
-                .as_ref()
-                .filter(|report| {
-                    revision.status != SessionStatus::Live
-                        || (info
-                            .as_ref()
-                            .is_some_and(|info| report.at >= info.started_ms / 1000)
-                            && now_ms().saturating_sub(report.at.saturating_mul(1000)) <= 60_000)
-                })
-                .map(|report| {
-                    let result = report
-                        .result
-                        .as_ref()
-                        .map(|result| result.summary.as_str())
-                        .unwrap_or("");
-                    format!("{}\n{result}", report.text.as_deref().unwrap_or(""))
-                })
-                .unwrap_or_default();
-            let mut secrets = vec![self.config.user_token.as_str().to_string()];
-            secrets.extend(state.tokens.export().into_iter().map(|(_, token)| token));
-            if let Some(environment) = state.spawn_env.get(id) {
-                secrets.extend(
-                    environment
-                        .iter()
-                        .filter(|(key, _)| {
-                            let key = key.to_ascii_uppercase();
-                            [
-                                "KEY",
-                                "SECRET",
-                                "TOKEN",
-                                "PASSWORD",
-                                "PASSWD",
-                                "CREDENTIAL",
-                                "AUTH",
-                            ]
-                            .iter()
-                            .any(|part| key.contains(part))
-                        })
-                        .map(|(_, value)| value.clone()),
-                );
-            }
-            targets.push(SummaryTarget {
-                id: id.clone(),
-                last_output_ms: info.as_ref().and_then(|info| info.last_output_ms),
-                revision,
-                report,
-                secrets,
-            });
-        }
-        Ok(targets)
-    }
-
-    fn summary_revision(&self, state: &State, record: &SessionRecord) -> SummaryRevision {
-        let runtime = self.runtime(state, record);
-        let info = runtime
-            .terminal
-            .and_then(|terminal| self.host.info(terminal));
-        SummaryRevision {
-            terminal: runtime.terminal,
-            status: runtime.status,
-            changed_at_ms: record
-                .last_active_at_ms
-                .max(record.ended_at_ms.unwrap_or(0)),
-            output_offset: info.as_ref().map_or(0, |info| info.output_offset),
-            report_seq: *state.report_seq.get(&record.id).unwrap_or(&0),
-            lifecycle: self.lifecycle(state, &record.id, runtime.status),
-            foreground_pid: info
-                .as_ref()
-                .and_then(|info| info.foreground.as_ref())
-                .map(|process| process.pid),
-        }
-    }
-
-    pub(super) fn summary_output(&self, target: &SummaryTarget) -> Result<String, HostError> {
-        if let Some(terminal) = target.revision.terminal {
-            match self
-                .host
-                .read(terminal, ReadSource::Recent, Some(60), TextFormat::Text)
-            {
-                Ok(read) => return Ok(read.text),
-                Err(HostError::NotFound | HostError::NotRunning)
-                    if target.revision.status != SessionStatus::Live => {}
-                Err(error) => return Err(error),
-            }
-        }
-        let saved = self
-            .store
-            .load(&target.id)
-            .map_err(|error| HostError::Io(error.to_string()))?;
-        Ok(saved::read(
-            saved.as_ref(),
-            ReadSource::Recent,
-            Some(60),
-            TextFormat::Text,
-        )
-        .text)
-    }
-
-    pub(super) fn apply_summary(
-        &self,
-        target: &SummaryTarget,
-        text: Option<String>,
-        error: Option<String>,
-        captured_ms: i64,
-    ) -> bool {
-        let mut state = self.lock();
-        if self.stopping() || !state.summaries_enabled {
-            return false;
-        }
-        let record = match registry(&state.registry)
-            .and_then(|registry| registry.get(&target.id).map_err(ApiError::from))
-        {
-            Ok(Some(record)) if !record.private => record,
-            Ok(_) => return false,
-            Err(error) => {
-                crate::log_warn!("control: checking activity summary {}: {error}", target.id);
-                return false;
-            }
-        };
-        if self.summary_revision(&state, &record) != target.revision {
-            return false;
-        }
-        let mut summary = state
-            .summaries
-            .get(&target.id)
-            .cloned()
-            .unwrap_or(ActivitySummary {
-                text: String::new(),
-                updated_at: captured_ms / 1000,
-                error: None,
-            });
-        if let Some(text) = text {
-            summary.text = text;
-            summary.updated_at = captured_ms / 1000;
-        }
-        summary.error = error;
-        if summary.text.is_empty()
-            && summary.error.is_none()
-            && !state.summaries.contains_key(&target.id)
-        {
-            return true;
-        }
-        if let Err(error) = self.store.save_activity_summary(&target.id, &summary) {
-            crate::log_warn!("control: saving activity summary {}: {error}", target.id);
-        }
-        state.summaries.insert(target.id.clone(), summary);
-        self.refresh(&mut state, &target.id);
-        true
     }
 
     /// Adopt terminals the host already runs: none after a daemon start (so
@@ -1184,7 +944,6 @@ impl Inner {
         state.recent_creates.remove(&record.id);
         state.bindings.remove(&record.id);
         state.views.remove(&record.id);
-        state.summaries.remove(&record.id);
         state.git.remove(&record.id);
         self.save_running(state);
         if let Err(error) = self.store.remove(&record.id) {
@@ -2366,17 +2125,6 @@ impl Inner {
             agent: merge_agent(detected_agent, record.agent.as_ref()),
             reported: record.reported.clone(),
             created_by: record.created_by.clone(),
-            activity_summary: (state.summaries_enabled && !record.private)
-                .then(|| {
-                    state.summaries.get(&record.id).cloned().or_else(|| {
-                        Some(ActivitySummary {
-                            text: String::new(),
-                            updated_at: 0,
-                            error: None,
-                        })
-                    })
-                })
-                .flatten(),
             parent_id: record.parent_id.clone(),
             depth: record.depth,
             children,

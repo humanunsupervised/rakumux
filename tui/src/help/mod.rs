@@ -1462,21 +1462,6 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          environment variable. Without a key, sessions keep their generated names. Names you \
           choose are never replaced."
     ));
-    doc.heading("AI activity summaries");
-    doc.text(
-        "Settings, General, Activity summaries is off by default. Enabling it asks for consent \
-         to share bounded recent or saved terminal output and agent reports with your own AI provider. \
-         Secret filtering is best-effort, not a guarantee; private sessions are excluded. Requests \
-         may incur charges, and a request already sent may finish after you turn it off.",
-    );
-    doc.text(
-        "The daemon generates one short status line for all clients after 10 seconds without \
-         session updates. Each new update resets that timer. Existing sessions with saved output \
-         are included, and unchanged output is not sent again. Failed requests retry after a minute. \
-         The list shows a third content line; while browsing, the detail pane shows its full text, \
-         capture age and refresh errors. Cached text can be stale and never replaces the session's \
-         name or description. No AI call runs during drawing or blocks terminal input.",
-    );
 }
 
 fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
