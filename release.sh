@@ -8,18 +8,21 @@ VERSION=""
 INCREMENT="patch"
 MODE="stable"
 DRY_RUN=false
+TARGETS=""
 
 fail() { printf 'release: %s\n' "$*" >&2; exit 1; }
 
 usage() {
     cat <<EOF
-Usage: ./release.sh [VERSION] [--increment=major|minor|patch] [--draft|--prerelease] [--dry-run]
+Usage: ./release.sh [VERSION] [--targets=LIST] [--increment=major|minor|patch] [--draft|--prerelease] [--dry-run]
 
-Creates and pushes a reviewed source tag. GitHub Actions builds and tests native
-macOS Apple Silicon, macOS Intel and Linux x64 packages, verifies checksums, and
+Creates and pushes a reviewed source tag. GitHub Actions builds and tests only
+the selected native packages, verifies checksums, and
 publishes the binary release used by https://rakumux.com/install.sh.
 
   VERSION          Version without v; defaults to the next published patch
+  --targets=LIST   One target or comma-separated targets (alias: --target)
+                   linux-x64, macos-arm64, macos-intel; defaults to this host
   --increment=TYPE Auto-version increment (default: patch)
   --draft          Upload all assets but leave the GitHub release unpublished
   --prerelease     Publish a prerelease, without changing the latest stable release
@@ -27,6 +30,10 @@ publishes the binary release used by https://rakumux.com/install.sh.
 
 Run from a clean public checkout whose HEAD has already been pushed to main.
 Git SSH/HTTPS push access is required; local gh, npm and Homebrew logins are not.
+
+Examples:
+  ./release.sh 0.1.1 --targets=linux-x64
+  ./release.sh 0.1.2 --targets=linux-x64,macos-arm64,macos-intel
 EOF
 }
 
@@ -34,6 +41,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help) usage; exit 0 ;;
         --increment=*) INCREMENT="${1#*=}" ;;
+        --target=*|--targets=*) TARGETS="${1#*=}"; [[ -n "$TARGETS" ]] || fail 'select at least one target' ;;
         --dry-run) DRY_RUN=true ;;
         --draft|--prerelease)
             [[ "$MODE" == "stable" ]] || fail "choose only one of --draft and --prerelease"
@@ -46,6 +54,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$INCREMENT" in major|minor|patch) ;; *) fail "invalid increment: $INCREMENT" ;; esac
+if [[ -z "$TARGETS" ]]; then
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64|Linux-amd64) TARGETS="linux-x64" ;;
+        Darwin-arm64) TARGETS="macos-arm64" ;;
+        Darwin-x86_64) TARGETS="macos-intel" ;;
+        *) fail 'select release targets explicitly with --targets' ;;
+    esac
+fi
+"$ROOT/install/scripts/release-targets.sh" "$TARGETS" >/dev/null
 cd "$ROOT"
 command -v git >/dev/null 2>&1 || fail "git is required"
 [[ -f .github/workflows/release.yml ]] || fail "binary release workflow is missing"
@@ -70,11 +87,12 @@ if git show-ref --verify --quiet "refs/tags/$tag"; then fail "local tag $tag alr
 [[ -z "$(git ls-remote origin "refs/tags/$tag")" ]] || fail "remote tag $tag already exists; tags are never overwritten"
 
 printf 'Release: %s (%s)\nSource: %s\nRepository: %s\n' "$tag" "$MODE" "$head" "$REPO"
+printf 'Targets: %s\n' "$TARGETS"
 if [[ "$DRY_RUN" == "true" ]]; then
     printf 'Dry run: would create and push %s; no tag or release was created.\n' "$tag"
     exit 0
 fi
-git tag -a "$tag" -m "Rakumux $tag" -m "Release-Mode: $MODE"
+git tag -a "$tag" -m "Rakumux $tag" -m "Release-Mode: $MODE" -m "Release-Targets: $TARGETS"
 git push origin "refs/tags/$tag"
 printf 'Binary release started: https://github.com/%s/actions/workflows/release.yml\n' "$REPO"
-printf 'The release becomes public only after every platform and package check succeeds.\n'
+printf 'The release becomes public only after every selected target and package check succeeds.\n'

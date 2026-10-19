@@ -61,11 +61,21 @@ expect_failure env RELEASE_TEST_REMOTE_TAG=already-exists bash "$ROOT/release.sh
 expect_failure env RELEASE_TEST_LOCAL_TAG_STATUS=0 bash "$ROOT/release.sh" 0.1.0
 expect_failure bash "$ROOT/release.sh" 0.1.0 --draft --prerelease
 expect_failure bash "$ROOT/release.sh" --unknown-option
+expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=unsupported
+expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=
+expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=linux-x64,linux-x64
+expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=linux-x64,
 [[ ! -e "$RELEASE_TEST_LOG" ]]
 
 bash "$ROOT/release.sh" 0.1.0 --draft >"$TEMP/output"
 grep -q 'Release-Mode: draft' "$RELEASE_TEST_LOG"
 grep -q 'push origin refs/tags/v0.1.0' "$RELEASE_TEST_LOG"
+
+bash "$ROOT/release.sh" 0.1.1 --target=linux-x64 --dry-run >"$TEMP/output"
+grep -q 'Targets: linux-x64' "$TEMP/output"
+bash "$ROOT/release.sh" 0.1.1 --targets=linux-x64,macos-arm64 --dry-run >"$TEMP/output"
+grep -q 'Targets: linux-x64,macos-arm64' "$TEMP/output"
+[[ "$(bash "$ROOT/install/scripts/release-targets.sh" linux-x64)" == '{"include":[{"os":"ubuntu-24.04","platform":"linux-x64","target":"x86_64-unknown-linux-musl"}]}' ]]
 
 [[ "$(bash "$ROOT/install/scripts/get-next-version.sh" patch)" == '0.1.5' ]]
 [[ "$(RELEASE_TEST_HTTP=404 bash "$ROOT/install/scripts/get-next-version.sh" patch)" == '0.1.0' ]]

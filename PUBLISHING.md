@@ -29,7 +29,8 @@ The public source repository is `humanunsupervised/rakumux`. The website is
 
 The current production entry point is `./release.sh`: binary releases only, installed with
 `curl -fsSL https://rakumux.com/install.sh | bash`. It publishes through GitHub Actions only
-after every platform and isolated package-install check succeeds.
+after every selected platform and isolated package-install check succeeds. Select one target or
+a comma-separated list with `--targets`; the current production target is `linux-x64`.
 
 ### Optional registries (not part of the binary release)
 

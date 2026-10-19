@@ -103,18 +103,23 @@ The binary-only entry point is `release.sh` at the repository root. Run from a c
 reviewed public checkout after pushing its source commit to `main`:
 
 ```bash
-./release.sh                  # next published patch version (first release: 0.1.0)
-./release.sh 0.1.0             # explicit version
-./release.sh 0.1.0 --dry-run   # validate and preview; create/push nothing
+./release.sh --targets=linux-x64                  # next published patch
+./release.sh 0.1.1 --targets=linux-x64             # explicit Linux-only release
+./release.sh 0.1.2 --targets=linux-x64,macos-arm64  # explicit target list
+./release.sh 0.1.1 --targets=linux-x64 --dry-run   # validate; create/push nothing
 ```
 
 The script verifies that HEAD equals public `main`, then creates and pushes an annotated
-`v<version>` tag. `.github/workflows/release.yml` tests the source and builds one package on
-each native runner: macOS Apple Silicon, macOS Intel and Linux x64 (static musl). Every package
-passes `test-install.sh` with an isolated install prefix. The publish job verifies all three
-tarballs and combines their checksums before uploading a draft, then makes the complete release
+`v<version>` tag carrying the requested targets. `.github/workflows/release.yml` validates that
+selection and builds only those targets on native runners. Supported selections are `linux-x64`
+(static musl), `macos-arm64` and `macos-intel`; the default is the invoking host's platform.
+Every selected package passes `test-install.sh` with an isolated install prefix. The publish
+job verifies the complete selected asset set and combines its checksums before uploading a draft,
+then makes the complete release
 public. `--draft` leaves it unpublished; `--prerelease` does not replace the latest stable release.
 Nothing publishes to npm or Homebrew. The public installer downloads these GitHub release assets.
+The current production release selects Linux x64 only. macOS checks are not bypassed: they run
+and must pass when macOS targets are explicitly selected for a future release.
 
 Local prerequisites: git push access to the public repository; curl for automatic version
 selection. No local GitHub CLI, npm or Homebrew login is needed. Actions uses its scoped

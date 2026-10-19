@@ -16,8 +16,9 @@ See [INSTALL.md](INSTALL.md) for every option and troubleshooting.
 ## Maintainers
 
 ```bash
-./release.sh                  # next binary release, built and tested by GitHub Actions
-./release.sh 0.1.0 --dry-run   # validate the source and preview; publish nothing
+./release.sh --targets=linux-x64             # next Linux binary release through Actions
+./release.sh 0.1.1 --targets=linux-x64        # explicit Linux-only release
+./release.sh --targets=linux-x64 --dry-run  # validate and preview; publish nothing
 ```
 
 | Task | Script |

@@ -39,6 +39,7 @@ curl -fsSL https://rakumux.com/install.sh | bash
 The installer verifies the release checksum before running the tarball's installer. Re-run it
 to upgrade. npm and Homebrew publishing are not enabled. See the
 [installation guide](install/INSTALL.md) for binary and release-tarball instructions.
+The current binary release is Linux x64; macOS packages are not published yet.
 
 ## Quick start
 

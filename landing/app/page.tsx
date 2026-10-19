@@ -108,7 +108,7 @@ export default function Home() {
                 How it installs →
               </a>
             </div>
-            <p className="hero-meta">macOS and Linux · no tmux, git or other tools needed</p>
+            <p className="hero-meta">Linux x64 binaries · no tmux, git or other tools needed</p>
           </div>
           <div className="container container-wide hero-demo">
             <TuiDemo />
@@ -257,7 +257,7 @@ export default function Home() {
               <h2>Up and running in a minute.</h2>
               <p className="section-lede">
                 One package with everything in it: the app, its background server, the MCP server and the local API.
-                Runs on macOS (Apple Silicon and Intel) and Linux x64, and needs nothing but bash.
+                Prebuilt Linux x64 binaries need nothing but bash. macOS binary releases are not available yet.
               </p>
               <div className="install">
                 <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />

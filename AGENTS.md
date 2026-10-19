@@ -117,7 +117,7 @@ in this repository's license grant. Public preparation and release checks: `PUBL
 ```
 rakumux.sh                 # launcher (entry point)
 build.sh                     # local build
-release.sh                   # binary-only GitHub release entry point (macOS + Linux)
+release.sh                   # binary-only GitHub release entry point (--targets selects platforms)
 api/                         # rakumux-api (external HTTP API), see api/README.md
   openapi.yaml               # the API contract (OpenAPI 3.1)
   src/                       # main, server, instance (flock), discovery (api.json), remote
