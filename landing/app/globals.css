@@ -221,9 +221,20 @@ h3 {
   border-radius: 8px;
 }
 
-.nav-links a:hover {
+.nav-links a:hover,
+.nav-links a.nav-github:focus-visible {
   color: var(--bright);
   background: var(--surface);
+}
+
+.nav-links a.nav-github {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
 }
 
 .nav-links a.nav-cta {
@@ -239,7 +250,7 @@ h3 {
 }
 
 @media (max-width: 600px) {
-  .nav-links a:not(.nav-cta) {
+  .nav-links a:not(.nav-cta):not(.nav-github) {
     display: none;
   }
 }
