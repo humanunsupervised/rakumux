@@ -119,8 +119,7 @@ job verifies the complete selected asset set and combines its checksums before u
 then makes the complete release
 public. `--draft` leaves it unpublished; `--prerelease` does not replace the latest stable release.
 Nothing publishes to npm or Homebrew. The public installer downloads these GitHub release assets.
-The existing `v0.1.2` release is Linux-only. The new default runs all macOS and Linux checks;
-macOS packages become available only when their native checks and package verification pass.
+`v0.1.3` publishes all three platforms after their native checks and isolated package installs pass.
 
 Local prerequisites: git push access to the public repository; curl for automatic version
 selection. No local GitHub CLI, npm or Homebrew login is needed. Actions uses its scoped

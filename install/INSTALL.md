@@ -1,6 +1,6 @@
 # Installing Rakumux
 
-Production binaries are currently available for Linux x64; macOS binary releases are deferred.
+Native binaries are available for macOS Intel, macOS Apple Silicon and Linux x64.
 The installed app needs only bash: no git, tmux or other tools.
 
 ## Installer
@@ -11,7 +11,7 @@ curl -fsSL https://rakumux.com/install.sh | bash
 
 The installer checks the archive against the release's `checksums.txt`, then runs its installer.
 Use `PREFIX="$HOME/.local" bash` in place of `bash` for a user-local installation.
-The current published binary target is Linux x64. macOS binary packages are not available yet.
+It automatically selects the package for your operating system and architecture.
 
 Re-run the same installer to upgrade. npm and Homebrew publishing are not enabled; use the
 binary installer or a release tarball.
@@ -24,8 +24,8 @@ Download the package for your platform from
 | Platform | Package | Availability |
 |---|---|---|
 | Linux x64 | `rakumux-linux-x64.tar.gz` | Published |
-| macOS Apple Silicon | `rakumux-macos-arm64.tar.gz` | Not published yet |
-| macOS Intel | `rakumux-macos-intel.tar.gz` | Not published yet |
+| macOS Apple Silicon | `rakumux-macos-arm64.tar.gz` | Published |
+| macOS Intel | `rakumux-macos-intel.tar.gz` | Published |
 
 ```bash
 curl -fL https://github.com/humanunsupervised/rakumux/releases/latest/download/rakumux-linux-x64.tar.gz | tar xz
