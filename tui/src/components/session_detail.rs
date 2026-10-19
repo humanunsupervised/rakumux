@@ -1,8 +1,8 @@
 //! Right pane: the selected session's terminal (running, or its saved
 //! screen), with placeholders for no sessions, loading, the session
 //! Rakumux runs in, errors and the daemon being unreachable. Live previews
-//! keep their colours in Rakumux mode; only dialogs and saved output fade
-//! the pane. The cursor appears only while the session takes keys.
+//! fade lightly in Rakumux mode; dialogs and saved output use a stronger
+//! fade. The cursor appears only while the session takes keys.
 
 use ratatui::{
     layout::{Alignment, Rect},
@@ -15,7 +15,7 @@ use session_core::api::Role;
 use session_core::model::SessionStatus;
 
 use super::format::{abbreviate_home, status_glyph, status_label, truncate};
-use super::utils::{fade, get_spinner_char};
+use super::utils::{fade, fade_preview, get_spinner_char};
 use crate::app::screen::Screen;
 use crate::app::types::{AppMode, Focus};
 use crate::app::{App, Connection, DetailView, Selection};
@@ -101,6 +101,8 @@ pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<
             || matches!(app.detail.view, DetailView::Saved { .. })
         {
             fade(f.buffer_mut(), title_area);
+        } else if !focused && matches!(app.detail.view, DetailView::Live(_)) {
+            fade_preview(f.buffer_mut(), title_area);
         }
     }
     let area = screen.terminal?;
@@ -263,6 +265,8 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
             let cursor = terminal.render(area, f.buffer_mut(), focused, colors);
             if !matches!(app.mode, AppMode::Normal) {
                 fade(f.buffer_mut(), area);
+            } else if !focused {
+                fade_preview(f.buffer_mut(), area);
             }
             cursor
         }

@@ -6,22 +6,31 @@ use crate::theme;
 
 /// Keep three quarters of the contrast in saved output or under a dialog.
 pub(crate) const FADE_TEXT: f32 = 0.25;
-const FADE_BACKGROUND: f32 = 0.25;
+/// Live previews keep most of their contrast while the session list takes keys.
+pub(crate) const PREVIEW_FADE: f32 = 0.12;
 
-/// Fade saved output or the session pane under a dialog. Live previews in
-/// Rakumux mode stay unchanged. Palettes that can't fade colours (16
-/// colours) dim the text instead.
+/// Fade saved output or the session pane under a dialog. Palettes that can't
+/// fade colours (16 colours) dim the text instead.
 pub fn fade(buf: &mut Buffer, area: Rect) {
+    fade_by(buf, area, FADE_TEXT);
+}
+
+/// Lightly fade a live session preview without making it look unavailable.
+pub fn fade_preview(buf: &mut Buffer, area: Rect) {
+    fade_by(buf, area, PREVIEW_FADE);
+}
+
+fn fade_by(buf: &mut Buffer, area: Rect, amount: f32) {
     let p = theme::palette();
     let area = area.intersection(buf.area);
     for y in area.top()..area.bottom() {
         for x in area.left()..area.right() {
             let cell = buf.get_mut(x, y);
-            match p.faded(cell.fg, FADE_TEXT) {
+            match p.faded(cell.fg, amount) {
                 Some(fg) => cell.fg = fg,
                 None => cell.modifier |= Modifier::DIM,
             }
-            if let Some(bg) = p.faded(cell.bg, FADE_BACKGROUND) {
+            if let Some(bg) = p.faded(cell.bg, amount) {
                 cell.bg = bg;
             }
         }
@@ -198,6 +207,36 @@ mod tests {
         assert_eq!(cell.bg, p.faded(p.selection, 0.25).unwrap_or(p.selection));
         assert!(cell.modifier.contains(Modifier::BOLD));
         assert_eq!(buffer.get(1, 0), &outside);
+    }
+
+    #[test]
+    fn preview_fading_is_lighter_than_dialog_fading_and_stays_within_the_pane() {
+        let p = theme::palette();
+        let mut preview = Buffer::empty(Rect::new(0, 0, 2, 1));
+        preview
+            .get_mut(0, 0)
+            .set_style(p.base().bg(p.selection).add_modifier(Modifier::BOLD));
+        let outside = preview.get(1, 0).clone();
+        let mut dialog = preview.clone();
+
+        fade_preview(&mut preview, Rect::new(0, 0, 1, 1));
+        fade(&mut dialog, Rect::new(0, 0, 1, 1));
+
+        let cell = preview.get(0, 0);
+        match p.faded(p.text_primary, PREVIEW_FADE) {
+            Some(fg) => {
+                assert_eq!(cell.fg, fg);
+                assert_ne!(cell.fg, dialog.get(0, 0).fg);
+                assert!(!cell.modifier.contains(Modifier::DIM));
+            }
+            None => assert!(cell.modifier.contains(Modifier::DIM)),
+        }
+        assert_eq!(
+            cell.bg,
+            p.faded(p.selection, PREVIEW_FADE).unwrap_or(p.selection)
+        );
+        assert!(cell.modifier.contains(Modifier::BOLD));
+        assert_eq!(preview.get(1, 0), &outside);
     }
 
     #[test]

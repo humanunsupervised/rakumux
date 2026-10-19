@@ -552,8 +552,8 @@ since running sessions end).
 TUI keys come in two modes. **Session mode**: everything goes to the program except `Ctrl-\`,
 which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_keys_in_session` is
 on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
-session is previewed in full colour: live previews don't fade in Rakumux mode, but the
-session pane still fades under a dialog and for saved output, while the list never fades; the folder filter, a folder
+session preview fades lightly in Rakumux mode and more under a dialog or for saved output,
+while the list never fades; the folder filter, a folder
 header and + New session keep the last session in view, one the filters show), `gg`/`G`,
 `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder) (a Ctrl or Alt that no shortcut uses is
 ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
@@ -590,7 +590,7 @@ Moving through the list on a phone doesn't resize anything: no session is on scr
 
 Narrow windows (Sidebar from 80 to `layout::SINGLE_PANE_BELOW` = 100 columns): in Rakumux mode
 the list is stacked on top, a one-row divider under it, and the selected session's detail (title
-row and full-colour preview) below, so switching sessions shows them. The list gets 40% of the rows above
+row and lightly faded preview) below, so switching sessions shows them. The list gets 40% of the rows above
 the footer, at least `LIST_MIN_ROWS` (9: the folder filter and two sessions) and leaving the detail
 `PREVIEW_MIN_ROWS` (4); dragging the divider sets that share (`sessions.stacked_list_percent`).
 Below `STACK_MIN_ROWS` (14 rows above the footer, a 15-row screen) Rakumux mode shows the list

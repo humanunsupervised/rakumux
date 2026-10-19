@@ -954,42 +954,78 @@ async fn the_session_list_is_never_faded() {
 }
 
 #[tokio::test]
-async fn live_previews_keep_their_colours_in_rakumux_mode_but_fade_under_dialogs() {
+async fn live_previews_fade_lightly_in_rakumux_mode_and_more_under_dialogs() {
     use ratatui::style::{Color, Modifier};
 
     for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
-        let mut h = harness(vec![view("A", "a", 10)]);
+        let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
         h.app.set_layout(layout);
+        let output = b"\r\n\x1b[1;38;2;200;120;80;48;2;40;50;60mpreview-color\x1b[0m";
         let (index, _) = h.last_attach();
         h.attach_event(
             index,
             AttachEvent::Output {
                 offset: 100,
-                bytes: b"\r\n\x1b[1;38;2;200;120;80;48;2;40;50;60mpreview-color\x1b[0m".to_vec(),
+                bytes: output.to_vec(),
             },
         );
         let p = crate::theme::palette();
-        // Rakumux mode preserves the program's text, background and boldness.
+        // Browsing applies a light fade without losing boldness or colours.
         assert_eq!(h.app.focus, Focus::List);
         let preview = cell_of(&mut h, "preview-color");
-        assert_eq!(preview.fg, Color::Rgb(200, 120, 80));
-        assert_eq!(preview.bg, Color::Rgb(40, 50, 60));
+        match p.faded(
+            Color::Rgb(200, 120, 80),
+            crate::components::utils::PREVIEW_FADE,
+        ) {
+            Some(fg) => {
+                assert_eq!(preview.fg, fg);
+                assert!(!preview.modifier.contains(Modifier::DIM));
+            }
+            None => assert!(preview.modifier.contains(Modifier::DIM)),
+        }
+        assert_eq!(
+            preview.bg,
+            p.faded(
+                Color::Rgb(40, 50, 60),
+                crate::components::utils::PREVIEW_FADE
+            )
+            .unwrap_or(Color::Rgb(40, 50, 60))
+        );
         assert!(preview.modifier.contains(Modifier::BOLD));
-        assert!(!preview.modifier.contains(Modifier::DIM));
-        // Enter changes input focus, not the terminal's colours.
+        // Enter restores the program's exact colours; leaving fades only once.
         h.press(KeyCode::Enter).await;
         assert_eq!(h.app.focus, Focus::Session);
-        assert_eq!(cell_of(&mut h, "preview-color"), preview);
+        let active = cell_of(&mut h, "preview-color");
+        assert_eq!(active.fg, Color::Rgb(200, 120, 80));
+        assert_eq!(active.bg, Color::Rgb(40, 50, 60));
+        assert!(active.modifier.contains(Modifier::BOLD));
+        assert!(!active.modifier.contains(Modifier::DIM));
         h.rakumux().await;
         assert_eq!(cell_of(&mut h, "preview-color"), preview);
         // Dialogs still fade the terminal behind them.
         h.press(KeyCode::Char('?')).await;
         let obscured = cell_of(&mut h, "preview-color");
-        match p.faded(preview.fg, crate::components::utils::FADE_TEXT) {
-            Some(faded) => assert_eq!(obscured.fg, faded),
+        match p.faded(active.fg, crate::components::utils::FADE_TEXT) {
+            Some(faded) => {
+                assert_eq!(obscured.fg, faded);
+                assert_ne!(obscured.fg, preview.fg);
+            }
             None => assert!(obscured.modifier.contains(Modifier::DIM)),
         }
         h.press(KeyCode::Esc).await;
+        assert_eq!(cell_of(&mut h, "preview-color"), preview);
+        // Selecting another session applies the same light fade to its output.
+        assert_eq!(h.selected().as_deref(), Some("B"));
+        h.press(KeyCode::Up).await;
+        assert_eq!(h.selected().as_deref(), Some("A"));
+        let (index, _) = h.last_attach();
+        h.attach_event(
+            index,
+            AttachEvent::Output {
+                offset: 100,
+                bytes: output.to_vec(),
+            },
+        );
         assert_eq!(cell_of(&mut h, "preview-color"), preview);
     }
 }

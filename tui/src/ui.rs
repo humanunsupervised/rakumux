@@ -414,16 +414,23 @@ mod tests {
     }
 
     #[test]
-    fn live_preview_title_is_not_faded_in_rakumux_mode() {
+    fn live_preview_title_is_lightly_faded_in_rakumux_mode() {
         let mut h = harness(vec![view("A", "color-check", 10)]);
         let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
         terminal.draw(|f| draw(f, &mut h.app)).unwrap();
         let title = h.app.screen().detail_title.unwrap();
         let name = terminal.backend().buffer().get(title.x + 3, title.y);
         assert_eq!(name.symbol(), "c");
-        assert_eq!(name.fg, theme::palette().text_primary);
-        assert_eq!(name.bg, theme::palette().panel);
-        assert!(!name.modifier.contains(ratatui::style::Modifier::DIM));
+        let p = theme::palette();
+        let amount = crate::components::utils::PREVIEW_FADE;
+        match p.faded(p.text_primary, amount) {
+            Some(fg) => {
+                assert_eq!(name.fg, fg);
+                assert!(!name.modifier.contains(ratatui::style::Modifier::DIM));
+            }
+            None => assert!(name.modifier.contains(ratatui::style::Modifier::DIM)),
+        }
+        assert_eq!(name.bg, p.faded(p.panel, amount).unwrap_or(p.panel));
     }
 
     #[test]
