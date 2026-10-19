@@ -280,7 +280,7 @@ impl Client {
         let response = exchange(&mut stream, request, REQUEST_TIMEOUT)
             .map_err(ExchangeError::into_api_error)
             .and_then(into_result)?;
-        stream.set_read_timeout(None).map_err(unavailable_io)?;
+        set_read_timeout(&stream, None).map_err(unavailable_io)?;
         Ok((stream, response))
     }
 }
@@ -829,6 +829,31 @@ fn spawn_detached(mut command: Command) -> io::Result<u32> {
 
 // ---------------------------------------------------------------- exchanges
 
+/// A closed macOS socket rejects timeout changes even while received bytes
+/// remain buffered. A confirmed hangup cannot block; let reads drain those
+/// bytes and writes report the disconnect through the normal retry path.
+fn set_read_timeout(stream: &UnixStream, timeout: Option<Duration>) -> io::Result<()> {
+    let result = stream.set_read_timeout(timeout);
+    #[cfg(target_os = "macos")]
+    if let Err(error) = &result {
+        use std::os::fd::AsRawFd;
+
+        if error.raw_os_error() == Some(libc::EINVAL) {
+            let mut descriptor = libc::pollfd {
+                fd: stream.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: one initialized descriptor, borrowed for this zero-timeout poll.
+            let ready = unsafe { libc::poll(&mut descriptor, 1, 0) };
+            if ready == 1 && descriptor.revents & libc::POLLHUP != 0 {
+                return Ok(());
+            }
+        }
+    }
+    result
+}
+
 /// How a request/response exchange failed.
 enum ExchangeError {
     /// The request could not be written (the daemon closed the connection
@@ -862,8 +887,7 @@ fn exchange(
     request: &Request,
     timeout: Duration,
 ) -> std::result::Result<Response, ExchangeError> {
-    stream
-        .set_read_timeout(Some(timeout.max(Duration::from_millis(1))))
+    set_read_timeout(stream, Some(timeout.max(Duration::from_millis(1))))
         .map_err(|error| ExchangeError::Failed(unavailable_io(error)))?;
     if let Err(error) = frame::write_control(stream, request) {
         return Err(match error.kind() {
@@ -1779,6 +1803,27 @@ mod tests {
     }
 
     // ------------------------------------------------------------ requests
+
+    #[test]
+    fn closed_sockets_keep_buffered_responses_when_timeouts_change() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        set_read_timeout(&client, Some(REQUEST_TIMEOUT)).unwrap();
+        frame::write_control(&mut server, &Response::Pong).unwrap();
+        server.shutdown(Shutdown::Both).unwrap();
+        drop(server);
+
+        set_read_timeout(&client, None).unwrap();
+        assert_eq!(
+            frame::read_control::<_, Response>(&mut client).unwrap(),
+            Response::Pong
+        );
+        assert_eq!(frame::read_frame(&mut client).unwrap(), None);
+        set_read_timeout(&client, Some(REQUEST_TIMEOUT)).unwrap();
+        assert!(matches!(
+            exchange(&mut client, &Request::Ping, REQUEST_TIMEOUT),
+            Err(ExchangeError::NotSent(_))
+        ));
+    }
 
     #[test]
     fn every_method_maps_to_its_request() {

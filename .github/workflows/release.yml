@@ -51,7 +51,7 @@ jobs:
           RAKUMUX_HOME: ${{ runner.temp }}/rakumux-test-home
         run: |
           cargo fmt --all --check
-          cargo test --workspace --locked
+          cargo test --workspace --locked --no-fail-fast
       - name: Test release entry and tag metadata handling
         shell: bash
         run: |

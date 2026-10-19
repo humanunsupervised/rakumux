@@ -30,7 +30,7 @@ jobs:
         working-directory: tui
       - run: cargo build --workspace --locked
         working-directory: tui
-      - run: cargo test --workspace --locked
+      - run: cargo test --workspace --locked --no-fail-fast
         working-directory: tui
         env:
           RAKUMUX_HOME: ${{ runner.temp }}/rakumux-home
