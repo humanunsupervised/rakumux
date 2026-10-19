@@ -663,8 +663,11 @@ wrapper that captures Rakumux's output never waits on the daemon.
 
 ## Development rules
 
-- Build and test from `tui/`: `cargo build --workspace`, `cargo test --workspace` (or
-  `cargo test -p <crate>`), `cargo fmt --all --check`. No new warnings.
+- After each fix, run only its targeted regression test(s), adding one if missing
+  (`cd tui && cargo test -p <crate> <test_filter> --locked`). Confirm they pass; do not rerun the full suite per fix.
+- Run the full checks only when ready to finalize or release: from `tui/`,
+  `cargo build --workspace --locked`, `cargo test --workspace --locked --no-fail-fast`,
+  `cargo fmt --all --check`, plus relevant shell/website checks. No new warnings.
 - Tests never touch the real `~/.rakumux`: set `RAKUMUX_HOME` to a temp dir.
 - Doc comments on public items, as in the contract files. Explicit errors; no `unwrap()`/`expect()`
   on daemon request paths (tests may).

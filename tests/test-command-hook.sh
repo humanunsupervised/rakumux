@@ -73,7 +73,10 @@ for sh in "${shells[@]}"; do
     fail "$sh: unexpected line format: $(head -n1 "$log")"
   fi
   logged="$(commands_logged "$log")"
-  if grep -qx 'true first' <<<"$logged" && grep -qx 'true second' <<<"$logged"; then
+  # Bash's DEBUG trap sees simple commands; zsh preexec sees the whole input line.
+  second_command='true second'
+  if [[ "$sh" == zsh ]]; then second_command=': && true second'; fi
+  if grep -qx 'true first' <<<"$logged" && grep -qx "$second_command" <<<"$logged"; then
     pass "$sh: commands are logged"
   else
     fail "$sh: missing commands in log: $logged"
