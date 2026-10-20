@@ -19,7 +19,8 @@ pub enum AppResult {
     SwitchDirectory(String),
 }
 
-/// Where keys go when no dialog is open: the two modes.
+/// Keyboard target when no dialog is open: Rakumux, the selected session,
+/// or the independent terminal panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Focus {
     /// Rakumux mode: keys drive Rakumux (the list or tab bar); the
@@ -29,6 +30,8 @@ pub enum Focus {
     /// Session mode: keys go to the selected session, which this client
     /// controls, except the Rakumux key.
     Session,
+    /// Keys go to the independent shell underneath the main detail pane.
+    Terminal,
 }
 
 #[derive(Debug, Clone)]
@@ -230,6 +233,8 @@ pub enum SettingsItem {
     PhoneAccess,
     /// Install a new release and restart only this UI.
     Update,
+    /// Independent shell below the main detail pane.
+    TerminalPanel,
     AnthropicKey,
     OpenAiKey,
     PrimaryAiProvider,
@@ -237,12 +242,13 @@ pub enum SettingsItem {
 }
 
 impl SettingsItem {
-    pub const ALL: [SettingsItem; 9] = [
+    pub const ALL: [SettingsItem; 10] = [
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
         SettingsItem::PhoneAccess,
         SettingsItem::Update,
+        SettingsItem::TerminalPanel,
         SettingsItem::AnthropicKey,
         SettingsItem::OpenAiKey,
         SettingsItem::PrimaryAiProvider,
@@ -255,7 +261,7 @@ impl SettingsItem {
             SettingsItem::Layout | SettingsItem::Icons => "Appearance",
             SettingsItem::CycleInSessions => "Keys",
             SettingsItem::PhoneAccess => "Phone",
-            SettingsItem::Update => "App",
+            SettingsItem::Update | SettingsItem::TerminalPanel => "App",
             SettingsItem::AnthropicKey
             | SettingsItem::OpenAiKey
             | SettingsItem::PrimaryAiProvider

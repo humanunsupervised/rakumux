@@ -48,7 +48,8 @@ admin-owned installs need the installer outside the app. Source builds use `./bu
 
 ## Quick start
 
-In the UI, press `n` to create a session. Run an agent or any command in its shell.
+In the UI, press `n` or click **+ New session** to create and enter a session immediately.
+Run an agent or any command in its shell.
 Press `Ctrl-\` to return to Rakumux mode. Use `j`/`k` or the arrow keys to select a session,
 `Enter` to work in it, and `?` for Help. Quitting the UI does not stop sessions.
 
@@ -60,6 +61,14 @@ apply to every layout. Grid previews are read-only observers: browsing never tak
 resizes a terminal, sends input, or marks a session as used. Cards crop/pan at the terminal's
 existing size. Only visible cards have preview streams; dead/exited cards show saved output.
 `n` or the + New session card creates and enters a generated-name session immediately.
+
+**Bottom terminal:** `T` in Rakumux mode, or Settings → General → Terminal panel, opens an
+independent shell underneath the main detail. It starts in the selected folder and has its
+own input focus. Click a pane to focus it; `Ctrl-\` returns to Rakumux mode, then `Esc` returns
+to the shell or `T` hides it. The × button hides it too. Drag the horizontal divider to resize.
+Hiding does not stop the shell or its command. The shell is a normal daemon-owned session,
+visible in the session list. This window reuses its shell when reopening the same folder;
+the pane stays bound to its folder until hidden. Short windows show the focused pane alone.
 
 ```bash
 rakumux new --name dev          # Create and attach

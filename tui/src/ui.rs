@@ -25,6 +25,7 @@ use crate::components::{
     session_grid::draw_session_grid,
     session_list::draw_session_list,
     session_tabs::draw_session_tabs,
+    terminal_panel::draw_terminal_panel,
 };
 use crate::help::{ModalState, ModalTab};
 use crate::theme;
@@ -73,6 +74,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // outer terminal's own colours.
     f.render_widget(Block::default().style(theme::palette().base()), area);
     let screen = app.screen();
+    // Keep the mode bar visible while dialogs are open, including
+    // short windows where the modal otherwise reaches the last row.
+    let modal_area = screen
+        .footer
+        .map(|footer| Rect {
+            height: footer.y.saturating_sub(area.y),
+            ..area
+        })
+        .unwrap_or(area);
     let mut hits = Vec::new();
     let mut tab_hits = Vec::new();
 
@@ -89,7 +99,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let Some(tabs) = screen.tabs {
         tab_hits = draw_session_tabs(f, app, tabs, &mut hits);
     }
-    let cursor = draw_session_detail(f, app, &screen);
+    let main_cursor = draw_session_detail(f, app, &screen);
+    let panel_cursor = draw_terminal_panel(f, app, &mut hits);
+    let cursor = if app.focus == Focus::Terminal {
+        panel_cursor
+    } else {
+        main_cursor
+    };
     if let Some(footer) = screen.footer {
         draw_footer(f, app, footer, &mut hits);
     }
@@ -101,37 +117,39 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let mut menu_hits = Vec::new();
     match &app.mode {
         AppMode::Normal => {}
-        AppMode::Folders(picker) => draw_folder_picker(f, app, picker, area, &mut menu_hits),
-        AppMode::Renaming(dialog) => draw_rename_dialog(f, dialog, area),
-        AppMode::Confirm(dialog) => draw_confirm_dialog(f, dialog, area),
-        AppMode::DaemonRestart(dialog) => draw_daemon_restart_dialog(f, dialog, area),
+        AppMode::Folders(picker) => draw_folder_picker(f, app, picker, modal_area, &mut menu_hits),
+        AppMode::Renaming(dialog) => draw_rename_dialog(f, dialog, modal_area),
+        AppMode::Confirm(dialog) => draw_confirm_dialog(f, dialog, modal_area),
+        AppMode::DaemonRestart(dialog) => draw_daemon_restart_dialog(f, dialog, modal_area),
         AppMode::Modal { state, in_session } => {
-            crate::help::render(f, area, state, &app.modal_context(*in_session))
+            crate::help::render(f, modal_area, state, &app.modal_context(*in_session))
         }
         AppMode::ConfiguringApiKey(dialog) => {
-            draw_settings_under(f, app, area);
-            draw_api_key_dialog(f, dialog, area)
+            draw_settings_under(f, app, modal_area);
+            draw_api_key_dialog(f, dialog, modal_area)
         }
         AppMode::AiProvider(dialog) => {
-            draw_settings_under(f, app, area);
-            draw_ai_provider_dialog(f, dialog, area)
+            draw_settings_under(f, app, modal_area);
+            draw_ai_provider_dialog(f, dialog, modal_area)
         }
         AppMode::OpenAiModel(dialog) => {
-            draw_settings_under(f, app, area);
-            draw_openai_model_dialog(f, dialog, area)
+            draw_settings_under(f, app, modal_area);
+            draw_openai_model_dialog(f, dialog, modal_area)
         }
-        AppMode::Upgrade(dialog) => draw_upgrade_dialog(f, dialog, area),
-        AppMode::Welcome(state) => crate::components::welcome::draw_welcome(f, app, *state, area),
-        AppMode::PhoneOffer => crate::components::phone_access::draw_phone_offer(f, area),
+        AppMode::Upgrade(dialog) => draw_upgrade_dialog(f, dialog, modal_area),
+        AppMode::Welcome(state) => {
+            crate::components::welcome::draw_welcome(f, app, *state, modal_area)
+        }
+        AppMode::PhoneOffer => crate::components::phone_access::draw_phone_offer(f, modal_area),
         AppMode::Pairing(dialog) => {
             if dialog.from_settings {
-                draw_settings_under(f, app, area);
+                draw_settings_under(f, app, modal_area);
             }
-            crate::components::phone_access::draw_pairing(f, dialog, area)
+            crate::components::phone_access::draw_pairing(f, dialog, modal_area)
         }
-        AppMode::Auth(menu) => draw_auth_menu(f, menu, area),
-        AppMode::AuthEmail(dialog) => draw_auth_email_dialog(f, dialog, area),
-        AppMode::AuthCode(dialog) => draw_auth_code_dialog(f, dialog, area),
+        AppMode::Auth(menu) => draw_auth_menu(f, menu, modal_area),
+        AppMode::AuthEmail(dialog) => draw_auth_email_dialog(f, dialog, modal_area),
+        AppMode::AuthCode(dialog) => draw_auth_code_dialog(f, dialog, modal_area),
     }
     // Dialogs cover the panes, so clicks only count in normal mode (and on
     // the Folders modal while it's open).
@@ -246,6 +264,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_orange_mode_bar_spans_the_app_and_stays_visible_under_settings_and_help() {
+        let palette = theme::palette();
+        for layout in SessionLayout::ALL {
+            for (width, height) in [(40, 20), (80, 24), (160, 48)] {
+                let mut h = with_layout(vec![view("A", "api", 10)], layout);
+                for key in [None, Some('o'), Some('?')] {
+                    if let Some(key) = key {
+                        h.press(KeyCode::Char(key)).await;
+                    }
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|frame| draw(frame, &mut h.app)).unwrap();
+                    for x in 0..width {
+                        let cell = terminal.backend().buffer().get(x, height - 1);
+                        assert_eq!(
+                            cell.bg, palette.accent_orange,
+                            "{layout:?} {width}x{height} col {x}"
+                        );
+                        assert_eq!(cell.fg, palette.background);
+                    }
+                    if key.is_some() {
+                        h.press(KeyCode::Esc).await;
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn the_footer_badge_uses_the_rakumux_name_in_both_layouts() {
         let badge = |h: &mut Harness, width: u16, height: u16| {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -269,8 +315,7 @@ mod tests {
                 let (text, fg, bg) = badge(&mut h, width, height);
                 assert!(text.starts_with(" RAKUMUX "), "{text:?}");
                 assert_eq!((fg, bg), (p.background, p.accent_orange));
-                // Dialogs keep the same mode label, even when a small screen
-                // lets the modal cover the footer.
+                // Help/Settings keep the mode bar visible on short screens too.
                 h.press(KeyCode::Char('?')).await;
                 let mode = crate::components::footer::mode_badge(&h.app);
                 assert_eq!(mode.content, " RAKUMUX ");
@@ -387,10 +432,9 @@ mod tests {
             // The note follows all settings; a 24-row screen scrolls it
             // below the visible rows once the App section is present.
             if height >= 40 {
-                assert!(
-                    screen.contains(SessionLayout::Sidebar.description()),
-                    "{screen}"
-                );
+                // Explanatory text now wraps inside the content-sized modal.
+                assert!(screen.contains("Session list on the left"), "{screen}");
+                assert!(screen.contains("session beside it"), "{screen}");
             }
         }
         // Keys tab: every action with its keys.

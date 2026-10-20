@@ -582,7 +582,7 @@ build; daemon and sessions stay up), `q`
 quit. There is no header: the panes start at the top row, and the folder filter (`▤ All folders
 ▾`, a folder's name and branch, or `▤ 3 folders ▾`) is the list's first row (Sidebar) or sits at
 the left of the tab bar (Tabs). The footer, always one row at the bottom (in zoom too), starts with the mode badge
-(orange RAKUMUX / quiet SESSION), then messages and the daemon connection while it isn't up
+(a full-width orange bar with dark text in Rakumux mode; quiet SESSION/TERMINAL otherwise), then messages and the daemon connection while it isn't up
 (`⠋ connecting`, `✕ daemon unavailable`), and on the right the keys for Help and Settings
 (`? help  , settings`; in session mode `Ctrl-\ rakumux  Ctrl-\ ? help  Ctrl-\ , settings`); when
 the row is short the message is cut first, then hints go from the right (Settings, then Help).
@@ -638,7 +638,9 @@ part, and are saved as `sessions.session_order`. A click without movement still 
 The first load still selects the most recently used session.
 
 New session (`n`, "+ New session", Enter on a folder header) creates immediately with a generated name,
-selects the new session and enters session mode at its login-shell prompt, without a naming modal. The
+selects the new session and enters session mode at its login-shell prompt, without a naming modal.
+A single click on "+ New session" creates and enters it on desktop and phones; it never just selects
+the action row. The
 session goes in the current folder (`App::current_folder`: the selected session's or header's
 folder, retained on the folder filter and "+ New session" rows; a single-folder filter takes
 precedence; without folder context, the launch folder). A session made in a folder the filter
@@ -656,6 +658,25 @@ mailboxes and checked generations; saved output is read with a cap. Browsing nev
 Promote, Resize, Fit, terminal input, Touch, clipboard, bell or terminal-query replies, even
 through the hidden detail path. Cards crop/pan rather than resizing terminals. Default config
 and wire spelling stays `sidebar`, now labelled Master detail; `grid` and `tabs` persist too.
+
+**Terminal panel.** `T` in Rakumux mode or Settings → General → Terminal panel opens a
+separate daemon-owned login shell under the main detail. `Focus::Terminal` routes keys,
+paste, mouse and cursor only to that attachment, with a distinct TERMINAL footer badge.
+The Rakumux key demotes it and returns to Rakumux mode; Esc returns to it, and T hides it.
+The hide button only detaches: never kill/delete a session or its running command. Drag its
+divider to resize the split. The selected agent remains observed while the shell takes input;
+only the focused terminal claims size, and scrolling an unfocused shell cannot resize the
+agent. Short windows show the focused pane alone. Grid browsing keeps its grid and hides the
+panel; focusing the shell restores the selected detail above it. Shells are regular sessions
+in the list. Per-folder panel bindings live in this window's memory; daemon sessions persist
+after UI restart. All work uses SessionApi off the UI thread, with stale-result checks,
+scope/self guards, passive emulators, bounded history and input-log privacy. Reconnects attach
+as observers until the user refocuses; they never create replacement shells implicitly.
+
+Settings measures its active General/Keys table instead of taking a percentage of the screen:
+centred, 48–88 columns when room allows, capped by screen width with a side margin. Explanatory
+notes wrap without changing its width as selection moves; Help retains its wider reading area.
+Dialogs stay above the one-row footer so the mode bar remains visible on short screens.
 
 The Folders modal (`P`, Enter on or a click on the folder filter; `AppMode::Folders`,
 `app/folders.rs`) lists All folders (ticked when there's no filter), then every folder that has

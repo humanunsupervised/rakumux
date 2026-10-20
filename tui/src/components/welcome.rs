@@ -108,6 +108,8 @@ struct Spacing {
     top: u16,
     /// A blank row between the title and the text.
     title_gap: bool,
+    /// A blank row between paragraphs.
+    paragraph_gap: bool,
     /// A blank row after the last paragraph.
     trailing_blank: bool,
     /// Rows below the text: the opt-out box, (a blank row,) the dots and
@@ -117,11 +119,12 @@ struct Spacing {
 
 /// The spacings to try, roomiest first; the last one is used when none
 /// fits.
-const SPACINGS: [Spacing; 3] = [
+const SPACINGS: [Spacing; 4] = [
     Spacing {
         side: 2,
         top: 1,
         title_gap: true,
+        paragraph_gap: true,
         trailing_blank: true,
         bottom: 4,
     },
@@ -129,6 +132,7 @@ const SPACINGS: [Spacing; 3] = [
         side: 1,
         top: 0,
         title_gap: true,
+        paragraph_gap: true,
         trailing_blank: false,
         bottom: 3,
     },
@@ -136,6 +140,15 @@ const SPACINGS: [Spacing; 3] = [
         side: 1,
         top: 0,
         title_gap: false,
+        paragraph_gap: true,
+        trailing_blank: false,
+        bottom: 3,
+    },
+    Spacing {
+        side: 1,
+        top: 0,
+        title_gap: false,
+        paragraph_gap: false,
         trailing_blank: false,
         bottom: 3,
     },
@@ -153,11 +166,10 @@ fn popup_rows(app: &App, width: u16, spacing: Spacing) -> u16 {
                 .iter()
                 .map(|p| wrapped_rows(&p.replace('`', ""), text_width))
                 .sum();
-            // The title (and a blank row), the paragraphs with a blank row
-            // between them, and maybe one after the last.
+            // The title, the paragraphs and any optional blank rows.
             1 + usize::from(spacing.title_gap)
                 + text
-                + paragraphs.len().saturating_sub(1)
+                + paragraphs.len().saturating_sub(1) * usize::from(spacing.paragraph_gap)
                 + usize::from(spacing.trailing_blank)
         })
         .max()
@@ -265,7 +277,7 @@ pub fn draw_welcome(f: &mut Frame, app: &App, state: WelcomeState, area: Rect) {
         lines.push(Line::default());
     }
     for (i, paragraph) in paragraphs.iter().enumerate() {
-        if i > 0 {
+        if i > 0 && spacing.paragraph_gap {
             lines.push(Line::default());
         }
         lines.push(Line::from(spans(paragraph)));

@@ -1875,6 +1875,97 @@ fn naming_input_reads_history_and_the_visible_screen() {
 // ---------------------------------------------------------------- mouse and paste
 
 #[tokio::test]
+async fn clicking_new_session_creates_once_and_enters_the_shell_without_a_keyboard_action() {
+    for layout in SessionLayout::ALL {
+        for (width, height) in [(40, 20), (80, 24), (90, 24), (160, 48)] {
+            // Desktop Tabs has no New session item; phones use the list.
+            if layout == SessionLayout::Tabs && width >= 80 {
+                continue;
+            }
+            for existing in [false, true] {
+                let mut h = harness(if existing {
+                    vec![view("A", "agent", 10)]
+                } else {
+                    vec![]
+                });
+                h.app.resize(width, height);
+                h.app.set_layout(layout);
+                // On short grids the action may be on a later page.
+                if layout == SessionLayout::Grid {
+                    h.app.list.select(Selection::NewSession);
+                }
+                h.app.process_pending();
+                let mut terminal =
+                    ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+                        .unwrap();
+                terminal
+                    .draw(|frame| crate::ui::draw(frame, &mut h.app))
+                    .unwrap();
+                let new_row = h.app.list.row_count() - 1;
+                let new_card = h.app.list.visible().len();
+                let area = h.app.hits.iter().find_map(|(area, hit)| {
+                    (*hit == Hit::ListRow(new_row) || *hit == Hit::GridCell(new_card)).then_some(*area)
+                }).unwrap_or_else(|| panic!("New session hit target missing: {layout:?} {width}x{height} existing={existing}"));
+                for index in 0..h.fake.attach_count() {
+                    h.fake.outgoing(index);
+                }
+                h.app.handle_mouse(mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    area.x + 3,
+                    area.y + 1,
+                ));
+                assert!(h.app.creating_session);
+                // Repeated presses while the create result is pending cannot
+                // create duplicates or route input to the previous session.
+                h.app.handle_mouse(mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    area.x + 3,
+                    area.y + 1,
+                ));
+                h.app.handle_mouse(mouse(
+                    MouseEventKind::Up(MouseButton::Left),
+                    area.x + 3,
+                    area.y + 1,
+                ));
+                h.app.process_pending();
+                h.app.handle_mouse(mouse(
+                    MouseEventKind::Up(MouseButton::Left),
+                    area.x + 3,
+                    area.y + 1,
+                ));
+                h.app.process_pending();
+
+                assert_eq!(
+                    h.fake.creates().len(),
+                    1,
+                    "{layout:?} {width}x{height} existing={existing}"
+                );
+                assert_eq!(h.selected().as_deref(), Some("N1"));
+                assert_eq!(h.app.focus, Focus::Session);
+                assert!(matches!(h.app.mode, AppMode::Normal));
+                assert!(h.app.drag.is_none());
+                let (index, request) = h.last_attach();
+                assert_eq!(request.id, id("N1"));
+                assert_eq!(request.role, Role::Controller);
+                h.fake.outgoing(index);
+                h.press(KeyCode::Char('x')).await;
+                assert_eq!(
+                    h.fake.outgoing(index),
+                    vec![AttachOutgoing::Input(b"x".to_vec())]
+                );
+                for previous in 0..index {
+                    assert!(h
+                        .fake
+                        .outgoing(previous)
+                        .iter()
+                        .all(|event| !matches!(event, AttachOutgoing::Input(_))));
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn clicking_a_row_selects_it_and_paste_goes_to_the_focused_session() {
     let mut h = harness(vec![aged("A", "a", 1, 20), aged("B", "b", 2, 10)]);
     let backend = ratatui::backend::TestBackend::new(160, 48);
@@ -3037,6 +3128,9 @@ async fn clicking_new_session_keeps_the_clicked_sections_folder() {
         h.app.process_pending();
     }
     assert_eq!(h.app.current_folder(), folder("/api"));
+    // The sidebar is clickable while an existing session has input focus.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
     draw(&mut h);
     let row = h.app.list.row_count() - 1;
     let area = h
@@ -3052,8 +3146,9 @@ async fn clicking_new_session_keeps_the_clicked_sections_folder() {
         area.y + 1,
     ));
     h.app.process_pending();
-    assert_eq!(h.app.list.selection(), &Selection::NewSession);
-    h.press(KeyCode::Enter).await;
+    assert_eq!(h.fake.creates().len(), 1);
+    assert_eq!(h.selected().as_deref(), Some("N1"));
+    assert_eq!(h.app.focus, Focus::Session);
     assert_eq!(created_folder(&h), folder("/api"));
     let create = h.fake.creates().pop().unwrap();
     assert_eq!(create.scope, Some(folder("/api")));
@@ -3275,7 +3370,13 @@ async fn welcome_cards_at(h: &mut Harness, width: u16, height: u16) -> Vec<(Stri
         let end = rows.iter().any(|row| row.contains(last_word));
         let keys = rows.iter().any(|row| row.contains("Esc close"));
         let opt_out = rows.iter().any(|row| row.contains("[ ] Don't show"));
-        cards.push((title, keys && opt_out && top && bottom && end));
+        let footer = rows.last().is_some_and(|row| row.starts_with(" RAKUMUX "));
+        let palette = crate::theme::palette();
+        assert!((0..width).all(
+            |column| terminal.backend().buffer().get(column, height - 1).bg
+                == palette.accent_orange
+        ));
+        cards.push((title, keys && opt_out && top && bottom && end && footer));
         h.press(KeyCode::Right).await;
     }
     cards
@@ -3284,7 +3385,7 @@ async fn welcome_cards_at(h: &mut Harness, width: u16, height: u16) -> Vec<(Stri
 #[tokio::test]
 async fn the_welcome_tour_fits_a_phone() {
     let mut h = harness(vec![view("A", "a", 20)]);
-    for (width, height) in [(45, 40), (40, 20)] {
+    for (width, height) in [(45, 40), (40, 20), (40, 19)] {
         let cards = welcome_cards_at(&mut h, width, height).await;
         assert_eq!(cards.len(), crate::components::welcome::CARDS);
         assert!(

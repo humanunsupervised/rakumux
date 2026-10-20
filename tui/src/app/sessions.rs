@@ -186,7 +186,12 @@ impl App {
         if let Some(session) = self.list.selected_session() {
             return Some(session.clone());
         }
-        let visible = self.list.visible();
+        let visible: Vec<_> = self
+            .list
+            .visible()
+            .into_iter()
+            .filter(|session| !self.terminal_panel.is_panel_session(&session.id))
+            .collect();
         [self.detail.session_id(), self.came_from.as_ref()]
             .into_iter()
             .flatten()
@@ -505,9 +510,8 @@ impl App {
     // ------------------------------------------------------------ focus
 
     /// Enter / `l` / `→` / click: open the Folders modal for the folder
-    /// filter, the new-session dialog for a folder header or "+ New
-    /// session", focus a live session, revive a dead one, restart an exited
-    /// one.
+    /// filter, create immediately for a folder header or "+ New session",
+    /// focus a live session, revive a dead one, restart an exited one.
     pub fn activate_selected(&mut self) {
         if self.list.selection() == &Selection::Folders {
             self.open_folder_picker();
@@ -549,6 +553,8 @@ impl App {
     }
 
     fn enter_session_focus(&mut self) {
+        self.demote_terminal_panel();
+        self.came_from_terminal = false;
         self.grid.clear();
         self.focus = Focus::Session;
         self.pending_key = None;
@@ -588,6 +594,15 @@ impl App {
     /// control and switch to Rakumux mode, remembering the session to go
     /// back to.
     pub fn enter_rakumux_mode(&mut self) {
+        if self.focus == Focus::Terminal {
+            self.demote_terminal_panel();
+            self.focus = Focus::List;
+            self.came_from_terminal = true;
+            self.came_from = None;
+            self.sync_grid();
+            return;
+        }
+        self.came_from_terminal = false;
         let from = self.detail.session_id().cloned();
         self.leave_session_focus(true);
         self.came_from = from;
@@ -596,6 +611,10 @@ impl App {
     /// Esc (with nothing to cancel) or the Rakumux key in Rakumux mode:
     /// back into the session Rakumux mode was entered from.
     pub fn return_to_session(&mut self) {
+        if self.came_from_terminal && self.terminal_panel.open {
+            self.focus_terminal_panel();
+            return;
+        }
         let Some(id) = self.came_from.clone() else {
             return;
         };
@@ -775,6 +794,9 @@ impl App {
     /// (`Fit`), so a session no one is typing in fits the pane showing it
     /// instead of keeping a size from another layout or window.
     pub(super) fn sync_terminal_size(&mut self) {
+        if self.focus == Focus::Terminal {
+            return;
+        }
         // Nothing of the session is on screen (a phone's list): leave its
         // size to the windows showing it.
         if self.screen().terminal.is_none() {
@@ -805,6 +827,9 @@ impl App {
     /// refuses while someone types in the session elsewhere; this tries
     /// again at most every [`CLAIM_INTERVAL`].
     pub(super) fn claim_terminal_size(&mut self) {
+        if self.focus == Focus::Terminal {
+            return;
+        }
         if self.screen().terminal.is_none() {
             return;
         }
@@ -978,6 +1003,7 @@ impl App {
             AppMode::ConfiguringApiKey(dialog) => dialog.input.insert_str(text),
             AppMode::AuthEmail(dialog) => dialog.input.insert_str(text),
             AppMode::AuthCode(dialog) => dialog.input.insert_str(text),
+            AppMode::Normal if self.focus == Focus::Terminal => self.paste_terminal_panel(text),
             AppMode::Normal if self.focus == Focus::Session => {
                 if let (Some(terminal), Some(attachment)) = (
                     self.detail.terminal.as_mut(),
@@ -1006,6 +1032,7 @@ impl App {
             return;
         }
         if !matches!(self.mode, AppMode::Normal) {
+            self.terminal_panel.dragging = false;
             // A dialog opened: a held session is let go.
             self.end_session_drag();
             if matches!(self.mode, AppMode::Folders(_)) {
@@ -1024,6 +1051,14 @@ impl App {
                     && event.row < a.y + a.height
             })
         };
+        if self.terminal_panel.dragging {
+            match event.kind {
+                MouseEventKind::Drag(MouseButton::Left) => self.drag_terminal_panel(event.row),
+                MouseEventKind::Up(_) => self.terminal_panel.dragging = false,
+                _ => {}
+            }
+            return;
+        }
         if self.divider.dragging {
             match event.kind {
                 MouseEventKind::Drag(MouseButton::Left) => self.drag_divider(event, &screen),
@@ -1054,8 +1089,18 @@ impl App {
             if let Some(index) = layout::tab_at(&self.tab_hits, event.column, event.row) {
                 let id = self.list.visible().get(index).map(|s| s.id.clone());
                 if let Some(id) = id {
+                    let from_panel = self.focus == Focus::Terminal;
+                    if from_panel {
+                        self.demote_terminal_panel();
+                        self.focus = Focus::List;
+                        self.came_from_terminal = false;
+                    }
                     self.select_session(id.clone());
-                    self.drag = Some(SessionDrag::new(id, event.column));
+                    if from_panel {
+                        self.activate_selected();
+                    } else {
+                        self.drag = Some(SessionDrag::new(id, event.column));
+                    }
                 }
                 return;
             }
@@ -1065,6 +1110,18 @@ impl App {
                 .find(|(area, _)| inside(Some(*area)))
                 .map(|(_, hit)| *hit);
             match hit {
+                Some(Hit::TerminalPanelHide) => {
+                    self.hide_terminal_panel();
+                    return;
+                }
+                Some(Hit::TerminalPanelDivider) => {
+                    self.terminal_panel.dragging = true;
+                    return;
+                }
+                Some(Hit::TerminalPanel) => {
+                    self.focus_terminal_panel();
+                    return;
+                }
                 Some(Hit::GridCell(index)) => {
                     let id = self.list.visible().get(index).map(|s| s.id.clone());
                     self.list.select(match id {
@@ -1079,18 +1136,21 @@ impl App {
                     return;
                 }
                 Some(Hit::ListRow(row)) => {
-                    if self.focus == Focus::Session {
+                    if self.focus != Focus::List {
                         self.enter_rakumux_mode();
                     }
                     self.list.select_row(row);
+                    // New session is an action, not a preview selection:
+                    // a click creates and enters it at every screen width.
+                    if self.list.selection() == &Selection::NewSession {
+                        self.activate_selected();
+                        return;
+                    }
                     self.reconcile_detail();
                     // A phone shows the list or a session: a tap on a
-                    // session (or "+ New session") opens it.
+                    // session opens it rather than only selecting it.
                     if self.phone() {
-                        let opens = matches!(
-                            self.list.rows().get(row),
-                            Some(ListRow::Session(_) | ListRow::NewSession)
-                        );
+                        let opens = matches!(self.list.rows().get(row), Some(ListRow::Session(_)));
                         if opens {
                             self.activate_selected();
                         }
@@ -1105,7 +1165,7 @@ impl App {
                     return;
                 }
                 Some(Hit::FolderSelector) => {
-                    if self.focus == Focus::Session {
+                    if self.focus != Focus::List {
                         self.enter_rakumux_mode();
                     }
                     self.open_folder_picker();
@@ -1115,7 +1175,7 @@ impl App {
                     // Like the Rakumux key in session mode, Esc in
                     // Rakumux mode.
                     match self.focus {
-                        Focus::Session => self.enter_rakumux_mode(),
+                        Focus::Session | Focus::Terminal => self.enter_rakumux_mode(),
                         Focus::List => self.return_to_session(),
                     }
                     return;
@@ -1123,7 +1183,7 @@ impl App {
                 Some(Hit::FooterKey(key)) => {
                     // What the hint's keys do: in session mode they start
                     // with the Rakumux key.
-                    if self.focus == Focus::Session {
+                    if self.focus != Focus::List {
                         self.enter_rakumux_mode();
                     }
                     match key {
@@ -1136,12 +1196,14 @@ impl App {
                 Some(Hit::FolderMenu | Hit::FolderRow(_)) | None => {}
             }
             // The session's title row, like its terminal: go in.
-            if self.focus == Focus::List && inside(screen.detail_title) {
+            if self.focus != Focus::Session && inside(screen.detail_title) {
                 self.click_preview();
                 return;
             }
         }
-        if inside(screen.terminal) {
+        if inside(screen.terminal_panel) {
+            self.terminal_panel_mouse(event);
+        } else if inside(screen.terminal) {
             self.terminal_mouse(event, screen.terminal.unwrap_or_default());
         } else if inside(screen.list) || inside(screen.grid) {
             match event.kind {
@@ -1321,7 +1383,7 @@ impl App {
             MouseEventKind::ScrollDown => Some(-WHEEL_ROWS),
             _ => None,
         };
-        if self.focus == Focus::List {
+        if self.focus != Focus::Session {
             match (event.kind, wheel) {
                 (MouseEventKind::Down(MouseButton::Left), _) => self.click_preview(),
                 (_, Some(rows)) => {

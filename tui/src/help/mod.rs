@@ -35,9 +35,11 @@ pub const SETTINGS_KEY: &str = "o";
 /// The key the footer shows for Settings in Rakumux mode.
 pub const SETTINGS_KEY_PRIMARY: &str = ",";
 
-/// The modal never shrinks below this size unless the screen does.
+/// Help keeps room for long-form documentation; Settings uses its table width.
 const MIN_MODAL_WIDTH: u16 = 80;
 const MIN_MODAL_HEIGHT: u16 = 24;
+const MIN_SETTINGS_WIDTH: usize = 48;
+const MAX_SETTINGS_WIDTH: usize = 88;
 
 /// Body columns not used for text: one of padding on the left, two of gap
 /// and one of scrollbar on the right.
@@ -211,6 +213,8 @@ pub enum KeyAction {
     Filter,
     /// Cycle Master detail, Grid and Tabs in Rakumux mode.
     CycleLayout,
+    /// Reveal/focus the independent shell below the detail pane.
+    TerminalPanel,
     Help,
     Settings,
     /// The welcome tour carousel.
@@ -227,7 +231,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The rows of the Keys tab, in order.
-    pub const ALL: [KeyAction; 35] = [
+    pub const ALL: [KeyAction; 36] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -255,6 +259,7 @@ impl KeyAction {
         KeyAction::Zoom,
         KeyAction::Filter,
         KeyAction::CycleLayout,
+        KeyAction::TerminalPanel,
         KeyAction::Help,
         KeyAction::Settings,
         KeyAction::Tour,
@@ -294,7 +299,8 @@ impl KeyAction {
             | KeyAction::Delete
             | KeyAction::Zoom
             | KeyAction::Filter
-            | KeyAction::CycleLayout => "Sessions and folders",
+            | KeyAction::CycleLayout
+            | KeyAction::TerminalPanel => "Sessions and folders",
             KeyAction::Help
             | KeyAction::Settings
             | KeyAction::Tour
@@ -335,6 +341,7 @@ impl KeyAction {
             KeyAction::Zoom => "Work in the session full screen",
             KeyAction::Filter => "Filter sessions",
             KeyAction::CycleLayout => "Cycle layout (Master detail, Grid, Tabs)",
+            KeyAction::TerminalPanel => "Terminal panel (show, focus or hide)",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
             KeyAction::Tour => "Welcome tour",
@@ -385,6 +392,7 @@ impl KeyAction {
             KeyAction::Zoom => plain(&["z"]),
             KeyAction::Filter => plain(&["/"]),
             KeyAction::CycleLayout => plain(&["v"]),
+            KeyAction::TerminalPanel => plain(&["T"]),
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
             KeyAction::Tour => "t (in Help)".into(),
@@ -457,6 +465,13 @@ impl KeyAction {
                 "Asks before reloading this UI through its launcher to pick up the latest build. \
                  Confirm with y or Enter; Esc cancels. The daemon and sessions stay up. \
                  Ctrl-r only reconnects or reloads the list."
+                    .into()
+            }
+            KeyAction::TerminalPanel => {
+                "T opens an independent shell below the main detail in the selected folder. \
+                 Click a pane to focus it. Use the Rakumux key to return to Rakumux mode; \
+                 then Esc returns to the shell or T hides it. Hiding does not end its \
+                 session or running command; drag the divider to resize the split."
                     .into()
             }
             KeyAction::CheckForUpdate => {
@@ -679,12 +694,14 @@ pub struct SettingRow {
     pub note: String,
 }
 
-/// Draw the Settings modal over `area` (normally the whole frame): centred
-/// at about 80% × 80%, never smaller than 80×24 unless the screen is (then
-/// it fills the screen). Records the scroll range in `state` for key
-/// handling.
+/// Draw Settings around the active tab's content, or Help at its reading
+/// width. Both stay screen-bounded and retain their existing vertical scroll.
 pub fn render(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext) {
-    let popup = modal_area(area);
+    let popup = if state.tab.modal() == Modal::Settings {
+        settings_area(area, state.tab, ctx)
+    } else {
+        modal_area(area)
+    };
     if popup.width < 3 || popup.height < 3 {
         return;
     }
@@ -834,6 +851,60 @@ fn modal_area(area: Rect) -> Rect {
         width,
         height,
     }
+}
+
+/// Measure the tables, not the selected explanatory paragraph: notes wrap,
+/// so moving the selection cannot make the dialog grow and shrink.
+fn settings_area(area: Rect, tab: ModalTab, ctx: &ModalContext) -> Rect {
+    let content = match tab {
+        ModalTab::General => {
+            let values = ctx
+                .general
+                .iter()
+                .map(|row| str_width(&row.value))
+                .max()
+                .unwrap_or(0);
+            2 + setting_label_width(ctx) + values
+        }
+        ModalTab::Keys => {
+            let names = KeyNames::new(ctx);
+            let labels = KeyAction::ALL
+                .iter()
+                .map(|action| str_width(action.label()))
+                .max()
+                .unwrap_or(0);
+            let keys = KeyAction::ALL
+                .iter()
+                .map(|action| str_width(&action.keys(&names)))
+                .max()
+                .unwrap_or(0);
+            2 + labels + 3 + keys
+        }
+        _ => return modal_area(area),
+    };
+    let title = str_width(" Settings ") + str_width(&format!(" Rakumux {} ", ctx.version)) + 2;
+    let preferred = (content + usize::from(BODY_MARGIN) + 2)
+        .max(title)
+        .clamp(MIN_SETTINGS_WIDTH, MAX_SETTINGS_WIDTH);
+    let available = if area.width > 2 {
+        area.width - 2
+    } else {
+        area.width
+    };
+    let width = (preferred as u16).min(available);
+    let mut popup = modal_area(area);
+    popup.x = area.x + (area.width - width) / 2;
+    popup.width = width;
+    popup
+}
+
+fn setting_label_width(ctx: &ModalContext) -> usize {
+    ctx.general
+        .iter()
+        .map(|row| str_width(&row.label))
+        .max()
+        .unwrap_or(0)
+        + 2
 }
 
 fn draw_scrollbar(f: &mut Frame, body: Rect, scroll: u16, max_scroll: u16, total: u16) {
@@ -1093,6 +1164,15 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
          you're in."
     ));
 
+    doc.heading("Terminal panel");
+    doc.text(
+        "T in Rakumux mode, or Settings, General, Terminal panel, opens a separate shell \
+         underneath the main detail in the selected folder. Click a pane to focus it; the \
+         TERMINAL badge identifies shell input. The Rakumux key returns to Rakumux mode, \
+         then Esc returns to the shell or T hides it. The hide button never ends its program. \
+         Drag the divider to resize. Short windows show the focused pane alone. These are \
+         normal daemon sessions, visible in the list; this window reuses one per folder.",
+    );
     doc.heading("Folders");
     doc.text(
         "Every session belongs to a folder: the one it was started in, such as a git \
@@ -1126,8 +1206,9 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     }
     doc.bullet("Detail or Grid cards: terminal screens, updating as the programs run.");
     doc.bullet(format!(
-        "Footer, the bottom row: the mode on the left (an orange RAKUMUX, or a quiet \
-         SESSION), then messages and the daemon connection when it isn't up, and on the right \
+        "Footer, the bottom row: a full-width orange bar in Rakumux mode, or a quiet SESSION \
+         or TERMINAL label while a program takes keys. It shows messages and the daemon \
+         connection when it isn't up, and on the right \
          the keys for this Help (`?`) and Settings (`,`); in a session they come after `{p}`, \
          the way to Rakumux mode. Settings' Keys tab lists every key."
     ));
@@ -1830,13 +1911,7 @@ fn general_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line
     let palette = theme::palette();
     let styles = Styles::from_theme();
     let width = width.max(1);
-    let label_width = ctx
-        .general
-        .iter()
-        .map(|row| str_width(&row.label))
-        .max()
-        .unwrap_or(0)
-        + 2;
+    let label_width = setting_label_width(ctx);
     // Too narrow for a label and its value side by side (a phone): every
     // value goes on the line under its label, so all the choices show.
     let values_below = ctx
@@ -1956,7 +2031,17 @@ fn action_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line<
         .unwrap_or(0)
         .max(str_width("Action"));
     // The Action column gives way to the keys on narrow screens.
-    let column = widest.min(width.saturating_sub(MARKER + GAP).saturating_mul(3) / 5);
+    let widest_key = rows
+        .iter()
+        .map(|(_, keys)| str_width(keys))
+        .max()
+        .unwrap_or(0)
+        .max(str_width("Key"));
+    let column = if MARKER + widest + GAP + widest_key <= width {
+        widest
+    } else {
+        widest.min(width.saturating_sub(MARKER + GAP).saturating_mul(3) / 5)
+    };
     let cell = |text: &str, room: usize| {
         let text = truncate(text, room);
         let pad = room.saturating_sub(str_width(&text));
@@ -2276,6 +2361,62 @@ mod tests {
         ModalState::new(tab, ROWS)
     }
 
+    #[test]
+    fn settings_hug_the_table_instead_of_growing_with_the_terminal() {
+        let context = ctx("Ctrl-\\");
+        for tab in [ModalTab::General, ModalTab::Keys] {
+            let narrow = settings_area(Rect::new(0, 0, 120, 40), tab, &context);
+            let wide = settings_area(Rect::new(0, 0, 240, 60), tab, &context);
+            assert_eq!(narrow.width, wide.width);
+            assert!(usize::from(wide.width) <= MAX_SETTINGS_WIDTH);
+            assert_eq!(wide.x, (240 - wide.width) / 2);
+            let body = usize::from(wide.width - 2 - BODY_MARGIN);
+            if tab == ModalTab::General {
+                let lines = general_lines(&context, 0, body).0;
+                assert!(lines.iter().any(|line| line_text(line).contains("▶ Layout")
+                    && line_text(line).contains("[Master detail] Grid Tabs")));
+            } else {
+                let lines = action_lines(&context, 0, body).0;
+                for action in KeyAction::ALL {
+                    assert!(
+                        lines
+                            .iter()
+                            .any(|line| line_text(line).contains(action.label())),
+                        "{} was needlessly truncated",
+                        action.label()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn settings_stay_screen_bounded_and_long_values_cannot_make_them_screen_wide() {
+        let mut context = ctx("Ctrl-\\");
+        context.general[0].value = "long model or layout value ".repeat(100);
+        for width in [0, 1, 2, 20, 40, 80, 160, 300] {
+            let area = Rect::new(3, 2, width, 40);
+            for tab in [ModalTab::General, ModalTab::Keys] {
+                let popup = settings_area(area, tab, &context);
+                assert_eq!(popup.intersection(area), popup);
+                assert!(usize::from(popup.width) <= MAX_SETTINGS_WIDTH);
+                if width > 2 {
+                    assert!(popup.width <= width - 2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn selected_notes_wrap_without_changing_the_settings_width() {
+        let mut context = ctx("Ctrl-\\");
+        let area = Rect::new(0, 0, 160, 48);
+        let before = settings_area(area, ModalTab::General, &context);
+        context.general[0].note =
+            "A long explanation that should wrap rather than stretch the dialog. ".repeat(100);
+        assert_eq!(settings_area(area, ModalTab::General, &context), before);
+    }
+
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
@@ -2585,7 +2726,7 @@ mod tests {
     // --- rendering ------------------------------------------------------
 
     #[test]
-    fn renders_at_80x24_full_screen_with_the_configured_prefix() {
+    fn settings_render_content_sized_at_80x24_with_the_configured_prefix() {
         let context = ctx("Ctrl-a");
         let state = state(ModalTab::Keys);
         let buf = draw(80, 24, &state, &context);
@@ -2603,9 +2744,10 @@ mod tests {
             assert!(strip.contains(label), "{strip}");
         }
         assert!(!strip.contains("Overview"), "{strip}");
-        // Fills the screen: the rounded corner is at the origin.
-        assert_eq!(buf.get(0, 0).symbol(), "╭");
-        assert_eq!(buf.get(79, 23).symbol(), "╯");
+        let popup = settings_area(Rect::new(0, 0, 80, 24), state.tab, &context);
+        assert!(popup.width < 80);
+        assert_eq!(buf.get(popup.x, popup.y).symbol(), "╭");
+        assert_eq!(buf.get(popup.right() - 1, popup.bottom() - 1).symbol(), "╯");
 
         // Help: every tab fits, the long label shortened.
         let help = draw(80, 24, &self::state(ModalTab::Overview), &context);
@@ -2640,12 +2782,16 @@ mod tests {
         let text = buffer_text(&buf);
         assert!(text.contains("Esc, Ctrl-Space"), "{text}");
         assert!(text.contains("↓, j, Option/Alt+↓"), "{text}");
-        // 80% of 160x48 = 128x38, centred.
+        // Settings hugs its table; Help retains its long-form reading width.
+        let popup = settings_area(Rect::new(0, 0, 160, 48), state.tab, &context);
         assert_eq!(buf.get(0, 0).symbol(), " ");
-        assert_eq!(buf.get(16, 5).symbol(), "╭");
-        assert_eq!(buf.get(143, 42).symbol(), "╯");
+        assert!(popup.width < 128);
+        assert_eq!(buf.get(popup.x, popup.y).symbol(), "╭");
+        assert_eq!(buf.get(popup.right() - 1, popup.bottom() - 1).symbol(), "╯");
 
         let overview = draw(160, 48, &self::state(ModalTab::Overview), &context);
+        assert_eq!(overview.get(16, 5).symbol(), "╭");
+        assert_eq!(overview.get(143, 42).symbol(), "╯");
         let text = buffer_text(&overview);
         assert!(text.contains("4 Agents & CLI"), "{text}");
         assert!(text.contains("Two modes"), "{text}");
@@ -2678,9 +2824,10 @@ mod tests {
         let y = (0..24)
             .find(|y| buffer_text(&buf).lines().nth(*y).unwrap().contains('▶'))
             .unwrap() as u16;
-        assert_eq!(buf.get(5, y).fg, p.text_bright);
-        assert_eq!(buf.get(5, y).bg, p.background);
-        assert_eq!(buf.get(5, y + 1).fg, p.text_primary);
+        let label_x = settings_area(Rect::new(0, 0, 80, 24), state.tab, &context).x + 4;
+        assert_eq!(buf.get(label_x, y).fg, p.text_bright);
+        assert_eq!(buf.get(label_x, y).bg, p.background);
+        assert_eq!(buf.get(label_x, y + 1).fg, p.text_primary);
     }
 
     #[test]

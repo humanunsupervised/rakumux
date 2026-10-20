@@ -84,6 +84,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Tab => app.go_to_last_session(),
         KeyCode::Char(digit @ '1'..='9') => app.go_into_nth(digit as usize - '0' as usize),
         KeyCode::Char('n') => app.open_new_session(),
+        KeyCode::Char('T') => app.toggle_terminal_panel(),
         KeyCode::Char('v') => app.set_layout(app.session_layout().next()),
         KeyCode::Char('p') => app.toggle_pin(),
         KeyCode::Char('J') => app.move_selected_session(1),

@@ -44,6 +44,9 @@ pub struct Screen {
     pub detail_title: Option<Rect>,
     /// Where the terminal view draws.
     pub terminal: Option<Rect>,
+    /// Independent shell panel below the detail; includes its title row.
+    pub terminal_panel: Option<Rect>,
+    pub terminal_panel_divider: Option<Rect>,
     /// The last row: mode badge, messages, keys. Shown in zoom too.
     pub footer: Option<Rect>,
 }
@@ -82,7 +85,7 @@ pub fn compute(
 
     let pane_focus = match focus {
         Focus::List => PaneFocus::List,
-        Focus::Session => PaneFocus::Detail,
+        Focus::Session | Focus::Terminal => PaneFocus::Detail,
     };
     let areas = layout::split_with(body, session_layout, pane_focus, sizes);
     screen.grid = areas.grid;
@@ -96,7 +99,7 @@ pub fn compute(
         let detail = areas.detail;
         screen.detail = Some(detail);
         // On a phone the tab bar names the session; every row counts.
-        if layout::is_phone(area.width) && focus == Focus::Session {
+        if layout::is_phone(area.width) && focus != Focus::List {
             screen.terminal = Some(detail);
         } else if detail.height > 1 {
             screen.detail_title = Some(Rect {
@@ -110,6 +113,47 @@ pub fn compute(
             });
         }
     }
+    screen
+}
+
+/// Split only the detail, never the sidebar or footer. On short screens
+/// the shell takes the detail while focused; it is hidden otherwise.
+pub fn with_terminal_panel(mut screen: Screen, open: bool, focused: bool, percent: u16) -> Screen {
+    let Some(detail) = screen.detail else {
+        return screen;
+    };
+    if !open {
+        return screen;
+    }
+    if detail.height < 14 {
+        if focused {
+            screen.terminal_panel = Some(detail);
+            screen.detail = None;
+            screen.detail_title = None;
+            screen.terminal = None;
+        }
+        return screen;
+    }
+    let height = ((u32::from(detail.height) * u32::from(percent.clamp(20, 70))) / 100) as u16;
+    let height = height.clamp(7, detail.height - 7);
+    let divider_y = detail.bottom() - height - 1;
+    screen.detail = Some(Rect {
+        height: divider_y - detail.y,
+        ..detail
+    });
+    if let Some(terminal) = &mut screen.terminal {
+        terminal.height = divider_y.saturating_sub(terminal.y);
+    }
+    screen.terminal_panel_divider = Some(Rect {
+        y: divider_y,
+        height: 1,
+        ..detail
+    });
+    screen.terminal_panel = Some(Rect {
+        y: divider_y + 1,
+        height,
+        ..detail
+    });
     screen
 }
 
@@ -157,6 +201,8 @@ mod tests {
             screen.tabs,
             screen.detail_title,
             screen.terminal,
+            screen.terminal_panel_divider,
+            screen.terminal_panel,
         ]
         .into_iter()
         .flatten()
@@ -196,6 +242,33 @@ mod tests {
             ),
             (terminal.width, 46)
         );
+    }
+
+    #[test]
+    fn terminal_panel_splits_only_the_detail_and_tiny_windows_show_the_focused_pane() {
+        for (width, height) in [(5, 5), (40, 10), (40, 20), (90, 40), (160, 48)] {
+            for layout in SessionLayout::ALL {
+                for focus in [Focus::List, Focus::Session, Focus::Terminal] {
+                    let base = at(width, height, layout, focus);
+                    let screen = with_terminal_panel(base, true, focus == Focus::Terminal, 35);
+                    assert_tiled(&screen, &format!("{width}x{height} {layout:?} {focus:?}"));
+                    assert_eq!(screen.footer, base.footer);
+                    assert_eq!(screen.list, base.list);
+                    assert_eq!(screen.tabs, base.tabs);
+                    if focus == Focus::Terminal && base.detail.is_some() {
+                        assert!(screen.terminal_panel.is_some());
+                        if base.detail.unwrap().height < 14 {
+                            assert!(screen.terminal.is_none());
+                        }
+                    }
+                    if let (Some(main), Some(panel)) = (screen.detail, screen.terminal_panel) {
+                        assert!(main.bottom() < panel.y);
+                        assert_eq!(panel.bottom(), base.detail.unwrap().bottom());
+                    }
+                    assert_eq!(with_terminal_panel(base, false, false, 35), base);
+                }
+            }
+        }
     }
 
     #[test]

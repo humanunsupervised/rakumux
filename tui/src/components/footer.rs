@@ -1,6 +1,6 @@
 //! One-line footer, the last row of every screen (zoom too): the mode
-//! badge at the left (a bright orange `RAKUMUX` while keys drive
-//! Rakumux, a quiet `SESSION` while they go to a session), then the
+//! badge at the left (a full-width orange bar while keys drive
+//! Rakumux, a quiet `SESSION`/`TERMINAL` while they go to a program), then the
 //! connection state and a message (a status message, why the daemon is
 //! unreachable, the zoomed session, a pending upgrade), and on the right the
 //! keys for Help and Settings (in session mode after the Rakumux key,
@@ -86,6 +86,13 @@ pub fn mode_badge(app: &App) -> Span<'static> {
                 .bg(p.selection)
                 .add_modifier(Modifier::BOLD),
         ),
+        Focus::Terminal => Span::styled(
+            " TERMINAL ",
+            Style::default()
+                .fg(p.text_primary)
+                .bg(p.selection)
+                .add_modifier(Modifier::BOLD),
+        ),
     }
 }
 
@@ -103,7 +110,7 @@ pub fn hints(app: &App) -> Vec<Hint> {
             Hint::new("?", "help", FooterKey::Help),
             Hint::new(settings, "settings", FooterKey::Settings),
         ],
-        Focus::Session => {
+        Focus::Session | Focus::Terminal => {
             let key = app.rakumux_key.label();
             vec![
                 Hint::new(key.clone(), "rakumux", FooterKey::Rakumux),
@@ -302,22 +309,42 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
         targets.extend(push_hints(&mut spans, hints, x));
         spans.push(Span::raw(" "));
     }
-    (Line::from(spans), targets)
+    let mut line = Line::from(spans);
+    if app.focus == Focus::List {
+        let palette = theme::palette();
+        for span in &mut line.spans {
+            let alert = span.style.fg == Some(palette.accent_pink);
+            span.style = span.style.fg(palette.background).bg(palette.accent_orange);
+            if alert {
+                span.style = span.style.add_modifier(Modifier::BOLD);
+            }
+        }
+    }
+    (line, targets)
+}
+
+fn footer_style(app: &App) -> Style {
+    let palette = theme::palette();
+    if app.focus == Focus::List {
+        Style::default()
+            .fg(palette.background)
+            .bg(palette.accent_orange)
+    } else {
+        Style::default()
+            .fg(palette.text_primary)
+            .bg(palette.background)
+    }
 }
 
 /// Draws the footer into the first row of `area`; it never takes more.
 /// Records its tap targets (the badge and the hints) in `hits`.
 pub fn draw_footer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
-    let p = theme::palette();
     if area.height == 0 {
         return;
     }
     let row = Rect { height: 1, ..area };
     let (line, targets) = footer(app, area.width as usize);
-    f.render_widget(
-        Paragraph::new(line).style(Style::default().bg(p.background)),
-        row,
-    );
+    f.render_widget(Paragraph::new(line).style(footer_style(app)), row);
     for (x, width, hit) in targets {
         let target = Rect {
             x: row.x.saturating_add(x),
@@ -340,6 +367,65 @@ mod tests {
 
     fn text(line: &Line) -> String {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn rakumux_bar_fills_the_row_with_readable_ink_in_all_message_states() {
+        use ratatui::{backend::TestBackend, widgets::Block, Terminal};
+        let palette = theme::palette();
+        for state in ["empty", "filter", "connecting", "error", "message"] {
+            let mut h = harness(vec![view("A", "api", 10)]);
+            h.app.list.filter_editing = state == "filter";
+            if state == "connecting" {
+                h.app.connection = Connection::Connecting;
+            }
+            if state == "error" {
+                h.app.connection = Connection::Failed(ApiError::new(
+                    ErrorCode::DaemonUnavailable,
+                    "daemon failed",
+                ));
+            }
+            if state == "message" {
+                h.app.set_status("A long status message ".repeat(20));
+            }
+            for width in [1, 9, 40, 80, 160] {
+                let mut terminal = Terminal::new(TestBackend::new(width + 4, 3)).unwrap();
+                let mut hits = Vec::new();
+                terminal
+                    .draw(|frame| {
+                        frame.render_widget(
+                            Block::default().style(Style::default().bg(palette.background)),
+                            frame.size(),
+                        );
+                        draw_footer(frame, &h.app, Rect::new(2, 1, width, 1), &mut hits);
+                    })
+                    .unwrap();
+                for x in 2..width + 2 {
+                    let cell = terminal.backend().buffer().get(x, 1);
+                    assert_eq!(cell.bg, palette.accent_orange, "{state}: col {x}");
+                    assert_eq!(cell.fg, palette.background, "{state}: col {x}");
+                }
+                assert_eq!(terminal.backend().buffer().get(2, 0).bg, palette.background);
+                assert_eq!(terminal.backend().buffer().get(0, 1).bg, palette.background);
+            }
+        }
+    }
+
+    #[test]
+    fn session_and_terminal_modes_keep_the_quiet_footer_background() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut h = harness(vec![view("A", "api", 10)]);
+        let palette = theme::palette();
+        for focus in [Focus::Session, Focus::Terminal] {
+            h.app.focus = focus;
+            let mut terminal = Terminal::new(TestBackend::new(160, 1)).unwrap();
+            terminal
+                .draw(|frame| draw_footer(frame, &h.app, frame.size(), &mut Vec::new()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer.get(0, 0).bg, palette.selection);
+            assert_eq!(buffer.get(159, 0).bg, palette.background);
+        }
     }
 
     #[tokio::test]

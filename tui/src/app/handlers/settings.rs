@@ -162,6 +162,10 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         KeyAction::Settings => open_settings(app),
         KeyAction::Tour => app.open_welcome(),
         KeyAction::CheckForUpdate => app.open_upgrade_dialog(),
+        KeyAction::TerminalPanel => {
+            leave(app);
+            app.toggle_terminal_panel();
+        }
         KeyAction::Reload => app.refresh(),
         KeyAction::Restart => app.request_restart(),
         KeyAction::QuitAndCd => match app.selected_cwd() {
@@ -199,6 +203,10 @@ fn open_item(app: &mut App, item: SettingsItem) {
         }
         SettingsItem::PhoneAccess => app.open_phone_access(),
         SettingsItem::Update => app.open_upgrade_dialog(),
+        SettingsItem::TerminalPanel => {
+            app.mode = AppMode::Normal;
+            app.show_terminal_panel();
+        }
         SettingsItem::CycleInSessions => {
             let on = !app.settings.sessions.cycle_keys_in_session;
             app.settings.sessions.cycle_keys_in_session = on;

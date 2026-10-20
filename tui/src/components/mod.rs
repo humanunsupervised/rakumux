@@ -11,5 +11,6 @@ pub mod session_detail;
 pub mod session_grid;
 pub mod session_list;
 pub mod session_tabs;
+pub mod terminal_panel;
 pub mod utils;
 pub mod welcome;

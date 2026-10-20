@@ -40,6 +40,7 @@ mod runtime;
 pub mod screen;
 mod session_list;
 mod sessions;
+pub mod terminal_panel;
 mod text_input;
 pub mod types;
 mod upgrade;
@@ -154,6 +155,9 @@ impl SessionDrag {
 /// Clickable regions recorded while drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hit {
+    TerminalPanel,
+    TerminalPanelHide,
+    TerminalPanelDivider,
     /// Session list row (0 = the folder filter; folder headers count).
     ListRow(usize),
     /// Visible Grid card in filtered session order (last is New session).
@@ -227,6 +231,7 @@ pub struct App {
     /// The session Rakumux mode was entered from: Esc and the Rakumux
     /// key go back to it.
     pub came_from: Option<SessionId>,
+    pub came_from_terminal: bool,
     /// The sessions worked in most recently, for Tab ("last session").
     pub recent: RecentSessions,
 
@@ -264,6 +269,7 @@ pub struct App {
     pub list: SessionList,
     pub detail: Detail,
     pub grid: grid::GridPreviews,
+    pub terminal_panel: terminal_panel::TerminalPanel,
     pub focus: Focus,
     pub zoomed: bool,
     /// The list/detail divider: hovered or being dragged.
@@ -319,6 +325,7 @@ impl App {
             cycle_keys,
             pending_key: None,
             came_from: None,
+            came_from_terminal: false,
             recent: RecentSessions::default(),
             exec,
             rx: Some(rx),
@@ -342,6 +349,7 @@ impl App {
             list,
             detail: Detail::default(),
             grid: grid::GridPreviews::default(),
+            terminal_panel: terminal_panel::TerminalPanel::default(),
             focus: Focus::List,
             zoomed: false,
             divider: DividerState::default(),
@@ -436,15 +444,18 @@ impl App {
     /// Where keys go now is the session's program (session mode with no
     /// dialog): what's typed there is the user's own and is never logged.
     pub fn keys_go_to_session(&self) -> bool {
-        self.focus == Focus::Session && matches!(self.mode, AppMode::Normal)
+        matches!(self.focus, Focus::Session | Focus::Terminal)
+            && matches!(self.mode, AppMode::Normal)
     }
 
     /// Session input, pending shell input and credential dialogs must never
     /// expose typed characters in the input-debug log.
     pub fn input_is_private(&self) -> bool {
         self.keys_go_to_session()
+            || (self.came_from_terminal && self.terminal_panel.open)
             || self.creating_session
             || self.pending_focus.is_some()
+            || self.terminal_panel.busy()
             || matches!(
                 self.mode,
                 AppMode::ConfiguringApiKey(_) | AppMode::AuthEmail(_) | AppMode::AuthCode(_)
@@ -461,6 +472,7 @@ impl App {
             .collect();
         let focus = match self.focus {
             Focus::Session => "session",
+            Focus::Terminal => "terminal",
             Focus::List => "rakumux",
         };
         let pending = self
@@ -510,23 +522,39 @@ impl App {
     }
 
     pub fn screen(&self) -> screen::Screen {
-        screen::compute(
+        self.screen_for(self.focus)
+    }
+
+    pub(super) fn screen_for(&self, focus: Focus) -> screen::Screen {
+        let screen = screen::compute(
             self.area,
             self.session_layout(),
-            self.focus,
+            focus,
             self.zoomed,
             self.pane_sizes(),
+        );
+        screen::with_terminal_panel(
+            screen,
+            self.terminal_panel.open,
+            focus == Focus::Terminal,
+            self.terminal_panel.height_percent,
         )
     }
 
     /// `(cols, rows)` for attaching/resizing.
     pub fn terminal_size(&self) -> (u16, u16) {
-        screen::terminal_size(
-            self.area,
-            self.session_layout(),
-            self.zoomed,
-            self.pane_sizes(),
-        )
+        if !self.terminal_panel.open {
+            return screen::terminal_size(
+                self.area,
+                self.session_layout(),
+                self.zoomed,
+                self.pane_sizes(),
+            );
+        }
+        self.screen_for(Focus::Session)
+            .terminal
+            .map(|area| (area.width.max(2), area.height.max(2)))
+            .unwrap_or((80, 24))
     }
 
     /// Show the welcome tour from its first card. Its "Don't show this on
@@ -679,6 +707,11 @@ impl App {
                     .unwrap_or_else(|| format!("{} · U", app_version())),
                 "Check for a new release, confirm installation, then restart only this UI. The daemon and all running sessions stay up. Source builds and admin-owned installations may need a manual update.",
             ),
+            SettingsItem::TerminalPanel => (
+                "Terminal panel",
+                if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
+                "Open an independent shell below the main detail in the selected folder. Click a pane to focus it; the Rakumux key returns to Rakumux mode. Hide with × or the Rakumux key then T. Hiding never ends the shell or command.",
+            ),
             SettingsItem::AnthropicKey => (
                 "Anthropic API key",
                 key_value(&ai.anthropic_api_key),
@@ -719,6 +752,7 @@ impl App {
                     && session.lifecycle == session_core::model::Lifecycle::Working
             })
             || self.creating_session
+            || self.terminal_panel.busy()
             || matches!(self.detail.view, DetailView::Loading(_))
             || match &self.mode {
                 AppMode::Folders(d) => d.busy,
@@ -733,6 +767,7 @@ impl App {
     /// Timers: status expiry and reconnects. Returns whether to redraw.
     pub fn on_tick(&mut self, now: Instant) -> bool {
         self.sync_grid();
+        self.sync_terminal_panel();
         let mut changed = self.is_animating();
         changed |= self.offer_phone_access();
         if let Some((_, at)) = &self.status {
@@ -755,6 +790,18 @@ impl App {
 
     pub fn handle_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::PanelResolved {
+                generation,
+                folder,
+                result,
+            } => self.on_panel_resolved(generation, folder, result),
+            AppEvent::PanelAttached { generation, result } => {
+                self.on_panel_attached(generation, result)
+            }
+            AppEvent::PanelAttach { generation, event } => {
+                self.on_panel_attach_event(generation, event)
+            }
+            AppEvent::PanelSaved { generation, result } => self.on_panel_saved(generation, result),
             AppEvent::Connected(api) => self.on_connected(api),
             AppEvent::ConnectFailed(error) => self.on_connect_failed(error),
             AppEvent::DaemonRestarted(result) => self.on_daemon_restarted(result),
@@ -831,10 +878,27 @@ impl App {
             }
         }
         self.sync_grid();
+        self.sync_terminal_panel();
     }
 
     /// Input from the terminal.
     pub async fn handle_terminal_event(&mut self, event: Event) -> AppResult {
+        let panel_pointer = match &event {
+            Event::Mouse(mouse) => {
+                let screen = self.screen();
+                self.terminal_panel.dragging
+                    || [screen.terminal_panel, screen.terminal_panel_divider]
+                        .into_iter()
+                        .flatten()
+                        .any(|area| {
+                            mouse.column >= area.x
+                                && mouse.column < area.right()
+                                && mouse.row >= area.y
+                                && mouse.row < area.bottom()
+                        })
+            }
+            _ => false,
+        };
         // Someone is using this window (not just a mouse moving over it):
         // the session it shows takes its size.
         let used = match &event {
@@ -863,7 +927,10 @@ impl App {
             Event::FocusGained | Event::FocusLost => AppResult::Continue,
         };
         if used {
-            self.claim_terminal_size();
+            if !panel_pointer {
+                self.claim_terminal_size();
+            }
+            self.claim_panel_size();
         }
         self.sync_grid();
         result
@@ -892,6 +959,7 @@ impl App {
         match self.focus {
             Focus::List => handlers::list::handle_list_key(self, key),
             Focus::Session => handlers::session::handle_session_key(self, key),
+            Focus::Terminal => self.handle_terminal_panel_key(key),
         }
     }
 
@@ -903,6 +971,7 @@ impl App {
     pub fn resize(&mut self, width: u16, height: u16) {
         self.area = Rect::new(0, 0, width, height);
         self.sync_terminal_size();
+        self.sync_panel_size();
         self.sync_grid();
     }
 
@@ -1013,6 +1082,7 @@ impl App {
 
     /// The subscription (and so presumably the daemon) went away.
     fn connection_lost(&mut self, reason: String) {
+        self.terminal_panel_disconnected();
         self.grid.clear();
         if let Some(cancel) = self.sync_cancel.take() {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1094,6 +1164,7 @@ impl App {
     /// Stop listening to the daemon before it goes away on purpose, so that
     /// isn't reported as a lost connection.
     fn let_go_of_daemon(&mut self) {
+        self.terminal_panel_disconnected();
         self.grid.clear();
         if self.connection.is_connected() {
             if let Some(cancel) = self.sync_cancel.take() {

@@ -14,6 +14,10 @@ new-session flow, and code boundaries.
 - `app.rs` (in `tui/src`): facade. Owns `App` (state slices below, `Arc<dyn SessionApi>`, config,
   updater state) and dispatches events by mode and focus.
 - `types.rs`: `AppMode`, `AppResult`, dialog structs, shared enums.
+- Settings width comes from its General/Keys table content, not a percentage of the terminal.
+  Notes wrap; Help keeps a reading width. All dialogs leave the footer row visible. The footer
+  is orange across the full row only in Rakumux mode, with dark text for contrast; session and
+  terminal input modes retain quiet backgrounds and the same hit targets.
 - `upgrade.rs`: `U` / Settings' Update action, behind `updater::UpdateService` (a fake in tests).
   Jobs run off the UI thread; a generation drops cancelled/stale results. Installation needs
   Enter and cannot be started twice. Success reloads only the UI through the updated launcher.
@@ -82,11 +86,21 @@ new-session flow, and code boundaries.
   (`App::hits`, `Hit`): list rows, the folder filter, the Folders modal's rows, and the footer's
   mode badge (`Hit::ModeBadge`: `enter_rakumux_mode` / `return_to_session`) and key hints
   (`Hit::FooterKey`: what the keys do). The divider drags side to side, or up and down when
-  stacked. A click on the previewed session (its title row or terminal) goes in. On a phone a
+  stacked. Clicking "+ New session" creates and enters its shell immediately at any width,
+  using the current folder; pending creation ignores repeated clicks.
+  A click on the previewed session (its title row or terminal) goes in. On a phone a
   tap on a session row (or "+ New session") opens it, and a tap on a tab switches session in
   session mode.
 - `constants.rs`: timings and UI constants. `feature_flags.rs`: code-only flags (`auth: false`).
 - State slices (`state/`):
+  - terminal panel (`terminal_panel.rs`): a normal daemon-owned shell under the main detail.
+    `Focus::Terminal` owns key/paste/mouse/cursor routing; no input leaks to the agent. T or
+    Settings opens/focuses it, the Rakumux key demotes, Esc returns, T/× hides without ending
+    any program. Per-folder bindings are window-local; records/programs remain in the daemon.
+    Resolve/create/attach/read/revive run as jobs with checked epochs and one pending operation.
+    Reconnects only reuse existing records and attach as observers. History has a cell budget;
+    emulators are passive. Only the focused controller resizes. Private input includes loading
+    and live panel keys. `Screen::with_terminal_panel` owns its split and short-window fallback.
   - hook activity: the daemon supplies normalized `SessionView.activity`; the UI renders
     phases/counts. `is_animating` keeps busy markers ticking without PTY output. Provider
     adapters belong in root `integrations/`, not app handlers.
@@ -94,12 +108,12 @@ new-session flow, and code boundaries.
     text filter, selection, the last selected folder section, the nesting-guard session;
   - detail: the active attach stream, its `TerminalView`, current role (observer/controller),
     detail tab (Terminal / Info), saved scrollback for dead sessions;
-  - focus: list (or tab bar) / session / dialog, zoom, layout (`layout::SessionLayout`).
+  - focus: list (or tab bar) / main session / terminal panel / dialog, zoom, layout (`layout::SessionLayout`).
 - `sessions.rs`: pipelines over `SessionApi`: create, rename, delete, kill, revive, touch; attach,
   detach, promote and demote; applying `EventEnvelope`s to the list; re-listing after a reconnect;
   triggering AI naming (`crate::naming`) when a generated-name session first goes idle or done.
-- `handlers/`: key handling by mode (`Focus::List` = Rakumux mode, `Focus::Session` = session
-  mode):
+- `handlers/`: key handling by target (`Focus::List` = Rakumux mode, `Focus::Session` = main
+  session, `Focus::Terminal` = utility shell):
   - Rakumux mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
     `{`/`}` folders), `gg` via `App::pending_key`, `d`/`dd` opens delete confirmation, Enter/`i`
     go in, Esc (cancel first) or the
