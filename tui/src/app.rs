@@ -271,6 +271,8 @@ pub struct App {
     pub grid: grid::GridPreviews,
     pub terminal_panel: terminal_panel::TerminalPanel,
     pub focus: Focus,
+    /// Terminal focus reporting prevents background windows acknowledging replies.
+    window_focused: bool,
     pub zoomed: bool,
     /// The list/detail divider: hovered or being dragged.
     pub divider: DividerState,
@@ -351,6 +353,7 @@ impl App {
             grid: grid::GridPreviews::default(),
             terminal_panel: terminal_panel::TerminalPanel::default(),
             focus: Focus::List,
+            window_focused: true,
             zoomed: false,
             divider: DividerState::default(),
             drag: None,
@@ -924,13 +927,22 @@ impl App {
                 self.resize(width, height);
                 AppResult::Continue
             }
-            Event::FocusGained | Event::FocusLost => AppResult::Continue,
+            Event::FocusGained => {
+                self.window_focused = true;
+                AppResult::Continue
+            }
+            Event::FocusLost => {
+                self.window_focused = false;
+                AppResult::Continue
+            }
         };
         if used {
+            self.window_focused = true;
             if !panel_pointer {
                 self.claim_terminal_size();
             }
             self.claim_panel_size();
+            self.acknowledge_visible_completion();
         }
         self.sync_grid();
         result

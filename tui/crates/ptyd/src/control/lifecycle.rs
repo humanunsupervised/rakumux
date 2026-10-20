@@ -68,11 +68,18 @@ impl LifecycleTracker {
         // This hook was received after any earlier self-report, even when
         // both arrived in the same millisecond.
         self.report = None;
+        if self
+            .activity
+            .as_ref()
+            .is_some_and(|activity| !activity.is_for(update))
+        {
+            self.done = false;
+            self.in_turn = false;
+        }
         let activity = self
             .activity
             .get_or_insert_with(|| ActivityTracker::new(update, now));
-        activity.apply(update, now);
-        if activity.view().phase == session_core::activity::ActivityPhase::Done {
+        if activity.apply(update, now) {
             self.done = true;
             self.in_turn = false;
         }
@@ -262,6 +269,7 @@ mod tests {
             version: ACTIVITY_VERSION,
             agent: "claude".into(),
             conversation_id: "root".into(),
+            completion_id: None,
             event: ActivityEvent::Phase {
                 phase: ActivityPhase::Working,
             },
@@ -292,6 +300,7 @@ mod tests {
             version: ACTIVITY_VERSION,
             agent: "claude".into(),
             conversation_id: "root".into(),
+            completion_id: None,
             event: ActivityEvent::Phase {
                 phase: ActivityPhase::Working,
             },
@@ -301,5 +310,81 @@ mod tests {
         assert_eq!(tracker.current(), Lifecycle::Done);
         tracker.on_activity(&update, 2);
         assert_eq!(tracker.current(), Lifecycle::Working);
+    }
+
+    #[test]
+    fn completed_reply_stays_seen_across_hook_heartbeats_until_a_new_completion() {
+        use session_core::activity::{ActivityEvent, ActivityPhase, ACTIVITY_VERSION};
+        for agent in ["claude", "codex", "opencode"] {
+            let mut tracker = LifecycleTracker::default();
+            let mut update = ActivityUpdate {
+                version: ACTIVITY_VERSION,
+                agent: agent.into(),
+                conversation_id: "root".into(),
+                completion_id: Some("reply-1".into()),
+                event: ActivityEvent::Snapshot {
+                    phase: ActivityPhase::Done,
+                    subagents: vec![],
+                },
+            };
+            tracker.on_activity(&update, 1);
+            assert_eq!(tracker.current(), Lifecycle::Done);
+            tracker.on_touch(2);
+            tracker.on_activity(&update, 3);
+            assert_eq!(tracker.current(), Lifecycle::Idle);
+            update.completion_id = Some("reply-2".into());
+            tracker.on_activity(&update, 4);
+            assert_eq!(tracker.current(), Lifecycle::Done);
+        }
+    }
+
+    #[test]
+    fn native_stop_duplicates_do_not_resurrect_a_seen_reply() {
+        use session_core::activity::{ActivityEvent, ActivityPhase, ACTIVITY_VERSION};
+        let mut tracker = LifecycleTracker::default();
+        let mut update = ActivityUpdate {
+            version: ACTIVITY_VERSION,
+            agent: "claude".into(),
+            conversation_id: "root".into(),
+            completion_id: None,
+            event: ActivityEvent::Phase {
+                phase: ActivityPhase::Done,
+            },
+        };
+        tracker.on_activity(&update, 1);
+        tracker.on_touch(2);
+        tracker.on_activity(&update, 3);
+        assert_eq!(tracker.current(), Lifecycle::Idle);
+        update.event = ActivityEvent::Phase {
+            phase: ActivityPhase::Working,
+        };
+        tracker.on_activity(&update, 4);
+        update.event = ActivityEvent::Phase {
+            phase: ActivityPhase::Done,
+        };
+        tracker.on_activity(&update, 5);
+        assert_eq!(tracker.current(), Lifecycle::Done);
+    }
+
+    #[test]
+    fn switching_conversations_does_not_transfer_an_unread_reply_or_in_progress_turn() {
+        use session_core::activity::{ActivityEvent, ActivityPhase, ACTIVITY_VERSION};
+        for phase in [ActivityPhase::Done, ActivityPhase::Working] {
+            let mut tracker = LifecycleTracker::default();
+            let mut update = ActivityUpdate {
+                version: ACTIVITY_VERSION,
+                agent: "opencode".into(),
+                conversation_id: "old".into(),
+                completion_id: None,
+                event: ActivityEvent::Phase { phase },
+            };
+            tracker.on_activity(&update, 1);
+            update.conversation_id = "new".into();
+            update.event = ActivityEvent::Phase {
+                phase: ActivityPhase::Idle,
+            };
+            tracker.on_activity(&update, 2);
+            assert_eq!(tracker.current(), Lifecycle::Idle);
+        }
     }
 }

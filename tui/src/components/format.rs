@@ -68,6 +68,21 @@ pub fn status_glyph(session: &SessionView) -> (&'static str, Style) {
     }
 }
 
+/// Right-side agent activity: busy, idle, unread reply, or needs input.
+/// Terminal presence/exit markers remain separate for non-agent sessions.
+pub fn activity_badge(session: &SessionView) -> Option<(&'static str, Style)> {
+    if session.status != SessionStatus::Live
+        || (session.agent.is_none() && session.activity.is_none())
+    {
+        return None;
+    }
+    match session.lifecycle {
+        Lifecycle::Working | Lifecycle::Blocked | Lifecycle::Done => Some(status_glyph(session)),
+        Lifecycle::Idle => Some(("○", Style::default().fg(theme::palette().text_muted))),
+        Lifecycle::None | Lifecycle::Unknown => None,
+    }
+}
+
 /// Whether a session wants the user's attention (tab bar marker).
 pub fn needs_attention(session: &SessionView) -> bool {
     session.status == SessionStatus::Live
@@ -100,6 +115,7 @@ pub fn status_label(session: &SessionView) -> Option<String> {
                 (Lifecycle::Working, Some(session_core::activity::ActivityPhase::RunningTool)) => {
                     Some("running tool")
                 }
+                (Lifecycle::Done, _) => Some("unread reply"),
                 _ => lifecycle_label(session.lifecycle),
             };
             let count = session
@@ -428,14 +444,17 @@ mod tests {
         });
         assert_eq!(
             secondary_text(&session, 80, Icons::Plain),
-            "⎇ main · done · Tests green, ready for review"
+            "⎇ main · unread reply · Tests green, ready for review"
         );
         assert_eq!(
-            secondary_text(&session, 30, Icons::Plain),
-            "⎇ main · done · Tests green, …"
+            secondary_text(&session, 38, Icons::Plain),
+            "⎇ main · unread reply · Tests green, …"
         );
         // Too little room for the report: the facts alone.
-        assert_eq!(secondary_text(&session, 19, Icons::Plain), "⎇ main · done");
+        assert_eq!(
+            secondary_text(&session, 27, Icons::Plain),
+            "⎇ main · unread reply"
+        );
         assert_eq!(secondary_text(&session, 10, Icons::Plain), "⎇ main · …");
         // With nothing else, the report is the whole line.
         session.git = None;
@@ -488,6 +507,29 @@ mod tests {
         session.lifecycle = Lifecycle::Done;
         session.activity = None;
         assert_eq!(status_glyph(&session).0, "●");
+    }
+
+    #[test]
+    fn agent_badges_distinguish_unread_idle_busy_and_input_without_marking_shells() {
+        let mut session = view("A", "agent", 0);
+        session.lifecycle = Lifecycle::Idle;
+        assert!(activity_badge(&session).is_none());
+        session.agent = Some(session_core::model::AgentInfo {
+            kind: "opencode".into(),
+            ..Default::default()
+        });
+        assert_eq!(activity_badge(&session).unwrap().0, "○");
+        session.lifecycle = Lifecycle::Done;
+        assert_eq!(activity_badge(&session).unwrap().0, "●");
+        assert_eq!(status_label(&session).as_deref(), Some("unread reply"));
+        session.lifecycle = Lifecycle::Working;
+        assert!("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(activity_badge(&session).unwrap().0));
+        session.lifecycle = Lifecycle::Blocked;
+        assert_eq!(activity_badge(&session).unwrap().0, "◐");
+        for status in [SessionStatus::Exited, SessionStatus::Dead] {
+            session.status = status;
+            assert!(activity_badge(&session).is_none());
+        }
     }
 
     #[test]

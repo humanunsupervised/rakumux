@@ -1497,8 +1497,12 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     ]);
     doc.text(
         "For coding agents the list also shows what they're doing: working, blocked (waiting \
-         for you), done (finished, not looked at yet) or idle. Rakumux reads this from the \
-         screen and the running process, and agents can report it themselves.",
+         for you), unread reply (finished, not opened yet) or idle. The right-side badge is \
+         a spinner for working (including subagents), ○ for idle, ● for an unread reply, \
+         or ◐ when input is needed. Opening the session clears unread across windows; \
+         list and Grid previews do not. A reply that arrives in the foreground open session \
+         is already seen. Rakumux uses agent hooks when available, with screen/process \
+         detection as the fallback.",
     );
 
     doc.heading("Watching and controlling");

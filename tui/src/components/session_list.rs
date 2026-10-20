@@ -2,8 +2,8 @@
 //! and `All folders`, a folder's name or `3 folders`; Enter opens the
 //! Folders modal), then the sessions of the folders shown, under a header
 //! row per folder when there are several, and "+ New session" last.
-//! Each session is a compact cell after a blank row: glyph, name (with a
-//! pin mark) and age; then its colour-coded program, git branch and state.
+//! Each session is a compact cell after a blank row: name (with a pin mark),
+//! a padded activity badge and age at the right; then its program, branch and state.
 //! The selected item's text is white and the others' muted; nothing has a
 //! background except the folder filter. A session being dragged has a blue
 //! bar on its left.
@@ -18,7 +18,9 @@ use ratatui::{
 use session_core::model::{ScopeRoot, SessionView};
 
 use super::folder_picker::{count_label, folder_branch};
-use super::format::{now_secs, relative_time, secondary_line, status_glyph, truncate, PIN_MARK};
+use super::format::{
+    activity_badge, now_secs, relative_time, secondary_line, status_glyph, truncate, PIN_MARK,
+};
 use super::utils::get_spinner_char;
 use crate::app::types::AppMode;
 use crate::app::{App, Connection, Hit, ListRow};
@@ -146,16 +148,31 @@ fn session_content(
     now: i64,
 ) -> Vec<Vec<Span<'static>>> {
     let p = theme::palette();
-    let (glyph, glyph_style) = status_glyph(session);
-    let age = relative_time(now, session.last_active_at);
+    let badge = activity_badge(session).map(|(mark, style)| {
+        Span::styled(
+            format!(" {mark} "),
+            style.bg(p.surface).add_modifier(Modifier::BOLD),
+        )
+    });
+    let (glyph, glyph_style) = if badge.is_some() {
+        (" ", Style::default())
+    } else {
+        status_glyph(session)
+    };
+    let pin = if session.pinned { 2 } else { 0 };
+    let badge_width = badge.as_ref().map_or(0, |span| span.width() + 1);
+    let age = truncate(
+        &relative_time(now, session.last_active_at),
+        width.saturating_sub(3 + pin + badge_width),
+    );
+    let right_width = badge_width + str_width(&age);
     let mut name = session.name.clone();
     if app.is_self_session(&session.id) {
         name.push_str(" (this)");
     }
-    // glyph + space, name, [space + pin], at least one space, age
-    let pin = if session.pinned { 2 } else { 0 };
-    let name = truncate(&name, width.saturating_sub(str_width(&age) + 3 + pin));
-    let pad = width.saturating_sub(2 + str_width(&name) + pin + str_width(&age));
+    // Leading marker slot, name, optional pin, at least one space, badge + age.
+    let name = truncate(&name, width.saturating_sub(right_width + 3 + pin));
+    let pad = width.saturating_sub(2 + str_width(&name) + pin + right_width);
     let (name_style, detail_color, age_color) = if selected {
         (
             Style::default()
@@ -183,6 +200,10 @@ fn session_content(
         first.push(Span::styled(PIN_MARK, Style::default().fg(p.accent_gold)));
     }
     first.push(Span::raw(" ".repeat(pad)));
+    if let Some(badge) = badge {
+        first.push(badge);
+        first.push(Span::raw(" "));
+    }
     first.push(Span::styled(age, Style::default().fg(age_color)));
     let mut second = vec![Span::raw("  ")];
     second.extend(
@@ -462,6 +483,58 @@ mod tests {
             }
         }
         assert_eq!(row_height(&ListRow::Session(&session)), 3);
+    }
+
+    #[test]
+    fn padded_agent_badges_precede_the_right_aligned_time() {
+        use crate::app::testing::{harness, view};
+        use session_core::model::{AgentInfo, Lifecycle};
+        let h = harness(vec![]);
+        let mut session = view("A", "A very long 界 session title", 0);
+        session.agent = Some(AgentInfo {
+            kind: "claude".into(),
+            ..Default::default()
+        });
+        let p = theme::palette();
+        for lifecycle in [
+            Lifecycle::Working,
+            Lifecycle::Idle,
+            Lifecycle::Done,
+            Lifecycle::Blocked,
+        ] {
+            session.lifecycle = lifecycle;
+            for width in [12, 24, 40, 80] {
+                for selected in [false, true] {
+                    for pinned in [false, true] {
+                        session.pinned = pinned;
+                        for now in [0, 45, 1_000_000_000] {
+                            let lines = session_content(&h.app, &session, width, selected, now);
+                            let first = &lines[0];
+                            let (mark, style) = activity_badge(&session).unwrap();
+                            let badge = &first[first.len() - 3];
+                            assert_eq!(badge.content, format!(" {mark} "));
+                            assert_eq!(badge.width(), 3);
+                            assert_eq!(badge.style.fg, style.fg);
+                            assert_eq!(badge.style.bg, Some(p.surface));
+                            assert!(badge.style.add_modifier.contains(Modifier::BOLD));
+                            assert_eq!(first[first.len() - 2].content, " ");
+                            let age = first.last().unwrap();
+                            assert!(!age.content.is_empty());
+                            assert!(age
+                                .content
+                                .chars()
+                                .all(|ch| ch.is_ascii_alphanumeric() || ch == '…'));
+                            if now == 0 {
+                                assert_eq!(age.content, "now");
+                            }
+                            assert_eq!(Line::from(first.clone()).width(), width);
+                            assert!(Line::from(lines[1].clone()).width() <= width);
+                            assert_eq!(first[0].content, " ", "no duplicate left-side badge");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

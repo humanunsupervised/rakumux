@@ -76,6 +76,9 @@ pub struct ControlHandoff {
     /// Ephemeral activity snapshots and their original receive times.
     #[serde(default)]
     pub activity: Vec<(SessionId, session_core::activity::ActivityUpdate, i64)>,
+    /// Completed activity already opened by the user; do not make it unread again.
+    #[serde(default)]
+    pub activity_seen: Vec<SessionId>,
     /// Session tokens: the programs inside sessions keep authenticating.
     #[serde(default)]
     pub tokens: Vec<(SessionId, String)>,

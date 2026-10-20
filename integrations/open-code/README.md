@@ -18,6 +18,12 @@ A running execution whose latest message is the submitted user message is **wait
 response**, not proof of a particular network operation. The cache is polled every 250 ms;
 snapshots are sent on change or every 10 seconds. No prompt/output text or model calls.
 
+A cached successful `idle` execution marker reports **done**, using its opaque message ID
+as `completion_id`. This catches completions even when the running phase fell between polls.
+Repeated snapshots cannot make that reply unread after it is opened. Active descendants or
+pending permissions/forms take priority over a root's completed marker. Failed/interrupted
+execution markers report idle rather than claiming a successful completion.
+
 - `rakumux-session/`: plugin and pure activity projection.
 - `install.rs`: installer compiled into MCP.
 - `detection.rs` / `recovery.rs`: terminal fallback and conversation resume.

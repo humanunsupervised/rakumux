@@ -233,6 +233,35 @@ mod tests {
         assert!(!short.contains("No sessions yet"), "{short}");
     }
 
+    #[test]
+    fn right_side_agent_badges_render_in_every_layout_at_phone_and_desktop_sizes() {
+        use session_core::model::AgentInfo;
+        for layout in SessionLayout::ALL {
+            for (width, height) in [(40, 20), (45, 40), (80, 24), (90, 20), (160, 48)] {
+                for (lifecycle, mark) in [
+                    (Lifecycle::Idle, "○"),
+                    (Lifecycle::Done, "●"),
+                    (Lifecycle::Blocked, "◐"),
+                ] {
+                    let mut session = view("A", "agent", 10);
+                    session.agent = Some(AgentInfo {
+                        kind: "opencode".into(),
+                        ..Default::default()
+                    });
+                    session.lifecycle = lifecycle;
+                    let mut h = with_layout(vec![session], layout);
+                    let screen = render(&mut h.app, width, height);
+                    assert!(
+                        screen.lines().any(|line| line
+                            .find("agent")
+                            .is_some_and(|name_at| line[name_at..].contains(mark))),
+                        "{layout:?} {width}x{height}: {screen}"
+                    );
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn live_session_observed_then_controlled() {
         let mut h = harness(vec![view("A", "api-refactor", 10)]);

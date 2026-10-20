@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use super::folder_picker::draw_selector;
-use super::format::{needs_attention, status_glyph};
+use super::format::{activity_badge, needs_attention, status_glyph};
 use crate::app::types::{AppMode, Focus};
 use crate::app::{App, Hit};
 use crate::layout::{self, TabItem};
@@ -32,13 +32,19 @@ pub fn tab_items(app: &App) -> (Vec<TabItem>, usize) {
         .enumerate()
         .map(|(index, session)| {
             let (glyph, glyph_style) = status_glyph(session);
+            let badge = activity_badge(session);
             TabItem {
                 name: session.name.clone(),
-                glyph: glyph.to_string(),
+                glyph: if badge.is_some() {
+                    String::new()
+                } else {
+                    glyph.to_string()
+                },
                 glyph_style,
                 selected: index == selected,
                 attention: needs_attention(session),
                 pinned: session.pinned,
+                badge: badge.map(|(mark, style)| (mark.to_string(), style)),
             }
         })
         .collect();

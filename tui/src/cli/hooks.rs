@@ -98,6 +98,7 @@ mod tests {
             version: ACTIVITY_VERSION,
             agent: "codex".into(),
             conversation_id: "thread".into(),
+            completion_id: None,
             event: ActivityEvent::Phase {
                 phase: ActivityPhase::Working,
             },

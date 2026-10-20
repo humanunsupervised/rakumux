@@ -283,6 +283,9 @@ impl Inner {
             {
                 if let Some(live) = state.live.get_mut(&id) {
                     live.tracker.on_activity(&update, received_ms);
+                    if handed.activity_seen.contains(&id) {
+                        live.tracker.on_touch(received_ms);
+                    }
                 }
             }
         }
@@ -298,6 +301,12 @@ impl Inner {
         let handed = {
             let state = self.lock();
             ControlHandoff {
+                activity_seen: state
+                    .live
+                    .iter()
+                    .filter(|(_, live)| live.tracker.current() == Lifecycle::Idle)
+                    .map(|(id, _)| id.clone())
+                    .collect(),
                 activity: state
                     .live
                     .iter()
@@ -1350,7 +1359,7 @@ impl Inner {
         let result = registry(&state.registry)
             .and_then(|r| r.touch(id, now_ms()).map_err(ApiError::from))
             .map(|()| self.mark_seen(&mut state, id));
-        // The TUI touches on every selection; only agents' touches are audited.
+        // The TUI touches on activation, not observer previews; only agents' touches are audited.
         if !caller.is_user() {
             self.audit_outcome(
                 &state,

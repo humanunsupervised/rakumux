@@ -2,14 +2,14 @@
 //! input, resize, fit, cursor, bell or clipboard operations happen here.
 
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{block::Title, Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
-use super::format::{secondary_line, status_glyph};
+use super::format::{activity_badge, secondary_line, status_glyph};
 use super::utils::{fade, fade_preview};
 use crate::app::grid::PreviewState;
 use crate::app::types::AppMode;
@@ -98,13 +98,18 @@ pub fn draw_session_grid(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         };
         let selected = app.list.selected_id() == Some(&session.id);
         let (glyph, glyph_style) = status_glyph(session);
+        let badge = activity_badge(session);
         let name = truncate(
             &session.name,
-            usize::from(card_area.width.saturating_sub(9)),
+            usize::from(
+                card_area
+                    .width
+                    .saturating_sub(if badge.is_some() { 12 } else { 9 }),
+            ),
         );
         let mut title = vec![
             Span::raw(" "),
-            Span::styled(glyph, glyph_style),
+            Span::styled(if badge.is_some() { " " } else { glyph }, glyph_style),
             Span::raw(" "),
             Span::styled(
                 name,
@@ -136,9 +141,19 @@ pub fn draw_session_grid(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 _ => "loading…",
             }
         };
-        let block = card_block(selected).title(Line::from(title)).title(
+        let mut block = card_block(selected).title(Line::from(title)).title(
             Title::from(format!(" {state} ")).position(ratatui::widgets::block::Position::Bottom),
         );
+        if let Some((mark, style)) = badge {
+            block = block.title(
+                Title::from(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(mark, style),
+                    Span::raw(" "),
+                ]))
+                .alignment(Alignment::Right),
+            );
+        }
         let inner = block.inner(card_area);
         f.render_widget(block, card_area);
         if inner.is_empty() {

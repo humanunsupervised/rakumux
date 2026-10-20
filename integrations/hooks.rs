@@ -46,6 +46,7 @@ fn update(
         version: ACTIVITY_VERSION,
         agent: agent.into(),
         conversation_id: conversation.into(),
+        completion_id: None,
         event,
     }))
 }
@@ -78,6 +79,10 @@ mod tests {
             let update = normalize(agent, &input).unwrap().unwrap();
             assert_eq!(update.event, phase(ActivityPhase::Working));
             assert!(!serde_json::to_string(&update).unwrap().contains("secret"));
+            let stopped = json!({"hook_event_name":"Stop", "session_id":"root", "last_assistant_message":"secret reply"});
+            let done = normalize(agent, &stopped).unwrap().unwrap();
+            assert_eq!(done.event, phase(ActivityPhase::Done));
+            assert!(!serde_json::to_string(&done).unwrap().contains("secret"));
             for (name, running) in [("SubagentStart", true), ("SubagentStop", false)] {
                 let input =
                     json!({"hook_event_name":name, "session_id":"root", "agent_id":"child"});

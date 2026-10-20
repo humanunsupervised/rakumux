@@ -38,6 +38,10 @@ pub struct ActivityUpdate {
     pub version: u8,
     pub agent: String,
     pub conversation_id: String,
+    /// Opaque completed-reply identifier, when the integration supplies one.
+    /// Repeated snapshots of this reply must not make it unread again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_id: Option<String>,
     #[serde(flatten)]
     pub event: ActivityEvent,
 }
@@ -80,6 +84,7 @@ mod tests {
             version: ACTIVITY_VERSION,
             agent: "codex".into(),
             conversation_id: "thread-1".into(),
+            completion_id: None,
             event: ActivityEvent::Subagent {
                 id: "child-1".into(),
                 running: true,
@@ -97,6 +102,22 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<ActivityEvent>("{\"event\":\"future_event\"}").unwrap(),
             ActivityEvent::Unknown
+        );
+    }
+
+    #[test]
+    fn completion_identity_is_optional_and_round_trips_without_changing_version_one() {
+        let legacy = r#"{"version":1,"agent":"opencode","conversation_id":"root","event":"snapshot","phase":"done","subagents":[]}"#;
+        let mut update: ActivityUpdate = serde_json::from_str(legacy).unwrap();
+        assert!(update.completion_id.is_none());
+        assert!(!serde_json::to_string(&update)
+            .unwrap()
+            .contains("completion_id"));
+        update.completion_id = Some("reply-1".into());
+        assert_eq!(
+            serde_json::from_str::<ActivityUpdate>(&serde_json::to_string(&update).unwrap())
+                .unwrap(),
+            update
         );
     }
 }

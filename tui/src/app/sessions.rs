@@ -14,7 +14,7 @@ use session_core::api::{
 };
 use session_core::client::{AttachEvent, AttachStream, SessionApi};
 use session_core::ids::SessionId;
-use session_core::model::{SessionStatus, SessionView};
+use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
 use super::detail::{classify_output, Attachment, DetailView, OutputAction};
 use super::folders::{self, SyncResult};
@@ -144,6 +144,7 @@ impl App {
             self.sync_terminal_size();
         }
         self.maybe_auto_name(&id);
+        self.acknowledge_visible_completion();
     }
 
     /// Bring the detail pane in line with the selection after list changes:
@@ -866,6 +867,35 @@ impl App {
         self.exec.job(move || AppEvent::Touched {
             result: api.touch(&id),
         });
+    }
+
+    /// Only the foreground, open conversation counts as reading a new reply.
+    /// Passive previews, dialogs, the utility shell and scrolled history do not.
+    pub(super) fn acknowledge_visible_completion(&mut self) {
+        if self.focus != Focus::Session
+            || !self.window_focused
+            || !matches!(self.mode, AppMode::Normal)
+            || !self
+                .detail
+                .terminal
+                .as_ref()
+                .is_some_and(|terminal| terminal.scroll_offset() == 0)
+        {
+            return;
+        }
+        let Some(attachment) = self.detail.attachment.as_ref() else {
+            return;
+        };
+        if attachment.role == Role::Controller
+            && self
+                .list
+                .get(&attachment.session_id)
+                .is_some_and(|session| {
+                    session.status == SessionStatus::Live && session.lifecycle == Lifecycle::Done
+                })
+        {
+            self.touch(&attachment.session_id.clone());
+        }
     }
 
     // ------------------------------------------------------------ navigation

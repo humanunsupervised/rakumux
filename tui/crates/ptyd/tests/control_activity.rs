@@ -12,6 +12,7 @@ fn update(agent: &str, event: ActivityEvent) -> Report {
             version: ACTIVITY_VERSION,
             agent: agent.into(),
             conversation_id: "root".into(),
+            completion_id: None,
             event,
         }),
         ..Default::default()
@@ -205,4 +206,111 @@ fn fresh_activity_survives_a_compatible_handoff_without_extending_its_age() {
     );
     assert_eq!(after.activity, Some(before));
     assert_eq!(after.lifecycle, Lifecycle::Working);
+}
+
+#[test]
+fn completed_replies_stay_seen_across_snapshots_and_daemon_handoff() {
+    use ptyd::control::{ControlConfig, ControlService, Limits};
+    use session_core::api::{AttachRequest, Role};
+
+    for seen in [false, true] {
+        let harness = Harness::new();
+        let session = harness.create(Some("agent"));
+        let caller = harness.session_caller(&session.id);
+        let mut report = update(
+            "opencode",
+            ActivityEvent::Snapshot {
+                phase: ActivityPhase::Done,
+                subagents: vec![],
+            },
+        );
+        report.activity.as_mut().unwrap().completion_id = Some("reply-1".into());
+        harness.handle(&caller, Request::SessionReport(report.clone()));
+        harness
+            .control
+            .prepare_attach(
+                &harness.user,
+                &AttachRequest {
+                    id: session.id.clone(),
+                    role: Role::Observer,
+                    cols: 80,
+                    rows: 24,
+                },
+            )
+            .unwrap();
+        assert_eq!(harness.get(&session.id).lifecycle, Lifecycle::Done);
+        if seen {
+            harness.handle(
+                &harness.user,
+                Request::SessionTouch {
+                    id: session.id.clone(),
+                },
+            );
+        }
+        let expected = if seen {
+            Lifecycle::Idle
+        } else {
+            Lifecycle::Done
+        };
+        harness.handle(&caller, Request::SessionReport(report.clone()));
+        assert_eq!(harness.get(&session.id).lifecycle, expected);
+
+        let handed = harness.control.handoff();
+        let restored = ControlService::open_after_handoff(
+            ControlConfig {
+                layout: harness.layout.clone(),
+                user_token: harness.user_token.clone(),
+                socket: "/tmp/rakumux-test/ptyd.sock".into(),
+                rakumux_bin: Some(RAKUMUX_BIN.into()),
+                version: "test".into(),
+                limits: Limits::default(),
+            },
+            harness.host.clone(),
+            handed,
+        )
+        .unwrap();
+        let get = || {
+            control_common::session(restored.handle(
+                &harness.user,
+                Request::SessionGet {
+                    id: session.id.clone(),
+                },
+            ))
+        };
+        assert_eq!(get().lifecycle, expected);
+        restored.handle(&caller, Request::SessionReport(report.clone()));
+        assert_eq!(
+            get().lifecycle,
+            expected,
+            "a heartbeat cannot resurrect a seen reply"
+        );
+        report.activity.as_mut().unwrap().completion_id = Some("reply-2".into());
+        restored.handle(&caller, Request::SessionReport(report));
+        assert_eq!(
+            get().lifecycle,
+            Lifecycle::Done,
+            "a new reply becomes unread"
+        );
+    }
+}
+
+#[test]
+fn invalid_completion_identifiers_are_rejected_without_changing_activity() {
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    let caller = harness.session_caller(&session.id);
+    for completion_id in [String::new(), "a".repeat(257), "bad\nidentifier".into()] {
+        let mut report = update(
+            "opencode",
+            ActivityEvent::Phase {
+                phase: ActivityPhase::Done,
+            },
+        );
+        report.activity.as_mut().unwrap().completion_id = Some(completion_id);
+        assert_eq!(
+            error(harness.handle(&caller, Request::SessionReport(report))).code,
+            ErrorCode::InvalidArgument
+        );
+        assert!(harness.get(&session.id).activity.is_none());
+    }
 }

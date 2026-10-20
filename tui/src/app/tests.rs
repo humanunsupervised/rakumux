@@ -29,6 +29,81 @@ fn id(s: &str) -> SessionId {
 // ---------------------------------------------------------------- startup
 
 #[tokio::test]
+async fn unread_completion_is_not_acknowledged_by_selection_or_passive_previews() {
+    for layout in SessionLayout::ALL {
+        let mut session = view("A", "agent", 10);
+        session.lifecycle = Lifecycle::Done;
+        let mut h = harness_with_folders(vec![session.clone(), view("B", "other", 1)], &[], layout);
+        h.event(
+            "A",
+            SessionEvent::Updated {
+                session: session.clone(),
+            },
+        );
+        h.press(KeyCode::Down).await;
+        h.press(KeyCode::Up).await;
+        assert!(
+            !h.fake.calls().iter().any(|call| call.starts_with("touch ")),
+            "{layout:?}"
+        );
+        h.app.list.select(Selection::Session(id("A")));
+        h.app.show_selected();
+        h.app.process_pending();
+        h.press(KeyCode::Enter).await;
+        assert!(
+            h.fake.calls().contains(&"touch A".to_string()),
+            "{layout:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn unread_completion_is_acknowledged_only_in_the_foreground_open_conversation() {
+    let mut h = harness(vec![view("A", "agent", 10)]);
+    h.press(KeyCode::Enter).await;
+    let touches = |h: &Harness| {
+        h.fake
+            .calls()
+            .iter()
+            .filter(|call| *call == "touch A")
+            .count()
+    };
+    let before = touches(&h);
+    h.app.handle_terminal_event(Event::FocusLost).await;
+    let mut session = view("A", "agent", 10);
+    session.lifecycle = Lifecycle::Done;
+    h.event(
+        "A",
+        SessionEvent::Updated {
+            session: session.clone(),
+        },
+    );
+    assert_eq!(
+        touches(&h),
+        before,
+        "a background controller has not read the reply"
+    );
+    h.app.handle_terminal_event(Event::FocusGained).await;
+    h.app.process_pending();
+    assert_eq!(touches(&h), before + 1);
+    session.lifecycle = Lifecycle::Working;
+    h.event(
+        "A",
+        SessionEvent::Updated {
+            session: session.clone(),
+        },
+    );
+    let before = touches(&h);
+    session.lifecycle = Lifecycle::Done;
+    h.event("A", SessionEvent::Updated { session });
+    assert_eq!(
+        touches(&h),
+        before + 1,
+        "the user is already watching this reply"
+    );
+}
+
+#[tokio::test]
 async fn quiet_working_agents_keep_the_ui_animating_until_they_need_input() {
     let mut session = view("A", "agent", 1);
     session.lifecycle = Lifecycle::Working;

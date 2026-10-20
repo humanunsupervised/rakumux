@@ -29,6 +29,10 @@ pub(super) fn validate(update: &ActivityUpdate) -> Result<(), ApiError> {
     if update.version != ACTIVITY_VERSION
         || !identifier(&update.agent)
         || !identifier(&update.conversation_id)
+        || update
+            .completion_id
+            .as_deref()
+            .is_some_and(|id| !identifier(id))
         || !valid_event
     {
         return Err(ApiError::new(
@@ -43,6 +47,7 @@ pub(super) fn validate(update: &ActivityUpdate) -> Result<(), ApiError> {
 pub(super) struct ActivityTracker {
     pub agent: String,
     conversation: String,
+    completion_id: Option<String>,
     phase: ActivityPhase,
     subagents: HashSet<String>,
     stopped: HashSet<String>,
@@ -54,6 +59,7 @@ impl ActivityTracker {
         Self {
             agent: update.agent.clone(),
             conversation: update.conversation_id.clone(),
+            completion_id: None,
             phase: ActivityPhase::Idle,
             subagents: HashSet::new(),
             stopped: HashSet::new(),
@@ -61,9 +67,27 @@ impl ActivityTracker {
         }
     }
 
-    pub fn apply(&mut self, update: &ActivityUpdate, now: i64) {
-        if self.agent != update.agent || self.conversation != update.conversation_id {
+    /// Apply metadata and return whether it announces a new completed reply.
+    pub fn apply(&mut self, update: &ActivityUpdate, now: i64) -> bool {
+        if !self.is_for(update) {
             *self = Self::new(update, now);
+        }
+        let completed = matches!(
+            update.event,
+            ActivityEvent::Phase {
+                phase: ActivityPhase::Done
+            } | ActivityEvent::Snapshot {
+                phase: ActivityPhase::Done,
+                ..
+            }
+        );
+        let new_completion = completed
+            && match &update.completion_id {
+                Some(id) => self.completion_id.as_ref() != Some(id),
+                None => self.phase != ActivityPhase::Done,
+            };
+        if completed || update.completion_id.is_some() {
+            self.completion_id.clone_from(&update.completion_id);
         }
         match &update.event {
             ActivityEvent::Phase { phase } => {
@@ -95,6 +119,11 @@ impl ActivityTracker {
             ActivityEvent::Unknown => {}
         }
         self.received_ms = now;
+        new_completion
+    }
+
+    pub fn is_for(&self, update: &ActivityUpdate) -> bool {
+        self.agent == update.agent && self.conversation == update.conversation_id
     }
 
     pub fn fresh(&self, now: i64) -> bool {
@@ -111,6 +140,7 @@ impl ActivityTracker {
                 version: ACTIVITY_VERSION,
                 agent: self.agent.clone(),
                 conversation_id: self.conversation.clone(),
+                completion_id: self.completion_id.clone(),
                 event: ActivityEvent::Snapshot {
                     phase: self.phase,
                     subagents: self.subagents.iter().cloned().collect(),
@@ -137,6 +167,7 @@ mod tests {
             version: ACTIVITY_VERSION,
             agent: "claude".into(),
             conversation_id: "turn".into(),
+            completion_id: None,
             event,
         }
     }

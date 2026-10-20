@@ -388,6 +388,8 @@ pub struct TabItem {
     pub attention: bool,
     /// Pinned: a mark follows the name.
     pub pinned: bool,
+    /// Optional activity marker after the name/pin, independent of selection.
+    pub badge: Option<(String, Style)>,
 }
 
 /// Mark after a pinned session's name (tab bar and session list). One
@@ -505,6 +507,7 @@ struct TabLabel {
     glyph: String,
     name: String,
     pinned: bool,
+    badge: Option<String>,
 }
 
 impl TabLabel {
@@ -514,6 +517,7 @@ impl TabLabel {
             glyph: item.glyph.clone(),
             name: truncate(&item.name, name_max),
             pinned: item.pinned,
+            badge: item.badge.as_ref().map(|(glyph, _)| glyph.clone()),
         }
     }
 
@@ -527,6 +531,9 @@ impl TabLabel {
         }
         if self.pinned {
             width += str_width(PIN_MARK) + 1;
+        }
+        if let Some(badge) = &self.badge {
+            width += str_width(badge) + 1;
         }
         u16::try_from(width).unwrap_or(u16::MAX)
     }
@@ -568,6 +575,10 @@ impl TabLabel {
         if self.pinned {
             pieces.push((" ", base));
             pieces.push((PIN_MARK, base.fg(palette.accent_gold)));
+        }
+        if let Some((badge, style)) = &item.badge {
+            pieces.push((" ", base));
+            pieces.push((badge, base.patch(*style)));
         }
         pieces.push((" ", base));
 
@@ -1041,6 +1052,30 @@ mod tests {
         assert_eq!(row_text(&buf, 0).trim_end(), " 1 ● api ★   2 ● docs");
         assert_eq!(hits[0].1.width, 11);
         assert_eq!(buf.get(9, 0).fg, theme::palette().accent_gold);
+    }
+
+    #[test]
+    fn trailing_activity_badges_survive_long_tab_names_and_keep_their_state_colour() {
+        let palette = theme::palette();
+        for width in [12, 24, 40, 80] {
+            for selected in [false, true] {
+                let area = rect(0, 0, width, 1);
+                let mut buf = Buffer::empty(area);
+                let item = TabItem {
+                    name: "A very long 界 session title".into(),
+                    selected,
+                    pinned: true,
+                    badge: Some(("●".into(), Style::default().fg(palette.accent_gold))),
+                    ..Default::default()
+                };
+                let hits = render_tabs(area, &mut buf, &[item], 0);
+                let text = row_text(&buf, 0);
+                assert!(text.trim_end().ends_with("★ ●"), "{text:?}");
+                let badge = (0..width).find(|&x| buf.get(x, 0).symbol() == "●").unwrap();
+                assert_eq!(buf.get(badge, 0).fg, palette.accent_gold);
+                assert!(hits[0].1.right() <= area.right());
+            }
+        }
     }
 
     #[test]
