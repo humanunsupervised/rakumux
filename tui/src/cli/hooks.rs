@@ -5,7 +5,7 @@ use session_core::api::{CallerInfo, ErrorCode, Report};
 use session_core::client::SessionApi;
 use std::io::{Read, Write};
 
-#[path = "../../../Integrations/hooks.rs"]
+#[path = "../../../integrations/hooks.rs"]
 mod adapters;
 
 const MAX_HOOK_BYTES: u64 = 1_048_576;

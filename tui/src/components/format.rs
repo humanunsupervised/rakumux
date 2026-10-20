@@ -10,7 +10,7 @@ use crate::icons::Icons;
 use crate::layout::{char_width, str_width};
 use crate::theme;
 
-#[path = "../../../Integrations/presentation.rs"]
+#[path = "../../../integrations/presentation.rs"]
 mod agents;
 
 pub use crate::layout::PIN_MARK;

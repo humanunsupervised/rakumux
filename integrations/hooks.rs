@@ -3,9 +3,9 @@
 use serde_json::Value;
 use session_core::activity::{ActivityEvent, ActivityPhase, ActivityUpdate, ACTIVITY_VERSION};
 
-#[path = "Claude Code/hooks.rs"]
+#[path = "claude-code/hooks.rs"]
 mod claude;
-#[path = "Codex/hooks.rs"]
+#[path = "codex/hooks.rs"]
 mod codex;
 
 pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, String> {
@@ -26,8 +26,8 @@ pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, S
 
 pub fn config(agent: &str) -> Option<&'static str> {
     match agent {
-        "claude" => Some(include_str!("Claude Code/hooks.json")),
-        "codex" => Some(include_str!("Codex/hooks.json")),
+        "claude" => Some(include_str!("claude-code/hooks.json")),
+        "codex" => Some(include_str!("codex/hooks.json")),
         _ => None,
     }
 }

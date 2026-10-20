@@ -1,10 +1,10 @@
 //! Provider-owned presentation metadata; shared UI code consumes only a colour.
 use ratatui::style::Color;
-#[path = "Claude Code/presentation.rs"]
+#[path = "claude-code/presentation.rs"]
 mod claude;
-#[path = "Codex/presentation.rs"]
+#[path = "codex/presentation.rs"]
 mod codex;
-#[path = "Open Code/presentation.rs"]
+#[path = "open-code/presentation.rs"]
 mod opencode;
 
 pub(super) fn color(agent: &str) -> Option<Color> {

@@ -75,7 +75,7 @@ From a checkout, use `./rakumux.sh` instead of `rakumux`.
 
 Activity hooks for OpenCode, Claude Code and Codex provide busy spinners, needs-input
 markers, tool phases and agent-internal subagent counts. Setup is opt-in; see
-[agent integrations](Integrations/README.md). Screen detection remains the fallback.
+[agent integrations](integrations/README.md). Screen detection remains the fallback.
 
 ```bash
 claude mcp add --scope user rakumux -- rakumux-mcp

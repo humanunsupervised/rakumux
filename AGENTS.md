@@ -76,7 +76,7 @@ in this repository's license grant. Public preparation and release checks: `PUBL
    it `exec`s the new binary in the same process and hands over the PTYs, screens, tokens and
    socket, so running programs keep running (`ptyd/src/handoff.rs`). When programs can't survive
    (a crash, a reboot), the next start revives the sessions that were running, each with its resume
-   command (`Integrations/recovery.rs`; see "Recovery" below).
+   command (`integrations/recovery.rs`; see "Recovery" below).
 4. **`session-core`** (`tui/crates/session-core`, lib `session_core`): the shared contract: model,
    protocol, frame codec, ids, filesystem layout, and the blocking client.
 5. **`vt`** (`tui/crates/vt`): terminal emulation on `vt100`, shared by daemon (responding emulator
@@ -115,8 +115,8 @@ in this repository's license grant. Public preparation and release checks: `PUBL
 ## File structure
 
 Agent-specific hooks, detection profiles, resume code and the OpenCode plugin/installer live
-under `Integrations/{Open Code,Claude Code,Codex}/`. Shared engines live in `Integrations/`.
-See [integration boundaries and protocol](Integrations/README.md). New integrations go there,
+under `integrations/{open-code,claude-code,codex}/`. Shared engines live in `integrations/`.
+See [integration boundaries and protocol](integrations/README.md). New integrations go there,
 not in UI handlers, API/MCP transport or control policy. Optional version-1 `Report.activity`
 is self-only (`session.activity` capability). The daemon validates, timestamps and expires
 activity. The TUI animates busy markers locally without network calls.
@@ -170,7 +170,7 @@ tui/
       host.rs                # TerminalHost trait (control ↔ terminals), SpawnSpec, HostEvent
       terminal/              # Host: PTY actors, emulators, replay ring, attach fan-out, adopt/handoff
       handoff.rs             # restart in place: HandoffState across exec, target check
-                             # detection/resume modules are mounted from Integrations/
+                             # detection/resume modules are mounted from integrations/
       persist.rs             # ScrollbackStore: sessions/<id>/{scrollback.ansi, meta.json}
       procinfo/              # foreground process, cwd, RSS (Linux /proc, macOS libproc)
       log.rs                 # ~/.rakumux/logs/ptyd.log
@@ -218,7 +218,7 @@ last_active_at, added_at, git}` on the wire.
 
 ### Recovery
 
-What survives what (`ptyd/src/handoff.rs` and `Integrations/recovery.rs`):
+What survives what (`ptyd/src/handoff.rs` and `integrations/recovery.rs`):
 
 | Event | Running programs | How sessions come back |
 |---|---|---|
@@ -292,7 +292,7 @@ session per minute. `rakumux new` inside a session needs `--detach`, since sessi
 
 Conversation bindings (`session_bind`) live in daemon memory: the newest binding of a conversation
 wins, and a session's bindings end when it exits. OpenCode 2.x runs MCP servers in a service shared by
-every conversation, so the Rakumux plugin for its TUI (`Integrations/Open Code/rakumux-session/`,
+every conversation, so the Rakumux plugin for its TUI (`integrations/open-code/rakumux-session/`,
 installed with `rakumux-mcp opencode-plugin --install`) binds the conversations it shows.
 
 Mutating requests and denials are written to the audit log. Tokens give attribution and prevent

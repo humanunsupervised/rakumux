@@ -1,10 +1,10 @@
 # Agent integrations
 
 ```text
-Integrations/
-  Open Code/     # V2 CLI plugin, detection, recovery, installer, tests
-  Claude Code/   # Native command hooks, detection, recovery
-  Codex/         # Native command hooks, detection, recovery
+integrations/
+  open-code/     # V2 CLI plugin, detection, recovery, installer, tests
+  claude-code/   # Native command hooks, detection, recovery
+  codex/         # Native command hooks, detection, recovery
   detection.rs   # Shared process/screen engine and retained older profiles
   recovery.rs    # Shared resume dispatch and safe argument/file helpers
   hooks.rs       # Adapter dispatch and metadata-only normalization
@@ -21,9 +21,9 @@ Older detection profiles remain supported; new hooks start with these three agen
 
 ## Setup
 
-- [OpenCode](Open%20Code/README.md)
-- [Claude Code](Claude%20Code/README.md)
-- [Codex](Codex/README.md)
+- [OpenCode](open-code/README.md)
+- [Claude Code](claude-code/README.md)
+- [Codex](codex/README.md)
 
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
@@ -73,7 +73,7 @@ cargo test -p rakumux-ptyd detect:: --locked
 cargo test -p rakumux-ptyd resume:: --locked
 cargo test -p tui hook --locked
 cargo test -p rakumux-mcp --test opencode_plugin --locked
-node --test '../Integrations/Open Code/activity.test.mjs'
+node --test '../integrations/open-code/activity.test.mjs'
 ```
 
 Fixtures/fake clients do not replace real-agent or native macOS verification. Verify those

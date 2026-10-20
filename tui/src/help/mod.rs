@@ -1473,7 +1473,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
         "Optional OpenCode, Claude Code and Codex hooks report tool phases, input requests \
          and active subagent counts without an AI key. Busy markers animate locally; \
          needs-input and done stay still. Without fresh hooks, Rakumux uses screen/process \
-         detection. See Integrations/README.md in the repository for setup. Agent subagents \
+         detection. See integrations/README.md in the repository for setup. Agent subagents \
          are not Rakumux child sessions.",
     );
     doc.heading("AI naming");

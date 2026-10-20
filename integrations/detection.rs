@@ -28,11 +28,11 @@
 use crate::host::ProcessInfo;
 use session_core::model::Lifecycle;
 
-#[path = "Claude Code/detection.rs"]
+#[path = "claude-code/detection.rs"]
 mod claude;
-#[path = "Codex/detection.rs"]
+#[path = "codex/detection.rs"]
 mod codex;
-#[path = "Open Code/detection.rs"]
+#[path = "open-code/detection.rs"]
 mod opencode;
 use claude::PROFILE as CLAUDE;
 #[cfg(test)]

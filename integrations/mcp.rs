@@ -1,6 +1,6 @@
 //! Normalize agent-owned MCP metadata; the transport applies common identity policy.
 use serde_json::{Map, Value};
-#[path = "Open Code/mcp.rs"]
+#[path = "open-code/mcp.rs"]
 mod opencode;
 
 /// Agent conversation identified by a tool call, independent of its MCP transport.

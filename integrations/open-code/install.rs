@@ -1,5 +1,5 @@
 //! The Rakumux plugin for OpenCode 2.x's TUI
-//! (bundled from `Integrations/Open Code/rakumux-session/`) and its installer.
+//! (bundled from `integrations/open-code/rakumux-session/`) and its installer.
 //!
 //! OpenCode 2.x runs MCP servers in a service shared by every conversation, so
 //! tool calls reach this server without the calling session's environment; they

@@ -37,7 +37,20 @@ jobs:
         working-directory: tui
         env:
           RAKUMUX_HOME: ${{ runner.temp }}/rakumux-home
-      - run: node --test 'Integrations/Open Code/activity.test.mjs'
+      - name: Check and test the Linux static updater
+        if: runner.os == 'Linux'
+        working-directory: tui
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          RAKUMUX_HOME: ${{ runner.temp }}/rakumux-musl-home
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          cargo build --workspace --locked --target x86_64-unknown-linux-musl
+          cargo test -p tui updater::binary --locked --target x86_64-unknown-linux-musl
+      - run: node --test 'integrations/open-code/activity.test.mjs'
       - run: bash tests/test-repository.sh
       - run: bash tests/test-command-hook.sh
       - run: bash tests/test-release.sh

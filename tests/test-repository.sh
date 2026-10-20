@@ -15,7 +15,7 @@ grep -q 'license "Apache-2.0"' install/homebrew/rakumux.rb.template || fail "wro
 
 for file in rakumux.sh shell/rakumux-local.sh shell/rakumux-command-hook.sh \
     install/npm/bin/rakumux.js install/npm/bin/rakumux-api.js \
-    install/npm/bin/rakumux-mcp.js "Integrations/Open Code/rakumux-session/runtime.js"; do
+    install/npm/bin/rakumux-mcp.js "integrations/open-code/rakumux-session/runtime.js"; do
     [[ -f "$file" ]] || fail "missing $file"
 done
 

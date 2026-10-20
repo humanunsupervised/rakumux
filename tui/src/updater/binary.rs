@@ -297,7 +297,8 @@ fn exchange(left: &Path, right: &Path) -> io::Result<()> {
     // SAFETY: both paths are valid NUL-terminated strings owned throughout this call.
     #[cfg(target_os = "linux")]
     let result = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             libc::AT_FDCWD,
             left.as_ptr(),
             libc::AT_FDCWD,

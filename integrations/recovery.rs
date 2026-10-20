@@ -13,7 +13,7 @@
 //! What an agent reports itself (`rakumux session report --resume`) wins
 //! while that agent runs.
 //!
-//! Provider implementations live beside their hooks in `Integrations/<agent>`.
+//! Provider implementations live beside their hooks in `integrations/<agent>`.
 //! Agents:
 //! - **Claude Code** writes `<config dir>/sessions/<pid>.json` with the id
 //!   of the conversation that process runs (`sessionId`): `claude <flags>
@@ -37,11 +37,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-#[path = "Claude Code/recovery.rs"]
+#[path = "claude-code/recovery.rs"]
 mod claude;
-#[path = "Codex/recovery.rs"]
+#[path = "codex/recovery.rs"]
 mod codex;
-#[path = "Open Code/recovery.rs"]
+#[path = "open-code/recovery.rs"]
 mod opencode;
 #[cfg(test)]
 use claude::claude_flags;

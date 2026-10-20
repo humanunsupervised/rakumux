@@ -11,7 +11,7 @@ use session_core::ids::{SessionId, Token};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-#[path = "../../../../../Integrations/environment.rs"]
+#[path = "../../../../../integrations/environment.rs"]
 mod agents;
 
 /// Variables removed from the inherited environment.

@@ -89,7 +89,7 @@ new-session flow, and code boundaries.
 - State slices (`state/`):
   - hook activity: the daemon supplies normalized `SessionView.activity`; the UI renders
     phases/counts. `is_animating` keeps busy markers ticking without PTY output. Provider
-    adapters belong in root `Integrations/`, not app handlers.
+    adapters belong in root `integrations/`, not app handlers.
   - session list: every folder's `SessionView`s in the user's order, the folder filter, the
     text filter, selection, the last selected folder section, the nesting-guard session;
   - detail: the active attach stream, its `TerminalView`, current role (observer/controller),

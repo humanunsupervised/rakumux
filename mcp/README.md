@@ -1,6 +1,6 @@
 # rakumux-mcp
 
-Agent-specific adapters now live in root [`Integrations/`](../Integrations/README.md),
+Agent-specific adapters now live in root [`integrations/`](../integrations/README.md),
 including OpenCode's CLI plugin/installer and the optional Claude Code/Codex activity hooks.
 Activity does not depend on MCP; it uses the daemon's authenticated self-report protocol.
 
@@ -169,7 +169,7 @@ Then restart OpenCode. It loads every directory under `plugins/` on start; no co
 predecessor was tried with OpenCode 2.0.28: the TUI, run inside Rakumux against the shared
 service, bound its conversation, and a tagged call created a session as that Rakumux session.
 The current activity-enabled adapter has fake-client coverage; real-agent verification is
-separate. See [OpenCode integration](../Integrations/Open%20Code/README.md).
+separate. See [OpenCode integration](../integrations/open-code/README.md).
 
 ## Environment
 
