@@ -85,7 +85,7 @@ fn verified_bundle_replaces_every_binary_without_touching_other_directories() {
     fs::write(&unrelated, b"keep").unwrap();
     assert_eq!(install_root(&root.join("rakumux")), Some(root.clone()));
     let launcher = install(&source(package("0.1.5"), None), &root, "0.1.5", "linux-x64").unwrap();
-    assert_eq!(launcher, root.join("rakumux.sh"));
+    assert_eq!(launcher, root.canonicalize().unwrap().join("rakumux.sh"));
     for binary in BINARIES {
         assert!(fs::read_to_string(root.join(binary))
             .unwrap()
