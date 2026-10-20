@@ -88,6 +88,7 @@ pub fn claim(layout: &Layout) -> Result<Instance, ClaimError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn second_claim_fails_until_the_first_is_dropped() {
@@ -100,8 +101,25 @@ mod tests {
             Err(other) => panic!("unexpected error: {other}"),
             Ok(_) => panic!("second claim succeeded"),
         }
+        // flock belongs to the shared open file description. A duplicate
+        // (including one inherited by a child before exec) keeps it held.
+        let duplicate = first._lock.try_clone().unwrap();
         drop(first);
-        assert!(claim(&layout).is_ok());
+        assert!(matches!(claim(&layout), Err(ClaimError::AlreadyRunning(_))));
+        drop(duplicate);
+
+        // Other tests spawn processes concurrently. On macOS an in-flight
+        // spawn can briefly retain the descriptor until the child execs.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match claim(&layout) {
+                Ok(_) => break,
+                Err(ClaimError::AlreadyRunning(_)) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("API claim was not released: {error}"),
+            }
+        }
     }
 
     #[test]

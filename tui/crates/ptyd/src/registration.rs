@@ -287,6 +287,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn atomic_write_is_private_and_replaces() {
@@ -313,8 +314,18 @@ mod tests {
             0
         );
         assert!(lock_is_held(&path));
+        let duplicate = holder.try_clone().unwrap();
         drop(holder);
-        assert!(!lock_is_held(&path));
+        assert!(lock_is_held(&path));
+        drop(duplicate);
+
+        // Concurrent process-spawning tests can briefly retain a copy of
+        // this descriptor before exec on macOS. The lock must still release.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while lock_is_held(&path) {
+            assert!(Instant::now() < deadline, "service lock was not released");
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]
