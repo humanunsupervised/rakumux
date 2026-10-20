@@ -6,7 +6,6 @@
 //! [`ExecMode::Inline`] runs jobs immediately and polls streams on demand,
 //! so tests are deterministic.
 
-use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -69,6 +68,22 @@ pub enum AppEvent {
         generation: u64,
         result: Result<ReadResult, ApiError>,
     },
+    PreviewAttached {
+        id: SessionId,
+        generation: u64,
+        result: Result<AttachStream, ApiError>,
+    },
+    PreviewSaved {
+        id: SessionId,
+        generation: u64,
+        result: Result<ReadResult, ApiError>,
+    },
+    /// Coalesced notification: queued output is bounded per visible card.
+    PreviewReady {
+        id: SessionId,
+        generation: u64,
+        mailbox: super::grid::PreviewMailbox,
+    },
     Created {
         result: Result<SessionView, ApiError>,
     },
@@ -100,7 +115,10 @@ pub enum AppEvent {
         expected_name: String,
         result: Result<Option<String>, String>,
     },
-    Upgrade(UpgradeMessage),
+    Upgrade {
+        generation: u64,
+        message: UpgradeMessage,
+    },
     /// Phone access checked at startup: whether it's on, and whether to
     /// offer it.
     PhoneChecked {
@@ -134,6 +152,7 @@ pub enum ExecMode {
 #[cfg(test)]
 struct InlineAttach {
     generation: u64,
+    preview: Option<(SessionId, super::grid::PreviewMailbox)>,
     stream: AttachStream,
     cancel: CancelFlag,
 }
@@ -200,36 +219,41 @@ impl Exec {
         }
     }
 
-    /// Run an async job (network calls) on the runtime.
-    pub fn task<F>(&self, task: F)
-    where
-        F: Future<Output = AppEvent> + Send + 'static,
-    {
-        let tx = self.tx.clone();
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                handle.spawn(async move {
-                    let _ = tx.send(task.await);
-                });
-            }
-            Err(_) => {
-                let _ = tx.send(AppEvent::JobFailed("no async runtime".into()));
-            }
-        }
-    }
-
     /// Forward an attach stream's events until it closes or `cancel` is
     /// set. Dropping the stream detaches.
     pub fn pump_attach(&mut self, generation: u64, stream: AttachStream, cancel: CancelFlag) {
+        self.pump_terminal(generation, stream, cancel, None);
+    }
+
+    /// Pump a read-only card through a bounded, coalescing mailbox.
+    pub fn pump_preview(
+        &mut self,
+        id: SessionId,
+        generation: u64,
+        stream: AttachStream,
+        cancel: CancelFlag,
+    ) {
+        self.pump_terminal(generation, stream, cancel, Some((id, Default::default())));
+    }
+
+    fn pump_terminal(
+        &mut self,
+        generation: u64,
+        stream: AttachStream,
+        cancel: CancelFlag,
+        preview: Option<(SessionId, super::grid::PreviewMailbox)>,
+    ) {
         match self.mode {
             #[cfg(test)]
             ExecMode::Inline => self.inline_attach.push(InlineAttach {
                 generation,
+                preview,
                 stream,
                 cancel,
             }),
             ExecMode::Threaded => {
                 let tx = self.tx.clone();
+                let failure_preview = preview.clone();
                 let spawned = std::thread::Builder::new()
                     .name("rakumux-attach".into())
                     .spawn(move || {
@@ -238,16 +262,18 @@ impl Exec {
                                 continue;
                             };
                             let closed = matches!(event, AttachEvent::Closed(_));
-                            if tx.send(AppEvent::Attach { generation, event }).is_err() || closed {
+                            if !forward_attach(&tx, generation, &preview, event) || closed {
                                 break;
                             }
                         }
                     });
                 if let Err(err) = spawned {
-                    let _ = self.tx.send(AppEvent::Attach {
+                    forward_attach(
+                        &self.tx,
                         generation,
-                        event: AttachEvent::Closed(Some(format!("can't start reader: {err}"))),
-                    });
+                        &failure_preview,
+                        AttachEvent::Closed(Some(format!("can't start reader: {err}"))),
+                    );
                 }
             }
         }
@@ -308,10 +334,7 @@ impl Exec {
             }
             while let Some(event) = entry.stream.try_recv() {
                 let closed = matches!(event, AttachEvent::Closed(_));
-                let _ = tx.send(AppEvent::Attach {
-                    generation: entry.generation,
-                    event,
-                });
+                forward_attach(tx, entry.generation, &entry.preview, event);
                 if closed {
                     return false;
                 }
@@ -342,4 +365,26 @@ impl Exec {
             true
         });
     }
+}
+
+fn forward_attach(
+    tx: &UnboundedSender<AppEvent>,
+    generation: u64,
+    preview: &Option<(SessionId, super::grid::PreviewMailbox)>,
+    event: AttachEvent,
+) -> bool {
+    let event = match preview {
+        Some((id, mailbox)) => {
+            if !mailbox.push(event) {
+                return true;
+            }
+            AppEvent::PreviewReady {
+                id: id.clone(),
+                generation,
+                mailbox: mailbox.clone(),
+            }
+        }
+        None => AppEvent::Attach { generation, event },
+    };
+    tx.send(event).is_ok()
 }

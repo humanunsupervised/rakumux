@@ -161,6 +161,9 @@ pub struct SessionView {
     pub agent: Option<AgentInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reported: Option<Reported>,
+    /// Fresh hook activity. Absent when unavailable, expired or not live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<crate::activity::AgentActivity>,
     pub created_by: Creator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<SessionId>,
@@ -288,6 +291,7 @@ mod tests {
             lifecycle: Lifecycle::None,
             agent: None,
             reported: None,
+            activity: None,
             created_by: Creator::User,
             parent_id: None,
             depth: 0,
@@ -300,6 +304,7 @@ mod tests {
         };
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("exit_code"));
+        assert!(!json.contains("activity"));
         assert!(json.contains(r#""created_by":{"kind":"user"}"#));
         let back: SessionView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, view);

@@ -14,7 +14,10 @@
 
 pub mod client;
 pub mod instructions;
+#[path = "../../Integrations/mcp.rs"]
+pub mod integrations;
 pub mod launch;
+#[path = "../../Integrations/Open Code/install.rs"]
 pub mod opencode;
 pub mod render;
 pub mod server;

@@ -1,7 +1,7 @@
 //! Right pane: the selected session's terminal (running, or its saved
 //! screen), with placeholders for no sessions, loading, the session
 //! Rakumux runs in, errors and the daemon being unreachable. Live previews
-//! and their title areas fade lightly in Rakumux mode; dialogs and saved
+//! and their title areas recede in Rakumux mode; dialogs and saved
 //! output use a stronger fade. The cursor appears only while the session
 //! takes keys.
 
@@ -41,7 +41,7 @@ pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<
     }
     if let Some(title_area) = screen.detail_title {
         let name_color = if focused {
-            p.accent_primary
+            p.text_bright
         } else {
             p.text_primary
         };

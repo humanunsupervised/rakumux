@@ -80,8 +80,18 @@ impl TerminalView {
     /// `SessionApi::read`), the new emulator retains all of them.
     pub fn reset(&mut self, rows: u16, cols: u16, checkpoint: &[u8]) {
         let lines = checkpoint.iter().filter(|&&b| b == b'\n').count();
+        self.reset_with_history(rows, cols, checkpoint, self.scrollback.max(lines));
+    }
+
+    /// Apply a screen checkpoint without allocating extra history. Used by
+    /// bounded, passive Grid previews, which retain no scrollback.
+    pub fn reset_screen(&mut self, rows: u16, cols: u16, checkpoint: &[u8]) {
+        self.reset_with_history(rows, cols, checkpoint, self.scrollback);
+    }
+
+    fn reset_with_history(&mut self, rows: u16, cols: u16, checkpoint: &[u8], history: usize) {
         let (rows, cols) = clamp_size(rows, cols);
-        self.emulator = vt::Emulator::passive(rows, cols, self.scrollback.max(lines));
+        self.emulator = vt::Emulator::passive(rows, cols, history);
         self.emulator.feed(checkpoint);
         self.scroll_to_bottom();
     }
@@ -91,22 +101,12 @@ impl TerminalView {
     /// session's saved scrollback. Rows that don't fit on the screen are
     /// kept as history for [`scroll`](Self::scroll); the cursor is hidden.
     pub fn reset_to_text(&mut self, rows: u16, cols: u16, text: &str) {
-        let mut bytes = Vec::with_capacity(text.len() + text.len() / 16 + 8);
-        for (i, line) in text
-            .strip_suffix('\n')
-            .unwrap_or(text)
-            .split('\n')
-            .enumerate()
-        {
-            if i > 0 {
-                bytes.extend_from_slice(b"\r\n");
-            }
-            // Each row starts from default attributes.
-            bytes.extend_from_slice(b"\x1b[m");
-            bytes.extend_from_slice(line.strip_suffix('\r').unwrap_or(line).as_bytes());
-        }
-        bytes.extend_from_slice(b"\x1b[m\x1b[?25l");
-        self.reset(rows, cols, &bytes);
+        self.reset(rows, cols, &text_checkpoint(text));
+    }
+
+    /// Saved text without extra retained history, for bounded Grid cards.
+    pub fn reset_screen_to_text(&mut self, rows: u16, cols: u16, text: &str) {
+        self.reset_screen(rows, cols, &text_checkpoint(text));
     }
 
     /// Apply live output. While scrolled back the picture stays frozen;
@@ -229,6 +229,25 @@ impl TerminalView {
         }
         input::encode_mouse_at(event, col, row, &self.modes())
     }
+}
+
+fn text_checkpoint(text: &str) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(text.len() + text.len() / 16 + 8);
+    for (i, line) in text
+        .strip_suffix('\n')
+        .unwrap_or(text)
+        .split('\n')
+        .enumerate()
+    {
+        if i > 0 {
+            bytes.extend_from_slice(b"\r\n");
+        }
+        // Each row starts from default attributes.
+        bytes.extend_from_slice(b"\x1b[m");
+        bytes.extend_from_slice(line.strip_suffix('\r').unwrap_or(line).as_bytes());
+    }
+    bytes.extend_from_slice(b"\x1b[m\x1b[?25l");
+    bytes
 }
 
 /// Bytes for a key press, honouring the program's modes. `None` for keys

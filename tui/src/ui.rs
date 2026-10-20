@@ -22,6 +22,7 @@ use crate::components::{
     folder_picker::draw_folder_picker,
     footer::draw_footer,
     session_detail::draw_session_detail,
+    session_grid::draw_session_grid,
     session_list::draw_session_list,
     session_tabs::draw_session_tabs,
 };
@@ -64,7 +65,9 @@ fn draw_settings_under(f: &mut Frame, app: &App, area: Rect) {
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.size();
     if app.area != area {
-        app.resize(area.width, area.height);
+        // Rendering only records geometry. Resize events and ticks own
+        // preview synchronization; painting must never open streams.
+        app.area = area;
     }
     // Tokyo Night text on its background everywhere, so nothing shows the
     // outer terminal's own colours.
@@ -72,6 +75,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let screen = app.screen();
     let mut hits = Vec::new();
     let mut tab_hits = Vec::new();
+
+    if let Some(grid) = screen.grid {
+        draw_session_grid(f, app, grid, &mut hits);
+    }
 
     if let Some(list) = screen.list {
         draw_session_list(f, app, list, &mut hits);
@@ -374,13 +381,17 @@ mod tests {
             assert!(screen.contains("Settings"), "{screen}");
             assert!(screen.contains("1 General"), "{screen}");
             assert!(screen.contains("▶ Layout"), "{screen}");
-            assert!(screen.contains("[Sidebar] Tabs"), "{screen}");
+            assert!(screen.contains("[Master detail] Grid Tabs"), "{screen}");
             assert!(screen.contains("Anthropic API key"), "{screen}");
             assert!(screen.contains("not set"), "{screen}");
-            assert!(
-                screen.contains(SessionLayout::Sidebar.description()),
-                "{screen}"
-            );
+            // The note follows all settings; a 24-row screen scrolls it
+            // below the visible rows once the App section is present.
+            if height >= 40 {
+                assert!(
+                    screen.contains(SessionLayout::Sidebar.description()),
+                    "{screen}"
+                );
+            }
         }
         // Keys tab: every action with its keys.
         h.press(KeyCode::Char('2')).await;
@@ -411,8 +422,8 @@ mod tests {
         assert!(screen.contains("console.anthropic.com"), "{screen}");
     }
 
-    #[test]
-    fn live_preview_title_is_lightly_faded_in_rakumux_mode() {
+    #[tokio::test]
+    async fn live_preview_title_is_faded_until_session_mode_restores_its_emphasis() {
         let mut h = harness(vec![view("A", "color-check", 10)]);
         let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
         terminal.draw(|f| draw(f, &mut h.app)).unwrap();
@@ -429,6 +440,48 @@ mod tests {
             None => assert!(name.modifier.contains(ratatui::style::Modifier::DIM)),
         }
         assert_eq!(name.bg, p.faded(p.panel, amount).unwrap_or(p.panel));
+        assert!(name.modifier.contains(ratatui::style::Modifier::BOLD));
+        h.press(KeyCode::Enter).await;
+        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+        let title = h.app.screen().detail_title.unwrap();
+        let active_name = terminal.backend().buffer().get(title.x + 3, title.y);
+        assert_eq!(active_name.fg, p.text_bright);
+        assert!(active_name
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD));
+    }
+
+    #[test]
+    fn update_states_are_readable_and_explain_ui_only_restart_at_phone_and_desktop_sizes() {
+        use crate::app::types::UpgradeDialog;
+        for state in ["checking", "available", "installing", "error", "current"] {
+            for (width, height) in [(40, 20), (90, 20), (160, 48)] {
+                let mut h = harness(vec![view("A", "api", 10)]);
+                h.app.mode = AppMode::Upgrade(UpgradeDialog {
+                    current_version: "0.1.4".into(), latest_version: Some("0.1.5".into()),
+                    install_method: Some(crate::updater::InstallMethod::Binary),
+                    checking: state == "checking", installing: state == "installing",
+                    update_available: matches!(state, "available" | "installing"),
+                    error_message: (state == "error").then(|| "Cannot write the installation. Use the installer outside Rakumux with your original PREFIX; administrator permission may be required.".into()),
+                    info_message: (state == "current").then(|| "You're already on the latest version.".into()), selection: 0,
+                });
+                let text = render(&mut h.app, width, height);
+                assert!(text.contains("Update Rakumux"), "{state}: {text}");
+                assert!(
+                    text.contains("daemon") && text.contains("sessions"),
+                    "{state}: {text}"
+                );
+                if state == "error" {
+                    assert!(
+                        text.contains("administrator") && text.contains("PREFIX"),
+                        "{text}"
+                    );
+                }
+                if state == "available" {
+                    assert!(text.contains("Install update and restart"), "{text}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -556,7 +609,7 @@ mod tests {
         h.press(KeyCode::Char('o')).await;
         let screen = render(&mut h.app, 80, 24);
         assert!(screen.contains("Settings"), "{screen}");
-        assert!(screen.contains("[Sidebar] Tabs"), "{screen}");
+        assert!(screen.contains("[Master detail] Grid Tabs"), "{screen}");
         h.press(KeyCode::Esc).await;
         h.type_text("dd").await;
         let screen = render(&mut h.app, 80, 24);
@@ -767,6 +820,7 @@ mod tests {
                     assert!(top.contains("   ▤ web  ⎇ main"), "{top}")
                 }
                 SessionLayout::Tabs => assert!(top.starts_with(" ▤ web ▾ "), "{top}"),
+                SessionLayout::Grid => assert!(top.contains("web"), "{top}"),
             }
             // Several: how many.
             h.app
@@ -1198,7 +1252,7 @@ mod tests {
             // Settings shows every choice; Help and the Folders modal open.
             h.press(KeyCode::Char(',')).await;
             let screen = render(&mut h.app, width, height);
-            assert!(screen.contains("[Sidebar] Tabs"), "{screen}");
+            assert!(screen.contains("[Master detail] Grid Tabs"), "{screen}");
             h.press(KeyCode::Esc).await;
             h.press(KeyCode::Char('?')).await;
             let screen = render(&mut h.app, width, height);

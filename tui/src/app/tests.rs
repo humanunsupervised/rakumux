@@ -29,6 +29,17 @@ fn id(s: &str) -> SessionId {
 // ---------------------------------------------------------------- startup
 
 #[tokio::test]
+async fn quiet_working_agents_keep_the_ui_animating_until_they_need_input() {
+    let mut session = view("A", "agent", 1);
+    session.lifecycle = Lifecycle::Working;
+    let mut harness = harness(vec![session.clone()]);
+    assert!(harness.app.is_animating());
+    session.lifecycle = Lifecycle::Blocked;
+    harness.event("A", SessionEvent::Updated { session });
+    assert!(!harness.app.is_animating());
+}
+
+#[tokio::test]
 async fn startup_selects_the_most_recent_session_and_observes_it() {
     let h = harness(vec![view("A", "older", 10), view("B", "newer", 30)]);
     assert!(h.app.connection.is_connected());
@@ -950,7 +961,7 @@ async fn the_session_list_is_never_faded() {
 }
 
 #[tokio::test]
-async fn live_previews_fade_lightly_in_rakumux_mode_and_more_under_dialogs() {
+async fn live_previews_recede_in_rakumux_mode_and_more_under_dialogs() {
     use ratatui::style::{Color, Modifier};
 
     for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
@@ -966,7 +977,7 @@ async fn live_previews_fade_lightly_in_rakumux_mode_and_more_under_dialogs() {
             },
         );
         let p = crate::theme::palette();
-        // Browsing applies a light fade without losing boldness or colours.
+        // Browsing visibly fades the preview without losing boldness or colours.
         assert_eq!(h.app.focus, Focus::List);
         let preview = cell_of(&mut h, "preview-color");
         match p.faded(
@@ -1010,7 +1021,7 @@ async fn live_previews_fade_lightly_in_rakumux_mode_and_more_under_dialogs() {
         }
         h.press(KeyCode::Esc).await;
         assert_eq!(cell_of(&mut h, "preview-color"), preview);
-        // Selecting another session applies the same light fade to its output.
+        // Selecting another session applies the same fade to its output.
         assert_eq!(h.selected().as_deref(), Some("B"));
         h.press(KeyCode::Up).await;
         assert_eq!(h.selected().as_deref(), Some("A"));
@@ -1480,6 +1491,131 @@ async fn shift_r_still_types_in_a_session_and_in_the_list_filter() {
 }
 
 #[tokio::test]
+async fn shift_u_updates_after_confirmation_and_restarts_only_the_ui() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    let updater = Arc::new(testing::FakeUpdater::default());
+    *updater.latest.lock().unwrap() = Some("99.1.0".into());
+    *updater.launcher.lock().unwrap() = Some("/updated/rakumux.sh".into());
+    h.app.updater = updater.clone();
+    let calls_before = h.fake.calls();
+    h.key(crossterm::event::KeyEvent::new(
+        KeyCode::Char('U'),
+        KeyModifiers::SHIFT,
+    ))
+    .await;
+    assert!(
+        matches!(&h.app.mode, AppMode::Upgrade(dialog) if dialog.update_available && !dialog.installing)
+    );
+    assert_eq!(*updater.calls.lock().unwrap(), ["check"]);
+    assert!(
+        !h.app.restart_requested,
+        "a version check is not install authorization"
+    );
+    h.press(KeyCode::Enter).await;
+    assert_eq!(*updater.calls.lock().unwrap(), ["check", "install 99.1.0"]);
+    assert!(h.app.restart_requested);
+    assert_eq!(
+        h.app.restart_launcher.as_deref(),
+        Some(std::path::Path::new("/updated/rakumux.sh"))
+    );
+    assert_eq!(
+        h.fake.calls(),
+        calls_before,
+        "updates never stop/restart the daemon or mutate sessions"
+    );
+}
+
+#[tokio::test]
+async fn update_cancel_errors_and_cached_availability_never_install_implicitly() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    let updater = Arc::new(testing::FakeUpdater::default());
+    *updater.latest.lock().unwrap() = Some("99.1.0".into());
+    h.app.updater = updater.clone();
+    h.press(KeyCode::Char('U')).await;
+    h.press(KeyCode::Esc).await;
+    h.app.load_update_state();
+    assert_eq!(*updater.calls.lock().unwrap(), ["check"]);
+    assert!(!h.app.restart_requested);
+    *updater.install_error.lock().unwrap() =
+        Some("SHA-256 checksum mismatch; update was not installed".into());
+    h.press(KeyCode::Char('U')).await;
+    h.press(KeyCode::Enter).await;
+    assert!(
+        matches!(&h.app.mode, AppMode::Upgrade(dialog) if dialog.error_message.as_deref().is_some_and(|text| text.contains("checksum mismatch")))
+    );
+    assert!(!h.app.restart_requested);
+    h.press(KeyCode::Esc).await;
+    *updater.check_error.lock().unwrap() = Some("Source build: rebuild with ./build.sh".into());
+    h.press(KeyCode::Char('U')).await;
+    assert!(
+        matches!(&h.app.mode, AppMode::Upgrade(dialog) if !dialog.update_available && dialog.error_message.as_ref().unwrap().contains("Source build"))
+    );
+    assert!(!h.app.restart_requested);
+}
+
+#[tokio::test]
+async fn stale_update_jobs_are_ignored_and_uppercase_u_still_types_in_sessions() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    h.press(KeyCode::Char('U')).await;
+    let generation = h.app.update_generation;
+    h.press(KeyCode::Esc).await;
+    h.app.handle_event(AppEvent::Upgrade {
+        generation,
+        message: types::UpgradeMessage::InstallSuccess { launcher: None },
+    });
+    assert!(!h.app.restart_requested);
+    h.press(KeyCode::Enter).await;
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    h.press(KeyCode::Char('U')).await;
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Input(b"U".to_vec())]
+    );
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.rakumux().await;
+    h.press(KeyCode::Char('/')).await;
+    h.press(KeyCode::Char('U')).await;
+    assert_eq!(h.app.list.filter.value(), "U");
+    assert!(matches!(h.app.mode, AppMode::Normal));
+}
+
+#[tokio::test]
+async fn settings_has_an_update_action() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    h.press(KeyCode::Char('o')).await;
+    for _ in 0..SettingsItem::Update.index() {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(
+        matches!(&h.app.mode, AppMode::Upgrade(dialog) if !dialog.checking && !dialog.update_available)
+    );
+}
+
+#[tokio::test]
+async fn installation_cannot_be_cancelled_or_started_twice_by_more_keys() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    let updater = Arc::new(testing::FakeUpdater::default());
+    h.app.updater = updater.clone();
+    h.press(KeyCode::Char('U')).await;
+    if let AppMode::Upgrade(dialog) = &mut h.app.mode {
+        dialog.installing = true;
+    }
+    for code in [
+        KeyCode::Esc,
+        KeyCode::Char('q'),
+        KeyCode::Char('U'),
+        KeyCode::Enter,
+    ] {
+        assert_eq!(h.press(code).await, AppResult::Continue);
+        assert!(matches!(&h.app.mode, AppMode::Upgrade(dialog) if dialog.installing));
+    }
+    assert_eq!(*updater.calls.lock().unwrap(), ["check"]);
+    assert!(!h.app.restart_requested);
+}
+
+#[tokio::test]
 async fn the_keys_tab_can_restart_only_the_ui_from_either_focus() {
     for focus_session in [false, true] {
         let mut h = harness(vec![view("A", "a", 20)]);
@@ -1531,6 +1667,8 @@ async fn settings_switch_layout_live_and_save_it() {
     assert_eq!(settings_tab(&h), Some(ModalTab::General));
     h.press(KeyCode::Enter).await; // Layout is the first entry
     assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    assert_eq!(h.app.session_layout(), SessionLayout::Grid);
+    h.press(KeyCode::Enter).await;
     assert_eq!(h.app.session_layout(), SessionLayout::Tabs);
     // Tabs keep creation order: B (created at 10) is tab 1.
     assert_eq!(h.app.list.visible()[0].id, id("B"));

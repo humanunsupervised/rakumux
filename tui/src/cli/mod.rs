@@ -17,6 +17,7 @@ mod daemon;
 #[cfg(test)]
 mod fake;
 mod folders;
+mod hooks;
 mod remote;
 mod session;
 mod table;
@@ -84,6 +85,12 @@ fn execute(cli: CliArgs) -> Result<i32, CliError> {
     };
     let mut out = io::stdout();
     match cli.command {
+        Command::Session {
+            command: args::SessionCommand::Hook { agent },
+        } => hooks::run(&globals, agent, &mut out),
+        Command::Session {
+            command: args::SessionCommand::HookConfig { agent },
+        } => hooks::configuration(agent, &mut out),
         Command::Daemon { command } => daemon::run(&globals, command, &mut out),
         Command::Remote { command } => remote::run(&globals, command, &mut out),
         command => {

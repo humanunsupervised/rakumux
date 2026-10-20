@@ -133,6 +133,11 @@ without the upgrade).
 
 ## Streams (WebSocket)
 
+Sessions can include `activity: {phase, active_subagents, updated_at}` from agent hooks.
+`updated_at` is RFC 3339. This optional metadata is absent when unavailable, stale or not live.
+The daemon publishes changes through existing `updated` events. Agent-internal subagents
+are distinct from Rakumux child sessions. See [agent integrations](../Integrations/README.md).
+
 `GET /v1/events` and `GET /v1/sessions/{id}/attach` are WebSockets (RFC 6455, version 13) on the
 same port as everything else, with the same checks (bearer token, identity headers on loopback).
 The daemon stream is opened before the upgrade, so its errors are ordinary JSON answers: 404 for

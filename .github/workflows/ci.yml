@@ -20,6 +20,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -34,6 +37,7 @@ jobs:
         working-directory: tui
         env:
           RAKUMUX_HOME: ${{ runner.temp }}/rakumux-home
+      - run: node --test 'Integrations/Open Code/activity.test.mjs'
       - run: bash tests/test-repository.sh
       - run: bash tests/test-command-hook.sh
       - run: bash tests/test-release.sh

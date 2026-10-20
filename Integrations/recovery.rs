@@ -13,6 +13,7 @@
 //! What an agent reports itself (`rakumux session report --resume`) wins
 //! while that agent runs.
 //!
+//! Provider implementations live beside their hooks in `Integrations/<agent>`.
 //! Agents:
 //! - **Claude Code** writes `<config dir>/sessions/<pid>.json` with the id
 //!   of the conversation that process runs (`sessionId`): `claude <flags>
@@ -35,6 +36,18 @@ use serde::Deserialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+#[path = "Claude Code/recovery.rs"]
+mod claude;
+#[path = "Codex/recovery.rs"]
+mod codex;
+#[path = "Open Code/recovery.rs"]
+mod opencode;
+#[cfg(test)]
+use claude::claude_flags;
+use claude::{claude_config_dir, claude_resume};
+use codex::codex_resume;
+use opencode::opencode_resume;
 
 /// What to record for a session's foreground process.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,234 +104,12 @@ fn command_line(process: &ProcessInfo) -> Option<Vec<String>> {
     (!argv.is_empty() && !argv[0].is_empty()).then_some(argv)
 }
 
-/// Claude Code flags kept without a value.
-const CLAUDE_SWITCHES: &[&str] = &[
-    "--dangerously-skip-permissions",
-    "--allow-dangerously-skip-permissions",
-    "--chrome",
-    "--no-chrome",
-    "--ide",
-    "--verbose",
-    "--strict-mcp-config",
-    "--brief",
-];
-
-/// Claude Code flags kept with one value.
-const CLAUDE_OPTIONS: &[&str] = &[
-    "--model",
-    "--permission-mode",
-    "--effort",
-    "--agent",
-    "--settings",
-    "--setting-sources",
-    "--fallback-model",
-    "--plugin-dir",
-];
-
-/// Claude Code flags kept with every value that follows them.
-const CLAUDE_LISTS: &[&str] = &[
-    "--add-dir",
-    "--mcp-config",
-    "--allowedTools",
-    "--allowed-tools",
-    "--disallowedTools",
-    "--disallowed-tools",
-];
-
-fn claude_config_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
-        return Some(PathBuf::from(dir));
-    }
-    home_dir().map(|home| home.join(".claude"))
-}
-
-#[derive(Deserialize)]
-struct ClaudeSessionFile {
-    #[serde(rename = "sessionId")]
-    session_id: String,
-    #[serde(default)]
-    pid: Option<u32>,
-}
-
-fn claude_resume(process: &ProcessInfo, config_dir: &Path) -> Option<Vec<String>> {
-    let path = config_dir
-        .join("sessions")
-        .join(format!("{}.json", process.pid));
-    let file: ClaudeSessionFile = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    if file.pid.is_some_and(|pid| pid != process.pid) || !is_conversation_id(&file.session_id) {
-        return None;
-    }
-    let mut argv = vec!["claude".to_string()];
-    argv.extend(claude_flags(&program_args(&process.cmdline, "claude")));
-    argv.push("--resume".into());
-    argv.push(file.session_id);
-    Some(argv)
-}
-
 fn is_conversation_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
-/// The flags of [`CLAUDE_SWITCHES`], [`CLAUDE_OPTIONS`] and
-/// [`CLAUDE_LISTS`] in `args`.
-fn claude_flags(args: &[String]) -> Vec<String> {
-    keep_flags(args, CLAUDE_SWITCHES, CLAUDE_OPTIONS, CLAUDE_LISTS)
-}
-
-/// Codex flags kept without a value.
-const CODEX_SWITCHES: &[&str] = &[
-    "--full-auto",
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--yolo",
-    "--search",
-    "--oss",
-    "--skip-git-repo-check",
-];
-
-/// Codex flags kept with one value.
-const CODEX_OPTIONS: &[&str] = &[
-    "-m",
-    "--model",
-    "-p",
-    "--profile",
-    "-s",
-    "--sandbox",
-    "-a",
-    "--ask-for-approval",
-    "-c",
-    "--config",
-    "--add-dir",
-    "--local-provider",
-];
-
-fn codex_home() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("CODEX_HOME").filter(|d| !d.is_empty()) {
-        return Some(PathBuf::from(dir));
-    }
-    home_dir().map(|home| home.join(".codex"))
-}
-
-fn codex_resume(process: &ProcessInfo, cwd: Option<&Path>) -> Option<Vec<String>> {
-    let id =
-        codex_open_thread(process.pid).or_else(|| codex_recent_thread(&codex_home()?, cwd?))?;
-    if !is_conversation_id(&id) {
-        return None;
-    }
-    let mut argv = vec!["codex".to_string(), "resume".to_string()];
-    argv.extend(keep_flags(
-        &program_args(&process.cmdline, "codex"),
-        CODEX_SWITCHES,
-        CODEX_OPTIONS,
-        &[],
-    ));
-    argv.push(id);
-    Some(argv)
-}
-
-/// The thread whose rollout file the Codex process (or its native child)
-/// has open, skipping sub-agent threads.
-fn codex_open_thread(pid: u32) -> Option<String> {
-    let mut pids = vec![pid];
-    pids.extend(crate::procinfo::descendants(pid));
-    pids.into_iter()
-        .flat_map(crate::procinfo::open_files)
-        .filter(|path| {
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(".jsonl"))
-        })
-        .find_map(|path| codex_rollout_thread(&path))
-}
-
-/// The thread id in a rollout file's first line (`session_meta`), unless
-/// it belongs to a sub-agent.
-fn codex_rollout_thread(path: &Path) -> Option<String> {
-    use std::io::BufRead;
-    let file = std::fs::File::open(path).ok()?;
-    let mut line = String::new();
-    std::io::BufReader::new(file)
-        .take(1024 * 1024)
-        .read_line(&mut line)
-        .ok()?;
-    let meta: serde_json::Value = serde_json::from_str(&line).ok()?;
-    let payload = meta.get("payload")?;
-    if payload
-        .get("source")
-        .is_some_and(|source| !source.is_string())
-    {
-        return None;
-    }
-    payload.get("id")?.as_str().map(String::from)
-}
-
-/// The newest interactive thread Codex recorded for `cwd`.
-fn codex_recent_thread(home: &Path, cwd: &Path) -> Option<String> {
-    let db = newest_numbered(home, "state_", ".sqlite")?;
-    let conn = open_read_only(&db)?;
-    conn.query_row(
-        "SELECT id FROM threads WHERE cwd = ?1 AND source = 'cli' AND archived = 0 \
-         ORDER BY updated_at DESC LIMIT 1",
-        [cwd.to_str()?],
-        |row| row.get(0),
-    )
-    .ok()
-}
-
-/// OpenCode flags kept with one value.
-const OPENCODE_OPTIONS: &[&str] = &["-m", "--model", "--agent"];
-
-fn opencode_resume(
-    process: &ProcessInfo,
-    cwd: Option<&Path>,
-    bound: Option<&str>,
-) -> Option<Vec<String>> {
-    let id = match bound {
-        Some(id) => id.to_string(),
-        None => opencode_recent_session(cwd?)?,
-    };
-    if !is_conversation_id(&id) {
-        return None;
-    }
-    let mut argv = vec!["opencode".to_string()];
-    argv.extend(keep_flags(
-        &program_args(&process.cmdline, "opencode"),
-        &[],
-        OPENCODE_OPTIONS,
-        &[],
-    ));
-    argv.push("-s".into());
-    argv.push(id);
-    Some(argv)
-}
-
-/// The newest top-level OpenCode session of `cwd` (`opencode.db`; both of
-/// its session tables, whichever has the newer one).
-fn opencode_recent_session(cwd: &Path) -> Option<String> {
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| home_dir().map(|home| home.join(".local/share")))?;
-    let conn = open_read_only(&data.join("opencode/opencode.db"))?;
-    let cwd = cwd.to_str()?;
-    ["session_v2", "session"]
-        .into_iter()
-        .filter_map(|table| {
-            conn.query_row(
-                &format!(
-                    "SELECT id, time_updated FROM {table} WHERE directory = ?1 \
-                     AND parent_id IS NULL ORDER BY time_updated DESC LIMIT 1"
-                ),
-                [cwd],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .ok()
-        })
-        .max_by_key(|(_, updated)| *updated)
-        .map(|(id, _)| id)
 }
 
 fn home_dir() -> Option<PathBuf> {

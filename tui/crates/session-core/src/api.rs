@@ -248,6 +248,9 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Report {
+    /// Agent-neutral hook activity; never contains terminal or prompt text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<crate::activity::ActivityUpdate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<Lifecycle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -387,6 +390,9 @@ pub const CAPABILITY_SESSIONS_ALL: &str = "sessions.all";
 /// The capability a daemon announces when it accepts `daemon_restart`:
 /// it restarts in place and running sessions keep running.
 pub const CAPABILITY_DAEMON_RESTART: &str = "daemon.restart";
+
+/// Versioned, self-reported agent activity and normalized session projections.
+pub const CAPABILITY_ACTIVITY: &str = "session.activity";
 
 fn is_false(value: &bool) -> bool {
     !*value

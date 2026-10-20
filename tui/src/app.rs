@@ -30,6 +30,7 @@ mod connection;
 mod detail;
 mod feature_flags;
 pub mod folders;
+pub mod grid;
 mod handlers;
 mod keys;
 mod new_session;
@@ -155,6 +156,10 @@ impl SessionDrag {
 pub enum Hit {
     /// Session list row (0 = the folder filter; folder headers count).
     ListRow(usize),
+    /// Visible Grid card in filtered session order (last is New session).
+    GridCell(usize),
+    /// Previous/next Grid page.
+    GridPage(isize),
     /// The folder filter (top of the list or left end of the tab bar).
     FolderSelector,
     /// The open Folders modal (clicks inside it don't close it).
@@ -196,6 +201,8 @@ pub struct AppOptions {
     pub namer: Namer,
     /// Remote access for the phone app (`LocalPhoneAccess` in production).
     pub phone: Arc<dyn PhoneAccess>,
+    /// Update checks and installation, replaced by a fake in tests.
+    pub updater: Arc<dyn crate::updater::UpdateService>,
     pub exec_mode: ExecMode,
     pub debug: bool,
 }
@@ -228,6 +235,8 @@ pub struct App {
     connector: Connector,
     namer: Namer,
     phone: Arc<dyn PhoneAccess>,
+    updater: Arc<dyn crate::updater::UpdateService>,
+    update_generation: u64,
     /// Phone access is on; `None` until checked at startup.
     pub phone_enabled: Option<bool>,
     /// The one-time phone access offer waits for nothing else to be on
@@ -254,6 +263,7 @@ pub struct App {
 
     pub list: SessionList,
     pub detail: Detail,
+    pub grid: grid::GridPreviews,
     pub focus: Focus,
     pub zoomed: bool,
     /// The list/detail divider: hovered or being dragged.
@@ -281,6 +291,7 @@ pub struct App {
     /// Reload this UI after detaching and restoring the terminal. Does not
     /// stop or restart the daemon.
     pub restart_requested: bool,
+    pub restart_launcher: Option<std::path::PathBuf>,
     pub auth: AuthService,
 }
 
@@ -314,6 +325,8 @@ impl App {
             connector: options.connector,
             namer: options.namer,
             phone: options.phone,
+            updater: options.updater,
+            update_generation: 0,
             phone_enabled: None,
             phone_offer_pending: false,
             connection: Connection::Connecting,
@@ -328,6 +341,7 @@ impl App {
             sync_cancel: None,
             list,
             detail: Detail::default(),
+            grid: grid::GridPreviews::default(),
             focus: Focus::List,
             zoomed: false,
             divider: DividerState::default(),
@@ -344,6 +358,7 @@ impl App {
             pending_update_version: None,
             update_install_method: None,
             restart_requested: false,
+            restart_launcher: None,
             auth: AuthService::new_from_env(),
             settings: options.settings,
             config_path: options.config_path,
@@ -476,10 +491,10 @@ impl App {
         crate::layout::is_phone(self.area.width)
     }
 
-    /// How the list keys and taps behave: a phone always shows the list in
-    /// Rakumux mode, so it behaves like the Sidebar there.
+    /// How browsing keys and taps behave: phones use the Master detail
+    /// list for Sidebar/Tabs, and keep Grid's card navigation in Grid.
     pub fn list_layout(&self) -> SessionLayout {
-        if self.phone() {
+        if self.phone() && self.session_layout() != SessionLayout::Grid {
             SessionLayout::Sidebar
         } else {
             self.session_layout()
@@ -658,6 +673,12 @@ impl App {
                 };
                 ("Phone access", value.to_string(), note)
             }
+            SettingsItem::Update => (
+                "Update",
+                self.pending_update_version.as_ref().map(|version| format!("{version} available · U"))
+                    .unwrap_or_else(|| format!("{} · U", app_version())),
+                "Check for a new release, confirm installation, then restart only this UI. The daemon and all running sessions stay up. Source builds and admin-owned installations may need a manual update.",
+            ),
             SettingsItem::AnthropicKey => (
                 "Anthropic API key",
                 key_value(&ai.anthropic_api_key),
@@ -693,6 +714,10 @@ impl App {
     /// Whether something animates (spinners) and wants frequent ticks.
     pub fn is_animating(&self) -> bool {
         matches!(self.connection, Connection::Connecting)
+            || self.list.visible().iter().any(|session| {
+                session.status == session_core::model::SessionStatus::Live
+                    && session.lifecycle == session_core::model::Lifecycle::Working
+            })
             || self.creating_session
             || matches!(self.detail.view, DetailView::Loading(_))
             || match &self.mode {
@@ -707,6 +732,7 @@ impl App {
 
     /// Timers: status expiry and reconnects. Returns whether to redraw.
     pub fn on_tick(&mut self, now: Instant) -> bool {
+        self.sync_grid();
         let mut changed = self.is_animating();
         changed |= self.offer_phone_access();
         if let Some((_, at)) = &self.status {
@@ -748,6 +774,25 @@ impl App {
             AppEvent::SavedScreen { generation, result } => {
                 self.on_saved_screen(generation, result)
             }
+            AppEvent::PreviewAttached {
+                id,
+                generation,
+                result,
+            } => self.on_preview_attached(id, generation, result),
+            AppEvent::PreviewSaved {
+                id,
+                generation,
+                result,
+            } => self.on_preview_saved(id, generation, result),
+            AppEvent::PreviewReady {
+                id,
+                generation,
+                mailbox,
+            } => {
+                for event in mailbox.drain() {
+                    self.on_preview_event(&id, generation, event);
+                }
+            }
             AppEvent::FoldersLoaded { result } => self.on_folders_loaded(result),
             AppEvent::FolderAdded { result } => self.on_folder_added(result),
             AppEvent::Pinned { id, pinned, result } => self.on_pinned(id, pinned, result),
@@ -770,7 +815,14 @@ impl App {
                 expected_name,
                 result,
             } => self.on_name_suggested(id, expected_name, result),
-            AppEvent::Upgrade(message) => self.handle_upgrade_message(message),
+            AppEvent::Upgrade {
+                generation,
+                message,
+            } => {
+                if generation == self.update_generation {
+                    self.handle_upgrade_message(message);
+                }
+            }
             AppEvent::PhoneChecked { enabled, offer } => self.on_phone_checked(enabled, offer),
             AppEvent::PhonePairing(result) => self.on_phone_pairing(result),
             AppEvent::PhoneOff(result) => self.on_phone_off(result),
@@ -778,6 +830,7 @@ impl App {
                 self.set_status(format!("Background task failed: {message}"))
             }
         }
+        self.sync_grid();
     }
 
     /// Input from the terminal.
@@ -812,6 +865,7 @@ impl App {
         if used {
             self.claim_terminal_size();
         }
+        self.sync_grid();
         result
     }
 
@@ -849,6 +903,7 @@ impl App {
     pub fn resize(&mut self, width: u16, height: u16) {
         self.area = Rect::new(0, 0, width, height);
         self.sync_terminal_size();
+        self.sync_grid();
     }
 
     // ------------------------------------------------------------ daemon
@@ -958,6 +1013,7 @@ impl App {
 
     /// The subscription (and so presumably the daemon) went away.
     fn connection_lost(&mut self, reason: String) {
+        self.grid.clear();
         if let Some(cancel) = self.sync_cancel.take() {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
@@ -1038,6 +1094,7 @@ impl App {
     /// Stop listening to the daemon before it goes away on purpose, so that
     /// isn't reported as a lost connection.
     fn let_go_of_daemon(&mut self) {
+        self.grid.clear();
         if self.connection.is_connected() {
             if let Some(cancel) = self.sync_cancel.take() {
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);

@@ -9,14 +9,20 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Replace the UI process. Returns only when the new UI could not start.
-pub fn current_process() -> io::Result<()> {
-    let executable = std::env::current_exe()?;
+pub fn current_process(updated_launcher: Option<&Path>) -> io::Result<()> {
+    let executable = match updated_launcher {
+        Some(path) => path.to_path_buf(),
+        None => std::env::current_exe()?,
+    };
     let launcher = std::env::var_os(session_core::env::BIN).map(PathBuf::from);
-    let mut command = command(
-        &executable,
-        launcher.as_deref(),
-        std::env::args_os().skip(1),
-    );
+    let mut command = match updated_launcher {
+        Some(launcher) => updated_command(&executable, launcher, std::env::args_os().skip(1)),
+        None => command(
+            &executable,
+            launcher.as_deref(),
+            std::env::args_os().skip(1),
+        ),
+    };
     Err(command.exec())
 }
 
@@ -49,6 +55,20 @@ fn replacement_executable(executable: &Path) -> PathBuf {
     }
 }
 
+fn updated_command(
+    executable: &Path,
+    launcher: &Path,
+    arguments: impl IntoIterator<Item = OsString>,
+) -> Command {
+    let mut command = command(executable, Some(launcher), arguments);
+    if let Some(root) = launcher.parent() {
+        command.env("GW_TUI_BIN", root.join("rakumux"));
+        command.env("GW_PTYD_BIN", root.join("rakumux-ptyd"));
+        command.env("RAKUMUX_API_BIN", root.join("rakumux-api"));
+    }
+    command
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,6 +84,22 @@ mod tests {
         assert_eq!(
             command.get_args().collect::<Vec<_>>(),
             ["--debug", "--ptyd-path", "/custom/ptyd"]
+        );
+    }
+
+    #[test]
+    fn an_updated_bundle_restarts_from_its_new_path_and_never_repeats_new_server() {
+        let command = updated_command(
+            Path::new("/removed/old/rakumux"),
+            Path::new("/installed/rakumux.sh"),
+            ["--new-server", "--debug"].map(OsString::from),
+        );
+        assert_eq!(command.get_program(), "/installed/rakumux.sh");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["--debug"]);
+        let environment: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+        assert_eq!(
+            environment[OsStr::new("GW_TUI_BIN")],
+            Some(OsStr::new("/installed/rakumux"))
         );
     }
 

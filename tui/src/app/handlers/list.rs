@@ -55,6 +55,14 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
             return handle_list_key(app, plain);
         }
         KeyCode::Char('q') => return AppResult::Exit,
+        KeyCode::Up | KeyCode::Char('k') if app.browsing_grid() => {
+            app.move_grid_selection(-(app.grid_page().columns as isize))
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.browsing_grid() => {
+            app.move_grid_selection(app.grid_page().columns as isize)
+        }
+        KeyCode::Left | KeyCode::Char('h') if app.browsing_grid() => app.move_grid_selection(-1),
+        KeyCode::Right | KeyCode::Char('l') if app.browsing_grid() => app.move_grid_selection(1),
         KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
         KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
         KeyCode::Home => app.move_selection(-(app.list.row_count() as isize)),
@@ -76,6 +84,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Tab => app.go_to_last_session(),
         KeyCode::Char(digit @ '1'..='9') => app.go_into_nth(digit as usize - '0' as usize),
         KeyCode::Char('n') => app.open_new_session(),
+        KeyCode::Char('v') => app.set_layout(app.session_layout().next()),
         KeyCode::Char('p') => app.toggle_pin(),
         KeyCode::Char('J') => app.move_selected_session(1),
         KeyCode::Char('K') => app.move_selected_session(-1),
@@ -100,7 +109,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         }
         KeyCode::Char('?') => open_help(app),
         KeyCode::Char(',') | KeyCode::Char('o') => open_settings(app),
-        KeyCode::Char('u') => app.open_upgrade_dialog(),
+        KeyCode::Char('U') => app.open_upgrade_dialog(),
         KeyCode::Char('a') if app.flags.auth => {
             let items = if app.auth.has_session() {
                 vec!["Manage subscription", "View account", "Sign out"]

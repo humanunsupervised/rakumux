@@ -1,5 +1,5 @@
 //! The Rakumux plugin for OpenCode 2.x's TUI
-//! (`mcp/opencode/rakumux-session/tui.js`) and its installer.
+//! (bundled from `Integrations/Open Code/rakumux-session/`) and its installer.
 //!
 //! OpenCode 2.x runs MCP servers in a service shared by every conversation, so
 //! tool calls reach this server without the calling session's environment; they
@@ -10,9 +10,14 @@
 //! each TUI, with the session's environment.
 
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
 /// The plugin's source.
-pub const PLUGIN: &str = include_str!("../opencode/rakumux-session/tui.js");
+pub const PLUGIN: &str = concat!(
+    include_str!("rakumux-session/activity.mjs"),
+    "\n",
+    include_str!("rakumux-session/runtime.js")
+);
 /// The plugin's directory under `<OpenCode config>/plugins/`. OpenCode 2.x
 /// loads every directory there (its `tui` module) without configuration.
 pub const PLUGIN_DIR: &str = "rakumux-session";
@@ -41,6 +46,52 @@ pub fn install(config: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     std::fs::write(&path, PLUGIN).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(path)
+}
+
+/// Handle the existing `opencode-plugin [--install [--dir DIR]]` command.
+pub fn command(args: Vec<String>, usage: &str) -> ExitCode {
+    let mut install_plugin = false;
+    let mut dir = None;
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--install" => install_plugin = true,
+            "--dir" => match args.next() {
+                Some(value) => dir = Some(PathBuf::from(value)),
+                None => {
+                    eprintln!("rakumux-mcp: --dir needs a directory");
+                    return ExitCode::from(2);
+                }
+            },
+            other => {
+                eprintln!("rakumux-mcp: unknown argument {other:?}\n\n{usage}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    if !install_plugin {
+        if dir.is_some() {
+            eprintln!("rakumux-mcp: --dir needs --install");
+            return ExitCode::from(2);
+        }
+        print!("{PLUGIN}");
+        return ExitCode::SUCCESS;
+    }
+    let Some(dir) = dir.or_else(config_dir) else {
+        eprintln!("rakumux-mcp: can't find OpenCode's config directory; pass --dir");
+        return ExitCode::FAILURE;
+    };
+    match install(&dir) {
+        Ok(path) => {
+            println!("Wrote {}.", path.display());
+            println!("Restart OpenCode (2.x) to load it.");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("rakumux-mcp: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]
@@ -72,8 +123,8 @@ mod tests {
 
     #[test]
     fn the_plugin_is_an_opencode_2_plugin() {
-        assert!(PLUGIN.contains("export default {"));
-        assert!(PLUGIN.contains("setup,"));
-        assert!(PLUGIN.contains("\"session\", \"bind\", \"--agent\", AGENT"));
+        assert!(PLUGIN.contains("Plugin.define"));
+        assert!(PLUGIN.contains("snapshot(context)"));
+        assert!(PLUGIN.contains("context.data.session"));
     }
 }

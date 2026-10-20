@@ -41,11 +41,25 @@ to upgrade. npm and Homebrew publishing are not enabled. See the
 [installation guide](install/INSTALL.md) for binary and release-tarball instructions.
 Native binaries are available for macOS Intel, macOS Apple Silicon and Linux x64.
 
+**Update in the app:** press `Shift+U` in Rakumux mode, or open Settings → General → Update.
+Confirm to download, verify and install the new release, then restart only the UI. Running
+sessions and the daemon stay up. Binary installs need a writable installation directory;
+admin-owned installs need the installer outside the app. Source builds use `./build.sh`, then `R`.
+
 ## Quick start
 
 In the UI, press `n` to create a session. Run an agent or any command in its shell.
 Press `Ctrl-\` to return to Rakumux mode. Use `j`/`k` or the arrow keys to select a session,
 `Enter` to work in it, and `?` for Help. Quitting the UI does not stop sessions.
+
+**Layouts:** Settings → General → Layout, or `v` in Rakumux mode, cycles **Master detail**
+(the default), **Grid**, and **Tabs**. Grid shows a responsive page of up to six real live
+terminal previews. Arrows or `h`/`j`/`k`/`l` select cards; `PgUp`/`PgDn` change page. Enter or
+a tap opens a session; `Ctrl-\` returns to Grid. Folder/text filters and pinned/custom ordering
+apply to every layout. Grid previews are read-only observers: browsing never takes control,
+resizes a terminal, sends input, or marks a session as used. Cards crop/pan at the terminal's
+existing size. Only visible cards have preview streams; dead/exited cards show saved output.
+`n` or the + New session card creates and enters a generated-name session immediately.
 
 ```bash
 rakumux new --name dev          # Create and attach
@@ -58,6 +72,10 @@ rakumux --help
 From a checkout, use `./rakumux.sh` instead of `rakumux`.
 
 ## Agent integration
+
+Activity hooks for OpenCode, Claude Code and Codex provide busy spinners, needs-input
+markers, tool phases and agent-internal subagent counts. Setup is opt-in; see
+[agent integrations](Integrations/README.md). Screen detection remains the fallback.
 
 ```bash
 claude mcp add --scope user rakumux -- rakumux-mcp

@@ -122,6 +122,11 @@ fn every_json_field_is_documented() {
             files: vec!["f".into()],
             at: "1970-01-01T00:00:00Z".into(),
         }),
+        activity: Some(Activity {
+            phase: session_core::activity::ActivityPhase::RunningTool,
+            active_subagents: 2,
+            updated_at: "1970-01-01T00:00:00Z".into(),
+        }),
         created_by: Creator::Session {
             id: session_core::ids::SessionId::from_string("p"),
         },
@@ -257,6 +262,7 @@ fn every_stream_message_is_documented() {
         lifecycle: Lifecycle::Idle,
         agent: None,
         reported: None,
+        activity: None,
         created_by: Creator::User,
         parent_id: None,
         depth: 0,

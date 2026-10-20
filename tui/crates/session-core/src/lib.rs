@@ -10,6 +10,7 @@
 //! `rakumux-api` and the `rakumux remote` CLI; `tailscale` finds this
 //! machine's Tailscale addresses and name.
 
+pub mod activity;
 pub mod api;
 pub mod client;
 pub mod frame;

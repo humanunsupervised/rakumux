@@ -35,6 +35,7 @@ pub fn session(id: &str, name: &str) -> SessionView {
         lifecycle: Lifecycle::None,
         agent: None,
         reported: None,
+        activity: None,
         created_by: Creator::User,
         parent_id: None,
         depth: 0,
@@ -78,6 +79,7 @@ pub fn checkpoint_of(id: &str) -> Vec<u8> {
 }
 
 pub struct FakeApi {
+    pub capabilities: Option<Vec<String>>,
     caller: CallerInfo,
     pub sessions: Mutex<Vec<SessionView>>,
     pub projects: Mutex<Vec<ProjectView>>,
@@ -111,6 +113,7 @@ impl FakeApi {
 
     fn with_caller(caller: CallerInfo, sessions: Vec<SessionView>) -> Self {
         Self {
+            capabilities: Some(vec!["session.activity".into()]),
             caller,
             sessions: Mutex::new(sessions),
             projects: Mutex::new(vec![]),
@@ -149,6 +152,9 @@ impl FakeApi {
 }
 
 impl SessionApi for FakeApi {
+    fn daemon_capabilities(&self) -> Option<Vec<String>> {
+        self.capabilities.clone()
+    }
     fn caller(&self) -> &CallerInfo {
         &self.caller
     }

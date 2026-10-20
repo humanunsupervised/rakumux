@@ -32,7 +32,9 @@ make it act as that session.";
 fn main() -> ExitCode {
     match std::env::args().nth(1).as_deref() {
         None => {}
-        Some("opencode-plugin") => return opencode_plugin(std::env::args().skip(2).collect()),
+        Some("opencode-plugin") => {
+            return opencode::command(std::env::args().skip(2).collect(), USAGE)
+        }
         Some("--version" | "-V") => {
             println!("rakumux-mcp {VERSION}");
             return ExitCode::SUCCESS;
@@ -72,52 +74,6 @@ fn main() -> ExitCode {
     };
     match runtime.block_on(RakumuxServer::new(api, VERSION).serve_stdio()) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("rakumux-mcp: {error}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-/// `rakumux-mcp opencode-plugin [--install [--dir DIR]]`.
-fn opencode_plugin(args: Vec<String>) -> ExitCode {
-    let mut install = false;
-    let mut dir = None;
-    let mut args = args.into_iter();
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--install" => install = true,
-            "--dir" => match args.next() {
-                Some(value) => dir = Some(std::path::PathBuf::from(value)),
-                None => {
-                    eprintln!("rakumux-mcp: --dir needs a directory");
-                    return ExitCode::from(2);
-                }
-            },
-            other => {
-                eprintln!("rakumux-mcp: unknown argument {other:?}\n\n{USAGE}");
-                return ExitCode::from(2);
-            }
-        }
-    }
-    if !install {
-        if dir.is_some() {
-            eprintln!("rakumux-mcp: --dir needs --install");
-            return ExitCode::from(2);
-        }
-        print!("{}", opencode::PLUGIN);
-        return ExitCode::SUCCESS;
-    }
-    let Some(dir) = dir.or_else(opencode::config_dir) else {
-        eprintln!("rakumux-mcp: can't find OpenCode's config directory; pass --dir");
-        return ExitCode::FAILURE;
-    };
-    match opencode::install(&dir) {
-        Ok(path) => {
-            println!("Wrote {}.", path.display());
-            println!("Restart OpenCode (2.x) to load it.");
-            ExitCode::SUCCESS
-        }
         Err(error) => {
             eprintln!("rakumux-mcp: {error}");
             ExitCode::FAILURE

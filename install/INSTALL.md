@@ -94,9 +94,25 @@ see their own folder and rename themselves.
 
 ## Upgrading
 
-Update through the channel you installed from, then use `rakumux daemon restart` (or the TUI's
-offer) to switch to the new daemon in place. Running sessions keep running when the daemon
-supports restart-in-place handoff. The UI asks before a restart that would end sessions.
+Press `Shift+U` in Rakumux mode (`Ctrl-\` first when working in a session), or open
+Settings → General → Update. Rakumux checks the installed release channel. `Enter` confirms
+installation and automatically restarts **only this UI**. `Esc` cancels before installation
+starts. A failed download, checksum, package, version or permission check leaves the UI running.
+
+Binary installs download the official native release and its published SHA-256 checksums over
+HTTPS. All four binaries and launcher files are staged and checked, then the complete install
+is swapped atomically. Running programs keep their old mapped images. Unknown/custom files
+cause a refusal rather than being discarded. Settings and session data are not replaced.
+
+Automatic binary updates need write permission on the install directory's parent. User-local
+installs (`PREFIX="$HOME/.local"`) normally support this. Admin-owned installs need the installer
+outside Rakumux with the original `PREFIX`; there is no hidden `sudo` prompt. Source builds are
+never overwritten: rebuild the checkout, then press `R` to reload the UI.
+
+Cached availability never authorizes installation on startup. The launcher `--update` option
+is a check, not this in-app installation workflow. The daemon and API are not restarted by
+Update. To apply a new daemon later, use `rakumux daemon restart` for a supported restart in
+place. Decline any warning that it would end sessions. Update has no stop/revive fallback.
 
 ## Uninstall
 

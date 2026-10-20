@@ -209,7 +209,7 @@ fn message(app: &App) -> Vec<Span<'static>> {
         ]
     } else if let Some(version) = &app.pending_update_version {
         vec![Span::styled(
-            format!("🔄 Rakumux will upgrade to version {version} next time you restart"),
+            format!("Update {version} available · U to install"),
             Style::default().fg(p.accent_gold),
         )]
     } else {

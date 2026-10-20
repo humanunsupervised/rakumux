@@ -76,7 +76,7 @@ in this repository's license grant. Public preparation and release checks: `PUBL
    it `exec`s the new binary in the same process and hands over the PTYs, screens, tokens and
    socket, so running programs keep running (`ptyd/src/handoff.rs`). When programs can't survive
    (a crash, a reboot), the next start revives the sessions that were running, each with its resume
-   command (`ptyd/src/resume.rs`; see "Recovery" below).
+   command (`Integrations/recovery.rs`; see "Recovery" below).
 4. **`session-core`** (`tui/crates/session-core`, lib `session_core`): the shared contract: model,
    protocol, frame codec, ids, filesystem layout, and the blocking client.
 5. **`vt`** (`tui/crates/vt`): terminal emulation on `vt100`, shared by daemon (responding emulator
@@ -113,6 +113,13 @@ in this repository's license grant. Public preparation and release checks: `PUBL
    a nonce-delimited untrusted block. See `mcp/README.md`.
 
 ## File structure
+
+Agent-specific hooks, detection profiles, resume code and the OpenCode plugin/installer live
+under `Integrations/{Open Code,Claude Code,Codex}/`. Shared engines live in `Integrations/`.
+See [integration boundaries and protocol](Integrations/README.md). New integrations go there,
+not in UI handlers, API/MCP transport or control policy. Optional version-1 `Report.activity`
+is self-only (`session.activity` capability). The daemon validates, timestamps and expires
+activity. The TUI animates busy markers locally without network calls.
 
 ```
 rakumux.sh                 # launcher (entry point)
@@ -163,10 +170,9 @@ tui/
       host.rs                # TerminalHost trait (control ↔ terminals), SpawnSpec, HostEvent
       terminal/              # Host: PTY actors, emulators, replay ring, attach fan-out, adopt/handoff
       handoff.rs             # restart in place: HandoffState across exec, target check
-      resume.rs              # resume plans: Claude Code, Codex, OpenCode conversations; last command
+                             # detection/resume modules are mounted from Integrations/
       persist.rs             # ScrollbackStore: sessions/<id>/{scrollback.ansi, meta.json}
       procinfo/              # foreground process, cwd, RSS (Linux /proc, macOS libproc)
-      detect.rs              # agent and lifecycle detection from screen + process
       log.rs                 # ~/.rakumux/logs/ptyd.log
   src/
     main.rs                  # cli::dispatch, else the TUI event loop
@@ -179,7 +185,7 @@ tui/
     ui.rs, components/       # rendering: session list, detail, Folders modal, dialogs, footer (mode badge,
                              # messages), welcome tour, phone access (offer, pairing dialog with QR code)
     terminal_view/           # live terminal pane widget, key/mouse/paste encoding
-    layout/                  # Sidebar / Tabs geometry, tab bar, session cycling
+    layout/                  # Master detail / Grid / Tabs geometry, tab bar, session cycling
     help/                    # Settings modal (General, Keys: actions table) and Help modal (docs, license)
     naming/                  # AI session naming (Anthropic / OpenAI over HTTPS)
     auth/                    # Clerk auth, deferred (feature flag off)
@@ -212,7 +218,7 @@ last_active_at, added_at, git}` on the wire.
 
 ### Recovery
 
-What survives what (`ptyd/src/handoff.rs` and `ptyd/src/resume.rs`):
+What survives what (`ptyd/src/handoff.rs` and `Integrations/recovery.rs`):
 
 | Event | Running programs | How sessions come back |
 |---|---|---|
@@ -286,7 +292,7 @@ session per minute. `rakumux new` inside a session needs `--detach`, since sessi
 
 Conversation bindings (`session_bind`) live in daemon memory: the newest binding of a conversation
 wins, and a session's bindings end when it exits. OpenCode 2.x runs MCP servers in a service shared by
-every conversation, so the Rakumux plugin for its TUI (`mcp/opencode/rakumux-session/tui.js`,
+every conversation, so the Rakumux plugin for its TUI (`Integrations/Open Code/rakumux-session/`,
 installed with `rakumux-mcp opencode-plugin --install`) binds the conversations it shows.
 
 Mutating requests and denials are written to the audit log. Tokens give attribution and prevent
@@ -473,8 +479,15 @@ When a session with a generated name first goes `idle` or `done`, the TUI reads
 ### Updates
 
 `rakumux.sh` runs `shell/gwr/check-updates.sh` silently in the background (at most daily);
-`tui/src/updater.rs` keeps `UpdateState`, shows the upgrade dialog and runs `npm`/`brew` when the
-user accepts, then restarts the TUI. Upgrading never stops the daemon; on a protocol mismatch the TUI
+`U` (Shift+U) and Settings → General → Update use `UpdateService` off the UI thread. Binary
+installs fetch the official GitHub release, verify SHA-256 and binary versions, reject unsafe
+archive paths/links and custom install files, and atomically exchange staged/installed folders
+(`renameat2` on Linux, `renamex_np` on macOS). Unwritable or unsupported installs fail without
+changing the old bundle; source builds are not overwritten. Version probes use an isolated
+environment/home. The user confirms installation; cached `UpdateState` is availability, never
+startup authorization. Success reloads only the UI through the new launcher, stripping
+`--new-server`. The daemon/API and all sessions stay running; Update has no stop/revive
+fallback. Legacy npm/Homebrew installs use their package manager. On a protocol mismatch the TUI
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, read with
 `SessionApi::daemon_capabilities`) it says what's missing and offers a restart: in place when the
@@ -526,9 +539,10 @@ since running sessions end).
 - **Rakumux key**: `Ctrl-\` by default; the one key a session never receives. It switches from
   session mode (keys go to the program) to Rakumux mode (keys drive Rakumux; the session is
   previewed). `rakumux attach` uses it as its prefix.
-- **Layout**: Sidebar (list left, detail right; on narrow windows the list stacked above the
-  detail in Rakumux mode) or Tabs (tab bar on top); `sessions.layout`. Phones have their own:
-  the list, or a session under tabs.
+- **Layout**: Master detail (`sidebar`, default: list left, detail right; on narrow windows the
+  list stacked above the detail in Rakumux mode), Grid (`grid`: paged read-only live terminal
+  cards), or Tabs (`tabs`, tab bar on top); `sessions.layout`. Phones show the list (Master detail
+  and Tabs) or Grid, then a session under tabs.
 - **Contracts**: the crate types and traits that define the architecture.
 
 ## Using Rakumux
@@ -553,7 +567,7 @@ since running sessions end).
 TUI keys come in two modes. **Session mode**: everything goes to the program except `Ctrl-\`,
 which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_keys_in_session` is
 on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
-session preview fades lightly in Rakumux mode and more under a dialog or for saved output,
+session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the folder filter, a folder
 header and + New session keep the last session in view, one the filters show), `gg`/`G`,
 `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder) (a Ctrl or Alt that no shortcut uses is
@@ -562,7 +576,7 @@ folder header, a new session there), `Esc` (after cancelling a pending key or th
 `Ctrl-\` back to the session you came from, `Tab` last session, `1`-`9` go into that session,
 `n` new, `r` rename, `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
 screen, `P` (or Enter on the folder filter) the Folders modal, `/` filter, `Ctrl-y`/`Ctrl-e`/
-PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `R`
+PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `U` Update, `R`
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
 build; daemon and sessions stay up), `q`
 quit. There is no header: the panes start at the top row, and the folder filter (`▤ All folders
@@ -582,16 +596,16 @@ dialog (`AppMode::Pairing`: the QR code of the `rakumux://connect` link, the URL
 `x` turns phone access off), `n` leaves it off. Settings' General tab has the same switch (Phone
 access: Enter turns it on or shows the pairing dialog).
 
-Phones (under `layout::PHONE_BELOW` = 80 columns, whatever the layout setting; phone terminals
+Phones (under `layout::PHONE_BELOW` = 80 columns; phone terminals
 are about 40–60 columns in portrait) show one thing at a time: Rakumux mode is the session list
-alone, full screen; a tap on a session (or `Enter`) goes into it, and session mode gives it the
+alone in Master detail and Tabs, or the cards in Grid, full screen; a tap on a session (or `Enter`) goes into it, and session mode gives it the
 screen under a row of tabs, one per session (no folder filter, no title row; a tap on a tab switches
 session and stays in session mode). `Ctrl-\` (or a tap on the SESSION badge) goes back to the list.
 Moving through the list on a phone doesn't resize anything: no session is on screen there.
 
 Narrow windows (Sidebar from 80 to `layout::SINGLE_PANE_BELOW` = 100 columns): in Rakumux mode
 the list is stacked on top, a one-row divider under it, and the selected session's detail (title
-row and lightly faded preview) below, so switching sessions shows them. The list gets 40% of the rows above
+row and faded preview) below, so switching sessions shows them. The list gets 40% of the rows above
 the footer, at least `LIST_MIN_ROWS` (9: the folder filter and two sessions) and leaving the detail
 `PREVIEW_MIN_ROWS` (4); dragging the divider sets that share (`sessions.stacked_list_percent`).
 Below `STACK_MIN_ROWS` (14 rows above the footer, a 15-row screen) Rakumux mode shows the list
@@ -617,7 +631,7 @@ each has a header row (name, branch, live/total; selectable), and with one there
 list never reorders by itself: activity doesn't move a session or a group. The launch folder's
 group comes first, then the others by folder name, then path. In a folder, pinned sessions lead;
 both they and the others follow the order the user set, and sessions without a place go last,
-oldest first, so a new session appears just above "+ New session". Both layouts share it.
+oldest first, so a new session appears just above "+ New session". All layouts share it.
 Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
 held); `J`/`K` move it one place. Moves stay in the session's folder and its pinned or unpinned
 part, and are saved as `sessions.session_order`. A click without movement still just selects.
@@ -630,6 +644,18 @@ folder, retained on the folder filter and "+ New session" rows; a single-folder 
 precedence; without folder context, the launch folder). A session made in a folder the filter
 hides adds that folder to the filter. Other folders, commands and startup commands are CLI-only:
 `rakumux new --cwd DIR --cmd C -- ARGV`.
+
+**Grid.** Settings → General → Layout or `v` in Rakumux mode cycles Master detail, Grid and
+Tabs. Grid fills the body above the one-row footer with up to six terminal cards, including on
+phones. Arrows or `h`/`j`/`k`/`l` select cards, PgUp/PgDn change page, Home/End go to the ends;
+`P` and `/` keep filtering folders and text. Enter or a tap opens a session full screen under
+tabs; `Ctrl-\` returns to Grid. `n` or the last + New session card creates immediately.
+Only visible cards attach, always as observers, and are cancelled offscreen, on activation,
+layout change, disconnect or shutdown. Previews use passive, zero-scrollback mirrors, bounded
+mailboxes and checked generations; saved output is read with a cap. Browsing never sends
+Promote, Resize, Fit, terminal input, Touch, clipboard, bell or terminal-query replies, even
+through the hidden detail path. Cards crop/pan rather than resizing terminals. Default config
+and wire spelling stays `sidebar`, now labelled Master detail; `grid` and `tabs` persist too.
 
 The Folders modal (`P`, Enter on or a click on the folder filter; `AppMode::Folders`,
 `app/folders.rs`) lists All folders (ticked when there's no filter), then every folder that has

@@ -277,6 +277,15 @@ impl Inner {
             }
         }
         state.binding_seq = state.binding_seq.max(handed.binding_seq);
+        for (id, update, received_ms) in handed.activity {
+            if super::activity::validate(&update).is_ok()
+                && now_ms().saturating_sub(received_ms) < super::activity::FRESH_MS
+            {
+                if let Some(live) = state.live.get_mut(&id) {
+                    live.tracker.on_activity(&update, received_ms);
+                }
+            }
+        }
         crate::log_info!(
             "control: {} running session(s) carried over, {restored} with their token",
             state.live.len()
@@ -289,6 +298,15 @@ impl Inner {
         let handed = {
             let state = self.lock();
             ControlHandoff {
+                activity: state
+                    .live
+                    .iter()
+                    .filter_map(|(id, live)| {
+                        live.tracker
+                            .activity_handoff()
+                            .map(|(update, received_ms)| (id.clone(), update, received_ms))
+                    })
+                    .collect(),
                 tokens: state.tokens.export(),
                 spawn_env: state
                     .spawn_env
@@ -1085,7 +1103,17 @@ impl Inner {
         report: Report,
     ) -> Result<(), ApiError> {
         validate_report(&report)?;
+        if let Some(activity) = &report.activity {
+            super::activity::validate(activity)?;
+            if self.runtime(state, record).status != SessionStatus::Live {
+                return Err(ApiError::new(
+                    ErrorCode::SessionNotLive,
+                    "activity requires a live session",
+                ));
+            }
+        }
         let Report {
+            activity,
             state: lifecycle,
             text,
             result,
@@ -1096,6 +1124,23 @@ impl Inner {
         let registry = registry(&state.registry)?;
         if let Some(agent) = &agent {
             registry.set_agent(&record.id, agent)?;
+        } else if let Some(activity) = &activity {
+            let identity = AgentInfo {
+                kind: activity.agent.clone(),
+                agent_session_id: Some(activity.conversation_id.clone()),
+                agent_session_path: record
+                    .agent
+                    .as_ref()
+                    .filter(|agent| {
+                        agent.kind == activity.agent
+                            && agent.agent_session_id.as_deref()
+                                == Some(activity.conversation_id.as_str())
+                    })
+                    .and_then(|agent| agent.agent_session_path.clone()),
+            };
+            if record.agent.as_ref() != Some(&identity) {
+                registry.set_agent(&record.id, &identity)?;
+            }
         }
         if let Some(argv) = resume {
             registry.set_resume(
@@ -1120,6 +1165,9 @@ impl Inner {
         }
         if let (Some(lifecycle), Some(live)) = (lifecycle, state.live.get_mut(&record.id)) {
             live.tracker.on_report(lifecycle, now);
+        }
+        if let (Some(activity), Some(live)) = (&activity, state.live.get_mut(&record.id)) {
+            live.tracker.on_activity(activity, now);
         }
         if let Some(reported) = reported {
             self.publish(
@@ -2125,6 +2173,14 @@ impl Inner {
             agent: merge_agent(detected_agent, record.agent.as_ref()),
             reported: record.reported.clone(),
             created_by: record.created_by.clone(),
+            activity: (runtime.status == SessionStatus::Live)
+                .then(|| {
+                    state
+                        .live
+                        .get(&record.id)
+                        .and_then(|live| live.tracker.activity())
+                })
+                .flatten(),
             parent_id: record.parent_id.clone(),
             depth: record.depth,
             children,
@@ -2571,6 +2627,9 @@ fn validate_report(report: &Report) -> Result<(), ApiError> {
 
 fn report_detail(report: &Report) -> Option<String> {
     let mut parts = Vec::new();
+    if report.activity.is_some() {
+        parts.push("activity".into());
+    }
     if let Some(state) = report.state {
         parts.push(format!("state={}", waits::lifecycle_name(state)));
     }

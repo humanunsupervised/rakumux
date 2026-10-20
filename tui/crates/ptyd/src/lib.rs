@@ -17,6 +17,7 @@
 
 pub mod control;
 pub mod control_api;
+#[path = "../../../../Integrations/detection.rs"]
 pub mod detect;
 pub mod git;
 pub mod handoff;
@@ -25,6 +26,7 @@ pub mod log;
 pub mod persist;
 pub mod procinfo;
 pub mod registration;
+#[path = "../../../../Integrations/recovery.rs"]
 pub mod resume;
 pub mod server;
 pub mod terminal;

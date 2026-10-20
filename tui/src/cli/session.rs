@@ -19,6 +19,9 @@ pub(crate) fn run(
 ) -> Result<i32, CliError> {
     let scope = || invocation.request_scope(api);
     match command {
+        SessionCommand::Hook { .. } | SessionCommand::HookConfig { .. } => Err(CliError::internal(
+            "hook command requires the hook transport",
+        )),
         SessionCommand::List { all } => {
             let sessions = api.list(scope()?.as_ref(), all)?;
             emit(out, &json!({ "sessions": sessions }))
@@ -94,6 +97,7 @@ fn build_report(args: ReportArgs) -> Result<Report, CliError> {
         }));
     }
     let report = Report {
+        activity: None,
         state: args.state.map(Into::into),
         text: args.text,
         result: args.summary.map(|summary| ReportResult {
@@ -275,6 +279,7 @@ mod tests {
         assert_eq!(
             api.reports.lock().unwrap()[0],
             Report {
+                activity: None,
                 state: Some(Lifecycle::Done),
                 text: Some("3 findings".into()),
                 result: Some(ReportResult {

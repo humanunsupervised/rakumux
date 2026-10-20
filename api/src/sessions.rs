@@ -272,6 +272,7 @@ mod tests {
             lifecycle: Lifecycle::None,
             agent: None,
             reported: None,
+            activity: None,
             created_by: Creator::User,
             parent_id: None,
             depth: 0,

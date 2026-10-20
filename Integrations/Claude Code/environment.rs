@@ -1,0 +1,6 @@
+pub(super) const VARIABLES: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+];

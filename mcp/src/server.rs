@@ -6,6 +6,7 @@
 
 use crate::client::{ApiClient, ToolError};
 use crate::instructions::INSTRUCTIONS;
+use crate::integrations::AgentConversation;
 use crate::tools::{self, ToolOutcome, ToolSpec};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
@@ -15,14 +16,6 @@ use rmcp::model::{
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData, ServerHandler, ServiceExt};
 use std::sync::Arc;
-
-/// OpenCode 2.x tags every tool call with the calling conversation. Its MCP
-/// servers run in a background service shared by every conversation, so
-/// the environment's session identity (if any) may belong to another
-/// session. The Rakumux plugin in OpenCode's
-/// TUI binds the conversations it shows to its Rakumux session, and calls
-/// act as that session.
-const OPENCODE_SESSION_META: &str = "ai.opencode/sessionID";
 
 /// The Rakumux MCP server.
 pub struct RakumuxServer {
@@ -69,31 +62,28 @@ impl RakumuxServer {
     async fn run_tool(
         &self,
         request: CallToolRequestParams,
-        opencode_conversation: Option<String>,
+        conversation: Option<AgentConversation>,
     ) -> Option<ToolOutcome> {
         let spec = self.specs.iter().find(|spec| spec.name == request.name)?;
         let arguments = request.arguments.unwrap_or_default();
-        let Some(conversation) = opencode_conversation else {
+        let Some(conversation) = conversation else {
             return tools::call(&self.api.caller(true), spec.name, arguments).await;
         };
         // Act as the Rakumux session that bound this conversation.
-        let bound = self.api.for_conversation("opencode", &conversation);
+        let bound = self
+            .api
+            .for_conversation(conversation.agent, &conversation.id);
         let outcome = tools::call(&bound, spec.name, arguments.clone()).await?;
         if !outcome.conversation_unbound() {
             return Some(outcome);
         }
-        // No session bound it: OpenCode runs outside Rakumux, or without
-        // the plugin. An environment identity then may be any session's:
+        // Unbound calls from a shared service cannot trust its environment identity:
         // act as the user for reads and refuse changes.
         let ambiguous = self.api.identity().is_some();
         if ambiguous && spec.mutating {
             return Some(ToolOutcome::error(&ToolError::new(
                 "permission_denied",
-                "this OpenCode conversation isn't linked to a Rakumux session, and this MCP \
-                 server is shared by every OpenCode conversation, so it can't tell which \
-                 session is calling; tools that change sessions are disabled. Install the \
-                 Rakumux plugin for OpenCode (`rakumux-mcp opencode-plugin --install`, then \
-                 restart OpenCode), or run `rakumux new --detach` from the shell tool.",
+                conversation.unbound_message,
             )));
         }
         tools::call(&self.api.caller(false), spec.name, arguments).await
@@ -127,17 +117,11 @@ impl ServerHandler for RakumuxServer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let name = request.name.to_string();
-        let conversation = |meta: &rmcp::model::RequestMetaObject| {
-            meta.0
-                 .0
-                .get(OPENCODE_SESSION_META)
-                .and_then(|value| value.as_str())
-                .filter(|id| !id.is_empty())
-                .map(str::to_owned)
-        };
-        let opencode =
+        let conversation =
+            |meta: &rmcp::model::RequestMetaObject| crate::integrations::conversation(&meta.0 .0);
+        let caller =
             conversation(&context.meta).or_else(|| request.meta.as_ref().and_then(conversation));
-        match self.run_tool(request, opencode).await {
+        match self.run_tool(request, caller).await {
             Some(outcome) => Ok(CallToolResponse::Complete(to_result(outcome))),
             None => Err(ErrorData::invalid_params(
                 format!("unknown tool `{name}`"),

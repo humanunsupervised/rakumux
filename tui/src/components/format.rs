@@ -10,6 +10,9 @@ use crate::icons::Icons;
 use crate::layout::{char_width, str_width};
 use crate::theme;
 
+#[path = "../../../Integrations/presentation.rs"]
+mod agents;
+
 pub use crate::layout::PIN_MARK;
 
 /// `⎇ main`, or `⎇ @1a2b3c4` when HEAD is detached, with the branch mark of
@@ -44,8 +47,7 @@ pub fn relative_time(now: i64, then: i64) -> String {
     }
 }
 
-/// Status glyph as documented in help: live ● (coloured by lifecycle),
-/// waiting ◐, exited ✕, dead ○.
+/// Busy spinner; static live/attention/ended markers otherwise.
 pub fn status_glyph(session: &SessionView) -> (&'static str, Style) {
     let p = theme::palette();
     match session.status {
@@ -54,7 +56,10 @@ pub fn status_glyph(session: &SessionView) -> (&'static str, Style) {
         SessionStatus::Unknown => ("?", Style::default().fg(p.text_muted)),
         SessionStatus::Live => match session.lifecycle {
             Lifecycle::Blocked => ("◐", Style::default().fg(p.accent_orange)),
-            Lifecycle::Working => ("●", Style::default().fg(p.accent_primary)),
+            Lifecycle::Working => (
+                super::utils::get_spinner_char(),
+                Style::default().fg(p.accent_primary),
+            ),
             Lifecycle::Done => ("●", Style::default().fg(p.accent_gold)),
             Lifecycle::Idle | Lifecycle::Unknown | Lifecycle::None => {
                 ("●", Style::default().fg(p.accent_green))
@@ -83,7 +88,35 @@ pub fn lifecycle_label(lifecycle: Lifecycle) -> Option<&'static str> {
 /// that hasn't said what it's doing.
 pub fn status_label(session: &SessionView) -> Option<String> {
     match session.status {
-        SessionStatus::Live => lifecycle_label(session.lifecycle).map(Into::into),
+        SessionStatus::Live => {
+            let label = match (
+                session.lifecycle,
+                session.activity.as_ref().map(|activity| activity.phase),
+            ) {
+                (
+                    Lifecycle::Working,
+                    Some(session_core::activity::ActivityPhase::WaitingForResponse),
+                ) => Some("waiting for response"),
+                (Lifecycle::Working, Some(session_core::activity::ActivityPhase::RunningTool)) => {
+                    Some("running tool")
+                }
+                _ => lifecycle_label(session.lifecycle),
+            };
+            let count = session
+                .activity
+                .as_ref()
+                .map_or(0, |activity| activity.active_subagents);
+            label.map(|label| {
+                if count > 0 {
+                    format!(
+                        "{label} · {count} subagent{}",
+                        if count == 1 { "" } else { "s" }
+                    )
+                } else {
+                    label.into()
+                }
+            })
+        }
         SessionStatus::Exited => Some(match session.exit_code {
             Some(code) => format!("exited (code {code})"),
             None => "exited".into(),
@@ -133,17 +166,10 @@ pub fn secondary_line(
     }
 }
 
-/// Stable app colours from the active terminal palette, not its lifecycle.
+/// Quiet blue app labels, independent of lifecycle and its status colours.
 fn program_color(program: &str) -> Color {
     let p = theme::palette();
-    match program.to_ascii_lowercase().as_str() {
-        "claude" => p.accent_orange,
-        "codex" => p.accent_green,
-        "opencode" => p.accent_purple,
-        "pi" => p.accent_gold,
-        "gemini" => p.accent_primary,
-        _ => p.accent_pink,
-    }
+    agents::color(&program.to_ascii_lowercase()).unwrap_or(p.label_blue)
 }
 
 /// Description fitted to `width` columns. A plain shell with nothing to
@@ -186,8 +212,8 @@ fn session_facts(session: &SessionView, icons: Icons) -> Vec<String> {
         SessionStatus::Dead => parts.push("dead · ⏎ revive".into()),
         SessionStatus::Exited => parts.push("exited · ⏎ restart".into()),
         _ => {
-            if let Some(label) = lifecycle_label(session.lifecycle) {
-                parts.push(label.into());
+            if let Some(label) = status_label(session) {
+                parts.push(label);
             }
         }
     }
@@ -342,20 +368,20 @@ mod tests {
     }
 
     #[test]
-    fn app_names_are_colour_coded_without_colouring_the_branch_or_state() {
+    fn app_names_use_muted_blues_without_colouring_the_branch_or_state() {
         let p = theme::palette();
         let detail_style = Style::default().fg(p.text_muted);
         let mut session = view("A", "a", 0);
         session.git = Some(git(Some("main"), None, None));
         session.lifecycle = Lifecycle::Working;
         for (program, color) in [
-            ("claude", p.accent_orange),
-            ("codex", p.accent_green),
-            ("opencode", p.accent_purple),
-            ("pi", p.accent_gold),
-            ("gemini", p.accent_primary),
-            ("cargo", p.accent_pink),
-            ("OpenCode", p.accent_purple),
+            ("claude", p.label_blue),
+            ("codex", p.label_steel_blue),
+            ("opencode", p.label_slate_blue),
+            ("pi", p.label_blue),
+            ("gemini", p.label_blue),
+            ("cargo", p.label_blue),
+            ("OpenCode", p.label_slate_blue),
         ] {
             session.terminal.as_mut().unwrap().foreground_process = Some(program.into());
             let line = secondary_line(&session, 80, Icons::Plain, detail_style);
@@ -379,7 +405,10 @@ mod tests {
             for width in 0..80 {
                 let line = secondary_line(&session, width, icons, style);
                 assert!(line.width() <= width);
-                assert_eq!(line.spans[0].style.fg, Some(theme::palette().accent_purple));
+                assert_eq!(
+                    line.spans[0].style.fg,
+                    Some(theme::palette().label_slate_blue)
+                );
             }
         }
         let line = secondary_line(&session, 5, Icons::Plain, style);
@@ -433,6 +462,32 @@ mod tests {
         assert_eq!(truncate("abc", 4), "abc");
         assert_eq!(truncate_middle("/tmp/one/two/three", 10), "/tmp…three");
         assert_eq!(truncate_middle("short", 10), "short");
+    }
+
+    #[test]
+    fn busy_phases_spin_and_subagent_counts_do_not_animate_attention_or_done() {
+        use session_core::activity::{ActivityPhase, AgentActivity};
+        let mut session = view("A", "agent", 0);
+        session.lifecycle = Lifecycle::Working;
+        session.activity = Some(AgentActivity {
+            phase: ActivityPhase::WaitingForResponse,
+            active_subagents: 3,
+            updated_at: 1,
+        });
+        assert_eq!(
+            status_label(&session).as_deref(),
+            Some("waiting for response · 3 subagents")
+        );
+        assert!("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(status_glyph(&session).0));
+        session.lifecycle = Lifecycle::Blocked;
+        assert_eq!(status_glyph(&session).0, "◐");
+        assert_eq!(
+            status_label(&session).as_deref(),
+            Some("waiting for you · 3 subagents")
+        );
+        session.lifecycle = Lifecycle::Done;
+        session.activity = None;
+        assert_eq!(status_glyph(&session).0, "●");
     }
 
     #[test]

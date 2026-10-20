@@ -43,6 +43,9 @@ pub struct Session {
     /// program: untrusted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reported: Option<Reported>,
+    /// Normalized hook activity. Unix time is converted to RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<Activity>,
     pub created_by: Creator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
@@ -94,6 +97,14 @@ pub struct Agent {
     pub session_id: Option<String>,
 }
 
+/// Fresh, normalized agent-hook metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Activity {
+    pub phase: session_core::activity::ActivityPhase,
+    pub active_subagents: u16,
+    pub updated_at: String,
+}
+
 /// A session's self-report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reported {
@@ -142,6 +153,11 @@ impl From<SessionView> for Session {
                 session_id: agent.agent_session_id,
             }),
             reported: view.reported.map(Reported::from),
+            activity: view.activity.map(|activity| Activity {
+                phase: activity.phase,
+                active_subagents: activity.active_subagents,
+                updated_at: rfc3339(activity.updated_at),
+            }),
             created_by: view.created_by,
             parent_id: view.parent_id.map(|id| id.as_str().to_owned()),
             depth: view.depth,
@@ -658,6 +674,7 @@ mod tests {
                 }),
                 at: 0,
             }),
+            activity: None,
             created_by: Creator::Session {
                 id: SessionId::from_string("PARENT"),
             },

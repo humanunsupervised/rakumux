@@ -50,56 +50,12 @@ const TICK_ANIMATING: Duration = Duration::from_millis(100);
 
 enum RunOutcome {
     Exit,
-    Restart,
+    Restart(Option<std::path::PathBuf>),
     SwitchDirectory(String),
 }
 
-fn restart_current_process() -> Result<()> {
-    restart::current_process().map_err(Into::into)
-}
-
-async fn check_and_perform_update() -> Result<()> {
-    let state = updater::UpdateState::load()?;
-
-    if !state.pending_upgrade {
-        return Ok(());
-    }
-
-    if let (Some(version), Some(method_str)) =
-        (state.latest_version.clone(), state.install_method.clone())
-    {
-        eprintln!("🔄 Rakumux is upgrading to version {}...", version);
-
-        let method = match method_str.as_str() {
-            "npm" => updater::InstallMethod::Npm,
-            "homebrew" => updater::InstallMethod::Homebrew,
-            _ => return Ok(()),
-        };
-
-        match updater::perform_upgrade(method) {
-            Ok(_) => {
-                eprintln!("✅ Upgrade initiated successfully!");
-                eprintln!("   Restarting Rakumux with the upgraded version...");
-
-                let mut new_state = state;
-                new_state.clear_pending_upgrade();
-
-                restart_current_process()?;
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("❌ Upgrade failed: {}", e);
-                eprintln!("   You can manually upgrade using:");
-                match method {
-                    updater::InstallMethod::Npm => eprintln!("   npm install -g rakumux"),
-                    updater::InstallMethod::Homebrew => eprintln!("   brew upgrade rakumux"),
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    Ok(())
+fn restart_current_process(launcher: Option<&std::path::Path>) -> Result<()> {
+    restart::current_process(launcher).map_err(Into::into)
 }
 
 /// Note a newer release for the next start (runs in the background).
@@ -110,9 +66,11 @@ async fn check_for_updates_background() -> Result<()> {
     }
     if let Some((latest_version, method)) = updater::check_for_updates(app_version()).await? {
         state.mark_update_available(latest_version, method);
+    } else {
+        state.clear_pending_upgrade();
     }
     state.update_last_check();
-    Ok(())
+    state.save()
 }
 
 fn print_cli_help() {
@@ -168,11 +126,6 @@ async fn main() -> Result<()> {
     // CLI subcommands (`rakumux new`, `ls`, `session …`) run without the TUI.
     if let Some(code) = cli::dispatch(&std::env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
-    }
-
-    // Perform a pending upgrade BEFORE starting the TUI.
-    if let Err(e) = check_and_perform_update().await {
-        eprintln!("Update check failed: {}", e);
     }
 
     let args: Vec<String> = std::env::args().collect();
@@ -258,6 +211,7 @@ async fn main() -> Result<()> {
             layout: phone_layout,
             ptyd_path: cli.ptyd_path.clone(),
         }),
+        updater: std::sync::Arc::new(updater::SystemUpdateService),
         exec_mode: ExecMode::Threaded,
         debug,
     });
@@ -326,7 +280,7 @@ async fn main() -> Result<()> {
 
     match outcome {
         RunOutcome::Exit => Ok(()),
-        RunOutcome::Restart => restart_current_process(),
+        RunOutcome::Restart(launcher) => restart_current_process(launcher.as_deref()),
         RunOutcome::SwitchDirectory(path) => {
             // The shell wrapper evaluates this line.
             println!("cd \"{}\"", path);
@@ -604,7 +558,7 @@ async fn run_app<B: ratatui::backend::Backend + Write>(
             dirty = false;
         }
         if app.restart_requested {
-            return Ok(RunOutcome::Restart);
+            return Ok(RunOutcome::Restart(app.restart_launcher.clone()));
         }
     }
 }

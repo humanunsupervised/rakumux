@@ -20,6 +20,10 @@ pub struct Palette {
     pub text_muted: Color,
     pub text_subtle: Color,
     pub neutral_gray: Color,
+    /// Muted blue shades for secondary app-name labels.
+    pub label_blue: Color,
+    pub label_steel_blue: Color,
+    pub label_slate_blue: Color,
     pub accent_primary: Color,
     pub accent_green: Color,
     pub accent_orange: Color,
@@ -275,6 +279,9 @@ impl Theme {
                 text_muted: Color::Rgb(86, 95, 137),
                 text_subtle: Color::Rgb(84, 92, 126),
                 neutral_gray: Color::Rgb(115, 122, 162),
+                label_blue: Color::Rgb(119, 142, 205),
+                label_steel_blue: Color::Rgb(113, 146, 179),
+                label_slate_blue: Color::Rgb(125, 134, 176),
                 accent_primary: Color::Rgb(122, 162, 247),
                 accent_green: Color::Rgb(158, 206, 106),
                 accent_orange: Color::Rgb(255, 158, 100),
@@ -296,20 +303,23 @@ impl Theme {
     fn basic(support: ColorSupport) -> Theme {
         let palette = match support {
             ColorSupport::Truecolor | ColorSupport::Ansi256 => Palette {
-                background: Color::Indexed(17),      // #00005f
-                surface: Color::Indexed(18),         // #000087
-                border: Color::Indexed(111),         // #87afff ≈ blue
-                text_primary: Color::Indexed(189),   // #d7d7ff ≈ fg
-                text_bright: Color::Indexed(231),    // #ffffff
-                text_muted: Color::Indexed(60),      // #5f5f87 ≈ comment
-                text_subtle: Color::Indexed(60),     // ≈ dark3
-                neutral_gray: Color::Indexed(103),   // #8787af ≈ dark5
-                accent_primary: Color::Indexed(111), // ≈ blue
-                accent_green: Color::Indexed(149),   // #afd75f ≈ green
-                accent_orange: Color::Indexed(215),  // #ffaf5f ≈ orange
-                accent_pink: Color::Indexed(204),    // #ff5f87 ≈ red
-                accent_purple: Color::Indexed(141),  // #af87ff ≈ purple
-                accent_gold: Color::Indexed(179),    // #d7af5f ≈ yellow
+                background: Color::Indexed(17),        // #00005f
+                surface: Color::Indexed(18),           // #000087
+                border: Color::Indexed(111),           // #87afff ≈ blue
+                text_primary: Color::Indexed(189),     // #d7d7ff ≈ fg
+                text_bright: Color::Indexed(231),      // #ffffff
+                text_muted: Color::Indexed(60),        // #5f5f87 ≈ comment
+                text_subtle: Color::Indexed(60),       // ≈ dark3
+                neutral_gray: Color::Indexed(103),     // #8787af ≈ dark5
+                label_blue: Color::Indexed(68),        // #5f87d7
+                label_steel_blue: Color::Indexed(67),  // #5f87af
+                label_slate_blue: Color::Indexed(103), // #8787af
+                accent_primary: Color::Indexed(111),   // ≈ blue
+                accent_green: Color::Indexed(149),     // #afd75f ≈ green
+                accent_orange: Color::Indexed(215),    // #ffaf5f ≈ orange
+                accent_pink: Color::Indexed(204),      // #ff5f87 ≈ red
+                accent_purple: Color::Indexed(141),    // #af87ff ≈ purple
+                accent_gold: Color::Indexed(179),      // #d7af5f ≈ yellow
                 panel: Color::Indexed(17),
                 selection: Color::Indexed(18),
                 border_dim: Color::Indexed(238), // #444444 ≈ fg_gutter
@@ -323,6 +333,9 @@ impl Theme {
                 text_muted: Color::DarkGray,
                 text_subtle: Color::Gray,
                 neutral_gray: Color::Gray,
+                label_blue: Color::Blue,
+                label_steel_blue: Color::Cyan,
+                label_slate_blue: Color::Blue,
                 accent_primary: Color::LightBlue,
                 accent_green: Color::LightGreen,
                 accent_orange: Color::Yellow,
@@ -465,6 +478,44 @@ mod tests {
         };
         let (r, g, b) = cube(text);
         assert!(b >= r && b >= g, "text {:?}", (r, g, b));
+    }
+
+    #[test]
+    fn app_label_blues_are_readable_and_quieter_than_titles() {
+        fn luminance(color: Color) -> f64 {
+            let (r, g, b) = rgb(color).unwrap();
+            let linear = |channel: u8| {
+                let channel = f64::from(channel) / 255.0;
+                if channel <= 0.04045 {
+                    channel / 12.92
+                } else {
+                    ((channel + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+        }
+        let p = Theme::tokyo_night().palette;
+        for label in [p.label_blue, p.label_steel_blue, p.label_slate_blue] {
+            let (r, g, b) = rgb(label).unwrap();
+            assert!(b > r && b > g);
+            assert!((luminance(label) + 0.05) / (luminance(p.panel) + 0.05) >= 4.5);
+            assert!(luminance(label) < luminance(p.text_primary));
+            assert!(luminance(label) < luminance(p.accent_primary));
+        }
+        let indexed = Theme::basic(ColorSupport::Ansi256).palette;
+        for label in [
+            indexed.label_blue,
+            indexed.label_steel_blue,
+            indexed.label_slate_blue,
+        ] {
+            assert!(matches!(label, Color::Indexed(_)));
+            let (r, g, b) = rgb(label).unwrap();
+            assert!(b > r && b > g);
+        }
+        let ansi = Theme::basic(ColorSupport::Ansi16).palette;
+        assert_eq!(ansi.label_blue, Color::Blue);
+        assert_eq!(ansi.label_steel_blue, Color::Cyan);
+        assert_eq!(ansi.label_slate_blue, Color::Blue);
     }
 
     #[test]

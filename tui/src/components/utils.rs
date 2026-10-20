@@ -4,10 +4,10 @@ use ratatui::style::Modifier;
 
 use crate::theme;
 
-/// Keep three quarters of the contrast in saved output or under a dialog.
-pub(crate) const FADE_TEXT: f32 = 0.25;
-/// Live previews keep most of their contrast while the session list takes keys.
-pub(crate) const PREVIEW_FADE: f32 = 0.12;
+/// Strongly recede saved output and the session behind a dialog.
+pub(crate) const FADE_TEXT: f32 = 0.45;
+/// Clearly separate the inactive preview from the session list taking keys.
+pub(crate) const PREVIEW_FADE: f32 = 0.30;
 
 /// Fade saved output or the session pane under a dialog. Palettes that can't
 /// fade colours (16 colours) dim the text instead.
@@ -15,7 +15,7 @@ pub fn fade(buf: &mut Buffer, area: Rect) {
     fade_by(buf, area, FADE_TEXT);
 }
 
-/// Lightly fade a live session preview without making it look unavailable.
+/// Fade a live preview while preserving its readable text and colour cues.
 pub fn fade_preview(buf: &mut Buffer, area: Rect) {
     fade_by(buf, area, PREVIEW_FADE);
 }
@@ -37,14 +37,18 @@ fn fade_by(buf: &mut Buffer, area: Rect, amount: f32) {
     }
 }
 
-/// Simple spinner animation for renaming sessions
+/// Shared 100 ms spinner for busy sessions and background operations.
 pub fn get_spinner_char() -> &'static str {
-    let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let index = ((now / 100) % spinner_chars.len() as u128) as usize;
+    spinner_frame(now)
+}
+
+fn spinner_frame(milliseconds: u128) -> &'static str {
+    let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let index = ((milliseconds / 100) % spinner_chars.len() as u128) as usize;
     spinner_chars[index]
 }
 
@@ -186,7 +190,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fading_keeps_three_quarters_of_the_contrast_and_stays_within_the_pane() {
+    fn the_shared_working_spinner_advances_every_100_ms() {
+        assert_eq!(spinner_frame(0), spinner_frame(99));
+        for frame in 0..10 {
+            assert_ne!(spinner_frame(frame * 100), spinner_frame((frame + 1) * 100));
+        }
+        assert_eq!(spinner_frame(0), spinner_frame(1000));
+    }
+
+    #[test]
+    fn dialog_fading_is_pronounced_and_stays_within_the_pane() {
         let p = theme::palette();
         let mut buffer = Buffer::empty(Rect::new(0, 0, 2, 1));
         buffer
@@ -197,20 +210,25 @@ mod tests {
         fade(&mut buffer, Rect::new(0, 0, 1, 1));
 
         let cell = buffer.get(0, 0);
-        match p.faded(p.text_primary, 0.25) {
+        match p.faded(p.text_primary, FADE_TEXT) {
             Some(fg) => {
                 assert_eq!(cell.fg, fg);
                 assert!(!cell.modifier.contains(Modifier::DIM));
             }
             None => assert!(cell.modifier.contains(Modifier::DIM)),
         }
-        assert_eq!(cell.bg, p.faded(p.selection, 0.25).unwrap_or(p.selection));
+        assert_eq!(
+            cell.bg,
+            p.faded(p.selection, FADE_TEXT).unwrap_or(p.selection)
+        );
         assert!(cell.modifier.contains(Modifier::BOLD));
         assert_eq!(buffer.get(1, 0), &outside);
     }
 
     #[test]
     fn preview_fading_is_lighter_than_dialog_fading_and_stays_within_the_pane() {
+        assert_eq!(PREVIEW_FADE, 0.30);
+        assert_eq!(FADE_TEXT, 0.45);
         let p = theme::palette();
         let mut preview = Buffer::empty(Rect::new(0, 0, 2, 1));
         preview

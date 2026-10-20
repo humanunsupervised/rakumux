@@ -1,6 +1,6 @@
 //! Agent detection: which coding agent runs in a terminal and what it is
 //! doing, from the foreground process and the visible screen. Pure functions;
-//! the control layer combines the result with self-reports.
+//! the control layer combines the result with self-reports and hook events.
 //!
 //! **Which agent.** The foreground process's name and command line are
 //! matched against known executables (`claude`, `codex`, …) and package
@@ -27,6 +27,20 @@
 
 use crate::host::ProcessInfo;
 use session_core::model::Lifecycle;
+
+#[path = "Claude Code/detection.rs"]
+mod claude;
+#[path = "Codex/detection.rs"]
+mod codex;
+#[path = "Open Code/detection.rs"]
+mod opencode;
+use claude::PROFILE as CLAUDE;
+#[cfg(test)]
+use claude::{is_claude_activity_line, is_numbered_yes_option};
+use codex::PROFILE as CODEX;
+#[cfg(test)]
+use opencode::has_opencode_progress_bar;
+use opencode::PROFILE as OPENCODE;
 
 #[derive(Debug, Clone, Copy)]
 pub struct DetectInput<'a> {
@@ -151,132 +165,6 @@ static PROFILES: &[Profile] = &[
     generic("devin", &["devin"], &[]),
     generic("qodercli", &["qodercli"], &[]),
 ];
-
-/// Claude Code. Captured: 2.1.296 (alternate screen, `❯` input box between
-/// two rules, footer with mode and `esc to interrupt` while busy, title
-/// `✳ Claude Code` idle and a `◐◑◒◓` spinner busy); older versions used a
-/// braille title spinner and a rounded `│ > ` input box.
-const CLAUDE: Profile = Profile {
-    label: "claude",
-    names: &["claude", "claude-code"],
-    packages: &[&["@anthropic-ai", "claude-code"]],
-    title_hint: |title| title.starts_with("✳ ") || contains_ci(title, "claude code"),
-    blocked: &[
-        // Forms: folder trust, questions, plan approval.
-        marker(
-            Region::AfterLastRule,
-            Test::And(
-                &Test::All(&["esc to cancel"]),
-                &Test::Any(&["enter to confirm", "enter to select", "enter to submit"]),
-            ),
-        ),
-        // Permission prompts: a question with numbered Yes/No options.
-        marker(
-            Region::Bottom(20),
-            Test::And(
-                &Test::Any(&["do you want to", "would you like to"]),
-                &Test::Line(is_numbered_yes_option),
-            ),
-        ),
-        marker(Region::Bottom(12), Test::Any(&["waiting for permission"])),
-    ],
-    working: &[
-        marker(Region::Title, Test::Line(starts_with_claude_title_spinner)),
-        marker(Region::AfterLastRule, Test::Any(&["esc to interrupt"])),
-        marker(Region::Bottom(12), Test::Line(is_claude_activity_line)),
-    ],
-    idle: &[
-        marker(Region::PromptBox, Test::Line(|l| l.starts_with('❯'))),
-        marker(
-            Region::Bottom(8),
-            Test::Line(|l| l.starts_with("│ >") || l.starts_with("│ ❯")),
-        ),
-        marker(Region::Title, Test::Line(|t| t.starts_with("✳ "))),
-    ],
-    quiet: Lifecycle::Unknown,
-    output_means_working: false,
-};
-
-/// OpenAI Codex CLI (`›` composer, `Working (12s • esc to interrupt)`
-/// status, approval overlays ending in "Press enter to confirm or esc to
-/// cancel", braille title spinner, "Action Required" title).
-const CODEX: Profile = Profile {
-    label: "codex",
-    names: &["codex"],
-    packages: &[&["@openai", "codex"]],
-    title_hint: |title| has_word(title, "codex"),
-    blocked: &[
-        marker(Region::Title, Test::Any(&["action required"])),
-        marker(
-            Region::Bottom(20),
-            Test::Any(&[
-                "press enter to confirm or esc to cancel",
-                "enter to submit answer",
-                "enter to submit all",
-                "allow command?",
-                "would you like to run the following command?",
-                "would you like to make the following edits?",
-                "do you trust the contents of this directory?",
-                "trust this folder?",
-            ]),
-        ),
-        marker(
-            Region::Bottom(20),
-            Test::All(&["update available", "skip until next version"]),
-        ),
-    ],
-    working: &[
-        marker(Region::Title, Test::Line(has_braille_spinner_word)),
-        marker(Region::Bottom(12), Test::Any(&["esc to interrupt)"])),
-    ],
-    idle: &[marker(
-        Region::Bottom(8),
-        Test::Line(|l| l == "›" || l.starts_with("› ")),
-    )],
-    quiet: Lifecycle::Unknown,
-    output_means_working: false,
-};
-
-/// OpenCode. Captured: 1.18.16 (alternate screen, `tab agents  ctrl+p
-/// commands` under the input box, update dialog). From its UI strings:
-/// `esc interrupt` / `esc again to interrupt` and a `■⬝` progress bar while
-/// busy, `△ Permission required` with Allow once / Allow always / Reject.
-const OPENCODE: Profile = Profile {
-    label: "opencode",
-    names: &["opencode"],
-    packages: &[&["opencode-ai"]],
-    title_hint: |title| has_word(title, "opencode"),
-    blocked: &[
-        marker(
-            Region::Screen,
-            Test::And(
-                &Test::All(&["△ permission required"]),
-                &Test::Any(&["allow once", "allow always", "reject"]),
-            ),
-        ),
-        marker(
-            Region::Bottom(12),
-            Test::And(
-                &Test::All(&["esc dismiss"]),
-                &Test::Any(&["enter confirm", "enter submit", "enter toggle"]),
-            ),
-        ),
-        marker(
-            Region::Screen,
-            Test::All(&["update available", "would you like to update"]),
-        ),
-    ],
-    working: &[
-        marker(
-            Region::Bottom(12),
-            Test::Any(&["esc interrupt", "again to interrupt"]),
-        ),
-        marker(Region::Bottom(12), Test::Line(has_opencode_progress_bar)),
-    ],
-    idle: &[marker(Region::Screen, Test::Any(&["ctrl+p commands"]))],
-    quiet: Lifecycle::Unknown,
-    output_means_working: false,
-};
 
 /// Pi coding agent. Captured: 0.75.5 (inline, editor between rules, footer
 /// with context usage `0.0%/0`; busy loader `⠇ Running... (escape/ctrl+c to
@@ -438,9 +326,6 @@ const fn generic(
 // Line predicates
 // ---------------------------------------------------------------------------
 
-/// Glyphs Claude Code cycles through in its in-screen activity line.
-const CLAUDE_ACTIVITY_GLYPHS: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '*'];
-
 fn is_braille(c: char) -> bool {
     ('\u{2800}'..='\u{28FF}').contains(&c)
 }
@@ -455,68 +340,12 @@ fn split_glyph(line: &str) -> Option<(char, &str)> {
         .filter(|(_, rest)| !rest.is_empty())
 }
 
-/// Claude's live activity line: `✶ Pondering… (12s · ↓ 1.2k tokens)`,
-/// `* Thinking… (esc to interrupt)`. The ellipsis ends the verb; a finished
-/// turn's summary (`✻ Worked for 12s`) has none.
-fn is_claude_activity_line(line: &str) -> bool {
-    let Some((glyph, rest)) = split_glyph(line) else {
-        return false;
-    };
-    if !CLAUDE_ACTIVITY_GLYPHS.contains(&glyph) {
-        return false;
-    }
-    match rest.find('…') {
-        Some(at) => {
-            let after = rest[at + '…'.len_utf8()..].trim_start();
-            after.is_empty() || after.starts_with('(')
-        }
-        None => false,
-    }
-}
-
-/// Claude's busy title: a braille or half-circle spinner, then a space.
-fn starts_with_claude_title_spinner(title: &str) -> bool {
-    split_glyph(title).is_some_and(|(glyph, _)| is_braille(glyph) || ('◐'..='◓').contains(&glyph))
-}
-
 /// A braille spinner frame as a separate word anywhere in the line.
 fn has_braille_spinner_word(line: &str) -> bool {
     line.split_whitespace().any(|word| {
         let mut chars = word.chars();
         matches!((chars.next(), chars.next()), (Some(c), None) if is_braille(c) && c != '\u{2800}')
     })
-}
-
-/// `❯ 1. Yes`, `  2. Yes, and don't ask again …`, `1. Yes, proceed`.
-fn is_numbered_yes_option(line: &str) -> bool {
-    let option = line.trim_start_matches(['❯', '›', '>', ' ']);
-    let Some(rest) = option.strip_prefix(|c: char| c.is_ascii_digit()) else {
-        return false;
-    };
-    let Some(label) = rest.strip_prefix(". ") else {
-        return false;
-    };
-    let word = label
-        .split(|c: char| !c.is_alphabetic())
-        .next()
-        .unwrap_or("");
-    word.eq_ignore_ascii_case("yes")
-}
-
-/// OpenCode's busy bar: at least four consecutive `■`/`⬝` cells.
-fn has_opencode_progress_bar(line: &str) -> bool {
-    let mut run = 0;
-    for c in line.chars() {
-        if c == '■' || c == '⬝' {
-            run += 1;
-            if run >= 4 {
-                return true;
-            }
-        } else {
-            run = 0;
-        }
-    }
-    false
 }
 
 /// Pi's loader: braille frame, then a message with an ellipsis.

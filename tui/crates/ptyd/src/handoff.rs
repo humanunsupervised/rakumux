@@ -73,6 +73,9 @@ pub struct ClaimHandoff {
 /// The control layer's memory.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ControlHandoff {
+    /// Ephemeral activity snapshots and their original receive times.
+    #[serde(default)]
+    pub activity: Vec<(SessionId, session_core::activity::ActivityUpdate, i64)>,
     /// Session tokens: the programs inside sessions keep authenticating.
     #[serde(default)]
     pub tokens: Vec<(SessionId, String)>,

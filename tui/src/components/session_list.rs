@@ -166,7 +166,9 @@ fn session_content(
         )
     } else {
         (
-            Style::default().fg(p.neutral_gray),
+            Style::default()
+                .fg(p.text_primary)
+                .add_modifier(Modifier::BOLD),
             p.text_muted,
             p.text_muted,
         )
@@ -416,7 +418,7 @@ mod tests {
             let lines = session_content(&h.app, &session, 40, selected, 0);
             let second = &lines[1];
             assert_eq!(second[1].content, "opencode");
-            assert_eq!(second[1].style.fg, Some(p.accent_purple));
+            assert_eq!(second[1].style.fg, Some(p.label_slate_blue));
             assert_eq!(second[2].content, " · ⎇ main");
             assert_eq!(
                 second[2].style.fg,
@@ -427,6 +429,39 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn session_titles_are_prominent_without_increasing_row_height() {
+        use crate::app::testing::{harness, view};
+        let h = harness(vec![]);
+        let mut session = view("A", "A descriptive session title", 0);
+        session.agent = Some(session_core::model::AgentInfo {
+            kind: "opencode".into(),
+            ..Default::default()
+        });
+        let p = theme::palette();
+        for width in [12, 24, 40, 80] {
+            for selected in [false, true] {
+                let lines = session_content(&h.app, &session, width, selected, 0);
+                assert_eq!(lines.len(), 2);
+                let title = &lines[0][2];
+                assert!(title.style.add_modifier.contains(Modifier::BOLD));
+                assert_eq!(
+                    title.style.fg,
+                    Some(if selected {
+                        p.text_bright
+                    } else {
+                        p.text_primary
+                    })
+                );
+                assert!(!lines[1][1].style.add_modifier.contains(Modifier::BOLD));
+                assert!(lines
+                    .iter()
+                    .all(|line| Line::from(line.clone()).width() <= width));
+            }
+        }
+        assert_eq!(row_height(&ListRow::Session(&session)), 3);
     }
 
     #[test]

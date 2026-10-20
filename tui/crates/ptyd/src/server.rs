@@ -55,6 +55,7 @@ pub const VERSION: &str = match option_env!("RAKUMUX_VERSION") {
 
 /// Optional features this daemon supports (`HelloOk::capabilities`).
 pub const CAPABILITIES: &[&str] = &[
+    session_core::api::CAPABILITY_ACTIVITY,
     "attach",
     "subscribe",
     "list",

@@ -50,6 +50,7 @@ pub fn view(id: &str, name: &str, last_active_at: i64) -> SessionView {
         lifecycle: Lifecycle::None,
         agent: None,
         reported: None,
+        activity: None,
         created_by: Creator::User,
         parent_id: None,
         depth: 0,
@@ -723,6 +724,47 @@ pub struct Harness {
     pub home: tempfile::TempDir,
 }
 
+#[derive(Default)]
+pub struct FakeUpdater {
+    pub latest: Mutex<Option<String>>,
+    pub check_error: Mutex<Option<String>>,
+    pub install_error: Mutex<Option<String>>,
+    pub launcher: Mutex<Option<std::path::PathBuf>>,
+    pub calls: Mutex<Vec<String>>,
+}
+
+impl crate::updater::UpdateService for FakeUpdater {
+    fn check(
+        &self,
+        _current: &str,
+    ) -> anyhow::Result<Option<(String, crate::updater::InstallMethod)>> {
+        self.calls.lock().unwrap().push("check".into());
+        if let Some(error) = self.check_error.lock().unwrap().as_ref() {
+            anyhow::bail!("{error}");
+        }
+        Ok(self
+            .latest
+            .lock()
+            .unwrap()
+            .clone()
+            .map(|version| (version, crate::updater::InstallMethod::Binary)))
+    }
+    fn install(
+        &self,
+        version: &str,
+        _method: crate::updater::InstallMethod,
+    ) -> anyhow::Result<Option<std::path::PathBuf>> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("install {version}"));
+        if let Some(error) = self.install_error.lock().unwrap().as_ref() {
+            anyhow::bail!("{error}");
+        }
+        Ok(self.launcher.lock().unwrap().clone())
+    }
+}
+
 pub fn options(fake: &Arc<FakeApi>, scope: ScopeRoot, dir: &tempfile::TempDir) -> AppOptions {
     let api: Arc<dyn SessionApi> = fake.clone();
     AppOptions {
@@ -734,6 +776,7 @@ pub fn options(fake: &Arc<FakeApi>, scope: ScopeRoot, dir: &tempfile::TempDir) -
         connector: Arc::new(move || Ok(api.clone())),
         namer: fake_namer,
         phone: Arc::new(FakePhone::default()),
+        updater: Arc::new(FakeUpdater::default()),
         exec_mode: ExecMode::Inline,
         debug: false,
     }

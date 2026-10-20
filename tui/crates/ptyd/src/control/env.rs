@@ -11,15 +11,13 @@ use session_core::ids::{SessionId, Token};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+#[path = "../../../../../Integrations/environment.rs"]
+mod agents;
+
 /// Variables removed from the inherited environment.
 const STRIPPED: &[&str] = &[
     "TMUX",
     "TMUX_PANE",
-    "CLAUDECODE",
-    "CLAUDE_CODE_SESSION_ID",
-    "CLAUDE_CODE_CHILD_SESSION",
-    "CLAUDE_CODE_MESSAGING_TOKEN",
-    "CODEX_THREAD_ID",
     "OMPCODE",
     // Replaced below with this session's values.
     rakumux_env::SOCKET,
@@ -113,7 +111,9 @@ pub(crate) fn child_env(
 ) -> Vec<(String, String)> {
     let mut env: BTreeMap<String, String> = base.iter().cloned().collect();
     env.retain(|name, _| {
-        !STRIPPED.contains(&name.as_str()) && !STRIPPED_PREFIXES.iter().any(|p| name.starts_with(p))
+        !STRIPPED.contains(&name.as_str())
+            && !STRIPPED_PREFIXES.iter().any(|p| name.starts_with(p))
+            && !agents::inherited_marker(name)
     });
     env.insert(
         rakumux_env::SESSION_ID.into(),

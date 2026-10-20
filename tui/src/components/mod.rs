@@ -8,6 +8,7 @@ pub mod footer;
 pub mod format;
 pub mod phone_access;
 pub mod session_detail;
+pub mod session_grid;
 pub mod session_list;
 pub mod session_tabs;
 pub mod utils;

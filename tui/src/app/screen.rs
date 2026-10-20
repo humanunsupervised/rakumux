@@ -26,6 +26,8 @@ const MIN_TERMINAL: u16 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Screen {
+    /// Read-only terminal cards; no detail terminal is on screen here.
+    pub grid: Option<Rect>,
     /// Session list (Sidebar).
     pub list: Option<Rect>,
     /// Draggable line between the list and the detail (Sidebar): a column
@@ -83,6 +85,7 @@ pub fn compute(
         Focus::Session => PaneFocus::Detail,
     };
     let areas = layout::split_with(body, session_layout, pane_focus, sizes);
+    screen.grid = areas.grid;
     screen.list = areas.list;
     screen.divider = areas.divider;
     screen.stacked = areas.stacked;
@@ -148,6 +151,7 @@ mod tests {
     fn assert_tiled(screen: &Screen, label: &str) {
         let footer = screen.footer.expect("footer");
         let panes: Vec<Rect> = [
+            screen.grid,
             screen.list,
             screen.divider,
             screen.tabs,
@@ -199,7 +203,13 @@ mod tests {
         for layout in SessionLayout::ALL {
             // A phone in portrait, Rakumux mode: the list, then the footer.
             let screen = at(45, 40, layout, Focus::List);
-            assert_eq!(screen.list, Some(Rect::new(0, 0, 45, 39)));
+            if layout == SessionLayout::Grid {
+                assert_eq!(screen.grid, Some(Rect::new(0, 0, 45, 39)));
+                assert_eq!(screen.list, None);
+            } else {
+                assert_eq!(screen.list, Some(Rect::new(0, 0, 45, 39)));
+                assert_eq!(screen.grid, None);
+            }
             assert_eq!((screen.divider, screen.tabs), (None, None));
             assert!(!screen.stacked);
             assert!(screen.detail.is_none() && screen.terminal.is_none());
@@ -274,9 +284,9 @@ mod tests {
                     assert_eq!(footer, Rect::new(0, height - 1, width, 1), "{label}");
                     let phone = width < layout::PHONE_BELOW;
                     // The session is on screen, except in a phone's list.
-                    if phone && focus == Focus::List {
+                    if (phone || layout == SessionLayout::Grid) && focus == Focus::List {
                         assert!(screen.terminal.is_none(), "{label}");
-                        assert_eq!(screen.list.unwrap().width, width, "{label}");
+                        assert_eq!(screen.grid.or(screen.list).unwrap().width, width, "{label}");
                         continue;
                     }
                     let terminal = screen.terminal.expect(&label);
@@ -443,7 +453,7 @@ mod tests {
     #[test]
     fn tiny_screens_do_not_panic() {
         for (w, h) in [(0, 0), (1, 1), (5, 2), (10, 4), (3, 3), (20, 15), (45, 14)] {
-            for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
+            for layout in SessionLayout::ALL {
                 for focus in [Focus::List, Focus::Session] {
                     for zoom in [false, true] {
                         let _ = compute(area(w, h), layout, focus, zoom, PaneSizes::default());

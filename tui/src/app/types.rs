@@ -228,6 +228,8 @@ pub enum SettingsItem {
     CycleInSessions,
     /// Remote access for the phone app (`remote.json`), and pairing.
     PhoneAccess,
+    /// Install a new release and restart only this UI.
+    Update,
     AnthropicKey,
     OpenAiKey,
     PrimaryAiProvider,
@@ -235,11 +237,12 @@ pub enum SettingsItem {
 }
 
 impl SettingsItem {
-    pub const ALL: [SettingsItem; 8] = [
+    pub const ALL: [SettingsItem; 9] = [
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
         SettingsItem::PhoneAccess,
+        SettingsItem::Update,
         SettingsItem::AnthropicKey,
         SettingsItem::OpenAiKey,
         SettingsItem::PrimaryAiProvider,
@@ -252,6 +255,7 @@ impl SettingsItem {
             SettingsItem::Layout | SettingsItem::Icons => "Appearance",
             SettingsItem::CycleInSessions => "Keys",
             SettingsItem::PhoneAccess => "Phone",
+            SettingsItem::Update => "App",
             SettingsItem::AnthropicKey
             | SettingsItem::OpenAiKey
             | SettingsItem::PrimaryAiProvider
@@ -323,7 +327,9 @@ pub enum UpgradeMessage {
         latest_version: String,
         method: InstallMethod,
     },
-    InstallSuccess,
+    InstallSuccess {
+        launcher: Option<std::path::PathBuf>,
+    },
     InstallError(String),
 }
 

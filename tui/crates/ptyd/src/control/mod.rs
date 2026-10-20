@@ -13,6 +13,7 @@
 //! - `git_context`: per-session git context cache and its poll.
 //! - `host_events`: threads feeding host events into the service.
 
+mod activity;
 mod audit;
 mod auth;
 mod env;

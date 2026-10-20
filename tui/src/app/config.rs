@@ -86,7 +86,7 @@ pub struct SessionsConfig {
     /// row turns it on any time.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub phone_offer_seen: bool,
-    /// Sidebar (list + detail) or Tabs (tab bar + detail). A value this
+    /// Master detail (`sidebar`), Grid (`grid`) or Tabs (`tabs`). A value this
     /// version doesn't know (e.g. written by a newer one) reads as the
     /// default instead of breaking the whole config.
     #[serde(deserialize_with = "lenient_layout")]
@@ -461,7 +461,7 @@ mod tests {
         let path = dir.path().join("config.json");
         fs::write(
             &path,
-            r#"{"openai_model":"gpt-4.1","sessions":{"layout":"grid","prefix_key":"ctrl+a"}}"#,
+            r#"{"openai_model":"gpt-4.1","sessions":{"layout":"future-layout","prefix_key":"ctrl+a"}}"#,
         )
         .unwrap();
         let settings = Settings::load_from(&path).unwrap();

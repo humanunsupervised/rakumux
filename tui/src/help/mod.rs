@@ -209,6 +209,8 @@ pub enum KeyAction {
     Delete,
     Zoom,
     Filter,
+    /// Cycle Master detail, Grid and Tabs in Rakumux mode.
+    CycleLayout,
     Help,
     Settings,
     /// The welcome tour carousel.
@@ -225,7 +227,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The rows of the Keys tab, in order.
-    pub const ALL: [KeyAction; 34] = [
+    pub const ALL: [KeyAction; 35] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -252,6 +254,7 @@ impl KeyAction {
         KeyAction::Delete,
         KeyAction::Zoom,
         KeyAction::Filter,
+        KeyAction::CycleLayout,
         KeyAction::Help,
         KeyAction::Settings,
         KeyAction::Tour,
@@ -290,7 +293,8 @@ impl KeyAction {
             | KeyAction::Close
             | KeyAction::Delete
             | KeyAction::Zoom
-            | KeyAction::Filter => "Sessions and folders",
+            | KeyAction::Filter
+            | KeyAction::CycleLayout => "Sessions and folders",
             KeyAction::Help
             | KeyAction::Settings
             | KeyAction::Tour
@@ -318,8 +322,8 @@ impl KeyAction {
             KeyAction::HalfPageUp => "Half a page up",
             KeyAction::NextFolder => "Next folder",
             KeyAction::PreviousFolder => "Previous folder",
-            KeyAction::ScrollBack => "Scroll the session back",
-            KeyAction::ScrollForward => "Scroll the session forward",
+            KeyAction::ScrollBack => "Scroll back (Grid: previous page)",
+            KeyAction::ScrollForward => "Scroll forward (Grid: next page)",
             KeyAction::NewSession => "New session",
             KeyAction::FilterFolders => "Filter by folder",
             KeyAction::Rename => "Rename session",
@@ -330,10 +334,11 @@ impl KeyAction {
             KeyAction::Delete => "Delete session",
             KeyAction::Zoom => "Work in the session full screen",
             KeyAction::Filter => "Filter sessions",
+            KeyAction::CycleLayout => "Cycle layout (Master detail, Grid, Tabs)",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
             KeyAction::Tour => "Welcome tour",
-            KeyAction::CheckForUpdate => "Check for updates",
+            KeyAction::CheckForUpdate => "Update Rakumux (sessions keep running)",
             KeyAction::Reload => "Reconnect or reload the list",
             KeyAction::Restart => "Restart Rakumux (sessions keep running)",
             KeyAction::QuitAndCd => "Quit and cd to the session's folder",
@@ -379,10 +384,11 @@ impl KeyAction {
             KeyAction::Delete => plain(&["d", "dd"]),
             KeyAction::Zoom => plain(&["z"]),
             KeyAction::Filter => plain(&["/"]),
+            KeyAction::CycleLayout => plain(&["v"]),
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
             KeyAction::Tour => "t (in Help)".into(),
-            KeyAction::CheckForUpdate => plain(&["u"]),
+            KeyAction::CheckForUpdate => plain(&["U"]),
             KeyAction::Reload => plain(&["Ctrl-r"]),
             KeyAction::Restart => plain(&["R"]),
             KeyAction::QuitAndCd => plain(&["c"]),
@@ -451,6 +457,13 @@ impl KeyAction {
                 "Asks before reloading this UI through its launcher to pick up the latest build. \
                  Confirm with y or Enter; Esc cancels. The daemon and sessions stay up. \
                  Ctrl-r only reconnects or reloads the list."
+                    .into()
+            }
+            KeyAction::CheckForUpdate => {
+                "Shift+U checks the installed release channel. Enter confirms installation and \
+                 restarts only this UI; Esc cancels before installation starts. Binary installs \
+                 verify the release SHA-256 checksum. Source builds and admin-owned install \
+                 directories may need a manual update. No daemon stop or session revival."
                     .into()
             }
             KeyAction::Zoom => {
@@ -660,7 +673,7 @@ pub struct SettingRow {
     pub section: &'static str,
     /// What it sets, e.g. `Layout`.
     pub label: String,
-    /// Its current value, e.g. `[Sidebar] Tabs` or `not set`.
+    /// Its current value, e.g. `[Master detail] Grid Tabs` or `not set`.
     pub value: String,
     /// Shown below the rows while this one is selected.
     pub note: String,
@@ -1070,7 +1083,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
          drive Rakumux: the list, new sessions, folders, Help and Settings. The session \
          keeps showing beside the list (below it on a narrow screen; on a phone you see the \
          list alone) while you look around, \
-         in full colour: it's live, but your keys \
+         with its title and output faded: it's live, but your keys \
          don't reach it. On the folder filter, a folder's header or + New session it keeps \
          the last session in view."
     ));
@@ -1094,11 +1107,16 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         SessionLayout::Sidebar => doc.bullet(format!(
             "Session list, on the left: the folder filter on top ({} All folders), then the \
              sessions in the order you keep them (a new one goes at the bottom), each with a \
-             status mark, its colour-coded app name first, then its git branch; the selected \
-             name is white, the others dimmed. With \
+             status mark, a bold title, and its app name in muted blue before the git branch; \
+             the selected title is white, the others a softer foreground colour. With \
              several folders, each has a header row; pinned sessions (★) lead their folder.",
             ctx.icons.folder()
         )),
+        SessionLayout::Grid => doc.bullet(
+            "Grid: read-only live terminal cards. Arrows or h/j/k/l select; PgUp/PgDn change \
+             page. Enter or a tap opens a session; the Rakumux key returns to Grid. Folder \
+             and text filters and pinned/user ordering apply here too.",
+        ),
         SessionLayout::Tabs => doc.bullet(format!(
             "Tab bar, along the top: the folder filter ({} All folders) at the left, then the \
              sessions as numbered tabs, each with a status mark, in the order you keep them. \
@@ -1106,7 +1124,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
             ctx.icons.folder()
         )),
     }
-    doc.bullet("Detail: the selected session's screen, updating as its program runs.");
+    doc.bullet("Detail or Grid cards: terminal screens, updating as the programs run.");
     doc.bullet(format!(
         "Footer, the bottom row: the mode on the left (an orange RAKUMUX, or a quiet \
          SESSION), then messages and the daemon connection when it isn't up, and on the right \
@@ -1114,21 +1132,21 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
          the way to Rakumux mode. Settings' Keys tab lists every key."
     ));
     doc.note(format!(
-        "Current layout: {}. The Layouts tab explains both layouts and how to switch.",
+        "Current layout: {}. The Layouts tab explains all three layouts and how to switch.",
         ctx.layout.label()
     ));
 
     doc.heading("Quick start");
     doc.step(
         1,
-        "Press `n` to start a session. Leave the name empty and Rakumux picks one. You're \
-         working in it straight away.",
+        "Press `n` to start a session with a generated name. You're working in it straight \
+         away; use `r` in Rakumux mode to rename it later.",
     );
     doc.step(
         2,
         format!(
             "Press `{p}` for Rakumux mode. Move between sessions with `↑`/`↓` or `j`/`k`; the \
-             right side shows each one live, in full colour."
+             right side shows each one live with a faded, inactive treatment."
         ),
     );
     doc.step(
@@ -1450,6 +1468,14 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          current one and can't be opened from inside itself.",
     );
 
+    doc.heading("Agent activity hooks");
+    doc.text(
+        "Optional OpenCode, Claude Code and Codex hooks report tool phases, input requests \
+         and active subagent counts without an AI key. Busy markers animate locally; \
+         needs-input and done stay still. Without fresh hooks, Rakumux uses screen/process \
+         detection. See Integrations/README.md in the repository for setup. Agent subagents \
+         are not Rakumux child sessions.",
+    );
     doc.heading("AI naming");
     doc.text(
         "A session you didn't name gets a better name the first time it settles (its program \
@@ -1468,7 +1494,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     let p = &k.p;
     doc.note(format!("Current layout: {}.", ctx.layout.label()));
 
-    doc.heading("Sidebar (default)");
+    doc.heading("Master detail (default)");
     doc.text(
         "The session list sits in a column on the left; the selected session fills the right.",
     );
@@ -1481,7 +1507,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         layout::STACK_MIN_ROWS + 1
     ));
     doc.text(format!(
-        "On a phone (below {} columns, in either layout) you see one thing at a time: \
+        "On a phone (below {} columns, in Master detail or Tabs) you see one thing at a time: \
          Rakumux mode is the session list; tap a session to open it, full screen under a \
          row of tabs (tap a tab to switch); `{p}` or a tap on the SESSION badge at the bottom \
          left goes back to the list, and the RAKUMUX badge returns to the session. Tap \
@@ -1492,8 +1518,25 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         "A session is one terminal, so every window shows the program drawn for one size: \
          the size of the window you're using. Press a key or click in a window (or bring it to \
          the front) and the session takes its size, unless someone is typing in it in another \
-         window right now.",
+          window right now. Grid browsing never claims a terminal's size or control.",
     );
+
+    doc.heading("Grid");
+    doc.text(
+        "A responsive page of up to six cards shows real live terminal output as read-only \
+         observers, including on phones. Only visible cards have preview streams. Terminals \
+         keep their existing size; cards crop and pan rather than resizing them. Titles and \
+         selected borders stay readable while inactive output fades. Saved sessions show \
+         their saved output; the session Rakumux runs inside is never attached.",
+    );
+    doc.text(format!(
+        "Arrows or `h`/`j`/`k`/`l` select cards; `PgUp`/`PgDn` change page, `Home`/`End` \
+         go to the ends. `Enter` or a tap opens the selected session full screen under tabs; \
+         `{p}` returns to Grid. `n` or the + New session card creates and enters a generated-name \
+         session immediately. `P` filters folders, `/` filters text, and pins and your saved \
+         session order are retained. Browsing, scrolling, focus and window resize send no \
+         terminal input, size requests or activity touches."
+    ));
 
     doc.heading("Tabs");
     doc.text(
@@ -1508,21 +1551,22 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.text(format!(
         "In Rakumux mode, switch tabs with `↑`/`↓`, `j`/`k`{cycle} or the number keys, or \
          click a tab. Drag a tab left or right to move it. All other keys work as in the \
-         Sidebar layout."
+          Master detail layout."
     ));
 
     doc.heading("Switching layouts");
     doc.text(format!(
         "Change Layout on the Settings General tab (`,` or `{SETTINGS_KEY}` in Rakumux mode). \
          It applies at once and is saved in ~/.rakumux/config.json as `sessions.layout` \
-         (`sidebar` or `tabs`)."
+          (`sidebar`, `grid` or `tabs`). `v` cycles Master detail, Grid and Tabs in Rakumux mode; \
+          session mode forwards `v` to the program."
     ));
 
     doc.heading("Zoom");
     doc.text(format!(
         "`z` in Rakumux mode works in the selected session with the list or tab bar hidden, \
          so it gets the whole screen above the footer, which keeps showing the mode; `{p}` \
-         brings the list back. Works in both layouts."
+          brings the list or Grid back. Works in all layouts."
     ));
 
     doc.heading("Session cycle keys");
@@ -1530,7 +1574,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         Some(cycle) => {
             doc.text(format!(
                 "`{cycle}` moves to the previous or next session in list order in Rakumux \
-                 mode, in both layouts. It needs a terminal that sends Option/Alt with the key \
+                  mode, in all layouts. It needs a terminal that sends Option/Alt with the key \
                  (iTerm2, Ghostty, kitty, WezTerm, Alacritty; Terminal.app with \"Use Option \
                  as Meta key\")."
             ));
@@ -2221,7 +2265,7 @@ mod tests {
             version: "0.6.0".to_string(),
             in_session: false,
             general: vec![
-                setting("Layout", "[Sidebar] Tabs", "List on the left."),
+                setting("Layout", "[Master detail] Grid Tabs", "List on the left."),
                 setting("Anthropic API key", "not set", "Used for AI session naming"),
                 setting("OpenAI model", "gpt-4o-mini", "The model for naming"),
             ],
@@ -2620,7 +2664,7 @@ mod tests {
         let buf = draw(80, 24, &state, &context);
         let text = buffer_text(&buf);
         assert!(
-            text.contains("  Layout             [Sidebar] Tabs"),
+            text.contains("  Layout             [Master detail] Grid Tabs"),
             "{text}"
         );
         assert!(text.contains("▶ Anthropic API key  not set"), "{text}");
@@ -2661,12 +2705,16 @@ mod tests {
         let (lines, line) = general_lines(&context, 0, 30);
         let text: Vec<String> = lines.iter().map(line_text).collect();
         let layout = text.iter().position(|l| l == "▶ Layout").unwrap();
-        assert_eq!(text[layout + 1], "    [Sidebar] Tabs", "{text:?}");
+        assert_eq!(
+            text[layout + 1],
+            "    [Master detail] Grid Tabs",
+            "{text:?}"
+        );
         assert_eq!(line, layout + 1);
         assert!(text.contains(&"    not set".to_string()), "{text:?}");
         // Wide enough: side by side.
         let (lines, _) = general_lines(&context, 0, 76);
-        assert!(line_text(&lines[1]).starts_with("▶ Layout             [Sidebar] Tabs"));
+        assert!(line_text(&lines[1]).starts_with("▶ Layout             [Master detail] Grid Tabs"));
         // A short screen scrolls to the selected row.
         let state = state(ModalTab::General).with_selected(ROWS - 1);
         let buf = draw(80, 6, &state, &context);
@@ -2787,8 +2835,8 @@ mod tests {
             ("Half a page up", "Ctrl-u"),
             ("Next folder", "}"),
             ("Previous folder", "{"),
-            ("Scroll the session back", "Ctrl-y, PgUp"),
-            ("Scroll the session forward", "Ctrl-e, PgDn"),
+            ("Scroll back (Grid: previous page)", "Ctrl-y, PgUp"),
+            ("Scroll forward (Grid: next page)", "Ctrl-e, PgDn"),
             ("New session", "n"),
             ("Filter by folder", "P"),
             ("Rename session", "r"),
@@ -2799,9 +2847,10 @@ mod tests {
             ("Delete session", "d, dd"),
             ("Work in the session full screen", "z"),
             ("Filter sessions", "/"),
+            ("Cycle layout (Master detail, Grid, Tabs)", "v"),
             ("Help", "?"),
             ("Settings", "comma (,), o"),
-            ("Check for updates", "u"),
+            ("Update Rakumux (sessions keep running)", "U"),
             ("Reconnect or reload the list", "Ctrl-r"),
             ("Restart Rakumux", "R"),
             ("Quit and cd", "c"),
@@ -2929,7 +2978,9 @@ mod tests {
         assert!(tab_text(ModalTab::Layouts, &context, 100).contains("Current layout: Tabs."));
         assert!(tab_text(ModalTab::Overview, &context, 100).contains("Tab bar, along the top"));
         context.layout = SessionLayout::Sidebar;
-        assert!(tab_text(ModalTab::Layouts, &context, 100).contains("Current layout: Sidebar."));
+        assert!(
+            tab_text(ModalTab::Layouts, &context, 100).contains("Current layout: Master detail.")
+        );
         assert!(tab_text(ModalTab::Overview, &context, 100).contains("Session list, on the left"));
     }
 
@@ -2970,7 +3021,8 @@ mod tests {
             "revive",
             "rakumux-ptyd",
             "many windows",
-            "Sidebar",
+            "Master detail",
+            "Grid",
             "Tabs",
             "rakumux attach <name|id>",
             "rakumux daemon start|status|stop|restart|logs",

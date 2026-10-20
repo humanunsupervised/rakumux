@@ -238,6 +238,16 @@ pub enum RemoteCommand {
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum SessionCommand {
+    /// Receive agent hook JSON on stdin (advisory; never blocks an agent).
+    Hook {
+        #[arg(long, value_enum)]
+        agent: HookAgent,
+    },
+    /// Print hook configuration to merge into the agent's settings.
+    HookConfig {
+        #[arg(long, value_enum)]
+        agent: HookAgent,
+    },
     /// List this folder's sessions: {"sessions":[…]}
     List {
         /// Include dead sessions
@@ -318,6 +328,23 @@ pub struct ReportArgs {
     /// Resume command (after `--`)
     #[arg(last = true, value_name = "ARGV")]
     pub resume_argv: Vec<String>,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookAgent {
+    Claude,
+    Codex,
+    Opencode,
+}
+
+impl HookAgent {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Opencode => "opencode",
+        }
+    }
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]

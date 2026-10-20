@@ -154,6 +154,10 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             leave(app);
             app.list.filter_editing = true;
         }
+        KeyAction::CycleLayout => {
+            leave(app);
+            app.set_layout(app.session_layout().next());
+        }
         KeyAction::Help => open_help(app),
         KeyAction::Settings => open_settings(app),
         KeyAction::Tour => app.open_welcome(),
@@ -194,6 +198,7 @@ fn open_item(app: &mut App, item: SettingsItem) {
             save_config(app, format!("Icons: {}", next.label()));
         }
         SettingsItem::PhoneAccess => app.open_phone_access(),
+        SettingsItem::Update => app.open_upgrade_dialog(),
         SettingsItem::CycleInSessions => {
             let on = !app.settings.sessions.cycle_keys_in_session;
             app.settings.sessions.cycle_keys_in_session = on;
@@ -348,17 +353,17 @@ fn handle_upgrade_key(app: &mut App, key: KeyEvent) {
     }
     if dialog.checking {
         if key.code == KeyCode::Esc {
-            app.mode = AppMode::Normal;
+            app.close_upgrade_dialog();
         }
         return;
     }
     match key.code {
-        KeyCode::Esc => app.mode = AppMode::Normal,
+        KeyCode::Esc => app.close_upgrade_dialog(),
         KeyCode::Up | KeyCode::Char('k') => dialog.selection = dialog.selection.saturating_sub(1),
         KeyCode::Down | KeyCode::Char('j') => dialog.selection = (dialog.selection + 1).min(1),
         KeyCode::Enter => {
             if !dialog.update_available || dialog.selection != 0 {
-                app.mode = AppMode::Normal;
+                app.close_upgrade_dialog();
                 return;
             }
             match (dialog.latest_version.clone(), dialog.install_method) {

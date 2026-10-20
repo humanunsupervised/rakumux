@@ -14,6 +14,10 @@ new-session flow, and code boundaries.
 - `app.rs` (in `tui/src`): facade. Owns `App` (state slices below, `Arc<dyn SessionApi>`, config,
   updater state) and dispatches events by mode and focus.
 - `types.rs`: `AppMode`, `AppResult`, dialog structs, shared enums.
+- `upgrade.rs`: `U` / Settings' Update action, behind `updater::UpdateService` (a fake in tests).
+  Jobs run off the UI thread; a generation drops cancelled/stale results. Installation needs
+  Enter and cannot be started twice. Success reloads only the UI through the updated launcher.
+  Cache writes use `App::paths`, never the real user's home in tests.
 - `config.rs`: `~/.rakumux/config.json` load/save: API keys, AI provider and model, and
   `sessions { rakumux_key (prefix_key read for older configs), cycle_keys,
   cycle_keys_in_session, welcome_seen, phone_offer_seen, layout, icons, sidebar_width,
@@ -51,11 +55,24 @@ new-session flow, and code boundaries.
   (`layout::PaneSizes`: `sidebar_width`, `stacked_list_percent`). No header: the panes start at
   the top row and the footer (mode badge, messages, Help/Settings keys) is always exactly the
   last row, zoom included, so modes, selection and messages never move a pane. Phones
-  (`layout::is_phone`, under 80 columns, `App::phone`) show the list alone in Rakumux mode and
-  the session under a tab bar in session mode (no title row; `App::list_layout` is Sidebar there).
+  (`layout::is_phone`, under 80 columns, `App::phone`) show the list alone in Rakumux mode
+  (or Grid cards when Grid is selected) and the session under a tab bar in session mode
+  (no title row; `App::list_layout` is Sidebar there except for Grid).
   Narrow Sidebar windows (80–99 columns) stack the list above the detail in Rakumux mode
   (`Screen::stacked`, the divider a row) and give the session everything above the footer in
   session mode; `terminal_size` is always the session-mode pane.
+- `grid.rs` and `grid/tests.rs`: Grid's visible-page observer previews, generation checks,
+  cancellation and bounded output mailboxes. `layout/grid.rs` computes up to six cards; the
+  folder/text filters and pinned/user order come from `SessionList::visible`. Only the visible
+  cards attach, always as `Role::Observer`, with zero scrollback; saved reads are capped.
+  Offscreen cards, layout changes, activation, disconnect and dropping the app cancel previews.
+  The preview lease can only detach: never Promote, Resize, Fit, input or Touch. Bell/clipboard
+  events and terminal queries have no external effect. Grid browsing has no hidden detail
+  attachment or `Screen::terminal`, so size claims cannot escape through the detail path.
+  Cards render cropped/panned at the terminal's real size. Enter/tap uses normal activation;
+  the Rakumux key returns to Grid. Arrows/h/j/k/l select, PgUp/PgDn page, n creates immediately.
+  Settings > General > Layout or `v` cycles Master detail (`sidebar`, still default), Grid
+  (`grid`) and Tabs (`tabs`); `v` is forwarded normally in session mode.
 - Terminal size: `sync_terminal_size` (attach, own pane change) and `claim_terminal_size` (the
   user did something: key, click, paste, focus-in; at most once a second) send `Resize`
   (controller) or `Fit` (observer) when the session's size isn't this window's; the daemon
@@ -70,6 +87,9 @@ new-session flow, and code boundaries.
   session mode.
 - `constants.rs`: timings and UI constants. `feature_flags.rs`: code-only flags (`auth: false`).
 - State slices (`state/`):
+  - hook activity: the daemon supplies normalized `SessionView.activity`; the UI renders
+    phases/counts. `is_animating` keeps busy markers ticking without PTY output. Provider
+    adapters belong in root `Integrations/`, not app handlers.
   - session list: every folder's `SessionView`s in the user's order, the folder filter, the
     text filter, selection, the last selected folder section, the nesting-guard session;
   - detail: the active attach stream, its `TerminalView`, current role (observer/controller),

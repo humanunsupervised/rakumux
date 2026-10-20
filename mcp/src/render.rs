@@ -281,6 +281,7 @@ mod tests {
                 files: vec![],
                 at: "2026-10-13T00:00:00Z".into(),
             }),
+            activity: None,
             created_by: Creator::User,
             parent_id: None,
             depth: 0,

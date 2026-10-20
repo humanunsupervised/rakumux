@@ -15,8 +15,7 @@ use crate::app::types::{
     ConfirmDialog, DaemonRestartDialog, OpenAiModelDialog, RenameDialog, UpgradeDialog,
 };
 use crate::components::utils::{
-    draw_text_input, get_spinner_char, popup_area, popup_area_fixed_height, popup_width,
-    wrapped_rows,
+    draw_text_input, get_spinner_char, popup_area_fixed_height, popup_width, wrapped_rows,
 };
 use crate::theme;
 
@@ -429,8 +428,6 @@ pub fn draw_openai_model_dialog(f: &mut Frame, dialog: &OpenAiModelDialog, area:
 
 pub fn draw_upgrade_dialog(f: &mut Frame, dialog: &UpgradeDialog, area: Rect) {
     let p = palette();
-    let popup = popup_area(area, 60, 40);
-    let inner = dialog_frame(f, popup, "Upgrade Rakumux", p.accent_primary);
     let keys: &[(&str, &str)] = if dialog.installing {
         &[]
     } else if dialog.checking {
@@ -440,13 +437,28 @@ pub fn draw_upgrade_dialog(f: &mut Frame, dialog: &UpgradeDialog, area: Rect) {
     } else {
         &[("Enter/Esc", "Close")]
     };
+    let width = popup_width(area.width, 60);
+    let content_width = usize::from(width.saturating_sub(2));
+    let status_text = dialog
+        .error_message
+        .as_deref()
+        .or(dialog.info_message.as_deref())
+        .unwrap_or("Checking for updates…");
+    let status_rows = wrapped_rows(status_text, content_width).max(2) as u16;
+    let policy = "Restarts this UI only. The daemon and all sessions stay running.";
+    let policy_rows = wrapped_rows(policy, content_width) as u16;
+    let action_rows = if dialog.update_available { 3 } else { 0 };
+    let height = 5 + key_rows(keys, width) + status_rows + policy_rows + action_rows;
+    let popup = popup_area_fixed_height(area, 60, height);
+    let inner = dialog_frame(f, popup, "Update Rakumux", p.accent_primary);
     let above = draw_keys(f, inner, keys);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
+            Constraint::Length(2),
             Constraint::Min(2),
-            Constraint::Length(3),
+            Constraint::Length(policy_rows + 1),
+            Constraint::Length(action_rows),
         ])
         .split(above);
     f.render_widget(
@@ -481,6 +493,13 @@ pub fn draw_upgrade_dialog(f: &mut Frame, dialog: &UpgradeDialog, area: Rect) {
             .wrap(Wrap { trim: true }),
         rows[1],
     );
+    f.render_widget(
+        Paragraph::new(policy)
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(p.text_muted)),
+        rows[2],
+    );
     if dialog.update_available {
         let enabled = !(dialog.checking || dialog.installing);
         let items: Vec<ListItem> = ["Install update and restart", "Cancel"]
@@ -507,7 +526,7 @@ pub fn draw_upgrade_dialog(f: &mut Frame, dialog: &UpgradeDialog, area: Rect) {
                 ]))
             })
             .collect();
-        f.render_widget(List::new(items), rows[2]);
+        f.render_widget(List::new(items), rows[3]);
     }
 }
 
