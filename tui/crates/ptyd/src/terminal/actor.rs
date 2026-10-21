@@ -541,8 +541,15 @@ impl Actor {
             && self
                 .last_foreground_refresh
                 .is_none_or(|at| now.saturating_duration_since(at) >= FOREGROUND_REFRESH)
+            && self.refresh_foreground(now)
+            && self.settle_due.is_none()
         {
-            self.refresh_foreground(now);
+            // A quiet terminal's program changed; output in flight is
+            // reported by its trailing event instead.
+            self.publish(|session_id| HostEvent::Output {
+                id: self.shared.id,
+                session_id,
+            });
         }
         if self.pane_reconnect_due.is_some_and(|due| now >= due) {
             self.pane_reconnect_due = None;
@@ -735,7 +742,9 @@ impl Actor {
         });
     }
 
-    fn refresh_foreground(&mut self, now: Instant) {
+    /// Re-read the foreground process and cwd; `true` when the foreground
+    /// process changed.
+    fn refresh_foreground(&mut self, now: Instant) -> bool {
         self.last_foreground_refresh = Some(now);
         let leader = self.master.process_group_leader().map(|pid| pid as u32);
         let foreground = leader.and_then(crate::procinfo::process_info);
@@ -762,12 +771,7 @@ impl Actor {
                 self.set_cwd(cwd);
             }
         }
-        if changed {
-            self.publish(|session_id| HostEvent::Output {
-                id: self.shared.id,
-                session_id,
-            });
-        }
+        changed
     }
 
     /// Send coalesced output to every attachment.

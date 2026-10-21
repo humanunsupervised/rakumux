@@ -308,19 +308,21 @@ mod tests {
         assert!(!lock_is_held(&path));
         let holder = File::create(&path).unwrap();
         assert!(!lock_is_held(&path));
+        // Concurrent process-spawning tests can briefly retain a copy of
+        // the descriptor `lock_is_held` probed with before exec on macOS.
+        let deadline = Instant::now() + Duration::from_secs(5);
         // SAFETY: flock on an open descriptor.
-        assert_eq!(
-            unsafe { libc::flock(holder.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
-            0
-        );
+        while unsafe { libc::flock(holder.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            assert!(Instant::now() < deadline, "service lock was not acquired");
+            std::thread::sleep(Duration::from_millis(5));
+        }
         assert!(lock_is_held(&path));
         let duplicate = holder.try_clone().unwrap();
         drop(holder);
         assert!(lock_is_held(&path));
         drop(duplicate);
 
-        // Concurrent process-spawning tests can briefly retain a copy of
-        // this descriptor before exec on macOS. The lock must still release.
+        // The same race applies to `duplicate`. The lock must still release.
         let deadline = Instant::now() + Duration::from_secs(5);
         while lock_is_held(&path) {
             assert!(Instant::now() < deadline, "service lock was not released");
