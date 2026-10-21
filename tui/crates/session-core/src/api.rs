@@ -11,7 +11,7 @@
 //! Compatibility: new fields are optional; enums have an `Unknown` fallback;
 //! an op never changes meaning (add a new op instead).
 
-use crate::ids::SessionId;
+use crate::ids::{PaneId, SessionId};
 use crate::model::{
     AgentInfo, Lifecycle, ProjectView, ReportResult, Reported, ScopeRoot, SessionStatus,
     SessionView,
@@ -187,6 +187,12 @@ pub enum Request {
 
     /// Stream the terminal. Turns the connection into an attach stream.
     Attach(AttachRequest),
+    /// User-only temporary shell, with no session record or saved files.
+    /// Opens a stream; closing the stream ends the pane (except during handoff).
+    TerminalOpen(OpenTerminal),
+    /// Reconnect an existing temporary shell after a daemon restart in place.
+    /// Never creates a replacement terminal. User only.
+    TerminalAttach(TerminalAttachRequest),
     /// Stream session events. Turns the connection into an event stream.
     Subscribe(SubscribeRequest),
 
@@ -248,6 +254,10 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Report {
+    /// The agent's active logical directory, which may differ from its PTY
+    /// process cwd. Self-only metadata; does not change folder permissions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<AgentWorkingDirectory>,
     /// Agent-neutral hook activity; never contains terminal or prompt text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<crate::activity::ActivityUpdate>,
@@ -262,6 +272,15 @@ pub struct Report {
     /// Command that resumes the agent's conversation in this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<Vec<String>>,
+}
+
+/// The active (or last used) directory of the agent shown in a session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentWorkingDirectory {
+    pub agent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -349,6 +368,39 @@ pub struct AttachRequest {
     pub rows: u16,
 }
 
+/// Start a window-local terminal without creating a Rakumux session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenTerminal {
+    pub id: PaneId,
+    pub cwd: PathBuf,
+    #[serde(default)]
+    pub env: Vec<(String, String)>,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Attach only to an existing standalone terminal, never to a session's PTY.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalAttachRequest {
+    pub id: PaneId,
+    pub role: Role,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// A standalone terminal's checkpoint. No session identity is allocated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalAttached {
+    pub id: PaneId,
+    pub cwd: Option<PathBuf>,
+    pub pid: Option<u32>,
+    pub role: Role,
+    pub cols: u16,
+    pub rows: u16,
+    pub checkpoint: String,
+    pub offset: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
@@ -394,6 +446,12 @@ pub const CAPABILITY_DAEMON_RESTART: &str = "daemon.restart";
 /// Versioned, self-reported agent activity and normalized session projections.
 pub const CAPABILITY_ACTIVITY: &str = "session.activity";
 
+/// Temporary daemon-owned terminal panes, outside the session registry.
+pub const CAPABILITY_TERMINAL_PANE: &str = "terminal.pane";
+
+/// Self-reported logical agent directories, separate from the terminal cwd.
+pub const CAPABILITY_WORKING_DIRECTORY: &str = "session.working_directory";
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -403,6 +461,7 @@ fn is_false(value: &bool) -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
+    TerminalAttached(TerminalAttached),
     Hello(HelloOk),
     Pong,
     Ok,
@@ -553,6 +612,9 @@ impl std::error::Error for ApiError {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum StreamCommand {
+    /// Request a fresh checkpoint without resizing or taking control.
+    /// Requires `terminal.pane` support in the daemon.
+    Checkpoint,
     /// Controller only. Resizes the PTY.
     Resize {
         cols: u16,
@@ -653,6 +715,49 @@ pub enum SessionEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_pane_contract_round_trips_without_session_metadata() {
+        let id = PaneId::generate();
+        let request = Request::TerminalOpen(OpenTerminal {
+            id: id.clone(),
+            cwd: "/repo".into(),
+            env: Vec::new(),
+            cols: 80,
+            rows: 24,
+        });
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["op"], "terminal_open");
+        assert!(json.get("scope").is_none());
+        assert_eq!(serde_json::from_value::<Request>(json).unwrap(), request);
+        let request = Request::TerminalAttach(TerminalAttachRequest {
+            id: id.clone(),
+            role: Role::Observer,
+            cols: 80,
+            rows: 24,
+        });
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["op"], "terminal_attach");
+        assert_eq!(serde_json::from_value::<Request>(json).unwrap(), request);
+        let response = Response::TerminalAttached(TerminalAttached {
+            id,
+            cwd: Some("/repo".into()),
+            pid: Some(123),
+            role: Role::Controller,
+            cols: 80,
+            rows: 24,
+            checkpoint: String::new(),
+            offset: 0,
+        });
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["type"], "terminal_attached");
+        assert!(json.get("session").is_none());
+        assert_eq!(serde_json::from_value::<Response>(json).unwrap(), response);
+        assert_eq!(
+            serde_json::to_value(StreamCommand::Checkpoint).unwrap(),
+            serde_json::json!({"cmd":"checkpoint"})
+        );
+    }
 
     #[test]
     fn all_is_sent_only_when_set_and_defaults_to_off() {

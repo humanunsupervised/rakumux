@@ -14,6 +14,10 @@ report **running tool**, approval/question hooks **needs input**, and Stop **don
 start/stop uses actual `agent_id` values. Child tool/stop hooks do not overwrite the parent
 phase. Silence is never interpreted as API waiting. Remove only Rakumux handlers to disable.
 
+The root hook's `cwd` also reports Claude's active worktree. `CwdChanged` updates it without
+changing lifecycle status. The daemon needs `session.working_directory`; child hooks cannot
+replace the root's worktree. No worktree-creation hook or git operation is installed.
+
 - `hooks.rs` / `hooks.json`: native adapter and configuration.
 - `detection.rs`: screen fallback.
 - `recovery.rs`: conversation lookup and safe resume flags.

@@ -187,12 +187,7 @@ impl App {
         if let Some(session) = self.list.selected_session() {
             return Some(session.clone());
         }
-        let visible: Vec<_> = self
-            .list
-            .visible()
-            .into_iter()
-            .filter(|session| !self.terminal_panel.is_panel_session(&session.id))
-            .collect();
+        let visible = self.list.visible();
         [self.detail.session_id(), self.came_from.as_ref()]
             .into_iter()
             .flatten()
@@ -349,7 +344,7 @@ impl App {
             }
             AttachEvent::Event(event) => self.on_stream_event(event),
             AttachEvent::Closed(error) => {
-                let id = attachment.session_id.clone();
+                let id = attachment.id.clone();
                 self.detail.attachment = None;
                 if self.focus == Focus::Session {
                     // A server restart or lost connection: go back in once
@@ -404,7 +399,7 @@ impl App {
                     return;
                 }
                 attachment.role = role;
-                let id = attachment.session_id.clone();
+                let id = attachment.id.clone();
                 if role == Role::Observer && self.focus == Focus::Session {
                     self.leave_session_focus(false);
                     let name = self.session_name(&id);
@@ -419,7 +414,7 @@ impl App {
                 }
             }
             StreamEvent::Exited { code } => {
-                let id = attachment.session_id.clone();
+                let id = attachment.id.clone();
                 self.detail.attachment = None;
                 self.list.mark_exited(&id, code);
                 self.detail.view = DetailView::Saved {
@@ -444,7 +439,7 @@ impl App {
     /// Output went missing: attach again with the same role.
     fn resync_attachment(&mut self) {
         if let Some(attachment) = self.detail.attachment.as_ref() {
-            let (id, role) = (attachment.session_id.clone(), attachment.role);
+            let (id, role) = (attachment.id.clone(), attachment.role);
             self.attach(&id, role);
         }
     }
@@ -887,14 +882,11 @@ impl App {
             return;
         };
         if attachment.role == Role::Controller
-            && self
-                .list
-                .get(&attachment.session_id)
-                .is_some_and(|session| {
-                    session.status == SessionStatus::Live && session.lifecycle == Lifecycle::Done
-                })
+            && self.list.get(&attachment.id).is_some_and(|session| {
+                session.status == SessionStatus::Live && session.lifecycle == Lifecycle::Done
+            })
         {
-            self.touch(&attachment.session_id.clone());
+            self.touch(&attachment.id.clone());
         }
     }
 

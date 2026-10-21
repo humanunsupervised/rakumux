@@ -140,6 +140,22 @@ impl FakeHost {
         terminal.info.rows = rows;
     }
 
+    pub fn set_foreground(&self, session: &SessionId, process: ptyd::host::ProcessInfo) {
+        let id = self.terminal_of(session);
+        self.state
+            .lock()
+            .unwrap()
+            .terminals
+            .get_mut(&id)
+            .unwrap()
+            .info
+            .foreground = Some(process);
+        self.emit(HostEvent::Output {
+            id,
+            session_id: session.clone(),
+        });
+    }
+
     fn with_running<T>(
         &self,
         id: TerminalId,

@@ -111,8 +111,17 @@ pub struct FakeAttach {
     pub peer: AttachPeer,
 }
 
+pub struct FakePane {
+    pub id: session_core::ids::PaneId,
+    pub peer: AttachPeer,
+}
+
 #[derive(Default)]
 pub struct FakeState {
+    pub terminal_opens: Vec<session_core::api::OpenTerminal>,
+    pub terminal_attaches: Vec<session_core::api::TerminalAttachRequest>,
+    pub pane_streams: Vec<FakePane>,
+    pub panes: HashMap<session_core::ids::PaneId, session_core::api::TerminalAttached>,
     /// The daemon restarts in place (`daemon.restart`).
     pub restarts_in_place: bool,
     pub sessions: Vec<SessionView>,
@@ -182,6 +191,27 @@ pub struct FakeApi {
 }
 
 impl FakeApi {
+    pub fn pane_count(&self) -> usize {
+        self.state.lock().unwrap().pane_streams.len()
+    }
+
+    pub fn pane_outgoing(&self, index: usize) -> Vec<AttachOutgoing> {
+        let state = self.state.lock().unwrap();
+        std::iter::from_fn(|| state.pane_streams[index].peer.outgoing.try_recv().ok()).collect()
+    }
+
+    pub fn send_pane(&self, index: usize, event: AttachEvent) {
+        let mut state = self.state.lock().unwrap();
+        if matches!(
+            event,
+            AttachEvent::Event(session_core::api::StreamEvent::Exited { .. })
+        ) {
+            let id = state.pane_streams[index].id.clone();
+            state.panes.remove(&id);
+        }
+        let _ = state.pane_streams[index].peer.events.send(event);
+    }
+
     /// A current daemon; the sessions' folders are known.
     pub fn new(sessions: Vec<SessionView>) -> Arc<Self> {
         let mut state = FakeState {
@@ -337,12 +367,59 @@ impl FakeApi {
 }
 
 impl SessionApi for FakeApi {
+    fn open_terminal(
+        &self,
+        request: session_core::api::OpenTerminal,
+    ) -> Result<session_core::client::TerminalStream> {
+        self.take_failure("open_terminal")?;
+        let mut state = self.state.lock().unwrap();
+        let attached = session_core::api::TerminalAttached {
+            id: request.id.clone(),
+            cwd: Some(request.cwd.clone()),
+            pid: Some(5000),
+            role: session_core::api::Role::Controller,
+            cols: request.cols,
+            rows: request.rows,
+            checkpoint: base64::engine::general_purpose::STANDARD.encode(&state.checkpoint),
+            offset: 0,
+        };
+        state.panes.insert(request.id.clone(), attached.clone());
+        state.terminal_opens.push(request);
+        let (stream, peer) = session_core::client::TerminalStream::pair(attached.clone());
+        state.pane_streams.push(FakePane {
+            id: attached.id,
+            peer,
+        });
+        Ok(stream)
+    }
+
+    fn attach_terminal(
+        &self,
+        request: session_core::api::TerminalAttachRequest,
+    ) -> Result<session_core::client::TerminalStream> {
+        self.take_failure("attach_terminal")?;
+        let mut state = self.state.lock().unwrap();
+        let mut attached = state
+            .panes
+            .get(&request.id)
+            .cloned()
+            .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "terminal pane ended"))?;
+        attached.role = request.role;
+        state.terminal_attaches.push(request);
+        let (stream, peer) = session_core::client::TerminalStream::pair(attached.clone());
+        state.pane_streams.push(FakePane {
+            id: attached.id,
+            peer,
+        });
+        Ok(stream)
+    }
+
     fn caller(&self) -> &CallerInfo {
         &self.caller
     }
 
-    /// A current daemon's; an older one lacks `sessions.all`, and one from
-    /// before folders the rest too.
+    /// A current daemon's; an older one lacks `sessions.all` and what came
+    /// after it, and one from before folders the rest too.
     fn daemon_capabilities(&self) -> Option<Vec<String>> {
         let state = self.state.lock().unwrap();
         let mut capabilities = vec!["attach"];
@@ -350,7 +427,11 @@ impl SessionApi for FakeApi {
             capabilities.extend(["projects", "session.pin", "session.git"]);
         }
         if !state.all_unsupported {
-            capabilities.push(session_core::api::CAPABILITY_SESSIONS_ALL);
+            capabilities.extend([
+                session_core::api::CAPABILITY_SESSIONS_ALL,
+                session_core::api::CAPABILITY_TERMINAL_PANE,
+                session_core::api::CAPABILITY_WORKING_DIRECTORY,
+            ]);
         }
         if state.restarts_in_place {
             capabilities.push(session_core::api::CAPABILITY_DAEMON_RESTART);

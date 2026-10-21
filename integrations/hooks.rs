@@ -2,6 +2,7 @@
 
 use serde_json::Value;
 use session_core::activity::{ActivityEvent, ActivityPhase, ActivityUpdate, ACTIVITY_VERSION};
+use session_core::api::{AgentWorkingDirectory, Report};
 
 #[path = "claude-code/hooks.rs"]
 mod claude;
@@ -22,6 +23,52 @@ pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, S
         }
         _ => Err("unknown hook adapter".into()),
     }
+}
+
+/// Reduce native input to activity and the root agent's logical directory.
+/// Tool arguments, transcripts, prompts and child-agent directories are ignored.
+pub fn report(agent: &str, input: &Value) -> Result<Option<Report>, String> {
+    let activity = normalize(agent, input)?;
+    let context_only = agent == "claude" && input["hook_event_name"] == "CwdChanged";
+    if activity.is_none() && !context_only {
+        return Ok(None);
+    }
+    let child = input.get("agent_id").and_then(Value::as_str).is_some();
+    let working_directory = if child || input["hook_event_name"] == "SessionEnd" {
+        None
+    } else if agent == "opencode" {
+        input
+            .get("working_directory")
+            .map(|value| {
+                let context: AgentWorkingDirectory = serde_json::from_value(value.clone())
+                    .map_err(|_| "invalid OpenCode working directory")?;
+                if context.agent != agent {
+                    return Err("working-directory agent does not match hook adapter");
+                }
+                Ok(context)
+            })
+            .transpose()?
+    } else {
+        input
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(|path| AgentWorkingDirectory {
+                agent: agent.into(),
+                conversation_id: input
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                path: path.into(),
+            })
+    };
+    if activity.is_none() && working_directory.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(Report {
+        activity,
+        working_directory,
+        ..Report::default()
+    }))
 }
 
 pub fn config(agent: &str) -> Option<&'static str> {
@@ -106,5 +153,36 @@ mod tests {
             let config: Value = serde_json::from_str(config(agent).unwrap()).unwrap();
             assert!(config["hooks"]["PermissionRequest"].is_array());
         }
+    }
+
+    #[test]
+    fn native_working_directories_come_from_root_metadata_not_child_tools_or_prompts() {
+        for agent in ["claude", "codex"] {
+            let input = json!({"hook_event_name":"PreToolUse", "session_id":"root", "cwd":"/repo/worktree",
+                "prompt":"secret prompt", "tool_input":{"cwd":"/repo/wrong-child", "command":"secret command"}});
+            let normalized = report(agent, &input).unwrap().unwrap();
+            assert_eq!(
+                normalized.working_directory.as_ref().unwrap().path,
+                std::path::Path::new("/repo/worktree")
+            );
+            assert!(!serde_json::to_string(&normalized)
+                .unwrap()
+                .contains("secret"));
+            let child = json!({"hook_event_name":"SubagentStart", "session_id":"root", "agent_id":"child", "cwd":"/repo/child"});
+            assert!(report(agent, &child)
+                .unwrap()
+                .unwrap()
+                .working_directory
+                .is_none());
+        }
+        let changed = report("claude", &json!({"hook_event_name":"CwdChanged", "session_id":"root", "cwd":"/repo/new", "old_cwd":"/repo/old", "new_cwd":"/repo/new"})).unwrap().unwrap();
+        assert!(
+            changed.activity.is_none(),
+            "a directory notification must not change the lifecycle"
+        );
+        assert_eq!(
+            changed.working_directory.unwrap().path,
+            std::path::Path::new("/repo/new")
+        );
     }
 }

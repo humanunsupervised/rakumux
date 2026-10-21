@@ -35,6 +35,32 @@ impl Caller {
 
 /// Session control. Implemented by `control::ControlService`.
 pub trait Control: Send + Sync + 'static {
+    /// User-only standalone shell, with no registry or recovery record.
+    fn open_terminal(
+        &self,
+        caller: &Caller,
+        request: &session_core::api::OpenTerminal,
+    ) -> Result<crate::host::PaneAttachment, ApiError> {
+        let _ = (caller, request);
+        Err(ApiError::new(
+            session_core::api::ErrorCode::Unsupported,
+            "temporary terminal panes are unsupported",
+        ))
+    }
+
+    /// Reattach only an existing standalone terminal after a reconnect.
+    fn attach_terminal(
+        &self,
+        caller: &Caller,
+        request: &session_core::api::TerminalAttachRequest,
+    ) -> Result<crate::host::PaneAttachment, ApiError> {
+        let _ = (caller, request);
+        Err(ApiError::new(
+            session_core::api::ErrorCode::Unsupported,
+            "temporary terminal panes are unsupported",
+        ))
+    }
+
     /// Verify the hello's credentials and protocol version.
     fn authenticate(&self, hello: &Hello) -> Result<Caller, ApiError>;
 

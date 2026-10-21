@@ -73,3 +73,27 @@ test("active descendants take precedence over an already completed root reply", 
   assert.equal(snapshot(ctx).update.phase, "working");
   assert.deepEqual(snapshot(ctx).update.subagents, ["child"]);
 });
+
+test("directory updates follow the displayed session, not the plugin's launch location", () => {
+  const ctx = context();
+  ctx.location = { directory: "/repo/main" };
+  let directory = "/repo/worktrees/first";
+  ctx.data.session.get = (id) => ({ id, location: { directory }, subpath: "src" });
+  const before = snapshot(ctx).update;
+  assert.deepEqual(before.working_directory, {
+    agent: "opencode", conversation_id: "root", path: "/repo/worktrees/first/src",
+  });
+  directory = "/repo/worktrees/second";
+  const after = snapshot(ctx).update;
+  assert.equal(after.working_directory.path, "/repo/worktrees/second/src");
+  assert.notEqual(JSON.stringify(after), JSON.stringify(before), "a worktree switch must be sent even when activity is unchanged");
+});
+
+test("background subagent locations do not replace the displayed agent's directory", () => {
+  const ctx = context();
+  ctx.data.session.get = (id) => ({ id, location: { directory: id === "root" ? "/repo/root" : "/repo/background-child" } });
+  assert.equal(snapshot(ctx).update.working_directory.path, "/repo/root");
+  ctx.ui.router.current = () => ({ type: "session", sessionID: "child" });
+  assert.equal(snapshot(ctx).update.working_directory.path, "/repo/background-child");
+  assert.equal(snapshot(ctx).update.working_directory.conversation_id, "child");
+});

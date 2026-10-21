@@ -813,3 +813,206 @@ fn git_context_follows_the_cwd_and_head() {
     let listed = h.list(true);
     assert_eq!(listed[0].git, dead.git);
 }
+
+#[test]
+fn agent_working_directory_follows_internal_worktree_switches_without_changing_scope_or_terminal_cwd(
+) {
+    use ptyd::host::ProcessInfo;
+    use session_core::api::{AgentWorkingDirectory, Report};
+    for agent in ["claude", "codex", "opencode"] {
+        let h = Harness::new();
+        let root = h.scope.path().to_path_buf();
+        git_repo(&root, "main");
+        let checkout = h.root().join("active-worktree");
+        let admin = root.join(".git/worktrees/active");
+        std::fs::create_dir_all(&admin).unwrap();
+        set_head(&admin, "agent-feature");
+        std::fs::write(admin.join("commondir"), "../..\n").unwrap();
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(
+            checkout.join(".git"),
+            format!("gitdir: {}\n", admin.display()),
+        )
+        .unwrap();
+        let started = h.create(Some("agent"));
+        h.host.set_foreground(
+            &started.id,
+            ProcessInfo {
+                pid: 4242,
+                name: agent.into(),
+                cmdline: vec![agent.into()],
+            },
+        );
+        let caller = h.session_caller(&started.id);
+        assert_eq!(
+            h.handle(
+                &caller,
+                Request::SessionReport(Report {
+                    working_directory: Some(AgentWorkingDirectory {
+                        agent: agent.into(),
+                        conversation_id: Some("conversation".into()),
+                        path: checkout.clone()
+                    }),
+                    ..Report::default()
+                })
+            ),
+            Response::Ok
+        );
+        let active = h.get(&started.id);
+        assert_eq!(
+            active.git,
+            branch("agent-feature", &checkout, Some("active")),
+            "{agent}"
+        );
+        assert_eq!(active.scope, h.scope);
+        let outside = h.handle(
+            &caller,
+            Request::SessionList {
+                scope: Some(ScopeRoot::resolve(&checkout).unwrap()),
+                scopes: Vec::new(),
+                include_dead: true,
+                all: false,
+            },
+        );
+        assert!(
+            matches!(outside, Response::Error { error } if error.code == ErrorCode::OutOfScope),
+            "a logical working directory must not change the agent's authenticated folder"
+        );
+        assert_eq!(
+            active.cwd, root,
+            "the agent's logical worktree is not the terminal cwd"
+        );
+        assert_eq!(
+            h.list(true)[0].git,
+            active.git,
+            "listing must not reset the git cache to the launch directory"
+        );
+        let watch = h
+            .control
+            .subscribe(
+                &h.user,
+                &SubscribeRequest {
+                    scope: Some(h.scope.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        set_head(&admin, "renamed-agent-branch");
+        let update = eventually("agent worktree HEAD change without another report", || {
+            updated(&drain(&watch), &started.id).filter(|view| {
+                view.git.as_ref().and_then(|git| git.branch.as_deref())
+                    == Some("renamed-agent-branch")
+            })
+        });
+        assert_eq!(
+            update.git,
+            branch("renamed-agent-branch", &checkout, Some("active"))
+        );
+        assert_eq!(
+            h.get(&started.id).git,
+            update.git,
+            "last working context is retained while the agent waits"
+        );
+        h.host.set_foreground(
+            &started.id,
+            ProcessInfo {
+                pid: 5000,
+                name: "bash".into(),
+                cmdline: vec!["bash".into(), "-l".into()],
+            },
+        );
+        assert_eq!(
+            h.get(&started.id).git,
+            branch("main", &root, None),
+            "a non-agent uses its terminal cwd"
+        );
+        h.host.set_foreground(
+            &started.id,
+            ProcessInfo {
+                pid: 6000,
+                name: agent.into(),
+                cmdline: vec![agent.into()],
+            },
+        );
+        assert_eq!(
+            h.get(&started.id).git,
+            branch("main", &root, None),
+            "a new agent process cannot inherit an old process's worktree"
+        );
+    }
+}
+
+#[test]
+fn agent_working_directory_survives_handoff_and_rejects_invalid_paths() {
+    use ptyd::control::{ControlConfig, ControlService, Limits};
+    use ptyd::host::ProcessInfo;
+    use session_core::api::{AgentWorkingDirectory, Report};
+    let mut h = Harness::new();
+    let repo = h.scope.path().to_path_buf();
+    git_repo(&repo, "main");
+    let checkout = h.root().join("agent-work");
+    git_repo(&checkout, "agent-branch");
+    let started = h.create(Some("agent"));
+    h.host.set_foreground(
+        &started.id,
+        ProcessInfo {
+            pid: 4242,
+            name: "codex".into(),
+            cmdline: vec!["codex".into()],
+        },
+    );
+    let caller = h.session_caller(&started.id);
+    for invalid in [
+        PathBuf::from("relative"),
+        h.root().join("missing"),
+        PathBuf::from(""),
+    ] {
+        let response = h.handle(
+            &caller,
+            Request::SessionReport(Report {
+                working_directory: Some(AgentWorkingDirectory {
+                    agent: "codex".into(),
+                    conversation_id: Some("thread".into()),
+                    path: invalid,
+                }),
+                ..Report::default()
+            }),
+        );
+        assert!(
+            matches!(response, Response::Error { error } if error.code == ErrorCode::InvalidArgument)
+        );
+    }
+    assert_eq!(
+        h.handle(
+            &caller,
+            Request::SessionReport(Report {
+                working_directory: Some(AgentWorkingDirectory {
+                    agent: "codex".into(),
+                    conversation_id: Some("thread".into()),
+                    path: checkout.clone(),
+                }),
+                ..Report::default()
+            })
+        ),
+        Response::Ok
+    );
+    let handed = h.control.handoff();
+    assert_eq!(handed.working_directories.len(), 1);
+    h.control = ControlService::open_after_handoff(
+        ControlConfig {
+            layout: h.layout.clone(),
+            user_token: h.user_token.clone(),
+            socket: h.layout.socket_path(),
+            rakumux_bin: None,
+            version: "test".into(),
+            limits: Limits::default(),
+        },
+        h.host.clone(),
+        handed,
+    )
+    .unwrap();
+    let restored = h.get(&started.id);
+    assert_eq!(restored.git, branch("agent-branch", &checkout, None));
+    assert_eq!(restored.cwd, repo);
+    assert_eq!(restored.scope, h.scope);
+}

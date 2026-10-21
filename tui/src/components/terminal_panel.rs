@@ -12,7 +12,7 @@ use super::format::{abbreviate_home, truncate};
 use super::utils::{fade, fade_preview, get_spinner_char};
 use crate::app::terminal_panel::panel_output;
 use crate::app::types::{AppMode, Focus};
-use crate::app::{App, DetailView, Hit};
+use crate::app::{App, Hit};
 use crate::terminal_view::DefaultColors;
 use crate::theme;
 
@@ -29,7 +29,6 @@ pub fn draw_terminal_panel(
         && matches!(app.mode, AppMode::Normal)
         && app
             .terminal_panel
-            .detail
             .attachment
             .as_ref()
             .is_some_and(|attachment| attachment.role == Role::Controller);
@@ -55,28 +54,18 @@ pub fn draw_terminal_panel(
     };
     let folder = app
         .terminal_panel
-        .folder
+        .cwd
         .as_ref()
-        .map(|folder| abbreviate_home(folder.path()))
+        .map(|cwd| abbreviate_home(cwd))
         .unwrap_or_default();
     let status = if app.terminal_panel.busy() {
         format!("{} starting…", get_spinner_char())
     } else if focused {
         "typing here".into()
-    } else if matches!(app.terminal_panel.detail.view, DetailView::Saved { .. }) {
-        "Enter restarts".into()
     } else {
         "click to focus".into()
     };
-    let name = app
-        .terminal_panel
-        .session_id()
-        .and_then(|id| app.list.get(id))
-        .map(|session| session.name.as_str());
-    let title = match name {
-        Some(name) => format!(" Terminal · {name} · {folder} · {status}"),
-        None => format!(" Terminal · {folder} · {status}"),
-    };
+    let title = format!(" Terminal · {folder} · {status}");
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             truncate(&title, usize::from(area.width.saturating_sub(hide.width))),
@@ -102,7 +91,7 @@ pub fn draw_terminal_panel(
     hits.push((hide, Hit::TerminalPanelHide));
     hits.push((header, Hit::TerminalPanel));
     let output = panel_output(area);
-    let cursor = if let Some(terminal) = app.terminal_panel.detail.terminal.as_ref() {
+    let cursor = if let Some(terminal) = app.terminal_panel.terminal.as_ref() {
         terminal.render(
             output,
             frame.buffer_mut(),
@@ -130,7 +119,7 @@ pub fn draw_terminal_panel(
         );
         None
     };
-    if app.terminal_panel.detail.terminal.is_some() {
+    if app.terminal_panel.terminal.is_some() {
         if let Some(message) = app.terminal_panel.message.as_ref() {
             frame.render_widget(
                 Paragraph::new(message.as_str()).style(Style::default().fg(palette.accent_pink)),
@@ -141,9 +130,7 @@ pub fn draw_terminal_panel(
             );
         }
     }
-    if !matches!(app.mode, AppMode::Normal)
-        || matches!(app.terminal_panel.detail.view, DetailView::Saved { .. })
-    {
+    if !matches!(app.mode, AppMode::Normal) {
         fade(frame.buffer_mut(), area);
     } else if !focused {
         fade_preview(frame.buffer_mut(), area);

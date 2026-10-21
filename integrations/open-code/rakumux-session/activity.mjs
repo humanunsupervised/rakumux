@@ -1,4 +1,5 @@
 // Only use cached, documented OpenCode V2 data. Never read message text.
+import { resolve } from "node:path";
 export function snapshot(context) {
   const route = context.ui.router.current();
   if (route.type !== "session") return;
@@ -29,6 +30,10 @@ export function snapshot(context) {
       version: 1, agent: "opencode", conversation_id: root, event: "snapshot", phase,
       ...(phase === "done" ? { completion_id: latest.id } : {}),
       subagents: subagents.slice(0, 64),
+      ...(current.location?.directory ? { working_directory: {
+        agent: "opencode", conversation_id: current.id,
+        path: resolve(current.location.directory, current.subpath ?? "."),
+      } } : {}),
     },
   };
 }

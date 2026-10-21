@@ -9,6 +9,87 @@ use session_core::client::AttachEvent;
 use std::time::{Duration, Instant};
 
 #[test]
+fn standalone_pane_exit_removes_the_terminal_without_session_files_or_events() {
+    use ptyd::host::{PaneSpawnSpec, TerminalProgram};
+    use session_core::ids::PaneId;
+    let home = TestHome::new();
+    let host = home.host_with(|config| config.persist_interval = Duration::ZERO);
+    let events = host.subscribe();
+    let pane = PaneId::generate();
+    let info = host
+        .spawn_pane(PaneSpawnSpec {
+            id: pane.clone(),
+            program: TerminalProgram::from(home.bash_spec(80, 24, b"")),
+        })
+        .unwrap();
+    let attachment = host.attach_pane(&pane, Role::Controller, 80, 24).unwrap();
+    assert!(matches!(
+        host.attach_pane(&pane, Role::Observer, 80, 24),
+        Err(HostError::NotController)
+    ));
+    wait_for_prompt(&*host, info.id);
+    assert!(host.list().is_empty());
+    assert!(host.info(info.id).is_none());
+    assert!(matches!(
+        host.attach(info.id, Role::Observer, 80, 24),
+        Err(HostError::NotFound)
+    ));
+    attachment
+        .control
+        .input(b"printf 'PANE_%s\\n' 42; exit 7\r")
+        .unwrap();
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let event = attachment
+            .events
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap();
+        if let AttachEvent::Event(StreamEvent::Exited { code }) = event {
+            assert_eq!(code, Some(7));
+            break;
+        }
+    }
+    assert!(wait_until(TIMEOUT, || host.pane_info(&pane).is_none()));
+    assert_eq!(host.pane_count(), 0);
+    assert_eq!(host.scrollback_saves(), 0);
+    assert!(!home.layout.home.join("sessions").exists());
+    assert!(
+        events.try_recv().is_err(),
+        "standalone output must not become session events"
+    );
+    assert!(wait_until(TIMEOUT, || !pid_alive(info.pid.unwrap())));
+    host.shutdown();
+}
+
+#[test]
+fn standalone_pane_handoff_reaps_an_unclaimed_window_without_touching_sessions() {
+    use ptyd::host::{PaneSpawnSpec, TerminalProgram};
+    use session_core::ids::PaneId;
+    let home = TestHome::new();
+    let original = home.host();
+    let pane = PaneId::generate();
+    let info = original
+        .spawn_pane(PaneSpawnSpec {
+            id: pane.clone(),
+            program: TerminalProgram::from(home.bash_spec(80, 24, b"")),
+        })
+        .unwrap();
+    wait_for_prompt(&*original, info.id);
+    assert!(original.handoff().is_empty());
+    let panes = original.take_pane_handoff();
+    assert_eq!(panes.len(), 1);
+    let restored =
+        home.host_with(|config| config.pane_reconnect_grace = Some(Duration::from_millis(50)));
+    assert_eq!(restored.adopt_panes(panes), 1);
+    assert!(wait_until(TIMEOUT, || restored.pane_info(&pane).is_none()));
+    assert!(wait_until(TIMEOUT, || !pid_alive(info.pid.unwrap())));
+    assert_eq!(restored.pane_count(), 0);
+    assert!(restored.list().is_empty());
+    assert!(!home.layout.home.join("sessions").exists());
+    restored.shutdown();
+}
+
+#[test]
 fn spawn_submit_read_sees_the_output() {
     let home = TestHome::new();
     let host = home.host();
@@ -313,6 +394,43 @@ fn title_cwd_and_bell_become_events() {
     assert!(stream_events.contains(&StreamEvent::Cwd {
         path: "/tmp/some dir".into()
     }));
+    host.shutdown();
+}
+
+#[test]
+fn quiet_foreground_directory_changes_replace_stale_osc7_context() {
+    let home = TestHome::new();
+    let destination = home.work.join("worktree");
+    std::fs::create_dir(&destination).unwrap();
+    let host = home.host();
+    let script = format!("stty -echo; printf '\\033]7;file://localhost{}\\007READY'; IFS= read -r next; cd \"$next\"; IFS= read -r unused", home.work.display());
+    let info = host
+        .spawn(home.spec(
+            vec![
+                "bash".into(),
+                "--noprofile".into(),
+                "--norc".into(),
+                "-c".into(),
+                script,
+            ],
+            80,
+            24,
+            b"",
+        ))
+        .unwrap();
+    wait_for_screen(&*host, info.id, "READY");
+    // Let the initial output's settling refresh finish. The directory then
+    // changes without any more PTY output or an OSC 7 update.
+    std::thread::sleep(Duration::from_millis(800));
+    host.write(info.id, format!("{}\n", destination.display()).as_bytes())
+        .unwrap();
+    let expected = std::fs::canonicalize(destination).unwrap();
+    assert!(
+        wait_until(Duration::from_secs(5), || host
+            .info(info.id)
+            .is_some_and(|info| info.cwd.as_ref() == Some(&expected))),
+        "a quiet agent's process cwd stayed pinned to an old OSC 7 report"
+    );
     host.shutdown();
 }
 

@@ -28,6 +28,27 @@ Older detection profiles remain supported; new hooks start with these three agen
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
 
+## Active worktree and branch
+
+With `session.working_directory`, the same self-only report can include
+`working_directory: {agent, conversation_id?, path}`. The daemon validates and canonicalizes
+the path, then reads that directory's `.git` files for the session's branch/worktree. It
+retains the last report while the same agent process is running. No report changes the
+session's folder permissions, terminal cwd or another session.
+
+- OpenCode uses the displayed session's `location.directory` and `subpath`, not the plugin's
+  original launch location. A worktree switch is sent even if its activity stays idle.
+- Claude Code and Codex use the root hook input's `cwd`, never tool arguments or background
+  subagent directories. Claude's `CwdChanged` hook updates context without changing activity.
+- Without an active agent, git context follows the terminal cwd. The daemon polls quiet
+  foreground processes and releases stale OSC 7 authority after a process/directory change.
+
+Context survives an in-place daemon restart but is not a new session or a permission grant.
+Agent UI reloads may be needed after installing integrations; Codex hooks must be reviewed
+and trusted in `/hooks`. No adapter creates or switches a git worktree, runs `git`, or reads
+prompt/transcript text to guess a directory. Without agent metadata, the terminal cwd is the
+fallback; Rakumux does not guess from another conversation's most-recent directory.
+
 ## Common activity protocol, version 1
 
 Integrations use the existing self-only `session_report` request's optional `activity` field:

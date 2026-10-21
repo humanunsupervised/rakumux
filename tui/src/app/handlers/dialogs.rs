@@ -160,8 +160,8 @@ fn handle_daemon_restart_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') if outdated => {
             app.mode = AppMode::Normal;
             app.set_status(
-                "Kept the older server: no git branches, folders, pins or new folders live \
-                 until `rakumux daemon restart`.",
+                "Kept the older server: what it can't show waits for \
+                 `rakumux daemon restart`.",
             );
         }
         KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {

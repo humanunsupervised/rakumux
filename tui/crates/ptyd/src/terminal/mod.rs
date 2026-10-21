@@ -23,10 +23,10 @@ mod read;
 mod ring;
 mod sink;
 
-use crate::handoff::TerminalHandoff;
+use crate::handoff::{PaneHandoff, ProcessHandoff, TerminalHandoff};
 use crate::host::{
-    AttachControl, HostAttachment, HostError, HostEvent, SpawnSpec, TerminalHost, TerminalInfo,
-    TerminalState,
+    AttachControl, HostAttachment, HostError, HostEvent, PaneAttachment, PaneSpawnSpec, SpawnSpec,
+    TerminalHost, TerminalInfo, TerminalProcessInfo, TerminalProgram, TerminalState,
 };
 use crate::persist::ScrollbackStore;
 use crate::{log_debug, log_error, log_info, log_warn};
@@ -34,7 +34,7 @@ use actor::{Actor, ActorMsg, ActorParts, Adopted, AttachReply};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use pty_io::PtyMaster;
 use session_core::api::{ReadResult, ReadSource, Role, TextFormat};
-use session_core::ids::TerminalId;
+use session_core::ids::{PaneId, SessionId, TerminalId};
 use session_core::paths::Layout;
 use sink::AttachmentId;
 use std::collections::HashMap;
@@ -72,6 +72,9 @@ pub struct HostConfig {
     /// umask for spawned programs. `None` inherits the daemon's; the daemon
     /// runs with 077 and sets this to the umask it started with.
     pub child_umask: Option<u32>,
+    /// Grace for a pane's owning window to reconnect after handoff. `None`
+    /// uses 30 seconds; unclaimed panes then end instead of becoming orphans.
+    pub pane_reconnect_grace: Option<Duration>,
 }
 
 impl HostConfig {
@@ -84,6 +87,7 @@ impl HostConfig {
             exited_retention: Duration::from_secs(600),
             persist_interval: Duration::from_secs(30),
             child_umask: None,
+            pane_reconnect_grace: None,
         }
     }
 }
@@ -102,7 +106,7 @@ pub(crate) fn now_ms() -> i64 {
 
 /// State shared by the host, the actor and attachments.
 pub(crate) struct SharedState {
-    pub(crate) info: TerminalInfo,
+    pub(crate) info: TerminalProcessInfo,
     pub(crate) modes: vt::Modes,
     pub(crate) controller: Option<AttachmentId>,
     /// When the controller last sent input (someone typing in it).
@@ -110,9 +114,24 @@ pub(crate) struct SharedState {
 }
 
 /// One terminal as seen from outside its actor.
+#[derive(Clone)]
+enum TerminalOwner {
+    Session(SessionId),
+    Pane(PaneId),
+}
+
+impl TerminalOwner {
+    fn session_id(&self) -> Option<&SessionId> {
+        match self {
+            Self::Session(id) => Some(id),
+            Self::Pane(_) => None,
+        }
+    }
+}
+
 pub(crate) struct Shared {
     pub(crate) id: TerminalId,
-    pub(crate) session_id: session_core::ids::SessionId,
+    owner: TerminalOwner,
     commands: SyncSender<ActorMsg>,
     state: Mutex<SharedState>,
     /// PTY input queue; `None` once the terminal ended.
@@ -200,6 +219,7 @@ pub(crate) struct HostInner {
     subscribers: Mutex<Vec<Sender<HostEvent>>>,
     next_id: AtomicU64,
     shutting_down: AtomicBool,
+    pane_handoff: Mutex<Vec<PaneHandoff>>,
     /// Scrollback saves performed (diagnostics and tests).
     pub(crate) saves: AtomicU64,
 }
@@ -217,6 +237,14 @@ impl HostInner {
     fn get(&self, id: TerminalId) -> Result<Arc<Shared>, HostError> {
         self.terminals()
             .get(&id)
+            .cloned()
+            .ok_or(HostError::NotFound)
+    }
+
+    fn pane(&self, id: &PaneId) -> Result<Arc<Shared>, HostError> {
+        self.terminals()
+            .values()
+            .find(|shared| matches!(&shared.owner, TerminalOwner::Pane(pane) if pane == id))
             .cloned()
             .ok_or(HostError::NotFound)
     }
@@ -248,6 +276,7 @@ impl Host {
                 subscribers: Mutex::new(Vec::new()),
                 next_id: AtomicU64::new(1),
                 shutting_down: AtomicBool::new(false),
+                pane_handoff: Mutex::new(Vec::new()),
                 saves: AtomicU64::new(0),
             }),
         }
@@ -272,7 +301,7 @@ impl Host {
             .request(|reply| ActorMsg::ReplaySince { offset, reply })
     }
 
-    fn validate(spec: &SpawnSpec) -> Result<(), HostError> {
+    fn validate(spec: &TerminalProgram) -> Result<(), HostError> {
         if spec.argv.is_empty() || spec.argv[0].is_empty() {
             return Err(HostError::Spawn("empty command".into()));
         }
@@ -290,7 +319,8 @@ impl Host {
     fn start(
         &self,
         master: PtyMaster,
-        info: TerminalInfo,
+        info: TerminalProcessInfo,
+        owner: TerminalOwner,
         modes: vt::Modes,
         startup_input: Vec<u8>,
         adopted: Option<Adopted>,
@@ -306,7 +336,7 @@ impl Host {
         let (input_tx, input_rx) = mpsc::sync_channel(WRITER_QUEUE);
         let shared = Arc::new(Shared {
             id,
-            session_id: info.session_id.clone(),
+            owner,
             commands: command_tx.clone(),
             state: Mutex::new(SharedState {
                 modes,
@@ -365,8 +395,29 @@ impl Host {
     /// come back. Returns how many were adopted; a terminal that can't be
     /// is closed (its program gets SIGHUP).
     pub fn adopt(&self, terminals: Vec<TerminalHandoff>) -> usize {
+        self.adopt_processes(terminals.into_iter().map(|terminal| {
+            (
+                TerminalOwner::Session(terminal.session_id.clone()),
+                terminal.into(),
+            )
+        }))
+    }
+
+    /// Restore standalone panes without ever adopting them as sessions.
+    pub fn adopt_panes(&self, panes: Vec<PaneHandoff>) -> usize {
+        self.adopt_processes(
+            panes
+                .into_iter()
+                .map(|pane| (TerminalOwner::Pane(pane.id), pane.terminal)),
+        )
+    }
+
+    fn adopt_processes(
+        &self,
+        terminals: impl IntoIterator<Item = (TerminalOwner, ProcessHandoff)>,
+    ) -> usize {
         let mut adopted = 0;
-        for handed in terminals {
+        for (owner, handed) in terminals {
             let id = TerminalId(handed.id);
             if let Err(e) = crate::handoff::set_cloexec(handed.fd, true) {
                 log_warn!("terminal {id}: handed-over pty unusable: {e}");
@@ -377,9 +428,8 @@ impl Host {
             let (cols, rows) = clamp_size(handed.cols, handed.rows);
             let emulator = restore_emulator(&self.inner.config, rows, cols, &handed);
             let modes = emulator.modes();
-            let info = TerminalInfo {
+            let info = TerminalProcessInfo {
                 id,
-                session_id: handed.session_id.clone(),
                 pid: Some(handed.pid),
                 cwd: handed.cwd.clone(),
                 title: handed.title.clone(),
@@ -403,18 +453,16 @@ impl Host {
                 emulator,
                 total: handed.output_offset,
                 osc7_cwd: handed.osc7_cwd,
+                osc7_foreground: handed.osc7_foreground,
+                osc7_process_cwd: handed.osc7_process_cwd,
             };
-            match self.start(master, info, modes, startup_input, Some(parts)) {
+            match self.start(master, info, owner, modes, startup_input, Some(parts)) {
                 Ok(()) => {
                     adopted += 1;
                     self.inner
                         .next_id
                         .fetch_max(handed.id + 1, Ordering::SeqCst);
-                    log_info!(
-                        "terminal {id}: adopted (pid {}) for session {}",
-                        handed.pid,
-                        handed.session_id
-                    );
+                    log_info!("terminal {id}: adopted (pid {})", handed.pid,);
                 }
                 Err(e) => log_warn!("terminal {id}: can't adopt it: {e}"),
             }
@@ -429,7 +477,7 @@ fn restore_emulator(
     config: &HostConfig,
     rows: u16,
     cols: u16,
-    handed: &TerminalHandoff,
+    handed: &ProcessHandoff,
 ) -> vt::Emulator {
     let mut emulator = vt::Emulator::responding(rows, cols, config.scrollback_rows, config.colors);
     if !handed.history.is_empty() {
@@ -463,8 +511,12 @@ fn kill_group(pid: u32) {
     }
 }
 
-impl TerminalHost for Host {
-    fn spawn(&self, spec: SpawnSpec) -> Result<TerminalInfo, HostError> {
+impl Host {
+    fn spawn_process(
+        &self,
+        spec: TerminalProgram,
+        owner: TerminalOwner,
+    ) -> Result<TerminalProcessInfo, HostError> {
         if self.inner.shutting_down.load(Ordering::SeqCst) {
             return Err(HostError::Spawn("the daemon is shutting down".into()));
         }
@@ -514,9 +566,8 @@ impl TerminalHost for Host {
             }
         };
         let id = TerminalId(self.inner.next_id.fetch_add(1, Ordering::SeqCst));
-        let info = TerminalInfo {
+        let info = TerminalProcessInfo {
             id,
-            session_id: spec.session_id.clone(),
             pid: Some(pid),
             cwd: Some(spec.cwd.clone()),
             title: String::new(),
@@ -535,31 +586,99 @@ impl TerminalHost for Host {
         self.start(
             master,
             info.clone(),
+            owner,
             modes,
             spec.startup_input.clone(),
             None,
         )
         .inspect_err(|_| kill_group(pid))?;
         log_info!(
-            "terminal {id}: spawned {:?} (pid {pid}) for session {} in {}",
+            "terminal {id}: spawned {:?} (pid {pid}) in {}",
             spec.argv,
-            spec.session_id,
             spec.cwd.display()
         );
         Ok(info)
     }
+}
+
+impl TerminalHost for Host {
+    fn spawn(&self, spec: SpawnSpec) -> Result<TerminalInfo, HostError> {
+        let id = spec.session_id.clone();
+        self.spawn_process(spec.into(), TerminalOwner::Session(id.clone()))
+            .map(|info| info.for_session(id))
+    }
+
+    fn spawn_pane(&self, spec: PaneSpawnSpec) -> Result<TerminalProcessInfo, HostError> {
+        self.spawn_process(spec.program, TerminalOwner::Pane(spec.id))
+    }
+
+    fn pane_info(&self, id: &PaneId) -> Option<TerminalProcessInfo> {
+        Some(self.inner.pane(id).ok()?.lock().info.clone())
+    }
+
+    fn attach_pane(
+        &self,
+        id: &PaneId,
+        role: Role,
+        cols: u16,
+        rows: u16,
+    ) -> Result<PaneAttachment, HostError> {
+        let shared = self.inner.pane(id)?;
+        let reply = shared.request(|reply| ActorMsg::Attach {
+            role,
+            cols,
+            rows,
+            reply,
+        })??;
+        Ok(HostAttachment {
+            info: reply.info,
+            role,
+            checkpoint: reply.checkpoint,
+            offset: reply.offset,
+            events: reply.events,
+            control: Box::new(Attachment {
+                shared,
+                id: reply.attachment,
+                detached: AtomicBool::new(false),
+            }),
+        })
+    }
+
+    fn close_pane(&self, id: &PaneId) {
+        if let Ok(shared) = self.inner.pane(id) {
+            self.forget(shared.id);
+        }
+    }
+
+    fn pane_count(&self) -> usize {
+        self.inner
+            .terminals()
+            .values()
+            .filter(|shared| matches!(shared.owner, TerminalOwner::Pane(_)))
+            .count()
+    }
 
     fn list(&self) -> Vec<TerminalInfo> {
         let terminals: Vec<Arc<Shared>> = self.inner.terminals().values().cloned().collect();
-        let mut infos: Vec<TerminalInfo> =
-            terminals.iter().map(|t| t.lock().info.clone()).collect();
+        let mut infos: Vec<TerminalInfo> = terminals
+            .iter()
+            .filter_map(|t| {
+                t.owner
+                    .session_id()
+                    .map(|id| t.lock().info.clone().for_session(id.clone()))
+            })
+            .collect();
         infos.sort_by_key(|info| info.id);
         infos
     }
 
     fn info(&self, id: TerminalId) -> Option<TerminalInfo> {
         let shared = self.inner.get(id).ok()?;
-        let info = shared.lock().info.clone();
+        let info = shared
+            .lock()
+            .info
+            .clone()
+            .for_session(shared.owner.session_id()?.clone());
         Some(info)
     }
 
@@ -639,6 +758,11 @@ impl TerminalHost for Host {
         rows: u16,
     ) -> Result<HostAttachment, HostError> {
         let shared = self.inner.get(id)?;
+        let session_id = shared
+            .owner
+            .session_id()
+            .ok_or(HostError::NotFound)?
+            .clone();
         let reply: AttachReply = shared.request(|reply| ActorMsg::Attach {
             role,
             cols,
@@ -646,7 +770,7 @@ impl TerminalHost for Host {
             reply,
         })??;
         Ok(HostAttachment {
-            info: reply.info,
+            info: reply.info.for_session(session_id),
             role,
             checkpoint: reply.checkpoint,
             offset: reply.offset,
@@ -696,7 +820,18 @@ impl TerminalHost for Host {
         let mut handed = Vec::new();
         for shared in &terminals {
             match shared.request(|reply| ActorMsg::Handoff { reply }) {
-                Ok(Some(terminal)) => handed.push(terminal),
+                Ok(Some(terminal)) => match &shared.owner {
+                    TerminalOwner::Session(id) => handed.push(terminal.for_session(id.clone())),
+                    TerminalOwner::Pane(id) => self
+                        .inner
+                        .pane_handoff
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(PaneHandoff {
+                            id: id.clone(),
+                            terminal,
+                        }),
+                },
                 _ => {
                     if shared.is_running() {
                         log_warn!("terminal {}: not handed over; it ends", shared.id);
@@ -709,6 +844,16 @@ impl TerminalHost for Host {
         self.inner.terminals().clear();
         log_info!("handing over {} running terminal(s)", handed.len());
         handed
+    }
+
+    fn take_pane_handoff(&self) -> Vec<PaneHandoff> {
+        std::mem::take(
+            &mut *self
+                .inner
+                .pane_handoff
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        )
     }
 }
 
@@ -736,11 +881,15 @@ fn on_actor_panic(
         state.info.controlled = false;
         state.controller = None;
     }
-    host.publish(HostEvent::Exited {
-        id: shared.id,
-        session_id: shared.session_id.clone(),
-        code: None,
-    });
+    if let Some(session_id) = shared.owner.session_id() {
+        host.publish(HostEvent::Exited {
+            id: shared.id,
+            session_id: session_id.clone(),
+            code: None,
+        });
+    } else {
+        host.remove_if_same(shared);
+    }
 }
 
 /// An attached client's handle. Dropping it detaches.
@@ -751,6 +900,12 @@ struct Attachment {
 }
 
 impl AttachControl for Attachment {
+    fn checkpoint(&self) -> Result<(), HostError> {
+        self.shared.request(|reply| ActorMsg::Checkpoint {
+            attachment: self.id,
+            reply,
+        })?
+    }
     fn input(&self, bytes: &[u8]) -> Result<(), HostError> {
         {
             let mut state = self.shared.lock();

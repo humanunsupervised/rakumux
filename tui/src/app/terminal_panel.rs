@@ -1,19 +1,17 @@
-//! An independent daemon-owned shell below the main detail pane. Hiding
-//! the panel detaches its view, never kills its session or running command.
+//! A window-local terminal pane, not a Rakumux session. Hiding retains its
+//! stream; shell exit closes the pane and the daemon releases the PTY.
 
-use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use session_core::api::{
-    ApiError, AttachRequest, ErrorCode, ReadRequest, ReadResult, ReadSource, ReviveSession, Role,
-    StreamCommand, StreamEvent, TextFormat,
+    ApiError, ErrorCode, OpenTerminal, Role, StreamCommand, StreamEvent, TerminalAttachRequest,
 };
-use session_core::client::{AttachEvent, AttachStream};
-use session_core::ids::SessionId;
-use session_core::model::{ScopeRoot, SessionStatus, SessionView};
+use session_core::client::{AttachEvent, TerminalStream};
+use session_core::ids::PaneId;
 
-use super::detail::{classify_output, Attachment, Detail, DetailView, OutputAction};
+use super::detail::{classify_output, Attachment, OutputAction};
 use super::runtime::{cancel_flag, AppEvent};
 use super::types::{AppMode, AppResult, Focus};
 use super::App;
@@ -24,87 +22,89 @@ const MAX_CELLS: usize = 500_000;
 const MAX_CHECKPOINT: usize = 2 * 1024 * 1024;
 const SCROLLBACK: usize = 500;
 
-/// Window-local view state and opaque ids for independent daemon sessions.
-/// None of this state owns or terminates a shell process.
+/// An independent terminal and its view. It has no registry/session state.
 pub struct TerminalPanel {
     pub open: bool,
-    pub folder: Option<ScopeRoot>,
-    pub detail: Detail,
+    pub id: Option<PaneId>,
+    pub cwd: Option<PathBuf>,
+    pub terminal: Option<TerminalView>,
+    pub attachment: Option<Attachment<PaneId>>,
     pub message: Option<String>,
+    pub title: Option<String>,
     pub height_percent: u16,
     pub dragging: bool,
-    /// Bindings are local to this window. Sessions themselves remain normal,
-    /// durable Rakumux sessions, visible to every other client.
-    bindings: HashMap<ScopeRoot, SessionId>,
     pending: Option<u64>,
     epoch: u64,
     needs_open: bool,
+    creating: bool,
     reconnect: bool,
-    create_missing: bool,
     retry_at: Option<Instant>,
+    awaiting_checkpoint: bool,
+    needs_refocus: bool,
 }
 
 impl Default for TerminalPanel {
     fn default() -> Self {
         Self {
             open: false,
-            folder: None,
-            detail: Detail::default(),
+            id: None,
+            cwd: None,
+            terminal: None,
+            attachment: None,
             message: None,
+            title: None,
             height_percent: DEFAULT_HEIGHT_PERCENT,
             dragging: false,
-            bindings: HashMap::new(),
             pending: None,
             epoch: 0,
             needs_open: false,
+            creating: false,
             reconnect: false,
-            create_missing: true,
             retry_at: None,
+            awaiting_checkpoint: false,
+            needs_refocus: false,
         }
     }
 }
 
 impl TerminalPanel {
-    fn retarget(&mut self, view: DetailView) -> u64 {
-        self.epoch = self.epoch.wrapping_add(1);
-        self.detail.retarget(view);
-        self.detail.generation = self.epoch;
-        self.epoch
-    }
     pub fn busy(&self) -> bool {
-        self.open && self.pending.is_some()
+        self.pending.is_some()
     }
-    pub fn session_id(&self) -> Option<&SessionId> {
-        self.detail.session_id()
-    }
-    pub fn is_panel_session(&self, id: &SessionId) -> bool {
-        self.bindings.values().any(|target| target == id)
-    }
-    pub fn clear_attachment(&mut self) {
-        self.retarget(DetailView::Empty);
+
+    fn clear_attachment(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
+        self.pending = None;
+        self.attachment = None;
     }
 }
 
 impl App {
-    /// T opens/focuses the shell; T after leaving it with the Rakumux key
-    /// hides it. A visible, unfocused panel can also be focused by clicking.
+    /// Reveal/focus a pane, or hide it after leaving its input mode.
     pub fn toggle_terminal_panel(&mut self) {
-        if self.terminal_panel.open && self.came_from_terminal {
+        if self.terminal_panel.open && self.came_from_terminal && !self.terminal_panel.needs_refocus
+        {
             self.hide_terminal_panel();
-            return;
+        } else {
+            self.show_terminal_panel();
         }
-        self.show_terminal_panel();
     }
 
-    /// Settings reveal/focus an existing shell without toggling it away.
+    /// Start a standalone shell only when this window has no existing pane.
     pub fn show_terminal_panel(&mut self) {
-        if !self.terminal_panel.open {
-            self.terminal_panel.folder = Some(self.current_folder());
-            self.terminal_panel.open = true;
-            self.terminal_panel.message = None;
+        if self.terminal_panel.id.is_none() {
+            self.terminal_panel.id = Some(PaneId::generate());
+            self.terminal_panel.cwd = Some(
+                self.list
+                    .selected_session()
+                    .map(|session| session.cwd.clone())
+                    .unwrap_or_else(|| self.current_folder().path().to_path_buf()),
+            );
+            self.terminal_panel.creating = true;
             self.terminal_panel.needs_open = true;
-            self.terminal_panel.create_missing = true;
+            self.terminal_panel.message = None;
         }
+        self.terminal_panel.open = true;
         self.focus_terminal_panel();
     }
 
@@ -118,12 +118,13 @@ impl App {
         self.focus = Focus::Terminal;
         self.zoomed = false;
         self.came_from_terminal = false;
+        self.terminal_panel.needs_refocus = false;
         self.pending_key = None;
         self.list.filter_editing = false;
         self.grid.clear();
         self.reconcile_detail();
         let size = self.terminal_panel_size();
-        if let Some(attachment) = self.terminal_panel.detail.attachment.as_mut() {
+        if let Some(attachment) = self.terminal_panel.attachment.as_mut() {
             if attachment.role == Role::Observer {
                 match attachment.change_role(StreamCommand::Promote {
                     cols: size.0,
@@ -144,11 +145,11 @@ impl App {
         self.claim_panel_size();
     }
 
+    /// Hide the view, not its process or stream. Hidden exits still clean up.
     pub fn hide_terminal_panel(&mut self) {
+        self.demote_terminal_panel();
         self.terminal_panel.open = false;
-        self.terminal_panel.needs_open = false;
         self.terminal_panel.dragging = false;
-        self.terminal_panel.clear_attachment();
         self.came_from_terminal = false;
         if self.focus == Focus::Terminal {
             self.focus = Focus::List;
@@ -158,30 +159,20 @@ impl App {
     }
 
     pub(super) fn demote_terminal_panel(&mut self) {
-        if let Some(attachment) = self.terminal_panel.detail.attachment.as_mut() {
+        if let Some(attachment) = self.terminal_panel.attachment.as_mut() {
             if attachment.role == Role::Controller {
-                if let Err(error) = attachment.change_role(StreamCommand::Demote) {
-                    self.set_status(format!("Could not release terminal control: {error}"));
-                    self.terminal_panel.detail.attachment = None;
-                } else {
-                    attachment.role = Role::Observer;
+                match attachment.change_role(StreamCommand::Demote) {
+                    Ok(()) => attachment.role = Role::Observer,
+                    Err(error) => {
+                        self.set_status(format!("Could not release terminal control: {error}"))
+                    }
                 }
             }
         }
     }
 
     pub(super) fn sync_terminal_panel(&mut self) {
-        if self.terminal_panel.open
-            && self.detail.session_id().is_some_and(|id| {
-                self.terminal_panel.is_panel_session(id) && self.list.selected_id() != Some(id)
-            })
-        {
-            self.detail.retarget(DetailView::Empty);
-        }
-        if !self.terminal_panel.open
-            || !self.connection.is_connected()
-            || self.terminal_panel.pending.is_some()
-        {
+        if !self.connection.is_connected() || self.terminal_panel.pending.is_some() {
             return;
         }
         if self.terminal_panel.reconnect {
@@ -193,322 +184,170 @@ impl App {
                 return;
             }
             self.terminal_panel.reconnect = false;
+            self.terminal_panel.creating = false;
             self.terminal_panel.needs_open = true;
-            self.terminal_panel.create_missing = false;
         }
-        if self.terminal_panel.needs_open {
-            self.resolve_terminal_panel();
+        if !self.terminal_panel.needs_open {
             return;
         }
-        let Some(id) = self.terminal_panel.session_id().cloned() else {
-            return;
-        };
-        if let Some(session) = self.list.get(&id).cloned() {
-            if session.status == SessionStatus::Live
-                && matches!(self.terminal_panel.detail.view, DetailView::Saved { .. })
-            {
-                self.attach_terminal_panel(&session);
-            }
-        } else if self.list.is_loaded() {
-            self.terminal_panel.clear_attachment();
-            self.terminal_panel.message =
-                Some("Terminal session was removed. Enter opens a new shell.".into());
-            if let Some(folder) = self.terminal_panel.folder.as_ref() {
-                self.terminal_panel.bindings.remove(folder);
-            }
-            if self.focus == Focus::Terminal {
-                self.focus = Focus::List;
-                self.came_from_terminal = true;
-            }
-        }
-    }
-
-    fn resolve_terminal_panel(&mut self) {
-        let (Some(api), Some(folder)) = (self.api(), self.terminal_panel.folder.clone()) else {
+        let (Some(api), Some(id), Some(cwd)) = (
+            self.api(),
+            self.terminal_panel.id.clone(),
+            self.terminal_panel.cwd.clone(),
+        ) else {
             return;
         };
-        let existing = self.terminal_panel.bindings.get(&folder).cloned();
-        let create_missing = self.terminal_panel.create_missing;
-        let request = super::new_session::request(
-            folder.clone(),
-            super::env_snapshot(),
-            self.terminal_panel_size(),
-        );
-        let generation = self.terminal_panel.retarget(DetailView::Empty);
+        let creating = self.terminal_panel.creating;
+        let size = self.terminal_panel_size();
+        self.terminal_panel.epoch = self.terminal_panel.epoch.wrapping_add(1);
+        let generation = self.terminal_panel.epoch;
         self.terminal_panel.pending = Some(generation);
         self.terminal_panel.needs_open = false;
-        self.terminal_panel.message = None;
-        self.exec.job(move || AppEvent::PanelResolved {
-            generation,
-            folder,
-            result: match existing {
-                Some(id) => match api.get(&id) {
-                    Err(error) if error.code == ErrorCode::NotFound && create_missing => {
-                        api.create(request)
-                    }
-                    other => other,
-                },
-                None if create_missing => api.create(request),
-                None => Err(ApiError::new(
-                    ErrorCode::NotFound,
-                    "Terminal session is gone; open a new terminal explicitly",
-                )),
-            },
-        });
-    }
-
-    pub(super) fn on_panel_resolved(
-        &mut self,
-        generation: u64,
-        folder: ScopeRoot,
-        result: Result<SessionView, ApiError>,
-    ) {
-        if self.terminal_panel.pending != Some(generation) {
-            return;
-        }
-        self.terminal_panel.pending = None;
-        if result
-            .as_ref()
-            .is_ok_and(|session| session.scope != folder || self.is_self_session(&session.id))
-        {
-            self.terminal_panel.bindings.remove(&folder);
-        }
-        let result = result.and_then(|session| {
-            if session.scope != folder || self.is_self_session(&session.id) {
-                Err(ApiError::new(
-                    ErrorCode::InvalidArgument,
-                    "Terminal session does not belong to this folder or cannot be nested",
-                ))
-            } else {
-                Ok(session)
-            }
-        });
-        if let Ok(session) = &result {
-            self.terminal_panel
-                .bindings
-                .insert(folder.clone(), session.id.clone());
-            self.list.upsert(session.clone());
-        }
-        if generation != self.terminal_panel.epoch
-            || !self.terminal_panel.open
-            || self.terminal_panel.folder.as_ref() != Some(&folder)
-        {
-            return;
-        }
-        match result {
-            Ok(session) if session.status == SessionStatus::Live => {
-                self.attach_terminal_panel(&session)
-            }
-            Ok(session)
-                if matches!(session.status, SessionStatus::Dead | SessionStatus::Exited) =>
-            {
-                self.read_terminal_panel(&session)
-            }
-            Ok(_) => {
-                self.terminal_panel.message =
-                    Some("Unknown terminal status; open it from the session list.".into())
-            }
-            Err(error) => {
-                self.terminal_panel.message =
-                    Some(format!("Can't open terminal: {error}. Enter retries."))
-            }
-        }
-    }
-
-    fn attach_terminal_panel(&mut self, session: &SessionView) {
-        let Some(api) = self.api() else {
-            return;
-        };
-        let role = if self.focus == Focus::Terminal && self.terminal_panel.open {
-            Role::Controller
-        } else {
-            Role::Observer
-        };
-        let size = if role == Role::Controller {
-            self.terminal_panel_size()
-        } else {
-            session
-                .terminal
-                .as_ref()
-                .map(|terminal| (terminal.cols, terminal.rows))
-                .unwrap_or((80, 24))
-        };
-        let request = AttachRequest {
-            id: session.id.clone(),
-            role,
-            cols: size.0,
-            rows: size.1,
-        };
-        let generation = self
-            .terminal_panel
-            .retarget(DetailView::Loading(session.id.clone()));
-        self.terminal_panel.pending = Some(generation);
+        let env = super::env_snapshot();
         self.exec.job(move || AppEvent::PanelAttached {
             generation,
-            result: api.attach(request),
+            result: if creating {
+                api.open_terminal(OpenTerminal {
+                    id,
+                    cwd,
+                    env,
+                    cols: size.0,
+                    rows: size.1,
+                })
+            } else {
+                api.attach_terminal(TerminalAttachRequest {
+                    id,
+                    role: Role::Observer,
+                    cols: size.0,
+                    rows: size.1,
+                })
+            },
         });
     }
 
     pub(super) fn on_panel_attached(
         &mut self,
         generation: u64,
-        result: Result<AttachStream, ApiError>,
+        result: Result<TerminalStream, ApiError>,
     ) {
-        if self.terminal_panel.pending == Some(generation) {
-            self.terminal_panel.pending = None;
-        }
-        if generation != self.terminal_panel.epoch || !self.terminal_panel.open {
+        if generation != self.terminal_panel.epoch {
+            if let Ok(stream) = result {
+                stream.detach();
+            }
             return;
         }
-        let Some(id) = self.terminal_panel.session_id().cloned() else {
-            return;
+        self.terminal_panel.pending = None;
+        let stream = match result {
+            Ok(stream) => stream,
+            Err(error) if !self.terminal_panel.creating && error.code == ErrorCode::NotFound => {
+                self.finish_terminal_panel();
+                self.set_status("Terminal ended while disconnected; open a new pane with T.");
+                return;
+            }
+            Err(error) => {
+                self.terminal_panel.message = Some(if error.code == ErrorCode::Unsupported {
+                    "The daemon needs an in-place restart to support standalone terminal panes. No session was created.".into()
+                } else {
+                    format!("Can't open terminal: {error}. Enter retries.")
+                });
+                return;
+            }
         };
-        match result {
-            Ok(stream) => {
-                let attached = &stream.attached;
-                if attached.session.id != id
-                    || attached.session.is_self
-                    || self.is_self_session(&id)
-                    || self.terminal_panel.folder.as_ref() != Some(&attached.session.scope)
-                {
-                    self.terminal_panel.message = Some("Invalid terminal attachment".into());
+        let attached = &stream.attached;
+        if Some(&attached.id) != self.terminal_panel.id.as_ref() {
+            stream.detach();
+            self.terminal_panel.message = Some("Invalid terminal pane attachment".into());
+            return;
+        }
+        if let Some(cwd) = &attached.cwd {
+            self.terminal_panel.cwd = Some(cwd.clone());
+        }
+        let terminal = match panel_terminal(attached.rows, attached.cols, &attached.checkpoint) {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                stream.detach();
+                self.terminal_panel.message = Some(error);
+                return;
+            }
+        };
+        let cancel = cancel_flag();
+        let mut attachment = Attachment::new(
+            attached.id.clone(),
+            generation,
+            attached.role,
+            stream.sender(),
+            cancel.clone(),
+            attached.offset,
+        );
+        if attached.role == Role::Controller {
+            if self.focus != Focus::Terminal || !self.terminal_panel.open {
+                if let Err(error) = attachment.change_role(StreamCommand::Demote) {
+                    self.terminal_panel.message =
+                        Some(format!("Can't release stale terminal control: {error}"));
                     return;
                 }
-                let terminal =
-                    match panel_terminal(attached.rows, attached.cols, &attached.checkpoint) {
-                        Ok(terminal) => terminal,
-                        Err(error) => {
-                            self.terminal_panel.message = Some(error);
-                            return;
-                        }
-                    };
-                let cancel = cancel_flag();
-                let mut attachment = Attachment::new(
-                    id.clone(),
-                    generation,
-                    attached.role,
-                    stream.sender(),
-                    cancel.clone(),
-                    attached.offset,
-                );
-                if attached.role == Role::Controller {
-                    if self.focus != Focus::Terminal {
-                        if let Err(error) = attachment.change_role(StreamCommand::Demote) {
-                            self.terminal_panel.message =
-                                Some(format!("Can't release stale terminal control: {error}"));
-                            return;
-                        }
-                        attachment.role = Role::Observer;
-                    } else {
-                        attachment.sent_size = Some((attached.cols, attached.rows));
-                    }
-                }
-                self.terminal_panel.detail.terminal = Some(terminal);
-                self.terminal_panel.detail.attachment = Some(attachment);
-                self.terminal_panel.detail.view = DetailView::Live(id);
-                self.terminal_panel.message = None;
-                self.exec.pump_panel(generation, stream, cancel);
-                if self.focus == Focus::Terminal
-                    && self
-                        .terminal_panel
-                        .detail
-                        .attachment
-                        .as_ref()
-                        .is_some_and(|attachment| attachment.role == Role::Observer)
-                {
-                    self.focus = Focus::List;
-                    self.came_from_terminal = false;
-                    self.set_status(
-                        "Terminal is read-only; click its pane or press T to take control.",
-                    );
-                }
-                self.claim_panel_size();
+                attachment.role = Role::Observer;
+            } else {
+                attachment.sent_size = Some((attached.cols, attached.rows));
             }
-            Err(error) => {
-                self.terminal_panel.message =
-                    Some(format!("Can't attach terminal: {error}. Enter retries."));
-                self.terminal_panel.detail.view = DetailView::Empty;
-            }
+        } else if self.focus == Focus::Terminal {
+            self.focus = Focus::List;
+            self.came_from_terminal = true;
+            self.set_status("Terminal reconnected read-only; click it or press T to take control.");
         }
+        self.terminal_panel.terminal = Some(terminal);
+        self.terminal_panel.attachment = Some(attachment);
+        self.terminal_panel.creating = false;
+        self.terminal_panel.awaiting_checkpoint = false;
+        self.terminal_panel.needs_refocus = attached.role == Role::Observer;
+        self.terminal_panel.message = None;
+        self.exec.pump_panel(generation, stream, cancel);
+        self.claim_panel_size();
     }
 
-    fn read_terminal_panel(&mut self, session: &SessionView) {
-        let Some(api) = self.api() else {
-            return;
-        };
-        let request = ReadRequest {
-            id: session.id.clone(),
-            source: ReadSource::Recent,
-            lines: Some(500),
-            format: TextFormat::Ansi,
-        };
-        let generation = self.terminal_panel.retarget(DetailView::Saved {
-            id: session.id.clone(),
-            status: session.status,
-            exit_code: session.exit_code,
-        });
-        self.terminal_panel.pending = Some(generation);
-        self.exec.job(move || AppEvent::PanelSaved {
-            generation,
-            result: api.read(request),
-        });
-    }
-
-    pub(super) fn on_panel_saved(&mut self, generation: u64, result: Result<ReadResult, ApiError>) {
-        if self.terminal_panel.pending == Some(generation) {
-            self.terminal_panel.pending = None;
+    /// Shell exit is not a saved session: close the pane and release its lease.
+    fn finish_terminal_panel(&mut self) {
+        self.terminal_panel.clear_attachment();
+        self.terminal_panel.open = false;
+        self.terminal_panel.id = None;
+        self.terminal_panel.cwd = None;
+        self.terminal_panel.terminal = None;
+        self.terminal_panel.title = None;
+        self.terminal_panel.message = None;
+        self.terminal_panel.needs_open = false;
+        self.terminal_panel.reconnect = false;
+        self.terminal_panel.creating = false;
+        self.terminal_panel.dragging = false;
+        self.terminal_panel.awaiting_checkpoint = false;
+        self.terminal_panel.needs_refocus = false;
+        if self.focus == Focus::Terminal {
+            self.focus = Focus::List;
         }
-        if generation != self.terminal_panel.epoch || !self.terminal_panel.open {
-            return;
+        self.came_from_terminal = false;
+        // A background shell exit is not activity in the agent terminal.
+        // Resize only when that terminal already owns keyboard focus.
+        if self.focus == Focus::Session {
+            self.sync_terminal_size();
         }
-        match result {
-            Ok(read)
-                if read.text.len() <= MAX_CHECKPOINT
-                    && valid_size(read.rows.max(2), read.cols.max(2)) =>
-            {
-                let mut terminal = TerminalView::with_scrollback(
-                    read.rows.max(2),
-                    read.cols.max(2),
-                    panel_history(read.rows.max(2), read.cols.max(2)),
-                );
-                let lines: Vec<_> = read.text.lines().rev().take(SCROLLBACK).collect();
-                terminal.reset_screen_to_text(
-                    read.rows.max(2),
-                    read.cols.max(2),
-                    &lines.into_iter().rev().collect::<Vec<_>>().join("\n"),
-                );
-                self.terminal_panel.detail.terminal = Some(terminal);
-            }
-            Ok(_) => {
-                self.terminal_panel.message =
-                    Some("Saved terminal screen exceeds display limits".into())
-            }
-            Err(error) => {
-                self.terminal_panel.message = Some(format!("Can't read terminal: {error}"))
-            }
-        }
+        self.reconcile_detail();
     }
 
     pub(super) fn on_panel_attach_event(&mut self, generation: u64, event: AttachEvent) {
-        if generation != self.terminal_panel.epoch
-            || self.terminal_panel.detail.attachment.is_none()
-        {
+        if generation != self.terminal_panel.epoch || self.terminal_panel.attachment.is_none() {
             return;
         }
         match event {
             AttachEvent::Output { offset, bytes } => {
-                let Some(attachment) = self.terminal_panel.detail.attachment.as_mut() else {
-                    return;
-                };
+                let attachment = self.terminal_panel.attachment.as_mut().unwrap();
                 match classify_output(attachment.offset, offset, bytes.len()) {
-                    OutputAction::Feed { skip } => {
+                    OutputAction::Feed { skip } if !self.terminal_panel.awaiting_checkpoint => {
                         attachment.offset = offset + bytes.len() as u64;
-                        if let Some(terminal) = &mut self.terminal_panel.detail.terminal {
+                        if let Some(terminal) = &mut self.terminal_panel.terminal {
                             terminal.feed(&bytes[skip..]);
                         }
                     }
-                    OutputAction::Duplicate => {}
-                    OutputAction::Gap => self.resync_terminal_panel(),
+                    OutputAction::Gap => self.request_panel_checkpoint(),
+                    _ => {}
                 }
             }
             AttachEvent::Event(StreamEvent::Resized {
@@ -519,7 +358,6 @@ impl App {
             }) => {
                 if self
                     .terminal_panel
-                    .detail
                     .attachment
                     .as_ref()
                     .is_some_and(|attachment| offset < attachment.offset)
@@ -528,21 +366,22 @@ impl App {
                 }
                 match panel_terminal(rows, cols, &checkpoint) {
                     Ok(terminal) => {
-                        self.terminal_panel.detail.terminal = Some(terminal);
-                        if let Some(attachment) = self.terminal_panel.detail.attachment.as_mut() {
+                        self.terminal_panel.terminal = Some(terminal);
+                        self.terminal_panel.awaiting_checkpoint = false;
+                        self.terminal_panel.message = None;
+                        if let Some(attachment) = &mut self.terminal_panel.attachment {
                             attachment.offset = offset;
                         }
                     }
                     Err(error) => {
-                        self.terminal_panel.clear_attachment();
-                        self.terminal_panel.message = Some(error);
+                        self.finish_terminal_panel();
+                        self.set_status(error);
                     }
                 }
             }
+            AttachEvent::Event(StreamEvent::Exited { .. }) => self.finish_terminal_panel(),
             AttachEvent::Event(StreamEvent::RoleChanged { role }) => {
-                let Some(attachment) = self.terminal_panel.detail.attachment.as_mut() else {
-                    return;
-                };
+                let attachment = self.terminal_panel.attachment.as_mut().unwrap();
                 if attachment.own_role_change(role) {
                     return;
                 }
@@ -550,63 +389,48 @@ impl App {
                 if role == Role::Observer && self.focus == Focus::Terminal {
                     self.focus = Focus::List;
                     self.came_from_terminal = true;
-                    self.set_status("Another client took control of the terminal panel.");
                 } else if role == Role::Controller && self.focus != Focus::Terminal {
                     self.demote_terminal_panel();
                 }
             }
-            AttachEvent::Event(StreamEvent::Exited { code }) => {
-                if let Some(id) = self.terminal_panel.session_id().cloned() {
-                    self.terminal_panel.detail.attachment = None;
-                    self.list.mark_exited(&id, code);
-                    self.terminal_panel.detail.view = DetailView::Saved {
-                        id,
-                        status: SessionStatus::Exited,
-                        exit_code: code,
-                    };
-                }
+            AttachEvent::Event(StreamEvent::Title { title }) => {
+                self.terminal_panel.title = Some(title)
             }
+            AttachEvent::Event(StreamEvent::Cwd { path }) => self.terminal_panel.cwd = Some(path),
             AttachEvent::Event(StreamEvent::Clipboard { selection, data }) => {
                 if self.focus == Focus::Terminal
                     && matches!(self.mode, AppMode::Normal)
                     && self
                         .terminal_panel
-                        .detail
                         .attachment
                         .as_ref()
-                        .is_some_and(|attachment| attachment.role == Role::Controller)
+                        .is_some_and(|a| a.role == Role::Controller)
                 {
                     self.terminal_output
                         .extend_from_slice(format!("\x1b]52;{selection};{data}\x07").as_bytes());
                 }
             }
-            AttachEvent::Event(StreamEvent::Lagged { .. }) => self.resync_terminal_panel(),
-            AttachEvent::Event(StreamEvent::Title { title }) => {
-                self.terminal_panel.detail.title = Some(title)
-            }
+            AttachEvent::Event(StreamEvent::Lagged { .. }) => self.request_panel_checkpoint(),
             AttachEvent::Event(_) => {}
             AttachEvent::Closed(error) => {
-                self.terminal_panel.detail.attachment = None;
-                if self.focus == Focus::Terminal {
-                    self.focus = Focus::List;
-                    self.came_from_terminal = true;
+                self.terminal_panel_disconnected();
+                self.terminal_panel.retry_at = Some(Instant::now() + Duration::from_millis(250));
+                if let Some(error) = error {
+                    self.terminal_panel.message = Some(error);
                 }
-                self.terminal_panel.message =
-                    Some(error.unwrap_or_else(|| "Terminal disconnected; Enter retries.".into()));
-                self.terminal_panel.reconnect = true;
-                self.terminal_panel.retry_at = Some(Instant::now() + Duration::from_secs(2));
             }
         }
     }
 
-    fn resync_terminal_panel(&mut self) {
-        if let Some(session) = self
-            .terminal_panel
-            .session_id()
-            .and_then(|id| self.list.get(id))
-            .cloned()
-        {
-            self.attach_terminal_panel(&session);
+    fn request_panel_checkpoint(&mut self) {
+        if self.terminal_panel.awaiting_checkpoint {
+            return;
+        }
+        self.terminal_panel.awaiting_checkpoint = true;
+        if let Some(attachment) = &self.terminal_panel.attachment {
+            if let Err(error) = attachment.command(StreamCommand::Checkpoint) {
+                self.terminal_panel.message = Some(format!("Can't refresh terminal: {error}"));
+            }
         }
     }
 
@@ -625,86 +449,46 @@ impl App {
                 return AppResult::Continue;
             }
         }
-        if self.terminal_panel.pending.is_some() {
+        if self.terminal_panel.pending.is_some() || self.terminal_panel.awaiting_checkpoint {
             return AppResult::Continue;
         }
-        if key.code == KeyCode::Enter && self.terminal_panel.detail.attachment.is_none() {
-            self.restart_terminal_panel();
+        if key.code == KeyCode::Enter && self.terminal_panel.attachment.is_none() {
+            self.terminal_panel.needs_open = true;
+            self.sync_terminal_panel();
             return AppResult::Continue;
         }
-        if self.screen().terminal_panel.is_none() {
-            return AppResult::Continue;
-        }
-        if let (Some(terminal), Some(attachment)) = (
-            &mut self.terminal_panel.detail.terminal,
-            &self.terminal_panel.detail.attachment,
-        ) {
-            if attachment.role == Role::Controller {
+        if self.screen().terminal_panel.is_some() {
+            if let Some(terminal) = &self.terminal_panel.terminal {
                 if let Some(bytes) = terminal_view::key_to_bytes(&key, &terminal.modes()) {
-                    terminal.scroll_to_bottom();
-                    if let Err(error) = attachment.input(bytes) {
-                        self.set_status(format!("Terminal input failed: {error}"));
-                    }
+                    self.panel_input(bytes);
                 }
             }
         }
         AppResult::Continue
     }
 
-    fn restart_terminal_panel(&mut self) {
-        let Some(session) = self
-            .terminal_panel
-            .session_id()
-            .and_then(|id| self.list.get(id))
-            .cloned()
-        else {
-            self.terminal_panel.create_missing = true;
-            self.terminal_panel.reconnect = false;
-            self.terminal_panel.needs_open = true;
-            self.sync_terminal_panel();
-            return;
-        };
-        if session.status == SessionStatus::Live {
-            self.attach_terminal_panel(&session);
+    fn panel_input(&mut self, bytes: Vec<u8>) {
+        if self.terminal_panel.pending.is_some() || self.terminal_panel.awaiting_checkpoint {
             return;
         }
-        let (Some(api), Some(folder)) = (self.api(), self.terminal_panel.folder.clone()) else {
-            return;
-        };
-        let size = self.terminal_panel_size();
-        let request = ReviveSession {
-            id: session.id.clone(),
-            env: super::env_snapshot(),
-            cols: size.0,
-            rows: size.1,
-            resume: true,
-        };
-        let generation = self
-            .terminal_panel
-            .retarget(DetailView::Loading(session.id));
-        self.terminal_panel.pending = Some(generation);
-        self.exec.job(move || AppEvent::PanelResolved {
-            generation,
-            folder,
-            result: api.revive(request),
-        });
+        if let Some(attachment) = &self.terminal_panel.attachment {
+            if attachment.role == Role::Controller {
+                if let Some(terminal) = &mut self.terminal_panel.terminal {
+                    terminal.scroll_to_bottom();
+                }
+                if let Err(error) = attachment.input(bytes) {
+                    self.set_status(format!("Terminal input failed: {error}"));
+                }
+            }
+        }
     }
 
     pub(super) fn paste_terminal_panel(&mut self, text: &str) {
-        if self.terminal_panel.pending.is_some() || self.screen().terminal_panel.is_none() {
+        if self.screen().terminal_panel.is_none() {
             return;
         }
-        if let (Some(terminal), Some(attachment)) = (
-            &mut self.terminal_panel.detail.terminal,
-            &self.terminal_panel.detail.attachment,
-        ) {
-            if attachment.role == Role::Controller {
-                terminal.scroll_to_bottom();
-                let bytes = terminal_view::paste_to_bytes(text, &terminal.modes());
-                if let Err(error) = attachment.input(bytes) {
-                    self.set_status(format!("Terminal paste failed: {error}"));
-                }
-            }
+        if let Some(terminal) = &self.terminal_panel.terminal {
+            self.panel_input(terminal_view::paste_to_bytes(text, &terminal.modes()));
         }
     }
 
@@ -721,18 +505,15 @@ impl App {
         let Some(pane) = self.screen().terminal_panel.map(panel_output) else {
             return;
         };
-        if let (Some(terminal), Some(attachment)) = (
-            &mut self.terminal_panel.detail.terminal,
-            &self.terminal_panel.detail.attachment,
-        ) {
-            if self.focus == Focus::Terminal && attachment.role == Role::Controller {
+        if self.focus == Focus::Terminal && !self.terminal_panel.awaiting_checkpoint {
+            if let Some(terminal) = &self.terminal_panel.terminal {
                 if let Some(bytes) = terminal.mouse_bytes(&event, pane) {
-                    if let Err(error) = attachment.input(bytes) {
-                        self.set_status(format!("Terminal mouse input failed: {error}"));
-                    }
+                    self.panel_input(bytes);
                     return;
                 }
             }
+        }
+        if let Some(terminal) = &mut self.terminal_panel.terminal {
             match event.kind {
                 MouseEventKind::ScrollUp => terminal.scroll(3),
                 MouseEventKind::ScrollDown => terminal.scroll(-3),
@@ -765,7 +546,6 @@ impl App {
     pub(super) fn claim_panel_size(&mut self) {
         self.resize_panel(false);
     }
-
     pub(super) fn sync_panel_size(&mut self) {
         self.resize_panel(true);
     }
@@ -777,11 +557,10 @@ impl App {
         let size = self.terminal_panel_size();
         let shown = self
             .terminal_panel
-            .detail
             .terminal
             .as_ref()
             .map(TerminalView::size);
-        let Some(attachment) = self.terminal_panel.detail.attachment.as_mut() else {
+        let Some(attachment) = &mut self.terminal_panel.attachment else {
             return;
         };
         if attachment.role != Role::Controller
@@ -796,27 +575,31 @@ impl App {
         {
             return;
         }
-        if let Err(error) = attachment.command(StreamCommand::Resize {
+        match attachment.command(StreamCommand::Resize {
             cols: size.0,
             rows: size.1,
         }) {
-            self.set_status(format!("Terminal resize failed: {error}"));
-        } else {
-            attachment.sent_size = Some(size);
-            attachment.last_claim = Some(Instant::now());
+            Ok(()) => {
+                attachment.sent_size = Some(size);
+                attachment.last_claim = Some(Instant::now());
+            }
+            Err(error) => self.set_status(format!("Terminal resize failed: {error}")),
         }
     }
 
     pub(super) fn terminal_panel_disconnected(&mut self) {
-        if self.terminal_panel.open {
-            self.terminal_panel.clear_attachment();
-            self.terminal_panel.reconnect = true;
-            self.terminal_panel.retry_at = None;
-            self.terminal_panel.message = Some("Terminal disconnected; reconnecting…".into());
-            if self.focus == Focus::Terminal {
-                self.focus = Focus::List;
-                self.came_from_terminal = true;
-            }
+        if self.terminal_panel.id.is_none() {
+            return;
+        }
+        self.terminal_panel.clear_attachment();
+        self.terminal_panel.creating = false;
+        self.terminal_panel.reconnect = true;
+        self.terminal_panel.needs_refocus = true;
+        self.terminal_panel.retry_at = None;
+        self.terminal_panel.message = Some("Terminal disconnected; reconnecting…".into());
+        if self.focus == Focus::Terminal {
+            self.focus = Focus::List;
+            self.came_from_terminal = true;
         }
     }
 }
@@ -829,10 +612,6 @@ pub fn panel_output(area: ratatui::layout::Rect) -> ratatui::layout::Rect {
     }
 }
 
-fn valid_size(rows: u16, cols: u16) -> bool {
-    rows >= 2 && cols >= 2 && usize::from(rows) * usize::from(cols) <= MAX_CELLS
-}
-
 fn panel_history(rows: u16, cols: u16) -> usize {
     (MAX_CELLS / usize::from(cols.max(2)))
         .saturating_sub(usize::from(rows))
@@ -840,8 +619,12 @@ fn panel_history(rows: u16, cols: u16) -> usize {
 }
 
 fn panel_terminal(rows: u16, cols: u16, checkpoint: &str) -> Result<TerminalView, String> {
-    if !valid_size(rows, cols) || checkpoint.len() > MAX_CHECKPOINT {
-        return Err("Terminal screen exceeds panel display limits".into());
+    if rows < 2
+        || cols < 2
+        || usize::from(rows) * usize::from(cols) > MAX_CELLS
+        || checkpoint.len() > MAX_CHECKPOINT
+    {
+        return Err("Terminal screen exceeds pane display limits".into());
     }
     let bytes = super::sessions::decode_checkpoint(checkpoint)?;
     let mut terminal = TerminalView::with_scrollback(rows, cols, panel_history(rows, cols));

@@ -27,6 +27,8 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use crate::api::{OpenTerminal, TerminalAttachRequest, TerminalAttached};
+
 pub type Result<T> = std::result::Result<T, ApiError>;
 
 /// Operations every client can perform. Implemented by [`Client`] and by test
@@ -63,6 +65,16 @@ pub trait SessionApi: Send + Sync {
     }
     /// Open a dedicated attach stream.
     fn attach(&self, request: AttachRequest) -> Result<AttachStream>;
+    /// Open a temporary terminal pane. Requires `terminal.pane`; user only.
+    fn open_terminal(&self, request: OpenTerminal) -> Result<TerminalStream> {
+        let _ = request;
+        Err(unsupported("temporary terminal panes"))
+    }
+    /// Reconnect a pane without creating any terminal or session.
+    fn attach_terminal(&self, request: TerminalAttachRequest) -> Result<TerminalStream> {
+        let _ = request;
+        Err(unsupported("temporary terminal panes"))
+    }
     /// Open a dedicated event stream.
     fn subscribe(&self, request: SubscribeRequest) -> Result<EventStream>;
 
@@ -510,17 +522,23 @@ impl SessionApi for Client {
             Response::Attached(attached) => attached,
             other => return Err(unexpected(&other)),
         };
-        let reader = socket.try_clone().map_err(unavailable_io)?;
-        let (stream, AttachPeer { events, outgoing }) = AttachStream::pair(attached);
-        let finished = Arc::new(AtomicBool::new(false));
-        let reader_finished = finished.clone();
-        spawn_thread("rakumux-attach-rx", move || {
-            attach_reader(reader, events, reader_finished)
-        })?;
-        spawn_thread("rakumux-attach-tx", move || {
-            attach_writer(socket, outgoing, finished)
-        })?;
-        Ok(stream)
+        connect_attach_stream(socket, attached)
+    }
+
+    fn open_terminal(&self, request: OpenTerminal) -> Result<TerminalStream> {
+        let (socket, response) = self.open_stream(&Request::TerminalOpen(request))?;
+        match response {
+            Response::TerminalAttached(attached) => connect_attach_stream(socket, attached),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn attach_terminal(&self, request: TerminalAttachRequest) -> Result<TerminalStream> {
+        let (socket, response) = self.open_stream(&Request::TerminalAttach(request))?;
+        match response {
+            Response::TerminalAttached(attached) => connect_attach_stream(socket, attached),
+            other => Err(unexpected(&other)),
+        }
     }
 
     fn subscribe(&self, request: SubscribeRequest) -> Result<EventStream> {
@@ -1126,8 +1144,8 @@ impl AttachSender {
 
 /// A live attach stream: the initial screen plus channels for output/events
 /// and for input/commands.
-pub struct AttachStream {
-    pub attached: Attached,
+pub struct AttachStream<Checkpoint = Attached> {
+    pub attached: Checkpoint,
     events: Receiver<AttachEvent>,
     sender: AttachSender,
 }
@@ -1139,9 +1157,12 @@ pub struct AttachPeer {
     pub outgoing: Receiver<AttachOutgoing>,
 }
 
-impl AttachStream {
+/// A temporary terminal's stream, using the same input/output framing.
+pub type TerminalStream = AttachStream<TerminalAttached>;
+
+impl<Checkpoint> AttachStream<Checkpoint> {
     /// A connected stream/peer pair over in-memory channels.
-    pub fn pair(attached: Attached) -> (Self, AttachPeer) {
+    pub fn pair(attached: Checkpoint) -> (Self, AttachPeer) {
         let (events_tx, events_rx) = mpsc::channel();
         let (out_tx, out_rx) = mpsc::channel();
         (
@@ -1159,6 +1180,15 @@ impl AttachStream {
 
     pub fn sender(&self) -> AttachSender {
         self.sender.clone()
+    }
+
+    /// Consume the initial checkpoint while preserving the live event stream.
+    pub fn into_events(self) -> AttachStream<()> {
+        AttachStream {
+            attached: (),
+            events: self.events,
+            sender: self.sender,
+        }
     }
 
     /// Non-blocking. `None` when nothing is pending; a disconnected stream
@@ -1183,6 +1213,30 @@ impl AttachStream {
     pub fn detach(&self) {
         let _ = self.sender.command(StreamCommand::Detach);
     }
+}
+
+fn connect_attach_stream<Checkpoint>(
+    socket: UnixStream,
+    attached: Checkpoint,
+) -> Result<AttachStream<Checkpoint>> {
+    let reader = socket.try_clone().map_err(unavailable_io)?;
+    let abort = socket.try_clone().map_err(unavailable_io)?;
+    let (stream, AttachPeer { events, outgoing }) = AttachStream::pair(attached);
+    let finished = Arc::new(AtomicBool::new(false));
+    let reader_finished = finished.clone();
+    spawn_thread("rakumux-attach-rx", move || {
+        attach_reader(reader, events, reader_finished)
+    })
+    .inspect_err(|_| {
+        let _ = abort.shutdown(Shutdown::Both);
+    })?;
+    spawn_thread("rakumux-attach-tx", move || {
+        attach_writer(socket, outgoing, finished)
+    })
+    .inspect_err(|_| {
+        let _ = abort.shutdown(Shutdown::Both);
+    })?;
+    Ok(stream)
 }
 
 /// A live event subscription.
@@ -1541,6 +1595,8 @@ mod tests {
                     rss_bytes: None,
                 }),
                 Request::SessionPin { .. }
+                | Request::TerminalOpen(_)
+                | Request::TerminalAttach(_)
                 | Request::SessionBind { .. }
                 | Request::ProjectList
                 | Request::ProjectAdd { .. }
@@ -1605,6 +1661,12 @@ mod tests {
                     let command = frame::parse_control::<StreamCommand>(&payload).unwrap();
                     state.commands.lock().unwrap().push(command.clone());
                     match command {
+                        StreamCommand::Checkpoint => StreamEvent::Resized {
+                            cols: attach.cols,
+                            rows: attach.rows,
+                            checkpoint: b64(b"CHECKPOINT"),
+                            offset,
+                        },
                         StreamCommand::Resize { cols, rows }
                         | StreamCommand::Fit { cols, rows } => StreamEvent::Resized {
                             cols,

@@ -36,6 +36,8 @@ pub(crate) enum Op {
     Pin,
     Bind,
     Attach,
+    TerminalOpen,
+    TerminalAttach,
     Subscribe,
     ProjectList,
     ProjectAdd,
@@ -64,6 +66,8 @@ impl Op {
             Op::Pin => "session.pin",
             Op::Bind => "session.bind",
             Op::Attach => "attach",
+            Op::TerminalOpen => "terminal.open",
+            Op::TerminalAttach => "terminal.attach",
             Op::Subscribe => "subscribe",
             Op::ProjectList => "project.list",
             Op::ProjectAdd => "project.add",
@@ -77,6 +81,8 @@ impl Op {
         matches!(
             self,
             Op::Create
+                | Op::TerminalOpen
+                | Op::TerminalAttach
                 | Op::Import
                 | Op::Rename
                 | Op::Kill
@@ -132,6 +138,9 @@ pub(crate) fn authorize(
             _ => Err(denied(op, "a session may only do this to itself")),
         },
         Op::Import => Err(denied(op, "importing saved sessions is for user clients")),
+        Op::TerminalOpen | Op::TerminalAttach => {
+            Err(denied(op, "temporary terminals are for user clients"))
+        }
         Op::ProjectAdd | Op::ProjectRemove | Op::ProjectRelocate => {
             Err(denied(op, "folders are managed by the user"))
         }
@@ -195,7 +204,9 @@ mod tests {
         }
     }
 
-    const ALL: [Op; 22] = [
+    const ALL: [Op; 24] = [
+        Op::TerminalOpen,
+        Op::TerminalAttach,
         Op::List,
         Op::Get,
         Op::Create,

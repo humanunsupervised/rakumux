@@ -24,22 +24,13 @@ const PUMP_POLL: Duration = Duration::from_millis(100);
 
 /// Everything that happens outside the UI thread.
 pub enum AppEvent {
-    PanelResolved {
-        generation: u64,
-        folder: session_core::model::ScopeRoot,
-        result: Result<session_core::model::SessionView, ApiError>,
-    },
     PanelAttached {
         generation: u64,
-        result: Result<AttachStream, ApiError>,
+        result: Result<session_core::client::TerminalStream, ApiError>,
     },
     PanelAttach {
         generation: u64,
         event: AttachEvent,
-    },
-    PanelSaved {
-        generation: u64,
-        result: Result<session_core::api::ReadResult, ApiError>,
     },
     Connected(Arc<dyn SessionApi>),
     ConnectFailed(ApiError),
@@ -177,7 +168,7 @@ enum TerminalTarget {
 struct InlineAttach {
     generation: u64,
     target: TerminalTarget,
-    stream: AttachStream,
+    stream: AttachStream<()>,
     cancel: CancelFlag,
 }
 
@@ -246,7 +237,12 @@ impl Exec {
     /// Forward an attach stream's events until it closes or `cancel` is
     /// set. Dropping the stream detaches.
     pub fn pump_attach(&mut self, generation: u64, stream: AttachStream, cancel: CancelFlag) {
-        self.pump_terminal(generation, stream, cancel, TerminalTarget::Detail);
+        self.pump_terminal(
+            generation,
+            stream.into_events(),
+            cancel,
+            TerminalTarget::Detail,
+        );
     }
 
     /// Pump a read-only card through a bounded, coalescing mailbox.
@@ -259,20 +255,30 @@ impl Exec {
     ) {
         self.pump_terminal(
             generation,
-            stream,
+            stream.into_events(),
             cancel,
             TerminalTarget::Grid(id, Default::default()),
         );
     }
 
-    pub fn pump_panel(&mut self, generation: u64, stream: AttachStream, cancel: CancelFlag) {
-        self.pump_terminal(generation, stream, cancel, TerminalTarget::Panel);
+    pub fn pump_panel(
+        &mut self,
+        generation: u64,
+        stream: session_core::client::TerminalStream,
+        cancel: CancelFlag,
+    ) {
+        self.pump_terminal(
+            generation,
+            stream.into_events(),
+            cancel,
+            TerminalTarget::Panel,
+        );
     }
 
     fn pump_terminal(
         &mut self,
         generation: u64,
-        stream: AttachStream,
+        stream: AttachStream<()>,
         cancel: CancelFlag,
         target: TerminalTarget,
     ) {

@@ -25,7 +25,7 @@
 use crate::{log_error, log_info};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use session_core::ids::SessionId;
+use session_core::ids::{PaneId, SessionId};
 use session_core::paths::Registration;
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
@@ -38,7 +38,10 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Version of [`HandoffState`] this daemon writes and reads.
-pub const HANDOFF_VERSION: u32 = 1;
+pub const HANDOFF_VERSION: u32 = 2;
+
+/// This image can upgrade a version-1 daemon without ending its sessions.
+pub const READABLE_HANDOFF_VERSIONS: &[u32] = &[1, HANDOFF_VERSION];
 
 /// `rakumux-ptyd handoff-versions`: the state versions this build reads.
 pub const VERSIONS_COMMAND: &str = "handoff-versions";
@@ -60,6 +63,9 @@ pub struct HandoffState {
     pub claim: ClaimHandoff,
     pub control: ControlHandoff,
     pub terminals: Vec<TerminalHandoff>,
+    /// Standalone terminal panes are not registry sessions or crash recovery.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panes: Vec<PaneHandoff>,
 }
 
 /// The daemon's claim: same registration, inherited socket and lock.
@@ -73,6 +79,13 @@ pub struct ClaimHandoff {
 /// The control layer's memory.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ControlHandoff {
+    /// Last logical agent directories. The PTY's cwd and session scopes stay separate.
+    #[serde(default)]
+    pub working_directories: Vec<(
+        SessionId,
+        session_core::api::AgentWorkingDirectory,
+        Option<u32>,
+    )>,
     /// Ephemeral activity snapshots and their original receive times.
     #[serde(default)]
     pub activity: Vec<(SessionId, session_core::activity::ActivityUpdate, i64)>,
@@ -116,6 +129,10 @@ pub struct TerminalHandoff {
     #[serde(default)]
     pub osc7_cwd: bool,
     #[serde(default)]
+    pub osc7_foreground: Option<u32>,
+    #[serde(default)]
+    pub osc7_process_cwd: Option<PathBuf>,
+    #[serde(default)]
     pub title: String,
     pub started_ms: i64,
     #[serde(default)]
@@ -131,6 +148,89 @@ pub struct TerminalHandoff {
     /// Base64 of startup input not typed yet.
     #[serde(default)]
     pub startup_input: Option<String>,
+}
+
+/// A running PTY's state without any session identity.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProcessHandoff {
+    pub id: u64,
+    pub fd: RawFd,
+    pub pid: u32,
+    pub cols: u16,
+    pub rows: u16,
+    #[serde(default)]
+    pub cwd: Option<PathBuf>,
+    #[serde(default)]
+    pub osc7_cwd: bool,
+    #[serde(default)]
+    pub osc7_foreground: Option<u32>,
+    #[serde(default)]
+    pub osc7_process_cwd: Option<PathBuf>,
+    #[serde(default)]
+    pub title: String,
+    pub started_ms: i64,
+    #[serde(default)]
+    pub last_output_ms: Option<i64>,
+    pub output_offset: u64,
+    pub screen: String,
+    #[serde(default)]
+    pub history: Vec<String>,
+    #[serde(default)]
+    pub startup_input: Option<String>,
+}
+
+/// A standalone terminal survives an in-place restart without a session record.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PaneHandoff {
+    pub id: PaneId,
+    pub terminal: ProcessHandoff,
+}
+
+impl ProcessHandoff {
+    pub(crate) fn for_session(self, session_id: SessionId) -> TerminalHandoff {
+        TerminalHandoff {
+            session_id,
+            id: self.id,
+            fd: self.fd,
+            pid: self.pid,
+            cols: self.cols,
+            rows: self.rows,
+            cwd: self.cwd,
+            osc7_cwd: self.osc7_cwd,
+            osc7_foreground: self.osc7_foreground,
+            osc7_process_cwd: self.osc7_process_cwd,
+            title: self.title,
+            started_ms: self.started_ms,
+            last_output_ms: self.last_output_ms,
+            output_offset: self.output_offset,
+            screen: self.screen,
+            history: self.history,
+            startup_input: self.startup_input,
+        }
+    }
+}
+
+impl From<TerminalHandoff> for ProcessHandoff {
+    fn from(state: TerminalHandoff) -> Self {
+        Self {
+            id: state.id,
+            fd: state.fd,
+            pid: state.pid,
+            cols: state.cols,
+            rows: state.rows,
+            cwd: state.cwd,
+            osc7_cwd: state.osc7_cwd,
+            osc7_foreground: state.osc7_foreground,
+            osc7_process_cwd: state.osc7_process_cwd,
+            title: state.title,
+            started_ms: state.started_ms,
+            last_output_ms: state.last_output_ms,
+            output_offset: state.output_offset,
+            screen: state.screen,
+            history: state.history,
+            startup_input: state.startup_input,
+        }
+    }
 }
 
 pub fn encode(bytes: &[u8]) -> String {
@@ -190,6 +290,9 @@ pub fn close_all(state: &HandoffState) {
     for terminal in &state.terminals {
         close(terminal.fd);
     }
+    for pane in &state.panes {
+        close(pane.terminal.fd);
+    }
 }
 
 /// Write `state` to an unlinked private file in `dir`; returns its
@@ -221,12 +324,12 @@ pub fn read_state(fd: RawFd) -> io::Result<HandoffState> {
     let file = unsafe { File::from_raw_fd(fd) };
     let state: HandoffState = serde_json::from_reader(io::BufReader::new(file))
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    if state.version != HANDOFF_VERSION {
+    if !READABLE_HANDOFF_VERSIONS.contains(&state.version) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "handoff state version {} (this daemon reads {HANDOFF_VERSION})",
-                state.version
+                "handoff state version {} (this daemon reads {:?})",
+                state.version, READABLE_HANDOFF_VERSIONS
             ),
         ));
     }
@@ -318,6 +421,7 @@ mod tests {
 
     fn state(dir: &Path) -> HandoffState {
         HandoffState {
+            panes: Vec::new(),
             version: HANDOFF_VERSION,
             from_version: "0.1.0".into(),
             home: dir.to_path_buf(),
@@ -348,6 +452,8 @@ mod tests {
                 rows: 24,
                 cwd: Some("/tmp".into()),
                 osc7_cwd: false,
+                osc7_foreground: None,
+                osc7_process_cwd: None,
                 title: "t".into(),
                 started_ms: 5,
                 last_output_ms: None,
@@ -386,6 +492,18 @@ mod tests {
     }
 
     #[test]
+    fn legacy_handoff_state_is_still_readable_for_in_place_upgrades() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut old = state(dir.path());
+        old.version = 1;
+        let fd = write_state(dir.path(), &old).unwrap();
+        let restored = read_state(fd).unwrap();
+        assert_eq!(restored.version, 1);
+        assert!(restored.panes.is_empty());
+        assert_eq!(restored.terminals.len(), 1);
+    }
+
+    #[test]
     fn targets_must_read_this_state_version() {
         let dir = tempfile::tempdir().unwrap();
         let script = |name: &str, body: &str| {
@@ -397,6 +515,9 @@ mod tests {
         };
         let reads = script("new", &format!("echo {HANDOFF_VERSION}"));
         assert_eq!(check_target(&reads), Ok(()));
+        // A version-1 reader cannot preserve standalone pane descriptors.
+        let session_only = script("session-only", "echo 1");
+        assert!(check_target(&session_only).is_err());
         // An older daemon prints its usage and exits 2.
         let older = script("old", "echo usage >&2; exit 2");
         assert!(check_target(&older)

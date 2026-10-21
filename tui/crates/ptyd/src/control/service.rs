@@ -80,6 +80,8 @@ pub(super) fn now_ms() -> i64 {
 /// A session whose terminal the host has (running, or exited and not yet
 /// forgotten).
 struct LiveSession {
+    working_directory: Option<session_core::api::AgentWorkingDirectory>,
+    working_directory_pid: Option<u32>,
     terminal: TerminalId,
     scope: ScopeRoot,
     tracker: LifecycleTracker,
@@ -97,6 +99,8 @@ struct LiveSession {
 impl LiveSession {
     fn new(terminal: TerminalId, scope: ScopeRoot) -> Self {
         Self {
+            working_directory: None,
+            working_directory_pid: None,
             terminal,
             scope,
             tracker: LifecycleTracker::default(),
@@ -251,6 +255,15 @@ impl Inner {
         let Some(handed) = handed else {
             return;
         };
+        for (id, context, pid) in handed.working_directories {
+            if let (Ok(context), Some(live)) = (
+                super::working_directory::canonicalize(&context),
+                state.live.get_mut(&id),
+            ) {
+                live.working_directory = Some(context);
+                live.working_directory_pid = pid;
+            }
+        }
         let mut restored = 0;
         for (id, token) in handed.tokens {
             if state.live.contains_key(&id) {
@@ -306,6 +319,15 @@ impl Inner {
                     .iter()
                     .filter(|(_, live)| live.tracker.current() == Lifecycle::Idle)
                     .map(|(id, _)| id.clone())
+                    .collect(),
+                working_directories: state
+                    .live
+                    .iter()
+                    .filter_map(|(id, live)| {
+                        live.working_directory
+                            .clone()
+                            .map(|context| (id.clone(), context, live.working_directory_pid))
+                    })
                     .collect(),
                 activity: state
                     .live
@@ -409,6 +431,8 @@ impl Inner {
             Request::ProjectRelocate { from, to } => self.relocate_project(caller, &from, &to),
             Request::Hello(_)
             | Request::Attach(_)
+            | Request::TerminalOpen(_)
+            | Request::TerminalAttach(_)
             | Request::Subscribe(_)
             | Request::DaemonStatus
             | Request::DaemonShutdown
@@ -436,6 +460,56 @@ impl Inner {
         let children = registry(&state.registry)?.children(&record.id)?;
         let view = self.view(&state, &record, children, caller.session_id());
         Ok((terminal, view))
+    }
+
+    pub(super) fn open_terminal(
+        &self,
+        caller: &Caller,
+        request: &session_core::api::OpenTerminal,
+    ) -> Result<crate::host::PaneAttachment, ApiError> {
+        // Serialize the count/id check and spawn with the other control ops.
+        let state = self.lock();
+        let result = policy::authorize(caller, Op::TerminalOpen, None).and_then(|()| {
+            if self.stopping() {
+                Err(shutting_down())
+            } else {
+                super::panes::open(
+                    self.host.as_ref(),
+                    request,
+                    self.config.rakumux_bin.as_deref(),
+                )
+            }
+        });
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::TerminalOpen,
+            None,
+            None,
+            Some(format!("pane {}", request.id)),
+            &result,
+        );
+        result
+    }
+
+    pub(super) fn attach_terminal(
+        &self,
+        caller: &Caller,
+        request: &session_core::api::TerminalAttachRequest,
+    ) -> Result<crate::host::PaneAttachment, ApiError> {
+        let state = self.lock();
+        let result = policy::authorize(caller, Op::TerminalAttach, None)
+            .and_then(|()| super::panes::attach(self.host.as_ref(), request));
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::TerminalAttach,
+            None,
+            None,
+            Some(format!("pane {}", request.id)),
+            &result,
+        );
+        result
     }
 
     pub(super) fn subscribe(
@@ -519,7 +593,8 @@ impl Inner {
             crate::log_warn!("control: skipping registry row: {error}");
         }
         for record in &records {
-            state.git.ensure(&record.id, &record.cwd);
+            let directory = self.git_directory(&state, record);
+            state.git.ensure(&record.id, &directory);
         }
         let mut children: HashMap<SessionId, Vec<(i64, SessionId)>> = HashMap::new();
         for record in &records {
@@ -764,7 +839,8 @@ impl Inner {
                 .or_default()
                 .push(Instant::now());
         }
-        state.git.ensure(&id, &record.cwd);
+        let directory = self.git_directory(&state, &record);
+        state.git.ensure(&id, &directory);
         let view = self.view(state, &record, Vec::new(), None);
         state.views.insert(id.clone(), view.clone());
         self.publish(
@@ -1112,6 +1188,28 @@ impl Inner {
         report: Report,
     ) -> Result<(), ApiError> {
         validate_report(&report)?;
+        let working_directory = report
+            .working_directory
+            .as_ref()
+            .map(super::working_directory::canonicalize)
+            .transpose()?;
+        if let Some(context) = &working_directory {
+            let declared = report
+                .activity
+                .as_ref()
+                .map(|update| update.agent.as_str())
+                .or_else(|| report.agent.as_ref().map(|agent| agent.kind.as_str()));
+            if declared.is_some_and(|agent| agent != context.agent) {
+                return Err(invalid("working-directory agent does not match the report"));
+            }
+        }
+        if working_directory.is_some() && self.runtime(state, record).status != SessionStatus::Live
+        {
+            return Err(ApiError::new(
+                ErrorCode::SessionNotLive,
+                "working-directory reports require a live session",
+            ));
+        }
         if let Some(activity) = &report.activity {
             super::activity::validate(activity)?;
             if self.runtime(state, record).status != SessionStatus::Live {
@@ -1122,6 +1220,7 @@ impl Inner {
             }
         }
         let Report {
+            working_directory: _,
             activity,
             state: lifecycle,
             text,
@@ -1129,6 +1228,17 @@ impl Inner {
             agent,
             resume,
         } = report;
+        if let (Some(context), Some(live)) = (working_directory, state.live.get_mut(&record.id)) {
+            live.working_directory_pid = self
+                .host
+                .info(live.terminal)
+                .and_then(|info| info.foreground)
+                .filter(|process| {
+                    crate::detect::agent_label(process) == Some(context.agent.as_str())
+                })
+                .map(|process| process.pid);
+            live.working_directory = Some(context);
+        }
         let now = now_ms();
         let registry = registry(&state.registry)?;
         if let Some(agent) = &agent {
@@ -1698,6 +1808,7 @@ impl Inner {
 
     fn on_output(&self, terminal: TerminalId, session_id: &SessionId) {
         let detection = self.detect(terminal);
+        let process = self.host.info(terminal).and_then(|info| info.foreground);
         let now = now_ms();
         let plan = self.resume_plan(terminal, session_id, now);
         let mut state = self.lock();
@@ -1712,6 +1823,14 @@ impl Inner {
             return;
         };
         if let Some(detection) = detection {
+            let changed_agent = live.working_directory.as_ref().is_some_and(|context| {
+                detection.agent.as_deref() != Some(context.agent.as_str())
+                    || matches!((live.working_directory_pid, process.as_ref()), (Some(pid), Some(process)) if pid != process.pid)
+            });
+            if changed_agent {
+                live.working_directory = None;
+                live.working_directory_pid = None;
+            }
             live.tracker.on_detection(detection, now);
         }
         let activity = now.saturating_sub(live.last_activity_ms) >= ACTIVITY_INTERVAL_MS;
@@ -2164,9 +2283,10 @@ impl Inner {
         };
         // Callers cache the context first (`GitContexts::ensure`); a miss
         // reads it here.
-        let git = match state.git.get(&record.id, &record.cwd) {
+        let directory = self.git_directory(state, record);
+        let git = match state.git.get(&record.id, &directory) {
             Some(info) => info.clone(),
-            None => git::detect(&record.cwd),
+            None => git::detect(&directory),
         };
         SessionView {
             pinned: record.pinned,
@@ -2234,7 +2354,8 @@ impl Inner {
                 return;
             }
         };
-        state.git.ensure(id, &record.cwd);
+        let directory = self.git_directory(state, &record);
+        state.git.ensure(id, &directory);
         let view = self.view(state, &record, children, None);
         let previous = state.views.get(id);
         if previous == Some(&view) {
@@ -2256,6 +2377,29 @@ impl Inner {
             at: now_ms(),
             event,
         });
+    }
+
+    /// An agent's logical worktree wins only while that agent is running.
+    /// The registry cwd and authenticated folder remain the terminal's own.
+    fn git_directory(&self, state: &State, record: &SessionRecord) -> PathBuf {
+        let selected = state.live.get(&record.id).and_then(|live| {
+            let context = live.working_directory.as_ref()?;
+            let info = self.host.info(live.terminal)?;
+            if info.state != TerminalState::Running {
+                return None;
+            }
+            let process = info.foreground;
+            let agent = match &process {
+                Some(process) => crate::detect::agent_label(process),
+                None => live.tracker.detected_agent(),
+            };
+            let same_process = match (live.working_directory_pid, process.as_ref()) {
+                (Some(expected), Some(process)) => expected == process.pid,
+                _ => true,
+            };
+            (agent == Some(context.agent.as_str()) && same_process).then(|| context.path.clone())
+        });
+        selected.unwrap_or_else(|| record.cwd.clone())
     }
 
     /// Resolve `id` and check scope + permission. Denials are audited, as

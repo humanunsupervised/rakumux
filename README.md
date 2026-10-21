@@ -63,12 +63,17 @@ existing size. Only visible cards have preview streams; dead/exited cards show s
 `n` or the + New session card creates and enters a generated-name session immediately.
 
 **Bottom terminal:** `T` in Rakumux mode, or Settings → General → Terminal panel, opens an
-independent shell underneath the main detail. It starts in the selected folder and has its
+independent shell underneath the main detail. It starts in the selected session's current
+directory (or the current folder when none is selected) and has its
 own input focus. Click a pane to focus it; `Ctrl-\` returns to Rakumux mode, then `Esc` returns
 to the shell or `T` hides it. The × button hides it too. Drag the horizontal divider to resize.
-Hiding does not stop the shell or its command. The shell is a normal daemon-owned session,
-visible in the session list. This window reuses its shell when reopening the same folder;
-the pane stays bound to its folder until hidden. Short windows show the focused pane alone.
+Hiding does not stop the shell or its command; reopening reuses the same terminal.
+The pane creates no Rakumux session or session-list entry. Typing `exit` or sending end-of-file
+closes the pane and releases its terminal automatically. The pane belongs to this UI window,
+so closing or reloading the UI ends its temporary shell, not any Rakumux sessions.
+Short windows show the focused pane alone. A daemon restart in place preserves the pane;
+reconnecting starts read-only until you refocus it. Older daemons need an in-place restart
+to support standalone panes; Rakumux never falls back to creating a session for one.
 
 ```bash
 rakumux new --name dev          # Create and attach
@@ -85,6 +90,10 @@ From a checkout, use `./rakumux.sh` instead of `rakumux`.
 Activity hooks for OpenCode, Claude Code and Codex provide busy spinners, needs-input
 markers, tool phases and agent-internal subagent counts. Setup is opt-in; see
 [agent integrations](integrations/README.md). Screen detection remains the fallback.
+
+With agent integrations enabled, each session's branch follows the agent's active or
+last-used worktree while that agent runs. Without an agent it follows the terminal cwd.
+This never creates/switches worktrees or changes the session's folder permissions.
 
 ```bash
 claude mcp add --scope user rakumux -- rakumux-mcp

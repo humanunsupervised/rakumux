@@ -109,12 +109,9 @@ pub(crate) fn child_env(
     base: &[(String, String)],
     identity: &Identity<'_>,
 ) -> Vec<(String, String)> {
-    let mut env: BTreeMap<String, String> = base.iter().cloned().collect();
-    env.retain(|name, _| {
-        !STRIPPED.contains(&name.as_str())
-            && !STRIPPED_PREFIXES.iter().any(|p| name.starts_with(p))
-            && !agents::inherited_marker(name)
-    });
+    let mut env: BTreeMap<String, String> = terminal_env(base, identity.rakumux_bin)
+        .into_iter()
+        .collect();
     env.insert(
         rakumux_env::SESSION_ID.into(),
         identity.session_id.as_str().into(),
@@ -127,7 +124,21 @@ pub(crate) fn child_env(
         rakumux_env::SOCKET.into(),
         identity.socket.to_string_lossy().into_owned(),
     );
-    if let Some(bin) = identity.rakumux_bin {
+    env.into_iter().collect()
+}
+
+/// A standalone terminal inherits no session authentication or agent markers.
+pub(crate) fn terminal_env(
+    base: &[(String, String)],
+    rakumux_bin: Option<&Path>,
+) -> Vec<(String, String)> {
+    let mut env: BTreeMap<String, String> = base.iter().cloned().collect();
+    env.retain(|name, _| {
+        !STRIPPED.contains(&name.as_str())
+            && !STRIPPED_PREFIXES.iter().any(|p| name.starts_with(p))
+            && !agents::inherited_marker(name)
+    });
+    if let Some(bin) = rakumux_bin {
         env.insert(rakumux_env::BIN.into(), bin.to_string_lossy().into_owned());
     }
     env.insert("TERM".into(), "xterm-256color".into());

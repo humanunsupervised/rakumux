@@ -468,10 +468,12 @@ impl KeyAction {
                     .into()
             }
             KeyAction::TerminalPanel => {
-                "T opens an independent shell below the main detail in the selected folder. \
+                "T opens a standalone shell below the main detail in the current directory. \
                  Click a pane to focus it. Use the Rakumux key to return to Rakumux mode; \
                  then Esc returns to the shell or T hides it. Hiding does not end its \
-                 session or running command; drag the divider to resize the split."
+                 running command. Exit closes the pane and releases its terminal. No session \
+                 is created. Closing or reloading this UI ends its temporary shell, not any \
+                 sessions; drag the divider to resize the split."
                     .into()
             }
             KeyAction::CheckForUpdate => {
@@ -1167,11 +1169,13 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("Terminal panel");
     doc.text(
         "T in Rakumux mode, or Settings, General, Terminal panel, opens a separate shell \
-         underneath the main detail in the selected folder. Click a pane to focus it; the \
+         underneath the main detail in the current directory. Click a pane to focus it; the \
          TERMINAL badge identifies shell input. The Rakumux key returns to Rakumux mode, \
          then Esc returns to the shell or T hides it. The hide button never ends its program. \
-         Drag the divider to resize. Short windows show the focused pane alone. These are \
-         normal daemon sessions, visible in the list; this window reuses one per folder.",
+         Drag the divider to resize. Short windows show the focused pane alone. No session \
+         or session-list entry is created. Exit closes the pane and releases its terminal; \
+         closing or reloading this UI ends the temporary shell. A daemon restart in place \
+         preserves it, reconnecting read-only until refocused.",
     );
     doc.heading("Folders");
     doc.text(

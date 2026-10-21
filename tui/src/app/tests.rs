@@ -2546,7 +2546,14 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
     assert_eq!(visible_ids(&h), ["R1", "W1"]);
     // The restart notice says what's missing.
     match &h.app.mode {
-        AppMode::DaemonRestart(dialog) => assert_eq!(dialog.missing, ["new folders live"]),
+        AppMode::DaemonRestart(dialog) => assert_eq!(
+            dialog.missing,
+            [
+                "new folders live",
+                "the terminal panel",
+                "the branch an agent works on"
+            ]
+        ),
         mode => panic!("no restart offer: {mode:?}"),
     }
     h.press(KeyCode::Char('n')).await;
@@ -3056,7 +3063,9 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "git branches and worktrees",
                 "folders",
                 "pins",
-                "new folders live"
+                "new folders live",
+                "the terminal panel",
+                "the branch an agent works on"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),

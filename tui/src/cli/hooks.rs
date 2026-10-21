@@ -49,35 +49,52 @@ fn receive(globals: &Globals, agent: HookAgent) -> Result<(), String> {
         return Err("hook input exceeds 1 MiB".into());
     }
     let input = serde_json::from_slice(&bytes).map_err(|_| "invalid hook JSON")?;
-    let Some(update) = adapters::normalize(agent.name(), &input)? else {
+    let Some(report) = adapters::report(agent.name(), &input)? else {
         return Ok(());
     };
     // Never create a daemon from a hook. Hooks are optional, not session launchers.
     let client = globals
         .connect(false)
         .map_err(|_| "cannot connect to the running daemon")?;
-    submit(&client, update)
+    submit_report(&client, report)
 }
 
+#[cfg(test)]
 fn submit(
     api: &dyn SessionApi,
     update: session_core::activity::ActivityUpdate,
 ) -> Result<(), String> {
+    submit_report(
+        api,
+        Report {
+            activity: Some(update),
+            ..Report::default()
+        },
+    )
+}
+
+fn submit_report(api: &dyn SessionApi, mut report: Report) -> Result<(), String> {
     if !matches!(api.caller(), CallerInfo::Session { .. }) {
         return Err("hook requires session authentication".into());
     }
-    if !api.daemon_capabilities().is_some_and(|capabilities| {
-        capabilities
+    let capabilities = api.daemon_capabilities().unwrap_or_default();
+    if report.activity.is_some()
+        && !capabilities
             .iter()
             .any(|capability| capability == session_core::api::CAPABILITY_ACTIVITY)
-    }) {
+    {
         return Err("daemon needs the session.activity capability".into());
     }
-    api.report(Report {
-        activity: Some(update),
-        ..Report::default()
-    })
-    .map_err(|error| {
+    if !capabilities
+        .iter()
+        .any(|capability| capability == session_core::api::CAPABILITY_WORKING_DIRECTORY)
+    {
+        report.working_directory = None;
+    }
+    if report.activity.is_none() && report.working_directory.is_none() {
+        return Ok(());
+    }
+    api.report(report).map_err(|error| {
         if error.code == ErrorCode::Unsupported {
             "daemon does not support activity hooks".into()
         } else {
@@ -115,5 +132,34 @@ mod tests {
             session.reports.lock().unwrap()[0].activity.as_ref(),
             Some(&update)
         );
+    }
+
+    #[test]
+    fn working_directory_reports_are_self_only_and_capability_gated() {
+        let mut api = FakeApi::session_caller("A", "/repo", vec![]);
+        let report = Report {
+            working_directory: Some(session_core::api::AgentWorkingDirectory {
+                agent: "codex".into(),
+                conversation_id: Some("thread".into()),
+                path: "/repo/worktree".into(),
+            }),
+            ..Report::default()
+        };
+        api.capabilities = Some(vec!["session.activity".into()]);
+        submit_report(&api, report.clone()).unwrap();
+        assert!(
+            api.reports.lock().unwrap().is_empty(),
+            "older daemons do not receive a meaning-changing optional field"
+        );
+        api.capabilities
+            .as_mut()
+            .unwrap()
+            .push(session_core::api::CAPABILITY_WORKING_DIRECTORY.into());
+        submit_report(&api, report.clone()).unwrap();
+        assert_eq!(
+            api.reports.lock().unwrap()[0].working_directory,
+            report.working_directory
+        );
+        assert!(submit_report(&FakeApi::user(vec![]), report).is_err());
     }
 }

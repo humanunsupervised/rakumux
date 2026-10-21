@@ -1,5 +1,6 @@
 {
   "hooks": {
+    "CwdChanged": [{"hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],
     "SessionStart": [{"hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],
     "SessionEnd": [{"hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],

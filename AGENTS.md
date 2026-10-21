@@ -56,6 +56,8 @@ in this repository's license grant. Public preparation and release checks: `PUBL
   `ptyd`; `mcp` talks to the daemon only through the HTTP API. In the daemon,
   `server` → `Control` → `TerminalHost`; `terminal` knows nothing about scopes, callers or policy.
 - The UI never opens the socket itself, never reads the registry and never touches a PTY.
+- A session's git context follows its running agent's self-reported working directory when
+  available, otherwise its terminal cwd. Reports never change its scope or registry cwd.
 - Name modules by capability (`naming`, `terminal_view`, `layout`, `help`, `control`, `persist`), not
   by transport.
 - Make invalid states hard to represent, return explicit errors (`ApiError` with an `ErrorCode`),
@@ -150,7 +152,7 @@ tui/
       lib.rs                 # PROTOCOL_VERSION, env variable names
       model.rs               # ScopeRoot, SessionView, SessionStatus, Lifecycle, Creator, AgentInfo,
                              # Reported, LaunchSpec, ResumeSpec, TerminalView
-      ids.rs                 # SessionId (ULID), TerminalId, Token
+      ids.rs                 # SessionId (ULID), PaneId (standalone terminal), TerminalId, Token
       api.rs                 # Hello/Auth, Request, Response, errors, stream commands/events, events
       frame.rs               # [u32 len][u8 kind][payload] codec
       paths.rs               # Layout (~/.rakumux, run dir, socket), Registration, find_ptyd_binary
@@ -273,6 +275,26 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
 - Attach stream: checkpoint (base64 screen state) + offset, then output frames and stream events
   (`resized`, `role_changed`, `title`, `cwd`, `bell`, `clipboard`, `exited`, `lagged`); the client
   sends input frames and `resize` / `promote` / `demote` / `detach`.
+- Standalone terminal panes (user only, capability `terminal.pane`): `terminal_open {id, cwd,
+  env, cols, rows}` starts a login shell and opens a stream; `terminal_attach {id, role, cols,
+  rows}` reconnects an existing pane after an in-place daemon restart, never creates one.
+  The first response is `terminal_attached {id, cwd?, pid?, role, cols, rows, checkpoint, offset}`,
+  not a `SessionView`. `id` is an opaque `PaneId`, not a session id. No registry/session files,
+  identity environment, session events, `running.json` entry or crash recovery are created.
+  Hiding keeps the owning stream open; shell exit or closing that stream releases the PTY.
+  `checkpoint` requests a fresh `resized` checkpoint without resizing or taking control.
+  Handoff state version 2 preserves pane PTYs; the daemon still reads version 1 for upgrades,
+  but refuses a restart target that cannot read version 2 before affecting any programs.
+  A pane with no reconnected owning window is reaped after a 30-second handoff grace period.
+- Self-only `Report.working_directory` (capability `session.working_directory`) is
+  `{agent, conversation_id?, path}`. The daemon validates an absolute existing directory and
+  keeps the last report for that agent process. `SessionView.git` uses it while that agent
+  runs; `SessionView.cwd` and scope retain their terminal/folder meanings. A shell or a new
+  agent process uses the terminal cwd until it reports its own context. The normal two-second
+  git poll follows the selected context and publishes updates when HEAD changes. Agent
+  adapters report documented root context, never inferred tool paths or a different
+  conversation's newest worktree. Foreground cwd polling continues without terminal output;
+  old OSC 7 reports lose priority when their process or actual process cwd changes.
 - Event stream: `EventEnvelope { scope, session_id, at, event }` with `created`, `updated`,
   `removed`, `exited`, `lifecycle`, `reported`, `activity`.
 - **Compatibility**: new fields optional; enums carry an `Unknown` fallback; an op never changes
@@ -489,10 +511,10 @@ startup authorization. Success reloads only the UI through the new launcher, str
 `--new-server`. The daemon/API and all sessions stay running; Update has no stop/revive
 fallback. Legacy npm/Homebrew installs use their package manager. On a protocol mismatch the TUI
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
-shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, read with
-`SessionApi::daemon_capabilities`) it says what's missing and offers a restart: in place when the
-daemon has `daemon.restart` (sessions keep running; `y`/Enter), otherwise by stopping it (`y` only,
-since running sessions end).
+shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
+`session.working_directory`, read with `SessionApi::daemon_capabilities`) it says what's missing
+and offers a restart: in place when the daemon has `daemon.restart` (sessions keep running;
+`y`/Enter), otherwise by stopping it (`y` only, since running sessions end).
 
 ### Auth (deferred)
 
@@ -660,18 +682,22 @@ through the hidden detail path. Cards crop/pan rather than resizing terminals. D
 and wire spelling stays `sidebar`, now labelled Master detail; `grid` and `tabs` persist too.
 
 **Terminal panel.** `T` in Rakumux mode or Settings → General → Terminal panel opens a
-separate daemon-owned login shell under the main detail. `Focus::Terminal` routes keys,
+temporary daemon-owned login shell under the main detail, without a session record or list entry.
+It starts in the selected session's cwd, otherwise the current folder. `Focus::Terminal` routes keys,
 paste, mouse and cursor only to that attachment, with a distinct TERMINAL footer badge.
 The Rakumux key demotes it and returns to Rakumux mode; Esc returns to it, and T hides it.
-The hide button only detaches: never kill/delete a session or its running command. Drag its
+The hide button keeps the stream and shell running. Exit/EOF closes the pane and releases its
+terminal automatically; there is no session record to delete. Closing/reloading this UI ends
+the temporary pane shell, never any Rakumux sessions. Drag its
 divider to resize the split. The selected agent remains observed while the shell takes input;
 only the focused terminal claims size, and scrolling an unfocused shell cannot resize the
 agent. Short windows show the focused pane alone. Grid browsing keeps its grid and hides the
-panel; focusing the shell restores the selected detail above it. Shells are regular sessions
-in the list. Per-folder panel bindings live in this window's memory; daemon sessions persist
-after UI restart. All work uses SessionApi off the UI thread, with stale-result checks,
-scope/self guards, passive emulators, bounded history and input-log privacy. Reconnects attach
-as observers until the user refocuses; they never create replacement shells implicitly.
+panel; focusing the shell restores the selected detail above it. Each window keeps one pane,
+reusing it after hiding. All work uses SessionApi off the UI thread, with stale-result checks,
+user-only daemon policy, passive emulators, bounded history and input-log privacy. In-place
+daemon restarts preserve pane PTYs. Reconnects attach as observers until the user refocuses;
+they never create replacement shells implicitly. An older daemon reports that an in-place
+restart is needed; no fallback creates a normal or hidden session.
 
 Settings measures its active General/Keys table instead of taking a percentage of the screen:
 centred, 48–88 columns when room allows, capped by screen width with a side margin. Explanatory

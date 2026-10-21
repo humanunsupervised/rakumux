@@ -1,11 +1,11 @@
 use super::*;
-use crate::app::testing::{harness, scope, view, Harness};
+use crate::app::testing::{harness, view, Harness};
 use crossterm::event::{Event, KeyModifiers, MouseButton};
 use ratatui::{backend::TestBackend, Terminal};
 use session_core::client::AttachOutgoing;
 
 fn pane_index(h: &Harness) -> usize {
-    h.fake.attach_count() - 1
+    h.fake.pane_count() - 1
 }
 
 fn render(h: &mut Harness, width: u16, height: u16) -> String {
@@ -25,34 +25,31 @@ fn render(h: &mut Harness, width: u16, height: u16) -> String {
 }
 
 #[tokio::test]
-async fn terminal_panel_opens_an_independent_folder_shell_and_routes_private_input() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
+async fn terminal_panel_opens_in_the_current_directory_without_creating_a_session() {
+    let mut agent = view("A", "agent", 1);
+    agent.cwd = "/repo/src".into();
+    let mut h = harness(vec![agent]);
     let main = h.last_attach().0;
     let selected = h.app.list.selected_id().cloned();
     h.fake.outgoing(main);
     h.press(KeyCode::Char('T')).await;
     assert_eq!(h.app.focus, Focus::Terminal);
     assert!(h.app.terminal_panel.open);
-    let id = h.app.terminal_panel.session_id().unwrap().clone();
-    assert_ne!(Some(&id), selected.as_ref());
     assert_eq!(h.app.list.selected_id(), selected.as_ref());
-    let created = h.fake.state.lock().unwrap().creates[0].clone();
-    assert_eq!(created.scope, Some(scope()));
-    assert_eq!(created.cwd.as_deref(), Some(scope().path()));
-    assert!(created.argv.is_none() && created.startup_cmds.is_empty());
+    let state = h.fake.state.lock().unwrap();
+    assert!(state.creates.is_empty());
+    assert_eq!(state.sessions.len(), 1);
+    assert_eq!(state.terminal_opens.len(), 1);
+    assert_eq!(state.terminal_opens[0].cwd, PathBuf::from("/repo/src"));
+    drop(state);
     let panel = pane_index(&h);
-    assert_eq!(h.fake.attach_request(panel).role, Role::Controller);
-    let screen = h.app.screen();
-    assert!(screen.detail.unwrap().bottom() < screen.terminal_panel.unwrap().y);
-    assert!(h.app.input_is_private());
-    assert!(h.app.input_state().starts_with("terminal "));
-    h.fake.outgoing(panel);
+    h.fake.pane_outgoing(panel);
     h.press(KeyCode::Char('x')).await;
     h.app
         .handle_terminal_event(Event::Paste("echo private".into()))
         .await;
     assert_eq!(
-        h.fake.outgoing(panel),
+        h.fake.pane_outgoing(panel),
         vec![
             AttachOutgoing::Input(b"x".to_vec()),
             AttachOutgoing::Input(b"echo private".to_vec())
@@ -60,629 +57,360 @@ async fn terminal_panel_opens_an_independent_folder_shell_and_routes_private_inp
     );
     assert!(
         h.fake.outgoing(main).is_empty(),
-        "panel input or sizing escaped into the agent"
+        "pane input reached the agent"
     );
+    assert!(h.app.input_is_private());
+    assert!(h.app.input_state().starts_with("terminal "));
     assert!(render(&mut h, 160, 48).contains("Terminal"));
 }
 
 #[tokio::test]
-async fn hiding_the_panel_preserves_its_session_and_reopening_reuses_it() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    h.press(KeyCode::Char('T')).await;
-    let id = h.app.terminal_panel.session_id().unwrap().clone();
-    let panel = pane_index(&h);
-    h.fake.outgoing(panel);
-    h.rakumux().await;
-    assert!(h.app.came_from_terminal);
-    h.press(KeyCode::Char('T')).await;
-    assert!(!h.app.terminal_panel.open);
-    assert!(h
-        .fake
-        .state
-        .lock()
-        .unwrap()
-        .sessions
-        .iter()
-        .any(|session| session.id == id && session.status == SessionStatus::Live));
-    assert!(!h.fake.calls().iter().any(|call| call.starts_with("kill ")
-        || call.starts_with("delete ")
-        || call == "shutdown"));
-    let output = h.fake.outgoing(panel);
-    assert!(output.contains(&AttachOutgoing::Command(StreamCommand::Demote)));
-    assert!(output.contains(&AttachOutgoing::Command(StreamCommand::Detach)));
-    h.press(KeyCode::Char('T')).await;
-    assert_eq!(h.app.terminal_panel.session_id(), Some(&id));
-    assert_eq!(h.fake.state.lock().unwrap().creates.len(), 1);
-    assert_eq!(h.app.focus, Focus::Terminal);
-}
-
-#[tokio::test]
-async fn focus_moves_between_agent_panel_and_rakumux_without_typing_into_both() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    h.press(KeyCode::Enter).await;
-    let main = h.last_attach().0;
-    h.fake.outgoing(main);
-    h.app.toggle_terminal_panel();
-    h.app.process_pending();
-    let panel = pane_index(&h);
-    assert_eq!(
-        h.app.detail.attachment.as_ref().unwrap().role,
-        Role::Observer
-    );
-    assert!(h
-        .fake
-        .outgoing(main)
-        .contains(&AttachOutgoing::Command(StreamCommand::Demote)));
-    h.rakumux().await;
-    h.press(KeyCode::Esc).await;
-    assert_eq!(h.app.focus, Focus::Terminal);
-    h.rakumux().await;
-    h.press(KeyCode::Enter).await;
-    assert_eq!(h.app.focus, Focus::Session);
-    assert_eq!(
-        h.app
-            .terminal_panel
-            .detail
-            .attachment
-            .as_ref()
-            .unwrap()
-            .role,
-        Role::Observer
-    );
-    h.fake.outgoing(main);
-    h.fake.outgoing(panel);
-    h.press(KeyCode::Char('T')).await;
-    assert_eq!(
-        h.fake.outgoing(main),
-        vec![AttachOutgoing::Input(b"T".to_vec())]
-    );
-    assert!(h.fake.outgoing(panel).is_empty());
-}
-
-#[tokio::test]
-async fn another_client_taking_control_makes_the_panel_read_only() {
+async fn shell_exit_closes_the_pane_and_leaves_no_session_to_delete() {
     let mut h = harness(vec![view("A", "agent", 1)]);
     h.press(KeyCode::Char('T')).await;
     let panel = pane_index(&h);
-    h.attach_event(
-        panel,
-        AttachEvent::Event(StreamEvent::RoleChanged {
-            role: Role::Observer,
-        }),
-    );
-    assert_eq!(h.app.focus, Focus::List);
-    assert_eq!(
-        h.app
-            .terminal_panel
-            .detail
-            .attachment
-            .as_ref()
-            .unwrap()
-            .role,
-        Role::Observer
-    );
-    h.fake.outgoing(panel);
-    h.app
-        .handle_terminal_panel_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
-    assert!(h.fake.outgoing(panel).is_empty());
-    h.app.focus_terminal_panel();
-    assert_eq!(h.app.focus, Focus::Terminal);
-    assert!(h.fake.outgoing(panel).iter().any(|message| matches!(
-        message,
-        AttachOutgoing::Command(StreamCommand::Promote { .. })
-    )));
-}
-
-#[tokio::test]
-async fn panel_output_and_queries_stay_in_the_panel_and_only_active_clipboard_is_forwarded() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    let main = h.last_attach().0;
-    h.press(KeyCode::Char('T')).await;
-    let panel = pane_index(&h);
-    h.fake.outgoing(main);
-    h.fake.outgoing(panel);
-    h.attach_event(
-        panel,
-        AttachEvent::Output {
-            offset: 100,
-            bytes: b"\x1b[HPANEL_OUTPUT\x1b[6n\x1b[c".to_vec(),
-        },
-    );
-    assert!(render(&mut h, 160, 48).contains("PANEL_OUTPUT"));
-    assert!(h.fake.outgoing(main).is_empty());
-    assert!(
-        h.fake.outgoing(panel).is_empty(),
-        "passive mirrors must not answer queries"
-    );
-    h.attach_event(
-        panel,
-        AttachEvent::Event(StreamEvent::Clipboard {
-            selection: "c".into(),
-            data: "eA==".into(),
-        }),
-    );
-    assert!(!h.app.take_terminal_output().is_empty());
-    h.rakumux().await;
-    h.attach_event(
-        panel,
-        AttachEvent::Event(StreamEvent::Clipboard {
-            selection: "c".into(),
-            data: "eQ==".into(),
-        }),
-    );
-    assert!(h.app.take_terminal_output().is_empty());
-}
-
-#[tokio::test]
-async fn panel_exit_keeps_its_screen_and_enter_revives_only_that_session() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    h.press(KeyCode::Char('T')).await;
-    let id = h.app.terminal_panel.session_id().unwrap().clone();
-    let panel = pane_index(&h);
-    h.attach_event(
-        panel,
-        AttachEvent::Output {
-            offset: 100,
-            bytes: b"\x1b[HFINAL_PANEL_OUTPUT".to_vec(),
-        },
-    );
-    h.attach_event(
+    let before = h.app.screen();
+    assert!(before.terminal_panel.is_some());
+    h.fake.pane_outgoing(panel);
+    h.fake.send_pane(
         panel,
         AttachEvent::Event(StreamEvent::Exited { code: Some(0) }),
     );
-    h.attach_event(panel, AttachEvent::Closed(None));
-    assert!(matches!(
-        h.app.terminal_panel.detail.view,
-        DetailView::Saved { .. }
-    ));
-    assert!(render(&mut h, 160, 48).contains("FINAL_PANEL_OUTPUT"));
-    h.press(KeyCode::Enter).await;
-    assert_eq!(h.app.terminal_panel.session_id(), Some(&id));
-    assert!(h
-        .fake
-        .calls()
-        .iter()
-        .any(|call| call.starts_with(&format!("revive {id} "))));
+    h.app.process_pending();
+    assert!(!h.app.terminal_panel.open);
+    assert!(h.app.terminal_panel.id.is_none());
+    assert!(h.app.terminal_panel.terminal.is_none());
+    assert!(h.app.screen().terminal_panel.is_none());
+    assert_eq!(h.app.focus, Focus::List);
+    let state = h.fake.state.lock().unwrap();
+    assert!(state.panes.is_empty());
+    assert!(state.creates.is_empty());
+    assert_eq!(state.sessions.len(), 1);
+    assert_eq!(state.sessions[0].id.as_str(), "A");
+    drop(state);
     assert!(!h
         .fake
         .calls()
         .iter()
-        .any(|call| call.starts_with("revive A ")));
-}
-
-#[tokio::test]
-async fn panel_creation_failures_are_visible_and_keys_do_not_reach_the_agent() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    let main = h.last_attach().0;
-    h.fake.outgoing(main);
-    h.fake.fail_next(
-        "create",
-        ApiError::new(ErrorCode::PermissionDenied, "not allowed"),
-    );
-    h.press(KeyCode::Char('T')).await;
+        .any(|call| call.starts_with("delete ") || call.starts_with("kill ")));
     assert!(h
-        .app
-        .terminal_panel
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("not allowed"));
-    h.press(KeyCode::Char('x')).await;
-    assert!(h.fake.outgoing(main).is_empty());
-    h.press(KeyCode::Enter).await;
-    assert!(h.app.terminal_panel.detail.attachment.is_some());
+        .fake
+        .pane_outgoing(panel)
+        .contains(&AttachOutgoing::Command(StreamCommand::Detach)));
 }
 
 #[tokio::test]
-async fn panel_resize_changes_only_the_focused_shell_and_dragging_keeps_panes_tiled() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    let main = h.last_attach().0;
-    h.press(KeyCode::Char('T')).await;
-    let panel = pane_index(&h);
-    h.fake.outgoing(main);
-    h.fake.outgoing(panel);
-    h.app.resize(140, 40);
-    assert!(h.fake.outgoing(main).is_empty());
-    assert!(h.fake.outgoing(panel).iter().any(|message| matches!(
-        message,
-        AttachOutgoing::Command(StreamCommand::Resize { .. })
-    )));
-    let divider = h.app.screen().terminal_panel_divider.unwrap();
-    render(&mut h, 140, 40);
-    h.fake.outgoing(main);
-    h.fake.outgoing(panel);
-    let old_percent = h.app.terminal_panel.height_percent;
-    h.app
-        .handle_terminal_event(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: divider.x + 1,
-            row: divider.y,
-            modifiers: KeyModifiers::NONE,
-        }))
-        .await;
-    assert!(h.app.terminal_panel.dragging);
-    for kind in [
-        MouseEventKind::Drag(MouseButton::Left),
-        MouseEventKind::Up(MouseButton::Left),
-    ] {
-        h.app
-            .handle_terminal_event(Event::Mouse(MouseEvent {
-                kind,
-                column: divider.x + 1,
-                row: divider.y.saturating_sub(3),
-                modifiers: KeyModifiers::NONE,
-            }))
-            .await;
-    }
-    assert_ne!(h.app.terminal_panel.height_percent, old_percent);
-    assert!(!h.app.terminal_panel.dragging);
-    assert!(h.fake.outgoing(main).is_empty());
-    assert!(h.fake.outgoing(panel).iter().any(|message| matches!(
-        message,
-        AttachOutgoing::Command(StreamCommand::Resize { .. })
-    )));
-    let screen = h.app.screen();
-    assert!(screen.detail.unwrap().bottom() < screen.terminal_panel.unwrap().y);
-    assert_eq!(
-        screen.terminal_panel.unwrap().bottom(),
-        screen.footer.unwrap().y
-    );
-}
-
-#[tokio::test]
-async fn panel_claims_its_size_only_after_user_activity_not_on_an_external_resize() {
+async fn hiding_retains_the_stream_and_reopening_reuses_the_same_terminal() {
     let mut h = harness(vec![view("A", "agent", 1)]);
     h.press(KeyCode::Char('T')).await;
+    let id = h.app.terminal_panel.id.clone();
     let panel = pane_index(&h);
-    h.fake.outgoing(panel);
-    h.app
-        .terminal_panel
-        .detail
-        .attachment
-        .as_mut()
-        .unwrap()
-        .last_claim = None;
-    h.attach_event(
-        panel,
-        AttachEvent::Event(StreamEvent::Resized {
-            rows: 10,
-            cols: 60,
-            checkpoint: String::new(),
-            offset: 100,
-        }),
-    );
-    assert!(
-        h.fake.outgoing(panel).is_empty(),
-        "observer/other-window resize must not cause a sizing fight"
-    );
-    h.app
-        .handle_terminal_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('x'),
-            KeyModifiers::NONE,
-        )))
-        .await;
-    h.app.process_pending();
-    assert!(h.fake.outgoing(panel).iter().any(|message| matches!(
-        message,
-        AttachOutgoing::Command(StreamCommand::Resize { .. })
-    )));
+    h.fake.pane_outgoing(panel);
+    h.rakumux().await;
+    h.press(KeyCode::Char('T')).await;
+    assert!(!h.app.terminal_panel.open);
+    assert!(h.app.terminal_panel.attachment.is_some());
+    let outgoing = h.fake.pane_outgoing(panel);
+    assert!(outgoing.contains(&AttachOutgoing::Command(StreamCommand::Demote)));
+    assert!(!outgoing.contains(&AttachOutgoing::Command(StreamCommand::Detach)));
+    h.press(KeyCode::Char('T')).await;
+    assert_eq!(h.app.terminal_panel.id, id);
+    assert_eq!(h.fake.state.lock().unwrap().terminal_opens.len(), 1);
+    assert_eq!(h.fake.pane_count(), 1);
+    assert_eq!(h.app.focus, Focus::Terminal);
 }
 
 #[tokio::test]
-async fn panel_self_and_folder_guards_reject_reusing_the_wrong_terminal() {
-    for self_session in [false, true] {
-        let mut h = harness(vec![view("A", "agent", 1)]);
-        h.app
-            .terminal_panel
-            .bindings
-            .insert(scope(), SessionId::from_string("A"));
-        if self_session {
-            h.app.self_session = Some(SessionId::from_string("A"));
-        } else {
-            h.fake.state.lock().unwrap().sessions[0].scope =
-                ScopeRoot::from_canonical("/another-folder".into());
-        }
-        let attaches = h.fake.attach_count();
-        h.press(KeyCode::Char('T')).await;
-        assert_eq!(h.fake.attach_count(), attaches);
-        assert!(h
-            .app
-            .terminal_panel
-            .message
-            .as_ref()
-            .unwrap()
-            .contains("cannot be nested"));
-        assert!(h.app.terminal_panel.detail.attachment.is_none());
-    }
-}
-
-#[tokio::test]
-async fn an_empty_main_view_does_not_automatically_duplicate_the_new_utility_terminal() {
+async fn a_hidden_shell_exit_is_cleaned_up_and_the_next_open_uses_a_fresh_id() {
     let mut h = harness(vec![]);
     h.press(KeyCode::Char('T')).await;
-    assert!(h.app.detail.session_id().is_none());
-    assert!(h.app.terminal_panel.session_id().is_some());
-    assert_eq!(h.fake.attach_count(), 1);
-    assert_eq!(h.fake.attach_request(0).role, Role::Controller);
-}
-
-#[tokio::test]
-async fn panel_headers_focus_and_hide_with_mouse_without_terminating_the_shell() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    h.press(KeyCode::Char('T')).await;
+    let first = h.app.terminal_panel.id.clone();
+    let panel = pane_index(&h);
     h.rakumux().await;
-    render(&mut h, 160, 48);
-    let pane = h.app.screen().terminal_panel.unwrap();
-    h.app
-        .handle_terminal_event(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: pane.x + 2,
-            row: pane.y,
-            modifiers: KeyModifiers::NONE,
-        }))
-        .await;
-    assert_eq!(h.app.focus, Focus::Terminal);
-    render(&mut h, 160, 48);
-    let pane = h.app.screen().terminal_panel.unwrap();
-    let id = h.app.terminal_panel.session_id().unwrap().clone();
-    h.app
-        .handle_terminal_event(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: pane.right() - 3,
-            row: pane.y,
-            modifiers: KeyModifiers::NONE,
-        }))
-        .await;
-    assert!(!h.app.terminal_panel.open);
-    assert!(h
-        .fake
-        .state
-        .lock()
-        .unwrap()
-        .sessions
-        .iter()
-        .any(|session| session.id == id));
-    assert!(!h
-        .fake
-        .calls()
-        .iter()
-        .any(|call| call.starts_with("kill ") || call.starts_with("delete ")));
+    h.press(KeyCode::Char('T')).await;
+    h.fake.send_pane(
+        panel,
+        AttachEvent::Event(StreamEvent::Exited { code: Some(7) }),
+    );
+    h.app.process_pending();
+    assert!(h.app.terminal_panel.id.is_none());
+    h.press(KeyCode::Char('T')).await;
+    assert_ne!(h.app.terminal_panel.id, first);
+    assert!(h.fake.creates().is_empty());
+    assert!(h.app.list.visible().is_empty());
+    assert!(h.app.detail.session_id().is_none());
 }
 
 #[tokio::test]
-async fn closing_during_creation_and_reopening_does_not_create_duplicate_shells() {
+async fn hiding_during_open_keeps_one_request_and_releases_hidden_input_focus() {
     let mut h = harness(vec![view("A", "agent", 1)]);
     h.app.toggle_terminal_panel();
     assert!(h.app.terminal_panel.busy());
     h.app.hide_terminal_panel();
-    h.app.toggle_terminal_panel();
     h.app.process_pending();
-    assert_eq!(h.fake.state.lock().unwrap().creates.len(), 1);
-    assert_eq!(h.app.focus, Focus::Terminal);
-    assert!(h.app.terminal_panel.detail.attachment.is_some());
-    h.app.hide_terminal_panel();
-    assert!(!h
-        .fake
-        .calls()
-        .iter()
-        .any(|call| call.starts_with("kill ") || call.starts_with("delete ")));
-}
-
-#[tokio::test]
-async fn a_stale_attached_stream_is_dropped_when_the_panel_was_hidden() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    h.app.toggle_terminal_panel();
-    let resolved = h.app.rx.as_mut().unwrap().try_recv().unwrap();
-    assert!(matches!(resolved, AppEvent::PanelResolved { .. }));
-    h.app.handle_event(resolved);
-    let count = h.fake.attach_count();
-    h.app.hide_terminal_panel();
-    h.app.process_pending();
+    assert_eq!(h.fake.state.lock().unwrap().terminal_opens.len(), 1);
     assert!(!h.app.terminal_panel.open);
-    assert!(h.app.terminal_panel.detail.attachment.is_none());
-    assert_eq!(h.fake.attach_count(), count);
-    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(
+        h.app.terminal_panel.attachment.as_ref().unwrap().role,
+        Role::Observer
+    );
+    h.app.toggle_terminal_panel();
+    h.app.process_pending();
+    assert_eq!(h.fake.pane_count(), 1);
 }
 
 #[tokio::test]
-async fn a_panel_stream_disconnect_preserves_input_privacy_and_does_not_retake_control() {
+async fn old_exit_events_cannot_close_a_new_pane() {
+    let mut h = harness(vec![]);
+    h.press(KeyCode::Char('T')).await;
+    let old = h.app.terminal_panel.epoch;
+    h.fake
+        .send_pane(0, AttachEvent::Event(StreamEvent::Exited { code: Some(0) }));
+    h.app.process_pending();
+    h.press(KeyCode::Char('T')).await;
+    let current = h.app.terminal_panel.id.clone();
+    h.app.on_panel_attach_event(
+        old,
+        AttachEvent::Event(StreamEvent::Exited { code: Some(0) }),
+    );
+    assert!(h.app.terminal_panel.open);
+    assert_eq!(h.app.terminal_panel.id, current);
+}
+
+#[tokio::test]
+async fn unsupported_daemons_do_not_fall_back_to_session_creation() {
+    let mut h = harness(vec![view("A", "agent", 1)]);
+    h.fake.fail_next(
+        "open_terminal",
+        ApiError::new(ErrorCode::Unsupported, "old daemon"),
+    );
+    h.press(KeyCode::Char('T')).await;
+    assert!(h.fake.creates().is_empty());
+    assert!(h
+        .app
+        .terminal_panel
+        .message
+        .as_ref()
+        .unwrap()
+        .contains("in-place restart"));
+    assert!(h.app.input_is_private());
+    assert_eq!(h.fake.pane_count(), 0);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.fake.pane_count(), 1);
+    assert!(h.fake.creates().is_empty());
+}
+
+#[tokio::test]
+async fn reconnect_only_reattaches_the_existing_pane_as_an_observer() {
     let mut h = harness(vec![view("A", "agent", 1)]);
     h.press(KeyCode::Char('T')).await;
-    let id = h.app.terminal_panel.session_id().unwrap().clone();
-    let panel = pane_index(&h);
-    h.attach_event(panel, AttachEvent::Closed(Some("test stream loss".into())));
-    assert_eq!(h.app.focus, Focus::List);
-    assert!(
-        h.app.input_is_private(),
-        "remaining password characters must not enter debug logs"
-    );
-    h.app.terminal_panel.retry_at = None;
+    let id = h.app.terminal_panel.id.clone();
+    h.app.terminal_panel_disconnected();
     h.app.sync_terminal_panel();
     h.app.process_pending();
-    assert_eq!(h.app.terminal_panel.session_id(), Some(&id));
-    assert_eq!(
-        h.app
-            .terminal_panel
-            .detail
-            .attachment
-            .as_ref()
-            .unwrap()
-            .role,
-        Role::Observer
-    );
-    assert_eq!(h.fake.state.lock().unwrap().creates.len(), 1);
-    assert!(h.app.input_is_private());
-}
-
-#[tokio::test]
-async fn reconnect_restores_the_existing_shell_as_observer_until_user_refocuses_it() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    h.press(KeyCode::Char('T')).await;
-    let id = h.app.terminal_panel.session_id().unwrap().clone();
-    h.app.handle_event(AppEvent::SubscriptionLost {
-        generation: h.app.sync_generation,
-        error: "test connection loss".into(),
-    });
+    assert_eq!(h.app.terminal_panel.id, id);
     assert_eq!(h.app.focus, Focus::List);
-    assert!(h.app.terminal_panel.detail.attachment.is_none());
-    h.app.handle_event(AppEvent::Connected(h.fake.clone()));
-    h.app.process_pending();
-    assert_eq!(h.app.terminal_panel.session_id(), Some(&id));
-    assert_eq!(h.fake.state.lock().unwrap().creates.len(), 1);
     assert_eq!(
-        h.app
-            .terminal_panel
-            .detail
-            .attachment
-            .as_ref()
-            .unwrap()
-            .role,
+        h.app.terminal_panel.attachment.as_ref().unwrap().role,
         Role::Observer
     );
-    h.press(KeyCode::Esc).await;
+    let state = h.fake.state.lock().unwrap();
+    assert_eq!(state.terminal_opens.len(), 1);
+    assert_eq!(state.terminal_attaches.len(), 1);
+    assert_eq!(state.terminal_attaches[0].role, Role::Observer);
+    assert!(state.creates.is_empty());
+    drop(state);
+    assert!(h.app.input_is_private());
+    h.press(KeyCode::Char('T')).await;
     assert_eq!(h.app.focus, Focus::Terminal);
     assert_eq!(
-        h.app
-            .terminal_panel
-            .detail
-            .attachment
-            .as_ref()
-            .unwrap()
-            .role,
+        h.app.terminal_panel.attachment.as_ref().unwrap().role,
         Role::Controller
     );
 }
 
 #[tokio::test]
-async fn settings_can_open_the_terminal_panel_and_small_layouts_remain_usable() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    h.press(KeyCode::Char('o')).await;
-    for _ in 0..crate::app::types::SettingsItem::TerminalPanel.index() {
-        h.press(KeyCode::Down).await;
-    }
-    h.press(KeyCode::Enter).await;
-    assert_eq!(h.app.focus, Focus::Terminal);
-    assert!(matches!(h.app.mode, AppMode::Normal));
-    for layout in crate::layout::SessionLayout::ALL {
-        h.app.set_layout(layout);
-        for (width, height) in [(40, 10), (40, 20), (90, 40), (160, 48)] {
-            let output = render(&mut h, width, height);
-            assert!(h.app.screen().terminal_panel.is_some());
-            assert!(output.contains("Terminal"));
-            assert!(output.contains("TERMINAL"));
-        }
-    }
-}
-
-#[test]
-fn panel_visible_screen_and_history_share_a_bounded_cell_budget() {
-    for (rows, cols) in [(2, u16::MAX), (24, 80), (100, 1000), (5000, 100)] {
-        assert!(valid_size(rows, cols));
-        assert!((usize::from(rows) + panel_history(rows, cols)) * usize::from(cols) <= MAX_CELLS);
-        assert!(panel_history(rows, cols) <= SCROLLBACK);
-    }
-    assert!(!valid_size(u16::MAX, u16::MAX));
-    assert!(panel_terminal(24, 80, "not base64!").is_err());
+async fn a_pane_lost_during_disconnect_closes_without_implicitly_starting_another() {
+    let mut h = harness(vec![]);
+    h.press(KeyCode::Char('T')).await;
+    h.fake.state.lock().unwrap().panes.clear();
+    h.app.terminal_panel_disconnected();
+    h.app.sync_terminal_panel();
+    h.app.process_pending();
+    assert!(!h.app.terminal_panel.open);
+    assert!(h.app.terminal_panel.id.is_none());
+    assert_eq!(h.fake.state.lock().unwrap().terminal_opens.len(), 1);
+    assert!(h.fake.creates().is_empty());
 }
 
 #[tokio::test]
-async fn terminal_opened_from_grid_keeps_the_agent_above_it_as_an_observer() {
+async fn lag_requests_a_passive_checkpoint_and_pauses_input_until_it_arrives() {
     let mut h = harness(vec![view("A", "agent", 1)]);
-    h.app.set_layout(crate::layout::SessionLayout::Grid);
-    h.app.process_pending();
-    for index in 0..h.fake.attach_count() {
-        h.fake.outgoing(index);
-    }
     h.press(KeyCode::Char('T')).await;
-    assert_eq!(
-        h.app.detail.session_id(),
-        Some(&SessionId::from_string("A"))
+    let panel = pane_index(&h);
+    h.fake.pane_outgoing(panel);
+    h.fake.send_pane(
+        panel,
+        AttachEvent::Output {
+            offset: 10,
+            bytes: b"missing".to_vec(),
+        },
     );
+    h.app.process_pending();
+    h.press(KeyCode::Char('x')).await;
+    assert_eq!(
+        h.fake.pane_outgoing(panel),
+        vec![AttachOutgoing::Command(StreamCommand::Checkpoint)]
+    );
+    h.fake.send_pane(
+        panel,
+        AttachEvent::Event(StreamEvent::Resized {
+            rows: 12,
+            cols: 80,
+            checkpoint: String::new(),
+            offset: 17,
+        }),
+    );
+    h.app.process_pending();
+    assert!(!h.app.terminal_panel.awaiting_checkpoint);
+    h.press(KeyCode::Char('x')).await;
+    assert_eq!(
+        h.fake.pane_outgoing(panel),
+        vec![AttachOutgoing::Input(b"x".to_vec())]
+    );
+}
+
+#[tokio::test]
+async fn pane_focus_and_resize_do_not_claim_the_agents_size() {
+    let mut h = harness(vec![view("A", "agent", 1)]);
+    h.press(KeyCode::Enter).await;
+    let main = h.last_attach().0;
+    h.app.toggle_terminal_panel();
+    h.app.process_pending();
+    h.fake.outgoing(main);
+    let panel = pane_index(&h);
+    h.fake.pane_outgoing(panel);
+    h.app.handle_terminal_event(Event::Resize(120, 30)).await;
+    assert!(h.fake.outgoing(main).is_empty());
+    assert!(h
+        .fake
+        .pane_outgoing(panel)
+        .iter()
+        .any(|event| matches!(event, AttachOutgoing::Command(StreamCommand::Resize { .. }))));
     assert_eq!(
         h.app.detail.attachment.as_ref().unwrap().role,
         Role::Observer
     );
-    assert!(h.app.screen().detail.is_some() && h.app.screen().terminal_panel.is_some());
-    for index in 0..h.fake.attach_count() {
-        if h.fake.attach_request(index).id == SessionId::from_string("A") {
-            assert_eq!(h.fake.attach_request(index).role, Role::Observer);
-            assert!(h
-                .fake
-                .outgoing(index)
-                .iter()
-                .all(|message| *message == AttachOutgoing::Command(StreamCommand::Detach)));
+    h.rakumux().await;
+    let output = h.fake.pane_outgoing(panel);
+    assert!(output.contains(&AttachOutgoing::Command(StreamCommand::Demote)));
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::Terminal);
+}
+
+#[tokio::test]
+async fn tiny_layouts_keep_the_pane_usable_and_exit_restores_the_main_geometry() {
+    for layout in crate::layout::SessionLayout::ALL {
+        for (width, height) in [(40, 10), (40, 20), (90, 24), (160, 48)] {
+            let mut h = harness(vec![view("A", "agent", 1)]);
+            h.app.set_layout(layout);
+            render(&mut h, width, height);
+            h.press(KeyCode::Char('T')).await;
+            let panel = pane_index(&h);
+            assert!(render(&mut h, width, height).contains("Terminal"));
+            assert!(h.app.screen().terminal_panel.is_some());
+            h.fake.send_pane(
+                panel,
+                AttachEvent::Event(StreamEvent::Exited { code: Some(0) }),
+            );
+            h.app.process_pending();
+            assert!(h.app.screen().terminal_panel.is_none());
+            assert!(h.fake.creates().is_empty());
         }
     }
 }
 
 #[tokio::test]
-async fn panel_reuses_its_shell_per_folder_within_the_window() {
+async fn hide_button_hides_without_detaching_and_hidden_output_keeps_updating() {
     let mut h = harness(vec![view("A", "agent", 1)]);
     h.press(KeyCode::Char('T')).await;
-    let first = h.app.terminal_panel.session_id().unwrap().clone();
-    h.rakumux().await;
-    h.press(KeyCode::Char('T')).await;
-    let mut second = view("B", "second-agent", 2);
-    second.scope = ScopeRoot::from_canonical("/second".into());
-    second.cwd = "/second".into();
-    h.fake.state.lock().unwrap().sessions.push(second.clone());
-    h.app.list.upsert(second);
-    h.app.select_session(SessionId::from_string("B"));
-    h.press(KeyCode::Char('T')).await;
-    let other = h.app.terminal_panel.session_id().unwrap().clone();
-    assert_ne!(first, other);
-    assert_eq!(
-        h.fake.state.lock().unwrap().creates[1]
-            .scope
-            .as_ref()
-            .unwrap()
-            .path(),
-        std::path::Path::new("/second")
+    let panel = pane_index(&h);
+    render(&mut h, 160, 48);
+    let hide = h
+        .app
+        .hits
+        .iter()
+        .find_map(|(area, hit)| (*hit == crate::app::Hit::TerminalPanelHide).then_some(*area))
+        .unwrap();
+    h.fake.pane_outgoing(panel);
+    h.app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: hide.x,
+        row: hide.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    h.app.process_pending();
+    assert!(!h.app.terminal_panel.open);
+    assert!(!h
+        .fake
+        .pane_outgoing(panel)
+        .contains(&AttachOutgoing::Command(StreamCommand::Detach)));
+    h.fake.send_pane(
+        panel,
+        AttachEvent::Output {
+            offset: 0,
+            bytes: b"hidden output".to_vec(),
+        },
     );
-    h.rakumux().await;
+    h.app.process_pending();
+    assert!(h.app.terminal_panel.terminal.is_some());
     h.press(KeyCode::Char('T')).await;
-    h.app.select_session(SessionId::from_string("A"));
-    h.press(KeyCode::Char('T')).await;
-    assert_eq!(h.app.terminal_panel.session_id(), Some(&first));
-    assert_eq!(h.fake.state.lock().unwrap().creates.len(), 2);
+    assert_eq!(h.fake.pane_count(), 1);
 }
 
 #[tokio::test]
-async fn scrolling_an_unfocused_panel_does_not_claim_the_agents_terminal_size() {
+async fn dropping_the_ui_detaches_the_pane_but_never_kills_a_session() {
+    let mut h = harness(vec![view("A", "agent", 1)]);
+    h.press(KeyCode::Char('T')).await;
+    let panel = pane_index(&h);
+    h.fake.pane_outgoing(panel);
+    let fake = h.fake.clone();
+    drop(h);
+    assert!(fake
+        .pane_outgoing(panel)
+        .contains(&AttachOutgoing::Command(StreamCommand::Detach)));
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.starts_with("kill ") || call.starts_with("delete ")));
+}
+
+#[tokio::test]
+async fn an_unfocused_shell_exit_does_not_fit_or_resize_the_agent() {
     let mut h = harness(vec![view("A", "agent", 1)]);
     let main = h.last_attach().0;
     h.press(KeyCode::Char('T')).await;
     let panel = pane_index(&h);
     h.rakumux().await;
     h.fake.outgoing(main);
-    h.fake.outgoing(panel);
-    let pane = h.app.screen().terminal_panel.unwrap();
-    h.app
-        .handle_terminal_event(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::ScrollUp,
-            column: pane.x + 1,
-            row: pane.y + 2,
-            modifiers: KeyModifiers::NONE,
-        }))
-        .await;
-    assert!(h.fake.outgoing(main).is_empty());
-    assert!(h.fake.outgoing(panel).is_empty());
+    h.fake.send_pane(
+        panel,
+        AttachEvent::Event(StreamEvent::Exited { code: Some(0) }),
+    );
+    h.app.process_pending();
+    assert!(!h.app.terminal_panel.open);
+    assert!(
+        h.fake.outgoing(main).is_empty(),
+        "background exit claimed the agent terminal's size"
+    );
 }
 
-#[tokio::test]
-async fn terminal_shortcut_does_not_run_inside_a_filter_or_the_shell() {
-    let mut h = harness(vec![view("A", "agent", 1)]);
-    h.press(KeyCode::Char('/')).await;
-    h.press(KeyCode::Char('T')).await;
-    assert_eq!(h.app.list.filter.value(), "T");
-    assert!(!h.app.terminal_panel.open);
-    h.press(KeyCode::Esc).await;
-    h.press(KeyCode::Char('T')).await;
-    let panel = pane_index(&h);
-    h.fake.outgoing(panel);
-    h.press(KeyCode::Char('T')).await;
-    assert_eq!(
-        h.fake.outgoing(panel),
-        vec![AttachOutgoing::Input(b"T".to_vec())]
-    );
+#[test]
+fn terminal_pane_history_stays_within_its_cell_budget() {
+    for (rows, cols) in [(2, 2), (30, 120), (200, 1000), (500, 1000)] {
+        assert!((usize::from(rows) + panel_history(rows, cols)) * usize::from(cols) <= MAX_CELLS);
+    }
+    assert!(panel_terminal(0, 0, "").is_err());
+    assert!(panel_terminal(1000, 1000, "").is_err());
+    assert!(panel_terminal(24, 80, "not base64").is_err());
 }

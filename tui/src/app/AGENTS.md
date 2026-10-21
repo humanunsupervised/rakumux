@@ -93,12 +93,18 @@ new-session flow, and code boundaries.
   session mode.
 - `constants.rs`: timings and UI constants. `feature_flags.rs`: code-only flags (`auth: false`).
 - State slices (`state/`):
-  - terminal panel (`terminal_panel.rs`): a normal daemon-owned shell under the main detail.
+  - terminal panel (`terminal_panel.rs`): a temporary daemon-owned PTY under the main detail,
+    not a session. `SessionApi::open_terminal`/`attach_terminal` use the `terminal.pane`
+    capability; never `create`, `revive`, `delete`, list entries or saved session output.
     `Focus::Terminal` owns key/paste/mouse/cursor routing; no input leaks to the agent. T or
     Settings opens/focuses it, the Rakumux key demotes, Esc returns, T/× hides without ending
-    any program. Per-folder bindings are window-local; records/programs remain in the daemon.
-    Resolve/create/attach/read/revive run as jobs with checked epochs and one pending operation.
-    Reconnects only reuse existing records and attach as observers. History has a cell budget;
+    its shell. Hiding keeps the stream and passive mirror alive, so a hidden exit still closes
+    and cleans up the pane. Exit/EOF releases the lease and clears its id; reopening is a fresh
+    terminal. Closing/reloading the UI drops the lease and ends only its temporary shell.
+    Open/reattach run as jobs with checked epochs and one pending operation. An opaque `PaneId`
+    cannot alias a session or a different pane after a crash. Reconnects only attach an existing
+    pane as observer, never create replacements. Missing capability is an explicit restart
+    message, not a hidden-session fallback. History has a cell budget;
     emulators are passive. Only the focused controller resizes. Private input includes loading
     and live panel keys. `Screen::with_terminal_panel` owns its split and short-window fallback.
   - hook activity: the daemon supplies normalized `SessionView.activity`; the UI renders

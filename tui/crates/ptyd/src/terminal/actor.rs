@@ -8,8 +8,8 @@ use super::read::{formatted_scrollback, read_screen};
 use super::ring::ReplayRing;
 use super::sink::{AttachmentId, Sink};
 use super::{clamp_size, now_ms, HostInner, Shared};
-use crate::handoff::{self, TerminalHandoff};
-use crate::host::{HostError, HostEvent, TerminalInfo, TerminalState};
+use crate::handoff::{self, ProcessHandoff};
+use crate::host::{HostError, HostEvent, TerminalProcessInfo, TerminalState};
 use crate::persist::SessionMeta;
 use crate::{log_debug, log_warn};
 use base64::Engine;
@@ -68,6 +68,10 @@ pub(crate) enum ActorMsg {
         reply: Sender<Result<AttachReply, HostError>>,
     },
     Detach(AttachmentId),
+    Checkpoint {
+        attachment: AttachmentId,
+        reply: Sender<Result<(), HostError>>,
+    },
     Resize {
         attachment: AttachmentId,
         cols: u16,
@@ -111,7 +115,7 @@ pub(crate) enum ActorMsg {
     /// Hand the running terminal to the next daemon image and stop; `None`
     /// (and keep going) when it isn't running.
     Handoff {
-        reply: Sender<Option<TerminalHandoff>>,
+        reply: Sender<Option<ProcessHandoff>>,
     },
     /// Stop the actor now.
     Stop,
@@ -119,7 +123,7 @@ pub(crate) enum ActorMsg {
 
 pub(crate) struct AttachReply {
     pub(crate) attachment: AttachmentId,
-    pub(crate) info: TerminalInfo,
+    pub(crate) info: TerminalProcessInfo,
     pub(crate) checkpoint: Vec<u8>,
     pub(crate) offset: u64,
     pub(crate) events: Receiver<AttachEvent>,
@@ -167,6 +171,8 @@ pub(crate) struct Adopted {
     /// Output bytes so far.
     pub(crate) total: u64,
     pub(crate) osc7_cwd: bool,
+    pub(crate) osc7_foreground: Option<u32>,
+    pub(crate) osc7_process_cwd: Option<std::path::PathBuf>,
 }
 
 pub(crate) struct Actor {
@@ -195,6 +201,8 @@ pub(crate) struct Actor {
     last_foreground_refresh: Option<Instant>,
     /// The program reported its cwd via OSC 7 (preferred over inspection).
     osc7_cwd: bool,
+    osc7_foreground: Option<u32>,
+    osc7_process_cwd: Option<std::path::PathBuf>,
     output_since_persist: bool,
     last_persist: Instant,
     phase: Phase,
@@ -205,6 +213,7 @@ pub(crate) struct Actor {
     forgotten: bool,
     /// Handed over by a previous daemon image (refresh at start).
     adopted: bool,
+    pane_reconnect_due: Option<Instant>,
 }
 
 impl Actor {
@@ -212,8 +221,20 @@ impl Actor {
         let now = Instant::now();
         let config = &parts.host.config;
         let adopted = parts.adopted.is_some();
-        let (emulator, total, osc7_cwd) = match parts.adopted {
-            Some(adopted) => (adopted.emulator, adopted.total, adopted.osc7_cwd),
+        let pane_reconnect_due =
+            (adopted && parts.shared.owner.session_id().is_none()).then(|| {
+                now + config
+                    .pane_reconnect_grace
+                    .unwrap_or(Duration::from_secs(30))
+            });
+        let (emulator, total, osc7_cwd, osc7_foreground, osc7_process_cwd) = match parts.adopted {
+            Some(adopted) => (
+                adopted.emulator,
+                adopted.total,
+                adopted.osc7_cwd,
+                adopted.osc7_foreground,
+                adopted.osc7_process_cwd,
+            ),
             None => (
                 Emulator::responding(
                     parts.rows,
@@ -223,6 +244,8 @@ impl Actor {
                 ),
                 0,
                 false,
+                None,
+                None,
             ),
         };
         let ring = ReplayRing::new(config.replay_bytes);
@@ -248,6 +271,8 @@ impl Actor {
             settle_due: None,
             last_foreground_refresh: None,
             osc7_cwd,
+            osc7_foreground,
+            osc7_process_cwd,
             output_since_persist: false,
             last_persist: now,
             phase: Phase::Running,
@@ -257,6 +282,7 @@ impl Actor {
             kill_groups: Vec::new(),
             forgotten: false,
             adopted,
+            pane_reconnect_due,
             host: parts.host,
         }
     }
@@ -334,6 +360,29 @@ impl Actor {
                 let _ = reply.send(result);
             }
             ActorMsg::Detach(id) => self.detach(id),
+            ActorMsg::Checkpoint { attachment, reply } => {
+                self.flush(now);
+                let (rows, cols) = self.emulator.size();
+                let checkpoint =
+                    base64::engine::general_purpose::STANDARD.encode(self.emulator.checkpoint());
+                let result = match self.sinks.iter_mut().find(|sink| sink.id == attachment) {
+                    Some(sink) => {
+                        sink.push(
+                            AttachEvent::Event(StreamEvent::Resized {
+                                rows,
+                                cols,
+                                checkpoint,
+                                offset: self.total,
+                            }),
+                            now,
+                        );
+                        sink.pump(now);
+                        Ok(())
+                    }
+                    None => Err(HostError::NotFound),
+                };
+                let _ = reply.send(result);
+            }
             ActorMsg::Resize {
                 attachment,
                 cols,
@@ -435,7 +484,7 @@ impl Actor {
     /// Stop reading, take in what the reader already read (the rest waits
     /// in the PTY for the next image) and describe the terminal with an
     /// inheritable PTY descriptor. `None` unless it is running.
-    fn hand_off(&mut self) -> Option<TerminalHandoff> {
+    fn hand_off(&mut self) -> Option<ProcessHandoff> {
         if !self.running() {
             return None;
         }
@@ -467,15 +516,16 @@ impl Actor {
             .map(|row| handoff::encode(&row.content))
             .collect();
         let state = self.shared.lock();
-        Some(TerminalHandoff {
+        Some(ProcessHandoff {
             id: self.shared.id.0,
-            session_id: self.shared.session_id.clone(),
             fd,
             pid: self.pid,
             cols: state.info.cols,
             rows: state.info.rows,
             cwd: state.info.cwd.clone(),
             osc7_cwd: self.osc7_cwd,
+            osc7_foreground: self.osc7_foreground,
+            osc7_process_cwd: self.osc7_process_cwd.clone(),
             title: state.info.title.clone(),
             started_ms: state.info.started_ms,
             last_output_ms: state.info.last_output_ms,
@@ -487,6 +537,26 @@ impl Actor {
     }
 
     fn tick(&mut self, now: Instant) -> Flow {
+        if self.running()
+            && self
+                .last_foreground_refresh
+                .is_none_or(|at| now.saturating_duration_since(at) >= FOREGROUND_REFRESH)
+        {
+            self.refresh_foreground(now);
+        }
+        if self.pane_reconnect_due.is_some_and(|due| now >= due) {
+            self.pane_reconnect_due = None;
+            if self.running() && self.sinks.is_empty() {
+                log_debug!(
+                    "terminal {}: no owning window reconnected; closing temporary pane",
+                    self.shared.id
+                );
+                self.forgotten = true;
+                self.shared.mark_forgotten();
+                self.host.remove_if_same(&self.shared);
+                self.terminate(now);
+            }
+        }
         if self
             .pending_since
             .is_some_and(|since| now >= since + COALESCE_DELAY)
@@ -515,13 +585,14 @@ impl Actor {
             self.settle_due = None;
             // A program that started quietly is in the foreground by now.
             self.refresh_foreground(now);
-            self.publish(HostEvent::Output {
+            self.publish(|session_id| HostEvent::Output {
                 id: self.shared.id,
-                session_id: self.shared.session_id.clone(),
+                session_id,
             });
         }
         let persist_interval = self.host.config.persist_interval;
         if self.running()
+            && self.shared.owner.session_id().is_some()
             && self.output_since_persist
             && now.saturating_duration_since(self.last_persist) >= persist_interval
         {
@@ -592,9 +663,9 @@ impl Actor {
             .is_none_or(|at| now.saturating_duration_since(at) >= OUTPUT_EVENT_INTERVAL)
         {
             self.last_output_event = Some(now);
-            self.publish(HostEvent::Output {
+            self.publish(|session_id| HostEvent::Output {
                 id: self.shared.id,
-                session_id: self.shared.session_id.clone(),
+                session_id,
             });
         }
         if self
@@ -606,7 +677,7 @@ impl Actor {
     }
 
     fn on_emulator_event(&mut self, event: vt::Event) {
-        let (id, session_id) = (self.shared.id, self.shared.session_id.clone());
+        let id = self.shared.id;
         let now = Instant::now();
         match event {
             vt::Event::Title(title) => {
@@ -614,7 +685,7 @@ impl Actor {
                 self.broadcast(StreamEvent::Title {
                     title: title.clone(),
                 });
-                self.publish(HostEvent::Title {
+                self.publish(|session_id| HostEvent::Title {
                     id,
                     session_id,
                     title,
@@ -622,11 +693,18 @@ impl Actor {
             }
             vt::Event::Cwd(path) => {
                 self.osc7_cwd = true;
+                let pid = self
+                    .master
+                    .process_group_leader()
+                    .map(|pid| pid as u32)
+                    .unwrap_or(self.pid);
+                self.osc7_foreground = Some(pid);
+                self.osc7_process_cwd = crate::procinfo::cwd_of(pid);
                 self.set_cwd(path);
             }
             vt::Event::Bell => {
                 self.broadcast(StreamEvent::Bell);
-                self.publish(HostEvent::Bell { id, session_id });
+                self.publish(|session_id| HostEvent::Bell { id, session_id });
             }
             vt::Event::Clipboard { selection, data } => {
                 if let Some(controller) = self.controller {
@@ -650,9 +728,9 @@ impl Actor {
             state.info.cwd = Some(path.clone());
         }
         self.broadcast(StreamEvent::Cwd { path: path.clone() });
-        self.publish(HostEvent::Cwd {
+        self.publish(|session_id| HostEvent::Cwd {
             id: self.shared.id,
-            session_id: self.shared.session_id.clone(),
+            session_id,
             path,
         });
     }
@@ -661,16 +739,34 @@ impl Actor {
         self.last_foreground_refresh = Some(now);
         let leader = self.master.process_group_leader().map(|pid| pid as u32);
         let foreground = leader.and_then(crate::procinfo::process_info);
-        {
+        let changed = {
             let mut state = self.shared.lock();
-            if state.info.foreground != foreground {
-                state.info.foreground = foreground;
-            }
+            let changed = state.info.foreground != foreground;
+            state.info.foreground = foreground;
+            changed
+        };
+        let process = leader.unwrap_or(self.pid);
+        let cwd = crate::procinfo::cwd_of(process);
+        let process_moved = self
+            .osc7_process_cwd
+            .as_ref()
+            .zip(cwd.as_ref())
+            .is_some_and(|(before, after)| before != after);
+        if self.osc7_cwd && (self.osc7_foreground != Some(process) || process_moved) {
+            self.osc7_cwd = false;
+            self.osc7_foreground = None;
+            self.osc7_process_cwd = None;
         }
         if !self.osc7_cwd {
-            if let Some(cwd) = leader.or(Some(self.pid)).and_then(crate::procinfo::cwd_of) {
+            if let Some(cwd) = cwd {
                 self.set_cwd(cwd);
             }
+        }
+        if changed {
+            self.publish(|session_id| HostEvent::Output {
+                id: self.shared.id,
+                session_id,
+            });
         }
     }
 
@@ -760,8 +856,18 @@ impl Actor {
         rows: u16,
         now: Instant,
     ) -> Result<AttachReply, HostError> {
+        if self.forgotten || self.shared.is_forgotten() {
+            return Err(HostError::NotFound);
+        }
         if !self.running() {
             return Err(HostError::NotRunning);
+        }
+        // A temporary pane has one owning window stream. Its lease must
+        // never be shared with a second stream that could close it early.
+        if self.shared.owner.session_id().is_none()
+            && self.sinks.iter().any(|sink| !sink.is_closed())
+        {
+            return Err(HostError::NotController);
         }
         self.flush(now);
         let id = self.next_attachment;
@@ -776,6 +882,7 @@ impl Actor {
         }
         let checkpoint = self.emulator.checkpoint();
         self.sinks.push(Sink::new(id, role, tx));
+        self.pane_reconnect_due = None;
         Ok(AttachReply {
             attachment: id,
             info: self.shared.lock().info.clone(),
@@ -883,9 +990,9 @@ impl Actor {
             was
         };
         if was != now_controlled && self.running() {
-            self.publish(HostEvent::ControllerChanged {
+            self.publish(|session_id| HostEvent::ControllerChanged {
                 id: self.shared.id,
-                session_id: self.shared.session_id.clone(),
+                session_id,
                 controlled: now_controlled,
             });
         }
@@ -995,13 +1102,14 @@ impl Actor {
         self.writer = None;
         self.shared.close_input();
         self.reader_stop.store(true, Ordering::Relaxed);
-        if self.forgotten || self.shared.is_forgotten() {
+        if self.forgotten || self.shared.is_forgotten() || self.shared.owner.session_id().is_none()
+        {
             return Flow::Stop;
         }
         self.persist(now);
-        self.publish(HostEvent::Exited {
+        self.publish(|session_id| HostEvent::Exited {
             id: self.shared.id,
-            session_id: self.shared.session_id.clone(),
+            session_id,
             code,
         });
         Flow::Continue
@@ -1011,6 +1119,9 @@ impl Actor {
     /// guard is held through the write so `forget` can't interleave.
     fn persist(&mut self, now: Instant) {
         let shared = Arc::clone(&self.shared);
+        let Some(session_id) = shared.owner.session_id() else {
+            return;
+        };
         let forgotten = shared.persist_guard();
         if *forgotten {
             return;
@@ -1029,15 +1140,11 @@ impl Actor {
                 updated_at: now_ms() / 1000,
             }
         };
-        if let Err(e) = self
-            .host
-            .store
-            .save(&self.shared.session_id, &scrollback, &meta)
-        {
+        if let Err(e) = self.host.store.save(session_id, &scrollback, &meta) {
             log_warn!(
                 "terminal {}: saving scrollback for session {} failed: {e}",
                 self.shared.id,
-                self.shared.session_id
+                session_id
             );
         }
         self.host.saves.fetch_add(1, Ordering::SeqCst);
@@ -1046,9 +1153,11 @@ impl Actor {
         self.last_persist = now;
     }
 
-    fn publish(&self, event: HostEvent) {
+    fn publish(&self, event: impl FnOnce(session_core::ids::SessionId) -> HostEvent) {
         if !self.forgotten && !self.shared.is_forgotten() {
-            self.host.publish(event);
+            if let Some(id) = self.shared.owner.session_id() {
+                self.host.publish(event(id.clone()));
+            }
         }
     }
 

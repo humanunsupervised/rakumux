@@ -24,6 +24,11 @@ Repeated snapshots cannot make that reply unread after it is opened. Active desc
 pending permissions/forms take priority over a root's completed marker. Failed/interrupted
 execution markers report idle rather than claiming a successful completion.
 
+The displayed session's `location.directory` and `subpath` also report its active worktree.
+The original plugin location is not reused after a switch. A directory change is sent even
+when activity is unchanged; the daemon needs `session.working_directory` to use it for the
+branch/worktree label. Background descendants do not overwrite the displayed context.
+
 - `rakumux-session/`: plugin and pure activity projection.
 - `install.rs`: installer compiled into MCP.
 - `detection.rs` / `recovery.rs`: terminal fallback and conversation resume.

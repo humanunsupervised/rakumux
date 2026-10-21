@@ -18,6 +18,240 @@ use std::time::Duration;
 
 const EXE: &str = env!("CARGO_BIN_EXE_rakumux-ptyd");
 
+fn pane_client(home: &TestHome) -> session_core::client::Client {
+    use session_core::client::{AuthMode, Client, ClientConfig};
+    Client::connect(ClientConfig {
+        layout: home.layout.clone(),
+        client_name: "pane-test".into(),
+        version: "test".into(),
+        auth: AuthMode::User,
+        spawn: false,
+        ptyd_path: None,
+    })
+    .unwrap()
+}
+
+fn pane_request(home: &TestHome) -> session_core::api::OpenTerminal {
+    let mut env = home.env();
+    env.push(("SHELL".into(), "/bin/bash".into()));
+    session_core::api::OpenTerminal {
+        id: session_core::ids::PaneId::generate(),
+        cwd: home.work.clone(),
+        env,
+        cols: 80,
+        rows: 12,
+    }
+}
+
+#[test]
+fn terminal_pane_exit_cleans_up_without_creating_or_deleting_a_session() {
+    use session_core::api::{ErrorCode, StreamCommand, StreamEvent, TerminalAttachRequest};
+    use session_core::client::{AttachEvent, SessionApi};
+    let home = TestHome::new();
+    let (mut daemon, registration) = start_daemon(&home, "rakumux");
+    let mut user = TestClient::connect(&registration.socket);
+    user.hello(&registration.token);
+    let agent = create(&mut user, &home, &[]);
+    let before = session(&mut user, &agent.id).terminal.unwrap();
+    let client = pane_client(&home);
+    let mut request = pane_request(&home);
+    request.env.extend([
+        ("RAKUMUX_SESSION_ID".into(), "parent-id".into()),
+        ("RAKUMUX_SESSION_TOKEN".into(), "parent-token".into()),
+        ("RAKUMUX_SOCKET".into(), "/invalid/parent.sock".into()),
+        ("CLAUDECODE".into(), "1".into()),
+    ]);
+    let pane = request.id.clone();
+    let stream = client.open_terminal(request).unwrap();
+    let pid = stream.attached.pid.unwrap();
+    assert_eq!(
+        stream.attached.cwd,
+        Some(std::fs::canonicalize(&home.work).unwrap())
+    );
+    assert_eq!(client.status().unwrap().sessions, 1);
+    assert_eq!(client.list_all(true).unwrap().len(), 1);
+    assert!(
+        matches!(client.attach_terminal(TerminalAttachRequest { id: pane.clone(), role: Role::Observer, cols: 80, rows: 12 }), Err(error) if error.code == ErrorCode::PermissionDenied)
+    );
+    assert!(
+        pid_alive(pid),
+        "a refused second attach must not close the owning pane"
+    );
+    let marker = home.work.join("pane-environment");
+    let line = format!("printf '%s' \"${{RAKUMUX_SESSION_ID-unset}}:${{RAKUMUX_SESSION_TOKEN-unset}}:${{RAKUMUX_SOCKET-unset}}:${{CLAUDECODE-unset}}\" > '{}'\r", marker.display());
+    stream.sender().input(line.into_bytes()).unwrap();
+    assert!(wait_until(TIMEOUT, || std::fs::read_to_string(&marker)
+        .is_ok_and(|text| text == "unset:unset:unset:unset")));
+
+    // Resync is passive: a fresh checkpoint does not resize either terminal.
+    stream.sender().command(StreamCommand::Demote).unwrap();
+    stream.sender().command(StreamCommand::Checkpoint).unwrap();
+    let mut checkpoint = false;
+    assert!(wait_until(TIMEOUT, || {
+        if let Some(AttachEvent::Event(StreamEvent::Resized { cols, rows, .. })) =
+            stream.recv_timeout(Duration::from_millis(20))
+        {
+            assert_eq!((cols, rows), (80, 12));
+            checkpoint = true;
+        }
+        checkpoint
+    }));
+    stream
+        .sender()
+        .command(StreamCommand::Promote { cols: 80, rows: 12 })
+        .unwrap();
+    stream.sender().input(b"exit 7\r".to_vec()).unwrap();
+    assert!(wait_until(TIMEOUT, || matches!(
+        stream.recv_timeout(Duration::from_millis(20)),
+        Some(AttachEvent::Event(StreamEvent::Exited { code: Some(7) }))
+    )));
+    assert!(wait_until(TIMEOUT, || !pid_alive(pid)));
+    assert!(
+        matches!(client.attach_terminal(TerminalAttachRequest { id: pane, role: Role::Observer, cols: 80, rows: 12 }), Err(error) if error.code == ErrorCode::NotFound)
+    );
+    let after = session(&mut user, &agent.id);
+    assert_eq!(after.status, SessionStatus::Live);
+    let after = after.terminal.unwrap();
+    assert_eq!(
+        (after.pid, after.cols, after.rows),
+        (before.pid, before.cols, before.rows)
+    );
+    assert_eq!(client.status().unwrap().sessions, 1);
+    if let Ok(entries) = std::fs::read_dir(home.layout.home.join("sessions")) {
+        assert!(entries
+            .map(Result::unwrap)
+            .all(|entry| entry.file_name() == agent.id.as_str()));
+    }
+    client.shutdown().unwrap();
+    assert_eq!(wait_exit(&mut daemon), Some(0));
+}
+
+#[test]
+fn terminal_pane_stream_close_ends_only_its_temporary_process() {
+    use session_core::api::{ErrorCode, TerminalAttachRequest};
+    use session_core::client::SessionApi;
+    let home = TestHome::new();
+    let (mut daemon, _) = start_daemon(&home, "rakumux");
+    let client = pane_client(&home);
+    let request = pane_request(&home);
+    let id = request.id.clone();
+    let stream = client.open_terminal(request).unwrap();
+    let pid = stream.attached.pid.unwrap();
+    stream.detach();
+    drop(stream);
+    assert!(wait_until(TIMEOUT, || !pid_alive(pid)));
+    assert!(
+        matches!(client.attach_terminal(TerminalAttachRequest { id, role: Role::Observer, cols: 80, rows: 12 }), Err(error) if error.code == ErrorCode::NotFound)
+    );
+    assert_eq!(client.status().unwrap().sessions, 0);
+    assert!(!home.layout.home.join("sessions").exists());
+    client.shutdown().unwrap();
+    assert_eq!(wait_exit(&mut daemon), Some(0));
+}
+
+#[test]
+fn terminal_pane_survives_restart_in_place_without_a_registry_record() {
+    use session_core::api::{StreamCommand, TerminalAttachRequest};
+    use session_core::client::{AttachEvent, SessionApi};
+    let home = TestHome::new();
+    let (mut daemon, registration) = start_daemon(&home, "rakumux");
+    let client = pane_client(&home);
+    let request = pane_request(&home);
+    let id = request.id.clone();
+    let stream = client.open_terminal(request).unwrap();
+    let pid = stream.attached.pid;
+    client
+        .restart_daemon(Some(std::path::Path::new(EXE)))
+        .unwrap();
+    assert!(wait_until(TIMEOUT, || matches!(
+        stream.recv_timeout(Duration::from_millis(20)),
+        Some(AttachEvent::Closed(_))
+    )));
+    let mut user = reconnect(&registration.socket, &registration.token);
+    let client = pane_client(&home);
+    let restored = client
+        .attach_terminal(TerminalAttachRequest {
+            id,
+            role: Role::Observer,
+            cols: 80,
+            rows: 12,
+        })
+        .unwrap();
+    assert_eq!(restored.attached.pid, pid);
+    assert_eq!(restored.attached.role, Role::Observer);
+    assert_eq!(client.status().unwrap().pid, registration.pid);
+    assert_eq!(client.status().unwrap().sessions, 0);
+    assert!(client.list_all(true).unwrap().is_empty());
+    let marker = home.work.join("pane-after-restart");
+    restored
+        .sender()
+        .command(StreamCommand::Promote { cols: 80, rows: 12 })
+        .unwrap();
+    restored
+        .sender()
+        .input(format!("printf 'AFTER_%s' 42 > '{}'\r", marker.display()).into_bytes())
+        .unwrap();
+    assert!(wait_until(TIMEOUT, || std::fs::read_to_string(&marker)
+        .is_ok_and(|text| text == "AFTER_42")));
+    assert!(!home.layout.home.join("sessions").exists());
+    assert_eq!(user.request(&Request::DaemonShutdown), Response::Ok);
+    assert_eq!(wait_exit(&mut daemon), Some(0));
+}
+
+#[test]
+fn terminal_pane_operations_refuse_session_callers_and_invalid_requests() {
+    use session_core::api::{ErrorCode, TerminalAttachRequest};
+    use session_core::client::{AuthMode, Client, SessionApi};
+    let home = TestHome::new();
+    let (mut daemon, registration) = start_daemon(&home, "rakumux");
+    let mut user = TestClient::connect(&registration.socket);
+    user.hello(&registration.token);
+    let token_file = home.work.join("session-token");
+    let session = create(
+        &mut user,
+        &home,
+        &[&format!(
+            "printf '%s' \"$RAKUMUX_SESSION_TOKEN\" > '{}'",
+            token_file.display()
+        )],
+    );
+    assert!(wait_until(TIMEOUT, || token_file.exists()));
+    let client = pane_client(&home);
+    let mut config = client.config().clone();
+    config.auth = AuthMode::Session {
+        id: session.id,
+        token: std::fs::read_to_string(token_file).unwrap(),
+    };
+    let inside = Client::connect(config).unwrap();
+    let request = pane_request(&home);
+    let id = request.id.clone();
+    assert!(
+        matches!(inside.open_terminal(request.clone()), Err(error) if error.code == ErrorCode::PermissionDenied)
+    );
+    assert!(
+        matches!(inside.attach_terminal(TerminalAttachRequest { id, role: Role::Observer, cols: 80, rows: 12 }), Err(error) if error.code == ErrorCode::PermissionDenied)
+    );
+    let mut invalid = request.clone();
+    invalid.cwd = home.work.join("missing");
+    assert!(
+        matches!(client.open_terminal(invalid), Err(error) if error.code == ErrorCode::InvalidArgument)
+    );
+    let mut invalid = request.clone();
+    invalid.env.push(("BAD=NAME".into(), "value".into()));
+    assert!(
+        matches!(client.open_terminal(invalid), Err(error) if error.code == ErrorCode::InvalidArgument)
+    );
+    let mut invalid = request;
+    invalid.cols = u16::MAX;
+    invalid.rows = u16::MAX;
+    assert!(
+        matches!(client.open_terminal(invalid), Err(error) if error.code == ErrorCode::InvalidArgument)
+    );
+    assert_eq!(client.status().unwrap().sessions, 1);
+    client.shutdown().unwrap();
+    assert_eq!(wait_exit(&mut daemon), Some(0));
+}
+
 /// Kills the daemon if a test fails before shutting it down.
 struct Daemon(Child);
 

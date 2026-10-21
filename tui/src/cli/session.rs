@@ -97,6 +97,7 @@ fn build_report(args: ReportArgs) -> Result<Report, CliError> {
         }));
     }
     let report = Report {
+        working_directory: None,
         activity: None,
         state: args.state.map(Into::into),
         text: args.text,
@@ -279,6 +280,7 @@ mod tests {
         assert_eq!(
             api.reports.lock().unwrap()[0],
             Report {
+                working_directory: None,
                 activity: None,
                 state: Some(Lifecycle::Done),
                 text: Some("3 findings".into()),

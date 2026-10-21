@@ -48,8 +48,8 @@ impl DetailView {
 }
 
 /// A live attach stream. Dropping it detaches and stops its pump.
-pub struct Attachment {
-    pub session_id: SessionId,
+pub struct Attachment<Id = SessionId> {
+    pub id: Id,
     pub generation: u64,
     pub role: Role,
     sender: AttachSender,
@@ -67,9 +67,9 @@ pub struct Attachment {
     awaited_roles: std::collections::VecDeque<Role>,
 }
 
-impl Attachment {
+impl<Id> Attachment<Id> {
     pub fn new(
-        session_id: SessionId,
+        id: Id,
         generation: u64,
         role: Role,
         sender: AttachSender,
@@ -77,7 +77,7 @@ impl Attachment {
         offset: u64,
     ) -> Self {
         Self {
-            session_id,
+            id,
             generation,
             role,
             sender,
@@ -130,7 +130,7 @@ impl Attachment {
     }
 }
 
-impl Drop for Attachment {
+impl<Id> Drop for Attachment<Id> {
     fn drop(&mut self) {
         let _ = self.sender.command(StreamCommand::Detach);
         self.cancel.store(true, Ordering::Relaxed);
@@ -191,7 +191,7 @@ impl Detail {
     /// The live attachment for `id`, if any.
     /// The attachment when it is to session `id`.
     pub fn attachment_for_mut(&mut self, id: &SessionId) -> Option<&mut Attachment> {
-        self.attachment.as_mut().filter(|a| &a.session_id == id)
+        self.attachment.as_mut().filter(|a| &a.id == id)
     }
 }
 

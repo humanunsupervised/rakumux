@@ -55,6 +55,30 @@ impl fmt::Display for SessionId {
     }
 }
 
+/// Opaque identity of a temporary terminal pane, never a registry session.
+/// The client keeps it only for its window's lifetime and reconnects.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PaneId(String);
+
+impl PaneId {
+    /// Generate a fresh identity that cannot alias a pane after a daemon crash.
+    pub fn generate() -> Self {
+        Self(SessionId::generate().0)
+    }
+
+    /// Wrap an opaque identity received from the wire.
+    pub fn from_string(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+impl fmt::Display for PaneId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Daemon-assigned terminal (PTY) id. Not stable across daemon restarts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]

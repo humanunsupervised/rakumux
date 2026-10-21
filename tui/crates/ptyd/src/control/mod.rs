@@ -23,11 +23,13 @@ mod host_events;
 mod import;
 mod lifecycle;
 mod names;
+mod panes;
 mod policy;
 mod registry;
 mod saved;
 mod service;
 mod waits;
+mod working_directory;
 
 use crate::control_api::{Caller, Control};
 use crate::detect::{DetectInput, Detection};
@@ -143,6 +145,22 @@ impl Drop for ControlService {
 }
 
 impl Control for ControlService {
+    fn open_terminal(
+        &self,
+        caller: &Caller,
+        request: &session_core::api::OpenTerminal,
+    ) -> Result<crate::host::PaneAttachment, ApiError> {
+        self.inner.open_terminal(caller, request)
+    }
+
+    fn attach_terminal(
+        &self,
+        caller: &Caller,
+        request: &session_core::api::TerminalAttachRequest,
+    ) -> Result<crate::host::PaneAttachment, ApiError> {
+        self.inner.attach_terminal(caller, request)
+    }
+
     fn authenticate(&self, hello: &Hello) -> Result<Caller, ApiError> {
         self.inner.authenticate(hello)
     }

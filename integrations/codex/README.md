@@ -17,6 +17,10 @@ permissions, completion, interruption and actual subagent IDs. Older versions wi
 retain screen detection; legacy completion notifications cannot supply full phase/subagent
 data. Remove only the Rakumux handlers to disable.
 
+The root hook's `cwd` reports Codex's current/last-used worktree on native events. The daemon
+needs `session.working_directory`. Child-agent directories and tool argument paths are not
+used as the main thread's worktree; no transcript is parsed to guess one.
+
 - `hooks.rs` / `hooks.json`: native adapter and configuration.
 - `detection.rs`: screen fallback.
 - `recovery.rs`: root-thread lookup and safe resume flags.

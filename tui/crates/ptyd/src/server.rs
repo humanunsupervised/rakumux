@@ -22,7 +22,7 @@
 use crate::control::{ControlConfig, ControlService, Limits};
 use crate::control_api::{Caller, Control};
 use crate::handoff::{self, HandoffState};
-use crate::host::{HostAttachment, HostError, TerminalHost, TerminalState};
+use crate::host::{AttachControl, HostAttachment, HostError, TerminalHost, TerminalState};
 use crate::registration::{self, Claim, ClaimError};
 use crate::terminal::{Host, HostConfig};
 use crate::{log_debug, log_error, log_info, log_warn};
@@ -55,6 +55,8 @@ pub const VERSION: &str = match option_env!("RAKUMUX_VERSION") {
 
 /// Optional features this daemon supports (`HelloOk::capabilities`).
 pub const CAPABILITIES: &[&str] = &[
+    session_core::api::CAPABILITY_WORKING_DIRECTORY,
+    session_core::api::CAPABILITY_TERMINAL_PANE,
     session_core::api::CAPABILITY_ACTIVITY,
     "attach",
     "subscribe",
@@ -85,6 +87,8 @@ pub const CAPABILITIES: &[&str] = &[
 
 /// Every `op` tag of `api::Request`; anything else is `unsupported`.
 const KNOWN_OPS: &[&str] = &[
+    "terminal_open",
+    "terminal_attach",
     "hello",
     "ping",
     "session_list",
@@ -140,7 +144,14 @@ pub fn main_entry(args: Vec<String>) -> i32 {
             0
         }
         Some(handoff::VERSIONS_COMMAND) if args.len() == 2 => {
-            println!("{}", handoff::HANDOFF_VERSION);
+            println!(
+                "{}",
+                handoff::READABLE_HANDOFF_VERSIONS
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
             0
         }
         Some("serve") if args.len() == 2 => serve_main(None),
@@ -342,9 +353,14 @@ impl Instance<'_> {
             claim,
             control,
             terminals,
+            panes,
             ..
         } = state;
-        let terminal_fds: Vec<RawFd> = terminals.iter().map(|t| t.fd).collect();
+        let terminal_fds: Vec<RawFd> = terminals
+            .iter()
+            .map(|t| t.fd)
+            .chain(panes.iter().map(|p| p.terminal.fd))
+            .collect();
         let claim = match registration::reclaim(self.layout, VERSION, claim) {
             Ok(claim) => claim,
             Err(e) => {
@@ -358,6 +374,8 @@ impl Instance<'_> {
         };
         let host = Host::new(self.host_config());
         let adopted = host.adopt(terminals);
+        let adopted_panes = host.adopt_panes(panes);
+        log_info!("adopted {adopted_panes} standalone terminal pane(s)");
         log_info!("adopted {adopted} running terminal(s)");
         let host: Arc<dyn TerminalHost> = Arc::new(host);
         let control =
@@ -419,6 +437,7 @@ impl Instance<'_> {
                     claim: state.claim,
                     control: state.control,
                     terminals: state.terminals,
+                    panes: state.panes,
                 }),
             },
         })
@@ -555,6 +574,7 @@ pub enum Served {
 
 /// What a server hands over when it restarts in place.
 pub struct ServedHandoff {
+    pub panes: Vec<crate::handoff::PaneHandoff>,
     pub claim: handoff::ClaimHandoff,
     pub control: handoff::ControlHandoff,
     pub terminals: Vec<handoff::TerminalHandoff>,
@@ -718,6 +738,7 @@ impl Server {
             log_info!("restarting in place with {}", binary.display());
             let control = self.state.control.handoff();
             let terminals = self.state.host.handoff();
+            let panes = self.state.host.take_pane_handoff();
             self.close_connections();
             match self.claim.hand_off() {
                 Ok(claim) => {
@@ -727,6 +748,7 @@ impl Server {
                             claim,
                             control,
                             terminals,
+                            panes,
                         }),
                     }
                 }
@@ -734,6 +756,9 @@ impl Server {
                     log_error!("cannot hand over the socket: {e}; running sessions end");
                     for terminal in terminals {
                         handoff::close(terminal.fd);
+                    }
+                    for pane in panes {
+                        handoff::close(pane.terminal.fd);
                     }
                     return Served::Stopped;
                 }
@@ -993,6 +1018,20 @@ fn serve_requests(
             }
         };
         match request {
+            Request::TerminalOpen(request) => {
+                let pane = request.id.clone();
+                let attachment = state.control.open_terminal(caller, &request);
+                if terminal_stream(state, stream, attachment, pane, id)? {
+                    return Ok(());
+                }
+            }
+            Request::TerminalAttach(request) => {
+                let pane = request.id.clone();
+                let attachment = state.control.attach_terminal(caller, &request);
+                if terminal_stream(state, stream, attachment, pane, id)? {
+                    return Ok(());
+                }
+            }
             Request::Hello(_) => reply_error(
                 stream,
                 ApiError::new(ErrorCode::InvalidArgument, "already authenticated"),
@@ -1128,6 +1167,74 @@ fn attach_stream(
     )?;
     log_debug!("connection {id}: attached to terminal {terminal} as {role:?} at offset {offset}");
 
+    run_attachment(stream, id, events, control)?;
+    Ok(true)
+}
+
+/// A stream owns its temporary pane. Hiding keeps the stream open; exiting
+/// or closing the UI releases it. Handoff preserves it for reconnect instead.
+struct PaneLease<'a> {
+    state: &'a ServerState,
+    id: session_core::ids::PaneId,
+}
+
+impl Drop for PaneLease<'_> {
+    fn drop(&mut self) {
+        if !self.state.is_shutting_down() {
+            self.state.host.close_pane(&self.id);
+        }
+    }
+}
+
+fn terminal_stream(
+    state: &ServerState,
+    stream: &mut UnixStream,
+    attachment: Result<crate::host::PaneAttachment, ApiError>,
+    pane: session_core::ids::PaneId,
+    id: u64,
+) -> io::Result<bool> {
+    let attachment = match attachment {
+        Ok(attachment) => attachment,
+        Err(error) => {
+            reply_error(stream, error)?;
+            return Ok(false);
+        }
+    };
+    let _lease = PaneLease {
+        state,
+        id: pane.clone(),
+    };
+    let HostAttachment {
+        info,
+        role,
+        checkpoint,
+        offset,
+        events,
+        control,
+    } = attachment;
+    reply(
+        stream,
+        &Response::TerminalAttached(session_core::api::TerminalAttached {
+            id: pane,
+            cwd: info.cwd,
+            pid: info.pid,
+            role,
+            cols: info.cols,
+            rows: info.rows,
+            checkpoint: base64::engine::general_purpose::STANDARD.encode(checkpoint),
+            offset,
+        }),
+    )?;
+    run_attachment(stream, id, events, control)?;
+    Ok(true)
+}
+
+fn run_attachment(
+    stream: &mut UnixStream,
+    id: u64,
+    events: std::sync::mpsc::Receiver<AttachEvent>,
+    control: Box<dyn AttachControl>,
+) -> io::Result<()> {
     let mut out = stream.try_clone()?;
     let writer = std::thread::Builder::new()
         .name(format!("conn-{id}-out"))
@@ -1157,6 +1264,11 @@ fn attach_stream(
             }
             Ok(Some(Frame::Control(payload))) => {
                 match frame::parse_control::<StreamCommand>(&payload) {
+                    Ok(StreamCommand::Checkpoint) => {
+                        if let Err(error) = control.checkpoint() {
+                            log_debug!("connection {id}: checkpoint refused: {error}");
+                        }
+                    }
                     Ok(StreamCommand::Resize { cols, rows }) => {
                         if let Err(e) = control.resize(cols, rows) {
                             log_debug!("connection {id}: resize refused: {e}");
@@ -1184,8 +1296,8 @@ fn attach_stream(
     drop(control);
     let _ = stream.shutdown(Shutdown::Both);
     let _ = writer.join();
-    log_debug!("connection {id}: detached from terminal {terminal}");
-    Ok(true)
+    log_debug!("connection {id}: detached from terminal");
+    Ok(())
 }
 
 /// Run an event stream. `Ok(false)` when the subscription was refused.
@@ -1586,6 +1698,19 @@ mod tests {
             },
             Request::Attach(AttachRequest {
                 id: id.clone(),
+                role: Role::Observer,
+                cols: 80,
+                rows: 24,
+            }),
+            Request::TerminalOpen(session_core::api::OpenTerminal {
+                id: session_core::ids::PaneId::generate(),
+                cwd: "/p".into(),
+                env: Vec::new(),
+                cols: 80,
+                rows: 24,
+            }),
+            Request::TerminalAttach(session_core::api::TerminalAttachRequest {
+                id: session_core::ids::PaneId::generate(),
                 role: Role::Observer,
                 cols: 80,
                 rows: 24,

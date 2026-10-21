@@ -423,6 +423,7 @@ fn report_stores_state_result_agent_identity_and_resume() {
     let s = h.create(Some("worker"));
     let me = h.session_caller(&s.id);
     let report = Report {
+        working_directory: None,
         activity: None,
         state: Some(Lifecycle::Working),
         text: Some("refactoring the parser".into()),

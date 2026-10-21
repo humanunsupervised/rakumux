@@ -5,7 +5,7 @@
 use crate::handoff::TerminalHandoff;
 use session_core::api::{ReadResult, ReadSource, Role, TextFormat};
 use session_core::client::AttachEvent;
-use session_core::ids::{SessionId, TerminalId};
+use session_core::ids::{PaneId, SessionId, TerminalId};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
@@ -23,6 +23,37 @@ pub struct SpawnSpec {
     /// Typed into the terminal once the program has produced its first
     /// output (or after 500 ms): startup commands, resume command.
     pub startup_input: Vec<u8>,
+}
+
+/// A terminal program, independent of the session registry or caller policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalProgram {
+    pub argv: Vec<String>,
+    pub cwd: PathBuf,
+    pub env: Vec<(String, String)>,
+    pub cols: u16,
+    pub rows: u16,
+    pub startup_input: Vec<u8>,
+}
+
+/// A temporary pane's program and its opaque, non-session identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneSpawnSpec {
+    pub id: PaneId,
+    pub program: TerminalProgram,
+}
+
+impl From<SpawnSpec> for TerminalProgram {
+    fn from(spec: SpawnSpec) -> Self {
+        Self {
+            argv: spec.argv,
+            cwd: spec.cwd,
+            env: spec.env,
+            cols: spec.cols,
+            rows: spec.rows,
+            startup_input: spec.startup_input,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +93,49 @@ pub struct TerminalInfo {
     /// Unix milliseconds of the last output.
     pub last_output_ms: Option<i64>,
     pub started_ms: i64,
+}
+
+/// Process and screen metadata shared by session and standalone terminals.
+/// This type deliberately has no session identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalProcessInfo {
+    pub id: TerminalId,
+    pub pid: Option<u32>,
+    pub cwd: Option<PathBuf>,
+    pub title: String,
+    pub foreground: Option<ProcessInfo>,
+    pub state: TerminalState,
+    pub cols: u16,
+    pub rows: u16,
+    pub alternate_screen: bool,
+    pub bracketed_paste: bool,
+    pub controlled: bool,
+    pub output_offset: u64,
+    pub last_output_ms: Option<i64>,
+    pub started_ms: i64,
+}
+
+impl TerminalProcessInfo {
+    /// Project an existing session's metadata without inventing an identity.
+    pub(crate) fn for_session(self, session_id: SessionId) -> TerminalInfo {
+        TerminalInfo {
+            session_id,
+            id: self.id,
+            pid: self.pid,
+            cwd: self.cwd,
+            title: self.title,
+            foreground: self.foreground,
+            state: self.state,
+            cols: self.cols,
+            rows: self.rows,
+            alternate_screen: self.alternate_screen,
+            bracketed_paste: self.bracketed_paste,
+            controlled: self.controlled,
+            output_offset: self.output_offset,
+            last_output_ms: self.last_output_ms,
+            started_ms: self.started_ms,
+        }
+    }
 }
 
 /// Terminal-level events for the control layer.
@@ -127,8 +201,8 @@ impl std::fmt::Display for HostError {
 impl std::error::Error for HostError {}
 
 /// A client's view of a terminal it attached to.
-pub struct HostAttachment {
-    pub info: TerminalInfo,
+pub struct HostAttachment<Info = TerminalInfo> {
+    pub info: Info,
     pub role: Role,
     /// Bytes that bring a fresh emulator of `info.rows`×`info.cols` to the
     /// current screen.
@@ -140,8 +214,15 @@ pub struct HostAttachment {
     pub control: Box<dyn AttachControl>,
 }
 
+/// A standalone attachment has no registry session in its metadata.
+pub type PaneAttachment = HostAttachment<TerminalProcessInfo>;
+
 /// Commands from an attached client. Dropping the control detaches.
 pub trait AttachControl: Send {
+    /// Send the current screen to this attachment without changing its size.
+    fn checkpoint(&self) -> Result<(), HostError> {
+        Err(HostError::Io("checkpoints are unsupported".into()))
+    }
     /// Controller only.
     fn input(&self, bytes: &[u8]) -> Result<(), HostError>;
     /// Controller only.
@@ -159,6 +240,37 @@ pub trait AttachControl: Send {
 /// Terminal management. Implemented by `terminal::Host`; tests use fakes.
 pub trait TerminalHost: Send + Sync + 'static {
     fn spawn(&self, spec: SpawnSpec) -> Result<TerminalInfo, HostError>;
+    /// Start a temporary terminal without session files, events or recovery.
+    fn spawn_pane(&self, spec: PaneSpawnSpec) -> Result<TerminalProcessInfo, HostError> {
+        let _ = spec;
+        Err(HostError::Spawn(
+            "standalone terminals are unsupported".into(),
+        ))
+    }
+    /// Look up only a standalone pane, never a session's terminal.
+    fn pane_info(&self, id: &PaneId) -> Option<TerminalProcessInfo> {
+        let _ = id;
+        None
+    }
+    /// Attach only to an existing standalone pane.
+    fn attach_pane(
+        &self,
+        id: &PaneId,
+        role: Role,
+        cols: u16,
+        rows: u16,
+    ) -> Result<PaneAttachment, HostError> {
+        let _ = (id, role, cols, rows);
+        Err(HostError::NotFound)
+    }
+    /// Forget and terminate only this standalone pane, if it still exists.
+    fn close_pane(&self, id: &PaneId) {
+        let _ = id;
+    }
+    /// Number of standalone panes, separate from registry session counts.
+    fn pane_count(&self) -> usize {
+        0
+    }
     fn list(&self) -> Vec<TerminalInfo>;
     fn info(&self, id: TerminalId) -> Option<TerminalInfo>;
     fn read(
@@ -203,6 +315,10 @@ pub trait TerminalHost: Send + Sync + 'static {
     /// descriptors (`handoff`); exited ones are dropped.
     fn handoff(&self) -> Vec<TerminalHandoff> {
         self.shutdown();
+        Vec::new()
+    }
+    /// Standalone PTYs collected by `handoff`; no session records are involved.
+    fn take_pane_handoff(&self) -> Vec<crate::handoff::PaneHandoff> {
         Vec::new()
     }
 }

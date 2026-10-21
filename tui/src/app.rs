@@ -713,7 +713,7 @@ impl App {
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
                 if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
-                "Open an independent shell below the main detail in the selected folder. Click a pane to focus it; the Rakumux key returns to Rakumux mode. Hide with × or the Rakumux key then T. Hiding never ends the shell or command.",
+                "Open a temporary shell below the main detail in the current directory, without creating a session. Exit closes the pane; hiding with × or the Rakumux key then T keeps it running. Closing this UI ends its temporary shell, not any sessions.",
             ),
             SettingsItem::AnthropicKey => (
                 "Anthropic API key",
@@ -793,18 +793,12 @@ impl App {
 
     pub fn handle_event(&mut self, event: AppEvent) {
         match event {
-            AppEvent::PanelResolved {
-                generation,
-                folder,
-                result,
-            } => self.on_panel_resolved(generation, folder, result),
             AppEvent::PanelAttached { generation, result } => {
                 self.on_panel_attached(generation, result)
             }
             AppEvent::PanelAttach { generation, event } => {
                 self.on_panel_attach_event(generation, event)
             }
-            AppEvent::PanelSaved { generation, result } => self.on_panel_saved(generation, result),
             AppEvent::Connected(api) => self.on_connected(api),
             AppEvent::ConnectFailed(error) => self.on_connect_failed(error),
             AppEvent::DaemonRestarted(result) => self.on_daemon_restarted(result),
@@ -1190,13 +1184,21 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 4] = [
+const DAEMON_FEATURES: [(&str, &str); 6] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
     (
         session_core::api::CAPABILITY_SESSIONS_ALL,
         "new folders live",
+    ),
+    (
+        session_core::api::CAPABILITY_TERMINAL_PANE,
+        "the terminal panel",
+    ),
+    (
+        session_core::api::CAPABILITY_WORKING_DIRECTORY,
+        "the branch an agent works on",
     ),
 ];
 
