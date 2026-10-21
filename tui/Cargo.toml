@@ -10,7 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 
 [workspace]
-members = [".", "crates/vt", "crates/session-core", "crates/ptyd", "../api", "../mcp"]
+members = [".", "crates/vt", "crates/session-core", "crates/ptyd", "crates/sensagent", "../api", "../mcp"]
 
 [workspace.package]
 license = "Apache-2.0"

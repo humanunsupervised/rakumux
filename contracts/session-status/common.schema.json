@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:ai:session-status:v1:common",
+  "title": "AI session-status shared definitions",
+  "$defs": {
+    "requestId": {
+      "description": "Ephemeral public correlation only, never a local session ID, cache key or credential.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9]",
+      "not": {
+        "pattern": "[^A-Za-z0-9._-]"
+      }
+    },
+    "contextText": {
+      "description": "Selected plain text. Tab, LF and CR are allowed; other terminal controls, format controls, default-ignorables and lone surrogates are not.",
+      "type": "string",
+      "not": {
+        "pattern": "[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\\p{Cf}\\p{Cs}\\p{Default_Ignorable_Code_Point}]"
+      }
+    },
+    "meaningfulText": {
+      "description": "Contains at least one Unicode letter, number, punctuation mark or symbol. This rejects blank/control/combining-mark-only context, not semantically unhelpful prose.",
+      "type": "string",
+      "pattern": "[\\p{L}\\p{N}\\p{P}\\p{S}]"
+    },
+    "statusText": {
+      "description": "One advisory line, 1–140 Unicode codepoints, with visible content. No terminal, bidi/format, default-ignorable, surrogate or Unicode line/paragraph controls.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 140,
+      "pattern": "[\\p{L}\\p{N}\\p{P}\\p{S}]",
+      "not": {
+        "pattern": "[\\p{Cc}\\p{Cf}\\p{Cs}\\p{Zl}\\p{Zp}\\p{Default_Ignorable_Code_Point}]"
+      }
+    }
+  }
+}

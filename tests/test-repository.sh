@@ -7,6 +7,8 @@ cd "$ROOT"
 
 fail() { printf 'Repository check failed: %s\n' "$*" >&2; exit 1; }
 
+node tests/public-source-boundary.mjs
+
 [[ ! -d mobile ]] || fail "mobile source belongs in the separate repository"
 grep -q 'Version 2.0, January 2004' LICENSE || fail "missing Apache-2.0 license"
 grep -q 'license = "Apache-2.0"' tui/Cargo.toml || fail "wrong Cargo license"

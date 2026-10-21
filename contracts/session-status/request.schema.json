@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:ai:session-status:v1:request",
+  "title": "POST /api/v1/ai/session-status request",
+  "$comment": "maxUtf8Bytes is a mandatory custom assertion on decoded strings. x-maxBodyBytes is a mandatory transport-boundary annotation on original UTF-8 JSON bytes, not JSON.stringify(parsedBody). See README.md.",
+  "x-maxBodyBytes": 16384,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "request_id", "context"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "request_id": {
+      "$ref": "urn:rakumux:ai:session-status:v1:common#/$defs/requestId"
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lifecycle"],
+      "properties": {
+        "lifecycle": {
+          "type": "string",
+          "enum": ["working", "blocked", "done", "idle", "unknown", "none"]
+        },
+        "activity_phase": {
+          "type": "string",
+          "enum": ["working", "waiting_for_response", "running_tool", "needs_input", "idle", "done"]
+        },
+        "reported_text": {
+          "type": "string",
+          "$ref": "urn:rakumux:ai:session-status:v1:common#/$defs/contextText",
+          "maxUtf8Bytes": 2048
+        },
+        "recent_output": {
+          "type": "string",
+          "$ref": "urn:rakumux:ai:session-status:v1:common#/$defs/contextText",
+          "maxUtf8Bytes": 8192
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["reported_text"],
+          "properties": {
+            "reported_text": {
+              "$ref": "urn:rakumux:ai:session-status:v1:common#/$defs/meaningfulText"
+            }
+          }
+        },
+        {
+          "required": ["recent_output"],
+          "properties": {
+            "recent_output": {
+              "$ref": "urn:rakumux:ai:session-status:v1:common#/$defs/meaningfulText"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -12,6 +12,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  public-source-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test and check the public source boundary
+        run: |
+          node --test tests/public-source-boundary.test.mjs
+          node tests/public-source-boundary.mjs
+
+  session-status-contract:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/session-status
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: contracts/session-status/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+
   rust:
     strategy:
       fail-fast: false

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "matching_public_id",
+    "valid": true,
+    "request": { "version": 1, "request_id": "synthetic-001", "context": { "lifecycle": "working", "reported_text": "Checking" } },
+    "response": { "version": 1, "request_id": "synthetic-001", "status_text": "Adding validation tests" }
+  },
+  {
+    "name": "different_public_id",
+    "valid": false,
+    "request": { "version": 1, "request_id": "synthetic-001", "context": { "lifecycle": "working", "reported_text": "Checking" } },
+    "response": { "version": 1, "request_id": "synthetic-002", "status_text": "Adding validation tests" }
+  },
+  {
+    "name": "case_sensitive_public_id",
+    "valid": false,
+    "request": { "version": 1, "request_id": "synthetic-001", "context": { "lifecycle": "working", "reported_text": "Checking" } },
+    "response": { "version": 1, "request_id": "Synthetic-001", "status_text": "Adding validation tests" }
+  }
+]

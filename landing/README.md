@@ -1,8 +1,8 @@
 # landing/
 
 Rakumux's marketing site: one page that says what Rakumux is, why developers would use it and
-how to install it. A standalone Next.js app (not part of the Rust workspace) built as a static
-export.
+how to install it. A standalone Next.js static export, separate from the Rust workspace.
+This public project contains no hosted account, AI or billing implementation.
 
 ```bash
 npm install
@@ -23,12 +23,28 @@ vercel deploy --prod
 ```
 
 `vercel.json` sets the Next.js preset (a project created from the CLI has none and looks for
-`public/`); `next.config.ts` sets `output: "export"`, so Vercel serves the prerendered files and
-runs no server code. `.vercelignore` keeps `node_modules`, build output and `.env*` out of the
-upload. The site needs no environment variables. To deploy from git instead, connect the
+`public/`); `next.config.ts` sets `output: "export"`. No Clerk configuration is required.
+`.vercelignore` keeps dependencies, build output and `.env*` out of uploads.
+To deploy from git, connect the
 repository in Vercel and set **Root Directory** to `landing`.
 
-Any static host works too: serve `out/` after `npm run build`.
+Any static host can serve `out/` after `npm run build`.
+
+## Private hosted application
+
+The account-capable website lives in private `humanunsupervised/rakumux-cloud`,
+under `website/`. It owns Clerk pages and future AI/billing server implementation.
+This public folder stays independently buildable with no private dependency or keys.
+The private deployment includes a licensed marketing snapshot so it can preserve
+the proposed rakumux.com account paths without moving private code into this repository.
+
+Public marketing source remains Apache-2.0. New cloud-specific source is proprietary;
+moving already public marketing code does not revoke its license. Do not copy private
+account routes, SDK configuration or server handlers back here. The source-boundary
+check in `tests/public-source-boundary.mjs` enforces the public tree's intended shape.
+It is not a complete secret or Git-history scan. See [PUBLISHING.md](../PUBLISHING.md).
+
+No production deployment, DNS change or provider provisioning is performed by this split.
 
 ## Layout
 

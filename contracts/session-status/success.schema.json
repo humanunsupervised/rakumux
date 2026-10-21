@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:ai:session-status:v1:success",
+  "title": "POST /api/v1/ai/session-status success",
+  "$comment": "The consumer must separately compare request_id with the outstanding request. JSON Schema validates one instance, not the relationship between two messages.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "request_id", "status_text"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "request_id": {
+      "$ref": "urn:rakumux:ai:session-status:v1:common#/$defs/requestId"
+    },
+    "status_text": {
+      "$ref": "urn:rakumux:ai:session-status:v1:common#/$defs/statusText"
+    }
+  }
+}

@@ -51,3 +51,7 @@ test-package/
 
 # The proprietary mobile app belongs in its own repository
 /mobile/
+
+# Proprietary hosted implementation belongs in the independent rakumux-cloud repository
+/cloud/
+/rakumux-cloud/

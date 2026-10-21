@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:ai:session-status:v1:error",
+  "title": "POST /api/v1/ai/session-status error",
+  "description": "Static public diagnostics only. Never echo context, credentials, provider errors or validation details.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["error"],
+  "properties": {
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["invalid_request", "unauthenticated", "forbidden", "rate_limited", "upstream_unavailable", "invalid_output"]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "maxUtf8Bytes": 96
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        }
+      },
+      "dependentSchemas": {
+        "retry_after_seconds": {
+          "properties": {
+            "code": {
+              "enum": ["rate_limited", "upstream_unavailable"]
+            }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "code": { "const": "invalid_request" },
+            "message": { "const": "Invalid session-status request." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "unauthenticated" },
+            "message": { "const": "Sign in to use AI session status." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "forbidden" },
+            "message": { "const": "AI session status is not authorized." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "rate_limited" },
+            "message": { "const": "Too many AI session-status requests." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "upstream_unavailable" },
+            "message": { "const": "AI session status is temporarily unavailable." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "invalid_output" },
+            "message": { "const": "AI session status returned invalid output." }
+          }
+        }
+      ]
+    }
+  }
+}

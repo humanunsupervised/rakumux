@@ -4,8 +4,20 @@ The public source repository is `humanunsupervised/rakumux`. The website is
 <https://rakumux.com>. The proprietary mobile client belongs in the separate
 `humanunsupervised/rakumux-mobile` repository.
 
+The hosted account / AI / billing implementation is proprietary and belongs only in
+private `humanunsupervised/rakumux-cloud`. Public `landing/` is static marketing;
+the native app, local `rakumux-api` / MCP and canonical wire schemas remain public.
+Do not nest the cloud repository here, add it as a submodule, or copy its application
+code into public branches or source/package archives. Ignore rules do not establish
+privacy. Previously public Apache-2.0 marketing/contracts retain their license.
+
 ## Before publishing source
 
+- [ ] Run `node tests/public-source-boundary.mjs` and its regression tests. Check
+  every ref / source archive independently: this guard validates the selected tree,
+  not the entire Git history or all possible secrets. Cloud code that was already
+  published requires a separately reviewed exposure/history response; deletion alone
+  does not make earlier copies private.
 - [ ] Confirm ownership and permission to release the core under Apache-2.0.
 - [ ] Choose a clean public snapshot or a separately reviewed, filtered history.
   Removing `mobile/` from the working tree does **not** remove it from earlier commits, tags,
@@ -25,7 +37,12 @@ The public source repository is `humanunsupervised/rakumux`. The website is
 - [ ] Generate `THIRD_PARTY_NOTICES` and run the isolated package-install checks.
 - [ ] Create the release against the exact reviewed source commit; package scripts verify its
   `v<version>` tag rather than letting GitHub select a default-branch commit.
-- [ ] Verify `rakumux.com` hosting and DNS, then deploy the website from `landing/`.
+- [ ] For marketing-only deployment, verify hosting and DNS, then deploy static `landing/`.
+
+`landing/` is the public static marketing deployment only. The account-capable
+website deploys from `website/` in private `rakumux-cloud`, after separate provider,
+hosting and DNS approval. Public builds/releases must not fetch private cloud source
+or credentials. Never publish private cloud source as part of this repository's release.
 
 The current production entry point is `./release.sh`: binary releases only, installed with
 `curl -fsSL https://rakumux.com/install.sh | bash`. It publishes through GitHub Actions only

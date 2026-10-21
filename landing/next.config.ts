@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
-// A static site: `next build` writes plain HTML, CSS and JS to `out/`, which
-// Vercel (or any static host) serves as is.
+// Public marketing is a static export. Hosted accounts and AI implementation
+// belong to the separate private rakumux-cloud repository.
 const nextConfig: NextConfig = {
   output: "export",
   images: { unoptimized: true },

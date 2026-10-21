@@ -1,0 +1,5 @@
+[
+  { "name": "body_exact_limit", "encoding": "plain", "pad_to_bytes": 16384, "valid": true },
+  { "name": "body_one_byte_over", "encoding": "plain", "pad_to_bytes": 16385, "valid": false, "reason": "body_too_large" },
+  { "name": "escaped_body_over_despite_valid_decoded_output", "encoding": "escape_ascii", "output_count": 8192, "valid": false, "reason": "body_too_large" }
+]

@@ -31,6 +31,8 @@ bash tests/test-repository.sh
 bash tests/test-command-hook.sh
 bash tests/test-release.sh
 bash tests/test-release-tag.sh
+node tests/public-source-boundary.mjs
+node --test tests/public-source-boundary.test.mjs
 ```
 
 For website changes, run `npm ci`, `npm run typecheck`, and `npm run build` in `landing/`.
@@ -45,6 +47,8 @@ Every selected platform must pass its native checks before its package can be pu
 - Explain the behavior change and list checks you ran.
 - Update affected documentation, API contracts, and packaging together.
 - Do not commit credentials, local session data, generated packages, or mobile source.
+- Keep hosted account, AI and billing implementation in private `rakumux-cloud`.
+  Public `landing/` stays static; public wire contracts must not depend on private source.
 
 Unless explicitly stated otherwise, contributions are submitted under the repository's
 [Apache-2.0 license](LICENSE). This repository does not require copyright assignment.

@@ -1,0 +1,22 @@
+[
+  { "name": "valid_raw_body", "body": "{\"version\":1,\"request_id\":\"synthetic-001\",\"context\":{\"lifecycle\":\"working\",\"reported_text\":\"Checking\"}}", "valid": true },
+  { "name": "empty_body", "body": "", "valid": false, "reason": "invalid_json" },
+  { "name": "whitespace_body", "body": " \r\n\t", "valid": false, "reason": "invalid_json" },
+  { "name": "truncated_json", "body": "{\"version\":1", "valid": false, "reason": "invalid_json" },
+  { "name": "trailing_garbage", "body": "{} synthetic", "valid": false, "reason": "invalid_json" },
+  { "name": "two_documents", "body": "{}{}", "valid": false, "reason": "invalid_json" },
+  { "name": "trailing_comma", "body": "{\"version\":1,}", "valid": false, "reason": "invalid_json" },
+  { "name": "comment", "body": "{/*synthetic*/}", "valid": false, "reason": "invalid_json" },
+  { "name": "byte_order_mark", "body": "\ufeff{}", "valid": false, "reason": "invalid_json" },
+  { "name": "null_body", "body": "null", "valid": false, "reason": "invalid_request" },
+  { "name": "array_body", "body": "[]", "valid": false, "reason": "invalid_request" },
+  { "name": "string_body", "body": "\"synthetic\"", "valid": false, "reason": "invalid_request" },
+  { "name": "number_body", "body": "1", "valid": false, "reason": "invalid_request" },
+  { "name": "boolean_body", "body": "true", "valid": false, "reason": "invalid_request" },
+  { "name": "invalid_utf8", "bytes": [123, 34, 120, 34, 58, 34, 195, 40, 34, 125], "valid": false, "reason": "invalid_utf8" },
+  { "name": "truncated_utf8", "bytes": [240, 159, 152], "valid": false, "reason": "invalid_utf8" },
+  { "name": "duplicate_request_id", "body": "{\"version\":1,\"request_id\":\"synthetic-001\",\"request_id\":\"synthetic-002\",\"context\":{\"lifecycle\":\"working\",\"reported_text\":\"Checking\"}}", "valid": false, "reason": "duplicate_member" },
+  { "name": "duplicate_escaped_name", "body": "{\"version\":1,\"request_id\":\"synthetic-001\",\"request_\\u0069d\":\"synthetic-002\",\"context\":{\"lifecycle\":\"working\",\"reported_text\":\"Checking\"}}", "valid": false, "reason": "duplicate_member" },
+  { "name": "duplicate_context_member", "body": "{\"version\":1,\"request_id\":\"synthetic-001\",\"context\":{\"lifecycle\":\"working\",\"reported_text\":\"Checking\",\"reported_text\":\"Other\"}}", "valid": false, "reason": "duplicate_member" },
+  { "name": "escaped_quotes_are_text", "body": "{\"version\":1,\"request_id\":\"synthetic-001\",\"context\":{\"lifecycle\":\"working\",\"reported_text\":\"Checking \\\"name\\\": \\\"value\\\" and backslash \\\\\"}}", "valid": true }
+]

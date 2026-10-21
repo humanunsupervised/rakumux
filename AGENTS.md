@@ -9,6 +9,15 @@ website: <https://rakumux.com>. The core is licensed under Apache-2.0 (`LICENSE`
 The mobile app is maintained separately in `humanunsupervised/rakumux-mobile` and is not included
 in this repository's license grant. Public preparation and release checks: `PUBLISHING.md`.
 
+Hosted account, AI and billing implementation is proprietary and belongs only in
+private `humanunsupervised/rakumux-cloud`, outside this repository. Public `landing/`
+remains static marketing. The native app, local `rakumux-api` / MCP, local orchestration
+and canonical wire schemas stay public. Do not add cloud implementation as a nested
+folder, branch import, submodule or release asset here. Existing Apache-2.0 marketing
+and contract code retains its license when copied privately. Run
+`node tests/public-source-boundary.mjs` before source publication; it is not a complete
+secret/history audit. See `PUBLISHING.md` for that release boundary.
+
 ## Architectural requirements
 
 1. **One server, many clients.** Exactly one `rakumux-ptyd` per user owns every session's

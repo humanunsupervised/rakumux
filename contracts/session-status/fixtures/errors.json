@@ -1,0 +1,23 @@
+[
+  { "name": "invalid_request", "valid": true, "value": { "error": { "code": "invalid_request", "message": "Invalid session-status request." } } },
+  { "name": "unauthenticated", "valid": true, "value": { "error": { "code": "unauthenticated", "message": "Sign in to use AI session status." } } },
+  { "name": "forbidden", "valid": true, "value": { "error": { "code": "forbidden", "message": "AI session status is not authorized." } } },
+  { "name": "rate_limited", "valid": true, "value": { "error": { "code": "rate_limited", "message": "Too many AI session-status requests.", "retry_after_seconds": 1 } } },
+  { "name": "upstream_unavailable", "valid": true, "value": { "error": { "code": "upstream_unavailable", "message": "AI session status is temporarily unavailable.", "retry_after_seconds": 3600 } } },
+  { "name": "invalid_output", "valid": true, "value": { "error": { "code": "invalid_output", "message": "AI session status returned invalid output." } } },
+  { "name": "optional_retry_omitted", "valid": true, "value": { "error": { "code": "rate_limited", "message": "Too many AI session-status requests." } } },
+  { "name": "wrong_message_for_code", "valid": false, "value": { "error": { "code": "invalid_request", "message": "Sign in to use AI session status." } } },
+  { "name": "dynamic_diagnostic", "valid": false, "value": { "error": { "code": "invalid_request", "message": "Synthetic provider detail must not be echoed." } } },
+  { "name": "empty_message", "valid": false, "value": { "error": { "code": "invalid_request", "message": "" } } },
+  { "name": "unknown_error_code", "valid": false, "value": { "error": { "code": "provider_error", "message": "Invalid session-status request." } } },
+  { "name": "missing_message", "valid": false, "value": { "error": { "code": "invalid_request" } } },
+  { "name": "retry_zero", "valid": false, "value": { "error": { "code": "rate_limited", "message": "Too many AI session-status requests.", "retry_after_seconds": 0 } } },
+  { "name": "retry_negative", "valid": false, "value": { "error": { "code": "rate_limited", "message": "Too many AI session-status requests.", "retry_after_seconds": -1 } } },
+  { "name": "retry_fraction", "valid": false, "value": { "error": { "code": "rate_limited", "message": "Too many AI session-status requests.", "retry_after_seconds": 1.5 } } },
+  { "name": "retry_too_large", "valid": false, "value": { "error": { "code": "rate_limited", "message": "Too many AI session-status requests.", "retry_after_seconds": 3601 } } },
+  { "name": "retry_string", "valid": false, "value": { "error": { "code": "rate_limited", "message": "Too many AI session-status requests.", "retry_after_seconds": "60" } } },
+  { "name": "retry_on_auth_error", "valid": false, "value": { "error": { "code": "unauthenticated", "message": "Sign in to use AI session status.", "retry_after_seconds": 60 } } },
+  { "name": "extra_error_detail", "valid": false, "value": { "error": { "code": "invalid_request", "message": "Invalid session-status request.", "detail": "synthetic-rejected-value" } } },
+  { "name": "extra_error_root", "valid": false, "value": { "error": { "code": "invalid_request", "message": "Invalid session-status request." }, "request_id": "synthetic-001" } },
+  { "name": "terminal_control_in_message", "valid": false, "value": { "error": { "code": "invalid_request", "message": "Invalid session-status request.\u001b" } } }
+]
