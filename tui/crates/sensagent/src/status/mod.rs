@@ -1,7 +1,7 @@
 //! Local AI-status consent, cache and stale-result policy. No network or TUI wiring.
 
 mod account;
-mod model;
+pub(crate) mod model;
 mod service;
 #[cfg(unix)]
 mod sqlite_store;

@@ -225,8 +225,43 @@ fn another_owner_observes_revisions_and_lock_contention_is_explicit() {
             .unwrap_err(),
         CredentialStoreError::Conflict
     );
-    let (_directory_fd, _lock) = store.locked_directory().unwrap();
+    let (_directory_fd, _lock) = store.locked_directory(true).unwrap();
     assert!(matches!(other.load(), Err(CredentialStoreError::Busy)));
+}
+
+#[test]
+fn a_briefly_held_lock_is_waited_for_not_reported_busy() {
+    let (_directory, store) = setup();
+    let other = FileCredentialStore::new(store.directory.clone());
+    let held = store.locked_directory(true).unwrap();
+    let (released, release) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        release.recv().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        drop(held);
+    });
+    let started = std::time::Instant::now();
+    released.send(()).unwrap();
+    assert!(other.load().is_ok());
+    assert!(started.elapsed() >= std::time::Duration::from_millis(20));
+    holder.join().unwrap();
+}
+
+#[test]
+fn reads_share_the_lock_and_replacements_wait_for_them() {
+    let (_directory, store) = setup();
+    let other = FileCredentialStore::new(store.directory.clone());
+    let reading = store.locked_directory(false).unwrap();
+    let started = std::time::Instant::now();
+    assert!(other.load().is_ok());
+    assert!(started.elapsed() < std::time::Duration::from_millis(200));
+    let revision = other.load().unwrap().revision();
+    assert_eq!(
+        other.compare_and_swap(revision, None).unwrap_err(),
+        CredentialStoreError::Busy
+    );
+    drop(reading);
+    assert!(other.compare_and_swap(revision, None).is_ok());
 }
 
 #[test]

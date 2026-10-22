@@ -1,0 +1,163 @@
+use std::fmt;
+use std::io;
+use std::os::unix::net::UnixStream;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use session_core::ids::SessionId;
+
+use super::layout::{current_uid, peer_uid};
+use super::protocol::{
+    read_message, write_message, ConsentView, FolderChoice, Hello, OfferView, OwnerRequest,
+    OwnerResponse, OwnerState, StatusLine, MAX_SESSIONS, PROTOCOL,
+};
+use super::{OwnerError, OwnerLayout, OwnerRegistration};
+
+/// How long the owner may take to answer.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A user client of a running status owner, found through its registration. One
+/// connection; requests are answered in order. After any failed request the
+/// connection is closed, since a late answer could otherwise be read as the next
+/// one's: every later call fails with `Connection`, and the caller reconnects.
+/// Never starts an owner.
+pub struct OwnerClient {
+    stream: Mutex<Option<UnixStream>>,
+    version: String,
+}
+
+impl OwnerClient {
+    /// Connect to this home's owner and complete the hello. The registration must be
+    /// this user's private file and name this layout's socket.
+    pub fn connect(layout: &OwnerLayout, client: &str) -> Result<Self, OwnerError> {
+        let registration = OwnerRegistration::load(layout)?;
+        if registration.socket != layout.socket() {
+            return Err(OwnerError::Registration);
+        }
+        if registration.protocol != PROTOCOL {
+            return Err(OwnerError::ProtocolMismatch);
+        }
+        let mut stream = UnixStream::connect(&registration.socket).map_err(|error| match error
+            .kind()
+        {
+            io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => OwnerError::NotRunning,
+            _ => OwnerError::Connection,
+        })?;
+        // Another user could have bound a socket at this path while no owner ran.
+        if peer_uid(&stream).ok() != Some(current_uid()) {
+            return Err(OwnerError::Registration);
+        }
+        stream
+            .set_read_timeout(Some(REQUEST_TIMEOUT))
+            .and_then(|()| stream.set_write_timeout(Some(REQUEST_TIMEOUT)))
+            .map_err(|_| OwnerError::Connection)?;
+        let hello = Hello {
+            protocol: PROTOCOL,
+            client: client.to_owned(),
+            token: registration.token,
+        };
+        write_message(&mut stream, &hello).map_err(|_| OwnerError::Connection)?;
+        match read_message(&mut stream).map_err(|_| OwnerError::Connection)? {
+            Some(OwnerResponse::Welcome { version, .. }) => Ok(Self {
+                stream: Mutex::new(Some(stream)),
+                version,
+            }),
+            Some(OwnerResponse::Error { code }) => Err(OwnerError::Refused(code)),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// The owner's version.
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    pub fn state(&self) -> Result<OwnerState, OwnerError> {
+        match self.request(&OwnerRequest::State)? {
+            OwnerResponse::State { state } => Ok(state),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Status lines for `sessions` (at most `MAX_SESSIONS`), in order.
+    pub fn statuses(&self, sessions: &[SessionId]) -> Result<Vec<StatusLine>, OwnerError> {
+        if sessions.len() > MAX_SESSIONS {
+            return Err(OwnerError::TooManySessions);
+        }
+        let request = OwnerRequest::Statuses {
+            sessions: sessions.to_vec(),
+        };
+        match self.request(&request)? {
+            OwnerResponse::Statuses { statuses }
+                if statuses.len() == sessions.len()
+                    && statuses
+                        .iter()
+                        .zip(sessions)
+                        .all(|(line, id)| &line.session == id) =>
+            {
+                Ok(statuses)
+            }
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// What enabling would bind. Show all of it before calling `enable`.
+    pub fn consent_offer(&self) -> Result<OfferView, OwnerError> {
+        match self.request(&OwnerRequest::ConsentOffer)? {
+            OwnerResponse::Offer { offer } => Ok(offer),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Confirm the user's explicit choice for the offer with this id.
+    pub fn enable(
+        &self,
+        offer: &str,
+        folders: Vec<FolderChoice>,
+    ) -> Result<ConsentView, OwnerError> {
+        let request = OwnerRequest::Enable {
+            offer: offer.to_owned(),
+            folders,
+        };
+        match self.request(&request)? {
+            OwnerResponse::Consent { consent } => Ok(consent),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Stop sharing, if consent is still at `revision`.
+    pub fn disable(&self, revision: u64) -> Result<ConsentView, OwnerError> {
+        match self.request(&OwnerRequest::Disable { revision })? {
+            OwnerResponse::Consent { consent } => Ok(consent),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Stop sharing and remove local credentials.
+    pub fn sign_out(&self) -> Result<(), OwnerError> {
+        match self.request(&OwnerRequest::SignOut)? {
+            OwnerResponse::Done => Ok(()),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    fn request(&self, request: &OwnerRequest) -> Result<OwnerResponse, OwnerError> {
+        let mut connection = self.stream.lock().map_err(|_| OwnerError::Connection)?;
+        let stream = connection.as_mut().ok_or(OwnerError::Connection)?;
+        let answer = write_message(stream, request).and_then(|()| read_message(stream));
+        match answer {
+            Ok(Some(OwnerResponse::Error { code })) => Err(OwnerError::Refused(code)),
+            Ok(Some(response)) => Ok(response),
+            Ok(None) | Err(_) => {
+                *connection = None;
+                Err(OwnerError::Connection)
+            }
+        }
+    }
+}
+
+impl fmt::Debug for OwnerClient {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("OwnerClient")
+    }
+}

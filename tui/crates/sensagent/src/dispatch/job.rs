@@ -11,6 +11,7 @@ use crate::auth::{
 use crate::cloud::{
     Cancellation, CloudAIClient, CloudAIError, StatusResponse, ValidatedStatusRequest,
 };
+use crate::source::{CaptureError, SourceError};
 use crate::status::{
     AccountBinding, ConsentRevision, GenerationTicket, InputSelection, SourceStamp, StatusError,
     StatusView,
@@ -28,6 +29,12 @@ pub enum DispatchError {
     /// Bounded context/transport/protocol checks failed.
     #[error(transparent)]
     Cloud(#[from] CloudAIError),
+    /// Daemon observations could not be tracked.
+    #[error(transparent)]
+    Source(#[from] SourceError),
+    /// Scoped session capture was refused or failed before any context was built.
+    #[error(transparent)]
+    Capture(#[from] CaptureError),
     /// Offers, jobs and results belong to one fixed-target coordinator instance.
     #[error("the AI-status operation belongs to another local owner")]
     ForeignOwner,
@@ -90,7 +97,12 @@ pub struct StatusCaptureJob {
 }
 
 impl StatusCaptureJob {
-    /// Exact local session for the future scoped SessionApi capture adapter.
+    /// Local correlation binding a scoped capture to this job.
+    pub(crate) fn request_id(&self) -> &str {
+        &self.key.request_id
+    }
+
+    /// Exact local session for the scoped SessionApi capture.
     pub fn session_id(&self) -> &SessionId {
         &self.ticket.source().session_id
     }

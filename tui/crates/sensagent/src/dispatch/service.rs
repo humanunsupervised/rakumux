@@ -1,17 +1,22 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use session_core::api::EventEnvelope;
 use session_core::ids::SessionId;
+use session_core::model::SessionView;
 
 use crate::auth::SecretValue;
 use crate::auth::{
     AccountService, AccountSession, ApplyResult, CredentialStore, SystemClock, WallClock,
 };
 use crate::cloud::{CaptureInput, CaptureMetadata, CloudAIClient, CloudAIError, ContextBuilder};
+use crate::source::{
+    Candidate, CaptureExpectation, SessionCapture, SourceError, SourceTracker, SourceUpdate,
+};
 use crate::status::{
     AISessionStatusService, AccountGate, AccountSessionGate, ConsentPolicy, ConsentRevision,
-    ConsentSnapshot, FolderConsent, GenerationTicket, Preparation, StatusError, StatusSource,
-    StatusStore, StatusView,
+    ConsentSnapshot, FolderConsent, GenerationTicket, Preparation, SourceStamp, StatusError,
+    StatusSource, StatusStore, StatusView,
 };
 
 use super::job::JobKey;
@@ -36,10 +41,11 @@ struct Pending {
 /// Explicitly driven, in-process control state for one fixed-target status owner.
 ///
 /// All controls take `&mut self`, serializing dispatch commitment with local
-/// revocation. Workers run separately and return opaque completions. The embedding
-/// service must authenticate user-only mutations, attest scoped capture and call
-/// `recheck` on freshness events/ticks. This is not a running per-home/IPC authority.
-/// New instances never reuse destination consent implicitly, even from the same store.
+/// revocation. Workers run separately and return opaque completions. Daemon views and
+/// events reach the policy only through this instance's own source tracker. The
+/// embedding service must authenticate user-only mutations and call `recheck` on
+/// freshness ticks. This is not a running per-home/IPC authority. New instances never
+/// reuse destination consent implicitly, even from the same store.
 pub struct StatusDispatchService<S, A, C = SystemClock> {
     owner: Arc<()>,
     account: Arc<AccountService<A, C>>,
@@ -50,6 +56,7 @@ pub struct StatusDispatchService<S, A, C = SystemClock> {
     origin: String,
     confirmed: bool,
     pending: HashMap<String, Pending>,
+    sources: SourceTracker,
 }
 
 impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, A, C> {
@@ -68,6 +75,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
             origin,
             confirmed: false,
             pending: HashMap::new(),
+            sources: SourceTracker::new(),
         }
     }
 
@@ -88,6 +96,11 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
             self.session = Some(session);
         }
         Ok(())
+    }
+
+    /// The adopted account view, for display. Current-account checks still apply.
+    pub fn account_session(&self) -> Option<&AccountSession> {
+        self.session.as_ref()
     }
 
     /// Stop local sharing before attempting credential removal, even if storage fails.
@@ -135,6 +148,12 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
             return Err(DispatchError::ForeignOwner);
         }
         self.invalidate();
+        // Restore any tracked observation an earlier failed policy update missed.
+        let observations: Vec<StatusSource> = self.sources.observations().collect();
+        for source in observations {
+            let result = self.policy.observe(source);
+            self.policy_result(result)?;
+        }
         let result = self.policy.enable(offer.consent, &offer.account, folders);
         let saved = self.policy_result(result)?;
         self.confirmed = true;
@@ -149,8 +168,75 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
         self.policy_result(result)
     }
 
-    /// Apply a trusted ordered daemon observation, then cancel affected jobs.
-    pub fn observe(&mut self, source: StatusSource) -> Result<ApplyResult, DispatchError> {
+    /// Apply a complete daemon view (`list`, `get`, or a created/updated event) through
+    /// this coordinator's source tracker, then cancel affected jobs.
+    pub fn apply_view(&mut self, view: &SessionView) -> Result<(), DispatchError> {
+        let update = self.sources.apply_view(view);
+        let update = self.source_result(update)?;
+        self.apply_source(update)
+    }
+
+    /// Apply one subscribed daemon event through this coordinator's source tracker.
+    pub fn apply_event(&mut self, event: &EventEnvelope) -> Result<(), DispatchError> {
+        let update = self.sources.apply_event(event);
+        let update = self.source_result(update)?;
+        self.apply_source(update)
+    }
+
+    /// Rebuild from a fresh daemon `list` after a lost or lagging event stream. Every
+    /// view is attempted and every resulting update applied before the first error
+    /// is returned.
+    pub fn resync(&mut self, views: &[SessionView]) -> Result<(), DispatchError> {
+        let (updates, failure) = self.sources.resync(views);
+        let mut result = match failure {
+            Some(error) => self.source_result(Err(error)),
+            None => Ok(()),
+        };
+        for update in updates {
+            if let Err(error) = self.apply_source(update) {
+                result = result.and(Err(error));
+            }
+        }
+        result
+    }
+
+    /// Whether the session's output or activity phase changed since its current stamp.
+    pub fn is_dirty(&self, session: &SessionId) -> bool {
+        self.sources.is_dirty(session)
+    }
+
+    /// Tracked live, non-private sessions, for the refresh scheduler.
+    pub(crate) fn refresh_candidates(&self) -> Vec<Candidate> {
+        self.sources.candidates().collect()
+    }
+
+    /// A tracked session's current source stamp.
+    pub(crate) fn source_stamp(&self, session: &SessionId) -> Option<SourceStamp> {
+        self.sources.stamp(session)
+    }
+
+    /// Fold a session's coalesced output and activity changes into one new revision.
+    /// Call only when the refresh budget allows another generation for it. Returns
+    /// whether a new revision was observed (its cached text is then stale).
+    pub fn advance(&mut self, session: &SessionId) -> Result<bool, DispatchError> {
+        let update = self.sources.advance(session);
+        let update = self.source_result(update)?;
+        let advanced = update != SourceUpdate::Unchanged;
+        self.apply_source(update)?;
+        Ok(advanced)
+    }
+
+    /// The facts a capture for this job must find. Checked here without daemon
+    /// requests; run the expectation's blocking `capture` off this thread and pass
+    /// its result to `build_capture`.
+    pub fn expectation(&self, job: &StatusCaptureJob) -> Result<CaptureExpectation, DispatchError> {
+        self.check_owner(&job.key)?;
+        Ok(self.sources.expectation(job)?)
+    }
+
+    /// Apply a trusted ordered observation, then cancel affected jobs. Runtime
+    /// callers go through the source tracker (`apply_view`/`apply_event`).
+    pub(crate) fn observe(&mut self, source: StatusSource) -> Result<ApplyResult, DispatchError> {
         let result = self.policy.observe(source);
         let applied = self.policy_result(result)?;
         self.recheck()?;
@@ -158,7 +244,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
     }
 
     /// Retire a daemon-removed source and fence its workers. Never touches a PTY.
-    pub fn remove(&mut self, session: &SessionId) -> Result<(), DispatchError> {
+    pub(crate) fn remove(&mut self, session: &SessionId) -> Result<(), DispatchError> {
         let result = self.policy.remove(session);
         self.policy_result(result)?;
         self.recheck()
@@ -268,6 +354,35 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
             key: job.key.clone(),
             request,
         })
+    }
+
+    /// `build` from this job's own scoped capture: the runtime path. A capture whose
+    /// read windows held no meaningful context is recorded, so the session shows
+    /// NoContext instead of retrying that input. On any error, stop and acknowledge.
+    pub fn build_capture(
+        &mut self,
+        job: &StatusCaptureJob,
+        capture: &SessionCapture,
+        known_secrets: &[&SecretValue],
+    ) -> Result<PreparedStatusDispatch, DispatchError> {
+        self.check_owner(&job.key)?;
+        if capture.request != job.key.request_id {
+            job.cancel.cancel();
+            return Err(StatusError::InvalidSource.into());
+        }
+        let result = self.build(
+            job,
+            capture.stamp,
+            capture.metadata(),
+            capture.input(),
+            known_secrets,
+        );
+        if matches!(result, Err(DispatchError::Cloud(CloudAIError::NoContext))) {
+            let update = self.sources.no_context(capture);
+            let update = self.source_result(update)?;
+            self.apply_source(update)?;
+        }
+        result
     }
 
     /// Linearize dispatch commitment with all local controls. The returned worker
@@ -383,6 +498,25 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
                 Err(error)
             }
         }
+    }
+
+    fn apply_source(&mut self, update: SourceUpdate) -> Result<(), DispatchError> {
+        match update {
+            SourceUpdate::Unchanged => Ok(()),
+            SourceUpdate::Observe(source) => self.observe(source).map(|_| ()),
+            SourceUpdate::Remove(session) => self.remove(&session),
+        }
+    }
+
+    /// Exhausted counters or an invalid observation may have left a fencing change
+    /// unrecorded: stop sharing. A session over capacity was never observed.
+    fn source_result<T>(&mut self, result: Result<T, SourceError>) -> Result<T, DispatchError> {
+        result.map_err(|error| {
+            if error != SourceError::Capacity {
+                self.invalidate();
+            }
+            error.into()
+        })
     }
 
     fn unconfirmed_view(&mut self) -> Result<StatusView, DispatchError> {

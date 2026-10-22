@@ -56,6 +56,20 @@ enable login prompts, gate core features, create provider accounts or deploy ser
 - [Explicit dispatch coordinator](src/dispatch/README.md): fixed-target consent offers,
   bounded capture/preparation/commit/worker stages, cancellation and fenced completion.
   This is in-process control state, not a running per-home/IPC service.
+- [SessionApi source tracking and capture](src/source/README.md): the coordinator's own
+  tracker derives ordered source stamps from daemon views/events, coalescing output into
+  owner-advanced revisions; user-client capture reads bounded plain-text windows
+  confirmed against the job's stamp.
+- [Scheduled refreshing](src/refresh/README.md): a pure scheduler (one capture per
+  session per minute, two jobs, 12 starts a minute, error backoff, rate-limit pause,
+  unauthorized halt, coalesced output), a synchronous engine over the coordinator and
+  an in-process runner with a daemon subscription, reconnects and two workers. It is
+  started only by an embedding process; nothing is installed or wired to the TUI.
+- [Per-home owner](src/owner/README.md): a proposed `$RAKUMUX_HOME/sensagent/` layout,
+  a single-instance claim, and a versioned local socket protocol (state, status lines,
+  one-use consent offers, disable, sign-out) with a server and client. Same-user peers
+  with the registration token only. The `status_owner` developer example composes it
+  with explicit configuration; nothing is installed or started by the TUI.
 
 ## Integration contract
 
@@ -127,9 +141,8 @@ still require consent reconfirmation; stable authorization epochs are not added 
   owns guarded account pages; [public landing](../../../landing/README.md) remains static.
   Real Clerk configuration and end-to-end login remain pending.
 - TUI account / consent controls and browser opening / copy UX.
-- Running shared local feature/credential owner, real SessionApi capture pipeline,
-  authenticated IPC, runtime worker/event-loop integration, scheduling and third-line
-  rendering. The in-process coordinator is not an installed shared service.
+- An installed owner process and who starts it, sign-in over the owner's socket and
+  third-line rendering. The owner is a library plus a developer example.
   The low-level native client, context builder and local library/store are
   implemented; the private hosted API remains disabled for real authorization/inference.
 - Stripe account management, full local supervisor or native agent-worker control.
@@ -144,12 +157,27 @@ From `tui/`:
 ```sh
 cargo test -p rakumux-sensagent auth:: --locked
 cargo test -p rakumux-sensagent cloud::client::tests::dispatch --locked --offline
+cargo test -p rakumux-sensagent source --locked --offline
+cargo test -p rakumux-sensagent refresh --locked --offline
+cargo test -p rakumux-sensagent owner --locked --offline
 ```
 
 Tests use fake provider transports / clocks and private temporary directories,
 never real accounts, network requests or `~/.rakumux` data. File tests exercise the
 native Linux backend here; macOS behavior and real Clerk metadata / TLS / identity
 responses still need separate verification.
+
+## Developer status-owner example
+
+```sh
+cargo run -p rakumux-sensagent --example status_owner -- --help
+```
+
+Runs the per-home owner for `$RAKUMUX_HOME` (set it to a temporary directory) with
+explicit public sign-in and AI-service configuration, restoring credentials the
+device-login example saved in `$RAKUMUX_HOME/sensagent/credentials`. Other commands
+query it and confirm or stop sharing, showing the account, destination and consent
+revision first. It needs a running `rakumux-ptyd` for that home and is not installed.
 
 ## Developer device-login example
 

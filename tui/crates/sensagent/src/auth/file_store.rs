@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use super::credentials::{StoredCredential, StoredDocument};
 use super::{
@@ -13,6 +14,12 @@ use super::{
 const MAX_BYTES: usize = 64 * 1024;
 const FILE_NAME: &CStr = c"credentials.json";
 const LOCK_NAME: &CStr = c"credentials.lock";
+/// How long an operation waits for another to release the lock before `Busy`.
+/// Operations hold it only to read or replace small files, but an owner reads
+/// credentials from several threads (status checks and requests). Reads share the
+/// lock; replacements take it alone.
+const LOCK_WAIT: Duration = Duration::from_millis(250);
+const LOCK_RETRY: Duration = Duration::from_millis(2);
 
 impl From<std::io::Error> for CredentialStoreError {
     fn from(error: std::io::Error) -> Self {
@@ -44,7 +51,9 @@ impl FileCredentialStore {
         }
     }
 
-    fn locked_directory(&self) -> Result<(File, File), CredentialStoreError> {
+    /// Open the directory under its lock: shared for reads (records are only ever
+    /// replaced by rename), exclusive for replacements.
+    fn locked_directory(&self, exclusive: bool) -> Result<(File, File), CredentialStoreError> {
         match fs::DirBuilder::new().mode(0o700).create(&self.directory) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -57,13 +66,22 @@ impl FileCredentialStore {
         validate_directory(&directory)?;
         let lock = open_at(&directory, LOCK_NAME, libc::O_RDWR | libc::O_CREAT, 0o600)?;
         validate_file(&lock)?;
+        let deadline = Instant::now() + LOCK_WAIT;
+        let mode = if exclusive {
+            libc::LOCK_EX
+        } else {
+            libc::LOCK_SH
+        };
         // SAFETY: the descriptor belongs to this owned File and flock takes no pointers.
-        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        while unsafe { libc::flock(lock.as_raw_fd(), mode | libc::LOCK_NB) } != 0 {
             let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::WouldBlock {
+            if error.kind() != std::io::ErrorKind::WouldBlock {
+                return Err(error.into());
+            }
+            if Instant::now() >= deadline {
                 return Err(CredentialStoreError::Busy);
             }
-            return Err(error.into());
+            std::thread::sleep(LOCK_RETRY);
         }
         Ok((directory, lock))
     }
@@ -71,7 +89,7 @@ impl FileCredentialStore {
 
 impl CredentialStore for FileCredentialStore {
     fn load(&self) -> Result<CredentialSnapshot, CredentialStoreError> {
-        let (directory, _lock) = self.locked_directory()?;
+        let (directory, _lock) = self.locked_directory(false)?;
         read_snapshot(&directory)
     }
 
@@ -80,7 +98,7 @@ impl CredentialStore for FileCredentialStore {
         expected: CredentialRevision,
         credentials: Option<&SavedCredentials>,
     ) -> Result<CredentialRevision, CredentialStoreError> {
-        let (directory, _lock) = self.locked_directory()?;
+        let (directory, _lock) = self.locked_directory(true)?;
         let snapshot = read_snapshot(&directory)?;
         if snapshot.revision != expected {
             return Err(CredentialStoreError::Conflict);

@@ -7,6 +7,7 @@ mod error;
 mod wire;
 
 pub use client::{Cancellation, CloudAIClient, CloudAIConfig};
+pub(crate) use context::MAX_INSPECTION_BYTES;
 pub use context::{CaptureInput, CaptureMetadata, ContextBuilder};
 pub use error::CloudAIError;
 pub use wire::{RemoteErrorCode, StatusResponse, ValidatedStatusRequest};

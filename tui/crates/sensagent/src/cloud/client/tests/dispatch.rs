@@ -58,6 +58,7 @@ struct StoreState {
     cache: HashMap<SessionId, CachedStatus>,
     fail_load: bool,
     fail_write: bool,
+    fail_remove: bool,
     cache_reads: usize,
     consent_writes: usize,
 }
@@ -139,7 +140,11 @@ impl StatusStore for MemoryStatusStore {
     }
 
     fn remove_cache(&mut self, session: &SessionId) -> Result<(), StatusStoreError> {
-        self.0.lock().unwrap().cache.remove(session);
+        let mut state = self.0.lock().unwrap();
+        if state.fail_remove {
+            return Err(StatusStoreError::Database);
+        }
+        state.cache.remove(session);
         Ok(())
     }
 }
@@ -155,6 +160,8 @@ type Requests = Arc<Mutex<Vec<RecordedRequest>>>;
 
 enum ReplyMode {
     Success,
+    /// A canonical service error, with an optional suggested delay in seconds.
+    Remote(u16, crate::cloud::RemoteErrorCode, Option<u16>),
     BlockedBody {
         entered: mpsc::Sender<()>,
         release: mpsc::Receiver<()>,
@@ -189,6 +196,9 @@ impl HttpTransport for FakeTransport {
             cloneable,
         });
         let body: Box<dyn Read + Send> = match self.mode.lock().unwrap().take() {
+            Some(ReplyMode::Remote(status, code, delay)) => {
+                return Ok(super::error_reply(status, code, delay))
+            }
             Some(ReplyMode::BlockedBody {
                 entered,
                 release,
@@ -1320,3 +1330,7 @@ fn opaque_dispatch_debug_redacts_bindings_context_credentials_and_success_text()
         ApplyResult::Applied
     );
 }
+
+mod owner;
+mod refresh;
+mod source;

@@ -104,7 +104,8 @@ per-read timeout trap, implicit reusable-body/connection replay, and wrapped tim
 misclassification. Source inspection and offline request/error-shape regressions
 support these guarantees; real TLS timing/protocol behavior remains uncertified.
 
-Runtime owner/IPC permissions, real SessionApi capture, refresh/revocation,
-worker/event-loop integration, scheduling/backoff, TUI integration, approved
-provider configuration and live transport certification remain unfinished. Do not
-enable production sharing or pretend the disabled hosted API now generates output.
+Runtime owner/IPC permissions, the live [SessionApi capture](../source/README.md)
+loop, refresh/revocation, worker/event-loop integration, scheduling/backoff, TUI
+integration, approved provider configuration and live transport certification remain
+unfinished. Do not enable production sharing or pretend the disabled hosted API now
+generates output.

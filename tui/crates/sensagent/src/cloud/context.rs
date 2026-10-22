@@ -12,7 +12,8 @@ use crate::status::{
     AISessionStatusService, AccountGate, GenerationTicket, InputSelection, StatusClock, StatusStore,
 };
 
-const MAX_INSPECTION_BYTES: usize = 64 * 1024;
+/// Largest source window the builder inspects; capture adapters bound their windows to it.
+pub(crate) const MAX_INSPECTION_BYTES: usize = 64 * 1024;
 const MAX_REPORT_BYTES: usize = 2048;
 const MAX_OUTPUT_BYTES: usize = 8192;
 const MAX_KNOWN_SECRETS: usize = 32;
@@ -61,7 +62,7 @@ pub struct CaptureMetadata {
 }
 
 /// Explicit plain-text windows, not environments, files, ANSI streams or complete history.
-/// The future owner must obtain them through scoped SessionApi reads and recheck the job.
+/// Obtain them through scoped SessionApi capture (`source`) and recheck the job.
 #[derive(Clone, Copy)]
 pub struct CaptureInput<'a> {
     /// Optional bounded report window. Empty/blank/redaction-only data is omitted.

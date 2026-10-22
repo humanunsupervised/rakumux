@@ -70,8 +70,9 @@ old preferences from silently resuming sharing after sign-out/re-authentication.
 A reviewed stable authorization-epoch design is needed before preserving consent
 across safe refresh/restore. Do not weaken the current binding to subject alone.
 
-There is no automatic submission, SessionApi capture pipeline, IPC, TUI rendering,
-per-minute backoff or startup backfill in this module. The separate native
+There is no automatic submission, capture loop, IPC, TUI rendering, per-minute
+backoff or startup backfill in this module; [refresh](../refresh/README.md) schedules it. [Source tracking](../source/README.md)
+derives ordered observations from SessionApi views and events. The separate native
 [cloud adapters](../cloud/README.md) provide bounded context/redaction/HTTP helpers,
 and the separate dispatch module provides in-process coordination, not a running
 credential owner or authenticated IPC boundary. Context-

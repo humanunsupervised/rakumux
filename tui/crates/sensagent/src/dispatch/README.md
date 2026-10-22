@@ -2,7 +2,9 @@
 
 `StatusDispatchService` coordinates the existing account, consent/cache and native
 cloud adapters. It is **not** an installed per-home service, IPC permission boundary,
-TUI feature, scheduler or real terminal-capture adapter. Nothing starts automatically.
+TUI feature or scheduler. [Source tracking and capture](../source/README.md) supply its
+observations and windows; the [refresher](../refresh/README.md) schedules and drives it.
+Nothing starts automatically.
 Hosted production OAuth/inference remain unsupported/disabled in the private repository.
 
 ## Account and destination authority
@@ -41,10 +43,11 @@ prepare → Capturing → build → Prepared → commit → Committed → run �
 1. `prepare` checks explicit destination confirmation and current policy. Eligible
    work gets an opaque, non-cloneable capture handle with local session/folder,
    source stamp and allowed data kinds. No credential or raw text is included.
-2. The future scoped SessionApi adapter reads only selected bounded plain-text
-   windows. It must attest the exact session/folder and source revision, lifecycle
-   and metadata. The numeric stamp passed to `build` is a consistency check, **not**
-   cryptographic attestation or a replacement for that adapter's confinement checks.
+2. [`CaptureExpectation::capture`](../source/README.md) reads only selected bounded
+   plain-text windows through a user SessionApi client, confirming the session's
+   folder, incarnation, privacy, lifecycle and report before and after. The numeric
+   stamp passed to `build` is a consistency check, **not** cryptographic attestation
+   or a replacement for that adapter's confinement checks.
 3. `build` checks owner, phase and live policy before/after the bounded context builder.
    Reports-only jobs reject terminal output. The sealed prepared body has no public
    constructor/accessor and no token. Raw inputs/secrets are not retained by the service.
@@ -70,8 +73,10 @@ worker exits/panics explicitly; unknown work stays fenced rather than being repl
   work keeps its slot until capture actually stops or a committed worker completes.
 - Explicit consent/account changes cancel all old jobs before persistence. Failed
   opt-out/sign-out cannot leave this instance implicitly sharing under old consent.
-- Trusted source updates, privacy tightening, non-live state and retirement cancel
-  affected jobs. The runtime must call `recheck` on freshness events/ticks as well.
+- Daemon views and events reach the policy only through this coordinator's own
+  [source tracker](../source/README.md) (`apply_view`, `apply_event`, `resync`,
+  `advance`; `build_capture` records empty captures). Privacy tightening, non-live state, retirement and other
+  fencing changes cancel affected jobs. The runtime must call `recheck` on ticks as well.
 - Policy-read errors cancel all work and clear destination confirmation. Recovery
   requires a fresh explicit enable, not automatic resumption of previous settings.
 - Owner drop cancels outstanding jobs. A queued worker then submits nothing. Already
@@ -90,10 +95,10 @@ integration. Do not capture environments, credential files or complete histories
 
 ## Remaining runtime gates
 
-Per-home process ownership/lifecycle, authenticated IPC, real scoped SessionApi
-observations/capture, metadata provenance, scheduling/backoff, TUI controls/rendering,
-refresh/revocation, stable authorization epochs and live Clerk/TLS/model certification
-remain unfinished. No daemon registry or PTY is opened here. Do not wire UI directly
+Per-home process ownership/lifecycle, authenticated IPC, metadata provenance, TUI
+controls/rendering, credential refresh/revocation, stable authorization epochs and live
+Clerk/TLS/model certification remain unfinished. The subscription/capture loop and
+scheduling/backoff are in [refresh](../refresh/README.md). No daemon registry or PTY is opened here. Do not wire UI directly
 to these low-level controls or treat an injected fake as production authentication.
 
 Synthetic integration tests live under `cloud/client/tests/dispatch.rs` so they can
