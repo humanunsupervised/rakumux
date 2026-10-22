@@ -43,7 +43,8 @@ fn card(app: &App, index: usize) -> (&'static str, Vec<String>) {
                 "A session is a terminal in a folder, like a repo or a worktree: a shell, a dev \
                  server or a coding agent. The list shows each one's git branch."
                     .into(),
-                "The list starts on All folders: every session, under a header per folder.".into(),
+                "The list starts on the Folders tab: every session, under a header per folder."
+                    .into(),
                 "`P` filters by folder: pick one, tick several with `Tab`, or add a folder. All \
                  folders shows everything again."
                     .into(),

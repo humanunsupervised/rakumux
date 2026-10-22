@@ -2,9 +2,7 @@ use super::*;
 use crate::app::testing::{aged, folder, options, scope, start, view, view_in, FakeApi, Harness};
 use crate::app::types::AppMode;
 use base64::Engine;
-use crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{backend::TestBackend, buffer::Buffer, layout::Rect, Terminal};
 use session_core::api::{Attached, SessionEvent};
 use session_core::client::AttachOutgoing;
@@ -242,8 +240,9 @@ async fn grid_navigation_activation_return_and_v_routing() {
     assert_eq!(h.app.session_layout(), SessionLayout::Sidebar);
     h.press(KeyCode::Char('v')).await;
     assert_eq!(h.app.session_layout(), SessionLayout::Grid);
+    // Not saved: every start opens Master detail.
     let saved = crate::app::Settings::load_from(&h.home.path().join("config.json")).unwrap();
-    assert_eq!(saved.sessions.layout, SessionLayout::Grid);
+    assert_eq!(saved.sessions.layout, SessionLayout::Sidebar);
 }
 
 #[tokio::test]
@@ -406,8 +405,11 @@ fn grid_dead_saved_error_and_small_empty_phone_rendering() {
         let output = render(&mut empty.app, width, height);
         assert!(empty.app.screen().terminal.is_none());
         assert_eq!(empty.app.screen().footer.unwrap().height, 1);
-        if width >= 40 {
+        if width >= 80 {
             assert!(output.contains("No sessions yet"), "{output}");
+        } else if width >= 40 {
+            // A phone has no Grid: the list, ready for a session.
+            assert!(output.contains("+ New session"), "{output}");
         }
     }
     assert!(empty.app.grid.cards.is_empty());
@@ -455,29 +457,32 @@ fn grid_saved_single_line_and_empty_metadata_are_valid() {
 }
 
 #[tokio::test]
-async fn grid_phone_tap_opens_and_returns_without_background_size_claims() {
+async fn a_phone_has_no_grid_and_v_skips_it_there() {
     let mut h = harness(2);
+    // Grid chosen on a wide screen, then the window narrows to a phone:
+    // Master detail's list, no cards, nothing left attached for them.
+    render(&mut h.app, 160, 48);
+    assert!(h.app.screen().grid.is_some());
     render(&mut h.app, 45, 40);
-    assert_eq!(h.app.grid_page().columns, 1);
-    outgoing_only_detaches(&h);
-    let area = h
+    h.app.on_tick(Instant::now());
+    h.app.process_pending();
+    assert_eq!(h.app.session_layout(), SessionLayout::Sidebar);
+    assert!(h.app.screen().grid.is_none());
+    assert!(h.app.screen().list.is_some());
+    assert!(!h
         .app
         .hits
         .iter()
-        .find_map(|(a, hit)| matches!(hit, crate::app::Hit::GridCell(0)).then_some(*a))
-        .unwrap();
-    h.app.handle_mouse(MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: area.x + 1,
-        row: area.y + 1,
-        modifiers: KeyModifiers::NONE,
-    });
-    h.app.process_pending();
-    assert_eq!(h.app.focus, Focus::Session);
-    assert!(h.app.screen().tabs.is_some());
-    h.rakumux().await;
-    assert!(h.app.screen().grid.is_some());
-    assert!(h.app.screen().terminal.is_none());
+        .any(|(_, hit)| matches!(hit, crate::app::Hit::GridCell(_))));
+    // `v` goes between Master detail and Tabs only.
+    h.press(KeyCode::Char('v')).await;
+    assert_eq!(h.app.session_layout(), SessionLayout::Tabs);
+    h.press(KeyCode::Char('v')).await;
+    assert_eq!(h.app.session_layout(), SessionLayout::Sidebar);
+    // Back on a wide screen Grid is offered again.
+    render(&mut h.app, 160, 48);
+    h.press(KeyCode::Char('v')).await;
+    assert_eq!(h.app.session_layout(), SessionLayout::Grid);
     assert!(h.app.drag.is_none());
 }
 
@@ -649,7 +654,7 @@ fn grid_pending_jobs_remain_bounded_across_page_changes() {
 fn grid_drawing_never_opens_or_writes_streams() {
     let mut h = harness(10);
     let count = h.fake.attach_count();
-    let mut terminal = Terminal::new(TestBackend::new(45, 40)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(90, 40)).unwrap();
     terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
     assert_eq!(h.fake.attach_count(), count);
     for i in 0..count {
@@ -657,6 +662,7 @@ fn grid_drawing_never_opens_or_writes_streams() {
     }
     h.app.on_tick(Instant::now());
     h.app.process_pending();
-    assert_eq!(h.app.grid.cards.len(), 2);
+    assert_eq!(h.app.grid.cards.len(), h.app.grid_page().cards.len());
+    assert!(h.app.grid.cards.len() < 10);
     outgoing_only_detaches(&h);
 }

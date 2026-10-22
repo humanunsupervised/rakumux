@@ -1,4 +1,4 @@
-//! The active tab's filter at the left end of the tab bar (`▤ All folders
+//! The active tab's filter at the left end of the tab bar (`▤ Folders
 //! ▾`, `▤ web ▾`, `▤ 3 folders ▾`; `◇ claude ▾` under App), and the Folders
 //! modal it (and the list's All folders tab) opens: a query line, All
 //! folders, the folders with

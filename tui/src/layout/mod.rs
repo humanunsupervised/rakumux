@@ -60,7 +60,7 @@ pub const STACK_MIN_ROWS: u16 = LIST_MIN_ROWS + 1 + PREVIEW_MIN_ROWS;
 const STACKED_LIST_PERCENT: u32 = 40;
 
 /// Sidebar column width at the single-pane threshold: room for the list's
-/// tabs (`▤ All folders ▾   ◇ App   ◔ Status`).
+/// tabs (`▤ Folders ▾   ◇ App   ◔ Status`).
 const SIDEBAR_MIN_COLS: u16 = 40;
 /// Sidebar column width once there's room, until 30% of the screen is
 /// wider: the tabs with a filter's name, a branch or the text filter.
@@ -124,6 +124,21 @@ impl SessionLayout {
             SessionLayout::Grid => SessionLayout::Tabs,
             SessionLayout::Tabs => SessionLayout::Sidebar,
         }
+    }
+
+    /// The following layout a screen offers: phones have no Grid.
+    pub fn next_on(self, phone: bool) -> Self {
+        match self.next() {
+            SessionLayout::Grid if phone => SessionLayout::Grid.next(),
+            next => next,
+        }
+    }
+
+    /// The layouts a screen offers: phones have no Grid.
+    pub fn offered(phone: bool) -> impl Iterator<Item = SessionLayout> {
+        Self::ALL
+            .into_iter()
+            .filter(move |layout| !(phone && *layout == SessionLayout::Grid))
     }
 }
 
@@ -295,7 +310,9 @@ pub fn split_with(
             PaneFocus::Detail | PaneFocus::Zoomed => tabs_over(area),
         };
     }
-    if is_phone(area.width) {
+    // A phone's Master detail is the list, then a session under tabs; its
+    // Tabs keeps the tab bar over the session.
+    if is_phone(area.width) && layout == SessionLayout::Sidebar {
         return match focus {
             PaneFocus::List => LayoutAreas {
                 list: Some(area),
@@ -837,17 +854,30 @@ mod tests {
             for (width, height) in [(40, 19), (45, 39), (59, 52), (79, 30)] {
                 assert!(is_phone(width) && is_single_pane(width, layout));
                 let area = rect(0, 0, width, height);
-                // Rakumux mode: the list alone.
+                // Rakumux mode: Master detail's list alone (Grid's cards,
+                // which the app doesn't offer on phones); Tabs keeps its
+                // tab bar over the session.
                 let list = split(area, layout, PaneFocus::List);
-                if layout == SessionLayout::Grid {
-                    assert_eq!(list.grid, Some(area));
-                    assert_eq!(list.list, None);
-                } else {
-                    assert_eq!(list.list, Some(area));
-                    assert_eq!(list.grid, None);
+                match layout {
+                    SessionLayout::Grid => {
+                        assert_eq!(list.grid, Some(area));
+                        assert_eq!(list.list, None);
+                    }
+                    SessionLayout::Sidebar => {
+                        assert_eq!(list.list, Some(area));
+                        assert_eq!(list.grid, None);
+                    }
+                    SessionLayout::Tabs => {
+                        assert_eq!(list.list, None);
+                        assert_eq!(list.tabs, Some(rect(0, 0, width, 1)));
+                        assert_eq!(list.detail, rect(0, 1, width, height - 1));
+                    }
                 }
-                assert_eq!((list.divider, list.tabs, list.stacked), (None, None, false));
-                assert!(list.detail.is_empty());
+                assert_eq!((list.divider, list.stacked), (None, false));
+                if layout != SessionLayout::Tabs {
+                    assert_eq!(list.tabs, None);
+                    assert!(list.detail.is_empty());
+                }
                 // A session: a row of tabs, the session below.
                 let detail = split(area, layout, PaneFocus::Detail);
                 assert_eq!(detail.list, None);

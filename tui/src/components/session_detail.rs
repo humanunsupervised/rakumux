@@ -227,7 +227,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                 ]));
                 lines.push(Line::from(vec![
                     Span::styled("← →", key),
-                    Span::styled(" switch between All folders, App and Status.", muted),
+                    Span::styled(" switch between Status, Folders and App.", muted),
                 ]));
                 lines
             } else if app.list.is_loaded() && app.list.filter.is_empty() {

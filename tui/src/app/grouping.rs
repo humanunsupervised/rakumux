@@ -25,8 +25,8 @@ pub enum Grouping {
 }
 
 impl Grouping {
-    /// The tabs, left to right.
-    pub const ALL: [Grouping; 3] = [Grouping::Folder, Grouping::App, Grouping::Status];
+    /// The tabs, left to right: what wants the user first.
+    pub const ALL: [Grouping; 3] = [Grouping::Status, Grouping::Folder, Grouping::App];
 
     /// The tab `delta` places along, stopping at either end.
     pub fn step(self, delta: isize) -> Grouping {
@@ -38,7 +38,7 @@ impl Grouping {
     /// What the tab says while it filters nothing.
     pub fn name(self) -> &'static str {
         match self {
-            Grouping::Folder => "All folders",
+            Grouping::Folder => "Folders",
             Grouping::App => "App",
             Grouping::Status => "Status",
         }
@@ -112,7 +112,7 @@ impl AppKey {
 
 /// What a session is doing as the user reads it: the Status tab's
 /// sections, in the order they're shown (what wants the user first, then
-/// what's busy, then what's quiet or over). Derived like the list's status
+/// what's busy, then what's over, and idle sessions last). Derived like the list's status
 /// words (`components::format::status_label`): a running session's
 /// lifecycle, with the agent's activity phase telling a wait for the model
 /// apart from other work; else its status.
@@ -126,13 +126,14 @@ pub enum StatusGroup {
     Working,
     /// `Working`, waiting for the model's response.
     WaitingForResponse,
-    Idle,
     /// Live with nothing to say (no agent, or one whose state can't be
     /// told): a shell or another program.
     Running,
     Exited,
     Dead,
     Unknown,
+    /// Nothing to do until the user says so.
+    Idle,
 }
 
 impl StatusGroup {
@@ -142,11 +143,11 @@ impl StatusGroup {
         StatusGroup::Done,
         StatusGroup::Working,
         StatusGroup::WaitingForResponse,
-        StatusGroup::Idle,
         StatusGroup::Running,
         StatusGroup::Exited,
         StatusGroup::Dead,
         StatusGroup::Unknown,
+        StatusGroup::Idle,
     ];
 
     /// The status `session` is in (see [`StatusGroup`]).
@@ -273,14 +274,16 @@ mod tests {
 
     #[test]
     fn tabs_step_without_wrapping() {
+        // Status leads; the list starts on Folders.
         assert_eq!(Grouping::default(), Grouping::Folder);
+        assert_eq!(Grouping::Status.step(1), Grouping::Folder);
         assert_eq!(Grouping::Folder.step(1), Grouping::App);
-        assert_eq!(Grouping::App.step(1), Grouping::Status);
-        assert_eq!(Grouping::Status.step(1), Grouping::Status);
+        assert_eq!(Grouping::App.step(1), Grouping::App);
         assert_eq!(Grouping::App.step(-1), Grouping::Folder);
-        assert_eq!(Grouping::Folder.step(-1), Grouping::Folder);
+        assert_eq!(Grouping::Folder.step(-1), Grouping::Status);
+        assert_eq!(Grouping::Status.step(-1), Grouping::Status);
         let names: Vec<&str> = Grouping::ALL.iter().map(|g| g.name()).collect();
-        assert_eq!(names, ["All folders", "App", "Status"]);
+        assert_eq!(names, ["Status", "Folders", "App"]);
     }
 
     #[test]

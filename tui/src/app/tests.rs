@@ -1769,7 +1769,7 @@ async fn filter_narrows_the_list() {
 }
 
 #[tokio::test]
-async fn settings_switch_layout_live_and_save_it() {
+async fn settings_switch_layout_live_without_saving_it() {
     let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
     h.press(KeyCode::Char('o')).await;
     assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
@@ -1780,8 +1780,9 @@ async fn settings_switch_layout_live_and_save_it() {
     assert_eq!(h.app.session_layout(), SessionLayout::Tabs);
     // Tabs keep creation order: B (created at 10) is tab 1.
     assert_eq!(h.app.list.visible()[0].id, id("B"));
+    // Not saved: the next start opens Master detail.
     let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
-    assert_eq!(saved.sessions.layout, SessionLayout::Tabs);
+    assert_eq!(saved.sessions.layout, SessionLayout::Sidebar);
     h.press(KeyCode::Esc).await;
     // Number keys go into that tab's session.
     h.press(KeyCode::Char('1')).await;
@@ -1876,8 +1877,9 @@ fn naming_input_reads_history_and_the_visible_screen() {
 async fn clicking_new_session_creates_once_and_enters_the_shell_without_a_keyboard_action() {
     for layout in SessionLayout::ALL {
         for (width, height) in [(40, 20), (80, 24), (90, 24), (160, 48)] {
-            // Desktop Tabs has no New session item; phones use the list.
-            if layout == SessionLayout::Tabs && width >= 80 {
+            // Tabs has no New session item (`n` makes one); a phone has no
+            // Grid.
+            if layout == SessionLayout::Tabs || (layout == SessionLayout::Grid && width < 80) {
                 continue;
             }
             for existing in [false, true] {
@@ -2417,7 +2419,7 @@ async fn every_folder_is_listed_and_watched_from_the_start() {
     assert!(!calls.iter().any(|c| c.starts_with("list_in")), "{calls:?}");
     // All folders, under headers: the launch folder first, then by name.
     assert!(h.app.list.folder_filter().is_empty());
-    assert_eq!(h.app.folder_label(), "All folders");
+    assert_eq!(h.app.folder_label(), "Folders");
     assert!(h.app.list.is_grouped());
     assert_eq!(
         h.app.list.groups(),
@@ -2657,7 +2659,7 @@ async fn the_modal_ticks_folders_and_enter_shows_them() {
     app.start();
     app.process_pending();
     assert!(app.list.folder_filter().is_empty());
-    assert_eq!(app.folder_label(), "All folders");
+    assert_eq!(app.folder_label(), "Folders");
 }
 
 #[tokio::test]
@@ -3326,17 +3328,21 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     assert_eq!(h.app.list.grouping(), Grouping::Folder);
     h.press(KeyCode::Home).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
-    // → and l go along the tabs and stop at the last; the top row stays
-    // selected; ← and h come back.
+    // → and l go along the tabs (Status, Folders, App) and stop at the
+    // last; the top row stays selected; ← and h come back.
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
     assert!(h.app.list.is_grouped());
     h.press(KeyCode::Char('l')).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Status);
-    h.press(KeyCode::Right).await;
+    assert_eq!(h.app.list.grouping(), Grouping::App);
+    h.press(KeyCode::Left).await;
+    h.press(KeyCode::Char('h')).await;
     assert_eq!(h.app.list.grouping(), Grouping::Status);
     h.press(KeyCode::Left).await;
+    assert_eq!(h.app.list.grouping(), Grouping::Status);
+    h.press(KeyCode::Right).await;
+    h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
     // Enter: the active tab's modal; Esc leaves everything as it was.
     h.press(KeyCode::Enter).await;
@@ -3540,7 +3546,7 @@ async fn the_folders_modal_from_another_tab_shows_folders_under_all_folders() {
     h.app.show_tab(Grouping::App);
     assert_eq!(visible_ids(&h), ["R1", "R2"]);
     assert_eq!(h.app.tab_label(Grouping::App), "claude");
-    assert_eq!(h.app.tab_label(Grouping::Folder), "All folders");
+    assert_eq!(h.app.tab_label(Grouping::Folder), "Folders");
 }
 
 #[tokio::test]

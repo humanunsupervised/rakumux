@@ -87,7 +87,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
 
 ```
                                   │ ● api-refactor · working
-   ▤ All folders               ▾  │ $ cargo test
+   ▤ Folders                   ▾  │ $ cargo test
                                   │ running 42 tests ...
                                   │
  rakumux       ⎇ main ── 1/1 live │
@@ -106,8 +106,8 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
 ```
 
 - **Layouts**: Sidebar (above, default) or Tabs (a tab bar of sessions on top, the selected session
-  below); switch in Settings (`,` or `o` in Rakumux mode), saved as `sessions.layout` in
-  `~/.rakumux/config.json`.
+  below), or Grid (live terminal cards; not on phones); switch with `v` or in Settings (`,` or
+  `o` in Rakumux mode). Every start opens Master detail; the choice isn't saved.
 - **Narrow screens and phones** (Sidebar, under 100 columns; e.g. Blink, Termius or a web
   terminal): in Rakumux mode the list sits on top and the selected session below it, so you see
   it while you pick one. The list takes 40% of the height (at least the folder filter and two
@@ -135,7 +135,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   blue in session mode (with a `Ctrl-\ Rakumux` button). Help and Settings list the keys, and
   Settings runs any of them.
 - **Folders**: a session belongs to the folder it was started in (a repo, a worktree, any
-  folder). The list shows All folders, live: sessions another window, the CLI or an agent start
+  folder). The list shows every folder, live: sessions another window, the CLI or an agent start
   in any folder (a new worktree too) appear as they start. With more than one folder shown, each
   has a header row (name, branch, live/total).
 - **Order**: the list never reorders by itself; using a session doesn't move it. The folder you
@@ -153,14 +153,14 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   A confirmation explains that sessions stay running: `y`/Enter restarts, `n`/Esc cancels.
   This reloads the UI through its launcher, picking up the latest local build. The daemon and
   session programs keep running. `Ctrl-r` only reconnects or reloads the list.
-- **Folder filter** (`▤ All folders ▾` at the top; `P`, or Enter on it): the Folders modal lists
+- **Folder filter** (`▤ Folders ▾` at the top; `P`, or Enter on it): the Folders modal lists
   All folders and every folder with sessions. Type to filter; `Enter` shows the folder under the
   cursor alone (All folders: every folder); `Tab`/`Space` tick several, then `Enter` shows them
   together. Type a folder path (`/`, `~`, `.`, or with a `/` in it) to add a folder and show it:
   the folders that complete it are listed as you type (dot-folders once you type the `.`).
   `↑`/`↓` choose one, `Tab` (or `→` at the end) completes the path with it and adds a `/` so its
   folders come next, and `Enter` adds it. A folder that doesn't exist is created after you
-  confirm with `y`. The filter isn't saved: every start shows All folders.
+  confirm with `y`. The filter isn't saved: every start shows every folder.
 - **Welcome tour**: a six-card carousel on first start (folders and sessions, the two modes,
   moving around, the main shortcuts, Help and Settings). Every card has "Don't show this on
   startup" (Space; `sessions.welcome_seen`), so you can opt out at any point; until it's ticked

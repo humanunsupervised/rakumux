@@ -146,7 +146,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         }
         KeyAction::CycleLayout => {
             leave(app);
-            app.set_layout(app.session_layout().next());
+            app.set_layout(app.next_layout());
         }
         KeyAction::Help => open_help(app),
         KeyAction::Settings => open_settings(app),
@@ -172,7 +172,7 @@ fn open_item(app: &mut App, item: SettingsItem) {
     match item {
         SettingsItem::Layout => {
             // Applies live and stays in the modal so the change is visible.
-            let next = app.session_layout().next();
+            let next = app.next_layout();
             app.set_layout(next);
             app.set_status(format!("Layout: {}", next.label()));
         }

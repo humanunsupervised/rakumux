@@ -322,7 +322,7 @@ fn lay_out_tabs(tabs: &[(Grouping, &str, String)], active: Grouping, room: usize
     }
 }
 
-/// The tabs on a raised band: All folders, App, Status. The active one is
+/// The tabs on a raised band: Folders, App, Status. The active one is
 /// bold, names its filter (`▤ web  ⎇ main`, `◇ claude`), ends in `▾` (it
 /// opens its modal) and is underlined; the text filter shows at the right
 /// end while there is one. White and blue when selected, muted otherwise.
@@ -709,25 +709,29 @@ mod tests {
         }
     }
 
-    /// The tabs with `labels` and `marks` (All folders, App, Status).
+    /// The tabs with `labels` and `marks` (given for Folders, App, Status),
+    /// in the tabs' order.
     fn tabs(marks: [&'static str; 3], labels: [&str; 3]) -> Vec<(Grouping, &'static str, String)> {
+        let given = [Grouping::Folder, Grouping::App, Grouping::Status];
         Grouping::ALL
             .iter()
-            .zip(marks.iter().zip(labels.iter()))
-            .map(|(grouping, (mark, label))| (*grouping, *mark, label.to_string()))
+            .map(|grouping| {
+                let i = given.iter().position(|g| g == grouping).unwrap();
+                (*grouping, marks[i], labels[i].to_string())
+            })
             .collect()
     }
 
     #[test]
     fn tabs_narrow_their_gaps_then_show_marks_alone_then_cut_the_active_label() {
         let plain = ["▤", "◇", "◔"];
-        let shown = tabs(plain, ["All folders", "App", "Status"]);
+        let shown = tabs(plain, ["Folders", "App", "Status"]);
         let at = |room| lay_out_tabs(&shown, Grouping::App, room);
-        // `▤ All folders   ◇ App ▾   ◔ Status`: 13 + 7 + 8, three apart.
-        assert_eq!((at(40).gap, at(40).compact, at(40).width), (3, false, 34));
-        assert_eq!((at(33).gap, at(33).compact, at(33).width), (2, false, 32));
-        // `▤  ◇ App ▾  ◔`.
-        assert_eq!((at(31).gap, at(31).compact, at(31).width), (2, true, 13));
+        // `◔ Status   ▤ Folders   ◇ App ▾`: 8 + 9 + 7, three apart.
+        assert_eq!((at(40).gap, at(40).compact, at(40).width), (3, false, 30));
+        assert_eq!((at(29).gap, at(29).compact, at(29).width), (2, false, 28));
+        // `◔  ▤  ◇ App ▾`.
+        assert_eq!((at(27).gap, at(27).compact, at(27).width), (2, true, 13));
         assert_eq!((at(12).gap, at(12).compact, at(12).width), (1, true, 11));
         // Then the active label is cut.
         assert_eq!(at(10).active_label, "A…");
@@ -737,9 +741,9 @@ mod tests {
         let emoji = ["📁", "🤖", "🚦"];
         for marks in [plain, emoji] {
             for labels in [
-                ["All folders", "App", "Status"],
+                ["Folders", "App", "Status"],
                 ["web", "App", "Status"],
-                ["All folders", "App", "waiting for response"],
+                ["Folders", "App", "waiting for response"],
                 ["12 folders", "opencode", "Status"],
             ] {
                 let shown = tabs(marks, labels);

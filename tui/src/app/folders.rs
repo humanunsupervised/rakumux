@@ -6,7 +6,7 @@
 //! isn't saved. The folder Rakumux starts in is added at startup; new
 //! sessions go in [`App::current_folder`].
 //!
-//! The folder filter is the All folders tab's (`grouping`): it applies
+//! The folder filter is the Folders tab's (`grouping`): it applies
 //! while that tab is active. The Folders modal (Enter on the tabs with All
 //! folders active, a click on that tab, or `P` from any tab) lists All
 //! folders and the folders that have sessions, filters them as you type,
@@ -285,7 +285,7 @@ impl App {
     /// `3 folders`.
     pub fn folder_label(&self) -> String {
         match self.list.folder_filter() {
-            [] => "All folders".into(),
+            [] => "Folders".into(),
             [only] => self.folders.name_of(only),
             many => format!("{} folders", many.len()),
         }
@@ -305,7 +305,7 @@ impl App {
 
     /// Where new sessions go: the current folder section, retained on the
     /// tabs and "+ New session" rows; the folder filter's only folder takes
-    /// precedence while All folders is the active tab. Without folder
+    /// precedence while Folders is the active tab. Without folder
     /// context, use the launch folder.
     pub fn current_folder(&self) -> ScopeRoot {
         self.list

@@ -39,9 +39,9 @@ new-session flow, and code boundaries.
   `subscribe { scopes }` + `list_in` of the known folders; else `list(Some(launch))` on
   `unsupported`), `compare_folders` (launch folder first, then name, then path),
   `App::folder_label`, `App::current_folder` (the current section, retained on the folder filter
-  and "+ New session" rows; a single-folder filter takes precedence under All folders; without
-  folder context, the launch folder), `App::show_folders` (sets the filter and makes All folders
-  the active tab; an older daemon resyncs for a folder it isn't watching) and the Folders modal's
+  and "+ New session" rows; a single-folder filter takes precedence under the Folders tab; without
+  folder context, the launch folder), `App::show_folders` (sets the filter and makes the Folders tab
+  active; an older daemon resyncs for a folder it isn't watching) and the Folders modal's
   actions (filter
   rows, All folders, show one, tick and show several, add or create a typed folder).
   `handlers/folders.rs` routes its keys.
@@ -51,16 +51,16 @@ new-session flow, and code boundaries.
   rows (`PickerRow::Suggestion`): `↑`/`↓` choose, Tab or `→` completes, Enter adds, a click
   completes.
 - `grouping.rs`: the list tabs, pure derivations over `SessionView` (no drawing). `Grouping`
-  (All folders, App, Status; `step` for ←/→, no wrap), `AppKey::of` (agent kind, else a
+  (Status, Folders, App; `step` for ←/→, no wrap), `AppKey::of` (agent kind, else a
   non-shell foreground program while live, else a non-shell `launch.argv[0]`, else `shell`;
   lowercase; dead sessions keep their agent), `StatusGroup::of` (mirrors
   `components::format::status_label`: waiting for you, done, working, waiting for response by
-  activity phase, idle, running, exited, dead, unknown; display order = enum order), `Section`
+  activity phase, running, exited, dead, unknown, idle; display order = enum order), `Section`
   (an app or a status) and `sort_sections` (agents first, then programs, then `shell`, by name).
   `is_shell` is the one shell list (`format.rs` uses it too).
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
   folders / App / Status), `filter_label` (the Tabs layout's selector, Grid's header),
-  `switch_tab`/`show_tab`, `open_tab_picker` (All folders: the Folders modal) and the App and
+  `switch_tab`/`show_tab`, `open_tab_picker` (Folders: the Folders modal) and the App and
   Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
   then `picker_sections` (sessions' apps or every status but unknown, plus the filter's), typing
   narrows by name, Tab ticks (Space too while nothing is typed: status names have spaces), Enter
@@ -82,7 +82,7 @@ new-session flow, and code boundaries.
   (`refilter`) don't keep it. `move_session` moves one within its folder, its pinned or unpinned
   part and its app or status (`J`/`K`, and the drag in `sessions.rs`: `App::drag`,
   `SessionDrag`); `group_target` is `{`/`}` over any headers. A folder filter only sets
-  `current_folder` while All folders is active.
+  `current_folder` while the Folders tab is active.
 - `screen.rs`: screen geometry for a size, layout, focus, zoom and the dragged pane sizes
   (`layout::PaneSizes`: `sidebar_width`, `stacked_list_percent`). No header: the panes start at
   the top row and the footer (mode badge, messages, Help/Settings keys) is always exactly the

@@ -80,7 +80,7 @@ impl App {
             Ok(synced) => {
                 self.apply_synced_folders(synced.known, synced.support);
                 self.list.replace_all(synced.sessions, synced.listed);
-                if self.list_layout() == SessionLayout::Tabs {
+                if self.session_layout() == SessionLayout::Tabs {
                     self.select_default_tab();
                 }
                 let cancel = cancel_flag();
@@ -959,7 +959,7 @@ impl App {
     /// Move the selection with the list keys (`j`/`k`, arrows). Sidebar
     /// includes the "+ New session" row; Tabs only has sessions.
     pub fn move_selection(&mut self, delta: isize) {
-        match self.list_layout() {
+        match self.session_layout() {
             SessionLayout::Grid => self.move_grid_selection(delta),
             SessionLayout::Sidebar => {
                 if self.list.move_selection(delta) {
@@ -998,9 +998,6 @@ impl App {
             return;
         }
         self.settings.sessions.layout = session_layout;
-        if let Err(error) = self.save_settings() {
-            self.set_status(format!("Layout changed but not saved: {error}"));
-        }
         if session_layout == SessionLayout::Tabs {
             self.select_default_tab();
         }

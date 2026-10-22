@@ -198,7 +198,7 @@ mod tests {
         assert!(wide.contains("No sessions yet"), "{wide}");
         assert!(wide.contains("Press n to start one in repo"), "{wide}");
         // The folder filter heads the list.
-        assert!(wide.contains("\n   ▤ All folders "), "{wide}");
+        assert!(wide.contains("\n   ◔ Status   ▤ Folders ▾"), "{wide}");
         assert!(wide.contains("RAKUMUX"), "{wide}");
         // Narrow: the list, and the detail stacked below it.
         let narrow = render(&mut h.app, 80, 24);
@@ -512,7 +512,7 @@ mod tests {
         assert!(height < 120, "{height} rows");
         let screen = render(&mut h.app, 120, 200);
         assert!(screen.contains("Quit Rakumux"), "every row shows: {screen}");
-        assert!(!screen.contains('█'), "no scrollbar: {screen}");
+        assert!(!screen.contains('┃'), "no scrollbar: {screen}");
         // The wheel moves the selection, a row per notch.
         let wheel = |kind| MouseEvent {
             kind,
@@ -646,7 +646,7 @@ mod tests {
             assert!(screen.contains("hello from the fake"), "{screen}");
             // The folder filter sits at the left end of the tab bar.
             let bar = screen.lines().next().unwrap();
-            assert!(bar.starts_with(" ▤ All folders ▾   1 ● docs "), "{bar:?}");
+            assert!(bar.starts_with(" ▤ Folders ▾   1 ● docs "), "{bar:?}");
             assert!(!h.app.tab_hits.is_empty());
         }
         let mut empty = with_layout(vec![], SessionLayout::Tabs);
@@ -682,7 +682,7 @@ mod tests {
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("hello from the fake"), "{screen}");
-            assert!(!screen.contains("▤ All folders"), "{screen}");
+            assert!(!screen.contains("▤ Folders"), "{screen}");
             assert!(!screen.contains("RAKUMUX"), "{screen}");
             // The terminal starts at the top; the footer keeps the mode, the
             // zoomed session and the way out.
@@ -694,7 +694,7 @@ mod tests {
         // Back in Rakumux mode the list returns, and the badge says so.
         h.rakumux().await;
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("▤ All folders"), "{screen}");
+        assert!(screen.contains("▤ Folders"), "{screen}");
         let footer = screen.lines().last().unwrap();
         assert!(footer.starts_with(" RAKUMUX "), "{footer:?}");
     }
@@ -904,7 +904,7 @@ mod tests {
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, width);
         assert!(
-            list[1].starts_with("   ▤ All folders   ◇ App ▾   ◔ Status"),
+            list[1].starts_with("   ◔ Status   ▤ Folders   ◇ App ▾"),
             "{wide}"
         );
         let at = |list: &[String], needle: &str| {
@@ -937,21 +937,21 @@ mod tests {
         h.app.show_tab(Grouping::Status);
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, width);
-        assert!(list[1].ends_with("◔ Status ▾"), "{wide}");
+        assert!(list[1].starts_with("   ◔ Status ▾"), "{wide}");
         let headers: Vec<usize> = [
             " ◐ waiting for you ─",
             " ● done ─",
             " working ─",
             " waiting for response ─",
-            " ○ idle ─",
             " ● running ─",
             " ○ dead ─",
+            " ○ idle ─",
         ]
         .iter()
         .map(|header| at(&list, header))
         .collect();
         assert!(headers.windows(2).all(|w| w[0] < w[1]), "{wide}");
-        assert!(list[headers[5]].ends_with("─ 2 sessions"), "{wide}");
+        assert!(list[headers[4]].ends_with("─ 2 sessions"), "{wide}");
         assert!(list[headers[0]].ends_with("─ 1 session"), "{wide}");
         assert!(headers[0] < at(&list, "review-pr-412") && at(&list, "review-pr-412") < headers[1]);
         assert!(headers[3] < at(&list, "frontend") && at(&list, "frontend") < headers[4]);
@@ -974,7 +974,7 @@ mod tests {
                 };
                 let list = list_column(&screen, list_width);
                 // Every tab, the active one with its label and ▾.
-                for mark in ["▤ All folders", "◇ App", "◔ Status"] {
+                for mark in ["▤ Folders", "◇ App", "◔ Status"] {
                     assert!(list[1].contains(mark), "{width}x{height}: {screen}");
                 }
                 let active = format!("{} ▾", h.app.tab_label(grouping));
@@ -1004,7 +1004,7 @@ mod tests {
         let screen = render(&mut h.app, 40, 30);
         let tabs = screen.lines().nth(1).unwrap();
         assert!(
-            tabs.starts_with("   ▤ ◇ ◔ waiting for response ▾"),
+            tabs.starts_with("   ◔ waiting for response ▾ ▤ ◇"),
             "{tabs:?}"
         );
         assert!(tabs.ends_with("/front "), "{tabs:?}");
@@ -1143,11 +1143,12 @@ mod tests {
         // The tabs: a padded band above the sessions, the active tab
         // underlined on its last row.
         assert!(list[0].is_empty(), "{wide}");
-        assert_eq!(list[2], format!("   {}", "▁".repeat(15)), "{wide}");
-        // A folder icon and All folders, with ▾: it opens the Folders
-        // modal. Then the App and Status tabs.
-        assert!(list[1].starts_with("   ▤ All folders ▾"), "{wide}");
-        assert!(list[1].ends_with("▾   ◇ App   ◔ Status"), "{wide}");
+        let under = format!("   {}{}", " ".repeat(11), "▁".repeat(11));
+        assert_eq!(list[2], under, "{wide}");
+        // The Status tab, then a folder icon and Folders, with ▾: it opens
+        // the Folders modal. Then the App tab.
+        assert!(list[1].starts_with("   ◔ Status   ▤ Folders ▾"), "{wide}");
+        assert!(list[1].ends_with("▤ Folders ▾   ◇ App"), "{wide}");
         // Pinned first, with its mark; subtext is program, then git.
         let docs = list.iter().position(|l| l.contains("docs")).unwrap();
         let refactor = list
@@ -1166,7 +1167,7 @@ mod tests {
         // No header above the list: the folder filter says what's shown.
         assert!(wide.lines().last().unwrap().starts_with(" RAKUMUX "));
         let narrow = render(&mut h.app, 80, 24);
-        assert!(narrow.contains("▤ All folders"), "{narrow}");
+        assert!(narrow.contains("▤ Folders"), "{narrow}");
         assert!(narrow.contains("docs ★"), "{narrow}");
     }
 
@@ -1178,7 +1179,7 @@ mod tests {
                 let screen = render(&mut h.app, 160, 48);
                 screen.lines().take(2).collect::<Vec<_>>().join("\n")
             };
-            assert!(first_lines(&mut h).contains("▤ All folders"), "{layout:?}");
+            assert!(first_lines(&mut h).contains("▤ Folders"), "{layout:?}");
             // One folder: its name, and in the list its branch.
             h.app.show_folders(vec![folder("/code/web")]);
             let top = first_lines(&mut h);
@@ -1252,7 +1253,7 @@ mod tests {
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, crate::layout::sidebar_width(160).into());
-        assert!(list[1].starts_with("   ▤ All folders"), "{wide}");
+        assert!(list[1].starts_with("   ◔ Status   ▤ Folders ▾"), "{wide}");
         let at = |needle: &str| {
             list.iter()
                 .position(|l| l.contains(needle))
@@ -1303,7 +1304,7 @@ mod tests {
         // Narrow: still grouped; the stacked list scrolls to the selected
         // header, and the session in view stays below it.
         let narrow = render(&mut h.app, 80, 24);
-        assert!(narrow.contains("▤ All folders"), "{narrow}");
+        assert!(narrow.contains("▤ Folders"), "{narrow}");
         assert!(narrow.contains(" api ──"), "{narrow}");
         assert!(narrow.contains("frontend · waiting for you"), "{narrow}");
         assert!(narrow.contains("hello from the fake"), "{narrow}");
@@ -1318,7 +1319,7 @@ mod tests {
         h.press(KeyCode::Char('P')).await;
         let wide = render(&mut h.app, 160, 48);
         let lines: Vec<&str> = wide.lines().collect();
-        assert!(lines[1].starts_with("   ▤ All folders"), "{wide}");
+        assert!(lines[1].starts_with("   ◔ Status   ▤ Folders"), "{wide}");
         assert!(lines[1].contains("▴"), "{wide}");
         assert!(wide.contains("┌ Folders ─"), "{wide}");
         assert!(
@@ -1456,13 +1457,13 @@ mod tests {
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             let bar = screen.lines().next().unwrap();
-            assert!(bar.starts_with(" ▤ All folders ▾  "), "{bar:?}");
+            assert!(bar.starts_with(" ▤ Folders ▾  "), "{bar:?}");
         }
         // Wide enough for every tab: the launch folder's first, pinned
         // first, then the other folders' by name.
         let screen = render(&mut h.app, 160, 48);
         let bar = screen.lines().next().unwrap();
-        assert!(bar.starts_with(" ▤ All folders ▾   1 ● docs ★ "), "{bar:?}");
+        assert!(bar.starts_with(" ▤ Folders ▾   1 ● docs ★ "), "{bar:?}");
         let at = |name: &str| bar.find(name).unwrap();
         assert!(at("api-refactor") < at("server") && at("server") < at("frontend"));
         assert!(h
@@ -1484,7 +1485,7 @@ mod tests {
         assert!(wide.contains("[y] Restart"), "{wide}");
         h.press(KeyCode::Esc).await;
         let wide = render(&mut h.app, 160, 48);
-        assert!(wide.contains("▤ All folders"), "{wide}");
+        assert!(wide.contains("▤ Folders"), "{wide}");
         assert!(wide.contains("api"), "{wide}");
         h.press(KeyCode::Char('P')).await;
         let wide = render(&mut h.app, 160, 48);
@@ -1587,7 +1588,9 @@ mod tests {
             // Settings shows every choice; Help and the Folders modal open.
             h.press(KeyCode::Char(',')).await;
             let screen = render(&mut h.app, width, height);
-            assert!(screen.contains("[Master detail] Grid Tabs"), "{screen}");
+            // (A phone has no Grid.)
+            assert!(screen.contains("[Master detail] Tabs"), "{screen}");
+            assert!(!screen.contains("Grid"), "{screen}");
             h.press(KeyCode::Esc).await;
             h.press(KeyCode::Char('?')).await;
             let screen = render(&mut h.app, width, height);
@@ -1625,7 +1628,7 @@ mod tests {
             let layout = h.app.screen();
             assert!(!layout.stacked && layout.detail.is_none(), "{screen}");
             assert_eq!(layout.list.unwrap().height, height - 1);
-            for name in ["▤ All folders", "● api", "● docs", "+ New session"] {
+            for name in ["▤ Folders", "● api", "● docs", "+ New session"] {
                 assert!(screen.contains(name), "{name}: {screen}");
             }
             // No session on screen.
@@ -1643,7 +1646,7 @@ mod tests {
             h.press(KeyCode::Enter).await;
             assert_eq!(h.app.focus, Focus::Session);
             let screen = render(&mut h.app, width, height);
-            assert!(!screen.contains("▤ All folders"), "{screen}");
+            assert!(!screen.contains("▤ Folders"), "{screen}");
             let tabs = screen.lines().next().unwrap();
             assert!(tabs.contains("api") && tabs.contains("docs"), "{tabs:?}");
             assert!(screen
@@ -1658,7 +1661,7 @@ mod tests {
             h.rakumux().await;
             assert_eq!(h.app.focus, Focus::List);
             let screen = render(&mut h.app, width, height);
-            assert!(screen.contains("▤ All folders"), "{screen}");
+            assert!(screen.contains("▤ Folders"), "{screen}");
             assert!(!screen.contains("hello from the fake"), "{screen}");
         }
     }
@@ -1682,7 +1685,7 @@ mod tests {
                 let top = rows(&screen, 0, list.bottom());
                 let name = format!("● session-{i}");
                 assert!(top.contains(&name), "{name} {width}x{height}: {screen}");
-                assert!(top.contains("▤ All folders"), "{screen}");
+                assert!(top.contains("▤ Folders"), "{screen}");
             }
             // + New session: in view, and the last session stays below.
             h.press(KeyCode::Char('G')).await;

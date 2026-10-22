@@ -1,4 +1,4 @@
-//! The tabs on the session list's top row (All folders, App, Status;
+//! The tabs on the session list's top row (Folders, App, Status;
 //! `grouping`) and the App and Status modals. ←/→ on the top row, or a
 //! click, switch tabs; Enter there, or a click on the active tab, opens the
 //! active tab's modal (the Folders modal for All folders, `folders.rs`).
@@ -16,7 +16,7 @@ impl App {
     /// What a tab of the top row says. The active one names its filter:
     /// All folders, `web` or `3 folders`; App, `claude` or `2 apps`; Status,
     /// `working` or `2 statuses`. The others say what the list shows of them
-    /// while they're inactive: All folders, App, Status.
+    /// while they're inactive: Folders, App, Status.
     pub fn tab_label(&self, grouping: Grouping) -> String {
         if grouping != self.list.grouping() {
             return grouping.name().into();

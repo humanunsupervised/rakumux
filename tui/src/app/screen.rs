@@ -274,18 +274,31 @@ mod tests {
     #[test]
     fn a_phone_shows_the_list_or_the_session_under_tabs() {
         for layout in SessionLayout::ALL {
-            // A phone in portrait, Rakumux mode: the list, then the footer.
+            // A phone in portrait, Rakumux mode: Master detail's list (or
+            // Grid's cards, which the app doesn't offer on phones), then
+            // the footer; Tabs keeps its tab bar over the session.
             let screen = at(45, 40, layout, Focus::List);
-            if layout == SessionLayout::Grid {
-                assert_eq!(screen.grid, Some(Rect::new(0, 0, 45, 39)));
-                assert_eq!(screen.list, None);
-            } else {
-                assert_eq!(screen.list, Some(Rect::new(0, 0, 45, 39)));
-                assert_eq!(screen.grid, None);
+            match layout {
+                SessionLayout::Grid => {
+                    assert_eq!(screen.grid, Some(Rect::new(0, 0, 45, 39)));
+                    assert_eq!(screen.list, None);
+                }
+                SessionLayout::Sidebar => {
+                    assert_eq!(screen.list, Some(Rect::new(0, 0, 45, 39)));
+                    assert_eq!(screen.grid, None);
+                }
+                SessionLayout::Tabs => {
+                    assert_eq!(screen.list, None);
+                    assert_eq!(screen.tabs, Some(Rect::new(0, 0, 45, 1)));
+                    assert_eq!(screen.detail_title, Some(Rect::new(0, 1, 45, 1)));
+                    assert_eq!(screen.terminal, Some(Rect::new(0, 2, 45, 37)));
+                }
             }
-            assert_eq!((screen.divider, screen.tabs), (None, None));
+            if layout != SessionLayout::Tabs {
+                assert_eq!((screen.divider, screen.tabs), (None, None));
+                assert!(screen.detail.is_none() && screen.terminal.is_none());
+            }
             assert!(!screen.stacked);
-            assert!(screen.detail.is_none() && screen.terminal.is_none());
             assert_eq!(screen.footer, Some(Rect::new(0, 39, 45, 1)));
             assert_tiled(&screen, "45x40 list");
 
@@ -356,8 +369,10 @@ mod tests {
                     let footer = screen.footer.unwrap();
                     assert_eq!(footer, Rect::new(0, height - 1, width, 1), "{label}");
                     let phone = width < layout::PHONE_BELOW;
-                    // The session is on screen, except in a phone's list.
-                    if (phone || layout == SessionLayout::Grid) && focus == Focus::List {
+                    // The session is on screen, except in a phone's list
+                    // and in Grid.
+                    let list_alone = phone && layout == SessionLayout::Sidebar;
+                    if (list_alone || layout == SessionLayout::Grid) && focus == Focus::List {
                         assert!(screen.terminal.is_none(), "{label}");
                         assert_eq!(screen.grid.or(screen.list).unwrap().width, width, "{label}");
                         continue;
@@ -370,7 +385,14 @@ mod tests {
                         assert_eq!(terminal, Rect::new(0, 1, width, height - 2), "{label}");
                     }
                     if phone {
-                        assert_eq!(terminal, Rect::new(0, 1, width, height - 2), "{label}");
+                        // Under a row of tabs; in Rakumux mode with the
+                        // session's title row too.
+                        let top = if focus == Focus::List { 2 } else { 1 };
+                        assert_eq!(
+                            terminal,
+                            Rect::new(0, top, width, height - 1 - top),
+                            "{label}"
+                        );
                         assert_eq!(screen.tabs, Some(Rect::new(0, 0, width, 1)), "{label}");
                     }
                     if screen.stacked {

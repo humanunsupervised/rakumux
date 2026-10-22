@@ -430,8 +430,23 @@ impl App {
 
     // ------------------------------------------------------------ layout
 
+    /// The layout in use: the one chosen, except on a phone, which has no
+    /// Grid (it shows Master detail instead).
     pub fn session_layout(&self) -> SessionLayout {
-        self.settings.sessions.layout
+        match self.settings.sessions.layout {
+            SessionLayout::Grid if self.no_grid() => SessionLayout::Sidebar,
+            layout => layout,
+        }
+    }
+
+    /// The layout `v` switches to (phones skip Grid).
+    pub fn next_layout(&self) -> SessionLayout {
+        self.session_layout().next_on(self.no_grid())
+    }
+
+    /// This screen has no Grid: a phone, once its size is known.
+    fn no_grid(&self) -> bool {
+        self.area.width > 0 && self.phone()
     }
 
     /// Where keys go now is the session's program (session mode with no
@@ -491,16 +506,6 @@ impl App {
     /// never both.
     pub fn phone(&self) -> bool {
         crate::layout::is_phone(self.area.width)
-    }
-
-    /// How browsing keys and taps behave: phones use the Master detail
-    /// list for Sidebar/Tabs, and keep Grid's card navigation in Grid.
-    pub fn list_layout(&self) -> SessionLayout {
-        if self.phone() && self.session_layout() != SessionLayout::Grid {
-            SessionLayout::Sidebar
-        } else {
-            self.session_layout()
-        }
     }
 
     /// The list sizes set by dragging the dividers.
@@ -601,10 +606,9 @@ impl App {
         let (label, value, note) = match item {
             SettingsItem::Layout => {
                 let layout = self.session_layout();
-                let value = SessionLayout::ALL
-                    .iter()
+                let value = SessionLayout::offered(self.no_grid())
                     .map(|l| {
-                        if *l == layout {
+                        if l == layout {
                             format!("[{}]", l.label())
                         } else {
                             l.label().to_string()

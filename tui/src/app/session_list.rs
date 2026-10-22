@@ -34,7 +34,7 @@ use super::text_input::TextInput;
 /// section's header, a session, or "+ New session" (the last row).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
-    /// The top row: the tabs (All folders, App, Status). ←/→ switch tabs,
+    /// The top row: the tabs (Folders, App, Status). ←/→ switch tabs,
     /// Enter opens the active tab's modal (the Folders modal for All
     /// folders).
     Folders,
@@ -1666,7 +1666,7 @@ mod tests {
             row_names(&list),
             ["^", "## claude", "r1", "r4", "w1", "## shell", "r2", "+"]
         );
-        // Back on All folders, its filter applies again; the app filter
+        // Back on the Folders tab, its filter applies again; the app filter
         // waits for the App tab.
         list.set_grouping(Grouping::Folder);
         assert_eq!(names(&list), ["w1", "w2"]);
@@ -1692,12 +1692,12 @@ mod tests {
                 "r4",
                 "## working",
                 "r1",
-                "## idle",
-                "w1",
                 "## running",
                 "r2",
                 "## dead",
                 "w2",
+                "## idle",
+                "w1",
                 "+"
             ]
         );

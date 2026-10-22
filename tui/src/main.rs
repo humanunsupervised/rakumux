@@ -480,6 +480,7 @@ async fn run_app<B: ratatui::backend::Backend + Write>(
     let mut input = EventStream::new();
     // Keys whose escape sequence arrives in pieces (a phone over SSH).
     let mut escapes = escape_time::EscapeJoiner::default();
+    let link = escape_time::Link::from_env(|name| std::env::var_os(name));
     let mut input_log = InputLog::open(app);
     // `kill -USR1 <pid>` writes the input log now (a running Rakumux on
     // a phone, without quitting it).
@@ -496,11 +497,14 @@ async fn run_app<B: ratatui::backend::Backend + Write>(
             event = input.next() => match event {
                 Some(Ok(event)) => {
                     input_log.record("read", &event, app);
-                    let wait = if app.keys_go_to_session() {
-                        escape_time::ESCAPE_TIME
+                    let target = if app.keys_go_to_session() {
+                        escape_time::EscTarget::Session
+                    } else if matches!(app.mode, app::types::AppMode::Normal) {
+                        escape_time::EscTarget::List
                     } else {
-                        escape_time::ESCAPE_TIME_RAKUMUX
+                        escape_time::EscTarget::Dialog
                     };
+                    let wait = escape_time::wait(link, target);
                     escapes.feed(event, std::time::Instant::now(), wait)
                 }
                 Some(Err(e)) => return Err(anyhow::anyhow!("Failed to read input events: {e}")),

@@ -193,7 +193,8 @@ tui/
     auth/                    # Clerk auth, deferred (feature flag off)
     escape_time.rs           # keys whose escape sequence arrives in pieces (phones over SSH): a lone
                              # Esc waits for the rest of an arrow, Home/End, PgUp/PgDn, F1-F4 or a focus
-                             # report: 300 ms in session mode, 800 ms in Rakumux mode
+                             # report: 25 ms on a local terminal; over SSH (SSH_CONNECTION, SSH_CLIENT,
+                             # SSH_TTY) 300 ms in session mode and dialogs, 800 ms in Rakumux mode's list
     updater.rs, version.rs, theme.rs, icons.rs (plain / emoji / Nerd Font marks)
 ```
 
@@ -364,7 +365,7 @@ accidents; they don't stop a hostile process running as the same user.
 - **Config** (`tui/src/app/config.rs`): `Config {anthropic_api_key, openai_api_key,
   ai_primary_provider, openai_model}` plus `sessions {rakumux_key ("ctrl+\\"; an older
   `prefix_key` other than "ctrl+b" still counts), cycle_keys (["alt+up", "alt+down"]),
-  cycle_keys_in_session (false), layout ("sidebar" | "tabs"), icons ("plain" | "emoji" | "nerd":
+  cycle_keys_in_session (false), icons ("plain" | "emoji" | "nerd":
   the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
@@ -529,9 +530,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Folder** (scope, scope root; `project` on the wire): the directory a session was started in;
   the TUI shows all folders, grouped, and the folder filter narrows them; agents see only their
   own.
-- **Folder filter**: the All folders tab's filter (`▤ All folders ▾`, `▤ web ▾`, `▤ 3 folders ▾`)
+- **Folder filter**: the Folders tab's filter (`▤ Folders ▾`, `▤ web ▾`, `▤ 3 folders ▾`)
   and the Folders modal it opens; local to one window and not saved.
-- **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, All folders, App and
+- **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, Status, Folders and
   Status. The active one decides the list's headers (per folder, per app, per status) and the one
   filter that applies; each keeps its own filter while another is active; none is saved.
 - **Pin**: a user mark that lists a session first in its folder.
@@ -568,8 +569,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   previewed). `rakumux attach` uses it as its prefix.
 - **Layout**: Master detail (`sidebar`, default: list left, detail right; on narrow windows the
   list stacked above the detail in Rakumux mode), Grid (`grid`: paged read-only live terminal
-  cards), or Tabs (`tabs`, tab bar on top); `sessions.layout`. Phones show the list (Master detail
-  and Tabs) or Grid, then a session under tabs.
+  cards), or Tabs (`tabs`, tab bar on top). Not saved: every start opens Master detail. Phones
+  offer Master detail (the list, then a session under tabs) and Tabs (the tab bar over the
+  session), not Grid.
 - **Contracts**: the crate types and traits that define the architecture.
 
 ## Using Rakumux
@@ -596,7 +598,7 @@ which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_key
 on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the tabs, a header and + New session keep the last session in view,
-one the filters show), `←`/`→` (`h`/`l`) on the tabs switch between All folders, App and Status,
+one the filters show), `←`/`→` (`h`/`l`) on the tabs switch between Status, Folders and App,
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
 that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
@@ -607,10 +609,10 @@ PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
 build; daemon and sessions stay up), `q`
 quit. There is no header: the panes start at the top row, and the list's first row (Sidebar) is
-its tabs, `▤ All folders ▾   ◇ App   ◔ Status`: the active one is bold, underlined and names its
+its tabs, `▤ Folders ▾   ◇ App   ◔ Status`: the active one is bold, underlined and names its
 filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`, `◔ 2 statuses ▾`); short rows narrow the gaps, then show
 the inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's
-filter at the left (`▤ All folders ▾`); only Master detail shows the three tabs. The footer,
+filter at the left (`▤ Folders ▾`); only Master detail shows the three tabs. The footer,
 always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
 while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
 SESSION/TERMINAL), then in Rakumux mode `| session: <name>` (the selected session), messages and
@@ -631,11 +633,14 @@ changes it; Settings has no phone or AI naming rows (API keys come from `config.
 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`).
 
 Phones (under `layout::PHONE_BELOW` = 80 columns; phone terminals
-are about 40–60 columns in portrait) show one thing at a time: Rakumux mode is the session list
-alone in Master detail and Tabs, or the cards in Grid, full screen; a tap on a session (or `Enter`) goes into it, and session mode gives it the
-screen under a row of tabs, one per session (no folder filter, no title row; a tap on a tab switches
-session and stays in session mode). `Ctrl-\` (or a tap on the SESSION badge) goes back to the list.
-Moving through the list on a phone doesn't resize anything: no session is on screen there.
+are about 40–60 columns in portrait) offer Master detail and Tabs, not Grid (a chosen Grid shows
+as Master detail there, and `v` skips it). Master detail shows one thing at a time: Rakumux mode is
+the session list alone, full screen; a tap on a session (or `Enter`) goes into it, and session mode
+gives it the screen under a row of tabs, one per session (no folder filter, no title row; a tap on
+a tab switches session and stays in session mode). Tabs keeps that row of tabs over the selected
+session in Rakumux mode too. `Ctrl-\` (or a tap on the SESSION badge) goes back to Rakumux mode.
+Moving through Master detail's list on a phone doesn't resize anything: no session is on screen
+there.
 
 Narrow windows (Sidebar from 80 to `layout::SINGLE_PANE_BELOW` = 100 columns): in Rakumux mode
 the list is stacked on top, a one-row divider under it, and the selected session's detail (title
@@ -677,8 +682,8 @@ app (`AppKey::of`: the session's `agent.kind`, else its foreground program unles
 `launch.argv[0]` unless a shell, else `shell`; an ended session keeps its agent), agents first,
 then other programs, then `shell`, each by name, with live/total. Status: a header per status
 (`StatusGroup::of`, like `format::status_label`: waiting for you, done, working, waiting for
-response (the `WaitingForResponse` activity phase), idle, running (live, nothing reported),
-exited, dead), in that order, with a session count. Inside a header the sessions keep the list's
+response (the `WaitingForResponse` activity phase), running (live, nothing reported), exited,
+dead, then idle), in that order, with a session count. Inside a header the sessions keep the list's
 order, folder by folder (launch folder first); moves stay within the header too. A status
 change moves a session to another header, but the selected session stays shown when it stops
 matching the filter (an answered question), until something else is selected. Their modals
@@ -686,8 +691,8 @@ matching the filter (an answered question), until something else is selected. Th
 app or status with counts (Status lists every status); typing narrows, `Tab` (and `Space` while
 nothing is typed) tick several, `Enter` shows them, `Esc` closes. A click on a tab activates it,
 on the active one opens its modal; `P` opens the Folders modal from any tab and a folder picked
-there makes All folders active. New sessions still go in `App::current_folder`; a folder filter
-only counts while All folders is active.
+there makes the Folders tab active. New sessions still go in `App::current_folder`; a folder filter
+only counts while the Folders tab is active.
 
 New session (`n`, "+ New session", Enter on a folder header) creates immediately with a generated name,
 selects the new session and enters session mode at its login-shell prompt, without a naming modal.
@@ -700,8 +705,8 @@ hides adds that folder to the filter. Other folders, commands and startup comman
 `rakumux new --cwd DIR --cmd C -- ARGV`.
 
 **Grid.** Settings → Layout or `v` in Rakumux mode cycles Master detail, Grid and
-Tabs. Grid fills the body above the one-row footer with up to six terminal cards, including on
-phones. Arrows or `h`/`j`/`k`/`l` select cards, PgUp/PgDn change page, Home/End go to the ends;
+Tabs (phones skip Grid). Grid fills the body above the one-row footer with up to six terminal
+cards; a phone shows Master detail instead. Arrows or `h`/`j`/`k`/`l` select cards, PgUp/PgDn change page, Home/End go to the ends;
 `P` and `/` keep filtering folders and text. Enter or a tap opens a session full screen under
 tabs; `Ctrl-\` returns to Grid. `n` or the last + New session card creates immediately.
 Only visible cards attach, always as observers, and are cancelled offscreen, on activation,
@@ -743,7 +748,7 @@ in the outer terminal's own (`terminal_view::DefaultColors::NATIVE`), not the Ra
 colours a program sets itself are kept. The daemon still answers OSC 10/11 colour queries with
 Tokyo Night's (`vt::Colors`).
 
-The Folders modal (`P`, Enter on or a click on the active All folders tab; `AppMode::Folders`,
+The Folders modal (`P`, Enter on or a click on the active Folders tab; `AppMode::Folders`,
 `app/folders.rs`) lists All folders (ticked when there's no filter), then every folder that has
 sessions (and the filter's), with name, path, branch and live/total; typing filters the rows.
 `Enter` on a folder shows it alone, on All folders every folder; `Tab`/`Space` tick several, and

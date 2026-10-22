@@ -428,8 +428,8 @@ impl KeyAction {
                  filter); with nothing to cancel it goes back. `{p}` goes back at once."
             ),
             KeyAction::GoIn => "A dead session is revived, an exited one restarted. On the \
-                 tabs at the top it opens the active tab's modal (Folders, Apps or \
-                 Statuses); on a folder's header or + New session, creates a generated-name \
+                 tabs at the top it opens the active tab's modal (Statuses, Folders or \
+                 Apps); on a folder's header or + New session, creates a generated-name \
                  session and enters its shell immediately."
                 .into(),
             KeyAction::LastSession => {
@@ -450,8 +450,7 @@ impl KeyAction {
                 None => "Option/Alt+↑/↓ are turned off in your settings; ↑/↓ and j/k move.".into(),
             },
             KeyAction::Top => {
-                "The tabs (All folders, App, Status) are the first row; ←/→ switch them there."
-                    .into()
+                "The tabs (Status, Folders, App) are the first row; ←/→ switch them there.".into()
             }
             KeyAction::NextFolder | KeyAction::PreviousFolder => {
                 "With several folders shown: the first session under the next or previous \
@@ -1117,6 +1116,8 @@ fn setting_label_width(ctx: &ModalContext) -> usize {
         + 2
 }
 
+/// A quiet scrollbar down `body`'s last column: a thin muted thumb on a
+/// dim track.
 fn draw_scrollbar(f: &mut Frame, body: Rect, scroll: u16, max_scroll: u16, total: u16) {
     let palette = theme::palette();
     let height = u32::from(body.height);
@@ -1128,9 +1129,9 @@ fn draw_scrollbar(f: &mut Frame, body: Rect, scroll: u16, max_scroll: u16, total
     for row in 0..height {
         let in_thumb = row >= offset && row < offset + thumb;
         let (symbol, color) = if in_thumb {
-            ("█", palette.accent_primary)
+            ("┃", palette.text_muted)
         } else {
-            ("│", palette.text_subtle)
+            ("│", palette.border_dim)
         };
         buf.get_mut(x, body.y + row as u16)
             .set_symbol(symbol)
@@ -1362,7 +1363,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("The screen");
     match ctx.layout {
         SessionLayout::Sidebar => doc.bullet(format!(
-            "Session list, on the left: the tabs on top ({} All folders, App, Status), then the \
+            "Session list, on the left: the tabs on top (Status, {} Folders, App), then the \
              sessions in the order you keep them (a new one goes at the bottom), each with a \
              status mark, a bold title, and its app name in muted blue before the git branch; \
              the selected title is white, the others a softer foreground colour. With \
@@ -1375,7 +1376,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
              and text filters and pinned/user ordering apply here too.",
         ),
         SessionLayout::Tabs => doc.bullet(format!(
-            "Tab bar, along the top: the folder filter ({} All folders) at the left, then the \
+            "Tab bar, along the top: the folder filter ({} Folders) at the left, then the \
              sessions as numbered tabs, each with a status mark, in the order you keep them. \
              Pinned tabs (★) come first.",
             ctx.icons.folder()
@@ -1438,7 +1439,7 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         ),
         row(
             "←, →, h, l",
-            "On the tabs: switch between All folders, App and Status",
+            "On the tabs: switch between Status, Folders and App",
         ),
         row(
             "gg, G, Home, End",
@@ -1491,7 +1492,7 @@ fn mouse(doc: &mut Doc) {
     doc.heading("Mouse");
     doc.bullet("Click a session in the list to show it; click the session to work in it.");
     doc.bullet(
-        "Click a tab at the top of the list (All folders, App, Status) to group the list by \
+        "Click a tab at the top of the list (Status, Folders, App) to group the list by \
          it; click the active one (▾) to open its modal; click a row there to show it alone, \
          All to show everything, or outside it to close it.",
     );
@@ -1609,7 +1610,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          the session stays in its folder.",
     );
     doc.text(
-        "The list shows the sessions of All folders, including sessions started from another \
+        "The list shows the sessions of every folder, including sessions started from another \
          window, the command line or an agent, as they appear. With more than one folder shown, \
          each folder has a header row with its name, git branch and how many of its sessions \
          are running (live/total). The folder you started Rakumux in comes first, then the \
@@ -1617,7 +1618,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     );
     doc.text(
         "The folder filter at the top of the list (at the left end of the tab bar in the Tabs \
-         layout) says what's shown: All folders, one folder's name, or how many folders. \
+         layout) says what's shown: Folders (all of them), one folder's name, or how many. \
          `Enter` on it, `P` or a click opens the Folders modal: All folders, then every folder \
          that has sessions. Type to narrow the rows; `Enter` shows the folder under the cursor \
          alone, and on All folders every folder again. Tick several with `Tab` or `Space` and \
@@ -1627,10 +1628,11 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          it and `Enter` adds it.",
     );
     doc.text(
-        "All folders is the first of three tabs on the list's top row; `←`/`→` there (or a \
-         click) switch to App, a header per agent or program (claude, codex, opencode, …, \
-         then other programs, then shell), and Status, a header per state (waiting for you, \
-         done, working, waiting for response, idle, running, exited, dead). One tab is active \
+        "The list's top row has three tabs: Status, a header per state (waiting for you, \
+         done, working, waiting for response, running, exited, dead, then idle), Folders \
+         (where the list starts), and App, a header per agent or program (claude, codex, \
+         opencode, …, then other programs, then shell); `←`/`→` there (or a click) switch \
+         them. One tab is active \
          at a time: it decides the headers and the only filter that applies, and each tab \
          keeps its own while another is active. `Enter` on the active tab opens its modal \
          (Apps, Statuses) like the Folders modal: tick several with `Tab` (or `Space` while \
@@ -1639,7 +1641,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     );
     doc.text(
         "The filter only narrows what this window shows; it isn't saved, so Rakumux always \
-         starts on All folders.",
+         starts on every folder.",
     );
 
     filter_and_switcher_keys(doc);
@@ -1791,9 +1793,10 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         layout::STACK_MIN_ROWS + 1
     ));
     doc.text(format!(
-        "On a phone (below {} columns, in Master detail or Tabs) you see one thing at a time: \
-         Rakumux mode is the session list; tap a session to open it, full screen under a \
-         row of tabs (tap a tab to switch); `{p}` or a tap on the SESSION badge at the bottom \
+        "On a phone (below {} columns) Master detail and Tabs are offered, not Grid. Master \
+         detail shows one thing at a time: Rakumux mode is the session list; tap a session to \
+         open it, full screen under a row of tabs (tap a tab to switch); Tabs keeps the tabs \
+         over the session in Rakumux mode too; `{p}` or a tap on the SESSION badge at the bottom \
          left goes back to the list, and the RAKUMUX badge returns to the session. Tap \
          `? Help` or `, Settings` in Rakumux mode to open them.",
         layout::PHONE_BELOW
@@ -1808,7 +1811,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("Grid");
     doc.text(
         "A responsive page of up to six cards shows real live terminal output as read-only \
-         observers, including on phones. Only visible cards have preview streams. Terminals \
+         observers; phones don't offer Grid. Only visible cards have preview streams. Terminals \
          keep their existing size; cards crop and pan rather than resizing them. Titles and \
          selected borders stay readable while inactive output fades. Saved sessions show \
          their saved output; the session Rakumux runs inside is never attached.",
@@ -1841,9 +1844,9 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("Switching layouts");
     doc.text(format!(
         "Change Layout in Settings (`,` or `{SETTINGS_KEY}` in Rakumux mode). \
-         It applies at once and is saved in ~/.rakumux/config.json as `sessions.layout` \
-          (`sidebar`, `grid` or `tabs`). `v` cycles Master detail, Grid and Tabs in Rakumux mode; \
-          session mode forwards `v` to the program."
+         It applies at once to this window; every start opens Master detail. `v` cycles \
+          Master detail, Grid and Tabs in Rakumux mode (a phone skips Grid); session mode \
+          forwards `v` to the program."
     ));
 
     doc.heading("Zoom");
@@ -2962,7 +2965,7 @@ mod tests {
         assert_eq!(usize::from(popup.height), 2 + rows + 1);
         assert_eq!(popup.y, (120 - popup.height) / 2);
         let text = buffer_text(&buf);
-        assert!(!text.contains('█'), "everything fits: {text}");
+        assert!(!text.contains('┃'), "everything fits: {text}");
         // Nothing needlessly cut.
         let page = page_text(&context, 0, body);
         assert!(page.contains("▶ Layout"), "{page}");
@@ -3096,7 +3099,7 @@ mod tests {
         // Labels on the left, values pinned to the right.
         let row = |label: &str| -> String {
             let line = text.lines().find(|l| l.contains(label)).unwrap();
-            line.trim_matches(|c| c == ' ' || c == '│' || c == '█')
+            line.trim_matches(|c| c == ' ' || c == '│' || c == '┃')
                 .to_string()
         };
         for (label, value) in [
@@ -3111,7 +3114,7 @@ mod tests {
         }
         let right = |label| {
             let line = text.lines().find(|l: &&str| l.contains(label)).unwrap();
-            line.trim_end_matches(|c| c == ' ' || c == '│' || c == '█')
+            line.trim_end_matches(|c| c == ' ' || c == '│' || c == '┃')
                 .chars()
                 .count()
         };
@@ -3252,7 +3255,16 @@ mod tests {
         )
         .len();
         assert!(text.contains(&format!("/{total}")), "{text}");
-        assert!(text.contains('█'), "scrollbar thumb: {text}");
+        // A quiet thumb and track, not the accent.
+        let p = theme::palette();
+        let (x, thumb) = (80 - 2, buf.area.y..buf.area.bottom());
+        let cells: Vec<_> = thumb.map(|y| buf.get(x, y).clone()).collect();
+        let thumb = cells.iter().find(|c| c.symbol() == "┃").expect("thumb");
+        assert_eq!(thumb.fg, p.text_muted);
+        assert!(cells
+            .iter()
+            .any(|c| c.symbol() == "│" && c.fg == p.border_dim));
+        assert!(!text.contains('█'), "{text}");
     }
 
     #[test]

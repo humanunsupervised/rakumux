@@ -55,7 +55,7 @@ pub struct Settings {
 
 /// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
-/// `phone_offer_seen`, `layout`, `icons`, `sidebar_width`, `stacked_list_percent` and
+/// `phone_offer_seen`, `icons`, `sidebar_width`, `stacked_list_percent` and
 /// `session_order`; other keys in the
 /// section (daemon tuning such as `scrollback_rows`) are kept as they are
 /// when the TUI saves the file, except the retired ones
@@ -86,10 +86,9 @@ pub struct SessionsConfig {
     /// row turns it on any time.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub phone_offer_seen: bool,
-    /// Master detail (`sidebar`), Grid (`grid`) or Tabs (`tabs`). A value this
-    /// version doesn't know (e.g. written by a newer one) reads as the
-    /// default instead of breaking the whole config.
-    #[serde(deserialize_with = "lenient_layout")]
+    /// The layout this window shows: Master detail, Grid or Tabs. Not saved:
+    /// every start opens Master detail (an older file's `layout` is dropped).
+    #[serde(skip)]
     pub layout: SessionLayout,
     /// Marks for folders and branches: plain, emoji or Nerd Font. A value
     /// this version doesn't know reads as plain.
@@ -177,11 +176,6 @@ fn is_plain(icons: &Icons) -> bool {
     *icons == Icons::Plain
 }
 
-fn lenient_layout<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SessionLayout, D::Error> {
-    let value = serde_json::Value::deserialize(deserializer)?;
-    Ok(serde_json::from_value(value).unwrap_or_default())
-}
-
 /// `"cycle_keys": { "previous": "alt+up", "next": "alt+down" }`. Both
 /// empty turns them off (`j`/`k` and the arrows still move in Rakumux
 /// mode).
@@ -203,9 +197,9 @@ impl Default for CycleKeysConfig {
 
 /// Keys of the `"sessions"` section that earlier versions wrote and this
 /// one no longer reads: `selected_projects` (the shown projects; the folder
-/// filter isn't saved). They're dropped on load, so the next save leaves
-/// them out.
-pub const RETIRED_SESSION_KEYS: [&str; 1] = ["selected_projects"];
+/// filter isn't saved) and `layout` (every start opens Master detail).
+/// They're dropped on load, so the next save leaves them out.
+pub const RETIRED_SESSION_KEYS: [&str; 2] = ["selected_projects", "layout"];
 
 impl Settings {
     pub fn load_from(path: &Path) -> Result<Self> {
@@ -372,14 +366,15 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(raw["sessions"]["scrollback_rows"], 5000);
         assert_eq!(raw["sessions"]["prefix_key"], "ctrl+a");
-        assert_eq!(raw["sessions"]["layout"], "tabs");
+        // The layout isn't saved: every start opens Master detail.
+        assert!(raw["sessions"].get("layout").is_none(), "{raw}");
         assert_eq!(raw["sessions"]["cycle_keys"]["next"], "alt+down");
         assert_eq!(raw["openai_api_key"], "sk-y");
         assert_eq!(raw["anthropic_api_key"], "sk-ant-x");
     }
 
     #[test]
-    fn an_old_selected_projects_still_loads_and_is_dropped_on_save() {
+    fn an_old_selected_projects_or_layout_still_loads_and_is_dropped_on_save() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         fs::write(
@@ -389,12 +384,15 @@ mod tests {
         )
         .unwrap();
         let settings = Settings::load_from(&path).unwrap();
-        assert_eq!(settings.sessions.layout, SessionLayout::Tabs);
+        // A saved layout no longer applies: the start is Master detail.
+        assert_eq!(settings.sessions.layout, SessionLayout::Sidebar);
         assert!(!settings.sessions.other.contains_key("selected_projects"));
+        assert!(!settings.sessions.other.contains_key("layout"));
         settings.save_to(&path).unwrap();
         let raw: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(raw["sessions"].get("selected_projects").is_none(), "{raw}");
+        assert!(raw["sessions"].get("layout").is_none(), "{raw}");
         // Other keys this version doesn't know survive.
         assert_eq!(raw["sessions"]["scrollback_rows"], 5000);
         assert_eq!(raw["sessions"]["future"]["a"], 1);
@@ -456,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_layout_reads_as_the_default() {
+    fn any_saved_layout_reads_as_master_detail() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         fs::write(
