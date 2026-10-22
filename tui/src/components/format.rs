@@ -6,6 +6,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use session_core::model::{GitInfo, Lifecycle, SessionStatus, SessionView};
 
+use crate::app::grouping::{is_shell, StatusGroup};
 use crate::icons::Icons;
 use crate::layout::{char_width, str_width};
 use crate::theme;
@@ -65,6 +66,24 @@ pub fn status_glyph(session: &SessionView) -> (&'static str, Style) {
                 ("●", Style::default().fg(p.accent_green))
             }
         },
+    }
+}
+
+/// The mark of a status in the Status tab's headers and modal: the one
+/// its sessions have (see [`status_glyph`] and [`activity_badge`]).
+pub fn status_group_glyph(status: StatusGroup) -> (&'static str, Style) {
+    let p = theme::palette();
+    match status {
+        StatusGroup::WaitingForYou => ("◐", Style::default().fg(p.accent_orange)),
+        StatusGroup::Done => ("●", Style::default().fg(p.accent_gold)),
+        StatusGroup::Working | StatusGroup::WaitingForResponse => (
+            super::utils::get_spinner_char(),
+            Style::default().fg(p.accent_primary),
+        ),
+        StatusGroup::Idle | StatusGroup::Dead => ("○", Style::default().fg(p.text_muted)),
+        StatusGroup::Running => ("●", Style::default().fg(p.accent_green)),
+        StatusGroup::Exited => ("✕", Style::default().fg(p.accent_pink)),
+        StatusGroup::Unknown => ("?", Style::default().fg(p.text_muted)),
     }
 }
 
@@ -182,8 +201,9 @@ pub fn secondary_line(
     }
 }
 
-/// Quiet blue app labels, independent of lifecycle and its status colours.
-fn program_color(program: &str) -> Color {
+/// Quiet blue app labels, independent of lifecycle and its status colours
+/// (rows, and the App tab's headers and modal).
+pub fn program_color(program: &str) -> Color {
     let p = theme::palette();
     agents::color(&program.to_ascii_lowercase()).unwrap_or(p.label_blue)
 }
@@ -252,14 +272,9 @@ fn session_program(session: &SessionView) -> Option<&str> {
                 .terminal
                 .as_ref()
                 .and_then(|terminal| terminal.foreground_process.as_deref())
-                .filter(|process| !process.is_empty() && !SHELLS.contains(process))
+                .filter(|process| !process.is_empty() && !is_shell(process))
         })
 }
-
-/// Shells, which the list shows as nothing more than "shell".
-const SHELLS: &[&str] = &[
-    "sh", "bash", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh", "nu", "xonsh", "elvish",
-];
 
 /// `text` in at most `width` columns, cut in the middle with `…` (paths
 /// keep both ends).

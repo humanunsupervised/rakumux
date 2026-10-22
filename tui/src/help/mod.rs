@@ -1,10 +1,10 @@
-//! The Settings and Help modals, which share their frame, tabs and keys.
+//! The Settings and Help modals, which share their frame and keys.
 //!
-//! - **Settings** (`,` or `o` in Rakumux mode): the General
-//!   tab lists the settings (layout, AI naming provider, API keys) for the
-//!   caller to change; the Keys tab is a table of actions and their keys,
-//!   built from the user's configured keys, where `Enter` runs the selected
-//!   action.
+//! - **Settings** (`,` or `o` in Rakumux mode): one scrolling page, sized
+//!   to its contents: the settings (layout, icons, session keys, update,
+//!   terminal panel) for the caller to change, then every action and its
+//!   keys, built from the user's configured keys, where `Enter` runs the
+//!   selected action. `→` shows what the selected row does in a popover.
 //! - **Help** (`?` in Rakumux mode): sessions and
 //!   folders (the folder filter, All folders, multi-select, grouping, order,
 //!   pinning, git branch and worktree), the screen, moving around, the mouse, layouts, observer vs
@@ -35,11 +35,21 @@ pub const SETTINGS_KEY: &str = "o";
 /// The key the footer shows for Settings in Rakumux mode.
 pub const SETTINGS_KEY_PRIMARY: &str = ",";
 
-/// Help keeps room for long-form documentation; Settings uses its table width.
+/// Help keeps room for long-form documentation; Settings hugs its rows.
 const MIN_MODAL_WIDTH: u16 = 80;
 const MIN_MODAL_HEIGHT: u16 = 24;
 const MIN_SETTINGS_WIDTH: usize = 48;
-const MAX_SETTINGS_WIDTH: usize = 88;
+const MAX_SETTINGS_WIDTH: usize = 100;
+
+/// Columns Settings adds to its widest row, so its two columns (pinned
+/// left and right) have room between them.
+const SETTINGS_SPACE: usize = 16;
+
+/// The most of the screen's height Settings takes, in percent.
+const SETTINGS_MAX_HEIGHT: u32 = 80;
+
+/// Lines a Help tab scrolls per notch of the mouse wheel.
+const WHEEL_LINES: i32 = 3;
 
 /// Body columns not used for text: one of padding on the left, two of gap
 /// and one of scrollbar on the right.
@@ -48,7 +58,7 @@ const BODY_MARGIN: u16 = 4;
 /// Lines moved by PgUp/PgDn before the first render tells us the body height.
 const DEFAULT_PAGE: u16 = 10;
 
-/// General tab: how far a value sits in when it goes on the line under its
+/// Settings: how far a value sits in when it goes on the line under its
 /// label (a narrow screen).
 const VALUE_INDENT: usize = 4;
 
@@ -60,7 +70,7 @@ const LITERAL_BACKTICK: char = '\u{E000}';
 /// The two modals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Modal {
-    /// What you can change and do: General, Keys.
+    /// What you can change and do: the settings, then every action.
     Settings,
     /// How Rakumux works: Overview, Sessions, Layouts, Agents & CLI,
     /// License.
@@ -71,7 +81,7 @@ impl Modal {
     /// The modal's tabs, in order.
     pub fn tabs(self) -> &'static [ModalTab] {
         match self {
-            Modal::Settings => &[ModalTab::General, ModalTab::Keys],
+            Modal::Settings => &[ModalTab::Settings],
             Modal::Help => &[
                 ModalTab::Overview,
                 ModalTab::Sessions,
@@ -96,12 +106,12 @@ impl Modal {
 }
 
 /// Tabs of the two modals; each belongs to one ([`ModalTab::modal`]).
+/// Settings has one page and shows no tab strip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ModalTab {
-    /// The settings themselves.
+    /// The Settings page: the settings, then the actions and their keys.
     #[default]
-    General,
-    Keys,
+    Settings,
     Overview,
     Sessions,
     Layouts,
@@ -112,9 +122,8 @@ pub enum ModalTab {
 impl ModalTab {
     /// Every tab of both modals.
     #[cfg(test)]
-    pub const ALL: [ModalTab; 7] = [
-        ModalTab::General,
-        ModalTab::Keys,
+    pub const ALL: [ModalTab; 6] = [
+        ModalTab::Settings,
         ModalTab::Overview,
         ModalTab::Sessions,
         ModalTab::Layouts,
@@ -124,8 +133,7 @@ impl ModalTab {
 
     pub fn label(self) -> &'static str {
         match self {
-            ModalTab::General => "General",
-            ModalTab::Keys => "Keys",
+            ModalTab::Settings => "Settings",
             ModalTab::Overview => "Overview",
             ModalTab::Sessions => "Sessions",
             ModalTab::Layouts => "Layouts",
@@ -146,7 +154,7 @@ impl ModalTab {
     /// The modal this tab is in.
     pub fn modal(self) -> Modal {
         match self {
-            ModalTab::General | ModalTab::Keys => Modal::Settings,
+            ModalTab::Settings => Modal::Settings,
             _ => Modal::Help,
         }
     }
@@ -173,8 +181,8 @@ impl ModalTab {
     }
 }
 
-/// An action on the Settings modal's Keys tab: a row of the table, run with
-/// `Enter` there or with its keys in Rakumux mode.
+/// An action listed in Settings with its keys, run with `Enter` there or
+/// with its keys in Rakumux mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyAction {
     /// From a session to Rakumux mode (the Rakumux key).
@@ -230,7 +238,7 @@ pub enum KeyAction {
 }
 
 impl KeyAction {
-    /// The rows of the Keys tab, in order.
+    /// The actions as Settings lists them, in order.
     pub const ALL: [KeyAction; 36] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
@@ -270,7 +278,7 @@ impl KeyAction {
         KeyAction::Quit,
     ];
 
-    /// The Keys tab heading it's listed under.
+    /// The heading Settings lists it under.
     pub fn section(self) -> &'static str {
         match self {
             KeyAction::RakumuxMode
@@ -312,7 +320,7 @@ impl KeyAction {
         }
     }
 
-    /// The Action column.
+    /// What Settings calls it.
     pub fn label(self) -> &'static str {
         match self {
             KeyAction::RakumuxMode => "Rakumux mode (from a session)",
@@ -354,8 +362,8 @@ impl KeyAction {
         }
     }
 
-    /// The Key column: the Rakumux key for leaving a session, Rakumux
-    /// mode's keys for the rest, from the configured keys.
+    /// Its keys: the Rakumux key for leaving a session, Rakumux mode's
+    /// keys for the rest, from the configured keys.
     fn keys(self, k: &KeyNames) -> String {
         let plain = |keys: &[&str]| keys.join(", ");
         let with_cycle = |cycle: &str, keys: &[&str]| {
@@ -405,8 +413,8 @@ impl KeyAction {
         }
     }
 
-    /// Shown under the table while this row is selected, when there's
-    /// more to say.
+    /// Shown under the Settings page while this row is selected, when
+    /// there's more to say.
     fn note(self, k: &KeyNames) -> String {
         let p = &k.p;
         match self {
@@ -420,27 +428,31 @@ impl KeyAction {
                  filter); with nothing to cancel it goes back. `{p}` goes back at once."
             ),
             KeyAction::GoIn => "A dead session is revived, an exited one restarted. On the \
-                 folder filter it opens the Folders modal; on a folder's header or + New \
-                  session, creates a generated-name session and enters its shell immediately."
+                 tabs at the top it opens the active tab's modal (Folders, Apps or \
+                 Statuses); on a folder's header or + New session, creates a generated-name \
+                 session and enters its shell immediately."
                 .into(),
             KeyAction::LastSession => {
                 "Into the session you worked in before the current one.".into()
             }
             KeyAction::NextSession | KeyAction::PreviousSession => match &k.cycle {
                 Some(cycle) if k.cycle_in_session => format!(
-                    "`{cycle}` also works inside a session (Settings, General), so programs \
+                    "`{cycle}` also works inside a session (see its setting above), so programs \
                      there never get it. If it does nothing, your terminal isn't sending \
                      Option/Alt: in Terminal.app turn on \"Use Option as Meta key\"."
                 ),
                 Some(cycle) => format!(
                     "`{cycle}` works in Rakumux mode; turn on \"Option+↑/↓ in sessions\" \
-                     (General) to use it inside a session too. If it does nothing, your \
+                     (above) to use it inside a session too. If it does nothing, your \
                      terminal isn't sending Option/Alt: in Terminal.app turn on \"Use Option as \
                      Meta key\"."
                 ),
                 None => "Option/Alt+↑/↓ are turned off in your settings; ↑/↓ and j/k move.".into(),
             },
-            KeyAction::Top => "The folder filter is the first row.".into(),
+            KeyAction::Top => {
+                "The tabs (All folders, App, Status) are the first row; ←/→ switch them there."
+                    .into()
+            }
             KeyAction::NextFolder | KeyAction::PreviousFolder => {
                 "With several folders shown: the first session under the next or previous \
                  folder's header."
@@ -497,24 +509,27 @@ impl KeyAction {
     }
 }
 
-/// Open-modal state: the tab shown (which says the modal), how far its
-/// body is scrolled, the setting selected on the General tab and the action
-/// selected on the Keys tab.
+/// Open-modal state: the tab shown (which says the modal), how far a Help
+/// tab is scrolled, and the row selected on the Settings page.
 #[derive(Debug, Clone)]
 pub struct ModalState {
     pub tab: ModalTab,
-    /// Lines scrolled from the top of the tab's body.
+    /// Lines scrolled from the top of a Help tab's body.
     pub scroll: u16,
-    /// Row selected on the General tab.
+    /// Row selected on the Settings page: a setting (`0..general_rows`),
+    /// then an action (into [`KeyAction::ALL`]).
     pub selected: usize,
-    /// Row selected on the Keys tab (into [`KeyAction::ALL`]).
-    pub action: usize,
-    /// Rows on the General tab.
+    /// Settings listed before the actions.
     general_rows: usize,
-    /// Largest useful `scroll` for the current tab, recorded by `render`.
+    /// Largest useful scroll for the current tab, recorded by `render`.
     max_scroll: Cell<u16>,
     /// Body height in lines, recorded by `render` (PgUp/PgDn step).
     page: Cell<u16>,
+    /// The Settings page's first line in view, kept by `render` so the
+    /// selected row stays visible without the page jumping.
+    top: Cell<u16>,
+    /// The selected Settings row's note shows in a popover (`→`).
+    pub note_open: bool,
 }
 
 /// What the caller should do after [`ModalState::handle_key`].
@@ -527,34 +542,54 @@ pub enum ModalAction {
     Ignored,
     /// Close the modal.
     Close,
-    /// `Enter` or `Space` on the General tab: change the setting in this
-    /// row.
+    /// `Enter` or `Space` on a setting: change the setting in this row.
     Change(usize),
-    /// `Enter` or `Space` on the Keys tab: close the modal and run this.
+    /// `Enter` or `Space` on an action: close the modal and run this.
     Run(KeyAction),
     /// `t` in Help: show the welcome tour.
     Tour,
 }
 
 impl ModalState {
-    /// Settings opened on `tab`, with `general_rows` settings on the
-    /// General tab (the first one selected).
+    /// A modal opened on `tab`, with `general_rows` settings before the
+    /// actions on the Settings page (the first one selected).
     pub fn new(tab: ModalTab, general_rows: usize) -> Self {
         Self {
             tab,
             scroll: 0,
             selected: 0,
-            action: 0,
             general_rows,
             max_scroll: Cell::new(u16::MAX),
             page: Cell::new(DEFAULT_PAGE),
+            top: Cell::new(0),
+            note_open: false,
         }
     }
 
-    /// Select General row `row` (clamped to the rows there are).
+    /// Select Settings row `row` (clamped to the rows there are).
+    #[cfg(test)]
     pub fn with_selected(mut self, row: usize) -> Self {
-        self.selected = row.min(self.general_rows.saturating_sub(1));
+        self.selected = row.min(self.rows() - 1);
         self
+    }
+
+    /// Rows on the Settings page: the settings, then the actions.
+    fn rows(&self) -> usize {
+        self.general_rows + KeyAction::ALL.len()
+    }
+
+    /// The selected Settings row, when it's an action.
+    pub fn selected_action(&self) -> Option<KeyAction> {
+        let index = self.selected.checked_sub(self.general_rows)?;
+        KeyAction::ALL.get(index).copied()
+    }
+
+    /// Select `action`'s row on the Settings page.
+    #[cfg(test)]
+    pub fn select_action(&mut self, action: KeyAction) {
+        if let Some(index) = KeyAction::ALL.iter().position(|a| *a == action) {
+            self.selected = self.general_rows + index;
+        }
     }
 
     /// Show `tab` from its top.
@@ -567,19 +602,38 @@ impl ModalState {
         }
     }
 
-    /// Scroll the body by `delta` lines (positive = down), e.g. for the
-    /// mouse wheel.
+    /// Scroll a Help tab's body by `delta` lines (positive = down).
     pub fn scroll_by(&mut self, delta: i32) {
         let max = i32::from(self.max_scroll.get());
         let current = i32::from(self.scroll).min(max);
         self.scroll = (current + delta).clamp(0, max) as u16;
     }
 
-    /// `Esc`/`q` close, and `?` (Help) or `o` (Settings); `Tab`/`→` and
-    /// `Shift-Tab`/`←` switch tabs; number keys jump to a tab. On the
-    /// General and Keys tabs `↑`/`↓` (`j`/`k`, `Home`/`End`) select a row
-    /// and `Enter`/`Space` change the setting or run the action; on the
-    /// others `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` scroll (`j`/`k`/`g`/`G`
+    /// The mouse wheel turned `notches` (positive = down): Settings moves
+    /// its selection a row per notch, Help scrolls.
+    pub fn wheel(&mut self, notches: i32) {
+        if self.tab == ModalTab::Settings {
+            self.move_selection(notches);
+        } else {
+            self.scroll_by(notches.saturating_mul(WHEEL_LINES));
+        }
+    }
+
+    /// Move the Settings selection `delta` rows, stopping at either end. A
+    /// note in a popover closes.
+    fn move_selection(&mut self, delta: i32) {
+        let last = (self.rows() - 1) as i64;
+        self.selected = (self.selected as i64 + i64::from(delta)).clamp(0, last) as usize;
+        self.note_open = false;
+    }
+
+    /// `Esc`/`q` close, and `?` (Help) or `o` (Settings). In Settings
+    /// `↑`/`↓` (`j`/`k`, `PgUp`/`PgDn`, `Home`/`End`) select a row,
+    /// `Enter`/`Space` change the setting or run the action, and `→` (`l`)
+    /// shows the row's note in a popover that `←` (`h`) or `Esc` closes,
+    /// as does moving or `Enter`. In Help
+    /// `Tab`/`→` and `Shift-Tab`/`←` switch tabs, number keys jump to a tab,
+    /// and `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` scroll (`j`/`k`/`g`/`G`
     /// too). Keys with Ctrl or Alt held are ignored.
     pub fn handle_key(&mut self, key: &KeyEvent) -> ModalAction {
         if key.kind == KeyEventKind::Release {
@@ -588,35 +642,29 @@ impl ModalState {
         if !(key.modifiers - KeyModifiers::SHIFT).is_empty() {
             return ModalAction::Ignored;
         }
-        if self.tab == ModalTab::General {
-            let last = self.general_rows.saturating_sub(1);
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => self.selected = self.selected.saturating_sub(1),
-                KeyCode::Down | KeyCode::Char('j') => self.selected = (self.selected + 1).min(last),
-                KeyCode::Home | KeyCode::Char('g') => self.selected = 0,
-                KeyCode::End | KeyCode::Char('G') => self.selected = last,
-                KeyCode::Enter | KeyCode::Char(' ') if self.general_rows > 0 => {
-                    return ModalAction::Change(self.selected.min(last))
-                }
-                _ => return self.handle_common_key(key),
-            }
-            return ModalAction::Handled;
-        }
-        if self.tab == ModalTab::Keys {
-            let last = KeyAction::ALL.len() - 1;
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => self.action = self.action.saturating_sub(1),
-                KeyCode::Down | KeyCode::Char('j') => self.action = (self.action + 1).min(last),
-                KeyCode::Home | KeyCode::Char('g') => self.action = 0,
-                KeyCode::End | KeyCode::Char('G') => self.action = last,
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    return ModalAction::Run(KeyAction::ALL[self.action.min(last)])
-                }
-                _ => return self.handle_common_key(key),
-            }
-            return ModalAction::Handled;
-        }
         let page = i32::from(self.page.get().max(1));
+        if self.tab == ModalTab::Settings {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
+                KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
+                KeyCode::PageUp => self.move_selection(-page),
+                KeyCode::PageDown => self.move_selection(page),
+                KeyCode::Home | KeyCode::Char('g') => self.move_selection(i32::MIN),
+                KeyCode::End | KeyCode::Char('G') => self.move_selection(i32::MAX),
+                KeyCode::Right | KeyCode::Char('l') => self.note_open = true,
+                KeyCode::Left | KeyCode::Char('h') => self.note_open = false,
+                KeyCode::Esc if self.note_open => self.note_open = false,
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    self.note_open = false;
+                    return match self.selected_action() {
+                        Some(action) => ModalAction::Run(action),
+                        None => ModalAction::Change(self.selected),
+                    };
+                }
+                _ => return self.handle_common_key(key),
+            }
+            return ModalAction::Handled;
+        }
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.scroll_by(1),
             KeyCode::Up | KeyCode::Char('k') => self.scroll_by(-1),
@@ -629,7 +677,7 @@ impl ModalState {
         ModalAction::Handled
     }
 
-    /// Keys that work on every tab: closing and switching tabs.
+    /// Keys that work on every tab: closing, and in Help switching tabs.
     fn handle_common_key(&mut self, key: &KeyEvent) -> ModalAction {
         let own_keys: &[char] = match self.tab.modal() {
             Modal::Help => &['?'],
@@ -639,6 +687,8 @@ impl ModalState {
             KeyCode::Esc | KeyCode::Char('q') => return ModalAction::Close,
             KeyCode::Char(c) if own_keys.contains(&c) => return ModalAction::Close,
             KeyCode::Char('t') if self.tab.modal() == Modal::Help => return ModalAction::Tour,
+            // One page: nothing to switch to.
+            _ if self.tab.modal() == Modal::Settings => return ModalAction::Ignored,
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => self.select_tab(self.tab.next()),
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
                 self.select_tab(self.tab.prev())
@@ -657,7 +707,7 @@ impl ModalState {
 }
 
 /// What the modal needs to know about the user's setup, so shortcuts show
-/// the configured keys and the General tab the current settings.
+/// the configured keys and Settings the current settings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModalContext {
     /// The Rakumux key as the user should read it, e.g. `Ctrl-\\`.
@@ -679,11 +729,11 @@ pub struct ModalContext {
     pub version: String,
     /// Opened while a session had the keys rather than Rakumux mode.
     pub in_session: bool,
-    /// The General tab's rows, in order.
+    /// The settings, in order.
     pub general: Vec<SettingRow>,
 }
 
-/// One setting on the General tab.
+/// One setting on the Settings page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingRow {
     /// The heading it's listed under, e.g. `Appearance`.
@@ -696,20 +746,23 @@ pub struct SettingRow {
     pub note: String,
 }
 
-/// Draw Settings around the active tab's content, or Help at its reading
-/// width. Both stay screen-bounded and retain their existing vertical scroll.
+/// Draw Settings at its contents' size, or Help at its reading width. Both
+/// stay screen-bounded and scroll what doesn't fit.
 pub fn render(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext) {
-    let popup = if state.tab.modal() == Modal::Settings {
-        settings_area(area, state.tab, ctx)
-    } else {
-        modal_area(area)
-    };
+    match state.tab.modal() {
+        Modal::Settings => render_settings(f, area, state, ctx),
+        Modal::Help => render_help(f, area, state, ctx),
+    }
+}
+
+/// Clear `popup` and draw the modal's frame on it: its title, and the
+/// version on the right. Returns the area inside, unless too small to use.
+fn draw_frame(f: &mut Frame, popup: Rect, modal: Modal, ctx: &ModalContext) -> Option<Rect> {
     if popup.width < 3 || popup.height < 3 {
-        return;
+        return None;
     }
     let palette = theme::palette();
     f.render_widget(Clear, popup);
-
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -720,7 +773,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext)
                 .fg(palette.text_primary),
         )
         .title(Span::styled(
-            format!(" {} ", state.tab.modal().title()),
+            format!(" {} ", modal.title()),
             Style::default()
                 .fg(palette.accent_primary)
                 .add_modifier(Modifier::BOLD),
@@ -734,11 +787,35 @@ pub fn render(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext)
         );
     let inner = block.inner(popup);
     f.render_widget(block, popup);
-    if inner.width == 0 || inner.height == 0 {
-        return;
-    }
+    (inner.width > 0 && inner.height > 0).then_some(inner)
+}
 
-    // Tab strip, rule, body, footer.
+/// `lines` from `scroll` in `body`, after a column of padding, with a
+/// scrollbar on the right when they don't all fit.
+fn draw_body(f: &mut Frame, body: Rect, lines: Vec<Line<'static>>, scroll: u16, max_scroll: u16) {
+    let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    let visible: Vec<Line> = lines
+        .into_iter()
+        .skip(usize::from(scroll))
+        .take(usize::from(body.height))
+        .collect();
+    let text_area = Rect {
+        x: body.x + 1,
+        width: body.width.saturating_sub(1),
+        ..body
+    };
+    f.render_widget(Paragraph::new(visible), text_area);
+    if max_scroll > 0 && body.width >= 3 && body.height > 0 {
+        draw_scrollbar(f, body, scroll, max_scroll, total);
+    }
+}
+
+/// Help: a tab strip, a rule, the tab's text and the keys.
+fn render_help(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext) {
+    let Some(inner) = draw_frame(f, modal_area(area), Modal::Help, ctx) else {
+        return;
+    };
+    let palette = theme::palette();
     let tabs_row = Rect { height: 1, ..inner };
     let items = tab_items(state.tab, tabs_row.width);
     layout::render_tabs(tabs_row, f.buffer_mut(), &items, state.tab.index());
@@ -764,43 +841,94 @@ pub fn render(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext)
     };
 
     let text_width = usize::from(body.width.saturating_sub(BODY_MARGIN)).max(1);
-    let (lines, selected_line) = match state.tab {
-        ModalTab::General => {
-            let (lines, line) = general_lines(ctx, state.selected, text_width);
-            (lines, Some(line))
-        }
-        ModalTab::Keys => {
-            let (lines, line) = action_lines(ctx, state.action, text_width);
-            (lines, Some(line))
-        }
-        tab => (body_lines(tab, ctx, text_width), None),
-    };
+    let lines = body_lines(state.tab, ctx, text_width);
     let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
     let max_scroll = total.saturating_sub(body.height);
     state.max_scroll.set(max_scroll);
     state.page.set(body.height.saturating_sub(1).max(1));
-    let scroll = match selected_line {
-        // The selected setting stays in view.
-        Some(line) => u16::try_from(line + 1)
-            .unwrap_or(u16::MAX)
-            .saturating_sub(body.height)
-            .min(max_scroll),
-        None => state.scroll.min(max_scroll),
+    let scroll = state.scroll.min(max_scroll);
+    draw_body(f, body, lines, scroll, max_scroll);
+
+    if footer_height == 1 {
+        let footer = Rect {
+            y: inner.bottom() - 1,
+            height: 1,
+            ..inner
+        };
+        let jump = format!("1-{}", Modal::Help.tabs().len());
+        let position = if total > body.height {
+            let last = (scroll + body.height).min(total);
+            format!("{}-{}/{} ", scroll + 1, last, total)
+        } else {
+            String::new()
+        };
+        draw_footer(
+            f,
+            footer,
+            [
+                &[
+                    ("Tab ←→", "switch"),
+                    ("↑↓ PgUp PgDn", "scroll"),
+                    (&jump, "jump"),
+                    ("t", "tour"),
+                    ("Esc", "close"),
+                ],
+                &[("←→", "tabs"), ("↑↓", "scroll"), ("Esc", "close")],
+                &[("←→", "tabs"), ("Esc", "close")],
+            ],
+            &position,
+        );
+    }
+}
+
+/// Settings: one page as tall as its rows (up to 80% of the screen), then
+/// the keys.
+fn render_settings(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext) {
+    let width = settings_width(area, ctx);
+    let text_width = usize::from(width.saturating_sub(2 + BODY_MARGIN)).max(1);
+    let page = settings_lines(ctx, state.selected, text_width);
+    let total = u16::try_from(page.lines.len()).unwrap_or(u16::MAX);
+    // The borders and the footer, within most of the screen: a long page
+    // scrolls rather than filling it.
+    let room = (u32::from(area.height) * SETTINGS_MAX_HEIGHT / 100) as u16;
+    let height = total.saturating_add(3).min(room.max(area.height.min(8)));
+    let popup = Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + (area.height - height) / 2,
+        width,
+        height,
+    };
+    let Some(inner) = draw_frame(f, popup, Modal::Settings, ctx) else {
+        return;
+    };
+    let footer_height = u16::from(inner.height >= 4);
+    let body = Rect {
+        height: inner.height - footer_height,
+        ..inner
     };
 
-    let visible: Vec<Line> = lines
-        .into_iter()
-        .skip(usize::from(scroll))
-        .take(usize::from(body.height))
-        .collect();
-    let text_area = Rect {
-        x: body.x + 1,
-        width: body.width.saturating_sub(1),
-        ..body
-    };
-    f.render_widget(Paragraph::new(visible), text_area);
-    if max_scroll > 0 && body.width >= 3 && body.height > 0 {
-        draw_scrollbar(f, body, scroll, max_scroll, total);
+    // Scroll only as far as it takes to show the selected row (from its
+    // heading when it starts a section).
+    let max_scroll = total.saturating_sub(body.height);
+    let to_line = |line: usize| u16::try_from(line).unwrap_or(u16::MAX);
+    let (start, end) = page.selected;
+    let mut top = state.top.get().min(max_scroll);
+    if to_line(end) >= top.saturating_add(body.height) {
+        top = to_line(end + 1).saturating_sub(body.height);
+    }
+    top = top.min(to_line(start)).min(max_scroll);
+    state.top.set(top);
+    state.max_scroll.set(max_scroll);
+    state.page.set(body.height.saturating_sub(1).max(1));
+    draw_body(f, body, page.lines, top, max_scroll);
+
+    let names = KeyNames::new(ctx);
+    let note = row_note(ctx, &names, state.selected);
+    let showing = state.note_open && !note.is_empty();
+    if showing {
+        let row = body.y + to_line(end).saturating_sub(top);
+        let label = row_label(ctx, state.selected);
+        draw_note(f, body, row, &label, &note);
     }
 
     if footer_height == 1 {
@@ -809,12 +937,101 @@ pub fn render(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext)
             height: 1,
             ..inner
         };
-        draw_footer(f, footer, state.tab, scroll, body.height, total);
+        let enter = if state.selected < ctx.general.len() {
+            "change"
+        } else {
+            "run"
+        };
+        let about = if showing {
+            ("←", "back")
+        } else if note.is_empty() {
+            ("", "")
+        } else {
+            ("→", "about")
+        };
+        let hints = |pairs: &[(&'static str, &'static str)]| -> Vec<(&'static str, &'static str)> {
+            pairs
+                .iter()
+                .copied()
+                .filter(|(keys, _)| !keys.is_empty())
+                .collect()
+        };
+        draw_footer(
+            f,
+            footer,
+            [
+                &hints(&[("↑↓", "select"), about, ("Enter", enter), ("Esc", "close")]),
+                &hints(&[("↑↓", "select"), about, ("Enter", enter), ("Esc", "close")]),
+                &hints(&[about, ("Enter", enter), ("Esc", "close")]),
+            ],
+            "",
+        );
     }
 }
 
-/// The tab strip's items (the open modal's tabs): the full labels when
-/// they all fit in `width`, otherwise the short ones.
+/// The selected row's note in a popover over the Settings page, just below
+/// the row on screen at `row` (above it when there's no room below), inside
+/// `body`: the page doesn't move.
+fn draw_note(f: &mut Frame, body: Rect, row: u16, label: &str, note: &str) {
+    let palette = theme::palette();
+    let width = body.width.saturating_sub(4).min(64);
+    if width < 8 || body.height < 3 {
+        return;
+    }
+    // Borders and a column of padding on each side.
+    let text_width = usize::from(width - 4);
+    let mut lines = note_lines(note, text_width);
+    let most = usize::from(body.height - 2);
+    if lines.len() > most {
+        lines.truncate(most);
+        if let Some(last) = lines.pop() {
+            let mut last = fit(last.spans, text_width.saturating_sub(1));
+            last.spans
+                .push(Span::styled("…", Styles::from_theme().note));
+            lines.push(last);
+        }
+    }
+    let height = lines.len() as u16 + 2;
+    let y = if row + 1 + height <= body.bottom() {
+        row + 1
+    } else if row >= body.y + height {
+        row - height
+    } else {
+        body.bottom() - height
+    };
+    let popover = Rect {
+        x: body.x + 3,
+        y,
+        width,
+        height,
+    };
+    f.render_widget(Clear, popover);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(palette.accent_primary))
+        .style(Style::default().bg(palette.surface))
+        .title(Span::styled(
+            format!(
+                " {} ",
+                truncate(label, usize::from(width).saturating_sub(4))
+            ),
+            Style::default()
+                .fg(palette.text_bright)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(popover);
+    f.render_widget(block, popover);
+    let text = Rect {
+        x: inner.x + 1,
+        width: inner.width.saturating_sub(2),
+        ..inner
+    };
+    f.render_widget(Paragraph::new(lines), text);
+}
+
+/// Help's tab strip items: the full labels when they all fit in `width`,
+/// otherwise the short ones.
 fn tab_items(selected: ModalTab, width: u16) -> Vec<TabItem> {
     let tabs = selected.modal().tabs();
     // A tab is ` N label `; tabs are one column apart.
@@ -839,7 +1056,7 @@ fn tab_items(selected: ModalTab, width: u16) -> Vec<TabItem> {
         .collect()
 }
 
-/// Where the modal goes within `area`.
+/// Where Help goes within `area`.
 fn modal_area(area: Rect) -> Rect {
     let scaled = |size: u16, min: u16| -> u16 {
         let eighty = (u32::from(size) * 4 / 5) as u16;
@@ -855,37 +1072,32 @@ fn modal_area(area: Rect) -> Rect {
     }
 }
 
-/// Measure the tables, not the selected explanatory paragraph: notes wrap,
-/// so moving the selection cannot make the dialog grow and shrink.
-fn settings_area(area: Rect, tab: ModalTab, ctx: &ModalContext) -> Rect {
-    let content = match tab {
-        ModalTab::General => {
-            let values = ctx
-                .general
-                .iter()
-                .map(|row| str_width(&row.value))
-                .max()
-                .unwrap_or(0);
-            2 + setting_label_width(ctx) + values
-        }
-        ModalTab::Keys => {
-            let names = KeyNames::new(ctx);
-            let labels = KeyAction::ALL
-                .iter()
-                .map(|action| str_width(action.label()))
-                .max()
-                .unwrap_or(0);
-            let keys = KeyAction::ALL
-                .iter()
-                .map(|action| str_width(&action.keys(&names)))
-                .max()
-                .unwrap_or(0);
-            2 + labels + 3 + keys
-        }
-        _ => return modal_area(area),
-    };
+/// How wide Settings is in `area`: its widest row, setting or action, and
+/// some space, not the selected note (notes wrap, so moving the selection
+/// never makes the dialog grow and shrink); a column of the screen kept
+/// free on each side.
+fn settings_width(area: Rect, ctx: &ModalContext) -> u16 {
+    let values = ctx
+        .general
+        .iter()
+        .map(|row| str_width(&row.value))
+        .max()
+        .unwrap_or(0);
+    let settings = 2 + setting_label_width(ctx) + values;
+    let names = KeyNames::new(ctx);
+    let labels = KeyAction::ALL
+        .iter()
+        .map(|action| str_width(action.label()))
+        .max()
+        .unwrap_or(0);
+    let keys = KeyAction::ALL
+        .iter()
+        .map(|action| str_width(&action.keys(&names)))
+        .max()
+        .unwrap_or(0);
+    let actions = 2 + labels + 3 + keys;
     let title = str_width(" Settings ") + str_width(&format!(" Rakumux {} ", ctx.version)) + 2;
-    let preferred = (content + usize::from(BODY_MARGIN) + 2)
+    let preferred = (settings.max(actions) + SETTINGS_SPACE + usize::from(BODY_MARGIN) + 2)
         .max(title)
         .clamp(MIN_SETTINGS_WIDTH, MAX_SETTINGS_WIDTH);
     let available = if area.width > 2 {
@@ -893,11 +1105,7 @@ fn settings_area(area: Rect, tab: ModalTab, ctx: &ModalContext) -> Rect {
     } else {
         area.width
     };
-    let width = (preferred as u16).min(available);
-    let mut popup = modal_area(area);
-    popup.x = area.x + (area.width - width) / 2;
-    popup.width = width;
-    popup
+    (preferred as u16).min(available)
 }
 
 fn setting_label_width(ctx: &ModalContext) -> usize {
@@ -930,48 +1138,14 @@ fn draw_scrollbar(f: &mut Frame, body: Rect, scroll: u16, max_scroll: u16, total
     }
 }
 
-fn draw_footer(f: &mut Frame, footer: Rect, tab: ModalTab, scroll: u16, page: u16, total: u16) {
+/// The modal's last row: the first of `hints` (keys and what they do) that
+/// fits beside `position` (shown on the right), shortest last, for a phone.
+fn draw_footer(f: &mut Frame, footer: Rect, hints: [&[(&str, &str)]; 3], position: &str) {
     let palette = theme::palette();
     let hint_style = Style::default().fg(palette.neutral_gray);
     let key_style = Style::default().fg(palette.accent_green);
-    let position = if total > page && !matches!(tab, ModalTab::General | ModalTab::Keys) {
-        let last = (scroll + page).min(total);
-        format!("{}-{}/{} ", scroll + 1, last, total)
-    } else {
-        String::new()
-    };
-    let position_width = str_width(&position) as u16;
+    let position_width = str_width(position) as u16;
     let room = footer.width.saturating_sub(position_width + 1);
-
-    let jump = format!("1-{}", tab.modal().tabs().len());
-    let rows = matches!(tab, ModalTab::General | ModalTab::Keys);
-    let enter = if tab == ModalTab::Keys {
-        "run"
-    } else {
-        "change"
-    };
-    let full: Vec<(&str, &str)> = if rows {
-        vec![
-            ("↑↓", "select"),
-            ("Enter", enter),
-            ("Tab ←→", "switch"),
-            (&jump, "jump"),
-            ("Esc", "close"),
-        ]
-    } else {
-        vec![
-            ("Tab ←→", "switch"),
-            ("↑↓ PgUp PgDn", "scroll"),
-            (&jump, "jump"),
-            ("t", "tour"),
-            ("Esc", "close"),
-        ]
-    };
-    let short = if rows {
-        [("↑↓", "select"), ("Enter", enter), ("Esc", "close")]
-    } else {
-        [("←→", "tabs"), ("↑↓", "scroll"), ("Esc", "close")]
-    };
     let hint = |pairs: &[(&str, &str)]| -> Line<'static> {
         let mut spans = vec![Span::raw(" ")];
         for (i, (keys, action)) in pairs.iter().enumerate() {
@@ -983,18 +1157,14 @@ fn draw_footer(f: &mut Frame, footer: Rect, tab: ModalTab, scroll: u16, page: u1
         }
         Line::from(spans)
     };
-    // Shortest, for a phone: the way out stays whole.
-    let tiny = if rows {
-        [("Enter", enter), ("Esc", "close")]
-    } else {
-        [("←→", "tabs"), ("Esc", "close")]
-    };
-    let mut line = hint(&full);
+    let [full, short, tiny] = hints;
+    let mut line = hint(full);
     if line.width() > usize::from(room) {
-        line = hint(&short);
+        line = hint(short);
     }
     if line.width() > usize::from(room) {
-        line = hint(&tiny);
+        // The way out stays whole.
+        line = hint(tiny);
     }
     let hint_area = Rect {
         width: room,
@@ -1007,7 +1177,10 @@ fn draw_footer(f: &mut Frame, footer: Rect, tab: ModalTab, scroll: u16, page: u1
             width: position_width,
             ..footer
         };
-        f.render_widget(Paragraph::new(position).style(hint_style), position_area);
+        f.render_widget(
+            Paragraph::new(position.to_string()).style(hint_style),
+            position_area,
+        );
     }
 }
 
@@ -1115,8 +1288,8 @@ fn content(tab: ModalTab, ctx: &ModalContext) -> Doc {
     let keys = KeyNames::new(ctx);
     let mut doc = Doc::default();
     match tab {
-        // Rows, not prose: see `general_lines` and `action_lines`.
-        ModalTab::General | ModalTab::Keys => {}
+        // Rows, not prose: see `settings_lines`.
+        ModalTab::Settings => {}
         ModalTab::Overview => overview(&mut doc, ctx, &keys),
         ModalTab::Sessions => sessions(&mut doc, &keys),
         ModalTab::Layouts => layouts(&mut doc, ctx, &keys),
@@ -1168,7 +1341,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
 
     doc.heading("Terminal panel");
     doc.text(
-        "T in Rakumux mode, or Settings, General, Terminal panel, opens a separate shell \
+        "T in Rakumux mode, or Settings, Terminal panel, opens a separate shell \
          underneath the main detail in the current directory. Click a pane to focus it; the \
          TERMINAL badge identifies shell input. The Rakumux key returns to Rakumux mode, \
          then Esc returns to the shell or T hides it. The hide button never ends its program. \
@@ -1189,7 +1362,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("The screen");
     match ctx.layout {
         SessionLayout::Sidebar => doc.bullet(format!(
-            "Session list, on the left: the folder filter on top ({} All folders), then the \
+            "Session list, on the left: the tabs on top ({} All folders, App, Status), then the \
              sessions in the order you keep them (a new one goes at the bottom), each with a \
              status mark, a bold title, and its app name in muted blue before the git branch; \
              the selected title is white, the others a softer foreground colour. With \
@@ -1210,11 +1383,12 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     }
     doc.bullet("Detail or Grid cards: terminal screens, updating as the programs run.");
     doc.bullet(format!(
-        "Footer, the bottom row: a full-width orange bar in Rakumux mode, or a quiet SESSION \
-         or TERMINAL label while a program takes keys. It shows messages and the daemon \
-         connection when it isn't up, and on the right \
-         the keys for this Help (`?`) and Settings (`,`); in a session they come after `{p}`, \
-         the way to Rakumux mode. Settings' Keys tab lists every key."
+        "Footer, the bottom row: a full-width orange bar in Rakumux mode, with the selected \
+         session (session: name) and buttons for this Help (`?`) and Settings (`,`); a muted \
+         blue bar \
+         with a SESSION or TERMINAL label while a program takes keys, with a `{p}` button, the \
+         way to Rakumux mode. It shows messages and the daemon connection when it isn't up. \
+         Settings lists every key."
     ));
     doc.note(format!(
         "Current layout: {}. The Layouts tab explains all three layouts and how to switch.",
@@ -1241,9 +1415,9 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     );
     doc.step(
         4,
-        "In Rakumux mode, `?` opens this Help and `,` opens Settings: the General tab holds \
-         the layout and API keys, and the Keys tab lists every key and runs the one you pick. \
-         `q` quits; quitting leaves every session running.",
+        "In Rakumux mode, `?` opens this Help and `,` opens Settings: the layout and icons, \
+         then every key, and `Enter` runs the one you pick. `q` quits; quitting leaves every \
+         session running.",
     );
 
     moving_around(doc, k);
@@ -1259,18 +1433,22 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
     let mut keys = vec![
         row(
             "↑, ↓, j, k",
-            "Select a session or a folder's header; the right side shows the session (the \
-             folder filter is above the first)",
+            "Select a session or a header; the right side shows the session (the tabs, All \
+             folders, App and Status, are above the first)",
+        ),
+        row(
+            "←, →, h, l",
+            "On the tabs: switch between All folders, App and Status",
         ),
         row(
             "gg, G, Home, End",
-            "Top (the folder filter) / bottom (+ New session)",
+            "Top (the tabs) / bottom (+ New session)",
         ),
         row("Ctrl-d, Ctrl-u", "Half a page down / up"),
         row("{, }", "Previous / next folder, when several are shown"),
         row(
             "Enter, i, l, →",
-            "Work in the selected session; on the folder filter, the Folders modal; on a \
+            "Work in the selected session; on the tabs, the active tab's modal; on a \
              folder's header, a new session there",
         ),
         row(
@@ -1299,13 +1477,13 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         Some(_) => doc.note(
             "If Option/Alt+↑/↓ do nothing, your terminal isn't sending Option/Alt with the key: \
              iTerm2, Ghostty, kitty, WezTerm and Alacritty do; in Terminal.app turn on \"Use \
-             Option as Meta key\". Settings, General can make them work inside sessions too.",
+             Option as Meta key\". A setting in Settings makes them work inside sessions too.",
         ),
         None => doc.note("Option/Alt+↑/↓ are turned off in your settings; ↑/↓ and j/k move."),
     }
     doc.note(format!(
         "From a session, everything starts with `{p}`: `{p} n` is a new session, `{p} ?` this \
-         Help. Every key: Settings (`,`), Keys tab."
+         Help. Every key: Settings (`,`)."
     ));
 }
 
@@ -1313,8 +1491,9 @@ fn mouse(doc: &mut Doc) {
     doc.heading("Mouse");
     doc.bullet("Click a session in the list to show it; click the session to work in it.");
     doc.bullet(
-        "Click the folder filter (▾) to open the Folders modal; click a folder there to show \
-         it alone, All folders to show every folder, or outside it to close it.",
+        "Click a tab at the top of the list (All folders, App, Status) to group the list by \
+         it; click the active one (▾) to open its modal; click a row there to show it alone, \
+         All to show everything, or outside it to close it.",
     );
     doc.bullet(
         "Drag a session up or down the list (or a tab left or right) to move it; a blue bar \
@@ -1326,13 +1505,13 @@ fn mouse(doc: &mut Doc) {
     );
     doc.bullet(
         "Click the mode badge at the bottom left: SESSION switches to Rakumux mode, RAKUMUX \
-         goes back to the session you came from. Click a key on the right of the footer (`? \
-         help`, `, settings`) to do what it says. Phones send taps as clicks, so all of this \
-         works there too.",
+         goes back to the session you came from. Click a button on the right of the footer \
+         (`? Help`, `, Settings`, or in a session the Rakumux key) to do what it says. Phones \
+         send taps as clicks, so all of this works there too.",
     );
     doc.bullet(
         "Wheel: scrolls the session's history, or goes to the program when it uses the mouse \
-         itself.",
+         itself. In Settings it moves the selection; in Help it scrolls.",
     );
     doc.bullet("Hold Shift while dragging to select and copy text with your terminal.");
     doc.bullet("Tabs layout: click a tab to show that session; click ‹ or › for hidden tabs.");
@@ -1342,17 +1521,21 @@ fn mouse(doc: &mut Doc) {
 fn modal_keys(doc: &mut Doc) {
     doc.heading("In Help and Settings");
     doc.keys(vec![
-        row("Tab, ←, →", "Switch tab"),
-        row("1-9", "Jump to a tab"),
+        row("Tab, ←, →", "Help: switch tab"),
+        row("1-9", "Help: jump to a tab"),
         row(
             "↑, ↓",
             "Settings: choose a setting or an action. Help: scroll",
         ),
+        row("→, ←", "Settings: show or hide what the selected row does"),
         row(
             "Enter, Space",
             "Change the selected setting, or run the selected action",
         ),
-        row("PgUp, PgDn, Home, End", "Scroll"),
+        row(
+            "PgUp, PgDn, Home, End",
+            "Scroll, or move a page in Settings",
+        ),
         row(
             format!("Esc, q (and ? in Help; comma or {SETTINGS_KEY} in Settings)"),
             "Close",
@@ -1444,6 +1627,17 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          it and `Enter` adds it.",
     );
     doc.text(
+        "All folders is the first of three tabs on the list's top row; `←`/`→` there (or a \
+         click) switch to App, a header per agent or program (claude, codex, opencode, …, \
+         then other programs, then shell), and Status, a header per state (waiting for you, \
+         done, working, waiting for response, idle, running, exited, dead). One tab is active \
+         at a time: it decides the headers and the only filter that applies, and each tab \
+         keeps its own while another is active. `Enter` on the active tab opens its modal \
+         (Apps, Statuses) like the Folders modal: tick several with `Tab` (or `Space` while \
+         nothing is typed), `Enter` shows them, `Esc` closes. A session you select stays \
+         shown when its status leaves the filter, until you select another.",
+    );
+    doc.text(
         "The filter only narrows what this window shows; it isn't saved, so Rakumux always \
          starts on All folders.",
     );
@@ -1482,7 +1676,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          (`rakumux daemon restart` does too)."
     ));
     doc.text(
-        "Settings, General, Icons picks the marks for folders and branches: plain symbols, \
+        "Settings, Icons picks the marks for folders and branches: plain symbols, \
          emoji or Nerd Font icons, whichever your terminal shows.",
     );
 
@@ -1525,8 +1719,9 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
 
     doc.heading("Exited and dead sessions");
     doc.text(
-        "Exited: the program ended, for example after `exit`. Its last screen stays visible, \
-         and `Enter` restarts it in the same folder.",
+        "Ending the program you're working in (`exit`, Ctrl-D, quitting the agent) deletes \
+         its session. Exited: the program ended in the background. Its last screen stays \
+         visible, and `Enter` restarts it in the same folder.",
     );
     doc.text(
         "Dead: the terminal no longer exists, for example after `rakumux daemon stop`. The \
@@ -1571,12 +1766,12 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          goes idle or finishes a task): Rakumux sends the session's recent commands and \
          screen text to your AI provider and renames the session with its suggestion.",
     );
-    doc.text(format!(
-        "It uses Anthropic or OpenAI with the API key from the General tab here \
-         (`{SETTINGS_KEY}` in the list opens it) or the ANTHROPIC_API_KEY or OPENAI_API_KEY \
+    doc.text(
+        "It uses Anthropic or OpenAI with the API key in ~/.rakumux/config.json \
+         (`anthropic_api_key`, `openai_api_key`) or the ANTHROPIC_API_KEY or OPENAI_API_KEY \
          environment variable. Without a key, sessions keep their generated names. Names you \
-          choose are never replaced."
-    ));
+         choose are never replaced.",
+    );
 }
 
 fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
@@ -1600,7 +1795,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
          Rakumux mode is the session list; tap a session to open it, full screen under a \
          row of tabs (tap a tab to switch); `{p}` or a tap on the SESSION badge at the bottom \
          left goes back to the list, and the RAKUMUX badge returns to the session. Tap \
-         `? help` or `, settings` to open them.",
+         `? Help` or `, Settings` in Rakumux mode to open them.",
         layout::PHONE_BELOW
     ));
     doc.text(
@@ -1645,7 +1840,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
 
     doc.heading("Switching layouts");
     doc.text(format!(
-        "Change Layout on the Settings General tab (`,` or `{SETTINGS_KEY}` in Rakumux mode). \
+        "Change Layout in Settings (`,` or `{SETTINGS_KEY}` in Rakumux mode). \
          It applies at once and is saved in ~/.rakumux/config.json as `sessions.layout` \
           (`sidebar`, `grid` or `tabs`). `v` cycles Master detail, Grid and Tabs in Rakumux mode; \
           session mode forwards `v` to the program."
@@ -1669,8 +1864,8 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
             ));
             doc.text(format!(
                 "Inside a session these keys normally go to the program: OpenCode, Pi and \
-                 Claude Code use them. Turn on \"Option+↑/↓ in sessions\" on the Settings \
-                 General tab to switch sessions with them from inside one too (`{p}` and \
+                 Claude Code use them. Turn on \"Option+↑/↓ in sessions\" in Settings \
+                 to switch sessions with them from inside one too (`{p}` and \
                  `↑`/`↓` always work)."
             ));
         }
@@ -1739,7 +1934,7 @@ fn agents_and_cli(doc: &mut Doc) {
     doc.heading("On your phone");
     doc.text(
         "The Rakumux app shows your sessions on a phone and types into them, over Tailscale. \
-         It's off until you turn it on: Settings (,) → Phone access, or the question Rakumux \
+         It's off until you turn it on: `rakumux remote on`, or the question Rakumux \
          asks once when it sees Tailscale running. Only devices on your tailnet that have the \
          pairing code get in, and Rakumux listens only on Tailscale's own addresses.",
     );
@@ -1911,31 +2106,64 @@ fn body_lines(tab: ModalTab, ctx: &ModalContext, width: usize) -> Vec<Line<'stat
     lines
 }
 
-/// The General tab: one row per setting (its label, then its current
-/// value, or the value on the next line when both don't fit), the selected
-/// one highlighted, then the selected setting's note. Also returns the
-/// selected row's last line, which the body keeps in view.
-fn general_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line<'static>>, usize) {
-    let palette = theme::palette();
+/// The Settings page's lines.
+struct SettingsPage {
+    lines: Vec<Line<'static>>,
+    /// The first and last lines of the selected row (from its heading when
+    /// it starts a section), which the body keeps in view.
+    selected: (usize, usize),
+}
+
+/// The Settings page: one row per setting (its label, then its current
+/// value, or the value on the next line when both don't fit), then under a
+/// `Keys` rule one row per [`KeyAction`] with its keys, each under its
+/// heading; then where settings are saved. The selected row is marked and
+/// white; notes show in a popover ([`draw_note`]), so the page never moves.
+fn settings_lines(ctx: &ModalContext, selected: usize, width: usize) -> SettingsPage {
     let styles = Styles::from_theme();
     let width = width.max(1);
+    let mut page = SettingsPage {
+        lines: Vec::new(),
+        selected: (0, 0),
+    };
+    push_setting_rows(&mut page, ctx, selected, width, &styles);
+    let action = selected.checked_sub(ctx.general.len());
+    push_action_rows(&mut page, ctx, action, width, &styles);
+    page.lines.push(Line::default());
+    let saved = words(
+        "Saved in ~/.rakumux/config.json. Help (`?`) explains how Rakumux works.",
+        styles.note,
+        styles.key,
+    );
+    page.lines.extend(wrap(&saved, width, Vec::new(), 0));
+    page
+}
+
+/// The settings: label and value side by side, or every value under its
+/// label when one pair doesn't fit (a phone), so all the choices show.
+fn push_setting_rows(
+    page: &mut SettingsPage,
+    ctx: &ModalContext,
+    selected: usize,
+    width: usize,
+    styles: &Styles,
+) {
+    let palette = theme::palette();
+    let lines = &mut page.lines;
     let label_width = setting_label_width(ctx);
-    // Too narrow for a label and its value side by side (a phone): every
-    // value goes on the line under its label, so all the choices show.
     let values_below = ctx
         .general
         .iter()
         .any(|row| 2 + label_width + str_width(&row.value) > width);
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    let mut selected_line = 0;
     let mut section = "";
     for (i, row) in ctx.general.iter().enumerate() {
+        let mut first = lines.len();
         if row.section != section {
             section = row.section;
-            push_section(&mut lines, section, width, &styles);
+            push_section(lines, section, width, styles);
+            first = lines.len() - 1;
         }
         let (marker, label_style, value_style) = if i == selected {
-            selected_line = lines.len();
             (
                 "▶ ",
                 Style::default()
@@ -1950,18 +2178,17 @@ fn general_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line
                 Style::default().fg(palette.text_muted),
             )
         };
-        let pad = label_width - str_width(&row.label);
-        let label = truncate(
-            &format!("{}{}", row.label, " ".repeat(pad)),
-            width.saturating_sub(2),
-        );
         let marker = Span::styled(marker, Style::default().fg(palette.accent_primary));
         if !values_below {
-            let value = truncate(&row.value, width.saturating_sub(2 + str_width(&label)));
+            // The label on the left, the value pinned to the right.
+            let label = truncate(&row.label, width.saturating_sub(2));
+            let value = truncate(&row.value, width.saturating_sub(2 + label_width));
+            let pad = width.saturating_sub(2 + str_width(&label) + str_width(&value));
             lines.push(fit(
                 vec![
                     marker,
                     Span::styled(label, label_style),
+                    Span::raw(" ".repeat(pad)),
                     Span::styled(value, value_style),
                 ],
                 width,
@@ -1971,9 +2198,6 @@ fn general_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line
                 vec![marker, Span::styled(row.label.clone(), label_style)],
                 width,
             ));
-            if i == selected {
-                selected_line = lines.len();
-            }
             lines.push(fit(
                 vec![
                     Span::raw(" ".repeat(VALUE_INDENT)),
@@ -1985,21 +2209,10 @@ fn general_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line
                 width,
             ));
         }
+        if i == selected {
+            page.selected = (first, lines.len() - 1);
+        }
     }
-    if let Some(row) = ctx.general.get(selected) {
-        lines.push(Line::default());
-        let note = words(&row.note, styles.note, styles.key);
-        lines.extend(wrap(&note, width, Vec::new(), 0));
-    }
-    lines.push(Line::default());
-    let saved = words(
-        "Saved in ~/.rakumux/config.json. The Keys tab lists every action and its keys; Help \
-         (`?`) explains how Rakumux works.",
-        styles.note,
-        styles.key,
-    );
-    lines.extend(wrap(&saved, width, Vec::new(), 0));
-    (lines, selected_line)
 }
 
 /// A section heading in a list of rows, after a blank line unless it's
@@ -2017,17 +2230,20 @@ fn push_section(lines: &mut Vec<Line<'static>>, title: &str, width: usize, style
     ));
 }
 
-/// The Keys tab: a two-column table (Action, Key) with one row per
-/// [`KeyAction`], the selected one marked and white, then where the
-/// selected action's keys work. Also returns the selected row's line,
-/// which the body keeps in view.
-fn action_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line<'static>>, usize) {
+/// The actions under a `Keys` rule and how to run them: a two-column table
+/// (what it does, its keys), `selected` (into [`KeyAction::ALL`]) marked.
+fn push_action_rows(
+    page: &mut SettingsPage,
+    ctx: &ModalContext,
+    selected: Option<usize>,
+    width: usize,
+    styles: &Styles,
+) {
     const MARKER: usize = 2;
     const GAP: usize = 3;
     let palette = theme::palette();
-    let styles = Styles::from_theme();
+    let lines = &mut page.lines;
     let names = KeyNames::new(ctx);
-    let width = width.max(1);
     let rows: Vec<(&str, String)> = KeyAction::ALL
         .iter()
         .map(|action| (action.label(), action.keys(&names)))
@@ -2036,55 +2252,56 @@ fn action_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line<
         .iter()
         .map(|(label, _)| str_width(label))
         .max()
-        .unwrap_or(0)
-        .max(str_width("Action"));
-    // The Action column gives way to the keys on narrow screens.
+        .unwrap_or(0);
+    // The action column gives way to the keys on narrow screens.
     let widest_key = rows
         .iter()
         .map(|(_, keys)| str_width(keys))
         .max()
-        .unwrap_or(0)
-        .max(str_width("Key"));
+        .unwrap_or(0);
     let column = if MARKER + widest + GAP + widest_key <= width {
         widest
     } else {
         widest.min(width.saturating_sub(MARKER + GAP).saturating_mul(3) / 5)
     };
-    let cell = |text: &str, room: usize| {
-        let text = truncate(text, room);
-        let pad = room.saturating_sub(str_width(&text));
-        format!("{text}{}", " ".repeat(pad))
-    };
     let key_room = width.saturating_sub(MARKER + column + GAP);
-    let header = Style::default()
-        .fg(palette.neutral_gray)
-        .add_modifier(Modifier::BOLD);
-    let mut lines = vec![
-        fit(
-            vec![
-                Span::raw(" ".repeat(MARKER)),
-                Span::styled(cell("Action", column), header),
-                Span::raw(" ".repeat(GAP)),
-                Span::styled(truncate("Key", key_room), header),
-            ],
-            width,
+
+    if !lines.is_empty() {
+        lines.push(Line::default());
+    }
+    let rule = lines.len();
+    let title = "Keys";
+    let after = width.saturating_sub(3 + str_width(title) + 1);
+    let rule_style = Style::default().fg(palette.border_dim);
+    lines.push(fit(
+        vec![
+            Span::styled("── ", rule_style),
+            Span::styled(title, styles.heading),
+            Span::styled(format!(" {}", "─".repeat(after)), rule_style),
+        ],
+        width,
+    ));
+    let p = &names.p;
+    let how = words(
+        &format!(
+            "`Enter` runs the selected action, as do its keys in Rakumux mode. From inside a \
+             session, press `{p}` first."
         ),
-        Line::from(Span::styled(
-            "─".repeat(width),
-            Style::default().fg(palette.border_dim),
-        )),
-    ];
-    let selected = selected.min(rows.len().saturating_sub(1));
-    let mut selected_line = 0;
+        styles.note,
+        styles.key,
+    );
+    lines.extend(wrap(&how, width, Vec::new(), 0));
     let mut section = "";
     for (i, (label, keys)) in rows.iter().enumerate() {
-        let row_section = KeyAction::ALL[i].section();
-        if row_section != section {
-            section = row_section;
-            push_section(&mut lines, section, width, &styles);
+        let mut first = lines.len();
+        let action = KeyAction::ALL[i];
+        if action.section() != section {
+            section = action.section();
+            push_section(lines, section, width, styles);
+            // The first heading keeps the rule above it in view.
+            first = if i == 0 { rule } else { lines.len() - 1 };
         }
-        let (marker, label_style, key_style) = if i == selected {
-            selected_line = lines.len();
+        let (marker, label_style, key_style) = if Some(i) == selected {
             (
                 "▶ ",
                 Style::default()
@@ -2101,37 +2318,55 @@ fn action_lines(ctx: &ModalContext, selected: usize, width: usize) -> (Vec<Line<
                 Style::default().fg(palette.accent_green),
             )
         };
+        // What it does on the left, its keys pinned to the right.
+        let label = truncate(label, column);
+        let keys = truncate(keys, key_room);
+        let pad = width.saturating_sub(MARKER + str_width(&label) + str_width(&keys));
         lines.push(fit(
             vec![
                 Span::styled(marker, Style::default().fg(palette.accent_primary)),
-                Span::styled(cell(label, column), label_style),
-                Span::raw(" ".repeat(GAP)),
-                Span::styled(truncate(keys, key_room), key_style),
+                Span::styled(label, label_style),
+                Span::raw(" ".repeat(pad)),
+                Span::styled(keys, key_style),
             ],
             width,
         ));
+        if Some(i) == selected {
+            page.selected = (first, lines.len() - 1);
+        }
     }
-    let note = KeyAction::ALL
-        .get(selected)
-        .map(|action| action.note(&names))
-        .unwrap_or_default();
-    if !note.is_empty() {
-        lines.push(Line::default());
-        let note = words(&note, styles.note, styles.key);
-        lines.extend(wrap(&note, width, Vec::new(), 0));
+}
+
+/// `text` as a note, wrapped to `width`.
+fn note_lines(text: &str, width: usize) -> Vec<Line<'static>> {
+    if text.is_empty() {
+        return Vec::new();
     }
-    lines.push(Line::default());
-    let p = &names.p;
-    let hint = words(
-        &format!(
-            "Press `Enter` to run the selected action, or press its keys in Rakumux mode. \
-             From inside a session, press `{p}` first."
-        ),
-        styles.note,
-        styles.key,
-    );
-    lines.extend(wrap(&hint, width, Vec::new(), 0));
-    (lines, selected_line)
+    let styles = Styles::from_theme();
+    wrap(&words(text, styles.text, styles.key), width, Vec::new(), 0)
+}
+
+/// What Settings row `row` says when asked (`→`): the setting's note or the
+/// action's; empty when there's nothing more to say.
+fn row_note(ctx: &ModalContext, names: &KeyNames, row: usize) -> String {
+    match ctx.general.get(row) {
+        Some(setting) => setting.note.clone(),
+        None => KeyAction::ALL
+            .get(row - ctx.general.len())
+            .map(|action| action.note(names))
+            .unwrap_or_default(),
+    }
+}
+
+/// What Settings row `row` is called.
+fn row_label(ctx: &ModalContext, row: usize) -> String {
+    match ctx.general.get(row) {
+        Some(setting) => setting.label.clone(),
+        None => KeyAction::ALL
+            .get(row - ctx.general.len())
+            .map(|action| action.label().to_string())
+            .unwrap_or_default(),
+    }
 }
 
 /// `spans` as one line cut at `width` columns.
@@ -2333,7 +2568,7 @@ mod tests {
     use ratatui::buffer::Buffer;
     use ratatui::Terminal;
 
-    /// Rows on the General tab in these tests.
+    /// Settings before the actions in these tests.
     const ROWS: usize = 3;
 
     fn ctx(prefix: &str) -> ModalContext {
@@ -2369,60 +2604,9 @@ mod tests {
         ModalState::new(tab, ROWS)
     }
 
-    #[test]
-    fn settings_hug_the_table_instead_of_growing_with_the_terminal() {
-        let context = ctx("Ctrl-\\");
-        for tab in [ModalTab::General, ModalTab::Keys] {
-            let narrow = settings_area(Rect::new(0, 0, 120, 40), tab, &context);
-            let wide = settings_area(Rect::new(0, 0, 240, 60), tab, &context);
-            assert_eq!(narrow.width, wide.width);
-            assert!(usize::from(wide.width) <= MAX_SETTINGS_WIDTH);
-            assert_eq!(wide.x, (240 - wide.width) / 2);
-            let body = usize::from(wide.width - 2 - BODY_MARGIN);
-            if tab == ModalTab::General {
-                let lines = general_lines(&context, 0, body).0;
-                assert!(lines.iter().any(|line| line_text(line).contains("▶ Layout")
-                    && line_text(line).contains("[Master detail] Grid Tabs")));
-            } else {
-                let lines = action_lines(&context, 0, body).0;
-                for action in KeyAction::ALL {
-                    assert!(
-                        lines
-                            .iter()
-                            .any(|line| line_text(line).contains(action.label())),
-                        "{} was needlessly truncated",
-                        action.label()
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn settings_stay_screen_bounded_and_long_values_cannot_make_them_screen_wide() {
-        let mut context = ctx("Ctrl-\\");
-        context.general[0].value = "long model or layout value ".repeat(100);
-        for width in [0, 1, 2, 20, 40, 80, 160, 300] {
-            let area = Rect::new(3, 2, width, 40);
-            for tab in [ModalTab::General, ModalTab::Keys] {
-                let popup = settings_area(area, tab, &context);
-                assert_eq!(popup.intersection(area), popup);
-                assert!(usize::from(popup.width) <= MAX_SETTINGS_WIDTH);
-                if width > 2 {
-                    assert!(popup.width <= width - 2);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn selected_notes_wrap_without_changing_the_settings_width() {
-        let mut context = ctx("Ctrl-\\");
-        let area = Rect::new(0, 0, 160, 48);
-        let before = settings_area(area, ModalTab::General, &context);
-        context.general[0].note =
-            "A long explanation that should wrap rather than stretch the dialog. ".repeat(100);
-        assert_eq!(settings_area(area, ModalTab::General, &context), before);
+    /// The Settings row of `action`.
+    fn row_of(action: KeyAction) -> usize {
+        ROWS + KeyAction::ALL.iter().position(|a| *a == action).unwrap()
     }
 
     fn press(code: KeyCode) -> KeyEvent {
@@ -2433,14 +2617,19 @@ mod tests {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
-    /// The Keys tab's lines with `selected` chosen.
-    fn keys_text(ctx: &ModalContext, selected: usize, width: usize) -> String {
-        action_lines(ctx, selected, width)
-            .0
+    /// The Settings page's lines with `selected` chosen.
+    fn page_text(ctx: &ModalContext, selected: usize, width: usize) -> String {
+        settings_lines(ctx, selected, width)
+            .lines
             .iter()
             .map(line_text)
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// What `→` shows for Settings row `selected`.
+    fn note_text(ctx: &ModalContext, selected: usize) -> String {
+        row_note(ctx, &KeyNames::new(ctx), selected)
     }
 
     fn tab_text(tab: ModalTab, ctx: &ModalContext, width: usize) -> String {
@@ -2469,13 +2658,27 @@ mod tests {
         terminal.backend().buffer().clone()
     }
 
+    /// Where the dialog is in `buf`, from its rounded corners.
+    /// (The outermost corners: a popover inside has its own.)
+    fn dialog(buf: &Buffer) -> Rect {
+        let area = buf.area();
+        let corners = |corner: &'static str| {
+            (area.top()..area.bottom())
+                .flat_map(|y| (area.left()..area.right()).map(move |x| (x, y)))
+                .filter(move |(x, y)| buf.get(*x, *y).symbol() == corner)
+        };
+        let (left, top) = corners("╭").next().expect("no ╭");
+        let (right, bottom) = corners("╯").last().expect("no ╯");
+        Rect::new(left, top, right - left + 1, bottom - top + 1)
+    }
+
     // --- tabs -----------------------------------------------------------
 
     #[test]
-    fn each_modal_has_its_tabs_in_order_and_they_wrap() {
-        assert_eq!(ModalTab::ALL.len(), 7);
-        assert_eq!(ModalTab::default(), ModalTab::General);
-        assert_eq!(Modal::Settings.tabs(), [ModalTab::General, ModalTab::Keys]);
+    fn settings_has_one_page_and_help_its_tabs_in_order() {
+        assert_eq!(ModalTab::ALL.len(), 6);
+        assert_eq!(ModalTab::default(), ModalTab::Settings);
+        assert_eq!(Modal::Settings.tabs(), [ModalTab::Settings]);
         assert_eq!(
             Modal::Help.tabs(),
             [
@@ -2486,15 +2689,12 @@ mod tests {
                 ModalTab::License
             ]
         );
-        assert_eq!(Modal::Settings.first_tab(), ModalTab::General);
+        assert_eq!(Modal::Settings.first_tab(), ModalTab::Settings);
         assert_eq!(Modal::Help.first_tab(), ModalTab::Overview);
-        assert_eq!(ModalTab::Keys.next(), ModalTab::General);
-        assert_eq!(ModalTab::General.prev(), ModalTab::Keys);
         assert_eq!(ModalTab::License.next(), ModalTab::Overview);
         assert_eq!(ModalTab::Overview.prev(), ModalTab::License);
         assert_eq!(ModalTab::AgentsCli.label(), "Agents & CLI");
         assert_eq!(ModalTab::AgentsCli.short_label(), "CLI");
-        assert_eq!(ModalTab::Keys.short_label(), "Keys");
         for modal in [Modal::Settings, Modal::Help] {
             for (i, tab) in modal.tabs().iter().enumerate() {
                 assert_eq!(tab.modal(), modal);
@@ -2518,8 +2718,7 @@ mod tests {
         // `o` closes Settings, `?` closes Help; each is left alone in the
         // other modal.
         for (tab, closes, other) in [
-            (ModalTab::General, 'o', '?'),
-            (ModalTab::Keys, 'o', '?'),
+            (ModalTab::Settings, 'o', '?'),
             (ModalTab::Overview, '?', 'o'),
         ] {
             let mut state = state(tab);
@@ -2539,19 +2738,28 @@ mod tests {
     }
 
     #[test]
-    fn tab_and_arrows_switch_tabs_within_the_modal_and_reset_scroll() {
-        let mut state = state(ModalTab::General);
-        assert_eq!(state.handle_key(&press(KeyCode::Tab)), ModalAction::Handled);
-        assert_eq!(state.tab, ModalTab::Keys);
-        state.handle_key(&press(KeyCode::Right));
-        assert_eq!(state.tab, ModalTab::General);
-        state.handle_key(&press(KeyCode::Left));
-        assert_eq!(state.tab, ModalTab::Keys);
-        // `h`/`l` too.
-        state.handle_key(&press(KeyCode::Char('l')));
-        assert_eq!(state.tab, ModalTab::General);
-        state.handle_key(&press(KeyCode::Char('h')));
-        assert_eq!(state.tab, ModalTab::Keys);
+    fn tab_and_arrows_switch_help_tabs_and_reset_scroll() {
+        // Settings has nothing to switch to; its arrows open and close a
+        // row's note.
+        let mut state = self::state(ModalTab::Settings);
+        for code in [
+            KeyCode::Tab,
+            KeyCode::BackTab,
+            KeyCode::Char('1'),
+            KeyCode::Char('2'),
+        ] {
+            assert_eq!(state.handle_key(&press(code)), ModalAction::Ignored);
+            assert_eq!(state.tab, ModalTab::Settings);
+        }
+        for (code, open) in [
+            (KeyCode::Right, true),
+            (KeyCode::Left, false),
+            (KeyCode::Char('l'), true),
+            (KeyCode::Char('h'), false),
+        ] {
+            assert_eq!(state.handle_key(&press(code)), ModalAction::Handled);
+            assert_eq!((state.tab, state.note_open), (ModalTab::Settings, open));
+        }
 
         let mut state = self::state(ModalTab::Overview);
         state.scroll = 3;
@@ -2568,41 +2776,43 @@ mod tests {
             state.handle_key(&press(KeyCode::Tab));
         }
         assert_eq!(state.tab, ModalTab::AgentsCli);
+        // `h`/`l` too.
+        state.handle_key(&press(KeyCode::Char('l')));
+        assert_eq!(state.tab, ModalTab::License);
+        state.handle_key(&press(KeyCode::Char('h')));
+        assert_eq!(state.tab, ModalTab::AgentsCli);
     }
 
     #[test]
-    fn number_keys_jump_to_the_modals_tabs() {
-        for modal in [Modal::Settings, Modal::Help] {
-            let mut state = state(modal.first_tab());
-            for (i, tab) in modal.tabs().iter().enumerate() {
-                let digit = char::from(b'1' + i as u8);
-                assert_eq!(
-                    state.handle_key(&press(KeyCode::Char(digit))),
-                    ModalAction::Handled
-                );
-                assert_eq!(state.tab, *tab);
-            }
-            let past = char::from(b'1' + modal.tabs().len() as u8);
+    fn number_keys_jump_to_helps_tabs() {
+        let mut state = state(Modal::Help.first_tab());
+        for (i, tab) in Modal::Help.tabs().iter().enumerate() {
+            let digit = char::from(b'1' + i as u8);
             assert_eq!(
-                state.handle_key(&press(KeyCode::Char(past))),
-                ModalAction::Ignored
+                state.handle_key(&press(KeyCode::Char(digit))),
+                ModalAction::Handled
             );
+            assert_eq!(state.tab, *tab);
         }
+        let past = char::from(b'1' + Modal::Help.tabs().len() as u8);
+        assert_eq!(
+            state.handle_key(&press(KeyCode::Char(past))),
+            ModalAction::Ignored
+        );
     }
 
     #[test]
-    fn general_tab_selects_and_changes_settings() {
-        let mut state = state(ModalTab::General);
+    fn settings_select_and_change_settings_then_run_actions() {
+        let mut state = state(ModalTab::Settings);
         assert_eq!(state.selected, 0);
         state.handle_key(&press(KeyCode::Up));
         assert_eq!(state.selected, 0);
         state.handle_key(&press(KeyCode::Down));
         state.handle_key(&press(KeyCode::Char('j')));
         assert_eq!(state.selected, 2);
-        state.handle_key(&press(KeyCode::Down));
-        assert_eq!(state.selected, ROWS - 1);
         state.handle_key(&press(KeyCode::Char('k')));
         assert_eq!(state.selected, 1);
+        assert_eq!(state.selected_action(), None);
         assert_eq!(
             state.handle_key(&press(KeyCode::Enter)),
             ModalAction::Change(1)
@@ -2611,62 +2821,59 @@ mod tests {
             state.handle_key(&press(KeyCode::Char(' '))),
             ModalAction::Change(1)
         );
+        // Past the settings come the actions.
+        state.handle_key(&press(KeyCode::Down));
+        state.handle_key(&press(KeyCode::Down));
+        assert_eq!(state.selected, ROWS);
+        assert_eq!(state.selected_action(), Some(KeyAction::RakumuxMode));
+        assert_eq!(
+            state.handle_key(&press(KeyCode::Enter)),
+            ModalAction::Run(KeyAction::RakumuxMode)
+        );
+        state.handle_key(&press(KeyCode::Down));
+        state.handle_key(&press(KeyCode::Down));
+        assert_eq!(
+            state.handle_key(&press(KeyCode::Char(' '))),
+            ModalAction::Run(KeyAction::GoIn)
+        );
         state.handle_key(&press(KeyCode::End));
-        assert_eq!(state.selected, ROWS - 1);
+        assert_eq!(state.selected, ROWS + KeyAction::ALL.len() - 1);
+        state.handle_key(&press(KeyCode::Down));
+        assert_eq!(
+            state.handle_key(&press(KeyCode::Enter)),
+            ModalAction::Run(KeyAction::Quit)
+        );
         state.handle_key(&press(KeyCode::Home));
         assert_eq!(state.selected, 0);
-        // The selection survives a look at the Keys tab.
-        state.handle_key(&press(KeyCode::Down));
-        state.handle_key(&press(KeyCode::Tab));
-        state.handle_key(&press(KeyCode::Down));
-        assert_eq!(state.action, 1);
-        state.handle_key(&press(KeyCode::BackTab));
-        assert_eq!(state.selected, 1);
+        // PgDn and PgUp move a page of rows (before a render, a default
+        // page), stopping at the ends.
+        state.handle_key(&press(KeyCode::PageDown));
+        assert_eq!(state.selected, usize::from(DEFAULT_PAGE));
+        state.handle_key(&press(KeyCode::PageUp));
+        state.handle_key(&press(KeyCode::PageUp));
+        assert_eq!(state.selected, 0);
+        // The wheel moves a row per notch.
+        state.wheel(2);
+        assert_eq!(state.selected, 2);
+        state.wheel(-5);
+        assert_eq!(state.selected, 0);
+        // Without settings the actions come first.
+        assert_eq!(
+            ModalState::new(ModalTab::Settings, 0).handle_key(&press(KeyCode::Enter)),
+            ModalAction::Run(KeyAction::RakumuxMode)
+        );
+        let last = ROWS + KeyAction::ALL.len() - 1;
+        assert_eq!(state.clone().with_selected(999).selected, last);
+        let mut picked = state.clone();
+        picked.select_action(KeyAction::Restart);
+        assert_eq!(picked.selected_action(), Some(KeyAction::Restart));
+        assert_eq!(picked.selected, row_of(KeyAction::Restart));
         // Enter on a Help tab changes nothing.
         state.select_tab(ModalTab::Overview);
         assert_eq!(
             state.handle_key(&press(KeyCode::Enter)),
             ModalAction::Ignored
         );
-        assert_eq!(
-            ModalState::new(ModalTab::General, 0).handle_key(&press(KeyCode::Enter)),
-            ModalAction::Ignored
-        );
-        assert_eq!(
-            ModalState::new(ModalTab::General, ROWS)
-                .with_selected(99)
-                .selected,
-            ROWS - 1
-        );
-    }
-
-    #[test]
-    fn keys_tab_selects_and_runs_actions() {
-        let mut state = state(ModalTab::Keys);
-        assert_eq!(state.action, 0);
-        assert_eq!(
-            state.handle_key(&press(KeyCode::Enter)),
-            ModalAction::Run(KeyAction::RakumuxMode)
-        );
-        state.handle_key(&press(KeyCode::Up));
-        assert_eq!(state.action, 0);
-        state.handle_key(&press(KeyCode::Down));
-        state.handle_key(&press(KeyCode::Char('j')));
-        assert_eq!(state.action, 2);
-        assert_eq!(
-            state.handle_key(&press(KeyCode::Char(' '))),
-            ModalAction::Run(KeyAction::GoIn)
-        );
-        state.handle_key(&press(KeyCode::End));
-        assert_eq!(state.action, KeyAction::ALL.len() - 1);
-        state.handle_key(&press(KeyCode::Down));
-        assert_eq!(
-            state.handle_key(&press(KeyCode::Enter)),
-            ModalAction::Run(KeyAction::Quit)
-        );
-        state.handle_key(&press(KeyCode::Char('k')));
-        state.handle_key(&press(KeyCode::Home));
-        assert_eq!(state.action, 0);
     }
 
     #[test]
@@ -2706,11 +2913,14 @@ mod tests {
         assert_eq!(state.scroll, 0);
         state.scroll_by(1000);
         assert_eq!(state.scroll, max);
+        // The wheel scrolls a few lines per notch.
+        state.wheel(-1);
+        assert_eq!(state.scroll, max - 3);
     }
 
     #[test]
     fn modified_and_release_keys_are_left_to_the_caller() {
-        for tab in [ModalTab::General, ModalTab::Keys] {
+        for tab in [ModalTab::Settings, ModalTab::Overview] {
             let mut state = state(tab);
             let alt_down = KeyEvent::new(KeyCode::Down, KeyModifiers::ALT);
             assert_eq!(state.handle_key(&alt_down), ModalAction::Ignored);
@@ -2734,28 +2944,97 @@ mod tests {
     // --- rendering ------------------------------------------------------
 
     #[test]
-    fn settings_render_content_sized_at_80x24_with_the_configured_prefix() {
+    fn settings_hug_their_rows_instead_of_growing_with_the_terminal() {
+        let context = ctx("Ctrl-\\");
+        let narrow = settings_width(Rect::new(0, 0, 120, 40), &context);
+        let wide = settings_width(Rect::new(0, 0, 240, 60), &context);
+        assert_eq!(narrow, wide);
+        assert!(usize::from(wide) <= MAX_SETTINGS_WIDTH);
+        // Centred, and on a tall screen exactly as tall as its rows and the
+        // keys.
+        let state = state(ModalTab::Settings);
+        let buf = draw(240, 120, &state, &context);
+        let popup = dialog(&buf);
+        assert_eq!(popup.width, wide);
+        assert_eq!(popup.x, (240 - wide) / 2);
+        let body = usize::from(wide - 2 - BODY_MARGIN);
+        let rows = settings_lines(&context, 0, body).lines.len();
+        assert_eq!(usize::from(popup.height), 2 + rows + 1);
+        assert_eq!(popup.y, (120 - popup.height) / 2);
+        let text = buffer_text(&buf);
+        assert!(!text.contains('█'), "everything fits: {text}");
+        // Nothing needlessly cut.
+        let page = page_text(&context, 0, body);
+        assert!(page.contains("▶ Layout"), "{page}");
+        assert!(page.contains("[Master detail] Grid Tabs"), "{page}");
+        for action in KeyAction::ALL {
+            assert!(
+                page.contains(action.label()),
+                "{} was needlessly truncated",
+                action.label()
+            );
+        }
+    }
+
+    #[test]
+    fn settings_stay_screen_bounded_and_long_values_cannot_make_them_screen_wide() {
+        let mut context = ctx("Ctrl-\\");
+        context.general[0].value = "long model or layout value ".repeat(100);
+        for width in [0, 1, 2, 20, 40, 80, 160, 300] {
+            let area = Rect::new(3, 2, width, 40);
+            let popup = settings_width(area, &context);
+            assert!(usize::from(popup) <= MAX_SETTINGS_WIDTH);
+            if width > 2 {
+                assert!(popup <= width - 2);
+            }
+        }
+        for (width, height) in [(80, 24), (40, 12), (20, 6), (300, 6)] {
+            let buf = draw(width, height, &state(ModalTab::Settings), &context);
+            let popup = dialog(&buf);
+            assert_eq!(popup.intersection(buf.area), popup);
+            // 80% of the screen, or all of a tiny one.
+            let most = (height * 4 / 5).max(height.min(8));
+            assert!(popup.height <= most, "{width}x{height}");
+        }
+    }
+
+    #[test]
+    fn moving_the_selection_never_resizes_settings() {
+        let mut context = ctx("Ctrl-\\");
+        context.general[0].note =
+            "A long explanation that should wrap rather than stretch the dialog. ".repeat(100);
+        for (width, height) in [(160, 48), (160, 120), (80, 24)] {
+            let mut state = state(ModalTab::Settings);
+            let first = dialog(&draw(width, height, &state, &context));
+            for row in [1, ROWS, row_of(KeyAction::TerminalPanel), ROWS + 30] {
+                state.selected = row;
+                assert_eq!(dialog(&draw(width, height, &state, &context)), first);
+            }
+        }
+    }
+
+    #[test]
+    fn settings_render_at_80x24_with_the_configured_prefix() {
         let context = ctx("Ctrl-a");
-        let state = state(ModalTab::Keys);
+        let mut state = state(ModalTab::Settings);
+        state.selected = ROWS;
         let buf = draw(80, 24, &state, &context);
         let text = buffer_text(&buf);
-        let top = text.lines().next().unwrap();
+        let popup = dialog(&buf);
+        let top = text.lines().nth(usize::from(popup.y)).unwrap();
         assert!(top.contains("Settings"), "{top}");
         assert!(top.contains("Rakumux 0.6.0"), "{top}");
         assert!(text.contains("Ctrl-a"), "{text}");
         assert!(!text.contains("Ctrl-b"), "{text}");
-        assert!(text.contains("Esc"), "{text}");
+        assert!(text.contains("Esc close"), "{text}");
         assert!(text.contains("Enter run"), "{text}");
-        // Only Settings' tabs.
-        let strip = text.lines().nth(1).unwrap();
-        for label in ["1 General", "2 Keys"] {
-            assert!(strip.contains(label), "{strip}");
-        }
-        assert!(!strip.contains("Overview"), "{strip}");
-        let popup = settings_area(Rect::new(0, 0, 80, 24), state.tab, &context);
+        // No tab strip.
+        assert!(
+            !text.contains("1 Settings") && !text.contains("Keys tab"),
+            "{text}"
+        );
         assert!(popup.width < 80);
-        assert_eq!(buf.get(popup.x, popup.y).symbol(), "╭");
-        assert_eq!(buf.get(popup.right() - 1, popup.bottom() - 1).symbol(), "╯");
+        assert!(popup.height <= 22);
 
         // Help: every tab fits, the long label shortened.
         let help = draw(80, 24, &self::state(ModalTab::Overview), &context);
@@ -2772,10 +3051,7 @@ mod tests {
         ] {
             assert!(strip.contains(label), "{strip}");
         }
-        assert!(
-            !strip.contains("General") && !strip.contains("Keys"),
-            "{strip}"
-        );
+        assert!(!strip.contains("Settings"), "{strip}");
         assert!(!strip.contains('›') && !strip.contains('‹'), "{strip}");
     }
 
@@ -2785,17 +3061,17 @@ mod tests {
             in_session: true,
             ..ctx("Ctrl-Space")
         };
-        let state = state(ModalTab::Keys);
+        let mut state = state(ModalTab::Settings);
+        state.selected = row_of(KeyAction::NextSession);
         let buf = draw(160, 48, &state, &context);
         let text = buffer_text(&buf);
         assert!(text.contains("Esc, Ctrl-Space"), "{text}");
         assert!(text.contains("↓, j, Option/Alt+↓"), "{text}");
-        // Settings hugs its table; Help retains its long-form reading width.
-        let popup = settings_area(Rect::new(0, 0, 160, 48), state.tab, &context);
+        // Settings hugs its rows; Help retains its long-form reading width.
+        let popup = dialog(&buf);
         assert_eq!(buf.get(0, 0).symbol(), " ");
         assert!(popup.width < 128);
-        assert_eq!(buf.get(popup.x, popup.y).symbol(), "╭");
-        assert_eq!(buf.get(popup.right() - 1, popup.bottom() - 1).symbol(), "╯");
+        assert_eq!(popup.x, (160 - popup.width) / 2);
 
         let overview = draw(160, 48, &self::state(ModalTab::Overview), &context);
         assert_eq!(overview.get(16, 5).symbol(), "╭");
@@ -2812,68 +3088,130 @@ mod tests {
     }
 
     #[test]
-    fn general_tab_shows_each_setting_and_the_selected_note() {
+    fn settings_show_each_setting_and_the_selected_note_below() {
         let context = ctx("Ctrl-b");
-        let state = state(ModalTab::General).with_selected(1);
+        let state = state(ModalTab::Settings).with_selected(1);
         let buf = draw(80, 24, &state, &context);
         let text = buffer_text(&buf);
-        assert!(
-            text.contains("  Layout             [Master detail] Grid Tabs"),
-            "{text}"
-        );
-        assert!(text.contains("▶ Anthropic API key  not set"), "{text}");
-        assert!(text.contains("  OpenAI model       gpt-4o-mini"), "{text}");
-        assert!(text.contains("Used for AI session naming"), "{text}");
+        // Labels on the left, values pinned to the right.
+        let row = |label: &str| -> String {
+            let line = text.lines().find(|l| l.contains(label)).unwrap();
+            line.trim_matches(|c| c == ' ' || c == '│' || c == '█')
+                .to_string()
+        };
+        for (label, value) in [
+            ("  Layout", "[Master detail] Grid Tabs"),
+            ("▶ Anthropic API key", "not set"),
+            ("  OpenAI model", "gpt-4o-mini"),
+        ] {
+            let shown = row(label.trim_start());
+            assert!(shown.ends_with(value), "{label}: {text}");
+            let gap = shown.len() - shown.trim_start_matches(|c: char| c != ' ').len();
+            assert!(gap > 0, "{label}: {text}");
+        }
+        let right = |label| {
+            let line = text.lines().find(|l: &&str| l.contains(label)).unwrap();
+            line.trim_end_matches(|c| c == ' ' || c == '│' || c == '█')
+                .chars()
+                .count()
+        };
+        assert_eq!(right("Layout"), right("OpenAI model"), "{text}");
+        assert_eq!(right("Layout"), right("Anthropic API key"), "{text}");
+        // Notes wait for `→`: the rows follow one another.
+        assert!(!text.contains("Used for AI session naming"), "{text}");
         assert!(!text.contains("List on the left."), "{text}");
-        assert!(text.contains("~/.rakumux/config.json"), "{text}");
         assert!(text.contains("Enter change"), "{text}");
+        assert!(text.contains("→ about"), "{text}");
+        let lines: Vec<&str> = text.lines().collect();
+        let popup = dialog(&buf);
+        let y = lines.iter().position(|l| l.contains('▶')).unwrap();
+        assert!(lines[y + 1].contains("  OpenAI model"), "{text}");
+        assert!(page_text(&context, 1, 72).contains("~/.rakumux/config.json"));
         // The selected row is white, with no background of its own.
         let p = theme::palette();
-        let y = (0..24)
-            .find(|y| buffer_text(&buf).lines().nth(*y).unwrap().contains('▶'))
-            .unwrap() as u16;
-        let label_x = settings_area(Rect::new(0, 0, 80, 24), state.tab, &context).x + 4;
+        let (label_x, y) = (popup.x + 4, y as u16);
         assert_eq!(buf.get(label_x, y).fg, p.text_bright);
         assert_eq!(buf.get(label_x, y).bg, p.background);
         assert_eq!(buf.get(label_x, y + 1).fg, p.text_primary);
     }
 
     #[test]
-    fn general_rows_stay_in_view_and_inside_the_width() {
+    fn settings_rows_stay_in_view_and_inside_the_width() {
         let context = ctx("Ctrl-b");
-        for width in [1, 5, 12, 30, 76] {
-            for selected in 0..ROWS {
-                let (lines, line) = general_lines(&context, selected, width);
+        for width in [1, 5, 12, 30, 76, 125] {
+            for selected in 0..ROWS + KeyAction::ALL.len() {
+                let page = settings_lines(&context, selected, width);
+                let (lines, (start, end)) = (&page.lines, page.selected);
+                assert!(start <= end && end < lines.len());
                 if width > 1 {
-                    // The row's last line: the label's, or the value's
-                    // under it.
-                    let marked = |l: usize| line_text(&lines[l]).starts_with('▶');
-                    assert!(marked(line) || (line > 0 && marked(line - 1)));
+                    // The marked row is in the span: the label's line, or
+                    // the value's under it.
+                    let marked = (start..=end).any(|l| line_text(&lines[l]).starts_with('▶'));
+                    assert!(marked, "{width} {selected}");
                 }
-                for line in &lines {
+                for line in lines {
                     assert!(line.width() <= width, "{width}: {:?}", line_text(line));
                 }
             }
         }
         // Too narrow for labels and values side by side (a phone): each
         // value goes under its label, whole.
-        let (lines, line) = general_lines(&context, 0, 30);
-        let text: Vec<String> = lines.iter().map(line_text).collect();
+        let page = settings_lines(&context, 0, 30);
+        let text: Vec<String> = page.lines.iter().map(line_text).collect();
         let layout = text.iter().position(|l| l == "▶ Layout").unwrap();
         assert_eq!(
             text[layout + 1],
             "    [Master detail] Grid Tabs",
             "{text:?}"
         );
-        assert_eq!(line, layout + 1);
+        // From its heading to its value.
+        assert_eq!(page.selected, (layout - 1, layout + 1));
         assert!(text.contains(&"    not set".to_string()), "{text:?}");
         // Wide enough: side by side.
-        let (lines, _) = general_lines(&context, 0, 76);
-        assert!(line_text(&lines[1]).starts_with("▶ Layout             [Master detail] Grid Tabs"));
+        let lines = settings_lines(&context, 0, 76).lines;
+        let layout = line_text(&lines[1]);
+        assert!(layout.starts_with("▶ Layout  "), "{layout:?}");
+        assert!(
+            layout.ends_with("  [Master detail] Grid Tabs"),
+            "{layout:?}"
+        );
+        assert_eq!(lines[1].width(), 76);
         // A short screen scrolls to the selected row.
-        let state = state(ModalTab::General).with_selected(ROWS - 1);
-        let buf = draw(80, 6, &state, &context);
+        let state = state(ModalTab::Settings).with_selected(ROWS - 1);
+        let buf = draw(80, 9, &state, &context);
         assert!(buffer_text(&buf).contains("▶ OpenAI model"));
+        let mut state = state.with_selected(999);
+        let buf = draw(80, 12, &state, &context);
+        assert!(buffer_text(&buf).contains("▶ Quit Rakumux"));
+        // The first action shows with the rule and heading above it.
+        state.selected = ROWS;
+        let text = buffer_text(&draw(80, 12, &state, &context));
+        assert!(text.contains("── Keys"), "{text}");
+        assert!(text.contains("Modes"), "{text}");
+    }
+
+    #[test]
+    fn the_page_scrolls_only_as_far_as_the_selection_needs() {
+        let context = ctx("Ctrl-b");
+        let mut state = state(ModalTab::Settings);
+        let mut last_top = 0;
+        for _ in 0..ROWS + KeyAction::ALL.len() {
+            draw(80, 20, &state, &context);
+            let top = state.top.get();
+            assert!(top >= last_top, "moving down never scrolls up");
+            last_top = top;
+            state.handle_key(&press(KeyCode::Down));
+        }
+        assert!(last_top > 0);
+        // Back up a few rows: the page stays put until the selection
+        // reaches its top.
+        for _ in 0..3 {
+            state.handle_key(&press(KeyCode::Up));
+            draw(80, 20, &state, &context);
+            assert_eq!(state.top.get(), last_top);
+        }
+        // A render records the page for PgUp/PgDn.
+        assert!(state.page.get() > 1 && state.page.get() < DEFAULT_PAGE + 10);
     }
 
     #[test]
@@ -2889,8 +3227,7 @@ mod tests {
             (1, 1),
         ] {
             for tab in ModalTab::ALL {
-                let mut state = state(tab);
-                state.action = KeyAction::ALL.len() - 1;
+                let state = state(tab).with_selected(999);
                 let buf = draw(w, h, &state, &context);
                 if w >= 40 {
                     let text = buffer_text(&buf);
@@ -2931,10 +3268,11 @@ mod tests {
         assert!(!footer.contains("PgUp"), "{footer:?}");
         assert!(footer.contains(" 31-"), "{footer:?}");
         // A phone: fewer keys, Esc close still whole.
-        for tab in [ModalTab::Overview, ModalTab::General, ModalTab::Keys] {
+        for tab in [ModalTab::Overview, ModalTab::Settings] {
             let buf = draw(40, 20, &ModalState::new(tab, ROWS), &context);
+            let popup = dialog(&buf);
             let footer: String = (0..40)
-                .map(|x| buf.get(x, 18).symbol().to_string())
+                .map(|x| buf.get(x, popup.bottom() - 2).symbol().to_string())
                 .collect();
             assert!(footer.contains("Esc close"), "{tab:?} {footer:?}");
         }
@@ -2961,15 +3299,12 @@ mod tests {
     }
 
     #[test]
-    fn keys_tab_is_a_table_of_actions_and_their_configured_keys() {
+    fn actions_are_a_table_of_actions_and_their_configured_keys() {
         let mut context = ctx("C-a");
         context.cycle_previous = "Alt-k".into();
         context.cycle_next = "Alt-j".into();
-        let text = keys_text(&context, 0, 120);
+        let text = page_text(&context, ROWS, 120);
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[0].starts_with("  Action"), "{text}");
-        assert!(lines[0].contains("   Key"), "{text}");
-        assert!(lines[1].starts_with('─'), "{text}");
         let row = |action: &str| {
             lines
                 .iter()
@@ -3014,77 +3349,115 @@ mod tests {
         ] {
             assert!(row(action).trim_end().ends_with(keys), "{action}: {text}");
         }
-        // The Key column lines up.
-        let column = |line: &str, needle: &str| {
-            let at = line.find(needle).unwrap();
-            line[..at].chars().count()
-        };
-        assert_eq!(
-            column(row("Half a page down"), "Ctrl-d"),
-            column(lines[0], "Key"),
-            "{text}"
-        );
+        // The keys are pinned to the right: every row ends at the edge.
+        for action in ["Half a page down", "Next folder", "Rakumux mode"] {
+            assert_eq!(row(action).chars().count(), 120, "{action}: {text}");
+        }
         assert!(!text.contains("Ctrl-b"), "{text}");
-        // The first row is selected, with its note below the table.
+        // The first action is selected, its note under it.
         assert!(row("Rakumux mode").starts_with("▶ "), "{text}");
-        assert!(
-            text.contains("the one key a session's program never gets"),
-            "{text}"
-        );
-        assert!(
-            text.contains("Press Enter to run the selected action"),
-            "{text}"
-        );
-        // Rows are grouped under headings, in this order.
+        assert!(note_text(&context, ROWS).contains("the one key a session's program never gets"),);
+        // An action with nothing more to say has no note; the rule says
+        // how to run any of them.
+        assert_eq!(note_text(&context, row_of(KeyAction::Pin)), "");
+        let how = lines
+            .iter()
+            .position(|l| l.contains("Enter runs the selected action"))
+            .unwrap();
+        assert!(text.contains("press C-a first"), "{text}");
+        // The settings come first, then the actions under a rule, each
+        // under its heading, in this order.
         let at = |heading: &str| {
             lines
                 .iter()
                 .position(|l| l.trim() == heading)
                 .unwrap_or_else(|| panic!("no {heading} heading: {text}"))
         };
+        assert_eq!(lines[0], "Appearance");
+        let rule = lines
+            .iter()
+            .position(|l| l.starts_with("── Keys ─"))
+            .unwrap();
         let headings = [
+            at("AI session naming"),
+            rule,
             at("Modes"),
             at("Moving around"),
             at("Sessions and folders"),
             at("Help and app"),
         ];
         assert!(headings.windows(2).all(|w| w[0] < w[1]), "{text}");
-        // The General tab too.
-        let general = general_lines(&context, 0, 80)
-            .0
-            .iter()
-            .map(line_text)
-            .collect::<Vec<_>>();
-        assert_eq!(general[0], "Appearance");
-        assert!(general.iter().any(|l| l == "AI session naming"));
+        assert!(rule < how && how < at("Modes"), "{text}");
     }
 
     #[test]
-    fn keys_tab_notes_follow_the_selection_and_rows_fit_the_width() {
+    fn right_shows_the_rows_note_in_a_popover_without_moving_the_page() {
         let context = ctx("Ctrl-b");
-        let next = KeyAction::ALL
+        let mut state = state(ModalTab::Settings);
+        state.selected = row_of(KeyAction::NextSession);
+        let closed = draw(100, 40, &state, &context);
+        let closed_text = buffer_text(&closed);
+        assert!(
+            !closed_text.contains("Use Option as Meta key"),
+            "{closed_text}"
+        );
+        assert!(closed_text.contains("→ about"), "{closed_text}");
+        state.handle_key(&press(KeyCode::Right));
+        assert!(state.note_open);
+        let open = draw(100, 40, &state, &context);
+        let open_text = buffer_text(&open);
+        // Wrapping may split the phrase over two lines.
+        let words = open_text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(words.contains("Use Option as"), "{open_text}");
+        assert!(open_text.contains("← back"), "{open_text}");
+        // Titled with the row, just below it; the page stays put.
+        let lines: Vec<&str> = open_text.lines().collect();
+        let row = lines
             .iter()
-            .position(|a| *a == KeyAction::NextSession)
+            .position(|l| l.contains("▶ Next session"))
             .unwrap();
-        let text = keys_text(&context, next, 100);
-        assert!(text.contains("▶ Next session"), "{text}");
-        assert!(text.contains("Use Option as Meta key"), "{text}");
-        for width in [1, 12, 30, 60, 125] {
-            for selected in 0..KeyAction::ALL.len() {
-                let (lines, line) = action_lines(&context, selected, width);
-                if width > 2 {
-                    assert!(line_text(&lines[line]).starts_with('▶'));
-                }
-                for line in &lines {
-                    assert!(line.width() <= width, "{width}: {:?}", line_text(line));
-                }
+        assert!(lines[row + 1].contains("╭ Next session ─"), "{open_text}");
+        assert_eq!(dialog(&open), dialog(&closed));
+        let before: Vec<&str> = closed_text.lines().take(row + 1).collect();
+        assert_eq!(lines[..=row].to_vec(), before);
+        // ← and Esc close it (Esc then closes Settings), and so does moving.
+        state.handle_key(&press(KeyCode::Left));
+        assert!(!state.note_open);
+        state.handle_key(&press(KeyCode::Right));
+        assert_eq!(state.handle_key(&press(KeyCode::Esc)), ModalAction::Handled);
+        assert!(!state.note_open);
+        assert_eq!(state.handle_key(&press(KeyCode::Esc)), ModalAction::Close);
+        state.handle_key(&press(KeyCode::Right));
+        state.handle_key(&press(KeyCode::Down));
+        assert!(!state.note_open);
+        state.note_open = true;
+        state.wheel(1);
+        assert!(!state.note_open);
+        // A row with nothing more to say offers no note.
+        assert_eq!(note_text(&context, 0), "List on the left.");
+        assert_eq!(note_text(&context, row_of(KeyAction::Pin)), "");
+        state.select_action(KeyAction::Pin);
+        state.note_open = true;
+        let text = buffer_text(&draw(100, 40, &state, &context));
+        assert!(
+            !text.contains("→ about") && !text.contains("← back"),
+            "{text}"
+        );
+        // A long note near the bottom of a short screen goes above the row
+        // and stays inside the page.
+        state.select_action(KeyAction::TerminalPanel);
+        state.note_open = true;
+        for (width, height) in [(60, 16), (80, 24), (40, 12)] {
+            let buf = draw(width, height, &state, &context);
+            let page = dialog(&buf);
+            let text = buffer_text(&buf);
+            let lines: Vec<&str> = text.lines().collect();
+            if let Some(top) = lines.iter().position(|l| l.contains("╭ Terminal panel")) {
+                let bottom = lines.iter().rposition(|l| l.contains('╰')).unwrap();
+                assert!(top > usize::from(page.y), "{text}");
+                assert!(bottom <= usize::from(page.bottom()) - 1, "{text}");
             }
         }
-        // A short screen scrolls to the selected row.
-        let mut state = state(ModalTab::Keys);
-        state.action = KeyAction::ALL.len() - 1;
-        let buf = draw(80, 12, &state, &context);
-        assert!(buffer_text(&buf).contains("▶ Quit Rakumux"));
     }
 
     #[test]
@@ -3095,12 +3468,9 @@ mod tests {
         context.cycle_next = String::new();
         let overview = tab_text(ModalTab::Overview, &context, 100);
         assert!(overview.contains("turned off"), "{overview}");
-        let next = KeyAction::ALL
-            .iter()
-            .position(|a| *a == KeyAction::NextSession)
-            .unwrap();
-        let keys = keys_text(&context, next, 100);
-        assert!(keys.contains("turned off"), "{keys}");
+        let next = row_of(KeyAction::NextSession);
+        assert!(note_text(&context, next).contains("turned off"));
+        let keys = page_text(&context, next, 100);
         assert!(
             keys.lines()
                 .any(|l| l.contains("Next session") && l.trim_end().ends_with("   ↓, j")),
@@ -3145,7 +3515,7 @@ mod tests {
         let all: String = ModalTab::ALL
             .iter()
             .map(|tab| tab_text(*tab, &context, 200))
-            .chain([keys_text(&context, 0, 200)])
+            .chain([page_text(&context, 0, 200)])
             .collect::<Vec<_>>()
             .join("\n");
         // Wrapping may split a phrase over two lines.

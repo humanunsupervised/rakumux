@@ -41,7 +41,7 @@ to upgrade. npm and Homebrew publishing are not enabled. See the
 [installation guide](install/INSTALL.md) for binary and release-tarball instructions.
 Native binaries are available for macOS Intel, macOS Apple Silicon and Linux x64.
 
-**Update in the app:** press `Shift+U` in Rakumux mode, or open Settings → General → Update.
+**Update in the app:** press `Shift+U` in Rakumux mode, or open Settings → Update.
 Confirm to download, verify and install the new release, then restart only the UI. Running
 sessions and the daemon stay up. Binary installs need a writable installation directory;
 admin-owned installs need the installer outside the app. Source builds use `./build.sh`, then `R`.
@@ -53,7 +53,7 @@ Run an agent or any command in its shell.
 Press `Ctrl-\` to return to Rakumux mode. Use `j`/`k` or the arrow keys to select a session,
 `Enter` to work in it, and `?` for Help. Quitting the UI does not stop sessions.
 
-**Layouts:** Settings → General → Layout, or `v` in Rakumux mode, cycles **Master detail**
+**Layouts:** Settings → Layout, or `v` in Rakumux mode, cycles **Master detail**
 (the default), **Grid**, and **Tabs**. Grid shows a responsive page of up to six real live
 terminal previews. Arrows or `h`/`j`/`k`/`l` select cards; `PgUp`/`PgDn` change page. Enter or
 a tap opens a session; `Ctrl-\` returns to Grid. Folder/text filters and pinned/custom ordering
@@ -62,7 +62,7 @@ resizes a terminal, sends input, or marks a session as used. Cards crop/pan at t
 existing size. Only visible cards have preview streams; dead/exited cards show saved output.
 `n` or the + New session card creates and enters a generated-name session immediately.
 
-**Bottom terminal:** `T` in Rakumux mode, or Settings → General → Terminal panel, opens an
+**Bottom terminal:** `T` in Rakumux mode, or Settings → Terminal panel, opens an
 independent shell underneath the main detail. It starts in the selected session's current
 directory (or the current folder when none is selected) and has its
 own input focus. Click a pane to focus it; `Ctrl-\` returns to Rakumux mode, then `Esc` returns

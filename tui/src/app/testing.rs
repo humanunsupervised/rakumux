@@ -785,11 +785,6 @@ impl crate::remote_access::PhoneAccess for FakePhone {
         Ok(Self::pairing())
     }
 
-    fn pairing(&self) -> std::result::Result<Option<crate::remote_access::Pairing>, String> {
-        self.call("pairing");
-        Ok(self.enabled().then(Self::pairing))
-    }
-
     fn disable(&self) -> std::result::Result<(), String> {
         self.call("disable");
         *self.enabled.lock().unwrap() = false;

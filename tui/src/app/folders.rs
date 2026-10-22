@@ -6,9 +6,12 @@
 //! isn't saved. The folder Rakumux starts in is added at startup; new
 //! sessions go in [`App::current_folder`].
 //!
-//! The Folders modal (Enter on the folder filter, `P`, a click) lists All
+//! The folder filter is the All folders tab's (`grouping`): it applies
+//! while that tab is active. The Folders modal (Enter on the tabs with All
+//! folders active, a click on that tab, or `P` from any tab) lists All
 //! folders and the folders that have sessions, filters them as you type,
-//! shows one or the ticked ones (Tab, Space), and adds a typed folder
+//! shows one or the ticked ones (Tab, Space) under All folders, which
+//! becomes the active tab, and adds a typed folder
 //! (creating it when it doesn't exist, offering the folders that complete
 //! it as you type; `path_complete`).
 //!
@@ -24,6 +27,7 @@ use session_core::api::{ApiError, ErrorCode, SubscribeRequest, CAPABILITY_SESSIO
 use session_core::client::{EventStream, SessionApi};
 use session_core::model::{ProjectView, ScopeRoot, SessionView};
 
+use super::grouping::Grouping;
 use super::path_complete::{self, expand, home_dir, MAX_SUGGESTIONS};
 use super::runtime::AppEvent;
 use super::session_list::Listed;
@@ -300,8 +304,9 @@ impl App {
     }
 
     /// Where new sessions go: the current folder section, retained on the
-    /// folder filter and "+ New session" rows; the filter's only folder
-    /// takes precedence. Without folder context, use the launch folder.
+    /// tabs and "+ New session" rows; the folder filter's only folder takes
+    /// precedence while All folders is the active tab. Without folder
+    /// context, use the launch folder.
     pub fn current_folder(&self) -> ScopeRoot {
         self.list
             .current_folder()
@@ -321,16 +326,19 @@ impl App {
         }
     }
 
-    /// Show these folders (none: all folders). The list already has every
-    /// folder's sessions; an older daemon is asked for a folder it isn't
-    /// watching yet.
+    /// Show these folders (none: all folders) under All folders, which
+    /// becomes the active tab. The list already has every folder's
+    /// sessions; an older daemon is asked for a folder it isn't watching
+    /// yet.
     pub fn show_folders(&mut self, folders: Vec<ScopeRoot>) {
         let current = self.list.folder_filter();
-        let unchanged =
-            folders.len() == current.len() && folders.iter().all(|f| current.contains(f));
+        let unchanged = self.list.grouping() == Grouping::Folder
+            && folders.len() == current.len()
+            && folders.iter().all(|f| current.contains(f));
         if unchanged {
             return;
         }
+        self.list.set_grouping(Grouping::Folder);
         self.list.set_folder_filter(folders);
         let unlisted = self
             .list

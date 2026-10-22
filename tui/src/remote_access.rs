@@ -1,6 +1,5 @@
 //! Remote access for the Rakumux app on a phone (see `api/README.md`),
-//! shared by the `rakumux remote` CLI and the TUI (the one-time offer and
-//! Settings' Phone access row).
+//! shared by the `rakumux remote` CLI and the TUI (the one-time offer).
 //!
 //! The settings live in `<home>/remote.json` (`session_core::remote`);
 //! `rakumux-api` reads them when it starts, so turning remote access on or
@@ -358,8 +357,8 @@ pub fn autostart(layout: &Layout, ptyd_path: Option<PathBuf>) {
 
 // ---------------------------------------------------------------- the TUI's port
 
-/// What the TUI does with remote access (the one-time offer, Settings'
-/// Phone access row and the pairing dialog); blocking, so the TUI runs it
+/// What the TUI does with remote access (the one-time offer and the
+/// pairing dialog); blocking, so the TUI runs it
 /// off the UI thread. Tests use a fake.
 pub trait PhoneAccess: Send + Sync {
     /// Remote access is on.
@@ -368,8 +367,6 @@ pub trait PhoneAccess: Send + Sync {
     fn worth_offering(&self) -> bool;
     /// See [`enable`].
     fn enable(&self) -> Result<Pairing, String>;
-    /// See [`pairing`].
-    fn pairing(&self) -> Result<Option<Pairing>, String>;
     /// See [`disable`].
     fn disable(&self) -> Result<(), String>;
 }
@@ -391,10 +388,6 @@ impl PhoneAccess for LocalPhoneAccess {
 
     fn enable(&self) -> Result<Pairing, String> {
         enable(&self.layout, self.ptyd_path.as_deref(), None)
-    }
-
-    fn pairing(&self) -> Result<Option<Pairing>, String> {
-        pairing(&self.layout, self.ptyd_path.as_deref())
     }
 
     fn disable(&self) -> Result<(), String> {

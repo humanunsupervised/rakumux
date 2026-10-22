@@ -59,10 +59,12 @@ pub const STACK_MIN_ROWS: u16 = LIST_MIN_ROWS + 1 + PREVIEW_MIN_ROWS;
 /// percent.
 const STACKED_LIST_PERCENT: u32 = 40;
 
-/// Sidebar column width at the single-pane threshold.
-const SIDEBAR_MIN_COLS: u16 = 28;
-/// Sidebar column width once there's room, until 25% of the screen is wider.
-const SIDEBAR_COLS: u16 = 34;
+/// Sidebar column width at the single-pane threshold: room for the list's
+/// tabs (`▤ All folders ▾   ◇ App   ◔ Status`).
+const SIDEBAR_MIN_COLS: u16 = 40;
+/// Sidebar column width once there's room, until 30% of the screen is
+/// wider: the tabs with a filter's name, a branch or the text filter.
+const SIDEBAR_COLS: u16 = 48;
 /// Narrowest list a dragged divider leaves.
 pub const LIST_MIN_COLS: u16 = 20;
 /// Narrowest detail a dragged divider leaves.
@@ -192,13 +194,13 @@ pub fn can_stack(area: Rect) -> bool {
 }
 
 /// Width of the Sidebar list column for a screen `total` columns wide:
-/// 28 columns at the single-pane threshold, growing to 34, then 25% of the
+/// 40 columns at the single-pane threshold, growing to 48, then 30% of the
 /// screen on wide terminals. Never wider than `total`.
 pub fn sidebar_width(total: u16) -> u16 {
     let fixed = total
         .saturating_sub(SINGLE_PANE_BELOW - SIDEBAR_MIN_COLS)
         .clamp(SIDEBAR_MIN_COLS, SIDEBAR_COLS);
-    fixed.max(total / 4).min(total)
+    fixed.max(total * 3 / 10).min(total)
 }
 
 /// List width for a screen `total` columns wide: `preferred` (a dragged
@@ -743,13 +745,13 @@ mod tests {
 
     #[test]
     fn sidebar_width_follows_the_documented_curve() {
-        assert_eq!(sidebar_width(100), 28);
-        assert_eq!(sidebar_width(103), 31);
-        assert_eq!(sidebar_width(106), 34);
-        assert_eq!(sidebar_width(120), 34);
-        assert_eq!(sidebar_width(136), 34);
-        assert_eq!(sidebar_width(160), 40);
-        assert_eq!(sidebar_width(240), 60);
+        assert_eq!(sidebar_width(100), 40);
+        assert_eq!(sidebar_width(103), 43);
+        assert_eq!(sidebar_width(108), 48);
+        assert_eq!(sidebar_width(120), 48);
+        assert_eq!(sidebar_width(160), 48);
+        assert_eq!(sidebar_width(170), 51);
+        assert_eq!(sidebar_width(240), 72);
         assert_eq!(sidebar_width(20), 20);
     }
 
@@ -758,10 +760,10 @@ mod tests {
         let area = rect(0, 1, 160, 46);
         for focus in [PaneFocus::List, PaneFocus::Detail] {
             let areas = split(area, SessionLayout::Sidebar, focus);
-            assert_eq!(areas.list, Some(rect(0, 1, 40, 46)));
-            assert_eq!(areas.divider, Some(rect(40, 1, 1, 46)));
+            assert_eq!(areas.list, Some(rect(0, 1, 48, 46)));
+            assert_eq!(areas.divider, Some(rect(48, 1, 1, 46)));
             assert_eq!(areas.tabs, None);
-            assert_eq!(areas.detail, rect(41, 1, 119, 46));
+            assert_eq!(areas.detail, rect(49, 1, 111, 46));
         }
     }
 
@@ -787,8 +789,8 @@ mod tests {
     #[test]
     fn sidebar_at_threshold_and_offset_origin() {
         let areas = split(rect(5, 2, 100, 30), SessionLayout::Sidebar, PaneFocus::List);
-        assert_eq!(areas.list, Some(rect(5, 2, 28, 30)));
-        assert_eq!(areas.detail, rect(34, 2, 71, 30));
+        assert_eq!(areas.list, Some(rect(5, 2, 40, 30)));
+        assert_eq!(areas.detail, rect(46, 2, 59, 30));
     }
 
     #[test]

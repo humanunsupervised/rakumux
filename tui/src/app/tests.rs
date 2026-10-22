@@ -19,7 +19,7 @@ use super::types::{
     PickerStage, SettingsItem,
 };
 use super::*;
-use crate::help::ModalTab;
+use crate::help::{KeyAction, ModalState, ModalTab};
 use crate::layout::SessionLayout;
 
 fn id(s: &str) -> SessionId {
@@ -581,7 +581,7 @@ async fn tab_numbers_and_enter_go_into_sessions() {
 }
 
 #[tokio::test]
-async fn rakumux_mode_shows_only_help_and_settings_and_the_mode_in_the_footer() {
+async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_the_footer() {
     let mut h = harness(vec![view("A", "a", 30)]);
     h.press(KeyCode::Enter).await;
     h.rakumux().await;
@@ -593,12 +593,12 @@ async fn rakumux_mode_shows_only_help_and_settings_and_the_mode_in_the_footer() 
     let footer: String = (0..120)
         .map(|x| buffer.get(x, 39).symbol().to_string())
         .collect();
-    assert!(footer.starts_with(" RAKUMUX "), "the mode: {footer:?}");
-    assert_eq!(
-        footer.trim_start_matches(" RAKUMUX ").trim(),
-        "? help  , settings",
-        "{footer:?}"
+    assert!(
+        footer.starts_with(" RAKUMUX | session: a "),
+        "the mode, then A: {footer:?}"
     );
+    let between = footer.trim_start_matches(" RAKUMUX | session: a ").trim();
+    assert_eq!(between, "? Help   , Settings", "{footer:?}");
     let screen: String = buffer.content().iter().map(|c| c.symbol()).collect();
     for hint in ["go in", "Esc back", "last session"] {
         assert!(!screen.contains(hint), "{hint}");
@@ -786,7 +786,7 @@ async fn from_a_session_the_rakumux_key_then_one_key_does_everything() {
     assert!(matches!(h.app.mode, AppMode::Normal));
     assert_eq!(h.app.focus, Focus::List);
     h.press(KeyCode::Char(',')).await;
-    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
     h.press(KeyCode::Char(',')).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
     h.press(KeyCode::Esc).await;
@@ -1139,14 +1139,38 @@ async fn the_folder_filter_and_new_session_keep_the_session_in_view() {
 // ---------------------------------------------------------------- exited and dead
 
 #[tokio::test]
-async fn exit_returns_focus_and_enter_restarts() {
-    let mut h = harness(vec![view("A", "a", 10)]);
-    let (index, _) = h.last_attach();
+async fn exiting_the_session_you_work_in_deletes_it() {
+    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
     h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    let (index, request) = h.last_attach();
+    assert_eq!(request.id.as_str(), "A");
+    assert_eq!(
+        h.app.detail.attachment.as_ref().unwrap().role,
+        Role::Controller
+    );
+    h.attach_event(
+        index,
+        AttachEvent::Event(StreamEvent::Exited { code: Some(0) }),
+    );
+    assert!(h.fake.calls().iter().any(|c| c == "delete A"));
+    assert!(h.app.list.get(&id("A")).is_none(), "gone from the list");
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    assert_ne!(h.app.detail.session_id(), Some(&id("A")));
+    assert_eq!(h.app.status(), Some("Deleted a"));
+}
+
+#[tokio::test]
+async fn a_session_ending_in_the_background_stays_and_enter_restarts() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    // Previewed in Rakumux mode, not worked in.
+    let (index, _) = h.last_attach();
     h.attach_event(
         index,
         AttachEvent::Event(StreamEvent::Exited { code: Some(3) }),
     );
+    assert!(!h.fake.calls().iter().any(|c| c.starts_with("delete")));
     assert_eq!(h.app.focus, Focus::List);
     assert_eq!(
         h.app.detail.view,
@@ -1385,6 +1409,15 @@ async fn d_types_in_filters_and_sessions_without_opening_delete_confirmation() {
 }
 
 /// The open modal's tab (Settings or Help), or `None` when none is open.
+/// Settings with its first action selected, below the settings.
+fn settings_on_actions(in_session: bool) -> AppMode {
+    let rows = SettingsItem::ALL.len();
+    AppMode::Modal {
+        state: ModalState::new(ModalTab::Settings, rows).with_selected(rows),
+        in_session,
+    }
+}
+
 fn settings_tab(h: &Harness) -> Option<ModalTab> {
     match &h.app.mode {
         AppMode::Modal { state, .. } => Some(state.tab),
@@ -1419,7 +1452,7 @@ async fn help_opens_closes_and_lets_cycle_keys_through() {
 async fn settings_and_help_open_from_the_list_with_their_keys() {
     let mut h = harness(vec![view("A", "a", 20)]);
     h.press(KeyCode::Char('o')).await;
-    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
     // The key that opened it closes it.
     h.press(KeyCode::Char('o')).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
@@ -1431,19 +1464,22 @@ async fn settings_and_help_open_from_the_list_with_their_keys() {
     assert!(matches!(h.app.mode, AppMode::Normal));
     // `,` opens Settings too; the Rakumux key closes a modal.
     h.press(KeyCode::Char(',')).await;
-    assert_eq!(settings_tab(&h), Some(ModalTab::General));
-    h.press(KeyCode::Char('2')).await;
-    assert_eq!(settings_tab(&h), Some(ModalTab::Keys));
+    assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
+    // One page: number keys and Tab have nothing to switch to.
+    for key in [KeyCode::Char('2'), KeyCode::Tab] {
+        h.press(key).await;
+        assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
+    }
     h.rakumux().await;
     assert!(matches!(h.app.mode, AppMode::Normal));
     assert_eq!(h.app.focus, Focus::List);
 }
 
 #[tokio::test]
-async fn the_keys_tab_runs_the_selected_action() {
+async fn settings_runs_the_selected_action() {
     let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
     let open_keys = |h: &mut Harness| {
-        h.app.mode = AppMode::modal(ModalTab::Keys, h.app.focus == Focus::Session);
+        h.app.mode = settings_on_actions(h.app.focus == Focus::Session);
     };
     let row = |action: crate::help::KeyAction| {
         crate::help::KeyAction::ALL
@@ -1691,20 +1727,17 @@ async fn installation_cannot_be_cancelled_or_started_twice_by_more_keys() {
 }
 
 #[tokio::test]
-async fn the_keys_tab_can_restart_only_the_ui_from_either_focus() {
+async fn settings_can_restart_only_the_ui_from_either_focus() {
     for focus_session in [false, true] {
         let mut h = harness(vec![view("A", "a", 20)]);
         if focus_session {
             h.press(KeyCode::Enter).await;
         }
-        h.app.mode = AppMode::modal(ModalTab::Keys, focus_session);
+        h.app.mode = settings_on_actions(focus_session);
         let AppMode::Modal { state, .. } = &mut h.app.mode else {
             unreachable!();
         };
-        state.action = crate::help::KeyAction::ALL
-            .iter()
-            .position(|action| *action == crate::help::KeyAction::Restart)
-            .unwrap();
+        state.select_action(KeyAction::Restart);
         h.fake.clear_calls();
         h.press(KeyCode::Enter).await;
         assert!(
@@ -1739,9 +1772,9 @@ async fn filter_narrows_the_list() {
 async fn settings_switch_layout_live_and_save_it() {
     let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
     h.press(KeyCode::Char('o')).await;
-    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
     h.press(KeyCode::Enter).await; // Layout is the first entry
-    assert_eq!(settings_tab(&h), Some(ModalTab::General));
+    assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
     assert_eq!(h.app.session_layout(), SessionLayout::Grid);
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.session_layout(), SessionLayout::Tabs);
@@ -1757,116 +1790,6 @@ async fn settings_switch_layout_live_and_save_it() {
     h.prefix('2').await;
     assert_eq!(h.selected().as_deref(), Some("A"));
 }
-
-#[tokio::test]
-async fn api_key_dialog_validates_and_saves() {
-    let mut h = harness(vec![]);
-    h.press(KeyCode::Char('o')).await;
-    for _ in 0..SettingsItem::AnthropicKey.index() {
-        h.press(KeyCode::Down).await;
-    }
-    h.press(KeyCode::Enter).await;
-    assert!(matches!(h.app.mode, AppMode::ConfiguringApiKey(_)));
-    h.type_text("bad").await;
-    h.press(KeyCode::Enter).await;
-    match &h.app.mode {
-        AppMode::ConfiguringApiKey(dialog) => assert!(dialog.error_message.is_some()),
-        _ => panic!("dialog closed"),
-    }
-    h.ctrl('u').await;
-    h.type_text("sk-ant-123").await;
-    h.press(KeyCode::Enter).await;
-    // Back on the General tab, on the same row.
-    match &h.app.mode {
-        AppMode::Modal { state, .. } => {
-            assert_eq!(state.tab, ModalTab::General);
-            assert_eq!(state.selected, SettingsItem::AnthropicKey.index());
-        }
-        mode => panic!("not back in Settings: {mode:?}"),
-    }
-    assert_eq!(
-        h.app.settings.ai.anthropic_api_key.as_deref(),
-        Some("sk-ant-123")
-    );
-    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
-    assert_eq!(saved.ai.anthropic_api_key.as_deref(), Some("sk-ant-123"));
-    assert_eq!(
-        h.app.modal_context(false).general[SettingsItem::AnthropicKey.index()].value,
-        "set",
-        "the General tab shows the key as set"
-    );
-}
-
-#[tokio::test]
-async fn typing_an_api_key_never_switches_tabs_or_closes() {
-    let mut h = harness(vec![]);
-    h.press(KeyCode::Char('o')).await;
-    for _ in 0..SettingsItem::OpenAiKey.index() {
-        h.press(KeyCode::Down).await;
-    }
-    h.press(KeyCode::Enter).await;
-    assert!(matches!(h.app.mode, AppMode::ConfiguringApiKey(_)));
-    // Tab, close and number keys of the modal are text here.
-    h.type_text("sk-q?o1hl ").await;
-    h.press(KeyCode::Tab).await;
-    match &h.app.mode {
-        AppMode::ConfiguringApiKey(dialog) => assert_eq!(dialog.input.value(), "sk-q?o1hl "),
-        mode => panic!("dialog closed: {mode:?}"),
-    }
-    // Esc cancels: back to Settings, the OpenAI row selected, nothing saved.
-    h.press(KeyCode::Esc).await;
-    match &h.app.mode {
-        AppMode::Modal { state, .. } => {
-            assert_eq!(state.tab, ModalTab::General);
-            assert_eq!(state.selected, SettingsItem::OpenAiKey.index());
-        }
-        mode => panic!("not back in Settings: {mode:?}"),
-    }
-    assert!(h.app.settings.ai.openai_api_key.is_none());
-    h.press(KeyCode::Esc).await;
-    assert!(matches!(h.app.mode, AppMode::Normal));
-}
-
-#[tokio::test]
-async fn provider_and_model_dialogs_return_to_settings() {
-    let mut h = harness(vec![]);
-    h.press(KeyCode::Char('o')).await;
-    for _ in 0..SettingsItem::PrimaryAiProvider.index() {
-        h.press(KeyCode::Char('j')).await;
-    }
-    h.press(KeyCode::Char(' ')).await;
-    assert!(matches!(h.app.mode, AppMode::AiProvider(_)));
-    h.press(KeyCode::Down).await;
-    h.press(KeyCode::Enter).await;
-    assert_eq!(
-        h.app.settings.ai.ai_primary_provider.as_deref(),
-        Some("openai")
-    );
-    assert_eq!(settings_tab(&h), Some(ModalTab::General));
-    assert_eq!(
-        h.app.modal_context(false).general[SettingsItem::PrimaryAiProvider.index()].value,
-        "OpenAI"
-    );
-    h.press(KeyCode::Down).await;
-    h.press(KeyCode::Enter).await;
-    assert!(matches!(h.app.mode, AppMode::OpenAiModel(_)));
-    h.press(KeyCode::Down).await;
-    h.press(KeyCode::Enter).await;
-    assert_eq!(
-        h.app.settings.ai.openai_model.as_deref(),
-        Some("gpt-4.1-mini")
-    );
-    match &h.app.mode {
-        AppMode::Modal { state, .. } => {
-            assert_eq!(state.selected, SettingsItem::OpenAiModel.index())
-        }
-        mode => panic!("not back in Settings: {mode:?}"),
-    }
-    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
-    assert_eq!(saved.ai.openai_model.as_deref(), Some("gpt-4.1-mini"));
-}
-
-// ---------------------------------------------------------------- AI naming
 
 #[tokio::test]
 async fn auto_named_sessions_are_named_when_they_settle() {
@@ -2395,7 +2318,7 @@ async fn the_keys_tab_lists_and_runs_the_move_actions() {
     );
     // From a session too: it moves in Rakumux mode.
     h.press(KeyCode::Enter).await;
-    h.app.mode = AppMode::modal(ModalTab::Keys, true);
+    h.app.mode = settings_on_actions(true);
     for _ in 0..up {
         h.press(KeyCode::Down).await;
     }
@@ -3336,6 +3259,323 @@ async fn clicks_open_the_modal_pick_rows_and_close_it() {
     assert!(h.app.list.folder_filter().is_empty());
 }
 
+// ---------------------------------------------------------------- list tabs
+
+/// `/repo` (launch): Claude Code working and waiting for you, and a shell;
+/// `/web`: Codex with an unread reply, the most recent.
+fn agents_harness() -> Harness {
+    let agent = |id: &str, kind: &str, lifecycle: Lifecycle, at: i64| {
+        let mut session = view(id, &id.to_lowercase(), at);
+        session.agent = Some(session_core::model::AgentInfo {
+            kind: kind.into(),
+            ..Default::default()
+        });
+        session.lifecycle = lifecycle;
+        session
+    };
+    let mut codex = agent("W1", "codex", Lifecycle::Done, 40);
+    codex.scope = folder("/web");
+    codex.cwd = "/web".into();
+    harness_with_folders(
+        vec![
+            agent("R1", "claude", Lifecycle::Working, 10),
+            agent("R2", "claude", Lifecycle::Blocked, 20),
+            view("R3", "r3", 30),
+            codex,
+        ],
+        &[("/web", on_branch("main"))],
+        SessionLayout::Sidebar,
+    )
+}
+
+fn section_picker(h: &Harness) -> &types::SectionPicker {
+    match &h.app.mode {
+        AppMode::Sections(picker) => picker,
+        _ => panic!("the App or Status modal is closed"),
+    }
+}
+
+/// The App or Status modal's rows: `all` or a name, after `[x]` when
+/// ticked, and `>` before the one under the cursor.
+fn section_rows(h: &Harness) -> Vec<String> {
+    let picker = section_picker(h);
+    picker
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let name = match row {
+                types::SectionRow::All => "all",
+                types::SectionRow::Section(section) => section.label(),
+            };
+            let tick = if picker.is_ticked(row) { "[x]" } else { "[ ]" };
+            let cursor = if index == picker.cursor { ">" } else { " " };
+            format!("{cursor}{tick} {name}")
+        })
+        .collect()
+}
+
+fn app_section(name: &str) -> grouping::Section {
+    grouping::Section::App(grouping::AppKey::new(name))
+}
+
+#[tokio::test]
+async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal() {
+    use grouping::Grouping;
+    let mut h = agents_harness();
+    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    h.press(KeyCode::Home).await;
+    assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
+    // → and l go along the tabs and stop at the last; the top row stays
+    // selected; ← and h come back.
+    h.press(KeyCode::Right).await;
+    assert_eq!(h.app.list.grouping(), Grouping::App);
+    assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
+    assert!(h.app.list.is_grouped());
+    h.press(KeyCode::Char('l')).await;
+    assert_eq!(h.app.list.grouping(), Grouping::Status);
+    h.press(KeyCode::Right).await;
+    assert_eq!(h.app.list.grouping(), Grouping::Status);
+    h.press(KeyCode::Left).await;
+    assert_eq!(h.app.list.grouping(), Grouping::App);
+    // Enter: the active tab's modal; Esc leaves everything as it was.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(section_picker(&h).grouping, Grouping::App);
+    assert_eq!(
+        section_rows(&h),
+        [">[x] all", " [ ] claude", " [ ] codex", " [ ] shell"]
+    );
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.list.grouping(), Grouping::App);
+    assert!(h.app.list.section_filter(Grouping::App).is_empty());
+    // All folders' modal is the Folders modal.
+    h.press(KeyCode::Char('h')).await;
+    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Folders(_)));
+    h.press(KeyCode::Esc).await;
+    // Off the top row ← does nothing and → goes in, as before.
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Down).await;
+    assert!(h.app.list.selected_id().is_some());
+    h.press(KeyCode::Left).await;
+    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    h.press(KeyCode::Right).await;
+    assert_eq!(h.app.focus, Focus::Session);
+}
+
+#[tokio::test]
+async fn the_app_modal_ticks_several_enter_shows_them_and_esc_changes_nothing() {
+    use grouping::Grouping;
+    let mut h = agents_harness();
+    h.app.show_tab(Grouping::App);
+    h.app.list.select(session_list::Selection::Folders);
+    h.press(KeyCode::Enter).await;
+    // Tab and Space tick; Esc forgets them.
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Tab).await;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Char(' ')).await;
+    assert_eq!(
+        section_rows(&h),
+        [" [ ] all", " [x] claude", ">[x] codex", " [ ] shell"]
+    );
+    h.press(KeyCode::Esc).await;
+    assert!(h.app.list.section_filter(Grouping::App).is_empty());
+    assert_eq!(visible_ids(&h), ["R1", "R2", "W1", "R3"]);
+    // Enter after ticking: the ticked ones and the one under the cursor.
+    h.press(KeyCode::Enter).await;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Char(' ')).await;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(
+        h.app.list.section_filter(Grouping::App),
+        [app_section("claude"), app_section("codex")]
+    );
+    assert_eq!(visible_ids(&h), ["R1", "R2", "W1"]);
+    assert_eq!(h.app.tab_label(Grouping::App), "2 apps");
+    assert_eq!(h.app.status(), Some("Showing 2 apps"));
+    // Opened again: ticked like the filter, the cursor on its first app.
+    h.app.list.select(session_list::Selection::Folders);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        section_rows(&h),
+        [" [ ] all", ">[x] claude", " [x] codex", " [ ] shell"]
+    );
+    // Enter on an app without ticking: it alone.
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        h.app.list.section_filter(Grouping::App),
+        [app_section("codex")]
+    );
+    assert_eq!(h.app.tab_label(Grouping::App), "codex");
+    assert_eq!(visible_ids(&h), ["W1"]);
+    // All apps clears it.
+    h.app.list.select(session_list::Selection::Folders);
+    h.press(KeyCode::Enter).await;
+    h.press(KeyCode::PageUp).await;
+    assert_eq!(section_rows(&h)[0], ">[ ] all");
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.list.section_filter(Grouping::App).is_empty());
+    assert_eq!(h.app.tab_label(Grouping::App), "App");
+}
+
+#[tokio::test]
+async fn typing_narrows_the_status_modal_and_space_types_once_something_is_typed() {
+    use grouping::{Grouping, Section, StatusGroup};
+    let mut h = agents_harness();
+    h.app.show_tab(Grouping::Status);
+    h.app.list.select(session_list::Selection::Folders);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(section_picker(&h).grouping, Grouping::Status);
+    // Every status but unknown, sessions or not.
+    assert_eq!(section_rows(&h).len(), 9);
+    h.type_text("wait").await;
+    assert_eq!(
+        section_rows(&h),
+        [">[ ] waiting for you", " [ ] waiting for response"]
+    );
+    // Something is typed: Space goes in the query.
+    h.type_text("ing f").await;
+    assert_eq!(section_picker(&h).query.value(), "waiting f");
+    assert_eq!(section_rows(&h).len(), 2);
+    h.type_text("or y").await;
+    assert_eq!(section_rows(&h), [">[ ] waiting for you"]);
+    h.app.handle_paste("ou");
+    assert_eq!(section_rows(&h), [">[ ] waiting for you"]);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        h.app.list.section_filter(Grouping::Status),
+        [Section::Status(StatusGroup::WaitingForYou)]
+    );
+    assert_eq!(visible_ids(&h), ["R2"]);
+    assert_eq!(h.app.tab_label(Grouping::Status), "waiting for you");
+    // Nothing matches: Enter does nothing.
+    h.app.list.select(session_list::Selection::Folders);
+    h.press(KeyCode::Enter).await;
+    h.type_text("zzz").await;
+    assert!(section_rows(&h).is_empty());
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Sections(_)));
+}
+
+#[tokio::test]
+async fn clicks_switch_tabs_open_the_active_ones_modal_and_pick_its_rows() {
+    use grouping::Grouping;
+    let mut h = agents_harness();
+    let click = |h: &mut Harness, wanted: Hit| {
+        draw(h);
+        let area = h
+            .app
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == wanted)
+            .map(|(area, _)| *area)
+            .unwrap_or_else(|| panic!("no {wanted:?}"));
+        let row = area.y + area.height / 2;
+        h.app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            area.x + 1,
+            row,
+        ));
+        h.app.process_pending();
+    };
+    // From a session, a click on another tab: Rakumux mode, that tab.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    click(&mut h, Hit::ListTab(Grouping::App));
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(h.app.list.grouping(), Grouping::App);
+    assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    // On the active tab: its modal; a row picks it (All, claude, codex).
+    click(&mut h, Hit::ListTab(Grouping::App));
+    assert_eq!(section_picker(&h).grouping, Grouping::App);
+    click(&mut h, Hit::SectionRow(2));
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(
+        h.app.list.section_filter(Grouping::App),
+        [app_section("codex")]
+    );
+    // Another modal, closed by a click outside it: nothing changes.
+    click(&mut h, Hit::ListTab(Grouping::Status));
+    click(&mut h, Hit::ListTab(Grouping::Status));
+    assert_eq!(section_picker(&h).grouping, Grouping::Status);
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 1, 46));
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.app.list.section_filter(Grouping::Status).is_empty());
+    // The band beside the tabs opens the active tab's modal too.
+    click(&mut h, Hit::FolderSelector);
+    assert_eq!(section_picker(&h).grouping, Grouping::Status);
+    h.press(KeyCode::Esc).await;
+    // All folders' tab, clicked twice: the Folders modal, as before.
+    click(&mut h, Hit::ListTab(Grouping::Folder));
+    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    click(&mut h, Hit::ListTab(Grouping::Folder));
+    assert!(matches!(h.app.mode, AppMode::Folders(_)));
+}
+
+#[tokio::test]
+async fn the_folders_modal_from_another_tab_shows_folders_under_all_folders() {
+    use grouping::Grouping;
+    let mut h = agents_harness();
+    h.app
+        .show_sections(Grouping::App, vec![app_section("claude")]);
+    assert_eq!(visible_ids(&h), ["R1", "R2"]);
+    // `P` still opens the Folders modal; a folder picked there makes All
+    // folders the active tab.
+    h.press(KeyCode::Char('P')).await;
+    cursor_to(&mut h, "/web");
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    assert_eq!(h.app.list.folder_filter(), [folder("/web")]);
+    assert_eq!(visible_ids(&h), ["W1"]);
+    assert_eq!(h.app.tab_label(Grouping::App), "App");
+    // The app filter waited for its tab.
+    h.app.show_tab(Grouping::App);
+    assert_eq!(visible_ids(&h), ["R1", "R2"]);
+    assert_eq!(h.app.tab_label(Grouping::App), "claude");
+    assert_eq!(h.app.tab_label(Grouping::Folder), "All folders");
+}
+
+#[tokio::test]
+async fn a_session_that_leaves_the_filter_stays_while_it_is_selected() {
+    use grouping::{Grouping, Section, StatusGroup};
+    let mut h = agents_harness();
+    h.app.show_sections(
+        Grouping::Status,
+        vec![Section::Status(StatusGroup::WaitingForYou)],
+    );
+    assert_eq!(h.selected().as_deref(), Some("R2"));
+    // Working in it: answering the question doesn't take it away.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    h.event(
+        "R2",
+        SessionEvent::Lifecycle {
+            lifecycle: Lifecycle::Working,
+        },
+    );
+    assert_eq!(h.selected().as_deref(), Some("R2"));
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.app.detail.session_id(), Some(&id("R2")));
+    // Once something else is selected it goes.
+    h.rakumux().await;
+    h.press(KeyCode::Home).await;
+    assert!(visible_ids(&h).is_empty());
+    // A new session (a shell) the filter doesn't show is shown while
+    // selected, in the current folder.
+    h.press(KeyCode::Char('n')).await;
+    let new_id = h.app.list.selected_id().cloned().unwrap();
+    assert_eq!(created_folder(&h), scope());
+    assert_eq!(visible_ids(&h), [new_id.to_string()]);
+}
+
 /// The welcome tour's card and box, or `None` when it isn't open.
 fn welcome(h: &Harness) -> Option<(usize, bool)> {
     match h.app.mode {
@@ -3521,7 +3761,7 @@ async fn closing_the_welcome_tour_early_shows_it_again_next_start() {
 }
 
 #[tokio::test]
-async fn the_keys_tab_lists_and_runs_the_welcome_tour() {
+async fn settings_lists_and_runs_the_welcome_tour() {
     let mut h = harness(vec![view("A", "a", 20)]);
     let row = crate::help::KeyAction::ALL
         .iter()
@@ -3529,9 +3769,9 @@ async fn the_keys_tab_lists_and_runs_the_welcome_tour() {
         .unwrap();
     assert_eq!(crate::help::KeyAction::Tour.section(), "Help and app");
     h.press(KeyCode::Char(',')).await;
-    h.press(KeyCode::Tab).await;
-    assert_eq!(settings_tab(&h), Some(ModalTab::Keys));
-    for _ in 0..row {
+    assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
+    // The actions follow the settings.
+    for _ in 0..SettingsItem::ALL.len() + row {
         h.press(KeyCode::Down).await;
     }
     h.press(KeyCode::Enter).await;
@@ -3665,41 +3905,29 @@ async fn phone_access_is_not_offered_twice_or_without_tailscale() {
 }
 
 #[tokio::test]
-async fn settings_turns_phone_access_on_shows_the_code_and_turns_it_off() {
+async fn the_pairing_dialog_shows_the_code_and_turns_phone_access_off() {
     let (mut h, phone) = phone_harness(false, false);
-    let row = SettingsItem::PhoneAccess.index();
-    assert_eq!(h.app.modal_context(false).general[row].value, "On [Off]");
-    h.press(KeyCode::Char(',')).await;
-    for _ in 0..row {
-        h.press(KeyCode::Down).await;
-    }
-    h.press(KeyCode::Enter).await;
+    // Settings has no phone row: `rakumux remote` and the offer cover it.
+    let rows = h.app.modal_context(false).general;
+    assert!(!rows.iter().any(|row| row.label.contains("Phone")));
+    h.app.turn_phone_access_on();
+    h.app.process_pending();
     assert!(matches!(
         pairing_state(&h),
         Some(super::types::PairingState::Ready(_))
     ));
-    assert_eq!(h.app.modal_context(false).general[row].value, "[On] Off");
-    // Closing goes back to Settings, on the row.
-    h.press(KeyCode::Esc).await;
-    match &h.app.mode {
-        AppMode::Modal { state, .. } => assert_eq!(state.selected, row),
-        mode => panic!("not back in Settings: {mode:?}"),
-    }
-    // On: Enter shows the code again without turning anything on.
-    h.press(KeyCode::Enter).await;
-    assert_eq!(phone.calls(), vec!["worth_offering", "enable", "pairing"]);
+    assert_eq!(h.app.phone_enabled, Some(true));
     h.press(KeyCode::Char('x')).await;
     assert_eq!(phone.calls().last(), Some(&"disable"));
     assert_eq!(h.app.phone_enabled, Some(false));
-    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
-    assert_eq!(h.app.modal_context(false).general[row].value, "On [Off]");
+    assert!(matches!(h.app.mode, AppMode::Normal));
 }
 
 #[tokio::test]
 async fn phone_access_errors_stay_in_the_dialog() {
     let (mut h, phone) = phone_harness(false, false);
     *phone.fail_enable.lock().unwrap() = Some("rakumux-api not found".into());
-    h.app.turn_phone_access_on(false);
+    h.app.turn_phone_access_on();
     h.app.process_pending();
     assert_eq!(
         pairing_state(&h),

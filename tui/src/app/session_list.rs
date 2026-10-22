@@ -1,16 +1,23 @@
 //! The left pane's state: every session the daemon listed, kept live from
-//! its event stream, narrowed by the folder filter (none: all folders) and
-//! the text filter. With more than one folder shown the sessions are
-//! grouped under a header row per folder: the launch folder first, then by
-//! folder name, then by path. Activity never moves a group.
+//! its event stream, grouped and filtered by the active tab of the top row
+//! (`grouping`: All folders, App or Status) and narrowed by the text
+//! filter. Under All folders the folder filter applies (none: all
+//! folders), and with more than one folder shown the sessions are grouped
+//! under a header row per folder: the launch folder first, then by folder
+//! name, then by path. Under App or Status the app or status filter applies
+//! instead, with a header row per app or status when there are several.
+//! Activity never moves a group.
 //!
 //! The order never changes by itself: activity doesn't move a session.
 //! Inside a folder, pinned sessions come first. Both parts follow the
 //! order the user gave them (a drag, or `J`/`K`; `sessions.session_order`),
 //! and sessions without a place go after the others, oldest first, so a
-//! new session appears at the bottom of its folder. Both layouts use this
-//! order. Selection is tracked by session id (or header folder) so it
-//! survives moves and updates made by other clients.
+//! new session appears at the bottom of its folder. Inside an app or a
+//! status the sessions keep that order, folder by folder. Every layout uses
+//! this order. Selection is tracked by session id (or header) so it
+//! survives moves and updates made by other clients; under App or Status
+//! the selected session stays shown when it stops matching the filter
+//! (its status changed), until something else is selected.
 
 use std::collections::{HashMap, HashSet};
 
@@ -20,17 +27,23 @@ use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
 use super::config::SessionOrder;
 use super::folders::compare_folders;
+use super::grouping::{sort_sections, AppKey, Grouping, Section, StatusGroup};
 use super::text_input::TextInput;
 
-/// What is selected in the list: the folder filter (the first row), a
-/// folder's header, a session, or "+ New session" (the last row).
+/// What is selected in the list: the top row (the tabs), a folder's or a
+/// section's header, a session, or "+ New session" (the last row).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
-    /// The folder filter: Enter opens the Folders modal.
+    /// The top row: the tabs (All folders, App, Status). ←/→ switch tabs,
+    /// Enter opens the active tab's modal (the Folders modal for All
+    /// folders).
     Folders,
     /// A folder's header row (several folders shown): new sessions go in
     /// that folder.
     FolderHeader(ScopeRoot),
+    /// An app's or a status's header row (App or Status tab, several
+    /// shown): Enter opens that tab's modal there.
+    SectionHeader(Section),
     NewSession,
     Session(SessionId),
 }
@@ -38,10 +51,12 @@ pub enum Selection {
 /// One row of the list, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListRow<'a> {
-    /// The folder filter at the top: which folders are shown.
+    /// The tabs at the top: what the list is grouped and filtered by.
     Folders,
     /// A folder's header row (several folders shown).
     FolderHeader(&'a ScopeRoot),
+    /// An app's or a status's header row (several shown).
+    SectionHeader(&'a Section),
     NewSession,
     Session(&'a SessionView),
 }
@@ -71,11 +86,23 @@ pub enum ListChange {
 pub struct SessionList {
     /// The folder Rakumux started in: its group comes first.
     launch: ScopeRoot,
+    /// The active tab: the sections, and the one filter that applies.
+    grouping: Grouping,
     /// The folder filter: the folders shown, or every folder when empty.
     folders: Vec<ScopeRoot>,
-    /// The folders shown, in display order: the filter's, or with no
-    /// filter every folder that has sessions.
+    /// The App tab's filter: the apps shown, or every app when empty.
+    apps: Vec<AppKey>,
+    /// The Status tab's filter: the statuses shown, or every one when empty.
+    statuses: Vec<StatusGroup>,
+    /// The folders shown under All folders, in display order: the filter's,
+    /// or with no filter every folder that has sessions.
     groups: Vec<ScopeRoot>,
+    /// Every folder that has sessions, in display order: inside an app or a
+    /// status, sessions go folder by folder in this order.
+    all_folders: Vec<ScopeRoot>,
+    /// The apps or statuses shown under the App or Status tab, in display
+    /// order; none under All folders.
+    sections: Vec<Section>,
     /// Every listed session, of every folder; inside a folder in list
     /// order (pinned first).
     sessions: Vec<SessionView>,
@@ -101,8 +128,13 @@ impl SessionList {
     pub fn new(launch: ScopeRoot) -> Self {
         Self {
             launch,
+            grouping: Grouping::Folder,
             folders: Vec::new(),
+            apps: Vec::new(),
+            statuses: Vec::new(),
             groups: Vec::new(),
+            all_folders: Vec::new(),
+            sections: Vec::new(),
             sessions: Vec::new(),
             order: HashMap::new(),
             listed: Listed::Folders(Vec::new()),
@@ -116,32 +148,13 @@ impl SessionList {
     }
 
     /// Show these folders (none: all folders). Nothing is fetched: the
-    /// list keeps every folder's sessions. A selection the filter hides
-    /// goes to the most recent session shown; so does one on the folder
-    /// filter or "+ New session".
+    /// list keeps every folder's sessions. Under All folders, a selection
+    /// the filter hides goes to the most recent session shown; so does one
+    /// on the tabs or "+ New session". Under another tab the filter is
+    /// kept for when All folders is back.
     pub fn set_folder_filter(&mut self, folders: Vec<ScopeRoot>) {
-        let mut unique: Vec<ScopeRoot> = Vec::with_capacity(folders.len());
-        for folder in folders {
-            if !unique.contains(&folder) {
-                unique.push(folder);
-            }
-        }
-        self.folders = unique;
-        self.sort_groups();
-        let rows = self.rows();
-        let kept = match &self.selection {
-            Selection::Session(id) => rows
-                .iter()
-                .any(|r| matches!(r, ListRow::Session(s) if &s.id == id)),
-            Selection::FolderHeader(folder) => rows.contains(&ListRow::FolderHeader(folder)),
-            Selection::Folders | Selection::NewSession => false,
-        };
-        drop(rows);
-        if !kept {
-            self.selection = self.default_selection();
-            self.reselect = self.selection == Selection::NewSession;
-        }
-        self.remember_selected_folder();
+        self.folders = unique(folders);
+        self.refilter(self.grouping == Grouping::Folder);
     }
 
     /// The folder filter: the folders shown, or none for all folders.
@@ -149,24 +162,92 @@ impl SessionList {
         &self.folders
     }
 
-    /// Folder for new sessions: the filter's only folder, otherwise the
-    /// last selected section when the folder filter still includes it.
+    /// The folder filter while it applies (All folders is the active tab).
+    fn active_folder_filter(&self) -> &[ScopeRoot] {
+        match self.grouping {
+            Grouping::Folder => &self.folders,
+            Grouping::App | Grouping::Status => &[],
+        }
+    }
+
+    /// The active tab.
+    pub fn grouping(&self) -> Grouping {
+        self.grouping
+    }
+
+    /// Make `grouping` the active tab: its sections and filter apply, and
+    /// the other tabs' filters wait. The tabs and "+ New session" stay
+    /// selected; a session or header the new tab hides goes to the most
+    /// recent session shown.
+    pub fn set_grouping(&mut self, grouping: Grouping) {
+        if grouping != self.grouping {
+            self.grouping = grouping;
+            self.refilter(false);
+        }
+    }
+
+    /// The App or Status tab's filter, as sections (none: all of them; and
+    /// always none for All folders, whose filter is `folder_filter`).
+    pub fn section_filter(&self, grouping: Grouping) -> Vec<Section> {
+        match grouping {
+            Grouping::Folder => Vec::new(),
+            Grouping::App => self.apps.iter().cloned().map(Section::App).collect(),
+            Grouping::Status => self.statuses.iter().copied().map(Section::Status).collect(),
+        }
+    }
+
+    /// Show these apps or statuses (none: all) when `grouping`'s tab is
+    /// active; a selection the filter hides goes to the most recent session
+    /// shown, and so does one on the tabs or "+ New session".
+    pub fn set_section_filter(&mut self, grouping: Grouping, sections: Vec<Section>) {
+        let sections = unique(sections);
+        match grouping {
+            Grouping::Folder => return,
+            Grouping::App => {
+                self.apps = sections
+                    .into_iter()
+                    .filter_map(|section| match section {
+                        Section::App(app) => Some(app),
+                        Section::Status(_) => None,
+                    })
+                    .collect();
+            }
+            Grouping::Status => {
+                self.statuses = sections
+                    .into_iter()
+                    .filter_map(|section| match section {
+                        Section::Status(status) => Some(status),
+                        Section::App(_) => None,
+                    })
+                    .collect();
+            }
+        }
+        self.refilter(grouping == self.grouping);
+    }
+
+    /// Folder for new sessions: the filter's only folder (under All
+    /// folders), otherwise the last selected section when the folder filter
+    /// still includes it.
     pub fn current_folder(&self) -> Option<&ScopeRoot> {
-        match self.folders.as_slice() {
+        let filter = self.active_folder_filter();
+        match filter {
             [only] => Some(only),
             _ => self
                 .folder_context
                 .as_ref()
-                .filter(|folder| self.folders.is_empty() || self.folders.contains(folder)),
+                .filter(|folder| filter.is_empty() || filter.contains(folder)),
         }
     }
 
-    /// Several folders are shown, under header rows.
+    /// Several folders (or apps, or statuses) are shown, under header rows.
     pub fn is_grouped(&self) -> bool {
-        self.groups.len() > 1
+        match self.grouping {
+            Grouping::Folder => self.groups.len() > 1,
+            Grouping::App | Grouping::Status => self.sections.len() > 1,
+        }
     }
 
-    /// The folders shown, in display order.
+    /// The folders shown under All folders, in display order.
     pub fn groups(&self) -> &[ScopeRoot] {
         &self.groups
     }
@@ -226,15 +307,21 @@ impl SessionList {
 
     /// Move session `id` to visible position `to`, where a drag drops it or
     /// `J`/`K` take it. It stays in its part of the list (its folder's
-    /// pinned sessions, or the others): a `to` outside that part means its
-    /// first or last place. Returns whether it moved.
+    /// pinned sessions, or the others; under App or Status, those of its
+    /// app or status): a `to` outside that part means its first or last
+    /// place. Returns whether it moved.
     pub fn move_session(&mut self, id: &SessionId, to: usize) -> bool {
         let visible = self.visible();
         let Some(from) = visible.iter().position(|s| &s.id == id) else {
             return false;
         };
         let moving = visible[from];
-        let in_part = |s: &&SessionView| s.scope == moving.scope && s.pinned == moving.pinned;
+        let section = Section::of(self.grouping, moving);
+        let in_part = |s: &&SessionView| {
+            s.scope == moving.scope
+                && s.pinned == moving.pinned
+                && Section::of(self.grouping, s) == section
+        };
         // A part is contiguous in the list.
         let first = visible.iter().position(in_part).unwrap_or(from);
         let last = visible.iter().rposition(in_part).unwrap_or(from);
@@ -284,7 +371,10 @@ impl SessionList {
             Selection::Session(id) if self.index_of(id).is_some() => {}
             Selection::Session(_) => self.selection = self.default_selection(),
             Selection::NewSession if first => self.selection = self.default_selection(),
-            Selection::Folders | Selection::FolderHeader(_) | Selection::NewSession => {}
+            Selection::Folders
+            | Selection::FolderHeader(_)
+            | Selection::SectionHeader(_)
+            | Selection::NewSession => {}
         }
         self.ensure_selection_visible();
     }
@@ -379,47 +469,134 @@ impl SessionList {
         counts
     }
 
+    /// `(live, total)` sessions of an app or a status, whatever the
+    /// filters.
+    pub fn section_counts(&self, section: &Section) -> (usize, usize) {
+        let mut counts = (0, 0);
+        let grouping = section.grouping();
+        for session in self
+            .sessions
+            .iter()
+            .filter(|s| Section::of(grouping, s).as_ref() == Some(section))
+        {
+            counts.1 += 1;
+            if session.status == SessionStatus::Live {
+                counts.0 += 1;
+            }
+        }
+        counts
+    }
+
     fn is_filtering(&self) -> bool {
         !self.filter.value().trim().is_empty()
     }
 
-    /// Sessions of the folders shown that match the text filter, in
-    /// display order (folder by folder).
+    /// Whether the text filter shows session `id` (it shows everything
+    /// while it's empty).
+    pub fn matches_text(&self, id: &SessionId) -> bool {
+        let needle = self.filter.value().trim().to_lowercase();
+        needle.is_empty() || self.get(id).is_some_and(|s| self.matches(s, &needle))
+    }
+
+    /// Sessions of the folders (apps, statuses) shown that match the text
+    /// filter, in display order: folder by folder, or app by app (status by
+    /// status) and inside each folder by folder. Under App or Status the
+    /// selected session is shown even when the filter no longer matches it.
     pub fn visible(&self) -> Vec<&SessionView> {
+        self.visible_keeping(self.kept())
+    }
+
+    /// The session shown whatever the App or Status filter says: the
+    /// selected one. All folders keeps none, since a session never changes
+    /// folder.
+    fn kept(&self) -> Option<&SessionId> {
+        match (self.grouping, &self.selection) {
+            (Grouping::Folder, _) => None,
+            (_, Selection::Session(id)) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// [`SessionList::visible`], showing `kept` whatever the App or Status
+    /// filter says.
+    fn visible_keeping(&self, kept: Option<&SessionId>) -> Vec<&SessionView> {
         let needle = self.filter.value().trim().to_lowercase();
         let matching = |s: &&SessionView| needle.is_empty() || self.matches(s, &needle);
         let mut visible = Vec::with_capacity(self.sessions.len());
-        for group in &self.groups {
+        let grouping = self.grouping;
+        if grouping == Grouping::Folder {
+            for group in &self.groups {
+                visible.extend(
+                    self.sessions
+                        .iter()
+                        .filter(|s| &s.scope == group)
+                        .filter(matching),
+                );
+            }
+            return visible;
+        }
+        let in_folder_order: Vec<&SessionView> = self
+            .all_folders
+            .iter()
+            .flat_map(|folder| self.sessions.iter().filter(move |s| &s.scope == folder))
+            .collect();
+        for section in &self.sections {
+            let shown = self.section_shown(section);
             visible.extend(
-                self.sessions
+                in_folder_order
                     .iter()
-                    .filter(|s| &s.scope == group)
+                    .copied()
+                    .filter(|s| Section::of(grouping, s).as_ref() == Some(section))
+                    .filter(|s| shown || kept == Some(&s.id))
                     .filter(matching),
             );
         }
         visible
     }
 
-    /// Every row: the folder filter, the sessions, under a header per
-    /// folder when several are shown, then "+ New session" last. While
-    /// filtering by text, folders without a match have no header.
+    /// Whether the App or Status filter shows `section` (an empty one
+    /// shows every app or status).
+    fn section_shown(&self, section: &Section) -> bool {
+        match section {
+            Section::App(app) => self.apps.is_empty() || self.apps.contains(app),
+            Section::Status(status) => self.statuses.is_empty() || self.statuses.contains(status),
+        }
+    }
+
+    /// Every row: the tabs, the sessions, under a header per folder (app,
+    /// status) when several are shown, then "+ New session" last. While
+    /// filtering by text, headers without a match are left out.
     pub fn rows(&self) -> Vec<ListRow<'_>> {
         let visible = self.visible();
-        let mut rows = Vec::with_capacity(visible.len() + self.groups.len() + 2);
+        let mut rows =
+            Vec::with_capacity(visible.len() + self.groups.len().max(self.sections.len()) + 2);
         rows.push(ListRow::Folders);
         if !self.is_grouped() {
             rows.extend(visible.into_iter().map(ListRow::Session));
             rows.push(ListRow::NewSession);
             return rows;
         }
+        let grouping = self.grouping;
+        let headers: Vec<ListRow<'_>> = match grouping {
+            Grouping::Folder => self.groups.iter().map(ListRow::FolderHeader).collect(),
+            Grouping::App | Grouping::Status => {
+                self.sections.iter().map(ListRow::SectionHeader).collect()
+            }
+        };
         let filtering = self.is_filtering();
-        for group in &self.groups {
+        for header in headers {
             let start = rows.len();
-            rows.push(ListRow::FolderHeader(group));
+            rows.push(header);
             rows.extend(
                 visible
                     .iter()
-                    .filter(|s| &s.scope == group)
+                    .filter(|s| match header {
+                        ListRow::FolderHeader(folder) => &s.scope == folder,
+                        ListRow::SectionHeader(section) => {
+                            Section::of(grouping, s).as_ref() == Some(section)
+                        }
+                        ListRow::Folders | ListRow::NewSession | ListRow::Session(_) => false,
+                    })
                     .map(|s| ListRow::Session(s)),
             );
             if filtering && rows.len() == start + 1 {
@@ -462,7 +639,10 @@ impl SessionList {
     pub fn selected_id(&self) -> Option<&SessionId> {
         match &self.selection {
             Selection::Session(id) => Some(id),
-            Selection::Folders | Selection::FolderHeader(_) | Selection::NewSession => None,
+            Selection::Folders
+            | Selection::FolderHeader(_)
+            | Selection::SectionHeader(_)
+            | Selection::NewSession => None,
         }
     }
 
@@ -470,9 +650,8 @@ impl SessionList {
         self.selected_id().and_then(|id| self.get(id))
     }
 
-    /// Row of the selection; the folder filter is the first row, "+ New
-    /// session" the last, which also stands in for a selection that isn't
-    /// shown.
+    /// Row of the selection; the tabs are the first row, "+ New session"
+    /// the last, which also stands in for a selection that isn't shown.
     pub fn selected_row(&self) -> usize {
         let rows = self.rows();
         let new_session = rows.len() - 1;
@@ -482,6 +661,9 @@ impl SessionList {
             Selection::FolderHeader(folder) => rows
                 .iter()
                 .position(|row| matches!(row, ListRow::FolderHeader(f) if *f == folder)),
+            Selection::SectionHeader(section) => rows
+                .iter()
+                .position(|row| matches!(row, ListRow::SectionHeader(s) if *s == section)),
             Selection::Session(id) => rows
                 .iter()
                 .position(|row| matches!(row, ListRow::Session(s) if &s.id == id)),
@@ -494,6 +676,7 @@ impl SessionList {
         let selection = match self.rows().get(row) {
             Some(ListRow::Folders) => Selection::Folders,
             Some(ListRow::FolderHeader(folder)) => Selection::FolderHeader((*folder).clone()),
+            Some(ListRow::SectionHeader(section)) => Selection::SectionHeader((*section).clone()),
             Some(ListRow::NewSession) => Selection::NewSession,
             Some(ListRow::Session(s)) => Selection::Session(s.id.clone()),
             None => return,
@@ -511,47 +694,49 @@ impl SessionList {
         self.selection != before
     }
 
-    /// `{`/`}`: what to select `delta` folder groups from the selected
-    /// session's or header's (from the folder filter, `}` reaches the first
-    /// group; from "+ New session", `{` the last): the group's first
-    /// session, or its header when it shows none. `None` past either end,
-    /// or without headers.
+    /// `{`/`}`: what to select `delta` groups (folders, apps, statuses)
+    /// from the selected session's or header's (from the tabs, `}` reaches
+    /// the first group; from "+ New session", `{` the last): the group's
+    /// first session, or its header when it shows none. `None` past either
+    /// end, or without headers.
     pub fn group_target(&self, delta: isize) -> Option<Selection> {
         let rows = self.rows();
-        let groups: Vec<&ScopeRoot> = rows
+        let headers: Vec<usize> = rows
             .iter()
-            .filter_map(|row| match row {
-                ListRow::FolderHeader(folder) => Some(*folder),
-                _ => None,
-            })
+            .enumerate()
+            .filter(|(_, row)| matches!(row, ListRow::FolderHeader(_) | ListRow::SectionHeader(_)))
+            .map(|(index, _)| index)
             .collect();
-        if groups.is_empty() {
+        if headers.is_empty() {
             return None;
         }
-        let position = |found: Option<usize>| found.map_or(0, |i| i as isize);
+        let selected = self.selected_row();
         let current = match &self.selection {
             Selection::Folders => -1,
-            Selection::NewSession => groups.len() as isize,
-            Selection::FolderHeader(folder) => position(groups.iter().position(|g| *g == folder)),
-            Selection::Session(_) => position(
-                self.selected_session()
-                    .and_then(|s| groups.iter().position(|g| **g == s.scope)),
-            ),
+            Selection::NewSession => headers.len() as isize,
+            // The header at or above the selection.
+            _ => headers
+                .iter()
+                .rposition(|header| *header <= selected)
+                .map_or(0, |i| i as isize),
         };
-        let group = *groups.get(usize::try_from(current + delta).ok()?)?;
-        let first = rows.iter().find_map(|row| match row {
-            ListRow::Session(s) if &s.scope == group => Some(s.id.clone()),
-            _ => None,
-        });
-        Some(match first {
-            Some(id) => Selection::Session(id),
-            None => Selection::FolderHeader(group.clone()),
+        let header = *headers.get(usize::try_from(current + delta).ok()?)?;
+        Some(match (rows.get(header + 1), rows[header]) {
+            (Some(ListRow::Session(s)), _) => Selection::Session(s.id.clone()),
+            (_, ListRow::SectionHeader(section)) => Selection::SectionHeader(section.clone()),
+            (_, ListRow::FolderHeader(folder)) => Selection::FolderHeader(folder.clone()),
+            (_, ListRow::Folders | ListRow::NewSession | ListRow::Session(_)) => return None,
         })
     }
 
     pub fn select(&mut self, selection: Selection) {
         self.selection = selection;
         self.reselect = false;
+        // The selected session is shown under App or Status, whatever the
+        // filter: its section may have to be.
+        if self.grouping != Grouping::Folder {
+            self.sort_groups();
+        }
         self.remember_selected_folder();
     }
 
@@ -559,10 +744,12 @@ impl SessionList {
         let folder = match &self.selection {
             Selection::Session(_) => self.selected_session().map(|session| session.scope.clone()),
             Selection::FolderHeader(folder) => Some(folder.clone()),
-            Selection::Folders | Selection::NewSession => match self.folders.as_slice() {
-                [only] => Some(only.clone()),
-                _ => None,
-            },
+            Selection::Folders | Selection::SectionHeader(_) | Selection::NewSession => {
+                match self.active_folder_filter() {
+                    [only] => Some(only.clone()),
+                    _ => None,
+                }
+            }
         };
         if let Some(folder) = folder {
             self.folder_context = Some(folder);
@@ -574,22 +761,52 @@ impl SessionList {
     pub fn ensure_selection_visible(&mut self) {
         let shown = match &self.selection {
             Selection::Session(id) => self.visible().iter().any(|s| &s.id == id),
-            Selection::FolderHeader(folder) => self.rows().contains(&ListRow::FolderHeader(folder)),
+            Selection::FolderHeader(_) | Selection::SectionHeader(_) => self.header_shown(),
             Selection::Folders | Selection::NewSession => true,
         };
         if !shown {
             self.selection = self
-                .visible()
+                .visible_keeping(None)
                 .first()
                 .map(|s| Selection::Session(s.id.clone()))
                 .unwrap_or(Selection::NewSession);
+            self.sort_groups();
         }
         self.remember_selected_folder();
     }
 
-    /// The most recently active visible session, whatever the order.
+    /// Whether the selected header has its row.
+    fn header_shown(&self) -> bool {
+        let rows = self.rows();
+        match &self.selection {
+            Selection::FolderHeader(folder) => rows.contains(&ListRow::FolderHeader(folder)),
+            Selection::SectionHeader(section) => rows.contains(&ListRow::SectionHeader(section)),
+            Selection::Folders | Selection::NewSession | Selection::Session(_) => true,
+        }
+    }
+
+    /// A filter or the active tab changed: a selection it hides goes to the
+    /// most recent session shown; with `leave_top_row`, so does one on the
+    /// tabs or "+ New session".
+    fn refilter(&mut self, leave_top_row: bool) {
+        self.sort_groups();
+        let kept = match &self.selection {
+            Selection::Session(id) => self.visible_keeping(None).iter().any(|s| &s.id == id),
+            Selection::FolderHeader(_) | Selection::SectionHeader(_) => self.header_shown(),
+            Selection::Folders | Selection::NewSession => !leave_top_row,
+        };
+        if !kept {
+            self.selection = self.default_selection();
+            self.reselect = self.selection == Selection::NewSession;
+            self.sort_groups();
+        }
+        self.remember_selected_folder();
+    }
+
+    /// The most recently active session the filters show, whatever the
+    /// order.
     fn default_selection(&self) -> Selection {
-        self.visible()
+        self.visible_keeping(None)
             .into_iter()
             .max_by(|a, b| {
                 a.last_active_at
@@ -604,11 +821,18 @@ impl SessionList {
         self.sessions.iter().position(|s| &s.id == id)
     }
 
-    /// Change a session in place; nothing these events change moves it.
+    /// Change a session in place; nothing these events change moves it
+    /// within its folder. Under App or Status it may change sections (a new
+    /// lifecycle is a new status), which can leave a header without
+    /// sessions.
     fn modify(&mut self, id: &SessionId, f: impl FnOnce(&mut SessionView)) -> ListChange {
         match self.index_of(id) {
             Some(i) => {
                 f(&mut self.sessions[i]);
+                if self.grouping != Grouping::Folder {
+                    self.sort_groups();
+                    self.ensure_selection_visible();
+                }
                 ListChange::Changed
             }
             None => ListChange::Ignored,
@@ -634,22 +858,65 @@ impl SessionList {
         });
     }
 
-    /// The folders shown: the filter's, or every folder with sessions; the
-    /// launch folder first, then by name, then by path.
+    /// The folders shown under All folders: the filter's, or every folder
+    /// with sessions; the launch folder first, then by name, then by path.
+    /// And the apps or statuses shown under App or Status.
     fn sort_groups(&mut self) {
-        let mut groups: Vec<ScopeRoot> = if self.folders.is_empty() {
-            let mut seen = HashSet::new();
+        let mut seen = HashSet::new();
+        let mut with_sessions: Vec<ScopeRoot> = self
+            .sessions
+            .iter()
+            .filter(|s| seen.insert(&s.scope))
+            .map(|s| s.scope.clone())
+            .collect();
+        with_sessions.sort_by(|a, b| compare_folders(&self.launch, a, b));
+        self.groups = if self.folders.is_empty() {
+            with_sessions.clone()
+        } else {
+            let mut groups = self.folders.clone();
+            groups.sort_by(|a, b| compare_folders(&self.launch, a, b));
+            groups
+        };
+        self.all_folders = with_sessions;
+        self.sections = self.shown_sections();
+    }
+
+    /// The apps or statuses the active tab shows, in display order: the
+    /// filter's (empty ones included) and the selected session's, or with
+    /// no filter every one that has sessions. None under All folders.
+    fn shown_sections(&self) -> Vec<Section> {
+        let grouping = self.grouping;
+        if grouping == Grouping::Folder {
+            return Vec::new();
+        }
+        let filter = self.section_filter(grouping);
+        let candidates: Vec<Section> = if filter.is_empty() {
             self.sessions
                 .iter()
-                .filter(|s| seen.insert(&s.scope))
-                .map(|s| s.scope.clone())
+                .filter_map(|s| Section::of(grouping, s))
                 .collect()
         } else {
-            self.folders.clone()
+            let kept = self
+                .kept()
+                .and_then(|id| self.get(id))
+                .and_then(|s| Section::of(grouping, s));
+            filter.into_iter().chain(kept).collect()
         };
-        groups.sort_by(|a, b| compare_folders(&self.launch, a, b));
-        self.groups = groups;
+        let mut sections = unique(candidates);
+        sort_sections(&mut sections, &self.sessions);
+        sections
     }
+}
+
+/// `items` without repeats, in their first order.
+fn unique<T: PartialEq>(items: Vec<T>) -> Vec<T> {
+    let mut unique: Vec<T> = Vec::with_capacity(items.len());
+    for item in items {
+        if !unique.contains(&item) {
+            unique.push(item);
+        }
+    }
+    unique
 }
 
 #[cfg(test)]
@@ -686,8 +953,8 @@ mod tests {
         list.visible().iter().map(|s| s.name.clone()).collect()
     }
 
-    /// Rows as text: `^` for the folder filter, `+`, `# /path` for
-    /// headers, session names.
+    /// Rows as text: `^` for the tabs, `+`, `# /path` for folder headers,
+    /// `## name` for app and status headers, session names.
     fn row_names(list: &SessionList) -> Vec<String> {
         list.rows()
             .iter()
@@ -695,6 +962,7 @@ mod tests {
                 ListRow::Folders => "^".to_string(),
                 ListRow::NewSession => "+".to_string(),
                 ListRow::FolderHeader(scope) => format!("# {}", scope.path().display()),
+                ListRow::SectionHeader(section) => format!("## {}", section.label()),
                 ListRow::Session(s) => s.name.clone(),
             })
             .collect()
@@ -1318,6 +1586,227 @@ mod tests {
         list.set_folder_filter(vec![web]);
         assert_eq!(row_names(&list), ["^", "+"]);
         assert_eq!(list.selection(), &Selection::NewSession);
+    }
+
+    /// A session in `scope` running agent `kind` (none: a shell) in
+    /// `lifecycle`.
+    fn running(
+        scope: &ScopeRoot,
+        id: &str,
+        kind: Option<&str>,
+        lifecycle: Lifecycle,
+        at: i64,
+    ) -> SessionView {
+        let mut session = view_in(scope, id, &id.to_lowercase(), at);
+        session.agent = kind.map(|kind| session_core::model::AgentInfo {
+            kind: kind.into(),
+            ..Default::default()
+        });
+        session.lifecycle = lifecycle;
+        session
+    }
+
+    /// `/repo` (launch) and `/web`: Claude Code working and done, Codex
+    /// waiting for you, a shell, and in `/web` Claude Code idle and a dead
+    /// Codex session.
+    fn agents() -> SessionList {
+        let web = folder("/web");
+        let mut dead = running(&web, "W2", Some("codex"), Lifecycle::None, 6);
+        dead.status = SessionStatus::Dead;
+        dead.terminal = None;
+        loaded(vec![
+            running(&scope(), "R1", Some("claude"), Lifecycle::Working, 1),
+            running(&scope(), "R2", None, Lifecycle::None, 2),
+            running(&scope(), "R3", Some("codex"), Lifecycle::Blocked, 3),
+            running(&scope(), "R4", Some("claude"), Lifecycle::Done, 4),
+            running(&web, "W1", Some("claude"), Lifecycle::Idle, 5),
+            dead,
+        ])
+    }
+
+    fn app(name: &str) -> Section {
+        Section::App(AppKey::new(name))
+    }
+
+    #[test]
+    fn the_app_tab_groups_by_app_folder_by_folder_and_keeps_the_folder_filter_aside() {
+        let mut list = agents();
+        list.set_folder_filter(vec![folder("/web")]);
+        assert_eq!(names(&list), ["w1", "w2"]);
+        list.set_grouping(Grouping::App);
+        assert!(list.is_grouped());
+        // Agents first, then the shell; inside an app the launch folder's
+        // sessions first, each folder in its own order. The folder filter
+        // doesn't apply here.
+        assert_eq!(
+            row_names(&list),
+            [
+                "^",
+                "## claude",
+                "r1",
+                "r4",
+                "w1",
+                "## codex",
+                "r3",
+                "w2",
+                "## shell",
+                "r2",
+                "+"
+            ]
+        );
+        assert_eq!(list.section_counts(&app("claude")), (3, 3));
+        assert_eq!(list.section_counts(&app("codex")), (1, 2));
+        // The app filter: one app, no headers.
+        list.set_section_filter(Grouping::App, vec![app("codex")]);
+        assert_eq!(row_names(&list), ["^", "r3", "w2", "+"]);
+        assert_eq!(list.section_filter(Grouping::App), [app("codex")]);
+        // Two apps: their headers, in display order whatever the ticks'.
+        list.set_section_filter(Grouping::App, vec![app("shell"), app("claude")]);
+        assert_eq!(
+            row_names(&list),
+            ["^", "## claude", "r1", "r4", "w1", "## shell", "r2", "+"]
+        );
+        // Back on All folders, its filter applies again; the app filter
+        // waits for the App tab.
+        list.set_grouping(Grouping::Folder);
+        assert_eq!(names(&list), ["w1", "w2"]);
+        assert_eq!(list.folder_filter(), [folder("/web")]);
+        list.set_grouping(Grouping::App);
+        assert_eq!(names(&list), ["r1", "r4", "w1", "r2"]);
+        // The text filter still narrows, dropping headers without a match.
+        list.filter.set("w");
+        assert_eq!(row_names(&list), ["^", "## claude", "w1", "+"]);
+    }
+
+    #[test]
+    fn the_status_tab_groups_by_status_and_events_move_sessions_between_them() {
+        let mut list = agents();
+        list.set_grouping(Grouping::Status);
+        assert_eq!(
+            row_names(&list),
+            [
+                "^",
+                "## waiting for you",
+                "r3",
+                "## done",
+                "r4",
+                "## working",
+                "r1",
+                "## idle",
+                "w1",
+                "## running",
+                "r2",
+                "## dead",
+                "w2",
+                "+"
+            ]
+        );
+        // A session whose lifecycle changes changes status.
+        list.apply(&envelope(
+            "R1",
+            SessionEvent::Lifecycle {
+                lifecycle: Lifecycle::Blocked,
+            },
+        ));
+        assert_eq!(&row_names(&list)[1..4], ["## waiting for you", "r1", "r3"]);
+        assert!(!row_names(&list).contains(&"## working".to_string()));
+        // Filtered to what wants the user: the selected session stays shown
+        // when it stops matching, until something else is selected.
+        list.set_section_filter(
+            Grouping::Status,
+            vec![Section::Status(StatusGroup::WaitingForYou)],
+        );
+        assert_eq!(names(&list), ["r1", "r3"]);
+        list.select(Selection::Session(SessionId::from_string("R3")));
+        list.apply(&envelope(
+            "R3",
+            SessionEvent::Lifecycle {
+                lifecycle: Lifecycle::Working,
+            },
+        ));
+        assert_eq!(list.selected_id().unwrap().as_str(), "R3");
+        assert_eq!(
+            row_names(&list),
+            ["^", "## waiting for you", "r1", "## working", "r3", "+"]
+        );
+        list.select(Selection::Session(SessionId::from_string("R1")));
+        assert_eq!(row_names(&list), ["^", "r1", "+"]);
+        // An exited session is under exited.
+        list.apply(&envelope("R1", SessionEvent::Exited { code: Some(0) }));
+        assert_eq!(list.selected_id().unwrap().as_str(), "R1");
+        assert_eq!(
+            row_names(&list),
+            ["^", "## waiting for you", "## exited", "r1", "+"]
+        );
+    }
+
+    #[test]
+    fn switching_tabs_keeps_the_top_row_and_a_session_still_shown() {
+        let mut list = agents();
+        list.select(Selection::Folders);
+        list.set_grouping(Grouping::App);
+        assert_eq!(list.selection(), &Selection::Folders);
+        list.set_grouping(Grouping::Status);
+        assert_eq!(list.selection(), &Selection::Folders);
+        // A filter picked in a modal goes to the most recent session shown.
+        list.set_section_filter(
+            Grouping::Status,
+            vec![Section::Status(StatusGroup::Working)],
+        );
+        assert_eq!(list.selected_id().unwrap().as_str(), "R1");
+        // A tab that still shows the selected session keeps it; one that
+        // hides it (the app filter) picks the most recent session it shows.
+        list.set_grouping(Grouping::Folder);
+        assert_eq!(list.selected_id().unwrap().as_str(), "R1");
+        list.set_section_filter(Grouping::App, vec![app("codex")]);
+        assert_eq!(list.selected_id().unwrap().as_str(), "R1");
+        list.set_grouping(Grouping::App);
+        assert_eq!(list.selected_id().unwrap().as_str(), "W2");
+        // A header of a tab that isn't active anymore isn't kept.
+        list.set_section_filter(Grouping::App, vec![]);
+        list.select(Selection::SectionHeader(app("shell")));
+        assert_eq!(list.selected_row(), 8);
+        list.set_grouping(Grouping::Folder);
+        assert!(matches!(list.selection(), Selection::Session(_)));
+    }
+
+    #[test]
+    fn moves_and_group_jumps_stay_within_an_app() {
+        let mut list = agents();
+        list.set_grouping(Grouping::App);
+        let (r1, r4) = (SessionId::from_string("R1"), SessionId::from_string("R4"));
+        // R4 up past R1 within claude and /repo; past W1 (another folder)
+        // it can't go.
+        assert!(list.move_session(&r4, 0));
+        assert_eq!(names(&list), ["r4", "r1", "w1", "r3", "w2", "r2"]);
+        assert!(!list.move_session(&r1, 2));
+        assert_eq!(
+            list.session_order(),
+            order_of("/repo", &["R4", "R1", "R2", "R3"])
+        );
+        // `{`/`}` go from app to app.
+        list.select(Selection::Session(r1));
+        let target = |id: &str| Some(Selection::Session(SessionId::from_string(id)));
+        assert_eq!(list.group_target(1), target("R3"));
+        assert_eq!(list.group_target(-1), None);
+        list.select(Selection::NewSession);
+        assert_eq!(list.group_target(-1), target("R2"));
+        list.select(Selection::Folders);
+        assert_eq!(list.group_target(1), target("R4"));
+    }
+
+    #[test]
+    fn new_sessions_ignore_a_waiting_folder_filter() {
+        let mut list = agents();
+        list.set_folder_filter(vec![folder("/web")]);
+        assert_eq!(list.current_folder(), Some(&folder("/web")));
+        list.set_grouping(Grouping::App);
+        list.select(Selection::Session(SessionId::from_string("R1")));
+        list.select(Selection::Folders);
+        // Not /web: that filter isn't applied under App.
+        assert_eq!(list.current_folder(), Some(&scope()));
+        list.select(Selection::SectionHeader(app("claude")));
+        assert_eq!(list.current_folder(), Some(&scope()));
     }
 
     #[test]

@@ -14,15 +14,20 @@ new-session flow, and code boundaries.
 - `app.rs` (in `tui/src`): facade. Owns `App` (state slices below, `Arc<dyn SessionApi>`, config,
   updater state) and dispatches events by mode and focus.
 - `types.rs`: `AppMode`, `AppResult`, dialog structs, shared enums.
-- Settings width comes from its General/Keys table content, not a percentage of the terminal.
-  Notes wrap; Help keeps a reading width. All dialogs leave the footer row visible. The footer
-  is orange across the full row only in Rakumux mode, with dark text for contrast; session and
-  terminal input modes retain quiet backgrounds and the same hit targets.
+- Settings is one page (settings, then every action; values and keys pinned right), sized from
+  its rows, at most 80% of the screen's height; `→` shows the selected row's note in a popover
+  (the rows never shift) and the wheel moves the selection. Help keeps a reading width and tabs. All dialogs leave the footer row visible.
+  The footer is a full-width bar: orange with dark text in Rakumux mode (`| session: <name>` after
+  the badge, `? Help` and `, Settings` buttons in a darker orange), muted blue in session and
+  terminal input modes (a `Ctrl-\ Rakumux` button); the badge and buttons are hit targets.
+- A session the user exits from inside (controller, session mode) is deleted on its `exited`
+  stream event (`sessions.rs::on_stream_event`); one ending in the background stays `exited`.
 - `upgrade.rs`: `U` / Settings' Update action, behind `updater::UpdateService` (a fake in tests).
   Jobs run off the UI thread; a generation drops cancelled/stale results. Installation needs
   Enter and cannot be started twice. Success reloads only the UI through the updated launcher.
   Cache writes use `App::paths`, never the real user's home in tests.
-- `config.rs`: `~/.rakumux/config.json` load/save: API keys, AI provider and model, and
+- `config.rs`: `~/.rakumux/config.json` load/save: API keys, AI provider and model (edited in the
+  file; Settings doesn't show them), and
   `sessions { rakumux_key (prefix_key read for older configs), cycle_keys,
   cycle_keys_in_session, welcome_seen, phone_offer_seen, layout, icons, sidebar_width,
   stacked_list_percent,
@@ -34,9 +39,10 @@ new-session flow, and code boundaries.
   `subscribe { scopes }` + `list_in` of the known folders; else `list(Some(launch))` on
   `unsupported`), `compare_folders` (launch folder first, then name, then path),
   `App::folder_label`, `App::current_folder` (the current section, retained on the folder filter
-  and "+ New session" rows; a single-folder filter takes precedence; without folder context,
-  the launch folder), `App::show_folders` (sets the filter; an
-  older daemon resyncs for a folder it isn't watching) and the Folders modal's actions (filter
+  and "+ New session" rows; a single-folder filter takes precedence under All folders; without
+  folder context, the launch folder), `App::show_folders` (sets the filter and makes All folders
+  the active tab; an older daemon resyncs for a folder it isn't watching) and the Folders modal's
+  actions (filter
   rows, All folders, show one, tick and show several, add or create a typed folder).
   `handlers/folders.rs` routes its keys.
 - `path_complete.rs`: the folders that complete a typed path (`suggest`: folders and links to
@@ -44,17 +50,39 @@ new-session flow, and code boundaries.
   matches, capped reads; `expand` for `~` and relative paths). The Folders modal lists them as
   rows (`PickerRow::Suggestion`): `↑`/`↓` choose, Tab or `→` completes, Enter adds, a click
   completes.
-- `session_list.rs`: every listed session (`Listed::All`, or the folders an older daemon listed)
-  and the folder filter (`set_folder_filter`; empty = All folders), applied locally with the
-  text filter in `visible()`. `rows()` starts with the folder filter (`Selection::Folders`; Enter
-  opens the Folders modal), puts a selectable header row per folder when more than one is shown
+- `grouping.rs`: the list tabs, pure derivations over `SessionView` (no drawing). `Grouping`
+  (All folders, App, Status; `step` for ←/→, no wrap), `AppKey::of` (agent kind, else a
+  non-shell foreground program while live, else a non-shell `launch.argv[0]`, else `shell`;
+  lowercase; dead sessions keep their agent), `StatusGroup::of` (mirrors
+  `components::format::status_label`: waiting for you, done, working, waiting for response by
+  activity phase, idle, running, exited, dead, unknown; display order = enum order), `Section`
+  (an app or a status) and `sort_sections` (agents first, then programs, then `shell`, by name).
+  `is_shell` is the one shell list (`format.rs` uses it too).
+- `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
+  folders / App / Status), `filter_label` (the Tabs layout's selector, Grid's header),
+  `switch_tab`/`show_tab`, `open_tab_picker` (All folders: the Folders modal) and the App and
+  Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
+  then `picker_sections` (sessions' apps or every status but unknown, plus the filter's), typing
+  narrows by name, Tab ticks (Space too while nothing is typed: status names have spaces), Enter
+  shows (`show_sections`, which makes that tab active), Esc closes.
+- `session_list.rs`: every listed session (`Listed::All`, or the folders an older daemon listed),
+  the active tab (`grouping`, `set_grouping`) and one filter per tab: the folder filter
+  (`set_folder_filter`; empty = All folders) and the App/Status filters (`set_section_filter`),
+  of which only the active tab's applies, locally with the text filter in `visible()`. `rows()`
+  starts with the tabs (`Selection::Folders`; ←/→ switch them, Enter opens the active tab's
+  modal), puts a selectable header row per folder when more than one is shown
   (`Selection::FolderHeader`; the launch folder first, then by name, then path; with no filter
-  the folders that have sessions, with one the filter's, empty ones included), and ends with "+
-  New session". The order never changes by itself: pinned sessions lead their folder, both parts
-  follow the user's order (`sessions.session_order`), and sessions without a place go last,
-  oldest first. `move_session` moves one within its folder and its pinned or unpinned part
-  (`J`/`K`, and the drag in `sessions.rs`: `App::drag`, `SessionDrag`); `group_target` is
-  `{`/`}`.
+  the folders that have sessions, with one the filter's, empty ones included) or under App and
+  Status per app or status (`Selection::SectionHeader`, same rules; Enter opens that tab's
+  modal), and ends with "+ New session". The order never changes by itself: pinned sessions lead
+  their folder, both parts follow the user's order (`sessions.session_order`), and sessions
+  without a place go last, oldest first; inside an app or status, folder by folder. Under App
+  and Status the selected session is kept shown when it stops matching the filter (`kept`), so
+  a status change never takes away the session being worked in; filter and tab changes
+  (`refilter`) don't keep it. `move_session` moves one within its folder, its pinned or unpinned
+  part and its app or status (`J`/`K`, and the drag in `sessions.rs`: `App::drag`,
+  `SessionDrag`); `group_target` is `{`/`}` over any headers. A folder filter only sets
+  `current_folder` while All folders is active.
 - `screen.rs`: screen geometry for a size, layout, focus, zoom and the dragged pane sizes
   (`layout::PaneSizes`: `sidebar_width`, `stacked_list_percent`). No header: the panes start at
   the top row and the footer (mode badge, messages, Help/Settings keys) is always exactly the
@@ -75,7 +103,7 @@ new-session flow, and code boundaries.
   attachment or `Screen::terminal`, so size claims cannot escape through the detail path.
   Cards render cropped/panned at the terminal's real size. Enter/tap uses normal activation;
   the Rakumux key returns to Grid. Arrows/h/j/k/l select, PgUp/PgDn page, n creates immediately.
-  Settings > General > Layout or `v` cycles Master detail (`sidebar`, still default), Grid
+  Settings > Layout or `v` cycles Master detail (`sidebar`, still default), Grid
   (`grid`) and Tabs (`tabs`); `v` is forwarded normally in session mode.
 - Terminal size: `sync_terminal_size` (attach, own pane change) and `claim_terminal_size` (the
   user did something: key, click, paste, focus-in; at most once a second) send `Resize`
@@ -83,7 +111,9 @@ new-session flow, and code boundaries.
   ignores a `Fit` while the controller typed in the last 5 s. Neither runs while no session is
   on screen (a phone's list). Nobody fits back on its own.
 - Mouse (`sessions.rs::handle_mouse`): clicks go to the targets the last draw recorded
-  (`App::hits`, `Hit`): list rows, the folder filter, the Folders modal's rows, and the footer's
+  (`App::hits`, `Hit`): list rows, the list tabs (`Hit::ListTab`: activate one, or open the
+  active one's modal; the band beside them, `Hit::FolderSelector`, opens it too), the Folders,
+  App and Status modals' rows (`Hit::FolderRow`, `Hit::SectionRow`), and the footer's
   mode badge (`Hit::ModeBadge`: `enter_rakumux_mode` / `return_to_session`) and key hints
   (`Hit::FooterKey`: what the keys do). The divider drags side to side, or up and down when
   stacked. Clicking "+ New session" creates and enters its shell immediately at any width,
@@ -124,7 +154,8 @@ new-session flow, and code boundaries.
 - `handlers/`: key handling by target (`Focus::List` = Rakumux mode, `Focus::Session` = main
   session, `Focus::Terminal` = utility shell):
   - Rakumux mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
-    `{`/`}` folders), `gg` via `App::pending_key`, `d`/`dd` opens delete confirmation, Enter/`i`
+    `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs), `gg` via `App::pending_key`,
+    `d`/`dd` opens delete confirmation, Enter/`i`
     go in, Esc (cancel first) or the
     Rakumux key back to `App::came_from`, Tab to `App::recent.previous`, `1`-`9`, and the action
     letters (`n`, `r`, `p`, `J`/`K` move, `x`, `z`, `P`, `/`, `?`, `,`, `R` confirms a UI restart,
@@ -137,20 +168,20 @@ new-session flow, and code boundaries.
   - new session (`new_session.rs`) creates immediately with a generated name in
     `App::current_folder`, selects it and enters its login shell. There is no naming dialog.
     A hidden destination folder is added to the filter; input cannot reach the old session while creation/attach is pending.
-  - dialogs: the Folders modal (`AppMode::Folders`, `handlers/folders.rs`), rename, delete confirmation, upgrade, daemon-restart consent,
+  - dialogs: the Folders modal (`AppMode::Folders`, `handlers/folders.rs`), the App and Status
+    modals (`AppMode::Sections`, `handlers/sections.rs`), rename, delete confirmation, upgrade, daemon-restart consent,
     and the Settings and Help modals (`AppMode::Modal`, `help::ModalState::handle_key`; `,` or `o`
-    opens Settings, `?` Help, in Rakumux mode). Settings' Keys tab runs the selected
-    `help::KeyAction` (`handlers/settings.rs::run_action`); the General tab's API key, provider and
-    model dialogs go back to it. The welcome tour (`AppMode::Welcome(WelcomeState)`,
+    opens Settings, `?` Help, in Rakumux mode). Settings runs the selected
+    `help::KeyAction` (`handlers/settings.rs::run_action`). The welcome tour (`AppMode::Welcome(WelcomeState)`,
     `handlers/dialogs.rs::handle_welcome_key`, `components/welcome.rs`) opens from `main.rs` while
-    `sessions.welcome_seen` is false, and from `t` in Help (`ModalAction::Tour`) or the Keys tab;
+    `sessions.welcome_seen` is false, and from `t` in Help (`ModalAction::Tour`) or Settings;
     `App::close_welcome` saves its "Don't show this on startup" box (on every card).
   - Phone access (`phone_access.rs`, over `crate::remote_access::PhoneAccess`, a fake
     `FakePhone` in tests): `App::start` checks it in a job (`AppEvent::PhoneChecked`); the
     one-time offer (`AppMode::PhoneOffer`) waits until Rakumux mode has no dialog
     (`App::offer_phone_access`, also on every tick) and saves `sessions.phone_offer_seen` as it
     opens; the pairing dialog (`AppMode::Pairing`) turns it on, shows the QR code and turns it off
-    (`AppEvent::PhonePairing`, `PhoneOff`); from Settings' Phone access row it goes back there.
+    (`AppEvent::PhonePairing`, `PhoneOff`). Settings has no phone row (`rakumux remote`).
   - the prefix commands work in both panes (`handlers/list.rs` routes them too).
 
 ## Data flow
@@ -180,7 +211,7 @@ timers ───────────┘                                     
 - Select = attach as observer; Enter = promote; leaving session focus = demote. Only the
   controller's pane size is sent to the PTY.
 - `RAKUMUX_SESSION_ID` set → that session is "current" and must not be attached (nesting guard).
-- Shortcut text shown to the user (footer hints, the Keys tab, Help) is generated from the
+- Shortcut text shown to the user (footer buttons, Settings, Help) is generated from the
   configured keys.
 - Errors from the daemon are `ApiError { code, message }`; show the message, branch on the code.
 
@@ -189,7 +220,7 @@ timers ───────────┘                                     
 - New key in list or session focus: `handlers/` → a pipeline in `sessions.rs` (or a dialog) → state.
 - Session operations and event handling: `sessions.rs`.
 - New config option: `config.rs` (serde default so older files still load) + a `SettingsItem` row
-  on the Settings modal's General tab (`App::modal_context`, `handlers/settings.rs`).
+  in the Settings modal (`App::modal_context`, `handlers/settings.rs`).
 - New action: a `help::KeyAction` row (label, keys) and its case in `handlers/settings.rs::run_action`.
 - New dialog: its struct in `types.rs`, keys in `handlers/`, rendering in `components/`.
 - Layout geometry or the tab bar: `tui/src/layout`. Settings and Help modals: `tui/src/help`.
@@ -204,7 +235,8 @@ timers ───────────┘                                     
 - The fake (`testing.rs`) records `list_all`, `subscribe all` and `subscribe <scopes>`;
   `FakeApi::without_all` is a daemon without `sessions.all`, `FakeApi::without_folders` one from
   before folders.
-- Cover list ordering and filtering (text and folder), event application, key routing (prefix, cycle keys, promote/
+- Cover list ordering and filtering (text, folder, app and status, per tab), event application
+  (a status change moving a session, the selected one kept), key routing (prefix, cycle keys, promote/
   demote, zoom, nesting guard), dialogs, and ratatui `TestBackend` renders at 80×24 and 160×48 for
   empty, live, exited and dead states in both layouts, at phone sizes (45×40, 40×20) for the
   list-then-session layout, taps and dialogs, and at narrow-window sizes (90×40, 90×20) for the

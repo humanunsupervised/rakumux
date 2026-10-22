@@ -18,6 +18,7 @@ use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
 use super::detail::{classify_output, Attachment, DetailView, OutputAction};
 use super::folders::{self, SyncResult};
+use super::grouping::Grouping;
 use super::runtime::{cancel_flag, AppEvent};
 use super::screen::Screen;
 use super::session_list::{ListChange, ListRow, Selection};
@@ -415,6 +416,11 @@ impl App {
             }
             StreamEvent::Exited { code } => {
                 let id = attachment.id.clone();
+                // The user ended the program they were working in here
+                // (`exit`, Ctrl-D, quitting the agent): the session goes
+                // with it. One that ends in the background stays, its final
+                // screen kept for a restart.
+                let worked_in = attachment.role == Role::Controller && self.focus == Focus::Session;
                 self.detail.attachment = None;
                 self.list.mark_exited(&id, code);
                 self.detail.view = DetailView::Saved {
@@ -426,10 +432,20 @@ impl App {
                     self.leave_session_focus(false);
                 }
                 let name = self.session_name(&id);
-                self.set_status(match code {
+                let exited = match code {
                     Some(code) => format!("{name} exited with code {code}"),
                     None => format!("{name} exited"),
-                });
+                };
+                match self.api().filter(|_| worked_in) {
+                    Some(api) => {
+                        self.set_status(format!("{exited}; removing it…"));
+                        self.exec.job(move || AppEvent::Deleted {
+                            result: api.delete(&id),
+                            id,
+                        });
+                    }
+                    None => self.set_status(exited),
+                }
             }
             StreamEvent::Lagged { .. } => self.resync_attachment(),
             StreamEvent::Cwd { .. } | StreamEvent::Bell => {}
@@ -505,13 +521,18 @@ impl App {
 
     // ------------------------------------------------------------ focus
 
-    /// Enter / `l` / `→` / click: open the Folders modal for the folder
-    /// filter, create immediately for a folder header or "+ New session",
-    /// focus a live session, revive a dead one, restart an exited one.
+    /// Enter / `l` / `→` / click: open the active tab's modal for the tabs
+    /// (the Folders modal for All folders) and the App or Status modal for
+    /// one of their headers, create immediately for a folder header or "+
+    /// New session", focus a live session, revive a dead one, restart an
+    /// exited one.
     pub fn activate_selected(&mut self) {
-        if self.list.selection() == &Selection::Folders {
-            self.open_folder_picker();
-            return;
+        match self.list.selection().clone() {
+            Selection::Folders => return self.open_tab_picker(),
+            Selection::SectionHeader(section) => {
+                return self.open_section_picker(section.grouping(), Some(section))
+            }
+            Selection::FolderHeader(_) | Selection::NewSession | Selection::Session(_) => {}
         }
         let Some(session) = self.list.selected_session().cloned() else {
             self.open_new_session();
@@ -666,9 +687,9 @@ impl App {
         self.activate_selected();
     }
 
-    /// Make sure session `id` is shown: a folder filter that hides its
-    /// folder shows that folder too, and a text filter that hides it is
-    /// cleared.
+    /// Make sure session `id` is shown: under All folders a folder filter
+    /// that hides its folder shows that folder too (under App or Status,
+    /// selecting it shows it), and a text filter that hides it is cleared.
     fn reveal(&mut self, id: &SessionId) {
         let shown = |app: &Self| app.list.visible().iter().any(|s| &s.id == id);
         if shown(self) {
@@ -678,12 +699,13 @@ impl App {
             return;
         };
         let filter = self.list.folder_filter();
-        if !filter.is_empty() && !filter.contains(&folder) {
+        let folder_tab = self.list.grouping() == Grouping::Folder;
+        if folder_tab && !filter.is_empty() && !filter.contains(&folder) {
             let mut folders = filter.to_vec();
             folders.push(folder);
             self.list.set_folder_filter(folders);
         }
-        if !shown(self) {
+        if !self.list.matches_text(id) {
             self.list.filter.set("");
         }
     }
@@ -711,8 +733,8 @@ impl App {
         self.move_selection(direction * step);
     }
 
-    /// `{` / `}`: the first session of the previous or next folder group
-    /// (its header when it shows none).
+    /// `{` / `}`: the first session of the previous or next group (folder,
+    /// app or status; its header when it shows none).
     pub fn move_to_folder_group(&mut self, delta: isize) {
         if let Some(selection) = self.list.group_target(delta) {
             self.list.select(selection);
@@ -1020,9 +1042,13 @@ impl App {
             }
             return;
         }
+        if let AppMode::Sections(picker) = &mut self.mode {
+            picker.query.insert_str(text);
+            self.section_query_changed();
+            return;
+        }
         match &mut self.mode {
             AppMode::Renaming(dialog) => dialog.input.insert_str(text),
-            AppMode::ConfiguringApiKey(dialog) => dialog.input.insert_str(text),
             AppMode::AuthEmail(dialog) => dialog.input.insert_str(text),
             AppMode::AuthCode(dialog) => dialog.input.insert_str(text),
             AppMode::Normal if self.focus == Focus::Terminal => self.paste_terminal_panel(text),
@@ -1059,8 +1085,20 @@ impl App {
             self.end_session_drag();
             if matches!(self.mode, AppMode::Folders(_)) {
                 self.folder_picker_mouse(event);
-            } else {
-                self.divider = DividerState::default();
+                return;
+            }
+            if matches!(self.mode, AppMode::Sections(_)) {
+                self.section_picker_mouse(event);
+                return;
+            }
+            self.divider = DividerState::default();
+            // The wheel moves Settings' selection and scrolls Help.
+            if let AppMode::Modal { state, .. } = &mut self.mode {
+                match event.kind {
+                    MouseEventKind::ScrollUp => state.wheel(-1),
+                    MouseEventKind::ScrollDown => state.wheel(1),
+                    _ => {}
+                }
             }
             return;
         }
@@ -1190,7 +1228,21 @@ impl App {
                     if self.focus != Focus::List {
                         self.enter_rakumux_mode();
                     }
-                    self.open_folder_picker();
+                    self.open_tab_picker();
+                    return;
+                }
+                // A tab: the active one opens its modal, another becomes
+                // active. The top row is selected, so ←/→ go on from it.
+                Some(Hit::ListTab(grouping)) => {
+                    if self.focus != Focus::List {
+                        self.enter_rakumux_mode();
+                    }
+                    self.list.select(Selection::Folders);
+                    if grouping == self.list.grouping() {
+                        self.open_tab_picker();
+                    } else {
+                        self.show_tab(grouping);
+                    }
                     return;
                 }
                 Some(Hit::ModeBadge) => {
@@ -1203,8 +1255,8 @@ impl App {
                     return;
                 }
                 Some(Hit::FooterKey(key)) => {
-                    // What the hint's keys do: in session mode they start
-                    // with the Rakumux key.
+                    // What the button's keys do: Help and Settings are
+                    // Rakumux mode keys.
                     if self.focus != Focus::List {
                         self.enter_rakumux_mode();
                     }
@@ -1215,7 +1267,10 @@ impl App {
                     }
                     return;
                 }
-                Some(Hit::FolderMenu | Hit::FolderRow(_)) | None => {}
+                Some(
+                    Hit::FolderMenu | Hit::FolderRow(_) | Hit::SectionMenu | Hit::SectionRow(_),
+                )
+                | None => {}
             }
             // The session's title row, like its terminal: go in.
             if self.focus != Focus::Session && inside(screen.detail_title) {
@@ -1260,6 +1315,31 @@ impl App {
             },
             MouseEventKind::ScrollUp if browsing => self.move_picker_cursor(-1),
             MouseEventKind::ScrollDown if browsing => self.move_picker_cursor(1),
+            _ => {}
+        }
+    }
+
+    /// The App or Status modal: a click on a row picks it (like Enter), the
+    /// wheel moves the cursor, a click outside closes it.
+    fn section_picker_mouse(&mut self, event: MouseEvent) {
+        let hit = self
+            .hits
+            .iter()
+            .find(|(a, _)| {
+                event.column >= a.x
+                    && event.column < a.x + a.width
+                    && event.row >= a.y
+                    && event.row < a.y + a.height
+            })
+            .map(|(_, hit)| *hit);
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => match hit {
+                Some(Hit::SectionRow(row)) => self.click_section_row(row),
+                Some(Hit::SectionMenu) => {}
+                _ => self.mode = AppMode::Normal,
+            },
+            MouseEventKind::ScrollUp => self.move_section_cursor(-1),
+            MouseEventKind::ScrollDown => self.move_section_cursor(1),
             _ => {}
         }
     }

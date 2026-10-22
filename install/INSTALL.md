@@ -95,7 +95,7 @@ see their own folder and rename themselves.
 ## Upgrading
 
 Press `Shift+U` in Rakumux mode (`Ctrl-\` first when working in a session), or open
-Settings → General → Update. Rakumux checks the installed release channel. `Enter` confirms
+Settings → Update. Rakumux checks the installed release channel. `Enter` confirms
 installation and automatically restarts **only this UI**. `Esc` cancels before installation
 starts. A failed download, checksum, package, version or permission check leaves the UI running.
 

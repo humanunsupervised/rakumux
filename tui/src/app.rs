@@ -31,8 +31,10 @@ mod detail;
 mod feature_flags;
 pub mod folders;
 pub mod grid;
+pub mod grouping;
 mod handlers;
 mod keys;
+mod list_tabs;
 mod new_session;
 pub mod path_complete;
 mod phone_access;
@@ -69,29 +71,9 @@ pub fn app_version() -> &'static str {
     option_env!("RAKUMUX_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
-const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
 /// How long a status message stays in the footer.
 const STATUS_TTL: Duration = Duration::from_secs(6);
 const RECONNECT_MAX: Duration = Duration::from_secs(10);
-
-pub(crate) fn normalize_primary_provider(value: Option<&str>) -> &'static str {
-    match value {
-        Some(v) if v.eq_ignore_ascii_case("openai") => "openai",
-        _ => "anthropic",
-    }
-}
-
-pub(crate) fn effective_openai_model(value: Option<&str>) -> String {
-    value.unwrap_or(DEFAULT_OPENAI_MODEL).to_string()
-}
-
-fn openai_model_options() -> Vec<String> {
-    vec![
-        "gpt-4o-mini".to_string(),
-        "gpt-4.1-mini".to_string(),
-        "gpt-4.1".to_string(),
-    ]
-}
 
 /// The client's environment, passed on create/revive so sessions start
 /// with a current environment rather than the daemon's.
@@ -158,18 +140,26 @@ pub enum Hit {
     TerminalPanel,
     TerminalPanelHide,
     TerminalPanelDivider,
-    /// Session list row (0 = the folder filter; folder headers count).
+    /// Session list row (0 = the tabs; headers count).
     ListRow(usize),
     /// Visible Grid card in filtered session order (last is New session).
     GridCell(usize),
     /// Previous/next Grid page.
     GridPage(isize),
-    /// The folder filter (top of the list or left end of the tab bar).
+    /// The top row of the list around its tabs, the left end of the tab
+    /// bar, Grid's header: opens the active tab's modal.
     FolderSelector,
+    /// A tab on the list's top row: activates it, or opens its modal when
+    /// it's the active one.
+    ListTab(grouping::Grouping),
     /// The open Folders modal (clicks inside it don't close it).
     FolderMenu,
     /// A row of the Folders modal.
     FolderRow(usize),
+    /// The open App or Status modal (clicks inside it don't close it).
+    SectionMenu,
+    /// A row of the App or Status modal.
+    SectionRow(usize),
     /// The footer's mode badge: `SESSION` switches to Rakumux mode,
     /// `RAKUMUX` goes back to the session you came from.
     ModeBadge,
@@ -177,14 +167,14 @@ pub enum Hit {
     FooterKey(FooterKey),
 }
 
-/// What a footer hint does when tapped: what its keys do.
+/// What a footer button does when tapped: what its keys do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FooterKey {
-    /// `Ctrl-\ rakumux` (session mode): switch to Rakumux mode.
+    /// `Ctrl-\ Rakumux` (session mode): switch to Rakumux mode.
     Rakumux,
-    /// `? help`: open Help.
+    /// `? Help` (Rakumux mode): open Help.
     Help,
-    /// `, settings`: open Settings.
+    /// `, Settings` (Rakumux mode): open Settings.
     Settings,
 }
 
@@ -459,10 +449,7 @@ impl App {
             || self.creating_session
             || self.pending_focus.is_some()
             || self.terminal_panel.busy()
-            || matches!(
-                self.mode,
-                AppMode::ConfiguringApiKey(_) | AppMode::AuthEmail(_) | AppMode::AuthCode(_)
-            )
+            || matches!(self.mode, AppMode::AuthEmail(_) | AppMode::AuthCode(_))
     }
 
     /// Where keys go and what's open, for the input log: `session` or
@@ -587,7 +574,7 @@ impl App {
     }
 
     /// What the Settings and Help modals show: the configured keys, the
-    /// layout and the General tab's current values.
+    /// layout and the settings' current values.
     pub fn modal_context(&self, in_session: bool) -> ModalContext {
         ModalContext {
             rakumux_key: self.rakumux_key.label(),
@@ -609,17 +596,8 @@ impl App {
         }
     }
 
-    /// A General tab row: what `item` sets and its current value.
+    /// A row of Settings: what `item` sets and its current value.
     fn setting_row(&self, item: SettingsItem) -> SettingRow {
-        let ai = &self.settings.ai;
-        let key_value = |key: &Option<String>| {
-            if key.is_some() {
-                "set".to_string()
-            } else {
-                "not set".to_string()
-            }
-        };
-        let naming = "Used for AI session naming";
         let (label, value, note) = match item {
             SettingsItem::Layout => {
                 let layout = self.session_layout();
@@ -687,23 +665,6 @@ impl App {
                     ),
                 };
             }
-            SettingsItem::PhoneAccess => {
-                let value = match self.phone_enabled {
-                    Some(true) => "[On] Off",
-                    Some(false) => "On [Off]",
-                    None => "…",
-                };
-                let note = if self.phone_enabled == Some(true) {
-                    "Use Rakumux from the Rakumux app on your phone, over Tailscale. Enter \
-                     shows the QR code to pair a phone; x there turns phone access off. Kept in \
-                     ~/.rakumux/remote.json."
-                } else {
-                    "Use Rakumux from the Rakumux app on your phone, over Tailscale. Enter \
-                     turns it on and shows the QR code to pair a phone. Only devices on your \
-                     tailnet with the pairing code get in. Kept in ~/.rakumux/remote.json."
-                };
-                ("Phone access", value.to_string(), note)
-            }
             SettingsItem::Update => (
                 "Update",
                 self.pending_update_version.as_ref().map(|version| format!("{version} available · U"))
@@ -714,24 +675,6 @@ impl App {
                 "Terminal panel",
                 if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
                 "Open a temporary shell below the main detail in the current directory, without creating a session. Exit closes the pane; hiding with × or the Rakumux key then T keeps it running. Closing this UI ends its temporary shell, not any sessions.",
-            ),
-            SettingsItem::AnthropicKey => (
-                "Anthropic API key",
-                key_value(&ai.anthropic_api_key),
-                naming,
-            ),
-            SettingsItem::OpenAiKey => ("OpenAI API key", key_value(&ai.openai_api_key), naming),
-            SettingsItem::PrimaryAiProvider => {
-                let value = match normalize_primary_provider(ai.ai_primary_provider.as_deref()) {
-                    "openai" => "OpenAI",
-                    _ => "Anthropic",
-                };
-                ("AI naming provider", value.to_string(), naming)
-            }
-            SettingsItem::OpenAiModel => (
-                "OpenAI model",
-                effective_openai_model(ai.openai_model.as_deref()),
-                naming,
             ),
         };
         SettingRow {

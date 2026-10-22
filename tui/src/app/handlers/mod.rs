@@ -4,5 +4,6 @@ pub mod auth;
 pub mod dialogs;
 pub mod folders;
 pub mod list;
+pub mod sections;
 pub mod session;
 pub mod settings;

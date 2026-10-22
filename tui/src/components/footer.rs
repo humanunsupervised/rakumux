@@ -1,18 +1,20 @@
-//! One-line footer, the last row of every screen (zoom too): the mode
-//! badge at the left (a full-width orange bar while keys drive
-//! Rakumux, a quiet `SESSION`/`TERMINAL` while they go to a program), then the
-//! connection state and a message (a status message, why the daemon is
-//! unreachable, the zoomed session, a pending upgrade), and on the right the
-//! keys for Help and Settings (in session mode after the Rakumux key,
-//! which is shown too). Settings' Keys tab lists every key.
+//! One-line footer, the last row of every screen (zoom too): a full-width
+//! bar, orange while keys drive Rakumux and a muted blue while they go to a
+//! program. The mode badge (`RAKUMUX`, `SESSION` or `TERMINAL`) is at the
+//! left, then in Rakumux mode the selected session's name, the connection
+//! state and a message (a status message, why the daemon is unreachable,
+//! the zoomed session, a pending upgrade), and
+//! buttons on the right: Help (`?`) and Settings (`,`) in Rakumux mode, the
+//! way to Rakumux mode (the Rakumux key) in session mode. Settings lists
+//! every key.
 //!
 //! The footer never wraps or grows: when the row is short the message is
-//! cut first (down to [`MIN_MESSAGE`] columns), then hints are dropped from
-//! the right (Settings first, then Help); the badge always shows.
+//! cut first (down to [`MIN_MESSAGE`] columns), then buttons are dropped
+//! from the right (Settings first); the badge always shows.
 //!
-//! The badge and the hints are tap targets, for phones and the mouse: the
-//! `SESSION` badge switches to Rakumux mode, the `RAKUMUX` badge goes
-//! back to the session you came from, and a hint does what its keys do.
+//! The badge and the buttons are tap targets, for phones and the mouse: the
+//! `SESSION` badge switches to Rakumux mode, the `RAKUMUX` badge goes back
+//! to the session you came from, and a button does what its keys do.
 
 use ratatui::{
     layout::Rect,
@@ -28,38 +30,39 @@ use crate::app::{App, Connection, FooterKey, Hit};
 use crate::layout::{str_width, truncate};
 use crate::theme;
 
-/// Columns a message keeps before hints make way for it.
+/// Columns a message keeps before buttons make way for it.
 const MIN_MESSAGE: usize = 30;
 
-/// Blank columns between two hints.
-const GAP: usize = 2;
+/// Columns between two buttons.
+const GAP: usize = 1;
 
-/// A key hint: the keys, what they do (empty shows the keys alone), and
-/// what a tap on it does.
+/// How much darker than the orange bar its buttons are (see
+/// [`theme::Palette::faded`]).
+const BUTTON_SHADE: f32 = 0.2;
+
+/// Between the RAKUMUX badge and the selected session.
+const DIVIDER: &str = "| ";
+
+/// A footer button: its keys, what it opens, and what a tap on it does.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Hint {
+pub struct Button {
     pub keys: String,
-    pub action: &'static str,
+    pub label: &'static str,
     pub target: FooterKey,
 }
 
-impl Hint {
-    fn new(keys: impl Into<String>, action: &'static str, target: FooterKey) -> Self {
+impl Button {
+    fn new(keys: impl Into<String>, label: &'static str, target: FooterKey) -> Self {
         Self {
             keys: keys.into(),
-            action,
+            label,
             target,
         }
     }
 
-    /// Columns it takes.
+    /// Columns it takes: ` keys label `.
     fn width(&self) -> usize {
-        let action = if self.action.is_empty() {
-            0
-        } else {
-            1 + str_width(self.action)
-        };
-        str_width(&self.keys) + action
+        str_width(&self.keys) + str_width(self.label) + 3
     }
 }
 
@@ -67,8 +70,8 @@ impl Hint {
 pub type FooterTarget = (u16, u16, Hit);
 
 /// The mode badge: a bright orange `RAKUMUX` while the keys drive
-/// Rakumux (the mode to notice), a quiet `SESSION` that blends into the
-/// theme while they go to a session.
+/// Rakumux (the mode to notice), a quiet `SESSION` in the blue bar while
+/// they go to a session.
 pub fn mode_badge(app: &App) -> Span<'static> {
     let p = theme::palette();
     match app.focus {
@@ -96,73 +99,116 @@ pub fn mode_badge(app: &App) -> Span<'static> {
     }
 }
 
-/// The footer's hints: the keys for Help and Settings, after the Rakumux
-/// key in session mode (where the Rakumux key itself comes first, as the
-/// way out). Nothing while typing a filter (those keys type) or while a
+/// The footer's buttons: Help and Settings in Rakumux mode; in session
+/// mode the Rakumux key, the way out (Help and Settings are a tap away
+/// from there). Nothing while typing a filter (those keys type) or while a
 /// dialog is open.
-pub fn hints(app: &App) -> Vec<Hint> {
+pub fn buttons(app: &App) -> Vec<Button> {
     if !matches!(app.mode, AppMode::Normal) || app.list.filter_editing {
         return Vec::new();
     }
-    let settings = crate::help::SETTINGS_KEY_PRIMARY;
     match app.focus {
         Focus::List => vec![
-            Hint::new("?", "help", FooterKey::Help),
-            Hint::new(settings, "settings", FooterKey::Settings),
+            Button::new("?", "Help", FooterKey::Help),
+            Button::new(
+                crate::help::SETTINGS_KEY_PRIMARY,
+                "Settings",
+                FooterKey::Settings,
+            ),
         ],
-        Focus::Session | Focus::Terminal => {
-            let key = app.rakumux_key.label();
-            vec![
-                Hint::new(key.clone(), "rakumux", FooterKey::Rakumux),
-                Hint::new(format!("{key} ?"), "help", FooterKey::Help),
-                Hint::new(format!("{key} {settings}"), "settings", FooterKey::Settings),
-            ]
-        }
+        Focus::Session | Focus::Terminal => vec![Button::new(
+            app.rakumux_key.label(),
+            "Rakumux",
+            FooterKey::Rakumux,
+        )],
     }
 }
 
-fn hints_width(hints: &[Hint]) -> usize {
-    let items: usize = hints.iter().map(Hint::width).sum();
-    items + GAP * hints.len().saturating_sub(1)
+fn buttons_width(buttons: &[Button]) -> usize {
+    let items: usize = buttons.iter().map(Button::width).sum();
+    items + GAP * buttons.len().saturating_sub(1)
 }
 
-/// Add `hints` to `spans`, the first at column `x`; returns where each one
-/// is.
-fn push_hints(spans: &mut Vec<Span<'static>>, hints: &[Hint], x: usize) -> Vec<FooterTarget> {
+/// A button's keys and label styles on the bar: a darker shade of the
+/// orange bar with its dark ink (a dark chip where the palette can't
+/// shade), or a dark chip on the blue one, its keys in the accent.
+fn button_styles(focus: Focus) -> (Style, Style) {
     let p = theme::palette();
-    let key_style = Style::default()
-        .fg(p.accent_primary)
-        .add_modifier(Modifier::BOLD);
-    let action_style = Style::default().fg(p.neutral_gray);
-    let mut targets = Vec::with_capacity(hints.len());
+    let (chip, key, label) = match focus {
+        Focus::List => match p.faded(p.accent_orange, BUTTON_SHADE) {
+            Some(shade) => (shade, p.background, p.background),
+            None => (p.background, p.accent_orange, p.text_primary),
+        },
+        Focus::Session | Focus::Terminal => (p.background, p.accent_primary, p.text_primary),
+    };
+    let chip = Style::default().bg(chip);
+    (chip.fg(key).add_modifier(Modifier::BOLD), chip.fg(label))
+}
+
+/// Add `buttons` to `spans`, the first at column `x`. Returns where each
+/// one is.
+fn push_buttons(
+    spans: &mut Vec<Span<'static>>,
+    buttons: &[Button],
+    x: usize,
+    focus: Focus,
+) -> Vec<FooterTarget> {
+    let (key_style, label_style) = button_styles(focus);
+    let mut targets = Vec::with_capacity(buttons.len());
     let mut x = x;
-    for (i, hint) in hints.iter().enumerate() {
+    for (i, button) in buttons.iter().enumerate() {
         if i > 0 {
             spans.push(Span::raw(" ".repeat(GAP)));
             x += GAP;
         }
-        let width = hint.width();
+        let width = button.width();
         targets.push((
             u16::try_from(x).unwrap_or(u16::MAX),
             u16::try_from(width).unwrap_or(u16::MAX),
-            Hit::FooterKey(hint.target),
+            Hit::FooterKey(button.target),
         ));
         x += width;
-        let (keys, action) = (&hint.keys, hint.action);
-        spans.push(Span::styled(keys.clone(), key_style));
-        if !action.is_empty() {
-            spans.push(Span::styled(format!(" {action}"), action_style));
-        }
+        spans.push(Span::styled(format!(" {}", button.keys), key_style));
+        spans.push(Span::styled(format!(" {} ", button.label), label_style));
     }
     targets
 }
 
-/// What follows the badge: the connection state while not connected, then
+/// In Rakumux mode, right after the badge: `| session: name`, the session
+/// its keys act on, in at most `room` columns (just `| name` when that's
+/// all that fits; nothing under a few columns of it).
+fn session_label(app: &App, room: usize) -> Vec<Span<'static>> {
+    let Some(session) = app
+        .list
+        .selected_session()
+        .filter(|_| app.focus == Focus::List)
+    else {
+        return Vec::new();
+    };
+    let name = |room: usize| {
+        Span::styled(
+            truncate(&session.name, room),
+            Style::default().add_modifier(Modifier::BOLD),
+        )
+    };
+    let full = str_width(DIVIDER) + str_width("session: ") + str_width(&session.name);
+    if full <= room {
+        return vec![Span::raw(DIVIDER), Span::raw("session: "), name(room)];
+    }
+    match room.checked_sub(str_width(DIVIDER)) {
+        Some(left) if left >= 3 => vec![Span::raw(DIVIDER), name(left)],
+        _ => Vec::new(),
+    }
+}
+
+/// What follows the badge (and the session in Rakumux mode): the
+/// connection state while not connected, then
 /// a status message, or why the daemon is unreachable, debug details, the
 /// zoomed session or a pending upgrade. Empty when there's nothing to say.
 fn message(app: &App) -> Vec<Span<'static>> {
     let p = theme::palette();
-    let muted = Style::default().fg(p.text_muted);
+    // Readable on the blue bar; the orange one recolours everything.
+    let muted = Style::default().fg(p.neutral_gray);
     let mut spans = match &app.connection {
         Connection::Connected(_) => Vec::new(),
         Connection::Connecting => vec![Span::styled(
@@ -253,13 +299,13 @@ fn fit(spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static>> {
     out
 }
 
-/// How many of `hints` to keep: as many as leave the message its room (all
-/// of it, or [`MIN_MESSAGE`] columns of it) after `lead` columns, with a
-/// space on either side of the hints. Returns `(kept, room for the
+/// How many of `buttons` to keep: as many as leave the message its room
+/// (all of it, or [`MIN_MESSAGE`] columns of it) after `lead` columns, with
+/// a space on either side of the buttons. Returns `(kept, room for the
 /// message)`.
-fn keep_hints(width: usize, lead: usize, message: usize, hints: &[Hint]) -> (usize, usize) {
-    for kept in (1..=hints.len()).rev() {
-        let reserve = hints_width(&hints[..kept]) + 2;
+fn keep_buttons(width: usize, lead: usize, message: usize, buttons: &[Button]) -> (usize, usize) {
+    for kept in (1..=buttons.len()).rev() {
+        let reserve = buttons_width(&buttons[..kept]) + 2;
         if let Some(room) = width.checked_sub(lead + reserve) {
             if room >= message.min(MIN_MESSAGE) {
                 return (kept, room);
@@ -270,49 +316,52 @@ fn keep_hints(width: usize, lead: usize, message: usize, hints: &[Hint]) -> (usi
 }
 
 /// The footer line for a row `width` columns wide: the mode badge, the
-/// message, and the hints on the right. It always fits the row: the message
-/// is cut first, down to [`MIN_MESSAGE`] columns, then the hints go from
-/// the right.
+/// message, and the buttons on the right. It always fits the row: the
+/// message is cut first, down to [`MIN_MESSAGE`] columns, then the buttons
+/// go from the right.
 #[cfg(test)]
 pub fn footer_line(app: &App, width: usize) -> Line<'static> {
     footer(app, width).0
 }
 
 /// [`footer_line`] and where its tap targets are: the badge, then each
-/// hint shown.
+/// button shown. The buttons and a message come first; the session label
+/// takes what's left between them.
 fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
     let badge = mode_badge(app);
     let badge_width = str_width(&badge.content);
     // The badge, then a space before the message.
     let lead = badge_width + 1;
     let message = message(app);
-    let hints = hints(app);
-    let (kept, room) = keep_hints(width, lead, spans_width(&message), &hints);
+    let buttons = buttons(app);
+    let (kept, room) = keep_buttons(width, lead, spans_width(&message), &buttons);
     let message = fit(message, room);
+    // The divider sits a column after the badge, like its padding; the
+    // message follows the session after a dot.
+    let separator = if message.is_empty() { 0 } else { 3 };
+    let session = session_label(
+        app,
+        (room + 1).saturating_sub(spans_width(&message) + separator),
+    );
     let mut targets = vec![(
         0,
         u16::try_from(badge_width.min(width)).unwrap_or(u16::MAX),
         Hit::ModeBadge,
     )];
     let mut spans = vec![badge];
-    if !message.is_empty() {
-        spans.push(Span::raw(" "));
-        spans.extend(message);
-    }
-    if kept > 0 {
-        let hints = &hints[..kept];
-        let used = spans_width(&spans);
-        spans.push(Span::raw(
-            " ".repeat(width.saturating_sub(used + hints_width(hints) + 1)),
-        ));
-        let x = spans_width(&spans);
-        targets.extend(push_hints(&mut spans, hints, x));
+    if !session.is_empty() {
+        spans.extend(session);
+        if !message.is_empty() {
+            spans.push(Span::raw(" · "));
+        }
+    } else if !message.is_empty() {
         spans.push(Span::raw(" "));
     }
-    let mut line = Line::from(spans);
+    spans.extend(message);
     if app.focus == Focus::List {
+        // Dark ink on the orange bar; alerts stand out in bold.
         let palette = theme::palette();
-        for span in &mut line.spans {
+        for span in &mut spans {
             let alert = span.style.fg == Some(palette.accent_pink);
             span.style = span.style.fg(palette.background).bg(palette.accent_orange);
             if alert {
@@ -320,9 +369,21 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
             }
         }
     }
-    (line, targets)
+    if kept > 0 {
+        let buttons = &buttons[..kept];
+        let used = spans_width(&spans);
+        spans.push(Span::raw(
+            " ".repeat(width.saturating_sub(used + buttons_width(buttons) + 1)),
+        ));
+        let x = spans_width(&spans);
+        targets.extend(push_buttons(&mut spans, buttons, x, app.focus));
+        spans.push(Span::raw(" "));
+    }
+    (Line::from(spans), targets)
 }
 
+/// The bar: orange with dark text in Rakumux mode, muted blue (the badge's
+/// own) while a program takes the keys.
 fn footer_style(app: &App) -> Style {
     let palette = theme::palette();
     if app.focus == Focus::List {
@@ -332,12 +393,12 @@ fn footer_style(app: &App) -> Style {
     } else {
         Style::default()
             .fg(palette.text_primary)
-            .bg(palette.background)
+            .bg(palette.selection)
     }
 }
 
 /// Draws the footer into the first row of `area`; it never takes more.
-/// Records its tap targets (the badge and the hints) in `hits`.
+/// Records its tap targets (the badge and the buttons) in `hits`.
 pub fn draw_footer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     if area.height == 0 {
         return;
@@ -369,9 +430,32 @@ mod tests {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
+    /// Draw the footer `width` columns wide at (2, 1) on a larger screen;
+    /// returns the buffer and the button columns.
+    fn draw_at(app: &App, width: u16) -> (ratatui::buffer::Buffer, Vec<Rect>) {
+        use ratatui::{backend::TestBackend, widgets::Block, Terminal};
+        let palette = theme::palette();
+        let mut terminal = Terminal::new(TestBackend::new(width + 4, 3)).unwrap();
+        let mut hits = Vec::new();
+        terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    Block::default().style(Style::default().bg(palette.background)),
+                    frame.size(),
+                );
+                draw_footer(frame, app, Rect::new(2, 1, width, 1), &mut hits);
+            })
+            .unwrap();
+        let buttons = hits
+            .iter()
+            .filter(|(_, hit)| matches!(hit, Hit::FooterKey(_)))
+            .map(|(area, _)| *area)
+            .collect();
+        (terminal.backend().buffer().clone(), buttons)
+    }
+
     #[test]
     fn rakumux_bar_fills_the_row_with_readable_ink_in_all_message_states() {
-        use ratatui::{backend::TestBackend, widgets::Block, Terminal};
         let palette = theme::palette();
         for state in ["empty", "filter", "connecting", "error", "message"] {
             let mut h = harness(vec![view("A", "api", 10)]);
@@ -389,104 +473,134 @@ mod tests {
                 h.app.set_status("A long status message ".repeat(20));
             }
             for width in [1, 9, 40, 80, 160] {
-                let mut terminal = Terminal::new(TestBackend::new(width + 4, 3)).unwrap();
-                let mut hits = Vec::new();
-                terminal
-                    .draw(|frame| {
-                        frame.render_widget(
-                            Block::default().style(Style::default().bg(palette.background)),
-                            frame.size(),
-                        );
-                        draw_footer(frame, &h.app, Rect::new(2, 1, width, 1), &mut hits);
-                    })
-                    .unwrap();
+                let (buffer, buttons) = draw_at(&h.app, width);
                 for x in 2..width + 2 {
-                    let cell = terminal.backend().buffer().get(x, 1);
+                    let cell = buffer.get(x, 1);
+                    if buttons.iter().any(|b| x >= b.x && x < b.right()) {
+                        // A darker orange, with the same dark ink.
+                        let (key, _) = button_styles(Focus::List);
+                        assert_eq!(Some(cell.bg), key.bg, "{state}: col {x}");
+                        assert_ne!(cell.bg, palette.background, "{state}: col {x}");
+                        assert_eq!(cell.fg, palette.background, "{state}: col {x}");
+                        continue;
+                    }
                     assert_eq!(cell.bg, palette.accent_orange, "{state}: col {x}");
                     assert_eq!(cell.fg, palette.background, "{state}: col {x}");
                 }
-                assert_eq!(terminal.backend().buffer().get(2, 0).bg, palette.background);
-                assert_eq!(terminal.backend().buffer().get(0, 1).bg, palette.background);
+                assert_eq!(buffer.get(2, 0).bg, palette.background);
+                assert_eq!(buffer.get(0, 1).bg, palette.background);
             }
         }
     }
 
     #[test]
-    fn session_and_terminal_modes_keep_the_quiet_footer_background() {
-        use ratatui::{backend::TestBackend, Terminal};
+    fn session_and_terminal_modes_fill_the_row_with_muted_blue() {
         let mut h = harness(vec![view("A", "api", 10)]);
         let palette = theme::palette();
         for focus in [Focus::Session, Focus::Terminal] {
             h.app.focus = focus;
-            let mut terminal = Terminal::new(TestBackend::new(160, 1)).unwrap();
-            terminal
-                .draw(|frame| draw_footer(frame, &h.app, frame.size(), &mut Vec::new()))
-                .unwrap();
-            let buffer = terminal.backend().buffer();
-            assert_eq!(buffer.get(0, 0).bg, palette.selection);
-            assert_eq!(buffer.get(159, 0).bg, palette.background);
+            for width in [9, 40, 160] {
+                let (buffer, buttons) = draw_at(&h.app, width);
+                assert_eq!(buttons.len(), usize::from(width >= 40), "{focus:?} {width}");
+                for x in 2..width + 2 {
+                    let on_button = buttons.iter().any(|b| x >= b.x && x < b.right());
+                    let bg = if on_button {
+                        palette.background
+                    } else {
+                        palette.selection
+                    };
+                    assert_eq!(buffer.get(x, 1).bg, bg, "{focus:?} {width}: col {x}");
+                }
+                // Only the footer's row.
+                assert_eq!(buffer.get(2, 0).bg, palette.background);
+                assert_eq!(buffer.get(0, 1).bg, palette.background);
+            }
         }
     }
 
     #[tokio::test]
-    async fn the_badge_leads_and_the_help_and_settings_keys_end_the_line() {
+    async fn the_badge_leads_and_buttons_end_the_line() {
         let mut h = harness(vec![view("A", "api", 10)]);
         let p = theme::palette();
-        // Rakumux mode: the orange badge, then the keys themselves.
+        // Rakumux mode: the orange badge, then Help and Settings.
         let line = footer_line(&h.app, 60);
         let shown = text(&line);
         assert!(shown.starts_with(" RAKUMUX "), "{shown:?}");
-        assert!(shown.ends_with("? help  , settings "), "{shown:?}");
+        assert!(shown.ends_with(" ? Help   , Settings  "), "{shown:?}");
         assert_eq!(str_width(&shown), 60, "{shown:?}");
         assert_eq!(line.spans[0].style.bg, Some(p.accent_orange));
         assert_eq!(line.spans[0].style.fg, Some(p.background));
-        // Session mode: a quiet badge; the keys after the Rakumux key,
-        // which comes first.
+        let key = line.spans.iter().find(|s| s.content == " ?").unwrap();
+        assert_eq!(key.style.fg, Some(p.background));
+        assert_eq!(key.style.bg, p.faded(p.accent_orange, BUTTON_SHADE));
+        assert!(key.style.add_modifier.contains(Modifier::BOLD));
+        // Session mode: a quiet badge, and the way to Rakumux mode alone.
         h.press(KeyCode::Enter).await;
         let line = footer_line(&h.app, 80);
         let shown = text(&line);
         assert!(shown.starts_with(" SESSION "), "{shown:?}");
+        assert!(shown.ends_with(" Ctrl-\\ Rakumux  "), "{shown:?}");
         assert!(
-            shown.ends_with("Ctrl-\\ rakumux  Ctrl-\\ ? help  Ctrl-\\ , settings "),
+            !shown.contains("Help") && !shown.contains("Settings"),
             "{shown:?}"
         );
         assert_eq!(line.spans[0].style.bg, Some(p.selection));
         assert_eq!(line.spans[0].style.fg, Some(p.neutral_gray));
-        let key = line
-            .spans
-            .iter()
-            .find(|s| s.content == "Ctrl-\\ ?")
-            .unwrap();
+        let key = line.spans.iter().find(|s| s.content == " Ctrl-\\").unwrap();
         assert_eq!(key.style.fg, Some(p.accent_primary));
+        assert_eq!(key.style.bg, Some(p.background));
         // While typing a filter those keys type, so none show; the badge
-        // stays.
+        // and the selected session stay.
         h.rakumux().await;
         h.press(KeyCode::Char('/')).await;
-        assert!(hints(&h.app).is_empty());
-        assert_eq!(text(&footer_line(&h.app, 60)).trim(), "RAKUMUX");
+        assert!(buttons(&h.app).is_empty());
+        assert_eq!(
+            text(&footer_line(&h.app, 60)).trim(),
+            "RAKUMUX | session: api"
+        );
     }
 
     #[tokio::test]
-    async fn messages_follow_the_badge_and_are_cut_before_hints_go() {
+    async fn messages_follow_the_badge_and_are_cut_before_buttons_go() {
         let mut h = harness(vec![view("A", "api", 10)]);
         h.app.set_status("Layout: Tabs");
+        let line = text(&footer_line(&h.app, 70));
+        assert!(
+            line.starts_with(" RAKUMUX | session: api · Layout: Tabs "),
+            "{line:?}"
+        );
+        assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
+        // Short of room the session label gives way first: its name alone,
+        // then nothing.
         let line = text(&footer_line(&h.app, 60));
+        assert!(
+            line.starts_with(" RAKUMUX | api · Layout: Tabs "),
+            "{line:?}"
+        );
+        assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
+        let line = text(&footer_line(&h.app, 49));
         assert!(line.starts_with(" RAKUMUX  Layout: Tabs "), "{line:?}");
-        assert!(line.ends_with("? help  , settings "), "{line:?}");
-        // A long message is cut to keep the hints while it keeps 30
+        // A long message is cut to keep the buttons while it keeps 30
         // columns…
         let long = "A status message long enough to need the whole line here, and then some";
         h.app.set_status(long);
+        // (the session label has given way already)…
         let line = text(&footer_line(&h.app, 80));
         assert!(line.starts_with(" RAKUMUX  A status message"), "{line:?}");
         assert!(line.contains("…"), "{line:?}");
-        assert!(line.ends_with("? help  , settings "), "{line:?}");
+        assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         assert_eq!(str_width(&line), 80, "{line:?}");
-        // …then the hints go and the message takes the row.
+        // …then the buttons go and the message takes the row.
         let line = text(&footer_line(&h.app, 50));
-        assert!(!line.contains("settings"), "{line:?}");
+        assert!(!line.contains("Settings"), "{line:?}");
         assert!(line.starts_with(" RAKUMUX  A status message"), "{line:?}");
         assert_eq!(str_width(&line), 50, "{line:?}");
+        // With room to spare the session comes back.
+        let line = text(&footer_line(&h.app, 160));
+        assert!(
+            line.starts_with(" RAKUMUX | session: api · A status message"),
+            "{line:?}"
+        );
     }
 
     #[tokio::test]
@@ -522,58 +636,44 @@ mod tests {
                 }
             }
         }
-        // In a session, narrow rows drop the hints from the right: the
-        // way out stays longest.
+        // In a session, a message keeps its room before the way out shows.
         let line = text(&footer_line(&h.app, 40));
         assert!(line.contains("Renamed"), "{line:?}");
         expire(&mut h);
         let line = text(&footer_line(&h.app, 40));
-        assert!(line.ends_with("Ctrl-\\ rakumux "), "{line:?}");
-        assert!(!line.contains("help"), "{line:?}");
-        let line = text(&footer_line(&h.app, 50));
-        assert!(
-            line.ends_with("Ctrl-\\ rakumux  Ctrl-\\ ? help "),
-            "{line:?}"
-        );
+        assert!(line.ends_with(" Ctrl-\\ Rakumux  "), "{line:?}");
     }
 
     #[tokio::test]
     async fn a_phone_keeps_the_badge_and_help_longest() {
         let mut h = harness(vec![view("A", "api", 10)]);
-        // Rakumux mode: both hints fit 40 columns.
+        // Rakumux mode: both buttons fit 40 columns.
         for width in [40, 45] {
             let line = text(&footer_line(&h.app, width));
             assert!(line.starts_with(" RAKUMUX "), "{line:?}");
-            assert!(line.ends_with("? help  , settings "), "{line:?}");
+            assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         }
         // Then Settings goes before Help.
         let line = text(&footer_line(&h.app, 26));
-        assert!(line.ends_with("? help "), "{line:?}");
-        // Session mode: the way out and Help at 45, the way out at 40.
+        assert!(line.ends_with(" ? Help  "), "{line:?}");
+        // Session mode: the way out fits a phone.
         h.press(KeyCode::Enter).await;
-        let line = text(&footer_line(&h.app, 45));
-        assert!(line.starts_with(" SESSION "), "{line:?}");
-        assert!(
-            line.ends_with("Ctrl-\\ rakumux  Ctrl-\\ ? help "),
-            "{line:?}"
-        );
         let line = text(&footer_line(&h.app, 40));
-        assert!(line.ends_with("Ctrl-\\ rakumux "), "{line:?}");
+        assert!(line.starts_with(" SESSION "), "{line:?}");
+        assert!(line.ends_with(" Ctrl-\\ Rakumux  "), "{line:?}");
         // The targets match what's shown.
-        let (line, targets) = footer(&h.app, 45);
+        let (line, targets) = footer(&h.app, 40);
         let shown: Vec<char> = text(&line).chars().collect();
         let at = |(x, width, _): &FooterTarget| -> String {
             shown[usize::from(*x)..usize::from(x + width)]
                 .iter()
                 .collect()
         };
-        assert_eq!(targets.len(), 3);
+        assert_eq!(targets.len(), 2);
         assert_eq!(at(&targets[0]), " SESSION ");
         assert_eq!(targets[0].2, Hit::ModeBadge);
-        assert_eq!(at(&targets[1]), "Ctrl-\\ rakumux");
+        assert_eq!(at(&targets[1]), " Ctrl-\\ Rakumux ");
         assert_eq!(targets[1].2, Hit::FooterKey(FooterKey::Rakumux));
-        assert_eq!(at(&targets[2]), "Ctrl-\\ ? help");
-        assert_eq!(targets[2].2, Hit::FooterKey(FooterKey::Help));
     }
 
     #[tokio::test]
@@ -581,24 +681,59 @@ mod tests {
         let mut h = harness(vec![view("A", "api", 10)]);
         h.app.connection = Connection::Connecting;
         let line = text(&footer_line(&h.app, 80));
-        assert!(line.starts_with(" RAKUMUX  "), "{line:?}");
+        assert!(line.starts_with(" RAKUMUX | session: api · "), "{line:?}");
         assert!(line.contains(" connecting "), "{line:?}");
-        assert!(line.ends_with("? help  , settings "), "{line:?}");
+        assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         h.app.connection = Connection::Failed(ApiError::new(
             ErrorCode::DaemonUnavailable,
             "can't start rakumux-ptyd",
         ));
         let line = text(&footer_line(&h.app, 100));
         assert!(
-            line.starts_with(" RAKUMUX  ✕ daemon unavailable · can't start rakumux-ptyd "),
+            line.starts_with(
+                " RAKUMUX | session: api · ✕ daemon unavailable · can't start rakumux-ptyd "
+            ),
             "{line:?}"
         );
         // A status message takes the error's place; the state stays.
         h.app.set_status("Reconnecting…");
         let line = text(&footer_line(&h.app, 100));
         assert!(
-            line.starts_with(" RAKUMUX  ✕ daemon unavailable · Reconnecting… "),
+            line.starts_with(" RAKUMUX | session: api · ✕ daemon unavailable · Reconnecting… "),
             "{line:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn rakumux_mode_names_the_selected_session_and_session_mode_doesnt() {
+        let mut h = harness(vec![view("A", "api", 20), view("B", "docs", 10)]);
+        let p = theme::palette();
+        let line = footer_line(&h.app, 80);
+        assert!(
+            text(&line).starts_with(" RAKUMUX | session: api "),
+            "{:?}",
+            text(&line)
+        );
+        let name = line.spans.iter().find(|s| s.content == "api").unwrap();
+        assert!(name.style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(name.style.fg, Some(p.background));
+        h.press(KeyCode::Up).await;
+        assert!(text(&footer_line(&h.app, 80)).starts_with(" RAKUMUX | session: docs "));
+        // No session selected (+ New session): just the badge.
+        h.press(KeyCode::Down).await;
+        h.press(KeyCode::Down).await;
+        assert_eq!(h.app.list.selected_session(), None);
+        let shown = text(&footer_line(&h.app, 80));
+        assert!(shown.starts_with(" RAKUMUX  "), "{shown:?}");
+        assert!(
+            !shown.contains("api") && !shown.contains("docs"),
+            "{shown:?}"
+        );
+        // In a session the name is already on screen.
+        h.press(KeyCode::Up).await;
+        h.press(KeyCode::Up).await;
+        h.press(KeyCode::Enter).await;
+        let shown = text(&footer_line(&h.app, 80));
+        assert!(!shown.contains("docs"), "{shown:?}");
     }
 }

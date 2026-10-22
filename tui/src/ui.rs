@@ -10,24 +10,23 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::types::{AppMode, Focus, SettingsItem};
+use crate::app::types::{AppMode, Focus};
 use crate::app::App;
 use crate::components::{
     auth::draw_auth_menu,
     dialogs::{
-        draw_ai_provider_dialog, draw_api_key_dialog, draw_auth_code_dialog,
-        draw_auth_email_dialog, draw_confirm_dialog, draw_daemon_restart_dialog,
-        draw_openai_model_dialog, draw_rename_dialog, draw_upgrade_dialog,
+        draw_auth_code_dialog, draw_auth_email_dialog, draw_confirm_dialog,
+        draw_daemon_restart_dialog, draw_rename_dialog, draw_upgrade_dialog,
     },
     folder_picker::draw_folder_picker,
     footer::draw_footer,
+    section_picker::draw_section_picker,
     session_detail::draw_session_detail,
     session_grid::draw_session_grid,
     session_list::draw_session_list,
     session_tabs::draw_session_tabs,
     terminal_panel::draw_terminal_panel,
 };
-use crate::help::{ModalState, ModalTab};
 use crate::theme;
 
 /// The line between the list and the detail: a column side by side, a row
@@ -52,15 +51,6 @@ fn draw_divider(f: &mut Frame, app: &App, area: Rect, stacked: bool) {
         Paragraph::new(lines).style(Style::default().fg(color).bg(p.background)),
         area,
     );
-}
-
-/// The Settings modal on its General tab, under the dialog that changes
-/// one of its settings (that row selected).
-fn draw_settings_under(f: &mut Frame, app: &App, area: Rect) {
-    let row = app.mode.editing_setting().map_or(0, SettingsItem::index);
-    let state = ModalState::new(ModalTab::General, SettingsItem::ALL.len()).with_selected(row);
-    let ctx = app.modal_context(app.focus == Focus::Session);
-    crate::help::render(f, area, &state, &ctx);
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -113,28 +103,20 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         f.set_cursor(x, y);
     }
 
-    // The Folders modal's own click targets replace the panes'.
+    // The Folders, App and Status modals' own click targets replace the
+    // panes'.
     let mut menu_hits = Vec::new();
     match &app.mode {
         AppMode::Normal => {}
         AppMode::Folders(picker) => draw_folder_picker(f, app, picker, modal_area, &mut menu_hits),
+        AppMode::Sections(picker) => {
+            draw_section_picker(f, app, picker, modal_area, &mut menu_hits)
+        }
         AppMode::Renaming(dialog) => draw_rename_dialog(f, dialog, modal_area),
         AppMode::Confirm(dialog) => draw_confirm_dialog(f, dialog, modal_area),
         AppMode::DaemonRestart(dialog) => draw_daemon_restart_dialog(f, dialog, modal_area),
         AppMode::Modal { state, in_session } => {
             crate::help::render(f, modal_area, state, &app.modal_context(*in_session))
-        }
-        AppMode::ConfiguringApiKey(dialog) => {
-            draw_settings_under(f, app, modal_area);
-            draw_api_key_dialog(f, dialog, modal_area)
-        }
-        AppMode::AiProvider(dialog) => {
-            draw_settings_under(f, app, modal_area);
-            draw_ai_provider_dialog(f, dialog, modal_area)
-        }
-        AppMode::OpenAiModel(dialog) => {
-            draw_settings_under(f, app, modal_area);
-            draw_openai_model_dialog(f, dialog, modal_area)
         }
         AppMode::Upgrade(dialog) => draw_upgrade_dialog(f, dialog, modal_area),
         AppMode::Welcome(state) => {
@@ -142,9 +124,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
         AppMode::PhoneOffer => crate::components::phone_access::draw_phone_offer(f, modal_area),
         AppMode::Pairing(dialog) => {
-            if dialog.from_settings {
-                draw_settings_under(f, app, modal_area);
-            }
             crate::components::phone_access::draw_pairing(f, dialog, modal_area)
         }
         AppMode::Auth(menu) => draw_auth_menu(f, menu, modal_area),
@@ -169,7 +148,7 @@ mod tests {
         aged, folder, harness, harness_with_folders, on_branch, options, scope, start, view,
         view_in, FakeApi, Harness,
     };
-    use crate::app::types::Focus;
+    use crate::app::types::{Focus, SettingsItem};
     use crate::app::Hit;
     use crate::layout::SessionLayout;
     use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -287,8 +266,9 @@ mod tests {
             assert!(screen.contains("controlling"), "{screen}");
             let footer = screen.lines().last().unwrap();
             assert!(footer.starts_with(" SESSION "), "{footer:?}");
-            assert!(footer.contains(" Ctrl-\\ rakumux "), "{footer:?}");
-            assert!(footer.trim_end().ends_with("settings"), "{footer:?}");
+            // The way to Rakumux mode is the only button.
+            assert!(footer.ends_with(" Ctrl-\\ Rakumux  "), "{footer:?}");
+            assert!(!footer.contains("Settings"), "{footer:?}");
         }
     }
 
@@ -304,13 +284,32 @@ mod tests {
                     }
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                     terminal.draw(|frame| draw(frame, &mut h.app)).unwrap();
+                    // The buttons are a darker orange, while no dialog is
+                    // open.
+                    let buttons: Vec<Rect> = h
+                        .app
+                        .hits
+                        .iter()
+                        .filter(|(area, hit)| {
+                            area.y == height - 1 && matches!(hit, Hit::FooterKey(_))
+                        })
+                        .map(|(area, _)| *area)
+                        .collect();
+                    assert_eq!(buttons.is_empty(), key.is_some());
                     for x in 0..width {
                         let cell = terminal.backend().buffer().get(x, height - 1);
-                        assert_eq!(
-                            cell.bg, palette.accent_orange,
-                            "{layout:?} {width}x{height} col {x}"
-                        );
-                        assert_eq!(cell.fg, palette.background);
+                        let on_button = buttons.iter().any(|b| x >= b.x && x < b.right());
+                        let bg = if on_button {
+                            palette
+                                .faded(palette.accent_orange, 0.2)
+                                .unwrap_or(palette.background)
+                        } else {
+                            palette.accent_orange
+                        };
+                        assert_eq!(cell.bg, bg, "{layout:?} {width}x{height} col {x}");
+                        if !on_button {
+                            assert_eq!(cell.fg, palette.background);
+                        }
                     }
                     if key.is_some() {
                         h.press(KeyCode::Esc).await;
@@ -386,10 +385,7 @@ mod tests {
             assert_eq!(rows.len(), usize::from(height));
             let footer = rows[rows.len() - 1];
             assert!(footer.starts_with(" RAKUMUX "), "{footer:?}");
-            assert!(
-                footer.trim_end().ends_with("? help  , settings"),
-                "{footer:?}"
-            );
+            assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
             // No key hints above it: the panes reach the footer.
             for hint in ["select", "new", "rename", "switch pane"] {
                 assert!(!footer.contains(hint), "{footer:?}");
@@ -400,11 +396,11 @@ mod tests {
         h.app.set_status("Layout: Tabs");
         let screen = render(&mut h.app, 80, 24);
         let footer = screen.lines().last().unwrap();
-        assert!(footer.starts_with(" RAKUMUX  Layout: Tabs "), "{footer:?}");
         assert!(
-            footer.trim_end().ends_with("? help  , settings"),
+            footer.starts_with(" RAKUMUX | session: api · Layout: Tabs "),
             "{footer:?}"
         );
+        assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
     }
 
     /// Mode switches, selection moves and messages coming and going never
@@ -447,52 +443,94 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn settings_has_the_general_tab_and_a_table_of_actions() {
+    async fn settings_is_one_page_of_settings_then_actions() {
         let mut h = harness(vec![view("A", "api", 10)]);
         h.press(KeyCode::Char('o')).await;
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("Settings"), "{screen}");
-            assert!(screen.contains("1 General"), "{screen}");
+            assert!(!screen.contains("1 General"), "no tabs: {screen}");
             assert!(screen.contains("▶ Layout"), "{screen}");
             assert!(screen.contains("[Master detail] Grid Tabs"), "{screen}");
-            assert!(screen.contains("Anthropic API key"), "{screen}");
-            assert!(screen.contains("not set"), "{screen}");
-            // The note follows all settings; a 24-row screen scrolls it
-            // below the visible rows once the App section is present.
+            // The selected setting's note waits for `→`.
+            assert!(!screen.contains("Session list on the left"), "{screen}");
+            assert!(screen.contains("Enter change"), "{screen}");
+            // At most 80% of the screen: a 24-row one shows part of the page.
+            let lines: Vec<&str> = screen.lines().collect();
+            let top = lines.iter().position(|l| l.contains('╭')).unwrap();
+            let bottom = lines.iter().position(|l| l.contains('╰')).unwrap();
+            let rows = bottom - top + 1;
+            assert!(rows <= usize::from(height) * 4 / 5, "{rows}: {screen}");
             if height >= 40 {
-                // Explanatory text now wraps inside the content-sized modal.
-                assert!(screen.contains("Session list on the left"), "{screen}");
-                assert!(screen.contains("session beside it"), "{screen}");
+                assert!(screen.contains("Terminal panel"), "{screen}");
             }
         }
-        // Keys tab: every action with its keys.
-        h.press(KeyCode::Char('2')).await;
+        // The actions and their keys follow the settings.
         let screen = render(&mut h.app, 160, 48);
         for hint in [
-            "Action",
-            "Key",
-            "▶ Rakumux mode (from a session)",
-            "Esc, Ctrl-\\",
-            "↓, j, Alt-↓",
-            "gg, Home",
+            "── Keys",
             "Modes",
-            "Moving around",
-            "Pin or unpin",
-            "Enter run",
+            "Rakumux mode (from a session)",
+            "Esc, Ctrl-\\",
         ] {
             assert!(screen.contains(hint), "{hint}: {screen}");
         }
-        // A General dialog opens over the modal.
-        h.press(KeyCode::Char('1')).await;
-        for _ in 0..SettingsItem::AnthropicKey.index() {
-            h.press(KeyCode::Down).await;
+        // The page scrolls to the selected action.
+        h.press(KeyCode::End).await;
+        for (width, height) in SIZES {
+            let screen = render(&mut h.app, width, height);
+            for hint in ["▶ Quit Rakumux", "Help and app", "Enter run"] {
+                assert!(screen.contains(hint), "{hint}: {screen}");
+            }
         }
-        h.press(KeyCode::Enter).await;
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("1 General"), "{screen}");
-        assert!(screen.contains("API key"), "{screen}");
-        assert!(screen.contains("console.anthropic.com"), "{screen}");
+        assert!(screen.contains("Pin or unpin"), "{screen}");
+        // No phone or AI naming sections.
+        h.press(KeyCode::Home).await;
+        let screen = render(&mut h.app, 160, 48);
+        for gone in ["Phone", "AI session naming", "API key", "OpenAI"] {
+            assert!(!screen.contains(gone), "{gone}: {screen}");
+        }
+    }
+
+    #[tokio::test]
+    async fn settings_hugs_its_rows_and_the_wheel_moves_through_them() {
+        let mut h = harness(vec![view("A", "api", 10)]);
+        h.press(KeyCode::Char(',')).await;
+        // Taller than the page: the dialog ends where its rows do.
+        let mut terminal = Terminal::new(TestBackend::new(120, 200)).unwrap();
+        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let corners: Vec<u16> = (0..200)
+            .filter(|y| (0..120).any(|x| buffer.get(x, *y).symbol() == "╭"))
+            .collect();
+        let bottom = (0..200)
+            .find(|y| (0..120).any(|x| buffer.get(x, *y).symbol() == "╰"))
+            .unwrap();
+        assert_eq!(corners.len(), 1);
+        let height = bottom - corners[0] + 1;
+        assert!(height < 120, "{height} rows");
+        let screen = render(&mut h.app, 120, 200);
+        assert!(screen.contains("Quit Rakumux"), "every row shows: {screen}");
+        assert!(!screen.contains('█'), "no scrollbar: {screen}");
+        // The wheel moves the selection, a row per notch.
+        let wheel = |kind| MouseEvent {
+            kind,
+            column: 60,
+            row: 12,
+            modifiers: KeyModifiers::NONE,
+        };
+        h.app.handle_mouse(wheel(MouseEventKind::ScrollDown));
+        h.app.handle_mouse(wheel(MouseEventKind::ScrollDown));
+        assert!(matches!(&h.app.mode, AppMode::Modal { state, .. } if state.selected == 2));
+        h.app.handle_mouse(wheel(MouseEventKind::ScrollUp));
+        assert!(matches!(&h.app.mode, AppMode::Modal { state, .. } if state.selected == 1));
+        // Help scrolls instead.
+        h.press(KeyCode::Esc).await;
+        h.press(KeyCode::Char('?')).await;
+        render(&mut h.app, 80, 24);
+        h.app.handle_mouse(wheel(MouseEventKind::ScrollDown));
+        assert!(matches!(&h.app.mode, AppMode::Modal { state, .. } if state.scroll == 3));
     }
 
     #[tokio::test]
@@ -651,7 +689,7 @@ mod tests {
             assert!(screen.starts_with("hello from the fake"), "{screen}");
             let footer = screen.lines().last().unwrap();
             assert!(footer.starts_with(" SESSION  api · zoomed "), "{footer:?}");
-            assert!(footer.contains("Ctrl-\\ rakumux"), "{footer:?}");
+            assert!(footer.ends_with(" Ctrl-\\ Rakumux  "), "{footer:?}");
         }
         // Back in Rakumux mode the list returns, and the badge says so.
         h.rakumux().await;
@@ -665,7 +703,10 @@ mod tests {
     async fn modal_dialogs_render() {
         let mut h = harness(vec![view("A", "api", 10)]);
         h.press(KeyCode::Char('o')).await;
-        h.press(KeyCode::Char('2')).await; // Keys tab: shows the configured prefix
+        // The first action, under the settings, shows the configured prefix.
+        for _ in 0..SettingsItem::ALL.len() {
+            h.press(KeyCode::Down).await;
+        }
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("Keys"), "{screen}");
@@ -758,7 +799,7 @@ mod tests {
             let footer = screen.lines().last().unwrap();
             assert!(footer.starts_with(" RAKUMUX  "), "{footer:?}");
             assert!(footer.contains(" connecting "), "{footer:?}");
-            assert!(footer.trim_end().ends_with("settings"), "{footer:?}");
+            assert!(footer.ends_with(" , Settings  "), "{footer:?}");
         }
     }
 
@@ -816,6 +857,257 @@ mod tests {
         vec![refactor, docs, front, storybook, server]
     }
 
+    /// `/repo` (launch) and `/code/web`, with Claude Code, Codex and
+    /// OpenCode in every state, a shell, a program and a dead session.
+    fn agents_and_statuses() -> Vec<SessionView> {
+        use session_core::activity::{ActivityPhase, AgentActivity};
+        let web = folder("/code/web");
+        let mut refactor = view("R1", "api-refactor", ago(120));
+        refactor.git = on_branch("sessions-refactor");
+        agent(&mut refactor, "claude", Lifecycle::Working);
+        let mut review = view("R2", "review-pr-412", ago(300));
+        review.git = on_branch("main");
+        agent(&mut review, "codex", Lifecycle::Blocked);
+        let mut release = view("R3", "release-notes", ago(900));
+        agent(&mut release, "claude", Lifecycle::Done);
+        let mut docs = view("R4", "docs", ago(3_600));
+        docs.pinned = true;
+        let mut front = view_in(&web, "W1", "frontend", ago(30));
+        front.git = on_branch("feature/login");
+        agent(&mut front, "opencode", Lifecycle::Working);
+        front.activity = Some(AgentActivity {
+            phase: ActivityPhase::WaitingForResponse,
+            active_subagents: 0,
+            updated_at: 1,
+        });
+        let mut server = view_in(&web, "W2", "dev-server", ago(600));
+        if let Some(terminal) = server.terminal.as_mut() {
+            terminal.foreground_process = Some("cargo".into());
+        }
+        let mut idle = view_in(&web, "W3", "styles", ago(7_200));
+        agent(&mut idle, "claude", Lifecycle::Idle);
+        let mut storybook = view_in(&web, "W4", "storybook", ago(86_400 * 2));
+        storybook.status = SessionStatus::Dead;
+        storybook.terminal = None;
+        agent(&mut storybook, "codex", Lifecycle::None);
+        vec![
+            refactor, review, release, docs, front, server, idle, storybook,
+        ]
+    }
+
+    #[test]
+    fn the_app_and_status_tabs_group_sessions_under_headers() {
+        use crate::app::grouping::Grouping;
+        let mut h = harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Sidebar);
+        let width = usize::from(crate::layout::sidebar_width(160));
+        h.app.show_tab(Grouping::App);
+        let wide = render(&mut h.app, 160, 48);
+        let list = list_column(&wide, width);
+        assert!(
+            list[1].starts_with("   ▤ All folders   ◇ App ▾   ◔ Status"),
+            "{wide}"
+        );
+        let at = |list: &[String], needle: &str| {
+            list.iter()
+                .position(|l| l.contains(needle))
+                .unwrap_or_else(|| panic!("{needle} missing: {wide}"))
+        };
+        // Agents by name, then other programs, then the shell; each header
+        // ends in live/total.
+        let headers: Vec<usize> = [
+            " claude ─",
+            " codex ─",
+            " opencode ─",
+            " cargo ─",
+            " shell ─",
+        ]
+        .iter()
+        .map(|header| at(&list, header))
+        .collect();
+        assert!(headers.windows(2).all(|w| w[0] < w[1]), "{wide}");
+        assert!(list[headers[0]].ends_with("─ 3/3 live"), "{wide}");
+        assert!(list[headers[1]].ends_with("─ 1/2 live"), "{wide}");
+        // Inside an app, the launch folder's sessions first, each folder
+        // in its own order; the dead Codex session stays under codex.
+        assert!(at(&list, "release-notes") < at(&list, "api-refactor"));
+        assert!(at(&list, "api-refactor") < at(&list, "styles"));
+        assert!(headers[1] < at(&list, "storybook") && at(&list, "storybook") < headers[2]);
+        assert!(at(&list, "docs ★") > headers[4], "{wide}");
+
+        h.app.show_tab(Grouping::Status);
+        let wide = render(&mut h.app, 160, 48);
+        let list = list_column(&wide, width);
+        assert!(list[1].ends_with("◔ Status ▾"), "{wide}");
+        let headers: Vec<usize> = [
+            " ◐ waiting for you ─",
+            " ● done ─",
+            " working ─",
+            " waiting for response ─",
+            " ○ idle ─",
+            " ● running ─",
+            " ○ dead ─",
+        ]
+        .iter()
+        .map(|header| at(&list, header))
+        .collect();
+        assert!(headers.windows(2).all(|w| w[0] < w[1]), "{wide}");
+        assert!(list[headers[5]].ends_with("─ 2 sessions"), "{wide}");
+        assert!(list[headers[0]].ends_with("─ 1 session"), "{wide}");
+        assert!(headers[0] < at(&list, "review-pr-412") && at(&list, "review-pr-412") < headers[1]);
+        assert!(headers[3] < at(&list, "frontend") && at(&list, "frontend") < headers[4]);
+        assert!(!wide.contains(" exited ─"), "no empty statuses: {wide}");
+    }
+
+    #[test]
+    fn the_tabs_and_headers_fit_the_list_at_every_width() {
+        use crate::app::grouping::{Grouping, Section, StatusGroup};
+        for (width, height) in [(40, 30), (80, 24), (120, 40), (160, 48)] {
+            for grouping in Grouping::ALL {
+                let mut h =
+                    harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Sidebar);
+                h.app.show_tab(grouping);
+                let screen = render(&mut h.app, width, height);
+                let list_width = if width < 100 {
+                    usize::from(width)
+                } else {
+                    usize::from(crate::layout::sidebar_width(width))
+                };
+                let list = list_column(&screen, list_width);
+                // Every tab, the active one with its label and ▾.
+                for mark in ["▤ All folders", "◇ App", "◔ Status"] {
+                    assert!(list[1].contains(mark), "{width}x{height}: {screen}");
+                }
+                let active = format!("{} ▾", h.app.tab_label(grouping));
+                assert!(list[1].contains(&active), "{width}x{height}: {screen}");
+                // Headers end in their count: nothing is cut off.
+                for line in list
+                    .iter()
+                    .filter(|l| l.contains("─ ") && !l.trim().chars().all(|c| c == '─'))
+                {
+                    assert!(
+                        line.ends_with(" live")
+                            || line.ends_with(" session")
+                            || line.ends_with(" sessions"),
+                        "{width}x{height}: {line:?}\n{screen}"
+                    );
+                }
+            }
+        }
+        // A long filter name and a text filter on a phone: the other tabs
+        // keep their marks, the text filter shows at the right end.
+        let mut h = harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Sidebar);
+        h.app.show_sections(
+            Grouping::Status,
+            vec![Section::Status(StatusGroup::WaitingForResponse)],
+        );
+        h.app.list.filter.set("front");
+        let screen = render(&mut h.app, 40, 30);
+        let tabs = screen.lines().nth(1).unwrap();
+        assert!(
+            tabs.starts_with("   ▤ ◇ ◔ waiting for response ▾"),
+            "{tabs:?}"
+        );
+        assert!(tabs.ends_with("/front "), "{tabs:?}");
+    }
+
+    #[tokio::test]
+    async fn the_app_and_status_modals_list_each_one_with_its_sessions() {
+        use crate::app::grouping::Grouping;
+        let mut h = harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Sidebar);
+        h.app.show_tab(Grouping::App);
+        h.app.list.select(crate::app::Selection::Folders);
+        h.press(KeyCode::Enter).await;
+        let wide = render(&mut h.app, 160, 48);
+        let lines: Vec<&str> = wide.lines().collect();
+        assert!(lines[1].contains("◇ App ▴"), "{wide}");
+        assert!(wide.contains("┌ Apps ─"), "{wide}");
+        assert!(wide.contains("❯ Filter apps"), "{wide}");
+        let row = |name: &str| {
+            lines
+                .iter()
+                .position(|l| l.contains(&format!("] {name} ")))
+                .unwrap_or_else(|| panic!("{name} missing: {wide}"))
+        };
+        assert!(
+            lines[row("All apps")].contains("▎ [x] All apps  7/8 live"),
+            "{wide}"
+        );
+        assert!(
+            lines[row("claude")].contains("[ ] claude    3/3 live"),
+            "{wide}"
+        );
+        assert!(
+            lines[row("codex")].contains("[ ] codex     1/2 live"),
+            "{wide}"
+        );
+        let order: Vec<usize> = ["claude", "codex", "opencode", "cargo", "shell"]
+            .iter()
+            .map(|name| row(name))
+            .collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{wide}");
+        assert!(
+            wide.contains("⏎ show all  Tab/Space tick  Esc close"),
+            "{wide}"
+        );
+        assert!(h.app.hits.iter().any(|(_, hit)| *hit == Hit::SectionRow(5)));
+        // Something typed: Space types, so only Tab ticks.
+        h.type_text("c").await;
+        let wide = render(&mut h.app, 160, 48);
+        assert!(wide.contains("⏎ show  Tab tick  Esc close"), "{wide}");
+        h.press(KeyCode::Esc).await;
+
+        h.app.show_tab(Grouping::Status);
+        h.app.list.select(crate::app::Selection::Folders);
+        h.press(KeyCode::Enter).await;
+        for (width, height) in [(160, 48), (80, 24), (40, 30)] {
+            let screen = render(&mut h.app, width, height);
+            assert!(screen.contains("┌ Statuses ─"), "{screen}");
+            assert!(screen.contains("[x] All statuses"), "{screen}");
+            assert!(screen.contains("[ ] ◐ waiting for"), "{screen}");
+            // Statuses nothing is in yet are listed, to pick them anyway.
+            assert!(screen.contains("[ ] ✕ exited"), "{screen}");
+            for row in screen.lines().filter(|l| l.contains("] ")) {
+                let tick = row.find("] ").unwrap();
+                let left = row[..tick].rfind('│').unwrap();
+                let inside: String = row[left + '│'.len_utf8()..]
+                    .chars()
+                    .take_while(|c| *c != '│')
+                    .collect();
+                assert!(inside.ends_with(' '), "{row:?}\n{screen}");
+            }
+        }
+        let wide = render(&mut h.app, 160, 48);
+        assert!(
+            wide.contains("✕ exited                no sessions"),
+            "{wide}"
+        );
+        assert!(
+            wide.contains("● running               2 sessions"),
+            "{wide}"
+        );
+    }
+
+    #[test]
+    fn the_tabs_layout_and_grid_say_the_active_tabs_filter() {
+        use crate::app::grouping::Grouping;
+        for layout in [SessionLayout::Tabs, SessionLayout::Grid] {
+            let mut h = harness_with_folders(agents_and_statuses(), &known(), layout);
+            h.app.show_sections(
+                Grouping::App,
+                vec![crate::app::grouping::Section::App(
+                    crate::app::grouping::AppKey::new("claude"),
+                )],
+            );
+            let screen = render(&mut h.app, 160, 48);
+            let top = screen.lines().next().unwrap();
+            assert!(top.contains("claude"), "{layout:?}: {top:?}");
+            assert!(!screen.contains("frontend"), "{layout:?}: {screen}");
+            if layout == SessionLayout::Tabs {
+                assert!(top.starts_with(" ◇ claude ▾ "), "{top:?}");
+            }
+        }
+    }
+
     fn known() -> Vec<(&'static str, Option<session_core::model::GitInfo>)> {
         vec![
             ("/repo", on_branch("sessions-refactor")),
@@ -847,13 +1139,15 @@ mod tests {
             .collect();
         let mut h = harness_with_folders(sessions, &known(), SessionLayout::Sidebar);
         let wide = render(&mut h.app, 160, 48);
-        let list = list_column(&wide, 40);
-        // The folder filter: a padded band above the sessions.
-        assert!(list[0].is_empty() && list[2].is_empty(), "{wide}");
-        // A folder icon and All folders, and ▾ on the right: it opens the
-        // Folders modal.
-        assert!(list[1].starts_with("   ▤ All folders"), "{wide}");
-        assert!(list[1].ends_with('▾'), "{wide}");
+        let list = list_column(&wide, crate::layout::sidebar_width(160).into());
+        // The tabs: a padded band above the sessions, the active tab
+        // underlined on its last row.
+        assert!(list[0].is_empty(), "{wide}");
+        assert_eq!(list[2], format!("   {}", "▁".repeat(15)), "{wide}");
+        // A folder icon and All folders, with ▾: it opens the Folders
+        // modal. Then the App and Status tabs.
+        assert!(list[1].starts_with("   ▤ All folders ▾"), "{wide}");
+        assert!(list[1].ends_with("▾   ◇ App   ◔ Status"), "{wide}");
         // Pinned first, with its mark; subtext is program, then git.
         let docs = list.iter().position(|l| l.contains("docs")).unwrap();
         let refactor = list
@@ -957,7 +1251,7 @@ mod tests {
     fn all_folders_are_grouped_under_headers() {
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
         let wide = render(&mut h.app, 160, 48);
-        let list = list_column(&wide, 40);
+        let list = list_column(&wide, crate::layout::sidebar_width(160).into());
         assert!(list[1].starts_with("   ▤ All folders"), "{wide}");
         let at = |needle: &str| {
             list.iter()
@@ -1211,8 +1505,7 @@ mod tests {
             return;
         }
         use crate::app::types::{
-            AiProviderDialog, ApiKeyDialog, ApiProvider, ConfirmAction, ConfirmDialog,
-            DaemonRestartDialog, OpenAiModelDialog, RenameDialog, UpgradeDialog,
+            ConfirmAction, ConfirmDialog, DaemonRestartDialog, RenameDialog, UpgradeDialog,
         };
         use crate::app::TextInput;
         let id = session_core::ids::SessionId::from_string("A");
@@ -1251,24 +1544,6 @@ mod tests {
                 info_message: Some("Version 0.7.0 is available".into()),
                 selection: 0,
             }),
-            "api key" => AppMode::ConfiguringApiKey(ApiKeyDialog {
-                provider: ApiProvider::Anthropic,
-                input: TextInput::new(""),
-                error_message: None,
-            }),
-            "provider" => AppMode::AiProvider(AiProviderDialog {
-                selected: 0,
-                current: "anthropic".into(),
-            }),
-            "model" => AppMode::OpenAiModel(OpenAiModelDialog {
-                selected: 0,
-                current: "gpt-4o-mini".into(),
-                options: vec![
-                    "gpt-4o-mini".into(),
-                    "gpt-4.1-mini".into(),
-                    "gpt-4.1".into(),
-                ],
-            }),
             other => panic!("no dialog {other}"),
         };
     }
@@ -1277,7 +1552,7 @@ mod tests {
     #[tokio::test]
     async fn dialogs_fit_a_phone() {
         let mut h = harness(vec![view("A", "api", 10), view("B", "docs", 20)]);
-        let expected: [(&str, &[&str]); 8] = [
+        let expected: [(&str, &[&str]); 5] = [
             ("rename", &["Current: api", "[Enter] Rename • [Esc] Cancel"]),
             ("delete", &["output removed.", "[y/Enter] Yes • [n/Esc] No"]),
             ("restart", &["them.", "are.", "[y] Restart", "[q] Quit"]),
@@ -1299,19 +1574,6 @@ mod tests {
                     "[Esc] Cancel",
                 ],
             ),
-            (
-                "api key",
-                &[
-                    "'sk-ant-'",
-                    "remove the key.",
-                    "[Enter] Save • [Esc] Cancel",
-                ],
-            ),
-            (
-                "provider",
-                &["Anthropic (current)", "[↑/↓] Choose", "[Esc] Cancel"],
-            ),
-            ("model", &["gpt-4.1-mini", "[Enter] Save", "[Esc] Cancel"]),
         ];
         for (width, height) in PHONES {
             for (which, texts) in expected {
@@ -1506,11 +1768,8 @@ mod tests {
         assert_eq!(h.selected().as_deref(), Some("B"));
         let screen = render(&mut h.app, width, height);
         let footer = screen.lines().last().unwrap();
-        // Both the way out and Help fit 45 columns.
-        assert!(
-            footer.ends_with("Ctrl-\\ rakumux  Ctrl-\\ ? help "),
-            "{footer:?}"
-        );
+        // The way out is the one button in a session.
+        assert!(footer.ends_with(" Ctrl-\\ Rakumux  "), "{footer:?}");
 
         // The SESSION badge: out to Rakumux mode, remembering the session.
         tap(&mut h, Hit::ModeBadge);
@@ -1525,27 +1784,31 @@ mod tests {
         assert_eq!(h.app.focus, Focus::Session);
         assert_eq!(h.selected().as_deref(), Some("B"));
 
-        // `Ctrl-\ rakumux` does what the badge does.
+        // `Ctrl-\ Rakumux` does what the badge does.
         render(&mut h.app, width, height);
         tap(&mut h, Hit::FooterKey(FooterKey::Rakumux));
         assert_eq!(h.app.focus, Focus::List);
 
-        // `? help` and `, settings` open them, in either mode.
+        // `? Help` and `, Settings` open them.
         render(&mut h.app, width, height);
         tap(&mut h, Hit::FooterKey(FooterKey::Help));
         assert_eq!(modal_tab(&h), Some(Modal::Help.first_tab()));
         h.press(KeyCode::Esc).await;
         render(&mut h.app, width, height);
         tap(&mut h, Hit::FooterKey(FooterKey::Settings));
-        assert_eq!(modal_tab(&h), Some(ModalTab::General));
+        assert_eq!(modal_tab(&h), Some(ModalTab::Settings));
         h.press(KeyCode::Esc).await;
         h.press(KeyCode::Esc).await; // back into the session
         assert_eq!(h.app.focus, Focus::Session);
+        // In a session they're a tap away, after the way out.
         render(&mut h.app, width, height);
-        tap(&mut h, Hit::FooterKey(FooterKey::Help));
-        assert_eq!(modal_tab(&h), Some(Modal::Help.first_tab()));
-        // Like `Ctrl-\ ?`: Rakumux mode under Help.
+        let help = Hit::FooterKey(FooterKey::Help);
+        assert!(!h.app.hits.iter().any(|(_, hit)| *hit == help));
+        tap(&mut h, Hit::FooterKey(FooterKey::Rakumux));
         assert_eq!(h.app.focus, Focus::List);
+        render(&mut h.app, width, height);
+        tap(&mut h, help);
+        assert_eq!(modal_tab(&h), Some(Modal::Help.first_tab()));
         h.press(KeyCode::Esc).await;
 
         // While a dialog is open the footer isn't a target.
@@ -1556,7 +1819,7 @@ mod tests {
 
     /// The footer's targets line up with what it shows.
     #[tokio::test]
-    async fn footer_targets_cover_the_badge_and_the_hints() {
+    async fn footer_targets_cover_the_badge_and_the_buttons() {
         let mut h = harness(vec![view("A", "api", 10)]);
         for (width, height) in [(40, 20), (45, 40), (160, 48)] {
             for session in [false, true] {
@@ -1585,20 +1848,19 @@ mod tests {
                 for (area, hit) in &targets[1..] {
                     let shown = text(*area);
                     let wanted = match hit {
-                        Hit::FooterKey(crate::app::FooterKey::Rakumux) => "rakumux",
-                        Hit::FooterKey(crate::app::FooterKey::Help) => "? help",
-                        Hit::FooterKey(crate::app::FooterKey::Settings) => ", settings",
+                        Hit::FooterKey(crate::app::FooterKey::Rakumux) => " Ctrl-\\ Rakumux ",
+                        Hit::FooterKey(crate::app::FooterKey::Help) => " ? Help ",
+                        Hit::FooterKey(crate::app::FooterKey::Settings) => " , Settings ",
                         other => panic!("{other:?}"),
                     };
-                    assert!(shown.ends_with(wanted), "{shown:?} {wanted:?}");
+                    assert_eq!(shown, wanted);
                 }
-                // Help outlasts Settings as the row narrows.
+                // Rakumux mode has Help and Settings, a session the way out.
                 let has = |key| targets.iter().any(|(_, hit)| *hit == Hit::FooterKey(key));
-                use crate::app::FooterKey::{Help, Settings};
-                assert!(has(Help) || !has(Settings), "{width} {session}");
-                if !session || width >= 45 {
-                    assert!(has(Help), "{width} {session}");
-                }
+                use crate::app::FooterKey::{Help, Rakumux, Settings};
+                assert_eq!(has(Help), !session, "{width} {session}");
+                assert_eq!(has(Settings), !session, "{width} {session}");
+                assert_eq!(has(Rakumux), session, "{width} {session}");
             }
         }
     }

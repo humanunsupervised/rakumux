@@ -45,8 +45,8 @@ pub struct Colors {
     pub background: (u8, u8, u8),
 }
 
-/// Tokyo Night's text and background, which the TUI draws programs'
-/// default colours in.
+/// Tokyo Night's text and background: the Rakumux theme. The TUI itself
+/// draws programs' default colours in the outer terminal's own.
 impl Default for Colors {
     fn default() -> Self {
         Self {

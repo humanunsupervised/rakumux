@@ -17,6 +17,9 @@ pub struct Palette {
     pub text_primary: Color,
     /// Text of the selected list item (white).
     pub text_bright: Color,
+    /// Names of the list items that aren't selected, quieter than
+    /// `text_primary` so the selected one stands out.
+    pub text_unselected: Color,
     pub text_muted: Color,
     pub text_subtle: Color,
     pub neutral_gray: Color,
@@ -275,6 +278,8 @@ impl Theme {
                 // fg
                 text_primary: Color::Rgb(192, 202, 245),
                 text_bright: Color::Rgb(255, 255, 255),
+                // fg_dark
+                text_unselected: Color::Rgb(169, 177, 214),
                 // comment, dark3, dark5
                 text_muted: Color::Rgb(86, 95, 137),
                 text_subtle: Color::Rgb(84, 92, 126),
@@ -308,6 +313,7 @@ impl Theme {
                 border: Color::Indexed(111),           // #87afff ≈ blue
                 text_primary: Color::Indexed(189),     // #d7d7ff ≈ fg
                 text_bright: Color::Indexed(231),      // #ffffff
+                text_unselected: Color::Indexed(146),  // #afafd7 ≈ fg_dark
                 text_muted: Color::Indexed(60),        // #5f5f87 ≈ comment
                 text_subtle: Color::Indexed(60),       // ≈ dark3
                 neutral_gray: Color::Indexed(103),     // #8787af ≈ dark5
@@ -330,6 +336,7 @@ impl Theme {
                 border: Color::Blue,
                 text_primary: Color::White,
                 text_bright: Color::White,
+                text_unselected: Color::Gray,
                 text_muted: Color::DarkGray,
                 text_subtle: Color::Gray,
                 neutral_gray: Color::Gray,
@@ -516,6 +523,20 @@ mod tests {
         assert_eq!(ansi.label_blue, Color::Blue);
         assert_eq!(ansi.label_steel_blue, Color::Cyan);
         assert_eq!(ansi.label_slate_blue, Color::Blue);
+    }
+
+    #[test]
+    fn unselected_names_sit_between_the_selected_white_and_muted_text() {
+        let p = Theme::tokyo_night().palette;
+        let level = |color| {
+            let (r, g, b) = rgb(color).unwrap();
+            u32::from(r) + u32::from(g) + u32::from(b)
+        };
+        assert!(level(p.text_unselected) < level(p.text_primary));
+        assert!(level(p.text_unselected) > level(p.neutral_gray));
+        assert!(level(p.text_bright) > level(p.text_primary));
+        let indexed = Theme::basic(ColorSupport::Ansi256).palette;
+        assert!(level(indexed.text_unselected) < level(indexed.text_primary));
     }
 
     #[test]

@@ -11,8 +11,8 @@ use ratatui::{
 };
 
 use crate::app::types::{
-    AiProviderDialog, ApiKeyDialog, ApiProvider, AuthCodeDialog, AuthEmailDialog, ConfirmAction,
-    ConfirmDialog, DaemonRestartDialog, OpenAiModelDialog, RenameDialog, UpgradeDialog,
+    AuthCodeDialog, AuthEmailDialog, ConfirmAction, ConfirmDialog, DaemonRestartDialog,
+    RenameDialog, UpgradeDialog,
 };
 use crate::components::utils::{
     draw_text_input, get_spinner_char, popup_area_fixed_height, popup_width, wrapped_rows,
@@ -293,137 +293,6 @@ pub fn draw_daemon_restart_dialog(f: &mut Frame, dialog: &DaemonRestartDialog, a
             .style(Style::default().fg(palette().text_primary)),
         above,
     );
-}
-
-pub fn draw_api_key_dialog(f: &mut Frame, dialog: &ApiKeyDialog, area: Rect) {
-    let p = palette();
-    let (title, placeholder, steps): (&str, &str, &[&str]) = match dialog.provider {
-        ApiProvider::Anthropic => (
-            "Anthropic API key",
-            "sk-ant-…",
-            &[
-                "Visit console.anthropic.com",
-                "Open 'API Keys'",
-                "Create a key starting with 'sk-ant-'",
-            ],
-        ),
-        ApiProvider::OpenAI => (
-            "OpenAI API key",
-            "sk-…",
-            &[
-                "Visit platform.openai.com/api-keys",
-                "Create a key starting with 'sk-'",
-            ],
-        ),
-    };
-    let mut lines = match &dialog.error_message {
-        Some(error) => vec![error_line(error), Line::from("")],
-        None => Vec::new(),
-    };
-    lines.push(Line::from("Used for AI session naming."));
-    for step in steps {
-        lines.push(Line::from(vec![
-            Span::styled("• ", Style::default().fg(p.accent_green)),
-            Span::raw(*step),
-        ]));
-    }
-    lines.push(Line::from(Span::styled(
-        "Saved locally to ~/.rakumux/config.json with owner-only permissions. Leave empty to remove the key.",
-        Style::default().fg(p.text_muted),
-    )));
-    let keys = [("Enter", "Save"), ("Esc", "Cancel")];
-    // 14 rows, or what the text needs on a narrow screen.
-    let width = popup_width(area.width, 70);
-    let height =
-        (3 + text_rows(&lines, width.saturating_sub(2)) + key_rows(&keys, width) + 2).max(14);
-    let popup = popup_area_fixed_height(area, 70, height);
-    let inner = dialog_frame(f, popup, title, p.accent_primary);
-    let above = draw_keys(f, inner, &keys);
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
-        .split(above);
-    draw_text_input(
-        f,
-        rows[0],
-        "API key",
-        &dialog.input,
-        placeholder,
-        true,
-        true,
-    );
-    f.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: true })
-            .style(Style::default().fg(p.text_primary)),
-        rows[1],
-    );
-}
-
-/// A list of choices in a dialog over `area`: the options, a spare row and
-/// the keys.
-fn choice_list(
-    f: &mut Frame,
-    area: Rect,
-    title: &str,
-    options: &[(String, bool)],
-    selected: usize,
-) {
-    let p = palette();
-    let keys = [("↑/↓", "Choose"), ("Enter", "Save"), ("Esc", "Cancel")];
-    let options_rows = u16::try_from(options.len()).unwrap_or(u16::MAX);
-    let height = options_rows
-        .saturating_add(3)
-        .saturating_add(key_rows(&keys, popup_width(area.width, 50)));
-    let popup = popup_area_fixed_height(area, 50, height);
-    let inner = dialog_frame(f, popup, title, p.accent_primary);
-    let list_area = draw_keys(f, inner, &keys);
-    let items: Vec<ListItem> = options
-        .iter()
-        .enumerate()
-        .map(|(i, (label, current))| {
-            let marker = if i == selected { "➤ " } else { "  " };
-            let text = if *current {
-                format!("{label} (current)")
-            } else {
-                label.clone()
-            };
-            let style = if i == selected {
-                Style::default()
-                    .fg(p.accent_primary)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(p.text_primary)
-            };
-            ListItem::new(Line::from(vec![
-                Span::raw(marker),
-                Span::styled(text, style),
-            ]))
-        })
-        .collect();
-    f.render_widget(List::new(items), list_area);
-}
-
-pub fn draw_ai_provider_dialog(f: &mut Frame, dialog: &AiProviderDialog, area: Rect) {
-    let options = [("Anthropic", "anthropic"), ("OpenAI", "openai")]
-        .iter()
-        .map(|(label, value)| {
-            (
-                label.to_string(),
-                dialog.current.eq_ignore_ascii_case(value),
-            )
-        })
-        .collect::<Vec<_>>();
-    choice_list(f, area, "AI naming provider", &options, dialog.selected);
-}
-
-pub fn draw_openai_model_dialog(f: &mut Frame, dialog: &OpenAiModelDialog, area: Rect) {
-    let options = dialog
-        .options
-        .iter()
-        .map(|model| (model.clone(), *model == dialog.current))
-        .collect::<Vec<_>>();
-    choice_list(f, area, "OpenAI model", &options, dialog.selected);
 }
 
 pub fn draw_upgrade_dialog(f: &mut Frame, dialog: &UpgradeDialog, area: Rect) {

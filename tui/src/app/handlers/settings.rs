@@ -1,19 +1,12 @@
-//! The Settings modal (`,` or `o` in Rakumux mode: General and Keys tabs)
-//! and the Help modal (`?`): their tabs, the actions the Keys tab runs,
-//! and the dialogs of the General tab (session layout, AI provider keys and
-//! models); and the upgrade dialog.
+//! The Settings modal (`,` or `o` in Rakumux mode: the settings, then
+//! every action) and the Help modal (`?`): the settings it changes, the
+//! actions it runs; and the upgrade dialog.
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::types::{
-    AiProviderDialog, ApiKeyDialog, ApiProvider, AppMode, AppResult, Focus, OpenAiModelDialog,
-    SettingsItem,
-};
-use crate::app::{
-    effective_openai_model, normalize_primary_provider, openai_model_options, App, TextInput,
-    DEFAULT_OPENAI_MODEL,
-};
-use crate::help::{KeyAction, Modal, ModalAction, ModalState, ModalTab};
+use crate::app::types::{AppMode, AppResult, Focus, SettingsItem};
+use crate::app::App;
+use crate::help::{KeyAction, Modal, ModalAction, ModalTab};
 
 /// Open Settings or Help (whichever has `tab`) on `tab`, from whichever
 /// pane has focus.
@@ -34,9 +27,6 @@ pub fn open_help(app: &mut App) {
 pub fn handle_settings_key(app: &mut App, key: KeyEvent) -> AppResult {
     match &app.mode {
         AppMode::Modal { .. } => return handle_modal_key(app, key),
-        AppMode::ConfiguringApiKey(_) => handle_api_key_key(app, key),
-        AppMode::AiProvider(_) => handle_ai_provider_key(app, key),
-        AppMode::OpenAiModel(_) => handle_openai_model_key(app, key),
         AppMode::Upgrade(_) => handle_upgrade_key(app, key),
         _ => {}
     }
@@ -73,7 +63,7 @@ fn handle_modal_key(app: &mut App, key: KeyEvent) -> AppResult {
     AppResult::Continue
 }
 
-/// Run a Keys tab action as its keys would in Rakumux mode.
+/// Run an action from Settings as its keys would in Rakumux mode.
 pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
     let in_session = app.focus == Focus::Session;
     // Actions on the list happen in Rakumux mode.
@@ -178,16 +168,6 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
     AppResult::Continue
 }
 
-/// Close a General tab dialog: back to the modal with its setting
-/// selected.
-pub fn back_to_settings(app: &mut App) {
-    let row = app.mode.editing_setting().map_or(0, SettingsItem::index);
-    app.mode = AppMode::Modal {
-        state: ModalState::new(ModalTab::General, SettingsItem::ALL.len()).with_selected(row),
-        in_session: app.focus == Focus::Session,
-    };
-}
-
 fn open_item(app: &mut App, item: SettingsItem) {
     match item {
         SettingsItem::Layout => {
@@ -201,7 +181,6 @@ fn open_item(app: &mut App, item: SettingsItem) {
             app.settings.sessions.icons = next;
             save_config(app, format!("Icons: {}", next.label()));
         }
-        SettingsItem::PhoneAccess => app.open_phone_access(),
         SettingsItem::Update => app.open_upgrade_dialog(),
         SettingsItem::TerminalPanel => {
             app.mode = AppMode::Normal;
@@ -213,38 +192,6 @@ fn open_item(app: &mut App, item: SettingsItem) {
             let state = if on { "on" } else { "off" };
             save_config(app, format!("Option+↑/↓ in sessions: {state}"));
         }
-        SettingsItem::AnthropicKey | SettingsItem::OpenAiKey => {
-            let (provider, current) = if item == SettingsItem::AnthropicKey {
-                (
-                    ApiProvider::Anthropic,
-                    app.settings.ai.anthropic_api_key.clone(),
-                )
-            } else {
-                (ApiProvider::OpenAI, app.settings.ai.openai_api_key.clone())
-            };
-            app.mode = AppMode::ConfiguringApiKey(ApiKeyDialog {
-                provider,
-                input: TextInput::new(current.unwrap_or_default()),
-                error_message: None,
-            });
-        }
-        SettingsItem::PrimaryAiProvider => {
-            let current =
-                normalize_primary_provider(app.settings.ai.ai_primary_provider.as_deref())
-                    .to_string();
-            let selected = usize::from(current == "openai");
-            app.mode = AppMode::AiProvider(AiProviderDialog { selected, current });
-        }
-        SettingsItem::OpenAiModel => {
-            let options = openai_model_options();
-            let current = effective_openai_model(app.settings.ai.openai_model.as_deref());
-            let selected = options.iter().position(|m| m == &current).unwrap_or(0);
-            app.mode = AppMode::OpenAiModel(OpenAiModelDialog {
-                selected,
-                current,
-                options,
-            });
-        }
     }
 }
 
@@ -252,103 +199,6 @@ fn save_config(app: &mut App, success: String) {
     match app.save_settings() {
         Ok(()) => app.set_status(success),
         Err(e) => app.set_status(format!("Failed to save config: {e}")),
-    }
-}
-
-fn handle_api_key_key(app: &mut App, key: KeyEvent) {
-    let AppMode::ConfiguringApiKey(dialog) = &mut app.mode else {
-        return;
-    };
-    match key.code {
-        KeyCode::Esc => back_to_settings(app),
-        KeyCode::Enter => {
-            let value = dialog.input.value().trim().to_string();
-            let (prefix, label) = match dialog.provider {
-                ApiProvider::Anthropic => ("sk-ant-", "Anthropic"),
-                ApiProvider::OpenAI => ("sk-", "OpenAI"),
-            };
-            if !value.is_empty() && !value.starts_with(prefix) {
-                dialog.error_message = Some(format!("API key should start with '{prefix}'"));
-                return;
-            }
-            let value = (!value.is_empty()).then_some(value);
-            match dialog.provider {
-                ApiProvider::Anthropic => app.settings.ai.anthropic_api_key = value,
-                ApiProvider::OpenAI => app.settings.ai.openai_api_key = value,
-            }
-            match app.save_settings() {
-                Ok(()) => {
-                    back_to_settings(app);
-                    app.set_status(format!("{label} API key saved"));
-                }
-                Err(e) => {
-                    if let AppMode::ConfiguringApiKey(dialog) = &mut app.mode {
-                        dialog.error_message = Some(format!("Failed to save config: {e}"));
-                    }
-                }
-            }
-        }
-        _ => {
-            if dialog.input.handle_key(&key) {
-                dialog.error_message = None;
-            }
-        }
-    }
-}
-
-fn handle_ai_provider_key(app: &mut App, key: KeyEvent) {
-    let AppMode::AiProvider(dialog) = &mut app.mode else {
-        return;
-    };
-    match key.code {
-        KeyCode::Esc => back_to_settings(app),
-        KeyCode::Up | KeyCode::Char('k') => dialog.selected = dialog.selected.saturating_sub(1),
-        KeyCode::Down | KeyCode::Char('j') => dialog.selected = (dialog.selected + 1).min(1),
-        KeyCode::Enter => {
-            let provider = if dialog.selected == 1 {
-                "openai"
-            } else {
-                "anthropic"
-            };
-            app.settings.ai.ai_primary_provider = Some(provider.to_string());
-            if provider == "openai" && app.settings.ai.openai_model.is_none() {
-                app.settings.ai.openai_model = Some(DEFAULT_OPENAI_MODEL.to_string());
-            }
-            back_to_settings(app);
-            let label = if provider == "openai" {
-                "OpenAI"
-            } else {
-                "Anthropic"
-            };
-            save_config(app, format!("Primary AI provider set to {label}"));
-        }
-        _ => {}
-    }
-}
-
-fn handle_openai_model_key(app: &mut App, key: KeyEvent) {
-    let AppMode::OpenAiModel(dialog) = &mut app.mode else {
-        return;
-    };
-    match key.code {
-        KeyCode::Esc => back_to_settings(app),
-        KeyCode::Up | KeyCode::Char('k') => dialog.selected = dialog.selected.saturating_sub(1),
-        KeyCode::Down | KeyCode::Char('j') => {
-            if !dialog.options.is_empty() {
-                dialog.selected = (dialog.selected + 1).min(dialog.options.len() - 1);
-            }
-        }
-        KeyCode::Enter => {
-            let model = dialog
-                .options
-                .get(dialog.selected)
-                .cloned()
-                .unwrap_or_else(|| DEFAULT_OPENAI_MODEL.to_string());
-            app.settings.ai.openai_model = Some(model.clone());
-            back_to_settings(app);
-            save_config(app, format!("OpenAI model set to {model}"));
-        }
-        _ => {}
     }
 }
 

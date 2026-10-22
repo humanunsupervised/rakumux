@@ -17,6 +17,7 @@ use session_core::model::SessionStatus;
 
 use super::format::{abbreviate_home, status_glyph, status_label, truncate};
 use super::utils::{fade, fade_preview, get_spinner_char};
+use crate::app::grouping::Grouping;
 use crate::app::screen::Screen;
 use crate::app::types::{AppMode, Focus};
 use crate::app::{App, Connection, DetailView, Selection};
@@ -132,12 +133,8 @@ fn centered_text(f: &mut Frame, area: Rect, lines: Vec<Line>) {
 
 fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<(u16, u16)> {
     let p = theme::palette();
-    // Programs' default colours are the theme's, so the pane matches the
-    // rest of the app; colours they set themselves are kept.
-    let colors = DefaultColors {
-        fg: p.text_primary,
-        bg: p.background,
-    };
+    // Programs keep the outer terminal's colours, not the theme's.
+    let colors = DefaultColors::NATIVE;
     let muted = Style::default().fg(p.text_muted);
     let strong = Style::default()
         .fg(p.text_primary)
@@ -193,33 +190,61 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
         DetailView::Empty => {
             // Where `n` starts a session.
             let here = app.folders.name_of(&app.current_folder());
+            let grouping = app.list.grouping();
             let lines = if app.list.selection() == &Selection::Folders {
-                let filter = app.list.folder_filter();
                 let mut lines = vec![
-                    Line::from(Span::styled(app.folder_label(), strong)),
+                    Line::from(Span::styled(app.filter_label(), strong)),
                     Line::from(""),
                 ];
-                lines.extend(filter.iter().map(|folder| {
-                    Line::from(vec![
-                        Span::styled(app.folders.name_of(folder), key),
-                        Span::styled(format!("  {}", abbreviate_home(folder.path())), muted),
-                    ])
-                }));
-                if !filter.is_empty() {
+                let filtering = match grouping {
+                    Grouping::Folder => {
+                        let filter = app.list.folder_filter();
+                        lines.extend(filter.iter().map(|folder| {
+                            Line::from(vec![
+                                Span::styled(app.folders.name_of(folder), key),
+                                Span::styled(
+                                    format!("  {}", abbreviate_home(folder.path())),
+                                    muted,
+                                ),
+                            ])
+                        }));
+                        !filter.is_empty()
+                    }
+                    Grouping::App | Grouping::Status => false,
+                };
+                if filtering {
                     lines.push(Line::from(""));
                 }
+                let what = match grouping {
+                    Grouping::Folder => " to filter by folder or add one.",
+                    Grouping::App => " to filter by app.",
+                    Grouping::Status => " to filter by status.",
+                };
                 lines.push(Line::from(vec![
                     Span::styled("Press ", muted),
                     Span::styled("Enter", key),
-                    Span::styled(" to filter by folder or add one.", muted),
+                    Span::styled(what, muted),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled("← →", key),
+                    Span::styled(" switch between All folders, App and Status.", muted),
                 ]));
                 lines
             } else if app.list.is_loaded() && app.list.filter.is_empty() {
-                // Nothing in the folders shown.
-                let title = match app.list.folder_filter() {
-                    [] => "No sessions yet".to_string(),
-                    [only] => format!("No sessions in {} yet", app.folders.name_of(only)),
-                    many => format!("No sessions in these {} folders yet", many.len()),
+                // Nothing in the folders (apps, statuses) shown.
+                let title = match (grouping, app.list.folder_filter()) {
+                    (Grouping::App | Grouping::Status, _)
+                        if !app.list.section_filter(grouping).is_empty() =>
+                    {
+                        format!("No sessions in {}", app.filter_label())
+                    }
+                    (Grouping::Folder, [only]) => {
+                        format!("No sessions in {} yet", app.folders.name_of(only))
+                    }
+                    (Grouping::Folder, many) if many.len() > 1 => {
+                        format!("No sessions in these {} folders yet", many.len())
+                    }
+                    _ => "No sessions yet".to_string(),
                 };
                 vec![
                     Line::from(Span::styled(title, strong)),

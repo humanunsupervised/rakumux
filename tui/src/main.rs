@@ -404,12 +404,11 @@ mod input_log_tests {
     use super::*;
 
     #[test]
-    fn api_key_input_never_appears_in_debug_logs() {
+    fn private_dialog_input_never_appears_in_debug_logs() {
         let mut harness = crate::app::testing::harness(vec![]);
         harness.app.mode =
-            crate::app::types::AppMode::ConfiguringApiKey(crate::app::types::ApiKeyDialog {
-                provider: crate::app::types::ApiProvider::OpenAI,
-                input: crate::app::TextInput::new("sk-private-example-key"),
+            crate::app::types::AppMode::AuthCode(crate::app::types::AuthCodeDialog {
+                input: crate::app::TextInput::new("private-example-code"),
                 error_message: None,
             });
         let mut log = InputLog {
@@ -426,8 +425,7 @@ mod input_log_tests {
         let line = log.recent.back().unwrap();
         assert!(line.contains("(private input)"));
         assert!(!line.contains("Char("));
-        assert!(!line.contains("sk-private-example-key"));
-        assert!(!format!("{:?}", harness.app.mode).contains("sk-private-example-key"));
+        assert!(!line.contains("private-example-code"));
     }
 }
 

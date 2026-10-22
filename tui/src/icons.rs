@@ -1,4 +1,5 @@
-//! The marks for folders and git branches, in the style the user picks
+//! The marks for folders, git branches and the list's App and Status
+//! tabs, in the style the user picks
 //! (`sessions.icons`, Settings ▸ General ▸ Icons): plain symbols that every
 //! terminal font has, emoji (needs a colour emoji font, which macOS, Windows
 //! and most Linux desktops have), or Nerd Font icons (needs a Nerd Font set
@@ -43,6 +44,26 @@ impl Icons {
         }
     }
 
+    /// Marks the list's App tab: the agent or program sessions run.
+    pub fn app(self) -> &'static str {
+        match self {
+            Icons::Plain => "◇",
+            Icons::Emoji => "🤖",
+            // nf-fa-cube
+            Icons::Nerd => "\u{f1b2}",
+        }
+    }
+
+    /// Marks the list's Status tab: what sessions are doing.
+    pub fn status(self) -> &'static str {
+        match self {
+            Icons::Plain => "◔",
+            Icons::Emoji => "🚦",
+            // nf-fa-tasks
+            Icons::Nerd => "\u{f0ae}",
+        }
+    }
+
     /// Marks a git branch: `⎇ main`.
     pub fn branch(self) -> &'static str {
         match self {
@@ -76,6 +97,12 @@ mod tests {
         // Emoji take two columns; layout code must measure, not count.
         assert_eq!(str_width(Icons::Emoji.folder()), 2);
         assert_eq!(str_width(Icons::Plain.folder()), 1);
+        // The list's tabs have a mark in every style.
+        for icons in Icons::ALL {
+            assert!(!icons.app().is_empty() && !icons.status().is_empty());
+        }
+        assert_eq!(str_width(Icons::Emoji.app()), 2);
+        assert_eq!((Icons::Plain.app(), Icons::Plain.status()), ("◇", "◔"));
         assert_eq!(
             serde_json::to_value(Icons::Nerd).unwrap(),
             serde_json::json!("nerd")

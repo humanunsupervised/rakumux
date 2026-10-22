@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use session_core::ids::SessionId;
 use session_core::model::ScopeRoot;
 
+use super::grouping::{Grouping, Section};
 use super::path_complete::DirSuggestion;
 use super::text_input::TextInput;
 use crate::help::{ModalState, ModalTab};
@@ -195,6 +196,80 @@ impl FolderPicker {
     }
 }
 
+/// One row of the App or Status modal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SectionRow {
+    /// All apps (statuses): no filter.
+    All,
+    /// An app or a status the filter can show.
+    Section(Section),
+}
+
+/// The App or Status modal (Enter on the tabs with that tab active, a
+/// click on the active tab, Enter on one of its headers): All apps (All
+/// statuses), then each app (status), narrowed by what's typed. Enter shows
+/// the one under the cursor alone, All clears the filter, and once ticks
+/// were changed (Tab, Space) Enter shows the ticked ones.
+#[derive(Debug, Clone)]
+pub struct SectionPicker {
+    /// `Grouping::App` or `Grouping::Status`.
+    pub grouping: Grouping,
+    /// What's typed: narrows the rows by name.
+    pub query: TextInput,
+    /// The rows for the query, top to bottom: All (while it matches), then
+    /// the matching apps or statuses.
+    pub rows: Vec<SectionRow>,
+    /// Ticked apps or statuses, in the order they were ticked; none means
+    /// all. At first the filter's.
+    pub checked: Vec<Section>,
+    /// Ticks were changed with Tab or Space: Enter shows the ticked ones
+    /// (and the one under the cursor).
+    pub ticks_changed: bool,
+    /// Row under the cursor.
+    pub cursor: usize,
+}
+
+impl SectionPicker {
+    /// A modal for `grouping`, ticked like `filter`, with nothing typed yet.
+    pub fn new(grouping: Grouping, filter: Vec<Section>) -> Self {
+        Self {
+            grouping,
+            query: TextInput::default(),
+            rows: Vec::new(),
+            checked: filter,
+            ticks_changed: false,
+            cursor: 0,
+        }
+    }
+
+    /// The row under the cursor.
+    pub fn current_row(&self) -> Option<&SectionRow> {
+        self.rows.get(self.cursor)
+    }
+
+    /// Whether the row shows a tick: All when nothing else is ticked, an
+    /// app or a status when it's ticked.
+    pub fn is_ticked(&self, row: &SectionRow) -> bool {
+        match row {
+            SectionRow::All => self.checked.is_empty(),
+            SectionRow::Section(section) => self.checked.contains(section),
+        }
+    }
+
+    /// What Enter on `section` shows: it alone, or once ticks were changed
+    /// the ticked ones and it.
+    pub fn sections_for(&self, section: &Section) -> Vec<Section> {
+        if !self.ticks_changed {
+            return vec![section.clone()];
+        }
+        let mut sections = self.checked.clone();
+        if !sections.contains(section) {
+            sections.push(section.clone());
+        }
+        sections
+    }
+}
+
 /// Shown when the running daemon speaks another protocol version.
 #[derive(Debug, Clone)]
 pub struct DaemonRestartDialog {
@@ -221,7 +296,7 @@ pub enum ServerRestart {
     Replaced,
 }
 
-/// Rows of the Settings modal's General tab.
+/// The settings listed in Settings, before the actions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsItem {
     Layout,
@@ -229,87 +304,35 @@ pub enum SettingsItem {
     Icons,
     /// Option/Alt+↑/↓ also switch sessions inside a session.
     CycleInSessions,
-    /// Remote access for the phone app (`remote.json`), and pairing.
-    PhoneAccess,
     /// Install a new release and restart only this UI.
     Update,
     /// Independent shell below the main detail pane.
     TerminalPanel,
-    AnthropicKey,
-    OpenAiKey,
-    PrimaryAiProvider,
-    OpenAiModel,
 }
 
 impl SettingsItem {
-    pub const ALL: [SettingsItem; 10] = [
+    pub const ALL: [SettingsItem; 5] = [
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
-        SettingsItem::PhoneAccess,
         SettingsItem::Update,
         SettingsItem::TerminalPanel,
-        SettingsItem::AnthropicKey,
-        SettingsItem::OpenAiKey,
-        SettingsItem::PrimaryAiProvider,
-        SettingsItem::OpenAiModel,
     ];
 
-    /// The General tab heading it's listed under.
+    /// The heading Settings lists it under.
     pub fn section(self) -> &'static str {
         match self {
             SettingsItem::Layout | SettingsItem::Icons => "Appearance",
-            SettingsItem::CycleInSessions => "Keys",
-            SettingsItem::PhoneAccess => "Phone",
+            SettingsItem::CycleInSessions => "Keyboard",
             SettingsItem::Update | SettingsItem::TerminalPanel => "App",
-            SettingsItem::AnthropicKey
-            | SettingsItem::OpenAiKey
-            | SettingsItem::PrimaryAiProvider
-            | SettingsItem::OpenAiModel => "AI session naming",
         }
     }
 
-    /// Row on the General tab.
+    /// Its row in Settings.
+    #[cfg(test)]
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|item| *item == self).unwrap_or(0)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApiProvider {
-    Anthropic,
-    OpenAI,
-}
-
-#[derive(Clone)]
-pub struct ApiKeyDialog {
-    pub provider: ApiProvider,
-    pub input: TextInput,
-    pub error_message: Option<String>,
-}
-
-impl std::fmt::Debug for ApiKeyDialog {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ApiKeyDialog")
-            .field("provider", &self.provider)
-            .field("input", &"<redacted>")
-            .field("error_message", &self.error_message)
-            .finish()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct AiProviderDialog {
-    pub selected: usize,
-    pub current: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct OpenAiModelDialog {
-    pub selected: usize,
-    pub current: String,
-    pub options: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -362,15 +385,12 @@ pub struct AuthCodeDialog {
 #[derive(Debug, Clone)]
 pub struct PairingDialog {
     pub state: PairingState,
-    /// Opened from Settings: closing goes back to its Phone access row.
-    pub from_settings: bool,
 }
 
 impl PairingDialog {
-    pub fn loading(from_settings: bool, turning_on: bool) -> Self {
+    pub fn loading(turning_on: bool) -> Self {
         Self {
             state: PairingState::Loading { turning_on },
-            from_settings,
         }
     }
 
@@ -412,27 +432,25 @@ pub enum AppMode {
     Normal,
     /// The Folders modal: the folder filter.
     Folders(FolderPicker),
+    /// The App or Status modal: that tab's filter.
+    Sections(SectionPicker),
     Renaming(RenameDialog),
     Confirm(ConfirmDialog),
     DaemonRestart(DaemonRestartDialog),
-    /// The Settings modal (General and Keys tabs) or the Help modal (the
-    /// docs tabs); the tab says which.
+    /// The Settings modal (one page: settings, then actions) or the Help
+    /// modal (the docs tabs); the tab says which.
     Modal {
         state: ModalState,
         /// Opened from a session (with the prefix) rather than the list.
         in_session: bool,
     },
-    /// Dialogs of the General tab's rows; they go back to the modal.
-    ConfiguringApiKey(ApiKeyDialog),
-    AiProvider(AiProviderDialog),
-    OpenAiModel(OpenAiModelDialog),
     Upgrade(UpgradeDialog),
     /// The welcome tour (first start, or `t` in Help).
     Welcome(WelcomeState),
     /// "Use Rakumux from your phone?": offered once, when Tailscale runs
     /// here and phone access was never set up.
     PhoneOffer,
-    /// The pairing dialog (Settings' Phone access row, or the offer).
+    /// The pairing dialog (the offer).
     Pairing(PairingDialog),
     Auth(AuthMenu),
     AuthEmail(AuthEmailDialog),
@@ -445,21 +463,6 @@ impl AppMode {
         AppMode::Modal {
             state: ModalState::new(tab, SettingsItem::ALL.len()),
             in_session,
-        }
-    }
-
-    /// The setting the open dialog changes, when it's one of the General
-    /// tab's dialogs.
-    pub fn editing_setting(&self) -> Option<SettingsItem> {
-        match self {
-            AppMode::ConfiguringApiKey(dialog) => Some(match dialog.provider {
-                ApiProvider::Anthropic => SettingsItem::AnthropicKey,
-                ApiProvider::OpenAI => SettingsItem::OpenAiKey,
-            }),
-            AppMode::AiProvider(_) => Some(SettingsItem::PrimaryAiProvider),
-            AppMode::Pairing(dialog) if dialog.from_settings => Some(SettingsItem::PhoneAccess),
-            AppMode::OpenAiModel(_) => Some(SettingsItem::OpenAiModel),
-            _ => None,
         }
     }
 }

@@ -1,6 +1,7 @@
-//! The folder filter at the left end of the tab bar (`▤ All folders ▾`,
-//! `▤ web ▾`, `▤ 3 folders ▾`), and the Folders modal it (and the list's
-//! folder filter row) opens: a query line, All folders, the folders with
+//! The active tab's filter at the left end of the tab bar (`▤ All folders
+//! ▾`, `▤ web ▾`, `▤ 3 folders ▾`; `◇ claude ▾` under App), and the Folders
+//! modal it (and the list's All folders tab) opens: a query line, All
+//! folders, the folders with
 //! sessions (a tick, branch, session counts and path each), the typed
 //! folder to add and the folders that complete it.
 
@@ -17,6 +18,7 @@ use session_core::model::{ScopeRoot, SessionStatus};
 use super::format::{abbreviate_home, branch_label, truncate, truncate_middle};
 use super::utils::get_spinner_char;
 use crate::app::folders::looks_like_path;
+use crate::app::grouping::Grouping;
 use crate::app::types::{AppMode, FolderPicker, NewFolder, PickerRow, PickerStage};
 use crate::app::{App, Hit};
 use crate::layout::str_width;
@@ -47,16 +49,35 @@ pub fn folder_branch(app: &App, folder: &ScopeRoot) -> Option<String> {
         .and_then(|git| branch_label(git, app.icons()))
 }
 
-/// Draw the folder filter at the left of the one-row `area` (the tab bar);
-/// returns its click target.
+/// The mark of a tab of the list's top row, in the user's icon style.
+pub fn tab_icon(app: &App, grouping: Grouping) -> &'static str {
+    match grouping {
+        Grouping::Folder => app.icons().folder(),
+        Grouping::App => app.icons().app(),
+        Grouping::Status => app.icons().status(),
+    }
+}
+
+/// Whether the modal of the active tab (the Folders, App or Status modal)
+/// is open.
+pub fn tab_picker_open(app: &App) -> bool {
+    match &app.mode {
+        AppMode::Folders(_) => app.list.grouping() == Grouping::Folder,
+        AppMode::Sections(picker) => picker.grouping == app.list.grouping(),
+        _ => false,
+    }
+}
+
+/// Draw the active tab's filter (the folder filter under All folders) at
+/// the left of the one-row `area` (the tab bar); returns its click target.
 pub fn draw_selector(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Rect {
     let p = theme::palette();
     if area.width == 0 || area.height == 0 {
         return Rect::default();
     }
-    let open = matches!(app.mode, AppMode::Folders(_));
+    let open = tab_picker_open(app);
     let arrow = if open { "▴" } else { "▾" };
-    let label = truncate(&app.folder_label(), (area.width as usize).saturating_sub(6));
+    let label = truncate(&app.filter_label(), (area.width as usize).saturating_sub(6));
     let label_style = if focused || open {
         Style::default()
             .fg(p.accent_primary)
@@ -66,7 +87,7 @@ pub fn draw_selector(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Rec
             .fg(p.text_primary)
             .add_modifier(Modifier::BOLD)
     };
-    let icon = app.icons().folder();
+    let icon = tab_icon(app, app.list.grouping());
     let width = ((str_width(&label) + str_width(icon)) as u16 + 5).min(area.width);
     let rect = Rect { width, ..area };
     f.render_widget(

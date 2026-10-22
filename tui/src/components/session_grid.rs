@@ -34,9 +34,9 @@ pub fn draw_session_grid(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         ..header
     };
     let label = if app.list.filter_editing || !app.list.filter.is_empty() {
-        format!(" {} · /{}", app.folder_label(), app.list.filter.value())
+        format!(" {} · /{}", app.filter_label(), app.list.filter.value())
     } else {
-        format!(" {} · Grid · n new · v layout", app.folder_label())
+        format!(" {} · Grid · n new · v layout", app.filter_label())
     };
     f.render_widget(
         Paragraph::new(label).style(Style::default().fg(p.text_primary).bg(p.panel)),
@@ -186,15 +186,7 @@ pub fn draw_session_grid(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
             continue;
         }
         if let Some(terminal) = preview.and_then(|c| c.terminal.as_ref()) {
-            terminal.render(
-                output,
-                f.buffer_mut(),
-                false,
-                DefaultColors {
-                    fg: p.text_primary,
-                    bg: p.background,
-                },
-            );
+            terminal.render(output, f.buffer_mut(), false, DefaultColors::NATIVE);
         } else {
             let message = if app.is_self_session(&session.id) {
                 "This session cannot be nested inside itself."

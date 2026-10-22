@@ -102,11 +102,11 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
      ⎇ docs · dead · ⏎ revive     │
                                   │
    + New session                  │
- SESSION                                              Ctrl-\ rakumux
+ SESSION                                             Ctrl-\ Rakumux 
 ```
 
 - **Layouts**: Sidebar (above, default) or Tabs (a tab bar of sessions on top, the selected session
-  below); switch in Settings (`,` or `o` in Rakumux mode, General tab), saved as `sessions.layout` in
+  below); switch in Settings (`,` or `o` in Rakumux mode), saved as `sessions.layout` in
   `~/.rakumux/config.json`.
 - **Narrow screens and phones** (Sidebar, under 100 columns; e.g. Blink, Termius or a web
   terminal): in Rakumux mode the list sits on top and the selected session below it, so you see
@@ -115,7 +115,10 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   `sessions.stacked_list_percent`). In session mode the session fills the screen. Under 15 rows only
   the list shows in Rakumux mode. Dialogs keep at least 48 columns (or the screen less two).
 - **Selecting** a session shows it live (observer). **Enter** takes control: keys go to the program
-  and the terminal is sized to the pane. Other TUIs on the same session keep watching.
+  and the terminal is sized to the pane. Other TUIs on the same session keep watching. Ending
+  the program from inside it (`exit`, Ctrl-D, quitting the agent) deletes the session; one that
+  ends in the background stays, its last screen kept, and Enter restarts it. Programs keep
+  your terminal's own colours.
 - **Session descriptions** show the app name first, colour-coded by app, then the branch and state.
 - **Two modes.** In **session mode** everything you type goes to the program except `Ctrl-\`,
   which switches to **Rakumux mode**. There, `↑/↓`, `j/k` or `Option`/`Alt`+`↑/↓` select (the
@@ -126,9 +129,11 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   cancelled a pending key or the filter) or `Ctrl-\` goes back to the session you came from,
   `Tab` to the one before, `1`-`9` into that session. `n` new, `r` rename, `p` pin, `J`/`K` move
   the session down/up, `x` close, `d`/`dd` delete, `z` full screen, `P` folders, `/` filter, `\`
-  sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `R` restart the UI, `q` quit. The badge at the bottom left of the footer shows the mode
-  (orange RAKUMUX, quiet SESSION), in zoom too; Help and Settings' Keys tab list the keys, and
-  the Keys tab runs any of them.
+  sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `R` restart the UI, `q` quit. The footer is a
+  full-width bar that shows the mode, in zoom too: orange in Rakumux mode (with
+  `| session: <name>` after RAKUMUX and the `? Help` and `, Settings` buttons on the right), muted
+  blue in session mode (with a `Ctrl-\ Rakumux` button). Help and Settings list the keys, and
+  Settings runs any of them.
 - **Folders**: a session belongs to the folder it was started in (a repo, a worktree, any
   folder). The list shows All folders, live: sessions another window, the CLI or an agent start
   in any folder (a new worktree too) appear as they start. With more than one folder shown, each
@@ -144,7 +149,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   takes precedence; without folder context, the launch folder is used. The session runs your
   login shell there. For another folder or a command, use
   `rakumux new --cwd DIR --cmd C -- ARGV`.
-- **Restart the UI**: press `R` in Rakumux mode, or run Restart Rakumux from Settings → Keys.
+- **Restart the UI**: press `R` in Rakumux mode, or run Restart Rakumux from Settings.
   A confirmation explains that sessions stay running: `y`/Enter restarts, `n`/Esc cancels.
   This reloads the UI through its launcher, picking up the latest local build. The daemon and
   session programs keep running. `Ctrl-r` only reconnects or reloads the list.
@@ -160,17 +165,18 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   moving around, the main shortcuts, Help and Settings). Every card has "Don't show this on
   startup" (Space; `sessions.welcome_seen`), so you can opt out at any point; until it's ticked
   the tour shows on every start. `t` in Help replays it.
-- **Icons** (Settings, General): the marks for folders and branches, Plain (`▤`, `⎇`, any font),
+- **Icons** (Settings): the marks for folders and branches, Plain (`▤`, `⎇`, any font),
   Emoji (📁, 🌿) or Nerd Font icons, whichever your terminal shows. A TUI can't pick the
   terminal's font, so the choice is yours.
-- **Option/Alt+↑/↓** go to the program inside a session unless Settings, General, "Option+↑/↓ in
+- **Option/Alt+↑/↓** go to the program inside a session unless Settings, "Option+↑/↓ in
   sessions" is on (OpenCode, Pi and Claude Code use them). Terminal.app needs "Use Option as Meta
   key".
 - Mouse: click a session to show it, click the session pane to go in, drag a session to move
   it, drag the line beside (or under) the list to resize it. Click the mode badge: SESSION
   switches to Rakumux mode, RAKUMUX goes back to the session you came from. Click a footer
-  key (`? help`, `, settings`, `Ctrl-\ rakumux`) to do what it says. Phone terminals send taps
-  as clicks, so you can get around without `Ctrl-\`. Text selection: Shift+drag (the TUI
+  button (`? Help`, `, Settings`, `Ctrl-\ Rakumux`) to do what it says. Phone terminals send taps
+  as clicks, so you can get around without `Ctrl-\`. The wheel moves through Settings and
+  scrolls Help. Text selection: Shift+drag (the TUI
   captures the mouse).
 
 ## Development

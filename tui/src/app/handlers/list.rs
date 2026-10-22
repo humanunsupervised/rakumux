@@ -1,13 +1,14 @@
 //! Keys in Rakumux mode: the session list (Sidebar) or tab bar (Tabs)
 //! has the keys, and the session is previewed. Arrows and Vim keys both
-//! move; Enter (or `i`) goes into a session; Esc cancels what's pending,
-//! then goes back to the session Rakumux mode was entered from.
+//! move (on the list's top row ←/→ switch its tabs); Enter (or `i`) goes
+//! into a session; Esc cancels what's pending, then goes back to the
+//! session Rakumux mode was entered from.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::settings::{open_help, open_settings};
 use crate::app::types::{AppMode, AppResult, AuthMenu};
-use crate::app::App;
+use crate::app::{App, Selection};
 
 pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
     if app.list.filter_editing {
@@ -63,6 +64,10 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         }
         KeyCode::Left | KeyCode::Char('h') if app.browsing_grid() => app.move_grid_selection(-1),
         KeyCode::Right | KeyCode::Char('l') if app.browsing_grid() => app.move_grid_selection(1),
+        // On the top row, ←/→ go along its tabs (Enter opens the active
+        // one's modal).
+        KeyCode::Left | KeyCode::Char('h') if on_tabs(app) => app.switch_tab(-1),
+        KeyCode::Right | KeyCode::Char('l') if on_tabs(app) => app.switch_tab(1),
         KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
         KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
         KeyCode::Home => app.move_selection(-(app.list.row_count() as isize)),
@@ -126,6 +131,11 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         _ => {}
     }
     AppResult::Continue
+}
+
+/// The top row (the tabs) is selected.
+fn on_tabs(app: &App) -> bool {
+    app.list.selection() == &Selection::Folders
 }
 
 /// `/` filter: typing narrows the list; Enter keeps the filter, Esc

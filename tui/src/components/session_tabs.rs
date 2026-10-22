@@ -1,5 +1,6 @@
-//! Session tab bar (Tabs layout): the folder filter at the left end, then
-//! the tabs drawn by `layout::render_tabs`.
+//! Session tab bar (Tabs layout): the active list tab's filter at the left
+//! end (the folder filter under All folders), then the tabs drawn by
+//! `layout::render_tabs`.
 
 use ratatui::{
     layout::Rect,

@@ -68,7 +68,7 @@ Auth is independent of Rakumux's session architecture: it talks to Clerk directl
 ### TUI integration
 - `tui/src/app/types.rs`: `AppMode::{Auth, AuthEmail, AuthCode}` with `AuthMenu`, `AuthEmailDialog`, `AuthCodeDialog` (exist; bounced out of while the flag is off)
 - `tui/src/components/auth.rs`: menu and dialogs (exist)
-- When auth is picked up: bind the menu key in list focus, add it as a `KeyAction` row on the Settings modal's Keys tab (`tui/src/help`), and add it to the modal's General tab
+- When auth is picked up: bind the menu key in list focus, add it as a `KeyAction` row in the Settings modal (`tui/src/help`), and add it to the modal's settings
 
 ### No daemon involvement
 - All Clerk HTTP calls are made directly from the `tui` binary (using publishable/front-end endpoints). The session daemon, its protocol and its registry know nothing about accounts.
@@ -173,7 +173,7 @@ Phase 1 (no backend; 100% client-side)
 - Email code sign-in/sign-up
 - Local session storage & sign out
 - Manage subscription → external portal URL only
-- Bind `s` to the Auth menu; update the Settings modal (Keys and General tabs)
+- Bind `s` to the Auth menu; update the Settings modal (its settings and actions)
 
 Phase 2 (nice-to-have)
 - Device-like flow with short code via a tiny backend that issues one-time “CLI connect” tickets; web page shows code; terminal polls and exchanges for session
@@ -195,7 +195,7 @@ Phase 2 (nice-to-have)
 
 ## Implementation checklist
 - [x] Add `tui/src/auth/` module files (partial: Clerk client, models, service, file store)
-- [ ] Wire `s` → Auth menu; update the Settings modal (Keys and General tabs)
+- [ ] Wire `s` → Auth menu; update the Settings modal (its settings and actions)
 - [ ] Implement email code sign-in/sign-up
 - [ ] Persist session and expose `auth::service::current_user()`
 - [ ] Add “Manage subscription” action (URL from config)

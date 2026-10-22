@@ -7,6 +7,7 @@ pub mod folder_picker;
 pub mod footer;
 pub mod format;
 pub mod phone_access;
+pub mod section_picker;
 pub mod session_detail;
 pub mod session_grid;
 pub mod session_list;

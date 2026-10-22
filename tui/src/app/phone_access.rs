@@ -1,8 +1,8 @@
 //! Phone access: remote access for the Rakumux app on a phone
 //! (`crate::remote_access`). Checked at startup; offered once ("Use
 //! Rakumux from your phone?") when Tailscale runs here and it was never
-//! set up; turned on and off from Settings' Phone access row; and the
-//! pairing dialog, with the QR code the app scans.
+//! set up; and the pairing dialog, with the QR code the app scans.
+//! `rakumux remote` turns it on and off any time.
 
 use super::runtime::AppEvent;
 use super::types::{AppMode, Focus, PairingDialog, PairingState};
@@ -54,28 +54,15 @@ impl App {
     /// The offer was declined.
     pub fn decline_phone_access(&mut self) {
         self.mode = AppMode::Normal;
-        self.set_status("Phone access stays off. Settings (,) → Phone access turns it on.");
+        self.set_status("Phone access stays off. `rakumux remote on` turns it on.");
     }
 
     /// Turn phone access on, then show how to pair.
-    pub fn turn_phone_access_on(&mut self, from_settings: bool) {
-        self.mode = AppMode::Pairing(PairingDialog::loading(from_settings, true));
+    pub fn turn_phone_access_on(&mut self) {
+        self.mode = AppMode::Pairing(PairingDialog::loading(true));
         let phone = self.phone.clone();
         self.exec
             .job(move || AppEvent::PhonePairing(phone.enable().map(Some)));
-    }
-
-    /// Settings' Phone access row: show how to pair when it's on, else turn
-    /// it on.
-    pub fn open_phone_access(&mut self) {
-        if self.phone_enabled != Some(true) {
-            self.turn_phone_access_on(true);
-            return;
-        }
-        self.mode = AppMode::Pairing(PairingDialog::loading(true, false));
-        let phone = self.phone.clone();
-        self.exec
-            .job(move || AppEvent::PhonePairing(phone.pairing()));
     }
 
     /// `x` in the pairing dialog.
@@ -103,9 +90,9 @@ impl App {
             AppMode::Pairing(dialog) => dialog.state = state,
             // Closed meanwhile.
             _ => match state {
-                PairingState::Ready(_) => {
-                    self.set_status("Phone access is on. Settings (,) → Phone access to pair.")
-                }
+                PairingState::Ready(_) => self.set_status(
+                    "Phone access is on. `rakumux remote pair` shows the pairing code.",
+                ),
                 PairingState::Failed(error) => self.set_status(format!("Phone access: {error}")),
                 _ => {}
             },
@@ -128,13 +115,8 @@ impl App {
         }
     }
 
-    /// Close the pairing dialog: back to Settings when it came from there.
+    /// Close the pairing dialog.
     pub fn close_pairing(&mut self) {
-        match &self.mode {
-            AppMode::Pairing(dialog) if dialog.from_settings => {
-                super::handlers::settings::back_to_settings(self)
-            }
-            _ => self.mode = AppMode::Normal,
-        }
+        self.mode = AppMode::Normal;
     }
 }

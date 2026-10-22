@@ -209,7 +209,9 @@ last_active_at, added_at, git}` on the wire.
 
 - **Status**: `live` (terminal running), `exited` (process ended; final screen kept; Enter
   restarts), `dead` (record without terminal, e.g. after a reboot or daemon restart; saved
-  scrollback shown; Enter revives).
+  scrollback shown; Enter revives). A session whose program the user ends from inside it in
+  the TUI (`exit`, Ctrl-D, quitting the agent, while that window controls it in session mode) is
+  deleted by that TUI right away; one that ends in the background stays `exited`.
 - **Lifecycle**: what the program (usually an agent) is doing: `working`, `blocked` (needs the user),
   `done` (finished a turn, not yet looked at), `idle`, `unknown`, `none` (no agent). Detected by the
   daemon from the screen and foreground process; agents can add a self-report.
@@ -452,7 +454,7 @@ agent runs in a session, `X-Rakumux-Session-Id`/`-Token` → `rakumux-api` check
 
 ### A phone through remote access
 
-`rakumux remote on` (`tui/src/cli/remote.rs`), or Settings → Phone access / the one-time offer in
+`rakumux remote on` (`tui/src/cli/remote.rs`), or the one-time offer in
 the TUI (`app/phone_access.rs`, through `remote_access::PhoneAccess` off the UI thread) →
 `remote_access::enable` → `remote.json` `enabled` (new token if none) → SIGTERM to `api.json`'s pid
 if that process is `rakumux-api`, wait → `rakumux-api --detach` → `server::serve` →
@@ -501,7 +503,7 @@ When a session with a generated name first goes `idle` or `done`, the TUI reads
 ### Updates
 
 `rakumux.sh` runs `shell/gwr/check-updates.sh` silently in the background (at most daily);
-`U` (Shift+U) and Settings → General → Update use `UpdateService` off the UI thread. Binary
+`U` (Shift+U) and Settings → Update use `UpdateService` off the UI thread. Binary
 installs fetch the official GitHub release, verify SHA-256 and binary versions, reject unsafe
 archive paths/links and custom install files, and atomically exchange staged/installed folders
 (`renameat2` on Linux, `renamex_np` on macOS). Unwritable or unsupported installs fail without
@@ -527,8 +529,11 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Folder** (scope, scope root; `project` on the wire): the directory a session was started in;
   the TUI shows all folders, grouped, and the folder filter narrows them; agents see only their
   own.
-- **Folder filter**: the TUI's top item (`▤ All folders ▾`, `▤ web ▾`, `▤ 3 folders ▾`) and the
-  Folders modal it opens; local to one window and not saved.
+- **Folder filter**: the All folders tab's filter (`▤ All folders ▾`, `▤ web ▾`, `▤ 3 folders ▾`)
+  and the Folders modal it opens; local to one window and not saved.
+- **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, All folders, App and
+  Status. The active one decides the list's headers (per folder, per app, per status) and the one
+  filter that applies; each keeps its own filter while another is active; none is saved.
 - **Pin**: a user mark that lists a session first in its folder.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
@@ -538,7 +543,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **External API**: `rakumux-api`, HTTP on 127.0.0.1 over the daemon; found through `api.json`.
 - **Remote access** (phone access in the TUI): the API's remote listener (Tailscale addresses, port
   7337) for the phone app, paired by scanning a QR code of the `rakumux://connect` link;
-  opt-in with `rakumux remote on` or Settings → Phone access (`remote.json`), admitted by the
+  opt-in with `rakumux remote on` or the TUI's one-time offer (`remote.json`), admitted by the
   remote token, always the user.
 - **MCP server**: `rakumux-mcp`, the tools coding agents call; a client of the external API.
 - **User caller / session caller**: a client authenticated with the daemon's user token, or with a
@@ -582,7 +587,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
 | `rakumux daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
-| `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (also Settings → Phone access in the TUI): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
+| `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux-api [--port N] [--detach] [--remote-listen ADDR:PORT]...` | External HTTP API on 127.0.0.1, plus the remote listener when remote access is on (`api/README.md`) |
 | `rakumux-mcp` | MCP server for agents, e.g. `claude mcp add --scope user rakumux -- rakumux-mcp` (`mcp/README.md`) |
 
@@ -590,33 +595,40 @@ TUI keys come in two modes. **Session mode**: everything goes to the program exc
 which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_keys_in_session` is
 on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
-while the list never fades; the folder filter, a folder
-header and + New session keep the last session in view, one the filters show), `gg`/`G`,
-`Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder) (a Ctrl or Alt that no shortcut uses is
-ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
+while the list never fades; the tabs, a header and + New session keep the last session in view,
+one the filters show), `←`/`→` (`h`/`l`) on the tabs switch between All folders, App and Status,
+`gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
+that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
 `Ctrl-\` back to the session you came from, `Tab` last session, `1`-`9` go into that session,
 `n` new, `r` rename, `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
-screen, `P` (or Enter on the folder filter) the Folders modal, `/` filter, `Ctrl-y`/`Ctrl-e`/
+screen, `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `U` Update, `R`
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
 build; daemon and sessions stay up), `q`
-quit. There is no header: the panes start at the top row, and the folder filter (`▤ All folders
-▾`, a folder's name and branch, or `▤ 3 folders ▾`) is the list's first row (Sidebar) or sits at
-the left of the tab bar (Tabs). The footer, always one row at the bottom (in zoom too), starts with the mode badge
-(a full-width orange bar with dark text in Rakumux mode; quiet SESSION/TERMINAL otherwise), then messages and the daemon connection while it isn't up
-(`⠋ connecting`, `✕ daemon unavailable`), and on the right the keys for Help and Settings
-(`? help  , settings`; in session mode `Ctrl-\ rakumux  Ctrl-\ ? help  Ctrl-\ , settings`); when
-the row is short the message is cut first, then hints go from the right (Settings, then Help).
-Help and Settings' Keys tab list every key; the Keys tab runs them. A welcome tour
+quit. There is no header: the panes start at the top row, and the list's first row (Sidebar) is
+its tabs, `▤ All folders ▾   ◇ App   ◔ Status`: the active one is bold, underlined and names its
+filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`, `◔ 2 statuses ▾`); short rows narrow the gaps, then show
+the inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's
+filter at the left (`▤ All folders ▾`); only Master detail shows the three tabs. The footer,
+always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
+while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
+SESSION/TERMINAL), then in Rakumux mode `| session: <name>` (the selected session), messages and
+the daemon connection while it isn't up (`⠋ connecting`, `✕ daemon unavailable`), and on the right
+buttons (a darker shade of the orange bar; dark chips on the blue one): `? Help` and `, Settings`
+in Rakumux mode, `Ctrl-\ Rakumux` in session mode; when the row is short the session label gives
+way first (to `| <name>`, then nothing), then the message is cut, then buttons go from the right
+(Settings, then Help).
+Help and Settings list every key; Settings runs them. A welcome tour
 (`components/welcome.rs`, `AppMode::Welcome`) opens on startup until its "Don't show this on
 startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the list.
 When Tailscale runs on the machine and phone access was never set up (no `remote.json`), Rakumux
 asks once, in Rakumux mode with no other dialog open (so after the tour), "Use Rakumux from your
 phone?" (`AppMode::PhoneOffer`; `sessions.phone_offer_seen`): `y` turns it on and opens the pairing
 dialog (`AppMode::Pairing`: the QR code of the `rakumux://connect` link, the URL and the token;
-`x` turns phone access off), `n` leaves it off. Settings' General tab has the same switch (Phone
-access: Enter turns it on or shows the pairing dialog).
+`x` turns phone access off), `n` leaves it off. After that, `rakumux remote on|off|pair`
+changes it; Settings has no phone or AI naming rows (API keys come from `config.json` or
+`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`).
 
 Phones (under `layout::PHONE_BELOW` = 80 columns; phone terminals
 are about 40–60 columns in portrait) show one thing at a time: Rakumux mode is the session list
@@ -633,11 +645,12 @@ the footer, at least `LIST_MIN_ROWS` (9: the folder filter and two sessions) and
 Below `STACK_MIN_ROWS` (14 rows above the footer, a 15-row screen) Rakumux mode shows the list
 alone. Session mode fills everything above the footer. Taps arrive as clicks, so the footer is a
 tap target too (`Hit::ModeBadge`, `Hit::FooterKey`, recorded by `components/footer.rs`): the
-SESSION badge switches to Rakumux mode like `Ctrl-\`, the RAKUMUX badge goes back to the
-session you came from like `Esc`, and each hint does what its keys do. Dialogs are at least
+SESSION badge and the `Ctrl-\ Rakumux` button switch to Rakumux mode like `Ctrl-\`, the RAKUMUX
+badge goes back to the session you came from like `Esc`, and `? Help` and `, Settings` open
+them. Dialogs are at least
 min(screen width − 2, 48) columns (`components/utils.rs::popup_width`), wrap their key lines and
-grow to fit their text; the welcome tour tightens its spacing when it doesn't fit, and Settings'
-General tab puts values under their labels when both don't fit.
+grow to fit their text; the welcome tour tightens its spacing when it doesn't fit, and Settings
+puts values under their labels when both don't fit.
 
 **Terminal size across windows.** A session is one terminal with one size, so every window shows
 the program drawn for that size. The size follows the window being used (like tmux's `window-size
@@ -659,6 +672,23 @@ held); `J`/`K` move it one place. Moves stay in the session's folder and its pin
 part, and are saved as `sessions.session_order`. A click without movement still just selects.
 The first load still selects the most recently used session.
 
+The App and Status tabs group the same list differently (`app/grouping.rs`). App: a header per
+app (`AppKey::of`: the session's `agent.kind`, else its foreground program unless a shell, else
+`launch.argv[0]` unless a shell, else `shell`; an ended session keeps its agent), agents first,
+then other programs, then `shell`, each by name, with live/total. Status: a header per status
+(`StatusGroup::of`, like `format::status_label`: waiting for you, done, working, waiting for
+response (the `WaitingForResponse` activity phase), idle, running (live, nothing reported),
+exited, dead), in that order, with a session count. Inside a header the sessions keep the list's
+order, folder by folder (launch folder first); moves stay within the header too. A status
+change moves a session to another header, but the selected session stays shown when it stops
+matching the filter (an answered question), until something else is selected. Their modals
+(`AppMode::Sections`, `components/section_picker.rs`) work like the Folders modal: All, then each
+app or status with counts (Status lists every status); typing narrows, `Tab` (and `Space` while
+nothing is typed) tick several, `Enter` shows them, `Esc` closes. A click on a tab activates it,
+on the active one opens its modal; `P` opens the Folders modal from any tab and a folder picked
+there makes All folders active. New sessions still go in `App::current_folder`; a folder filter
+only counts while All folders is active.
+
 New session (`n`, "+ New session", Enter on a folder header) creates immediately with a generated name,
 selects the new session and enters session mode at its login-shell prompt, without a naming modal.
 A single click on "+ New session" creates and enters it on desktop and phones; it never just selects
@@ -669,7 +699,7 @@ precedence; without folder context, the launch folder). A session made in a fold
 hides adds that folder to the filter. Other folders, commands and startup commands are CLI-only:
 `rakumux new --cwd DIR --cmd C -- ARGV`.
 
-**Grid.** Settings → General → Layout or `v` in Rakumux mode cycles Master detail, Grid and
+**Grid.** Settings → Layout or `v` in Rakumux mode cycles Master detail, Grid and
 Tabs. Grid fills the body above the one-row footer with up to six terminal cards, including on
 phones. Arrows or `h`/`j`/`k`/`l` select cards, PgUp/PgDn change page, Home/End go to the ends;
 `P` and `/` keep filtering folders and text. Enter or a tap opens a session full screen under
@@ -681,7 +711,7 @@ Promote, Resize, Fit, terminal input, Touch, clipboard, bell or terminal-query r
 through the hidden detail path. Cards crop/pan rather than resizing terminals. Default config
 and wire spelling stays `sidebar`, now labelled Master detail; `grid` and `tabs` persist too.
 
-**Terminal panel.** `T` in Rakumux mode or Settings → General → Terminal panel opens a
+**Terminal panel.** `T` in Rakumux mode or Settings → Terminal panel opens a
 temporary daemon-owned login shell under the main detail, without a session record or list entry.
 It starts in the selected session's cwd, otherwise the current folder. `Focus::Terminal` routes keys,
 paste, mouse and cursor only to that attachment, with a distinct TERMINAL footer badge.
@@ -699,12 +729,21 @@ daemon restarts preserve pane PTYs. Reconnects attach as observers until the use
 they never create replacement shells implicitly. An older daemon reports that an in-place
 restart is needed; no fallback creates a normal or hidden session.
 
-Settings measures its active General/Keys table instead of taking a percentage of the screen:
-centred, 48–88 columns when room allows, capped by screen width with a side margin. Explanatory
-notes wrap without changing its width as selection moves; Help retains its wider reading area.
-Dialogs stay above the one-row footer so the mode bar remains visible on short screens.
+Settings is one scrolling page without tabs (`help::ModalTab::Settings`): the settings, then
+under a `Keys` rule every action and its keys, which `Enter` runs; `→` shows the selected row's
+note in a popover over the page (`←`, `Esc`, moving or `Enter` close it), so the rows never shift;
+the wheel moves the selection. Labels sit on the left and values and keys are
+pinned to the right. It's sized from its rows: centred, its widest row plus 16 columns (48–100),
+capped by screen width with a side margin, and as tall as its rows, up to 80% of the screen's
+height, scrolling only as far as the selected row needs. Help retains its wider reading area
+and tabs. Dialogs stay above the one-row footer so the mode bar remains visible on short screens.
 
-The Folders modal (`P`, Enter on or a click on the folder filter; `AppMode::Folders`,
+Embedded terminals (the detail, Grid cards, the terminal panel) draw a program's default colours
+in the outer terminal's own (`terminal_view::DefaultColors::NATIVE`), not the Rakumux theme;
+colours a program sets itself are kept. The daemon still answers OSC 10/11 colour queries with
+Tokyo Night's (`vt::Colors`).
+
+The Folders modal (`P`, Enter on or a click on the active All folders tab; `AppMode::Folders`,
 `app/folders.rs`) lists All folders (ticked when there's no filter), then every folder that has
 sessions (and the filter's), with name, path, branch and live/total; typing filters the rows.
 `Enter` on a folder shows it alone, on All folders every folder; `Tab`/`Space` tick several, and

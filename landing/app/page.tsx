@@ -159,7 +159,7 @@ export default function Home() {
                 <li>
                   <kbd>Option</kbd> <kbd>↑</kbd> <kbd>↓</kbd> cycle sessions, even from inside one if you turn it on.
                 </li>
-                <li>Settings has a Keys table that lists every action and runs the one you pick.</li>
+                <li>Settings lists every action with its keys and runs the one you pick.</li>
               </ul>
             </div>
             <div className="modes" aria-label="The two modes">

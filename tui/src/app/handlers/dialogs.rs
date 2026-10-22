@@ -16,14 +16,13 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
     match &app.mode {
         AppMode::Normal => {}
         AppMode::Folders(_) => super::folders::handle_folder_picker_key(app, key),
+        AppMode::Sections(_) => super::sections::handle_section_picker_key(app, key),
         AppMode::Renaming(_) => handle_rename_key(app, key),
         AppMode::Confirm(_) => handle_confirm_key(app, key),
         AppMode::DaemonRestart(_) => return handle_daemon_restart_key(app, key),
-        AppMode::Modal { .. }
-        | AppMode::ConfiguringApiKey(_)
-        | AppMode::AiProvider(_)
-        | AppMode::OpenAiModel(_)
-        | AppMode::Upgrade(_) => return super::settings::handle_settings_key(app, key),
+        AppMode::Modal { .. } | AppMode::Upgrade(_) => {
+            return super::settings::handle_settings_key(app, key)
+        }
         AppMode::Welcome(_) => handle_welcome_key(app, key),
         AppMode::PhoneOffer => handle_phone_offer_key(app, key),
         AppMode::Pairing(_) => handle_pairing_key(app, key),
@@ -104,10 +103,11 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent) {
 }
 
 /// "Use Rakumux from your phone?": `y`/Enter turns phone access on and
-/// shows how to pair, `n`/Esc declines (Settings can turn it on later).
+/// shows how to pair, `n`/Esc declines (`rakumux remote on` can turn it on
+/// later).
 fn handle_phone_offer_key(app: &mut App, key: KeyEvent) {
     match key.code {
-        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => app.turn_phone_access_on(false),
+        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => app.turn_phone_access_on(),
         KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') => {
             app.decline_phone_access()
         }
@@ -125,10 +125,9 @@ fn handle_pairing_key(app: &mut App, key: KeyEvent) {
     if dialog.busy() {
         return;
     }
-    let from_settings = dialog.from_settings;
     match (&dialog.state, key.code) {
         (PairingState::Off, KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y')) => {
-            app.turn_phone_access_on(from_settings)
+            app.turn_phone_access_on()
         }
         (_, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) => app.close_pairing(),
         (PairingState::Ready(_), KeyCode::Char('x') | KeyCode::Char('X')) => {

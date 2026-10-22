@@ -84,7 +84,7 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
 
 - [ ] Quit the TUI (`q`) and reopen it: sessions are still running and output produced meanwhile
       is visible.
-- [ ] `R` in Rakumux mode (also Settings → Keys → Restart Rakumux) shows a restart warning that
+- [ ] `R` in Rakumux mode (also Settings → Restart Rakumux) shows a restart warning that
       sessions keep running. `y`/Enter reloads the UI and latest build; `n`/Esc cancels. Repeating
       `R` doesn't confirm. Daemon and session PIDs stay unchanged. `R` still types in sessions and filters.
 - [ ] A session whose program exits shows the exit code and "Enter to restart".

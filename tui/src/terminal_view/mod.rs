@@ -46,6 +46,15 @@ pub struct DefaultColors {
     pub bg: Color,
 }
 
+impl DefaultColors {
+    /// The outer terminal's own colours, so a program looks in Rakumux as
+    /// it does outside it, without the Rakumux theme.
+    pub const NATIVE: DefaultColors = DefaultColors {
+        fg: Color::Reset,
+        bg: Color::Reset,
+    };
+}
+
 /// vt100 panics below 2×2 (wrapping on a single row, or a wide character
 /// in a single column), so smaller sizes are raised to that.
 const MIN_SIZE: u16 = 2;

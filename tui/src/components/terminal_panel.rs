@@ -92,15 +92,7 @@ pub fn draw_terminal_panel(
     hits.push((header, Hit::TerminalPanel));
     let output = panel_output(area);
     let cursor = if let Some(terminal) = app.terminal_panel.terminal.as_ref() {
-        terminal.render(
-            output,
-            frame.buffer_mut(),
-            focused,
-            DefaultColors {
-                fg: palette.text_primary,
-                bg: palette.background,
-            },
-        )
+        terminal.render(output, frame.buffer_mut(), focused, DefaultColors::NATIVE)
     } else {
         let message =
             app.terminal_panel

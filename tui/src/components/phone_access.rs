@@ -35,7 +35,7 @@ pub fn draw_phone_offer(f: &mut Frame, area: Rect) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "Asked once. Settings (,) → Phone access changes it any time.",
+            "Asked once. `rakumux remote on` or `off` changes it any time.",
             muted,
         )),
     ];
@@ -81,8 +81,8 @@ pub fn draw_pairing(f: &mut Frame, dialog: &PairingDialog, area: Rect) {
                 vec![
                     Line::from(
                         "Phone access is on, but this machine has no Tailscale address, so \
-                         nothing listens for the phone yet. Start Tailscale, then open this \
-                         again (Settings → Phone access).",
+                         nothing listens for the phone yet. Start Tailscale, then run \
+                         `rakumux remote pair`.",
                     ),
                     Line::from(""),
                     detail("Token", &pairing.token),

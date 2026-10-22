@@ -87,10 +87,10 @@ fn card(app: &App, index: usize) -> (&'static str, Vec<String>) {
             "Help is always there",
             vec![
                 "`?` opens Help: how Rakumux works, every key, the command line.".into(),
-                "`,` opens Settings: layout, icons, and a Keys tab that lists every action and \
+                "`,` opens Settings: layout, icons, then every action with its keys; Enter \
                  runs the one you pick."
                     .into(),
-                "The footer shows these two keys. Press `t` in Help any time to see this \
+                "The footer has a button for each. Press `t` in Help any time to see this \
                  tour again."
                     .into(),
             ],
