@@ -14,6 +14,11 @@ use crate::layout::SessionLayout;
 /// first to last.
 pub type SessionOrder = BTreeMap<PathBuf, Vec<SessionId>>;
 
+/// The order the user gave the sessions of each app or status, under the
+/// App and Status tabs: `app:claude` or `status:working` → session ids,
+/// first to last (see `grouping::Section::key`).
+pub type SectionOrder = BTreeMap<String, Vec<SessionId>>;
+
 /// Optional provider settings for the pre-existing AI session naming feature.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 #[serde(default)]
@@ -55,8 +60,8 @@ pub struct Settings {
 
 /// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
-/// `phone_offer_seen`, `icons`, `sidebar_width`, `stacked_list_percent` and
-/// `session_order`; other keys in the
+/// `phone_offer_seen`, `icons`, `sidebar_width`, `stacked_list_percent`,
+/// `session_order` and `section_order`; other keys in the
 /// section (daemon tuning such as `scrollback_rows`) are kept as they are
 /// when the TUI saves the file, except the retired ones
 /// ([`RETIRED_SESSION_KEYS`]), which are dropped.
@@ -119,6 +124,14 @@ pub struct SessionsConfig {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub session_order: SessionOrder,
+    /// The order of each app's or status's sessions under the App and
+    /// Status tabs, set the same ways; each tab orders its own groups.
+    /// Anything but a map of section keys to lists of ids reads as empty.
+    #[serde(
+        deserialize_with = "lenient_section_order",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub section_order: SectionOrder,
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
 }
@@ -137,6 +150,7 @@ impl Default for SessionsConfig {
             sidebar_width: None,
             stacked_list_percent: None,
             session_order: SessionOrder::new(),
+            section_order: SectionOrder::new(),
             other: serde_json::Map::new(),
         }
     }
@@ -163,6 +177,13 @@ fn lenient_width<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u1
 }
 
 fn lenient_order<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SessionOrder, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+fn lenient_section_order<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<SectionOrder, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
     Ok(serde_json::from_value(value).unwrap_or_default())
 }

@@ -1470,9 +1470,11 @@ impl App {
         }
     }
 
-    /// Save the order of the sessions (`sessions.session_order`).
+    /// Save the order of the sessions (`sessions.session_order`, and the
+    /// apps' and statuses' `sessions.section_order`).
     fn save_session_order(&mut self) {
         self.settings.sessions.session_order = self.list.session_order();
+        self.settings.sessions.section_order = self.list.section_order();
         if let Err(error) = self.save_settings() {
             self.set_status(format!("Order changed but not saved: {error}"));
         }

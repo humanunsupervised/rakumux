@@ -376,7 +376,8 @@ accidents; they don't stop a hostile process running as the same user.
   stacked_list_percent (the list's share of the height on narrow screens, set by dragging the
   divider under it, so the split follows a phone keyboard coming and going;
   left out until dragged), session_order ({folder path: [session ids]}: the list order set by
-  dragging or `J`/`K`; left out when empty)}`. The folder filter isn't saved; the
+  dragging or `J`/`K`; left out when empty), section_order ({"app:<name>" | "status:<status>":
+  [session ids]}: the same under the App and Status tabs, each its own; left out when empty)}`. The folder filter isn't saved; the
   `selected_projects` of 0.6 previews is ignored and dropped on the next save.
 - **Environment** injected into every session: `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN`,
   `RAKUMUX_SOCKET`, `RAKUMUX_BIN`, `TERM=xterm-256color`, `COLORTERM=truecolor`. Other variables:
@@ -601,7 +602,8 @@ which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_key
 on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the tabs, a header and + New session keep the last session in view,
-one the filters show), `←`/`→` (`h`/`l`) on the tabs switch between Status, Folders and App,
+one the filters show), `←`/`→` switch between the tabs, Status, Folders and App, wherever the
+selection is (`h`/`l` on the tabs row),
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
 that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
@@ -690,8 +692,11 @@ app (`AppKey::of`: the session's `agent.kind`, else its foreground program unles
 then other programs, then `shell`, each by name, with live/total. Status: a header per status
 (`StatusGroup::of`, like `format::status_label`: waiting for you, done, working, waiting for
 response (the `WaitingForResponse` activity phase), running (live, nothing reported), exited,
-dead, then idle), in that order, with a session count. Inside a header the sessions keep the list's
-order, folder by folder (launch folder first); moves stay within the header too. A status
+dead, then idle), in that order, with a session count. Each app and status has an order of its
+own (`sessions.section_order`, by `Section::key`: `app:claude`, `status:working`): pinned sessions
+first, then the order the user gave them there, then the rest folder by folder (launch folder
+first). Dragging and `J`/`K` reorder a session within its header across folders, never into
+another header, and never change the folders' order. A status
 change moves a session to another header, but the selected session stays shown when it stops
 matching the filter (an answered question), until something else is selected. Their modals
 (`AppMode::Sections`, `components/section_picker.rs`) work like the Folders modal: All, then each

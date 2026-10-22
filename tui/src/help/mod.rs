@@ -196,6 +196,10 @@ pub enum KeyAction {
     NumberedSession,
     NextSession,
     PreviousSession,
+    /// `→`: the list's next tab (Status, Folders, App).
+    NextTab,
+    /// `←`: the previous tab.
+    PreviousTab,
     Top,
     Bottom,
     HalfPageDown,
@@ -241,7 +245,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 37] = [
+    pub const ALL: [KeyAction; 39] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -250,6 +254,8 @@ impl KeyAction {
         KeyAction::SendRakumuxKey,
         KeyAction::NextSession,
         KeyAction::PreviousSession,
+        KeyAction::NextTab,
+        KeyAction::PreviousTab,
         KeyAction::Top,
         KeyAction::Bottom,
         KeyAction::HalfPageDown,
@@ -292,6 +298,8 @@ impl KeyAction {
             | KeyAction::SendRakumuxKey => "Modes",
             KeyAction::NextSession
             | KeyAction::PreviousSession
+            | KeyAction::NextTab
+            | KeyAction::PreviousTab
             | KeyAction::Top
             | KeyAction::Bottom
             | KeyAction::HalfPageDown
@@ -334,6 +342,8 @@ impl KeyAction {
             KeyAction::NumberedSession => "Go into session 1 to 9",
             KeyAction::NextSession => "Next session",
             KeyAction::PreviousSession => "Previous session",
+            KeyAction::NextTab => "Next tab (Status, Folders, App)",
+            KeyAction::PreviousTab => "Previous tab",
             KeyAction::Top => "Top of the list",
             KeyAction::Bottom => "Bottom of the list",
             KeyAction::HalfPageDown => "Half a page down",
@@ -381,11 +391,13 @@ impl KeyAction {
         match self {
             KeyAction::RakumuxMode => k.key.clone(),
             KeyAction::BackToSession => format!("Esc, {}", k.key),
-            KeyAction::GoIn => plain(&["Enter", "i", "l", "→"]),
+            KeyAction::GoIn => plain(&["Enter", "i", "l"]),
             KeyAction::LastSession => plain(&["Tab"]),
             KeyAction::NumberedSession => plain(&["1-9"]),
             KeyAction::NextSession => with_cycle(&k.cycle_next, &["↓", "j"]),
             KeyAction::PreviousSession => with_cycle(&k.cycle_previous, &["↑", "k"]),
+            KeyAction::NextTab => plain(&["→"]),
+            KeyAction::PreviousTab => plain(&["←"]),
             KeyAction::Top => plain(&["gg", "Home"]),
             KeyAction::Bottom => plain(&["G", "End"]),
             KeyAction::HalfPageDown => plain(&["Ctrl-d"]),
@@ -1449,8 +1461,8 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
              folders, App and Status, are above the first)",
         ),
         row(
-            "←, →, h, l",
-            "On the tabs: switch between Status, Folders and App",
+            "←, →",
+            "Switch between the tabs, Status, Folders and App (h, l on the tabs too)",
         ),
         row(
             "gg, G, Home, End",
@@ -1459,7 +1471,7 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         row("Ctrl-d, Ctrl-u", "Half a page down / up"),
         row("{, }", "Previous / next folder, when several are shown"),
         row(
-            "Enter, i, l, →",
+            "Enter, i, l",
             "Work in the selected session; on the tabs, the active tab's modal; on a \
              folder's header, a new session there",
         ),
@@ -3338,7 +3350,9 @@ mod tests {
         for (action, keys) in [
             ("Rakumux mode", "C-a"),
             ("Back to the session you came from", "Esc, C-a"),
-            ("Go into the selected session", "Enter, i, l, →"),
+            ("Go into the selected session", "Enter, i, l"),
+            ("Next tab (Status, Folders, App)", "→"),
+            ("Previous tab", "←"),
             ("Last session", "Tab"),
             ("Go into session 1 to 9", "1-9"),
             ("Next session", "↓, j, Alt-j"),

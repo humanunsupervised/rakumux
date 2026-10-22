@@ -90,6 +90,10 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         }
         KeyAction::NextSession => app.cycle_session(1),
         KeyAction::PreviousSession => app.cycle_session(-1),
+        KeyAction::NextTab | KeyAction::PreviousTab => {
+            leave(app);
+            app.switch_tab(if action == KeyAction::NextTab { 1 } else { -1 });
+        }
         KeyAction::Top | KeyAction::Bottom => {
             leave(app);
             let rows = app.list.row_count() as isize;

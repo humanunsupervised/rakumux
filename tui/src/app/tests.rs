@@ -3470,13 +3470,18 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     h.press(KeyCode::Enter).await;
     assert!(matches!(h.app.mode, AppMode::Folders(_)));
     h.press(KeyCode::Esc).await;
-    // Off the top row ← does nothing and → goes in, as before.
+    // Off the top row ← and → switch tabs too, the session staying
+    // selected; Enter (or `l`) goes in.
     h.press(KeyCode::Down).await;
     h.press(KeyCode::Down).await;
-    assert!(h.app.list.selected_id().is_some());
+    let selected = h.app.list.selected_id().cloned().expect("a session");
     h.press(KeyCode::Left).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    assert_eq!(h.app.list.grouping(), Grouping::Status);
     h.press(KeyCode::Right).await;
+    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    assert_eq!(h.app.focus, Focus::List);
+    assert_eq!(h.app.list.selected_id(), Some(&selected));
+    h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
 }
 

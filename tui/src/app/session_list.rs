@@ -12,9 +12,11 @@
 //! Inside a folder, pinned sessions come first. Both parts follow the
 //! order the user gave them (a drag, or `J`/`K`; `sessions.session_order`),
 //! and sessions without a place go after the others, oldest first, so a
-//! new session appears at the bottom of its folder. Inside an app or a
-//! status the sessions keep that order, folder by folder. Every layout uses
-//! this order. Selection is tracked by session id (or header) so it
+//! new session appears at the bottom of its folder. Each app and status has
+//! an order of its own (`sessions.section_order`), set the same ways under
+//! the App and Status tabs: pinned sessions first, then that order, then
+//! the rest folder by folder, so a drag there never changes the folders'
+//! order. Every layout uses the active tab's order. Selection is tracked by session id (or header) so it
 //! survives moves and updates made by other clients; under App or Status
 //! the selected session stays shown when it stops matching the filter
 //! (its status changed), until something else is selected.
@@ -25,7 +27,7 @@ use session_core::api::{EventEnvelope, SessionEvent};
 use session_core::ids::SessionId;
 use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
-use super::config::SessionOrder;
+use super::config::{SectionOrder, SessionOrder};
 use super::folders::compare_folders;
 use super::grouping::{sort_sections, AppKey, Grouping, Section, StatusGroup};
 use super::text_input::TextInput;
@@ -108,6 +110,9 @@ pub struct SessionList {
     sessions: Vec<SessionView>,
     /// The order the user gave each folder's sessions, first to last.
     order: HashMap<ScopeRoot, Vec<SessionId>>,
+    /// The order the user gave each app's or status's sessions (by
+    /// [`Section::key`]), first to last.
+    section_order: HashMap<String, Vec<SessionId>>,
     /// What the last snapshot brought in full.
     listed: Listed,
     selection: Selection,
@@ -137,6 +142,7 @@ impl SessionList {
             sections: Vec::new(),
             sessions: Vec::new(),
             order: HashMap::new(),
+            section_order: HashMap::new(),
             listed: Listed::Folders(Vec::new()),
             selection: Selection::NewSession,
             folder_context: None,
@@ -289,6 +295,33 @@ impl SessionList {
             .collect()
     }
 
+    /// Use the order the user gave the apps' and statuses' sessions (from
+    /// the config).
+    pub fn set_section_order(&mut self, order: &SectionOrder) {
+        self.section_order = order
+            .iter()
+            .map(|(key, ids)| (key.clone(), ids.clone()))
+            .collect();
+    }
+
+    /// The apps' and statuses' order to save: with every folder listed,
+    /// ids of sessions that are gone are dropped, and sections left without
+    /// any are too.
+    pub fn section_order(&self) -> SectionOrder {
+        let every_folder = matches!(self.listed, Listed::All);
+        self.section_order
+            .iter()
+            .filter_map(|(key, ids)| {
+                let ids: Vec<SessionId> = ids
+                    .iter()
+                    .filter(|id| !every_folder || self.get(id).is_some())
+                    .cloned()
+                    .collect();
+                (!ids.is_empty()).then(|| (key.clone(), ids))
+            })
+            .collect()
+    }
+
     /// Where `id` is among the visible sessions.
     pub fn visible_position(&self, id: &SessionId) -> Option<usize> {
         self.visible().iter().position(|s| &s.id == id)
@@ -306,10 +339,11 @@ impl SessionList {
     }
 
     /// Move session `id` to visible position `to`, where a drag drops it or
-    /// `J`/`K` take it. It stays in its part of the list (its folder's
-    /// pinned sessions, or the others; under App or Status, those of its
-    /// app or status): a `to` outside that part means its first or last
-    /// place. Returns whether it moved.
+    /// `J`/`K` take it. It stays in its part of the list: its folder's
+    /// pinned sessions, or the others; under App or Status, its app's or
+    /// status's (whatever their folders), which keep an order of their own.
+    /// A `to` outside that part means its first or last place. Returns
+    /// whether it moved.
     pub fn move_session(&mut self, id: &SessionId, to: usize) -> bool {
         let visible = self.visible();
         let Some(from) = visible.iter().position(|s| &s.id == id) else {
@@ -318,7 +352,7 @@ impl SessionList {
         let moving = visible[from];
         let section = Section::of(self.grouping, moving);
         let in_part = |s: &&SessionView| {
-            s.scope == moving.scope
+            (section.is_some() || s.scope == moving.scope)
                 && s.pinned == moving.pinned
                 && Section::of(self.grouping, s) == section
         };
@@ -329,8 +363,26 @@ impl SessionList {
         if to == from {
             return false;
         }
-        let scope = moving.scope.clone();
         let target = visible[to].id.clone();
+        if let Some(section) = section {
+            // Every session of the app or status, in its order now.
+            let mut order: Vec<SessionId> = self
+                .in_section_order(&section)
+                .iter()
+                .map(|s| s.id.clone())
+                .collect();
+            let (Some(from), Some(to)) = (
+                order.iter().position(|s| s == id),
+                order.iter().position(|s| s == &target),
+            ) else {
+                return false;
+            };
+            let moved = order.remove(from);
+            order.insert(to, moved);
+            self.section_order.insert(section.key(), order);
+            return true;
+        }
+        let scope = moving.scope.clone();
         let mut order: Vec<SessionId> = self
             .sessions
             .iter()
@@ -535,23 +587,37 @@ impl SessionList {
             }
             return visible;
         }
-        let in_folder_order: Vec<&SessionView> = self
-            .all_folders
-            .iter()
-            .flat_map(|folder| self.sessions.iter().filter(move |s| &s.scope == folder))
-            .collect();
         for section in &self.sections {
             let shown = self.section_shown(section);
             visible.extend(
-                in_folder_order
-                    .iter()
-                    .copied()
-                    .filter(|s| Section::of(grouping, s).as_ref() == Some(section))
+                self.in_section_order(section)
+                    .into_iter()
                     .filter(|s| shown || kept == Some(&s.id))
                     .filter(matching),
             );
         }
         visible
+    }
+
+    /// Every session of an app or a status, in its order: pinned ones
+    /// first, then the order the user gave them there, then the rest folder
+    /// by folder (each in its folder's order).
+    fn in_section_order(&self, section: &Section) -> Vec<&SessionView> {
+        let order = self.section_order.get(&section.key());
+        let place = |s: &SessionView| {
+            order
+                .and_then(|ids| ids.iter().position(|id| id == &s.id))
+                .unwrap_or(usize::MAX)
+        };
+        let mut sessions: Vec<&SessionView> = self
+            .all_folders
+            .iter()
+            .flat_map(|folder| self.sessions.iter().filter(move |s| &s.scope == folder))
+            .filter(|s| Section::of(self.grouping, s).as_ref() == Some(section))
+            .collect();
+        // Stable: unordered sessions keep their folder by folder order.
+        sessions.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(place(a).cmp(&place(b))));
+        sessions
     }
 
     /// Whether the App or Status filter shows `section` (an empty one
@@ -1773,17 +1839,27 @@ mod tests {
     #[test]
     fn moves_and_group_jumps_stay_within_an_app() {
         let mut list = agents();
+        let by_folder = names(&list);
         list.set_grouping(Grouping::App);
         let (r1, r4) = (SessionId::from_string("R1"), SessionId::from_string("R4"));
-        // R4 up past R1 within claude and /repo; past W1 (another folder)
-        // it can't go.
+        // Within claude whatever the folder: R4 up past R1, then R1 down
+        // past W1 (another folder); out of claude (into codex) it can't go.
         assert!(list.move_session(&r4, 0));
         assert_eq!(names(&list), ["r4", "r1", "w1", "r3", "w2", "r2"]);
-        assert!(!list.move_session(&r1, 2));
+        assert!(list.move_session(&r1, 2));
+        assert_eq!(names(&list), ["r4", "w1", "r1", "r3", "w2", "r2"]);
+        assert!(!list.move_session(&r1, 3));
+        // The app keeps an order of its own; the folders' is untouched.
+        assert!(list.session_order().is_empty());
+        let ids = |ids: &[&str]| ids.iter().map(|id| SessionId::from_string(*id)).collect();
         assert_eq!(
-            list.session_order(),
-            order_of("/repo", &["R4", "R1", "R2", "R3"])
+            list.section_order(),
+            SectionOrder::from([("app:claude".to_string(), ids(&["R4", "W1", "R1"]))])
         );
+        list.set_grouping(Grouping::Folder);
+        assert_eq!(names(&list), by_folder);
+        list.set_grouping(Grouping::App);
+        assert_eq!(names(&list), ["r4", "w1", "r1", "r3", "w2", "r2"]);
         // `{`/`}` go from app to app.
         list.select(Selection::Session(r1));
         let target = |id: &str| Some(Selection::Session(SessionId::from_string(id)));
@@ -1793,6 +1869,54 @@ mod tests {
         assert_eq!(list.group_target(-1), target("R2"));
         list.select(Selection::Folders);
         assert_eq!(list.group_target(1), target("R4"));
+    }
+
+    #[test]
+    fn each_status_keeps_its_own_order_saved_and_restored() {
+        let web = folder("/web");
+        let sessions = || {
+            vec![
+                running(&scope(), "R1", Some("claude"), Lifecycle::Working, 1),
+                running(&scope(), "R2", Some("codex"), Lifecycle::Idle, 2),
+                running(&web, "W1", Some("claude"), Lifecycle::Working, 3),
+            ]
+        };
+        let mut list = loaded(sessions());
+        list.set_grouping(Grouping::Status);
+        assert_eq!(names(&list), ["r1", "w1", "r2"]);
+        // W1 (another folder) up past R1 within working; not into idle.
+        let w1 = SessionId::from_string("W1");
+        assert!(list.move_session(&w1, 0));
+        assert_eq!(names(&list), ["w1", "r1", "r2"]);
+        // Past the group's end it stops at its last place, never into idle.
+        assert!(list.move_session(&w1, 2));
+        assert_eq!(names(&list), ["r1", "w1", "r2"]);
+        assert!(list.move_session(&w1, 0));
+        let saved = list.section_order();
+        assert_eq!(saved.keys().collect::<Vec<_>>(), ["status:working"]);
+        // The App tab's order is its own: there claude goes folder by
+        // folder still.
+        list.set_grouping(Grouping::App);
+        assert_eq!(names(&list), ["r1", "w1", "r2"]);
+        // Restored from the config, the working order comes back.
+        let mut again = loaded(sessions());
+        again.set_section_order(&saved);
+        again.set_grouping(Grouping::Status);
+        list.set_grouping(Grouping::Status);
+        assert_eq!(names(&again), names(&list));
+        // A session that's gone is dropped from the order to save.
+        let mut gone = loaded(vec![running(
+            &scope(),
+            "R1",
+            Some("claude"),
+            Lifecycle::Working,
+            1,
+        )]);
+        gone.set_section_order(&saved);
+        assert_eq!(
+            gone.section_order()["status:working"],
+            [SessionId::from_string("R1")]
+        );
     }
 
     #[test]

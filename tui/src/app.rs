@@ -307,6 +307,7 @@ impl App {
         let cycle_keys = parse_cycle_keys(&options.settings, &mut warnings);
         let mut list = SessionList::new(options.scope.clone());
         list.set_session_order(&options.settings.sessions.session_order);
+        list.set_section_order(&options.settings.sessions.section_order);
         let folders = Folders::new(options.scope.clone());
         let mut app = Self {
             flags: FeatureFlags::from_env(),

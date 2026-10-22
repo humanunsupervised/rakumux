@@ -196,6 +196,15 @@ pub enum Section {
 }
 
 impl Section {
+    /// How the order of its sessions is saved (`sessions.section_order`):
+    /// `app:claude`, `status:working`.
+    pub fn key(&self) -> String {
+        match self {
+            Section::App(app) => format!("app:{}", app.as_str()),
+            Section::Status(status) => format!("status:{}", status.label()),
+        }
+    }
+
     /// The section `session` is in under `grouping`; `None` under All
     /// folders, whose sections are folders.
     pub fn of(grouping: Grouping, session: &SessionView) -> Option<Section> {

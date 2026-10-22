@@ -64,10 +64,13 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         }
         KeyCode::Left | KeyCode::Char('h') if app.browsing_grid() => app.move_grid_selection(-1),
         KeyCode::Right | KeyCode::Char('l') if app.browsing_grid() => app.move_grid_selection(1),
-        // On the top row, ←/→ go along its tabs (Enter opens the active
-        // one's modal).
-        KeyCode::Left | KeyCode::Char('h') if on_tabs(app) => app.switch_tab(-1),
-        KeyCode::Right | KeyCode::Char('l') if on_tabs(app) => app.switch_tab(1),
+        // ←/→ go along the list's tabs wherever the selection is (`h`/`l`
+        // on the top row, where Enter opens the active one's modal); ↑/↓
+        // go through the sessions.
+        KeyCode::Left => app.switch_tab(-1),
+        KeyCode::Right => app.switch_tab(1),
+        KeyCode::Char('h') if on_tabs(app) => app.switch_tab(-1),
+        KeyCode::Char('l') if on_tabs(app) => app.switch_tab(1),
         KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
         KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
         KeyCode::Home => app.move_selection(-(app.list.row_count() as isize)),
@@ -83,9 +86,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
             let page = app.preview_page();
             app.scroll_preview(-page);
         }
-        KeyCode::Enter | KeyCode::Right | KeyCode::Char('i') | KeyCode::Char('l') => {
-            app.activate_selected()
-        }
+        KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char('l') => app.activate_selected(),
         KeyCode::Tab => app.go_to_last_session(),
         KeyCode::Char(digit @ '1'..='9') => app.go_into_nth(digit as usize - '0' as usize),
         KeyCode::Char('n') => app.open_new_session(),

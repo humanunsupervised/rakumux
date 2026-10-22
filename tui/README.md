@@ -124,7 +124,8 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   which switches to **Rakumux mode**. There, `↑/↓`, `j/k` or `Option`/`Alt`+`↑/↓` select (the
   session shows live, in full colour; on the folder filter, a folder header or + New
   session the last session stays in view), `gg`/`G` top/bottom, `Ctrl-d`/`Ctrl-u` half a page,
-  `{`/`}` previous/next folder; `Enter` or `i` goes in (reviving a dead session, restarting an
+  `{`/`}` previous/next folder, `←`/`→` switch the list's tabs (Status, Folders, App); `Enter` or
+  `i` goes in (reviving a dead session, restarting an
   exited one; on a folder header, a new session there), `Esc` (once it has
   cancelled a pending key or the filter) or `Ctrl-\` goes back to the session you came from (or,
   after a start or a reload, into the session shown),
@@ -143,7 +144,9 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   started in leads, then the others by name. A new session goes last in its folder, and pinned
   sessions come first. Drag a session (or a tab) up and down to move it, or press `J`/`K`; it
   stays in its folder, among the pinned sessions or the others. The order is saved as
-  `sessions.session_order` in `~/.rakumux/config.json`.
+  `sessions.session_order` in `~/.rakumux/config.json`. Under the Status and App tabs each
+  status and app keeps an order of its own (`sessions.section_order`): moves there reorder a
+  session within its group, across folders, without touching the folders' order.
 - **New session** (`n`, or "+ New session"): asks only for a name (leave it blank and one is
   picked). The session goes in the selected session's or header's folder, shown under the name.
   Moving to "+ New session" or the folder filter keeps that folder. A single-folder filter
