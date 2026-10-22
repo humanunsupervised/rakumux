@@ -18,8 +18,10 @@ pub(super) fn has_opencode_progress_bar(line: &str) -> bool {
 
 pub(super) const PROFILE: Profile = Profile {
     label: "opencode",
-    names: &["opencode"],
-    packages: &[&["opencode-ai"]],
+    // The V2 npm package (`@opencode/cli`) installs its binary as both `opencode` and
+    // `opencode2`; the process is named after the one that was run.
+    names: &["opencode", "opencode2"],
+    packages: &[&["opencode-ai"], &["@opencode", "cli"]],
     title_hint: |title| has_word(title, "opencode"),
     blocked: &[
         marker(

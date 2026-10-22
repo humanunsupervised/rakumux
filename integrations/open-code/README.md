@@ -29,6 +29,10 @@ The original plugin location is not reused after a switch. A directory change is
 when activity is unchanged; the daemon needs `session.working_directory` to use it for the
 branch/worktree label. Background descendants do not overwrite the displayed context.
 
+The daemon recognises OpenCode V2 run as `opencode` or as `opencode2` (the second name its
+`@opencode/cli` package installs); resuming keeps `opencode2`, since `opencode` may be a 1.x
+install. An unrecognised process name would count as "no agent" and drop the plugin's activity.
+
 - `rakumux-session/`: plugin and pure activity projection.
 - `install.rs`: installer compiled into MCP.
 - `detection.rs` / `recovery.rs`: terminal fallback and conversation resume.

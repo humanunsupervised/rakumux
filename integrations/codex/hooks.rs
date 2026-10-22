@@ -6,13 +6,13 @@ pub(super) fn normalize(input: &Value) -> Result<Option<ActivityUpdate>, String>
         .get("hook_event_name")
         .and_then(Value::as_str)
         .unwrap_or("");
-    if input.get("agent_id").and_then(Value::as_str).is_some()
-        && !matches!(name, "SubagentStart" | "SubagentStop")
-    {
-        return Ok(None);
+    // Child hooks never replace their parent's phase (see `child`).
+    if input.get("agent_id").and_then(Value::as_str).is_some() {
+        return child("codex", input, name);
     }
     let event = match name {
-        "SessionStart" if input["source"] == "compact" => phase(ActivityPhase::Working),
+        // Compaction neither starts nor ends a turn.
+        "SessionStart" if input["source"] == "compact" => return Ok(None),
         "SessionStart" | "SessionEnd" | "Interrupt" => phase(ActivityPhase::Idle),
         "UserPromptSubmit" | "PostToolUse" | "PostToolUseFailure" => phase(ActivityPhase::Working),
         "PreToolUse" if input["tool_name"] == "request_user_input" => {
@@ -21,8 +21,6 @@ pub(super) fn normalize(input: &Value) -> Result<Option<ActivityUpdate>, String>
         "PreToolUse" => phase(ActivityPhase::RunningTool),
         "PermissionRequest" => phase(ActivityPhase::NeedsInput),
         "Stop" => phase(ActivityPhase::Done),
-        "SubagentStart" => subagent(input, true)?,
-        "SubagentStop" => subagent(input, false)?,
         _ => return Ok(None),
     };
     update("codex", input, event)

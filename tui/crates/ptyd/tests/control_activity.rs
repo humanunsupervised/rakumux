@@ -314,3 +314,99 @@ fn invalid_completion_identifiers_are_rejected_without_changing_activity() {
         assert!(harness.get(&session.id).activity.is_none());
     }
 }
+
+#[test]
+fn opencode_v2_started_as_opencode2_keeps_its_activity_through_terminal_output() {
+    use session_core::model::ResumeSource;
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    let caller = harness.session_caller(&session.id);
+    harness.handle(
+        &caller,
+        Request::SessionBind {
+            agent: "opencode".into(),
+            conversations: vec!["root".into()],
+        },
+    );
+    harness.host.set_foreground(
+        &session.id,
+        ptyd::host::ProcessInfo {
+            pid: 4242,
+            name: "opencode2".into(),
+            cmdline: vec!["opencode2".into()],
+        },
+    );
+    harness.handle(
+        &caller,
+        Request::SessionReport(update(
+            "opencode",
+            ActivityEvent::Snapshot {
+                phase: ActivityPhase::RunningTool,
+                subagents: vec!["child".into()],
+            },
+        )),
+    );
+    // Output was detected as "no agent", which dropped the plugin's activity
+    // (and its unread replies) every time OpenCode drew.
+    harness.host.show(&session.id, "■■■■⬝⬝⬝⬝  esc interrupt");
+    let view = eventually("output is detected as OpenCode", || {
+        let view = harness.get(&session.id);
+        (view.resume.as_ref()?.source == ResumeSource::KnownAgent).then_some(view)
+    });
+    assert_eq!(
+        view.resume.unwrap().argv,
+        vec!["opencode2".to_string(), "-s".into(), "root".into()]
+    );
+    let activity = view.activity.expect("the plugin's activity is kept");
+    assert_eq!(activity.phase, ActivityPhase::RunningTool);
+    assert_eq!(activity.active_subagents, 1);
+    assert_eq!(view.lifecycle, Lifecycle::Working);
+}
+
+#[test]
+fn an_esc_interrupted_claude_turn_ends_without_a_stop_hook() {
+    const BUSY: &str =
+        "⏺ Bash(cargo test)\n  ⎿  Running…\n\n✻ Bloviating… (12s · ↓ 1.2k tokens)\n\n\
+        ────────────────────────────────────────\n❯\n────────────────────────────────────────\n\
+        \u{20} ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt\n";
+    const INTERRUPTED: &str =
+        "⏺ Bash(cargo test)\n  ⎿  Interrupted · What should Claude do instead?\n\n\
+        ────────────────────────────────────────\n❯\n────────────────────────────────────────\n\
+        \u{20} ⏵⏵ bypass permissions on (shift+tab to cycle)\n";
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    let caller = harness.session_caller(&session.id);
+    harness.host.set_foreground(
+        &session.id,
+        ptyd::host::ProcessInfo {
+            pid: 4242,
+            name: "claude".into(),
+            cmdline: vec!["claude".into()],
+        },
+    );
+    harness.handle(
+        &caller,
+        Request::SessionReport(update(
+            "claude",
+            ActivityEvent::Phase {
+                phase: ActivityPhase::RunningTool,
+            },
+        )),
+    );
+    harness.host.show(&session.id, BUSY);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // Esc: Claude Code redraws its idle prompt; no Stop or other hook follows.
+    harness.host.show(&session.id, INTERRUPTED);
+    std::thread::sleep(std::time::Duration::from_millis(1_000));
+    assert_eq!(
+        harness.get(&session.id).lifecycle,
+        Lifecycle::Working,
+        "a Stop hook may still be on its way"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(4_000));
+    let view = eventually("the missed turn end", || {
+        let view = harness.get(&session.id);
+        view.activity.is_none().then_some(view)
+    });
+    assert_eq!(view.lifecycle, Lifecycle::Done);
+}

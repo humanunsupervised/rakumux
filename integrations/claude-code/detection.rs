@@ -19,6 +19,17 @@ pub(super) fn is_claude_activity_line(line: &str) -> bool {
     }
 }
 
+/// `✻ Waiting for 2 background agents to finish` (captured 2.1.307): the turn
+/// paused until background agents wake it. It has no ellipsis, so it isn't an
+/// activity line, and the footer drops "esc to interrupt".
+pub(super) fn is_claude_background_wait_line(line: &str) -> bool {
+    split_glyph(line).is_some_and(|(glyph, rest)| {
+        ACTIVITY_GLYPHS.contains(&glyph)
+            && rest.starts_with("Waiting for ")
+            && rest.contains(" background agent")
+    })
+}
+
 fn starts_with_claude_title_spinner(title: &str) -> bool {
     split_glyph(title).is_some_and(|(glyph, _)| is_braille(glyph) || ('◐'..='◓').contains(&glyph))
 }
@@ -64,6 +75,10 @@ pub(super) const PROFILE: Profile = Profile {
         marker(Region::Title, Test::Line(starts_with_claude_title_spinner)),
         marker(Region::AfterLastRule, Test::Any(&["esc to interrupt"])),
         marker(Region::Bottom(12), Test::Line(is_claude_activity_line)),
+        marker(
+            Region::Bottom(12),
+            Test::Line(is_claude_background_wait_line),
+        ),
     ],
     idle: &[
         marker(Region::PromptBox, Test::Line(|line| line.starts_with('❯'))),

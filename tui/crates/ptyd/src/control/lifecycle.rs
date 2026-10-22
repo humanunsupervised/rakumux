@@ -6,6 +6,11 @@
 //!   touched (seen). A report of `done` has the same effect.
 //! - `Unknown` (agent running, state unrecognisable) neither starts nor
 //!   cancels a turn.
+//! - Fresh hook activity wins over detection, except a busy state from
+//!   command hooks whose agent's screen, recognised as working after the latest
+//!   hook, has then looked idle for [`SCREEN_IDLE_MS`]: that turn ended without
+//!   a hook (an interrupted Claude Code turn fires no Stop), so the activity is
+//!   dropped.
 
 use super::activity::ActivityTracker;
 use crate::detect::Detection;
@@ -15,9 +20,17 @@ use session_core::model::Lifecycle;
 /// How long a reported state overrides detection.
 pub(crate) const REPORT_FRESH_MS: i64 = 30_000;
 
+/// How long the agent's screen must look idle after the latest hook before a
+/// busy hook state is considered missed. Longer than a Stop hook takes to land.
+pub(crate) const SCREEN_IDLE_MS: i64 = 5_000;
+
 #[derive(Debug, Clone)]
 pub(crate) struct LifecycleTracker {
     detected: Lifecycle,
+    /// When detection last changed its agent or lifecycle (ms).
+    detected_since: i64,
+    /// When detection last said `Working` (ms).
+    working_seen: Option<i64>,
     agent: Option<String>,
     /// Last reported state (never `Done`; see `on_report`) and when.
     report: Option<(Lifecycle, i64)>,
@@ -33,6 +46,8 @@ impl Default for LifecycleTracker {
     fn default() -> Self {
         Self {
             detected: Lifecycle::None,
+            detected_since: 0,
+            working_seen: None,
             agent: None,
             report: None,
             activity: None,
@@ -95,12 +110,22 @@ impl LifecycleTracker {
         {
             self.activity = None;
         }
-        self.agent = detection.agent;
-        self.detected = match detection.lifecycle {
+        let detected = match detection.lifecycle {
             // Detection never reports Done; treat one as Idle defensively.
             Lifecycle::Done => Lifecycle::Idle,
             other => other,
         };
+        if detected != self.detected || detection.agent != self.agent {
+            self.detected_since = now_ms;
+        }
+        if detected == Lifecycle::Working {
+            self.working_seen = Some(now_ms);
+        }
+        self.agent = detection.agent;
+        self.detected = detected;
+        if self.hooks_contradicted(now_ms) {
+            self.activity = None;
+        }
         self.recompute(now_ms)
     }
 
@@ -123,16 +148,38 @@ impl LifecycleTracker {
         self.recompute(now_ms)
     }
 
-    /// Periodic re-evaluation (self-report and hook expiry).
+    /// Periodic re-evaluation (self-report and hook expiry, missed turn ends).
     pub fn tick(&mut self, now_ms: i64) -> bool {
-        let expired = self
+        let stale = self
             .activity
             .as_ref()
-            .is_some_and(|activity| !activity.fresh(now_ms));
-        if expired {
+            .is_some_and(|activity| !activity.fresh(now_ms))
+            || self.hooks_contradicted(now_ms);
+        if stale {
             self.activity = None;
         }
-        self.recompute(now_ms) || expired
+        self.recompute(now_ms) || stale
+    }
+
+    /// A busy state from command hooks (working, running a tool, or with active
+    /// subagents) whose agent's screen was recognised as working after the latest
+    /// hook (so its markers work for this version) and has since looked idle for
+    /// [`SCREEN_IDLE_MS`]. Waiting-for-input and finished phases, and live-cache
+    /// snapshots, are never second-guessed; nor is a screen never seen busy.
+    fn hooks_contradicted(&self, now_ms: i64) -> bool {
+        let Some(activity) = &self.activity else {
+            return false;
+        };
+        let view = activity.view();
+        let busy = view.phase != session_core::activity::ActivityPhase::NeedsInput
+            && (view.active_subagents > 0 || view.phase.lifecycle() == Lifecycle::Working);
+        busy && activity.from_deltas()
+            && self.detected == Lifecycle::Idle
+            && self.agent.as_deref() == Some(activity.agent.as_str())
+            && self
+                .working_seen
+                .is_some_and(|seen| seen >= activity.received_ms())
+            && now_ms.saturating_sub(self.detected_since) >= SCREEN_IDLE_MS
     }
 
     fn base(&self, now_ms: i64) -> Lifecycle {
@@ -386,5 +433,120 @@ mod tests {
             tracker.on_activity(&update, 2);
             assert_eq!(tracker.current(), Lifecycle::Idle);
         }
+    }
+
+    fn hook(event: session_core::activity::ActivityEvent) -> ActivityUpdate {
+        ActivityUpdate {
+            version: session_core::activity::ACTIVITY_VERSION,
+            agent: "claude".into(),
+            conversation_id: "root".into(),
+            completion_id: None,
+            event,
+        }
+    }
+
+    fn phase(phase: session_core::activity::ActivityPhase) -> ActivityUpdate {
+        hook(session_core::activity::ActivityEvent::Phase { phase })
+    }
+
+    #[test]
+    fn an_idle_screen_after_the_last_hook_ends_a_turn_whose_end_fired_no_hook() {
+        use session_core::activity::ActivityPhase;
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Working), 0);
+        t.on_activity(&phase(ActivityPhase::RunningTool), 1_000);
+        t.on_detection(detection(Lifecycle::Working), 2_000);
+        // Esc: Claude Code redraws its idle prompt and sends no Stop.
+        t.on_detection(detection(Lifecycle::Idle), 3_000);
+        assert!(!t.tick(3_000 + SCREEN_IDLE_MS - 1));
+        assert_eq!(t.current(), Lifecycle::Working, "a Stop may still land");
+        assert!(t.tick(3_000 + SCREEN_IDLE_MS));
+        assert!(t.activity().is_none(), "the missed hook state is dropped");
+        assert_eq!(t.current(), Lifecycle::Done);
+        // The next hook starts tracking again.
+        t.on_activity(&phase(ActivityPhase::Working), 10_000);
+        assert_eq!(t.current(), Lifecycle::Working);
+    }
+
+    #[test]
+    fn hook_states_the_screen_cannot_contradict_are_kept() {
+        use session_core::activity::{ActivityEvent, ActivityPhase};
+        // The screen was already idle when the hook arrived (no redraw since).
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Idle), 0);
+        t.on_activity(&phase(ActivityPhase::Working), 1_000);
+        t.on_detection(detection(Lifecycle::Idle), 2_000);
+        assert!(!t.tick(60_000));
+        assert_eq!(t.current(), Lifecycle::Working);
+
+        // A screen never recognised as busy after the hook proves nothing (its
+        // markers may not match this agent version).
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Working), 0);
+        t.on_activity(&phase(ActivityPhase::Working), 1_000);
+        t.on_detection(detection(Lifecycle::Idle), 2_000);
+        t.tick(60_000);
+        assert_eq!(t.current(), Lifecycle::Working);
+
+        // Waiting for the user and live-cache snapshots are never second-guessed.
+        for update in [
+            phase(ActivityPhase::NeedsInput),
+            hook(ActivityEvent::Snapshot {
+                phase: ActivityPhase::Working,
+                subagents: vec![],
+            }),
+        ] {
+            let mut t = LifecycleTracker::default();
+            t.on_activity(&update, 1_000);
+            t.on_detection(detection(Lifecycle::Working), 1_500);
+            t.on_detection(detection(Lifecycle::Idle), 2_000);
+            t.tick(60_000);
+            assert!(t.activity().is_some(), "{update:?}");
+        }
+
+        // A hook after the screen went idle wins again.
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Working), 0);
+        t.on_activity(&phase(ActivityPhase::Working), 1_000);
+        t.on_detection(detection(Lifecycle::Idle), 2_000);
+        t.on_activity(&phase(ActivityPhase::RunningTool), 3_000);
+        t.tick(60_000);
+        assert_eq!(t.current(), Lifecycle::Working);
+    }
+
+    #[test]
+    fn subagent_heartbeats_keep_a_background_subagent_counted_after_its_parent_waits() {
+        use super::super::activity::FRESH_MS;
+        use session_core::activity::{ActivityEvent, ActivityPhase};
+        let child = |running| {
+            hook(ActivityEvent::Subagent {
+                id: "child".into(),
+                running,
+            })
+        };
+        let mut t = LifecycleTracker::default();
+        t.on_activity(&phase(ActivityPhase::RunningTool), 0);
+        t.on_activity(&child(true), 1);
+        // Claude's Stop while a background agent runs is reported as working.
+        t.on_activity(&phase(ActivityPhase::Working), 2);
+        // The child's own tool hooks are its heartbeat, beyond the parent's freshness.
+        for at in [FRESH_MS / 2, FRESH_MS, FRESH_MS * 3 / 2] {
+            t.on_activity(&child(true), at);
+            assert!(!t.tick(at + 1));
+        }
+        assert_eq!(t.activity().unwrap().active_subagents, 1);
+        assert_eq!(t.current(), Lifecycle::Working);
+        t.on_activity(&child(false), FRESH_MS * 2);
+        t.on_activity(&child(true), FRESH_MS * 2 + 1);
+        assert_eq!(
+            t.activity().unwrap().active_subagents,
+            0,
+            "a late hook cannot resurrect a stopped subagent"
+        );
+        t.on_activity(&phase(ActivityPhase::Done), FRESH_MS * 2 + 2);
+        assert_eq!(t.current(), Lifecycle::Done);
+        // idle_prompt about a minute later: the unread reply stays unread.
+        t.on_activity(&phase(ActivityPhase::Idle), FRESH_MS * 2 + 60_000);
+        assert_eq!(t.current(), Lifecycle::Done);
     }
 }

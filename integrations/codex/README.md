@@ -13,7 +13,8 @@ or tool-approval controls. Local/managed policy can disable hooks.
 
 The command is `"${RAKUMUX_BIN:-rakumux}" session hook --agent codex`. Prompt submission
 reports **working**, not a confirmed network request. Native events cover tool execution,
-permissions, completion, interruption and actual subagent IDs. Older versions without hooks
+permissions, completion, interruption and actual subagent IDs. A compaction `SessionStart`
+changes nothing; hooks carrying `agent_id` only keep that subagent counted. Older versions without hooks
 retain screen detection; legacy completion notifications cannot supply full phase/subagent
 data. Remove only the Rakumux handlers to disable.
 

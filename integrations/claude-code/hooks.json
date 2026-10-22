@@ -11,6 +11,9 @@
     "Notification": [{"matcher": "permission_prompt|idle_prompt", "hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],
     "SubagentStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],
     "SubagentStop": [{"matcher": "*", "hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}]
+    "Stop": [{"hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],
+    "StopFailure": [{"hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],
+    "Elicitation": [{"matcher": "*", "hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}],
+    "ElicitationResult": [{"matcher": "*", "hooks": [{"type": "command", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent claude", "timeout": 3}]}]
   }
 }

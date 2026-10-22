@@ -158,6 +158,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         }
         KeyAction::Reload => app.refresh(),
         KeyAction::Restart => app.request_restart(),
+        KeyAction::RestartServer => app.request_server_restart(),
         KeyAction::QuitAndCd => match app.selected_cwd() {
             Some(cwd) => return AppResult::SwitchDirectory(cwd),
             None => app.set_status("Select a session to cd into its folder."),
@@ -182,6 +183,8 @@ fn open_item(app: &mut App, item: SettingsItem) {
             save_config(app, format!("Icons: {}", next.label()));
         }
         SettingsItem::Update => app.open_upgrade_dialog(),
+        SettingsItem::RestartUi => app.request_restart(),
+        SettingsItem::RestartServer => app.request_server_restart(),
         SettingsItem::TerminalPanel => {
             app.mode = AppMode::Normal;
             app.show_terminal_panel();

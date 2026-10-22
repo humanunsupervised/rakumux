@@ -214,7 +214,28 @@ pub fn draw_daemon_restart_dialog(f: &mut Frame, dialog: &DaemonRestartDialog, a
         .map(|v| format!(" (version {v})"))
         .unwrap_or_default();
     let outdated = !dialog.missing.is_empty();
-    let mut lines = if outdated {
+    let mut lines = if dialog.requested {
+        let consequence = if dialog.in_place {
+            Span::styled(
+                "Your sessions and their programs keep running, and every window reconnects.",
+                Style::default().fg(palette().text_muted),
+            )
+        } else {
+            Span::styled(
+                "This server can't hand its sessions over, so restarting it ends every running \
+                 session; Enter brings one back.",
+                Style::default().fg(palette().accent_gold),
+            )
+        };
+        vec![
+            Line::from(format!(
+                "Restart the Rakumux server{version} with this build ({})?",
+                crate::app::app_version()
+            )),
+            Line::from(""),
+            Line::from(consequence),
+        ]
+    } else if outdated {
         let consequence = if dialog.in_place {
             Span::styled(
                 "Your sessions keep running: the new server takes them over.",
@@ -257,25 +278,29 @@ pub fn draw_daemon_restart_dialog(f: &mut Frame, dialog: &DaemonRestartDialog, a
         ]
     };
     if dialog.restarting {
+        let doing = if dialog.in_place {
+            "Restarting the server…"
+        } else {
+            "Stopping the old server…"
+        };
         lines.push(Line::from(Span::styled(
-            format!("{} Stopping the old server…", get_spinner_char()),
+            format!("{} {doing}", get_spinner_char()),
             Style::default().fg(palette().accent_primary),
         )));
     } else if let Some(error) = &dialog.error {
         lines.push(error_line(error));
     }
-    let keys = [
-        (
-            if outdated && !dialog.in_place {
-                "y"
-            } else {
-                "y/Enter"
-            },
-            "Restart",
-        ),
-        ("n/Esc", "Not now"),
-        ("q", "Quit"),
-    ];
+    // Enter never ends sessions by accident; asked for, there's nothing to
+    // quit over.
+    let restart = if (outdated || dialog.requested) && !dialog.in_place {
+        "y"
+    } else {
+        "y/Enter"
+    };
+    let mut keys = vec![(restart, "Restart"), ("n/Esc", "Not now")];
+    if !dialog.requested {
+        keys.push(("q", "Quit"));
+    }
     // 12 rows, or what the text needs on a narrow screen.
     let width = popup_width(area.width, 70);
     let height = (text_rows(&lines, width.saturating_sub(2)) + key_rows(&keys, width) + 3).max(12);

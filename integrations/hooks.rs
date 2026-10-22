@@ -102,6 +102,21 @@ fn phase(phase: ActivityPhase) -> ActivityEvent {
     ActivityEvent::Phase { phase }
 }
 
+/// A hook fired inside a subagent (its input carries `agent_id`). It never replaces the
+/// parent's phase. Start/stop change the count; a tool or permission hook only shows that
+/// the subagent still runs, which keeps a long or background subagent counted and the
+/// parent's activity fresh while the parent itself sends no hooks. A stopped subagent is
+/// not resurrected (the daemon remembers stops). Other child events are ignored.
+fn child(agent: &str, input: &Value, name: &str) -> Result<Option<ActivityUpdate>, String> {
+    let event = match name {
+        "SubagentStart" | "PreToolUse" | "PostToolUse" | "PostToolUseFailure"
+        | "PermissionRequest" => subagent(input, true)?,
+        "SubagentStop" => subagent(input, false)?,
+        _ => return Ok(None),
+    };
+    update(agent, input, event)
+}
+
 fn subagent(input: &Value, running: bool) -> Result<ActivityEvent, String> {
     let id = input
         .get("agent_id")
@@ -184,5 +199,138 @@ mod tests {
             changed.working_directory.unwrap().path,
             std::path::Path::new("/repo/new")
         );
+    }
+
+    fn event_of(agent: &str, input: Value) -> Option<ActivityEvent> {
+        normalize(agent, &input).unwrap().map(|update| update.event)
+    }
+
+    #[test]
+    fn subagent_tool_hooks_keep_the_subagent_counted_without_replacing_the_parent_phase() {
+        for agent in ["claude", "codex"] {
+            for name in [
+                "PreToolUse",
+                "PostToolUse",
+                "PostToolUseFailure",
+                "PermissionRequest",
+            ] {
+                let input = json!({"hook_event_name":name, "session_id":"root", "agent_id":"child",
+                    "tool_name":"Bash", "tool_input":{"command":"secret command"}});
+                let update = normalize(agent, &input).unwrap().unwrap();
+                assert_eq!(update.conversation_id, "root");
+                assert_eq!(
+                    update.event,
+                    ActivityEvent::Subagent {
+                        id: "child".into(),
+                        running: true
+                    },
+                    "{agent} {name}"
+                );
+                assert!(!serde_json::to_string(&update).unwrap().contains("secret"));
+                assert!(report(agent, &input)
+                    .unwrap()
+                    .unwrap()
+                    .working_directory
+                    .is_none());
+            }
+            for name in ["Stop", "UserPromptSubmit", "Notification"] {
+                let input =
+                    json!({"hook_event_name":name, "session_id":"root", "agent_id":"child"});
+                assert_eq!(event_of(agent, input), None, "{agent} {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn compaction_neither_starts_nor_ends_a_turn() {
+        // Idle compaction and `/compact` have no Stop: reporting working left sessions
+        // busy until the activity expired, then showed an unread reply.
+        for agent in ["claude", "codex"] {
+            let input =
+                json!({"hook_event_name":"SessionStart", "session_id":"root", "source":"compact"});
+            assert_eq!(event_of(agent, input.clone()), None, "{agent}");
+            assert!(report(agent, &input).unwrap().is_none());
+            let startup =
+                json!({"hook_event_name":"SessionStart", "session_id":"root", "source":"startup"});
+            assert_eq!(event_of(agent, startup), Some(phase(ActivityPhase::Idle)));
+        }
+    }
+
+    #[test]
+    fn claude_notifications_stop_failures_and_elicitations_map_to_what_waits() {
+        let notification = |kind: &str| {
+            event_of(
+                "claude",
+                json!({"hook_event_name":"Notification", "session_id":"root", "notification_type":kind, "message":"secret"}),
+            )
+        };
+        assert_eq!(
+            notification("permission_prompt"),
+            Some(phase(ActivityPhase::NeedsInput))
+        );
+        assert_eq!(
+            notification("idle_prompt"),
+            Some(phase(ActivityPhase::Idle)),
+            "idle_prompt follows a finished turn; nothing waits for an answer"
+        );
+        assert_eq!(notification("auth_success"), None);
+        assert_eq!(
+            event_of(
+                "claude",
+                json!({"hook_event_name":"StopFailure", "session_id":"root", "error":"rate_limit"})
+            ),
+            Some(phase(ActivityPhase::Idle)),
+            "an API error ends the turn without a Stop"
+        );
+        assert_eq!(
+            event_of(
+                "claude",
+                json!({"hook_event_name":"Elicitation", "session_id":"root", "mcp_server_name":"x"})
+            ),
+            Some(phase(ActivityPhase::NeedsInput))
+        );
+        assert_eq!(
+            event_of(
+                "claude",
+                json!({"hook_event_name":"ElicitationResult", "session_id":"root", "action":"accept"})
+            ),
+            Some(phase(ActivityPhase::Working))
+        );
+        let config: Value = serde_json::from_str(config("claude").unwrap()).unwrap();
+        for event in ["StopFailure", "Elicitation", "ElicitationResult"] {
+            assert!(config["hooks"][event].is_array(), "{event} is configured");
+        }
+    }
+
+    #[test]
+    fn claude_stop_waiting_for_background_agents_is_still_working() {
+        let stop = |tasks: Value| {
+            event_of(
+                "claude",
+                json!({"hook_event_name":"Stop", "session_id":"root", "background_tasks":tasks}),
+            )
+        };
+        assert_eq!(
+            stop(
+                json!([{"id":"a1", "type":"subagent", "status":"running", "agent_type":"Explore"}])
+            ),
+            Some(phase(ActivityPhase::Working))
+        );
+        assert_eq!(
+            stop(json!([{"id":"w1", "type":"workflow", "status":"running"}])),
+            Some(phase(ActivityPhase::Working))
+        );
+        for unrelated in [
+            json!([]),
+            json!([{"id":"s1", "type":"shell", "status":"running", "command":"npm run dev"}]),
+            json!([{"id":"m1", "type":"monitor", "status":"running"}]),
+            json!(null),
+        ] {
+            assert_eq!(
+                stop(unrelated.clone()),
+                Some(phase(ActivityPhase::Done)),
+                "{unrelated}"
+            );
+        }
     }
 }

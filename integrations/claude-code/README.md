@@ -10,9 +10,17 @@ or settings. Restart Claude Code inside a Rakumux session.
 
 The command is `"${RAKUMUX_BIN:-rakumux}" session hook --agent claude`. It reads native JSON
 on stdin. Prompt submission reports **working**, not a confirmed network request. Tool hooks
-report **running tool**, approval/question hooks **needs input**, and Stop **done**. Subagent
-start/stop uses actual `agent_id` values. Child tool/stop hooks do not overwrite the parent
-phase. Silence is never interpreted as API waiting. Remove only Rakumux handlers to disable.
+report **running tool**, approval/question/MCP-elicitation hooks **needs input**, and Stop
+**done**. A Stop whose `background_tasks` lists running subagents or workflows ("Waiting for
+N background agents to finish") stays **working** until they wake the conversation again.
+`StopFailure` (an API error ended the turn) and the `idle_prompt` notification (a minute after
+a finished or Esc-interrupted turn) report **idle**, keeping an unread reply unread; a
+compaction `SessionStart` changes nothing. Subagent start/stop uses actual `agent_id` values;
+a subagent's tool and permission hooks keep it counted without replacing the parent's phase.
+Silence is never interpreted as API waiting. Remove only Rakumux handlers to disable.
+
+An Esc interrupt fires no hook. The daemon ends such a turn when Claude's own screen (its
+✳ title or idle prompt) has looked idle for 5 seconds after the last hook.
 
 The root hook's `cwd` also reports Claude's active worktree. `CwdChanged` updates it without
 changing lifecycle status. The daemon needs `session.working_directory`; child hooks cannot

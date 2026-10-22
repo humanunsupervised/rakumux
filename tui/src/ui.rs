@@ -396,10 +396,8 @@ mod tests {
         h.app.set_status("Layout: Tabs");
         let screen = render(&mut h.app, 80, 24);
         let footer = screen.lines().last().unwrap();
-        assert!(
-            footer.starts_with(" RAKUMUX | session: api · Layout: Tabs "),
-            "{footer:?}"
-        );
+        assert!(footer.starts_with(" RAKUMUX  Layout: Tabs "), "{footer:?}");
+        assert!(footer.contains("session: api"), "{footer:?}");
         assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
     }
 
@@ -688,7 +686,8 @@ mod tests {
             // zoomed session and the way out.
             assert!(screen.starts_with("hello from the fake"), "{screen}");
             let footer = screen.lines().last().unwrap();
-            assert!(footer.starts_with(" SESSION  api · zoomed "), "{footer:?}");
+            assert!(footer.starts_with(" SESSION  zoomed "), "{footer:?}");
+            assert!(footer.contains("session: api"), "{footer:?}");
             assert!(footer.ends_with(" Ctrl-\\ Rakumux  "), "{footer:?}");
         }
         // Back in Rakumux mode the list returns, and the badge says so.
@@ -1533,6 +1532,7 @@ mod tests {
                 missing: vec!["folders".into(), "pinning".into(), "git branches".into()],
                 restarting: false,
                 error: None,
+                requested: false,
             }),
             "upgrade" => AppMode::Upgrade(UpgradeDialog {
                 current_version: "0.6.0".into(),
@@ -1740,10 +1740,16 @@ mod tests {
         let mut h = harness(vec![aged("A", "api", 1, 20), aged("B", "docs", 2, 10)]);
         let (width, height) = (45, 40);
         render(&mut h.app, width, height);
-        // Nowhere to go back to yet: the RAKUMUX badge does nothing.
+        // Nowhere to go back to yet: the RAKUMUX badge, like Esc, goes into
+        // the selected session; the SESSION badge comes back out.
+        tap(&mut h, Hit::ModeBadge);
+        assert_eq!(h.app.focus, Focus::Session);
+        render(&mut h.app, width, height);
         tap(&mut h, Hit::ModeBadge);
         assert_eq!(h.app.focus, Focus::List);
         assert!(matches!(h.app.mode, AppMode::Normal));
+        h.app.came_from = None;
+        render(&mut h.app, width, height);
 
         // A session row: straight in, the session on screen under tabs.
         let row = h

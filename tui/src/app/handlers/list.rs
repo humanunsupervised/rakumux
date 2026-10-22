@@ -97,6 +97,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('P') => app.open_folder_picker(),
         KeyCode::Char('r') => app.open_rename(),
         KeyCode::Char('R') => app.request_restart(),
+        KeyCode::Char('S') => app.request_server_restart(),
         // A second `d` is ignored by the dialog, so `dd` works too without
         // bypassing the explicit deletion confirmation.
         KeyCode::Char('d') => app.confirm_delete(),

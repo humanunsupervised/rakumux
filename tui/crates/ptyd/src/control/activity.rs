@@ -8,6 +8,10 @@ use std::collections::HashSet;
 
 /// Hooks without a heartbeat eventually yield to screen/process detection.
 pub(super) const FRESH_MS: i64 = 120_000;
+/// While hook-reported subagents run, their own hooks are the only heartbeat, and
+/// one tool call of theirs can take minutes. A turn whose end was missed is still
+/// ended by the screen check in `lifecycle`.
+pub(super) const FRESH_WITH_SUBAGENTS_MS: i64 = 600_000;
 const MAX_SUBAGENTS: usize = 64;
 
 pub(super) fn validate(update: &ActivityUpdate) -> Result<(), ApiError> {
@@ -52,6 +56,9 @@ pub(super) struct ActivityTracker {
     subagents: HashSet<String>,
     stopped: HashSet<String>,
     received_ms: i64,
+    /// The latest update was a delta (command hooks), which can miss the end of a turn;
+    /// snapshots come from a live cache that keeps re-sending its state.
+    delta: bool,
 }
 
 impl ActivityTracker {
@@ -64,6 +71,7 @@ impl ActivityTracker {
             subagents: HashSet::new(),
             stopped: HashSet::new(),
             received_ms: now,
+            delta: false,
         }
     }
 
@@ -119,7 +127,14 @@ impl ActivityTracker {
             ActivityEvent::Unknown => {}
         }
         self.received_ms = now;
+        self.delta = !matches!(update.event, ActivityEvent::Snapshot { .. });
         new_completion
+    }
+
+    /// Whether the latest update came from command hooks, which send no heartbeat and
+    /// nothing when a turn is interrupted (Claude Code's Esc fires no Stop).
+    pub fn from_deltas(&self) -> bool {
+        self.delta
     }
 
     pub fn is_for(&self, update: &ActivityUpdate) -> bool {
@@ -127,7 +142,12 @@ impl ActivityTracker {
     }
 
     pub fn fresh(&self, now: i64) -> bool {
-        now.saturating_sub(self.received_ms) < FRESH_MS
+        let ttl = if self.delta && !self.subagents.is_empty() {
+            FRESH_WITH_SUBAGENTS_MS
+        } else {
+            FRESH_MS
+        };
+        now.saturating_sub(self.received_ms) < ttl
     }
 
     pub fn received_ms(&self) -> i64 {
@@ -232,5 +252,34 @@ mod tests {
         tracker.apply(&next, 5);
         assert_eq!(tracker.view().active_subagents, 0);
         assert!(!tracker.fresh(5 + FRESH_MS));
+    }
+
+    #[test]
+    fn running_hook_subagents_stay_fresh_longer_than_snapshots_or_a_quiet_parent() {
+        let child = update(ActivityEvent::Subagent {
+            id: "child".into(),
+            running: true,
+        });
+        let mut tracker = ActivityTracker::new(&child, 0);
+        tracker.apply(&child, 0);
+        assert!(tracker.fresh(FRESH_MS + 1), "a subagent's long tool call");
+        assert!(!tracker.fresh(FRESH_WITH_SUBAGENTS_MS));
+        tracker.apply(
+            &update(ActivityEvent::Subagent {
+                id: "child".into(),
+                running: false,
+            }),
+            1,
+        );
+        assert!(!tracker.fresh(1 + FRESH_MS));
+        // A live cache re-sends its state every few seconds: no extension.
+        tracker.apply(
+            &update(ActivityEvent::Snapshot {
+                phase: ActivityPhase::Working,
+                subagents: vec!["child".into()],
+            }),
+            2,
+        );
+        assert!(!tracker.fresh(2 + FRESH_MS));
     }
 }

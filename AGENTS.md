@@ -121,7 +121,9 @@ under `integrations/{open-code,claude-code,codex}/`. Shared engines live in `int
 See [integration boundaries and protocol](integrations/README.md). New integrations go there,
 not in UI handlers, API/MCP transport or control policy. Optional version-1 `Report.activity`
 is self-only (`session.activity` capability). The daemon validates, timestamps and expires
-activity. The TUI animates busy markers locally without network calls.
+activity, and drops a busy hook state that the agent's own screen has shown idle since the
+last hook (a turn that ended without one). The TUI animates busy markers locally without
+network calls.
 
 ```
 rakumux.sh                 # launcher (entry point)
@@ -237,7 +239,8 @@ PTY's foreground process. A known agent gives `KnownAgent` (run on revive): Clau
 (`~/.claude/sessions/<pid>.json` → `claude <flags> --resume <id>`), Codex (the rollout file the
 process has open, else the newest `cli` thread of the folder in `~/.codex/state_<n>.sqlite` →
 `codex resume <flags> <id>`) and OpenCode (the conversation its plugin bound, else the newest
-top-level session of the folder in `opencode.db` → `opencode <flags> -s <id>`); each keeps the
+top-level session of the folder in `opencode.db` → `opencode <flags> -s <id>`, or `opencode2 …`
+when V2 was started under that name); each keeps the
 flags that shape an interactive session (permissions, model, …). Any other program gives
 `LastCommand`: its command line is typed at the prompt on revive but not run. A shell back at its
 prompt for 15 s clears it. An agent's own report (`ReportedByAgent`) wins while an agent runs.
@@ -602,25 +605,29 @@ one the filters show), `←`/`→` (`h`/`l`) on the tabs switch between Status, 
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
 that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
-`Ctrl-\` back to the session you came from, `Tab` last session, `1`-`9` go into that session,
+`Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
+running session in view), `Tab` last session, `1`-`9` go into that session,
 `n` new, `r` rename, `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
 screen, `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `U` Update, `R`
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
-build; daemon and sessions stay up), `q`
+build; daemon and sessions stay up), `S` ask to restart the server (in place with this build when
+it can: `y`/Enter, sessions keep running; otherwise `y` only, since that ends them; also Settings →
+Restart server, which shows the running server's version), `q`
 quit. There is no header: the panes start at the top row, and the list's first row (Sidebar) is
-its tabs, `▤ Folders ▾   ◇ App   ◔ Status`: the active one is bold, underlined and names its
+its tabs, `◔ Status   ▤ Folders ▾   ◇ App`: the active one is bold, underlined and names its
 filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`, `◔ 2 statuses ▾`); short rows narrow the gaps, then show
 the inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's
 filter at the left (`▤ Folders ▾`); only Master detail shows the three tabs. The footer,
 always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
 while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
-SESSION/TERMINAL), then in Rakumux mode `| session: <name>` (the selected session), messages and
-the daemon connection while it isn't up (`⠋ connecting`, `✕ daemon unavailable`), and on the right
-buttons (a darker shade of the orange bar; dark chips on the blue one): `? Help` and `, Settings`
-in Rakumux mode, `Ctrl-\ Rakumux` in session mode; when the row is short the session label gives
-way first (to `| <name>`, then nothing), then the message is cut, then buttons go from the right
-(Settings, then Help).
+SESSION/TERMINAL), then messages and the daemon connection while it isn't up (`⠋ connecting`,
+`✕ daemon unavailable`); `session: <name>` in the centre (the selected session in Rakumux mode,
+the one taking the keys in session mode; none for the terminal panel); and on the right buttons
+(a darker shade of the orange bar; dark chips on the blue one): `? Help` and `, Settings` in
+Rakumux mode, `Ctrl-\ Rakumux` in session mode. When the row is short the session gives way
+first (off the centre, to its name alone, then nothing), then the message is cut, then buttons go
+from the right (Settings, then Help).
 Help and Settings list every key; Settings runs them. A welcome tour
 (`components/welcome.rs`, `AppMode::Welcome`) opens on startup until its "Don't show this on
 startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the list.

@@ -206,6 +206,7 @@ async fn protocol_mismatch_asks_before_restarting_the_daemon() {
         missing: Vec::new(),
         restarting: false,
         error: None,
+        requested: false,
     });
     h.press(KeyCode::Char('y')).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
@@ -331,6 +332,90 @@ async fn an_older_server_that_restarts_in_place_is_restarted_with_enter() {
         h.app.status(),
         Some("Restarted the Rakumux server; your sessions kept running.")
     );
+}
+
+#[tokio::test]
+async fn s_and_settings_restart_the_server_in_place_after_asking() {
+    let fake = FakeApi::new(vec![view("A", "a", 10)]);
+    fake.state.lock().unwrap().restarts_in_place = true;
+    let dir = tempfile::tempdir().unwrap();
+    let options = options(&fake, scope(), &dir);
+    let mut h = start(options, fake, dir);
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    // `S` asks first; `n` (or `q`, which doesn't quit here) keeps it.
+    h.press(KeyCode::Char('S')).await;
+    match &h.app.mode {
+        AppMode::DaemonRestart(dialog) => assert!(dialog.requested && dialog.in_place),
+        mode => panic!("no restart dialog: {mode:?}"),
+    }
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("Restart the Rakumux server"), "{text}");
+    assert!(text.contains("keep running"), "{text}");
+    assert!(!text.contains("[q] Quit"), "{text}");
+    h.press(KeyCode::Char('n')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.press(KeyCode::Char('S')).await;
+    assert_eq!(h.press(KeyCode::Char('q')).await, AppResult::Continue);
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(!h
+        .fake
+        .calls()
+        .iter()
+        .any(|c| c.starts_with("restart_daemon")));
+    // Enter restarts it in place; the sessions keep running.
+    h.press(KeyCode::Char('S')).await;
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    assert!(
+        h.fake
+            .calls()
+            .iter()
+            .any(|c| c.starts_with("restart_daemon")),
+        "{:?}",
+        h.fake.calls()
+    );
+    assert!(h.app.connection.is_connected());
+    assert_eq!(
+        h.app.status(),
+        Some("Restarted the Rakumux server; your sessions kept running.")
+    );
+    // Settings has both restarts, the server's with its version.
+    h.app.server_version = Some("0.1.8-dev".into());
+    let rows = h.app.modal_context(false).general;
+    let row = |label: &str| rows.iter().find(|r| r.label == label).cloned().unwrap();
+    assert_eq!(row("Restart UI").value, "R");
+    assert_eq!(
+        row("Restart server").value,
+        format!("0.1.8-dev → {} · S", app_version())
+    );
+    h.app.mode = settings_on_actions(false);
+    let AppMode::Modal { state, .. } = &mut h.app.mode else {
+        unreachable!();
+    };
+    state.selected = SettingsItem::RestartServer.index();
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(&h.app.mode, AppMode::DaemonRestart(d) if d.requested));
+}
+
+#[tokio::test]
+async fn a_server_that_cant_restart_in_place_needs_y_to_restart() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    h.press(KeyCode::Char('S')).await;
+    assert!(matches!(&h.app.mode, AppMode::DaemonRestart(d) if !d.in_place));
+    // Enter alone never ends the running sessions.
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::DaemonRestart(_)));
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.app.status(), Some("The server keeps running as it is."));
 }
 
 #[test]
@@ -549,10 +634,10 @@ async fn esc_and_the_rakumux_key_go_back_to_the_session_you_came_from() {
     assert_eq!(h.app.focus, Focus::List);
     h.press(KeyCode::Esc).await;
     assert_eq!(h.app.focus, Focus::Session);
-    // Started in Rakumux mode, Esc has nowhere to go back to.
+    // Started in Rakumux mode, Esc goes into the session in view.
     let mut fresh = harness(vec![view("A", "a", 30)]);
     fresh.press(KeyCode::Esc).await;
-    assert_eq!(fresh.app.focus, Focus::List);
+    assert_eq!(fresh.app.focus, Focus::Session);
 }
 
 #[tokio::test]
@@ -593,12 +678,14 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
     let footer: String = (0..120)
         .map(|x| buffer.get(x, 39).symbol().to_string())
         .collect();
+    assert!(footer.starts_with(" RAKUMUX  "), "the mode: {footer:?}");
+    // A in the middle, then the buttons.
+    let at = footer.find("session: a ").expect("the session");
     assert!(
-        footer.starts_with(" RAKUMUX | session: a "),
-        "the mode, then A: {footer:?}"
+        at.abs_diff((120 - "session: a".len()) / 2) <= 1,
+        "{footer:?}"
     );
-    let between = footer.trim_start_matches(" RAKUMUX | session: a ").trim();
-    assert_eq!(between, "? Help   , Settings", "{footer:?}");
+    assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
     let screen: String = buffer.content().iter().map(|c| c.symbol()).collect();
     for hint in ["go in", "Esc back", "last session"] {
         assert!(!screen.contains(hint), "{hint}");
@@ -1137,6 +1224,28 @@ async fn the_folder_filter_and_new_session_keep_the_session_in_view() {
 }
 
 // ---------------------------------------------------------------- exited and dead
+
+#[tokio::test]
+async fn esc_with_no_session_to_go_back_to_goes_into_the_one_in_view() {
+    // A fresh start (or a reloaded UI) is in Rakumux mode without a session
+    // it came from: Esc still leaves Rakumux mode, into the session shown.
+    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
+    assert_eq!(h.app.focus, Focus::List);
+    assert!(h.app.came_from.is_none());
+    let shown = h.app.detail.session_id().cloned().unwrap();
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.app.detail.session_id(), Some(&shown));
+    // With no running session in view it says so instead.
+    h.rakumux().await;
+    h.app.came_from = None;
+    h.app.list.select(session_list::Selection::NewSession);
+    h.app.reconcile_detail();
+    h.app.detail.view = DetailView::Empty;
+    h.press(KeyCode::Esc).await;
+    assert_eq!(h.app.focus, Focus::List);
+    assert!(h.app.status().unwrap().contains("No session to go back to"));
+}
 
 #[tokio::test]
 async fn exiting_the_session_you_work_in_deletes_it() {

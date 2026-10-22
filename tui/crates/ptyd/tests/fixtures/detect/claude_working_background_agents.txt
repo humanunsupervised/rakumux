@@ -1,0 +1,24 @@
+# Claude Code 2.1.307 (fullscreen) after a turn that waits for a background
+# agent: "✻ Waiting for 1 background agent to finish" has no ellipsis and the
+# footer has no "esc to interrupt"; the prompt box looks idle. The title (a
+# ◐◑◒◓ spinner) is left out so the screen alone decides. Chrome captured,
+# reply text hand-written.
+agent: claude
+expect: working
+process: claude
+cmdline: claude --dangerously-skip-permissions
+alternate_screen: true
+ms_since_output: 1800
+---
+⏺ The suites now run in a background agent. I'll report the results when it
+  finishes.
+  - What I'm doing: the run owner probes the test server before each suite.
+
+✻ Waiting for 1 background agent to finish
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on · 1 shell · ← 1 agent · ↓ to manage
+  ● main
+  ◯ minion  Polling the test server for health

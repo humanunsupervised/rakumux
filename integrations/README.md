@@ -84,6 +84,18 @@ carried through restart-in-place, cleared on detected agent changes/terminal exi
 120 seconds without updates. Screen/process detection remains the fallback. Command hooks
 have no heartbeat: long quiet operations may fall back to detection before they finish.
 
+Hooks fired inside a subagent (their input carries `agent_id`) never replace the parent's
+phase. Their tool and permission hooks are that subagent's heartbeat (`subagent`, running):
+a long foreground or background subagent stays counted, and its parent's activity fresh,
+while the parent itself is silent; a stopped subagent is never counted again. While
+hook-reported subagents run, activity stays fresh for 10 minutes without updates (one of
+their tool calls can take minutes); snapshots keep the 120-second limit. A busy state
+from command-hook deltas (not snapshots) that the same agent's screen has shown idle since
+after the latest hook, for 5 seconds, is dropped: that turn ended without a hook (Claude
+Code's Esc fires no Stop). Waiting-for-input and finished phases are never second-guessed.
+Compaction (`SessionStart` with `source: compact`, including idle compaction) neither starts
+nor ends a turn.
+
 The TUI animates busy states locally. Needs-input/done markers are static. Agent-internal
 subagents are not Rakumux child sessions. These adapters forward metadata only, never
 prompts, tool arguments, output or transcripts. Native input is capped at 1 MiB and never
@@ -92,13 +104,17 @@ generic diagnostic and empty JSON with success; activity cannot approve/deny/con
 
 ## Session badges
 
-Live agents have a right-side activity badge in the list, tabs and Grid. The list
-uses a wider, padded badge immediately before the right-aligned age:
+Live agents have a right-side activity mark in the list, tabs and Grid. In the list it
+follows the right-aligned age:
 
 - Spinner: working, including active subagents.
 - `○`: idle, with no unread completion.
 - `●`: the latest turn finished and has not been opened (`Lifecycle::Done`).
 - `◐`: waiting for input or permission, distinct from a completed reply.
+
+Active subagents also show as a count after the status in the session's description, the
+detail's title and Grid cards: `◈ 3` (🤖 or a Nerd Font robot with those icon sets). It's the
+subagents only; the session's own agent is the row itself.
 
 Opening the session marks a completed reply seen for every client. Passive list/Grid
 previews never do. Replies arriving in an open, focused conversation at the bottom of its

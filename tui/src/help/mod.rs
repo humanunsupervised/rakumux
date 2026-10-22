@@ -231,6 +231,8 @@ pub enum KeyAction {
     Reload,
     /// Reload only this UI, leaving the daemon and sessions running.
     Restart,
+    /// Restart the server in place with this build; sessions keep running.
+    RestartServer,
     QuitAndCd,
     Quit,
     /// Into the session and send it the Rakumux key itself.
@@ -239,7 +241,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 36] = [
+    pub const ALL: [KeyAction; 37] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -274,6 +276,7 @@ impl KeyAction {
         KeyAction::CheckForUpdate,
         KeyAction::Reload,
         KeyAction::Restart,
+        KeyAction::RestartServer,
         KeyAction::QuitAndCd,
         KeyAction::Quit,
     ];
@@ -315,6 +318,7 @@ impl KeyAction {
             | KeyAction::CheckForUpdate
             | KeyAction::Reload
             | KeyAction::Restart
+            | KeyAction::RestartServer
             | KeyAction::QuitAndCd
             | KeyAction::Quit => "Help and app",
         }
@@ -356,6 +360,7 @@ impl KeyAction {
             KeyAction::CheckForUpdate => "Update Rakumux (sessions keep running)",
             KeyAction::Reload => "Reconnect or reload the list",
             KeyAction::Restart => "Restart Rakumux (sessions keep running)",
+            KeyAction::RestartServer => "Restart the server (sessions keep running)",
             KeyAction::QuitAndCd => "Quit and cd to the session's folder",
             KeyAction::Quit => "Quit Rakumux (sessions keep running)",
             KeyAction::SendRakumuxKey => "Send the Rakumux key to the session",
@@ -407,6 +412,7 @@ impl KeyAction {
             KeyAction::CheckForUpdate => plain(&["U"]),
             KeyAction::Reload => plain(&["Ctrl-r"]),
             KeyAction::Restart => plain(&["R"]),
+            KeyAction::RestartServer => plain(&["S"]),
             KeyAction::QuitAndCd => plain(&["c"]),
             KeyAction::Quit => plain(&["q"]),
             KeyAction::SendRakumuxKey => plain(&["\\"]),
@@ -476,6 +482,12 @@ impl KeyAction {
                 "Asks before reloading this UI through its launcher to pick up the latest build. \
                  Confirm with y or Enter; Esc cancels. The daemon and sessions stay up. \
                  Ctrl-r only reconnects or reloads the list."
+                    .into()
+            }
+            KeyAction::RestartServer => {
+                "Asks first, then restarts the Rakumux server in place with this build (after an \
+                 update, say): sessions and their programs keep running and every window \
+                 reconnects. Same as `rakumux daemon restart`. R reloads only this UI."
                     .into()
             }
             KeyAction::TerminalPanel => {
@@ -1384,12 +1396,11 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     }
     doc.bullet("Detail or Grid cards: terminal screens, updating as the programs run.");
     doc.bullet(format!(
-        "Footer, the bottom row: a full-width orange bar in Rakumux mode, with the selected \
-         session (session: name) and buttons for this Help (`?`) and Settings (`,`); a muted \
-         blue bar \
-         with a SESSION or TERMINAL label while a program takes keys, with a `{p}` button, the \
-         way to Rakumux mode. It shows messages and the daemon connection when it isn't up. \
-         Settings lists every key."
+        "Footer, the bottom row: a full-width orange bar in Rakumux mode, with buttons for \
+         this Help (`?`) and Settings (`,`); a muted blue bar with a SESSION or TERMINAL \
+         label while a program takes keys, with a `{p}` button, the way to Rakumux mode. The \
+         session it's about is named in the middle (session: name). It shows messages and the \
+         daemon connection when it isn't up. Settings lists every key."
     ));
     doc.note(format!(
         "Current layout: {}. The Layouts tab explains all three layouts and how to switch.",
@@ -1759,8 +1770,9 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
         "Optional OpenCode, Claude Code and Codex hooks report tool phases, input requests \
          and active subagent counts without an AI key. Busy markers animate locally; \
          needs-input and done stay still. Without fresh hooks, Rakumux uses screen/process \
-         detection. See integrations/README.md in the repository for setup. Agent subagents \
-         are not Rakumux child sessions.",
+         detection. Running subagents show as a count after the status (◈ 3). See \
+         integrations/README.md in the repository for setup. Agent subagents are not Rakumux \
+         child sessions.",
     );
     doc.heading("AI naming");
     doc.text(

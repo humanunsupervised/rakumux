@@ -246,6 +246,8 @@ pub struct App {
     /// The server was just restarted from here; the next connection says
     /// how.
     restarted_daemon: Option<ServerRestart>,
+    /// The running server's version, read when it connects (Settings).
+    server_version: Option<String>,
     /// The session the user was typing in when its stream closed (a server
     /// restart, a lost connection): the next sync goes back into it.
     resume_focus: Option<(SessionId, Instant)>,
@@ -332,6 +334,7 @@ impl App {
             was_connected: false,
             checked_daemon_features: false,
             restarted_daemon: None,
+            server_version: None,
             resume_focus: None,
             ptyd_path: None,
             reconnect_at: None,
@@ -675,6 +678,25 @@ impl App {
                     .unwrap_or_else(|| format!("{} · U", app_version())),
                 "Check for a new release, confirm installation, then restart only this UI. The daemon and all running sessions stay up. Source builds and admin-owned installations may need a manual update.",
             ),
+            SettingsItem::RestartUi => (
+                "Restart UI",
+                "R".to_string(),
+                "Reload this UI with the latest build. The server and every running session keep running.",
+            ),
+            SettingsItem::RestartServer => {
+                let value = match self.server_version.as_deref() {
+                    Some(running) if running != app_version() => {
+                        format!("{running} → {} · S", app_version())
+                    }
+                    Some(running) => format!("{running} · S"),
+                    None => "S".into(),
+                };
+                (
+                    "Restart server",
+                    value,
+                    "Restart the Rakumux server in place with this build, e.g. after an update: sessions and their programs keep running and every window reconnects. Same as `rakumux daemon restart`.",
+                )
+            }
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
                 if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
@@ -962,6 +984,7 @@ impl App {
     fn on_connected(&mut self, api: Arc<dyn session_core::client::SessionApi>) {
         let missing = missing_features(api.as_ref());
         self.connection = Connection::Connected(api);
+        self.server_version = self.paths.as_ref().and_then(connection::daemon_version);
         if let Some(restart) = self.restarted_daemon.take() {
             self.set_status(match restart {
                 ServerRestart::InPlace => {
@@ -1004,6 +1027,25 @@ impl App {
             missing,
             restarting: false,
             error: None,
+            requested: false,
+        });
+    }
+
+    /// `S` or Settings: restart the server after asking, in place when it
+    /// can (sessions keep running), with this build's `rakumux-ptyd`.
+    pub fn request_server_restart(&mut self) {
+        if !self.connection.is_connected() {
+            self.set_status("Not connected to the server; Ctrl-r reconnects.");
+            return;
+        }
+        self.mode = AppMode::DaemonRestart(DaemonRestartDialog {
+            daemon_version: self.server_version.clone(),
+            in_place: api_restarts_in_place(self.api().as_deref()),
+            detail: String::new(),
+            missing: Vec::new(),
+            restarting: false,
+            error: None,
+            requested: true,
         });
     }
 
@@ -1016,6 +1058,7 @@ impl App {
                 missing: Vec::new(),
                 restarting: false,
                 error: None,
+                requested: false,
             });
         } else if self.was_connected {
             self.schedule_reconnect();

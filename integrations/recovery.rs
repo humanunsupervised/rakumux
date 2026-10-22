@@ -256,6 +256,40 @@ mod tests {
     }
 
     #[test]
+    fn opencode_v2_started_as_opencode2_resumes_as_opencode2() {
+        let plan_for = |name: &str, cmdline: &[&str]| {
+            let process = ProcessInfo {
+                pid: 7,
+                name: name.into(),
+                cmdline: args(cmdline),
+            };
+            plan(&Context {
+                process: &process,
+                cwd: None,
+                opencode_conversation: Some("ses_abc123"),
+            })
+        };
+        // `opencode` may be a different (1.x) install earlier on PATH.
+        assert_eq!(
+            plan_for(
+                "opencode2",
+                &["opencode2", "-m", "openai/gpt-5", "--print-logs"]
+            ),
+            Plan::Resume(args(&[
+                "opencode2",
+                "-m",
+                "openai/gpt-5",
+                "-s",
+                "ses_abc123"
+            ]))
+        );
+        assert_eq!(
+            plan_for("opencode", &["/home/me/.opencode/bin/opencode"]),
+            Plan::Resume(args(&["opencode", "-s", "ses_abc123"]))
+        );
+    }
+
+    #[test]
     fn session_flags_are_kept_and_the_rest_dropped() {
         assert_eq!(
             claude_flags(&args(&[

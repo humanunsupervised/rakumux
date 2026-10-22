@@ -126,13 +126,14 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   session the last session stays in view), `gg`/`G` top/bottom, `Ctrl-d`/`Ctrl-u` half a page,
   `{`/`}` previous/next folder; `Enter` or `i` goes in (reviving a dead session, restarting an
   exited one; on a folder header, a new session there), `Esc` (once it has
-  cancelled a pending key or the filter) or `Ctrl-\` goes back to the session you came from,
+  cancelled a pending key or the filter) or `Ctrl-\` goes back to the session you came from (or,
+  after a start or a reload, into the session shown),
   `Tab` to the one before, `1`-`9` into that session. `n` new, `r` rename, `p` pin, `J`/`K` move
   the session down/up, `x` close, `d`/`dd` delete, `z` full screen, `P` folders, `/` filter, `\`
-  sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `R` restart the UI, `q` quit. The footer is a
-  full-width bar that shows the mode, in zoom too: orange in Rakumux mode (with
-  `| session: <name>` after RAKUMUX and the `? Help` and `, Settings` buttons on the right), muted
-  blue in session mode (with a `Ctrl-\ Rakumux` button). Help and Settings list the keys, and
+  sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `R` restart the UI, `S` restart the server, `q` quit. The footer is a
+  full-width bar that shows the mode, in zoom too, with `session: <name>` in its centre:
+  orange in Rakumux mode (with the `? Help` and `, Settings` buttons on the right), muted blue in
+  session mode (with a `Ctrl-\ Rakumux` button). Help and Settings list the keys, and
   Settings runs any of them.
 - **Folders**: a session belongs to the folder it was started in (a repo, a worktree, any
   folder). The list shows every folder, live: sessions another window, the CLI or an agent start
@@ -153,6 +154,10 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   A confirmation explains that sessions stay running: `y`/Enter restarts, `n`/Esc cancels.
   This reloads the UI through its launcher, picking up the latest local build. The daemon and
   session programs keep running. `Ctrl-r` only reconnects or reloads the list.
+- **Restart the server**: press `S` in Rakumux mode, or Restart server in Settings (it shows the
+  running server's version next to this build's), or run `rakumux daemon restart`. After you
+  confirm, the server restarts in place with this build: sessions and their programs keep
+  running, and every window reconnects.
 - **Folder filter** (`▤ Folders ▾` at the top; `P`, or Enter on it): the Folders modal lists
   All folders and every folder with sessions. Type to filter; `Enter` shows the folder under the
   cursor alone (All folders: every folder); `Tab`/`Space` tick several, then `Enter` shows them

@@ -15,9 +15,10 @@ pub(super) fn opencode_resume(
     if !is_conversation_id(&id) {
         return None;
     }
-    let mut argv = vec!["opencode".to_string()];
+    let program = opencode_program(process);
+    let mut argv = vec![program.to_string()];
     argv.extend(keep_flags(
-        &program_args(&process.cmdline, "opencode"),
+        &program_args(&process.cmdline, program),
         &[],
         OPENCODE_OPTIONS,
         &[],
@@ -25,6 +26,21 @@ pub(super) fn opencode_resume(
     argv.push("-s".into());
     argv.push(id);
     Some(argv)
+}
+
+/// The command that started this OpenCode: `opencode2` (the V2 package's second name,
+/// often next to a 1.x `opencode` on `PATH`) is kept, anything else resumes as `opencode`.
+fn opencode_program(process: &ProcessInfo) -> &'static str {
+    let argv0 = process.cmdline.first().map(String::as_str).unwrap_or("");
+    let argv0 = argv0.split_whitespace().next().unwrap_or("");
+    let v2 = [process.name.as_str(), argv0]
+        .into_iter()
+        .any(|word| word.rsplit('/').next() == Some("opencode2"));
+    if v2 {
+        "opencode2"
+    } else {
+        "opencode"
+    }
 }
 
 fn opencode_recent_session(cwd: &Path) -> Option<String> {

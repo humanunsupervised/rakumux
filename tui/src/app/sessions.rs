@@ -626,13 +626,27 @@ impl App {
     }
 
     /// Esc (with nothing to cancel) or the Rakumux key in Rakumux mode:
-    /// back into the session Rakumux mode was entered from.
+    /// back into the session Rakumux mode was entered from, or without one
+    /// into the running session in view.
     pub fn return_to_session(&mut self) {
         if self.came_from_terminal && self.terminal_panel.open {
             self.focus_terminal_panel();
             return;
         }
-        let Some(id) = self.came_from.clone() else {
+        // Nothing to go back to (a fresh start, a reloaded UI): into the
+        // running session in view instead, as Esc leaves Rakumux mode.
+        let in_view = || {
+            self.detail
+                .session_id()
+                .filter(|id| {
+                    self.list
+                        .get(id)
+                        .is_some_and(|s| s.status == SessionStatus::Live)
+                })
+                .cloned()
+        };
+        let Some(id) = self.came_from.clone().or_else(in_view) else {
+            self.set_status("No session to go back to: select one and press Enter.");
             return;
         };
         match self.list.get(&id).map(|s| s.status) {

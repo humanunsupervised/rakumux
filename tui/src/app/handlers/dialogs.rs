@@ -151,8 +151,20 @@ fn handle_daemon_restart_key(app: &mut App, key: KeyEvent) -> AppResult {
     }
     // An older daemon still works: restarting it ends the running sessions
     // unless it restarts in place, so then only `y` does, never a stray
-    // Enter.
+    // Enter. Asked for, declining (or `q`) only closes it.
     let outdated = !dialog.missing.is_empty();
+    if dialog.requested {
+        match key.code {
+            KeyCode::Enter if !dialog.in_place => {}
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => app.restart_daemon(),
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') => {
+                app.mode = AppMode::Normal;
+                app.set_status("The server keeps running as it is.");
+            }
+            _ => {}
+        }
+        return AppResult::Continue;
+    }
     match key.code {
         KeyCode::Enter if outdated && !dialog.in_place => {}
         KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => app.restart_daemon(),

@@ -17,8 +17,8 @@ new-session flow, and code boundaries.
 - Settings is one page (settings, then every action; values and keys pinned right), sized from
   its rows, at most 80% of the screen's height; `→` shows the selected row's note in a popover
   (the rows never shift) and the wheel moves the selection. Help keeps a reading width and tabs. All dialogs leave the footer row visible.
-  The footer is a full-width bar: orange with dark text in Rakumux mode (`| session: <name>` after
-  the badge, `? Help` and `, Settings` buttons in a darker orange), muted blue in session and
+  The footer is a full-width bar with `session: <name>` in its centre: orange with dark text in
+  Rakumux mode (`? Help` and `, Settings` buttons in a darker orange), muted blue in session and
   terminal input modes (a `Ctrl-\ Rakumux` button); the badge and buttons are hit targets.
 - A session the user exits from inside (controller, session mode) is deleted on its `exited`
   stream event (`sessions.rs::on_stream_event`); one ending in the background stays `exited`.

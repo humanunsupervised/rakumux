@@ -285,6 +285,9 @@ pub struct DaemonRestartDialog {
     pub missing: Vec<String>,
     pub restarting: bool,
     pub error: Option<String>,
+    /// Asked for (`S`, Settings) rather than offered: nothing is missing,
+    /// and declining just closes it.
+    pub requested: bool,
 }
 
 /// How this TUI just restarted the server (the next connection says so).
@@ -306,16 +309,22 @@ pub enum SettingsItem {
     CycleInSessions,
     /// Install a new release and restart only this UI.
     Update,
+    /// Reload this UI with the latest build (`R`).
+    RestartUi,
+    /// Restart the server in place with this build (`S`).
+    RestartServer,
     /// Independent shell below the main detail pane.
     TerminalPanel,
 }
 
 impl SettingsItem {
-    pub const ALL: [SettingsItem; 5] = [
+    pub const ALL: [SettingsItem; 7] = [
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
         SettingsItem::Update,
+        SettingsItem::RestartUi,
+        SettingsItem::RestartServer,
         SettingsItem::TerminalPanel,
     ];
 
@@ -324,7 +333,10 @@ impl SettingsItem {
         match self {
             SettingsItem::Layout | SettingsItem::Icons => "Appearance",
             SettingsItem::CycleInSessions => "Keyboard",
-            SettingsItem::Update | SettingsItem::TerminalPanel => "App",
+            SettingsItem::Update
+            | SettingsItem::RestartUi
+            | SettingsItem::RestartServer
+            | SettingsItem::TerminalPanel => "App",
         }
     }
 

@@ -810,6 +810,15 @@ mod tests {
             Some("claude")
         );
         assert_eq!(agent_of("opencode", &["opencode"]), Some("opencode"));
+        // OpenCode V2's npm package (`@opencode/cli`) also installs `opencode2`.
+        assert_eq!(agent_of("opencode2", &["opencode2"]), Some("opencode"));
+        assert_eq!(
+            agent_of(
+                "opencode.exe",
+                &["/usr/lib/node_modules/@opencode/cli/bin/opencode.exe"]
+            ),
+            Some("opencode")
+        );
         assert_eq!(
             agent_of("cursor-agent", &["cursor-agent"]),
             Some("cursor-agent")
@@ -1027,6 +1036,18 @@ mod tests {
         ] {
             assert!(!is_claude_activity_line(line), "{line}");
         }
+        assert!(claude::is_claude_background_wait_line(
+            "✻ Waiting for 1 background agent to finish"
+        ));
+        assert!(claude::is_claude_background_wait_line(
+            "✢ Waiting for 3 background agents to finish"
+        ));
+        assert!(!claude::is_claude_background_wait_line(
+            "⏺ Waiting for 1 background agent to finish"
+        ));
+        assert!(!claude::is_claude_background_wait_line(
+            "I'm waiting for the background agent to finish."
+        ));
     }
 
     #[test]

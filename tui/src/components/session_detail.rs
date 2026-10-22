@@ -15,7 +15,7 @@ use ratatui::{
 use session_core::api::Role;
 use session_core::model::SessionStatus;
 
-use super::format::{abbreviate_home, status_glyph, status_label, truncate};
+use super::format::{abbreviate_home, status_glyph, status_label, subagent_badge, truncate};
 use super::utils::{fade, fade_preview, get_spinner_char};
 use crate::app::grouping::Grouping;
 use crate::app::screen::Screen;
@@ -66,6 +66,12 @@ pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<
                 if let Some(status) = status_label(session) {
                     spans.push(Span::styled(
                         format!(" · {status}"),
+                        Style::default().fg(p.text_muted),
+                    ));
+                }
+                if let Some(badge) = subagent_badge(session, app.icons()) {
+                    spans.push(Span::styled(
+                        format!(" · {badge}"),
                         Style::default().fg(p.text_muted),
                     ));
                 }

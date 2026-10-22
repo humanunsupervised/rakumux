@@ -64,6 +64,16 @@ impl Icons {
         }
     }
 
+    /// Marks the coding agents a session has working: `◈ 3` subagents.
+    pub fn agents(self) -> &'static str {
+        match self {
+            Icons::Plain => "◈",
+            Icons::Emoji => "🤖",
+            // nf-md-robot
+            Icons::Nerd => "\u{f06a9}",
+        }
+    }
+
     /// Marks a git branch: `⎇ main`.
     pub fn branch(self) -> &'static str {
         match self {

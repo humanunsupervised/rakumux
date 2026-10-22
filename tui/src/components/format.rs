@@ -137,20 +137,7 @@ pub fn status_label(session: &SessionView) -> Option<String> {
                 (Lifecycle::Done, _) => Some("unread reply"),
                 _ => lifecycle_label(session.lifecycle),
             };
-            let count = session
-                .activity
-                .as_ref()
-                .map_or(0, |activity| activity.active_subagents);
-            label.map(|label| {
-                if count > 0 {
-                    format!(
-                        "{label} · {count} subagent{}",
-                        if count == 1 { "" } else { "s" }
-                    )
-                } else {
-                    label.into()
-                }
-            })
+            label.map(str::to_string)
         }
         SessionStatus::Exited => Some(match session.exit_code {
             Some(code) => format!("exited (code {code})"),
@@ -159,6 +146,17 @@ pub fn status_label(session: &SessionView) -> Option<String> {
         SessionStatus::Dead => Some("dead".into()),
         SessionStatus::Unknown => None,
     }
+}
+
+/// The subagents a running agent has working, as an agent mark and their
+/// number (`◈ 3`, after the status); nothing without any.
+pub fn subagent_badge(session: &SessionView, icons: Icons) -> Option<String> {
+    let count = session
+        .activity
+        .as_ref()
+        .filter(|_| session.status == SessionStatus::Live)
+        .map_or(0, |activity| activity.active_subagents);
+    (count > 0).then(|| format!("{} {count}", icons.agents()))
 }
 
 /// `~/…` for paths under the home directory.
@@ -251,6 +249,7 @@ fn session_facts(session: &SessionView, icons: Icons) -> Vec<String> {
             if let Some(label) = status_label(session) {
                 parts.push(label);
             }
+            parts.extend(subagent_badge(session, icons));
         }
     }
     parts
@@ -508,20 +507,66 @@ mod tests {
             active_subagents: 3,
             updated_at: 1,
         });
+        // The count is a badge of its own, not part of the status.
         assert_eq!(
             status_label(&session).as_deref(),
-            Some("waiting for response · 3 subagents")
+            Some("waiting for response")
+        );
+        assert_eq!(
+            subagent_badge(&session, Icons::Plain).as_deref(),
+            Some("◈ 3")
         );
         assert!("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(status_glyph(&session).0));
         session.lifecycle = Lifecycle::Blocked;
         assert_eq!(status_glyph(&session).0, "◐");
-        assert_eq!(
-            status_label(&session).as_deref(),
-            Some("waiting for you · 3 subagents")
-        );
+        assert_eq!(status_label(&session).as_deref(), Some("waiting for you"));
         session.lifecycle = Lifecycle::Done;
         session.activity = None;
         assert_eq!(status_glyph(&session).0, "●");
+    }
+
+    #[test]
+    fn the_subagent_badge_follows_the_status_in_the_description() {
+        use session_core::activity::{ActivityPhase, AgentActivity};
+        let mut session = view("A", "agent", 0);
+        session.agent = Some(session_core::model::AgentInfo {
+            kind: "claude".into(),
+            ..Default::default()
+        });
+        session.lifecycle = Lifecycle::Working;
+        let style = Style::default();
+        let text = |session: &SessionView, icons: Icons| -> String {
+            secondary_line(session, 80, icons, style)
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        };
+        // None running: no badge.
+        assert_eq!(text(&session, Icons::Plain), "claude · working");
+        assert_eq!(subagent_badge(&session, Icons::Plain), None);
+        session.activity = Some(AgentActivity {
+            phase: ActivityPhase::RunningTool,
+            active_subagents: 2,
+            updated_at: 1,
+        });
+        assert_eq!(text(&session, Icons::Plain), "claude · running tool · ◈ 2");
+        assert_eq!(text(&session, Icons::Emoji), "claude · running tool · 🤖 2");
+        assert!(text(&session, Icons::Nerd).ends_with("\u{f06a9} 2"));
+        // A report comes after it, room allowing.
+        session.reported = Some(session_core::model::Reported {
+            state: None,
+            text: Some("reviewing the diff".into()),
+            result: None,
+            at: 1,
+        });
+        assert_eq!(
+            text(&session, Icons::Plain),
+            "claude · running tool · ◈ 2 · reviewing the diff"
+        );
+        // An ended session has nothing running.
+        session.status = SessionStatus::Exited;
+        assert_eq!(subagent_badge(&session, Icons::Plain), None);
     }
 
     #[test]
