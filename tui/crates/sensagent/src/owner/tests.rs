@@ -252,7 +252,8 @@ fn a_failed_request_closes_the_client_so_late_answers_are_never_misread() {
         let mut garbage = 4u32.to_be_bytes().to_vec();
         garbage.extend_from_slice(&[0, b'{', b'{', b'{']);
         stream.write_all(&garbage).unwrap();
-        write_message(&mut stream, &OwnerResponse::Done).unwrap();
+        // The client may already have closed (macOS: `NotConnected`).
+        let _ = write_message(&mut stream, &OwnerResponse::Done);
         stream
     });
     let client = OwnerClient::connect(&layout, "test").unwrap();
