@@ -1287,6 +1287,7 @@ impl App {
                         FooterKey::Rakumux => {}
                         FooterKey::Help => super::handlers::settings::open_help(self),
                         FooterKey::Settings => super::handlers::settings::open_settings(self),
+                        FooterKey::SignIn => self.start_sign_in(),
                     }
                     return;
                 }

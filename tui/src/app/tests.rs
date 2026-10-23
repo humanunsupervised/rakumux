@@ -4273,3 +4273,55 @@ async fn signing_out_stops_the_descriptions() {
     );
     assert_eq!(h.app.description(&SessionId::from_string("A")), None);
 }
+
+#[tokio::test]
+async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let footer = |h: &Harness| -> String {
+        crate::components::footer::footer_line(&h.app, 120)
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    };
+    let (mut h, account) = account_harness(testing::FakeAccount::default());
+    assert!(
+        footer(&h).ends_with(" , Settings   Sign in  "),
+        "{:?}",
+        footer(&h)
+    );
+    // Drawn at the bottom right, and a tap there asks for a code at once.
+    screen_rows(&mut h, 160, 48);
+    let (area, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::FooterKey(FooterKey::SignIn))
+        .expect("the Sign in button");
+    assert_eq!(area.y, 47);
+    assert_eq!(area.x + area.width, 159);
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        h.app.handle_mouse(MouseEvent {
+            kind,
+            column: area.x + 1,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    h.app.process_pending();
+    assert!(account.calls().contains(&"sign_in"));
+    assert!(matches!(
+        account_state(&h),
+        Some(super::types::AccountDialogState::Waiting(_))
+    ));
+    // Signed in (or not yet checked) there's no button.
+    let (h, _) = account_harness(testing::FakeAccount::signed_in());
+    assert!(
+        footer(&h).ends_with(" ? Help   , Settings  "),
+        "{:?}",
+        footer(&h)
+    );
+}

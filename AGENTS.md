@@ -670,9 +670,10 @@ has (in Rakumux mode the selected session, else the one kept in view; the one ta
 session mode; none for the terminal panel), since the detail has no title row: the session's
 terminal fills it from its top row; and on the right buttons
 (a darker shade of the orange bar; dark chips on the blue one): `? Help` and `, Settings` in
-Rakumux mode, `Ctrl-\ Rakumux` in session mode. When the row is short the session gives way
-first (off the centre, to its name alone, then nothing), then the message is cut, then buttons go
-from the right (Settings, then Help).
+Rakumux mode, then `Sign in` at the bottom right while signed out of the Rakumux account (a tap
+asks for a sign-in code at once), `Ctrl-\ Rakumux` in session mode. When the row is short the
+session gives way first (off the centre, to its name alone, then nothing), then the message is
+cut, then buttons go from the right (Sign in, Settings, then Help).
 Help and Settings list every key; Settings runs them. A welcome tour
 (`components/welcome.rs`, `AppMode::Welcome`) opens on startup until its "Don't show this on
 startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the list.

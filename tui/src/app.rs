@@ -185,6 +185,8 @@ pub enum FooterKey {
     Help,
     /// `, Settings` (Rakumux mode): open Settings.
     Settings,
+    /// `Sign in` (Rakumux mode, signed out): sign in to the Rakumux account.
+    SignIn,
 }
 
 /// Everything `App::new` needs; tests swap the connector, executor and

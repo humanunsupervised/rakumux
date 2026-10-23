@@ -6,13 +6,13 @@
 //! in the centre (in Rakumux mode the selected session, else the one kept in
 //! view; in session mode the one taking the keys; with the status mark its
 //! list row has, since the detail has no title row); and buttons on the right: Help (`?`) and Settings
-//! (`,`) in Rakumux mode, the way to Rakumux mode (the Rakumux key) in
-//! session mode. Settings lists every key.
+//! (`,`) in Rakumux mode, then Sign in while signed out of the Rakumux account; the
+//! way to Rakumux mode (the Rakumux key) in session mode. Settings lists every key.
 //!
 //! The footer never wraps or grows: when the row is short the session
 //! gives way first (to its mark and name, then nothing), then the message is
 //! cut (down to [`MIN_MESSAGE`] columns), then buttons are dropped from the
-//! right (Settings first); the badge always shows.
+//! right (Sign in, then Settings); the badge always shows.
 //!
 //! The badge and the buttons are tap targets, for phones and the mouse: the
 //! `SESSION` badge switches to Rakumux mode, the `RAKUMUX` badge goes back
@@ -29,7 +29,7 @@ use session_core::model::SessionView;
 
 use super::format::{activity_badge, status_glyph};
 use super::utils::get_spinner_char;
-use crate::app::types::{AppMode, Focus};
+use crate::app::types::{AccountStatus, AppMode, Focus};
 use crate::app::{App, Connection, FooterKey, Hit};
 use crate::layout::{str_width, truncate};
 use crate::theme;
@@ -44,7 +44,8 @@ const GAP: usize = 1;
 /// [`theme::Palette::faded`]).
 const BUTTON_SHADE: f32 = 0.2;
 
-/// A footer button: its keys, what it opens, and what a tap on it does.
+/// A footer button: its keys (none for one only tapped), what it opens, and
+/// what a tap on it does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Button {
     pub keys: String,
@@ -61,8 +62,11 @@ impl Button {
         }
     }
 
-    /// Columns it takes: ` keys label `.
+    /// Columns it takes: ` keys label `, or ` label ` without keys.
     fn width(&self) -> usize {
+        if self.keys.is_empty() {
+            return str_width(self.label) + 2;
+        }
         str_width(&self.keys) + str_width(self.label) + 3
     }
 }
@@ -100,23 +104,30 @@ pub fn mode_badge(app: &App) -> Span<'static> {
     }
 }
 
-/// The footer's buttons: Help and Settings in Rakumux mode; in session
-/// mode the Rakumux key, the way out (Help and Settings are a tap away
-/// from there). Nothing while typing a filter (those keys type) or while a
-/// dialog is open.
+/// The footer's buttons: Help and Settings in Rakumux mode, and Sign in at
+/// the right while signed out of the Rakumux account (not before the account
+/// was checked); in session mode the Rakumux key, the way out (Help and
+/// Settings are a tap away from there). Nothing while typing a filter (those
+/// keys type) or while a dialog is open.
 pub fn buttons(app: &App) -> Vec<Button> {
     if !matches!(app.mode, AppMode::Normal) || app.list.filter_editing {
         return Vec::new();
     }
     match app.focus {
-        Focus::List => vec![
-            Button::new("?", "Help", FooterKey::Help),
-            Button::new(
-                crate::help::SETTINGS_KEY_PRIMARY,
-                "Settings",
-                FooterKey::Settings,
-            ),
-        ],
+        Focus::List => {
+            let mut buttons = vec![
+                Button::new("?", "Help", FooterKey::Help),
+                Button::new(
+                    crate::help::SETTINGS_KEY_PRIMARY,
+                    "Settings",
+                    FooterKey::Settings,
+                ),
+            ];
+            if app.account == AccountStatus::SignedOut {
+                buttons.push(Button::new("", "Sign in", FooterKey::SignIn));
+            }
+            buttons
+        }
         Focus::Session | Focus::Terminal => vec![Button::new(
             app.rakumux_key.label(),
             "Rakumux",
@@ -169,6 +180,11 @@ fn push_buttons(
             Hit::FooterKey(button.target),
         ));
         x += width;
+        if button.keys.is_empty() {
+            // Only tapped: the label in the keys' bolder ink.
+            spans.push(Span::styled(format!(" {} ", button.label), key_style));
+            continue;
+        }
         spans.push(Span::styled(format!(" {}", button.keys), key_style));
         spans.push(Span::styled(format!(" {} ", button.label), label_style));
     }

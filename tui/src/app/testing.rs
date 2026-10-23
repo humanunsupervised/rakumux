@@ -967,7 +967,8 @@ pub fn options(fake: &Arc<FakeApi>, scope: ScopeRoot, dir: &tempfile::TempDir) -
         connector: Arc::new(move || Ok(api.clone())),
         namer: fake_namer,
         phone: Arc::new(FakePhone::default()),
-        account: Arc::new(FakeAccount::default()),
+        // Signed in, so the footer shows only its usual buttons.
+        account: Arc::new(FakeAccount::signed_in()),
         updater: Arc::new(FakeUpdater::default()),
         exec_mode: ExecMode::Inline,
         debug: false,

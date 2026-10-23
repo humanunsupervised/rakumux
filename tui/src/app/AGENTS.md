@@ -19,7 +19,8 @@ new-session flow, and code boundaries.
   (the rows never shift) and the wheel moves the selection. Help keeps a reading width and tabs. All dialogs leave the footer row visible.
   The detail has no title row: the footer names the session in view (`session: ● <name>`, the
   mark its list row has). The footer is a full-width bar with that in its centre: orange with dark text in
-  Rakumux mode (`? Help` and `, Settings` buttons in a darker orange), muted blue in session and
+  Rakumux mode (`? Help` and `, Settings` buttons in a darker orange, and `Sign in` while signed
+  out, `FooterKey::SignIn` → `App::start_sign_in`), muted blue in session and
   terminal input modes (a `Ctrl-\ Rakumux` button); the badge and buttons are hit targets.
 - A session the user exits from inside (controller, session mode) is deleted on its `exited`
   stream event (`sessions.rs::on_stream_event`); one ending in the background stays `exited`.
