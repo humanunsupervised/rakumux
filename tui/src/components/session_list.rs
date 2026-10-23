@@ -72,8 +72,9 @@ fn folder_item_height(pane: u16) -> u16 {
 const INDENT: usize = 3;
 
 /// A session's right column: its age (at most four columns, `52w`) and its
-/// mark, which the lines under its name stay clear of, with a gap.
-const RIGHT_COLUMN: usize = 7;
+/// mark, which the lines under its name stay clear of, with a few columns'
+/// gap so a long line doesn't run up against them.
+const RIGHT_COLUMN: usize = 10;
 
 /// Shown left of a session while it's dragged.
 const DRAG_MARK: &str = "▎";

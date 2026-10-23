@@ -4503,7 +4503,7 @@ async fn the_lines_under_a_name_stop_short_of_its_age_and_mark() {
     for below in [title + 1, title + 2] {
         let end = row(&screen[below]).trim_end().chars().count();
         assert!(
-            end + 6 <= mark_end,
+            end + 9 <= mark_end,
             "{:?}\n{:?}",
             row(&screen[title]),
             row(&screen[below])
