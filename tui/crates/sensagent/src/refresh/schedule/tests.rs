@@ -17,6 +17,7 @@ fn candidate(number: u8, revision: u64, dirty: bool) -> Candidate {
         stamp: stamp(revision),
         dirty,
         finished: false,
+        follows_turn: false,
     }
 }
 
@@ -76,6 +77,29 @@ fn new_sessions_are_due_once_and_settled_stamps_are_skipped() {
         plan(&mut scheduler, 0, vec![candidate(2, 5, false)]),
         [(2, false)]
     );
+}
+
+#[test]
+fn a_followed_turns_trigger_points_skip_the_session_interval() {
+    let mut scheduler = RefreshScheduler::new();
+    let turn = |revision| Candidate {
+        follows_turn: true,
+        ..candidate(1, revision, false)
+    };
+    attempt(&mut scheduler, 1, 1, 10, Outcome::Done);
+    assert_eq!(plan(&mut scheduler, 11, vec![turn(2)]), [(1, false)]);
+    attempt(&mut scheduler, 1, 2, 11, Outcome::Done);
+    assert!(plan(&mut scheduler, 12, vec![turn(2)]).is_empty());
+    // Failures still back off.
+    attempt(
+        &mut scheduler,
+        1,
+        3,
+        12,
+        Outcome::Failed(RefreshFailure::Unavailable),
+    );
+    assert!(plan(&mut scheduler, 13, vec![turn(3)]).is_empty());
+    assert_eq!(plan(&mut scheduler, 72, vec![turn(3)]), [(1, false)]);
 }
 
 #[test]

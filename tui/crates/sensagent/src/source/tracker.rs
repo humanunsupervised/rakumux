@@ -4,7 +4,7 @@ use std::fmt;
 use session_core::activity::ActivityPhase;
 use session_core::api::{EventEnvelope, SessionEvent};
 use session_core::ids::SessionId;
-use session_core::model::{Lifecycle, Reported, ScopeRoot, SessionStatus, SessionView};
+use session_core::model::{AgentTurn, Lifecycle, Reported, ScopeRoot, SessionStatus, SessionView};
 use thiserror::Error;
 
 use super::capture::{report_text, CaptureError, CaptureExpectation, SessionCapture};
@@ -48,11 +48,47 @@ pub(crate) struct Candidate {
     /// The agent just finished a turn (native lifecycle `Done`), so a new stamp should
     /// be described now rather than after the per-session interval.
     pub(crate) finished: bool,
+    /// The daemon follows the agent's turn: its stamps advance only at the turn's
+    /// trigger points, each described now (see [`TurnSettings`]).
+    pub(crate) follows_turn: bool,
+}
+
+/// When an agent's turn gets an AI summary, and from what (`sessions.ai_summary` in
+/// the TUI's `config.json`). Without a followed turn (another program, an older
+/// daemon), terminal output is summarized as before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TurnSettings {
+    /// While the agent works: a summary when the user gives it a prompt, then each
+    /// time it has written this many more messages. Waiting for the user and the
+    /// final reply always get one, the reply from the prompt and every message.
+    pub every: u32,
+    /// The newest messages a working turn's summary reads, after the prompt.
+    pub recent: u32,
+}
+
+impl Default for TurnSettings {
+    fn default() -> Self {
+        Self {
+            every: 5,
+            recent: 10,
+        }
+    }
+}
+
+impl TurnSettings {
+    /// At least one message each; at most what the daemon keeps of a turn.
+    pub fn bounded(self) -> Self {
+        Self {
+            every: self.every.clamp(1, 100),
+            recent: self.recent.clamp(1, 100),
+        }
+    }
 }
 
 /// Daemon facts that supersede a source revision at once: incarnation, liveness,
-/// folder, privacy, native lifecycle and the session's own report.
-#[derive(Clone, PartialEq, Eq)]
+/// folder, privacy, progress (native lifecycle, or the followed turn's trigger
+/// point) and the session's own report. Compare them with [`Facts::same`].
+#[derive(Clone)]
 pub(super) struct Facts {
     pub(super) scope: ScopeRoot,
     pub(super) live: bool,
@@ -60,6 +96,33 @@ pub(super) struct Facts {
     pub(super) private: bool,
     pub(super) lifecycle: Lifecycle,
     pub(super) reported: Option<Reported>,
+    /// The agent's turn the daemon follows (`SessionView::agent_turn`).
+    pub(super) turn: Option<AgentTurn>,
+}
+
+/// What a session is doing, as far as its summaries go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Progress {
+    /// No followed turn: the native lifecycle.
+    Lifecycle(Lifecycle),
+    /// A followed turn's trigger point.
+    Turn {
+        id: u64,
+        state: TurnState,
+        /// Working or blocked: how many times the agent wrote `every` messages.
+        /// Finished: every message, so a reply read after the lifecycle changed
+        /// is summarized too.
+        mark: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TurnState {
+    Working,
+    /// Waiting for the user (lifecycle `blocked`).
+    Blocked,
+    /// The agent gave its final reply (lifecycle `done` or `idle`).
+    Finished,
 }
 
 impl Facts {
@@ -76,7 +139,43 @@ impl Facts {
             private: view.private,
             lifecycle: view.lifecycle,
             reported: view.reported.clone(),
+            turn: view.agent_turn.filter(|_| live),
         }
+    }
+
+    pub(super) fn follows_turn(&self) -> bool {
+        self.turn.is_some()
+    }
+
+    pub(super) fn progress(&self, every: u32) -> Progress {
+        let Some(turn) = self.turn else {
+            return Progress::Lifecycle(self.lifecycle);
+        };
+        let state = match self.lifecycle {
+            Lifecycle::Done | Lifecycle::Idle => TurnState::Finished,
+            Lifecycle::Blocked => TurnState::Blocked,
+            _ => TurnState::Working,
+        };
+        let mark = match state {
+            TurnState::Finished => turn.messages,
+            _ => turn.messages / every.max(1),
+        };
+        Progress::Turn {
+            id: turn.id,
+            state,
+            mark,
+        }
+    }
+
+    /// Whether `other` describes the same source: a followed turn's lifecycle and
+    /// messages count only through its trigger point.
+    pub(super) fn same(&self, other: &Facts, every: u32) -> bool {
+        self.scope == other.scope
+            && self.live == other.live
+            && self.pid == other.pid
+            && self.private == other.private
+            && self.reported == other.reported
+            && self.progress(every) == other.progress(every)
     }
 }
 
@@ -108,12 +207,18 @@ pub(crate) struct SourceTracker {
     generation: u64,
     sessions: HashMap<SessionId, Tracked>,
     retired: HashSet<SessionId>,
+    turns: TurnSettings,
 }
 
 impl SourceTracker {
     /// No sessions observed; no daemon request is made.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Summarize followed turns with these settings from now on.
+    pub fn set_turn_settings(&mut self, settings: TurnSettings) {
+        self.turns = settings.bounded();
     }
 
     /// Apply a complete view from `list`/`get` or a created/updated event. Sessions
@@ -141,7 +246,7 @@ impl SourceTracker {
             SessionEvent::Removed => return self.remove(id),
             SessionEvent::Activity => {
                 if let Some(tracked) = self.sessions.get_mut(id) {
-                    tracked.dirty |= tracked.facts.live;
+                    tracked.dirty |= output_counts(&tracked.facts);
                 }
                 return Ok(SourceUpdate::Unchanged);
             }
@@ -186,7 +291,7 @@ impl SourceTracker {
         let mut failure = None;
         for view in views {
             if let Some(tracked) = self.sessions.get_mut(&view.id) {
-                tracked.dirty |= tracked.facts.live;
+                tracked.dirty |= output_counts(&tracked.facts);
             }
             match self.apply_view(view) {
                 Ok(SourceUpdate::Unchanged) => {}
@@ -239,7 +344,15 @@ impl SourceTracker {
                 session: id.clone(),
                 stamp: tracked.stamp,
                 dirty: tracked.dirty,
-                finished: tracked.facts.lifecycle == Lifecycle::Done,
+                finished: matches!(
+                    tracked.facts.progress(self.turns.every),
+                    Progress::Lifecycle(Lifecycle::Done)
+                        | Progress::Turn {
+                            state: TurnState::Finished,
+                            ..
+                        }
+                ),
+                follows_turn: tracked.facts.follows_turn(),
             })
     }
 
@@ -312,6 +425,7 @@ impl SourceTracker {
         Ok(CaptureExpectation::new(
             job,
             tracked.facts.clone(),
+            self.turns,
             tracked.reports,
             tracked.output,
         ))
@@ -366,7 +480,7 @@ impl SourceTracker {
             tracked.reports = has_report(&facts);
             tracked.output = true;
             tracked.dirty = false;
-        } else if facts != tracked.facts {
+        } else if !facts.same(&tracked.facts, self.turns.every) {
             revise(tracked)?;
             if facts.reported != tracked.facts.reported {
                 tracked.reports = has_report(&facts);
@@ -374,14 +488,19 @@ impl SourceTracker {
             if tracked.incarnation.is_none() {
                 tracked.incarnation = facts.pid;
             }
-            // The new revision is captured afresh, so it covers pending output too.
-            tracked.output |= tracked.dirty;
+            // The new revision is captured afresh, so it covers pending output too;
+            // a followed turn that moved on has new messages.
+            let progressed = facts.follows_turn()
+                && facts.progress(self.turns.every) != tracked.facts.progress(self.turns.every);
+            tracked.output |= tracked.dirty || progressed;
             tracked.dirty = false;
         } else {
             if phase != tracked.phase {
-                tracked.phase = phase;
-                tracked.dirty |= tracked.facts.live;
+                tracked.dirty |= output_counts(&facts);
             }
+            // Messages and lifecycle changes between a turn's trigger points.
+            tracked.facts = facts;
+            tracked.phase = phase;
             return Ok(SourceUpdate::Unchanged);
         }
         tracked.facts = facts;
@@ -422,6 +541,12 @@ fn revise(tracked: &mut Tracked) -> Result<(), SourceError> {
         .checked_add(1)
         .ok_or(SourceError::Exhausted)?;
     Ok(())
+}
+
+/// Whether new terminal output or activity calls for a new summary: not while the
+/// daemon follows the agent's turn, whose own trigger points decide.
+fn output_counts(facts: &Facts) -> bool {
+    facts.live && !facts.follows_turn()
 }
 
 fn has_report(facts: &Facts) -> bool {

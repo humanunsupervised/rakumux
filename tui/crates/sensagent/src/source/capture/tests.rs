@@ -173,3 +173,43 @@ fn captured_text_is_redacted_from_debug() {
     assert_eq!(input.reported_text, Some("synthetic-private-report"));
     assert_eq!(input.recent_output, Some("synthetic-private-output"));
 }
+
+fn turn(prompt: Option<&str>, messages: &[&str]) -> TurnContent {
+    TurnContent {
+        id: 3,
+        prompt: prompt.map(Into::into),
+        messages: messages.iter().map(|message| (*message).into()).collect(),
+        total: messages.len() as u32,
+    }
+}
+
+#[test]
+fn a_turn_window_is_the_prompt_then_the_newest_messages_oldest_first() {
+    let messages = ["Reading", "Bash: Run the tests", "Fixing", "Done: all pass"];
+    assert_eq!(
+        turn_text(&turn(Some("Fix the tests"), &messages), 2),
+        "The user's last prompt:\nFix the tests\n\n\
+         The agent's messages since (reasoning, tool calls and replies; the last 2 of 4, \
+         oldest first):\nFixing\nDone: all pass"
+    );
+    let all = turn_text(&turn(Some("Fix the tests"), &messages), usize::MAX);
+    assert!(all.contains("; all 4, oldest first):\nReading\nBash: Run the tests\n"));
+    assert_eq!(
+        turn_text(&turn(None, &[]), 10),
+        "The user's last prompt:\n(not known)\n\nThe agent hasn't written anything since."
+    );
+}
+
+#[test]
+fn a_long_turn_keeps_its_prompt_and_final_reply_within_the_bound() {
+    // Words, unlike one long base64-like run, which windows mask.
+    let long = "word ".repeat(100);
+    let mut messages: Vec<&str> = vec![&long; 40];
+    messages.push("The final reply\u{7}");
+    let text = turn_text(&turn(Some("Do it all"), &messages), usize::MAX);
+    assert!(text.len() <= TURN_BYTES);
+    assert!(text.starts_with("The user's last prompt:\nDo it all\n"));
+    assert!(text.ends_with("\nThe final reply"));
+    assert!(text.contains("of 41, oldest first"));
+    assert_eq!(kept(&text).as_deref(), Some(text.as_str()));
+}

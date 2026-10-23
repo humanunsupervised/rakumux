@@ -1,6 +1,7 @@
 //! In-memory SessionApi for AI-status source tests: scripted views and output, a
 //! listed session set, queued event streams and recorded calls. Every operation other
-//! than `get`, `read`, `list_all` and `subscribe` fails and is recorded.
+//! than `get`, `read`, `turn` (once set), `list_all` and `subscribe` fails and is
+//! recorded.
 
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -8,8 +9,8 @@ use std::sync::Mutex;
 
 use session_core::api::{
     ApiError, AttachRequest, CallerInfo, CreateSession, DaemonStatusInfo, ErrorCode, EventEnvelope,
-    ReadRequest, ReadResult, Report, ReviveSession, SendRequest, SubscribeRequest, WaitRequest,
-    WaitResult,
+    ReadRequest, ReadResult, Report, ReviveSession, SendRequest, SubscribeRequest, TurnContent,
+    WaitRequest, WaitResult,
 };
 use session_core::client::{AttachStream, EventStream, Result, SessionApi};
 use session_core::ids::SessionId;
@@ -72,6 +73,7 @@ pub(crate) struct FakeSessionApi {
     calls: Mutex<Vec<String>>,
     reads: Mutex<Vec<ReadRequest>>,
     panic_get: Mutex<Option<usize>>,
+    turn: Mutex<Option<TurnContent>>,
 }
 
 impl FakeSessionApi {
@@ -97,7 +99,13 @@ impl FakeSessionApi {
             calls: Mutex::new(Vec::new()),
             reads: Mutex::new(Vec::new()),
             panic_get: Mutex::new(None),
+            turn: Mutex::new(None),
         }
+    }
+
+    /// What `turn` answers; without one it fails.
+    pub(crate) fn set_turn(&self, turn: TurnContent) {
+        *self.turn.lock().unwrap() = Some(turn);
     }
 
     /// Answers for the next `get` calls, in order; the last one repeats.
@@ -220,6 +228,17 @@ impl SessionApi for FakeSessionApi {
             truncated: true,
             untrusted: true,
         })
+    }
+
+    fn turn(&self, id: &SessionId) -> Result<TurnContent> {
+        let turn = self.turn.lock().unwrap().clone();
+        match turn {
+            Some(turn) => {
+                self.calls.lock().unwrap().push(format!("turn {id}"));
+                Ok(turn)
+            }
+            None => self.refuse("turn"),
+        }
     }
 
     fn wait(&self, _request: WaitRequest) -> Result<WaitResult> {

@@ -162,6 +162,58 @@ fn tracked_capture_feeds_dispatch_and_later_output_is_coalesced() {
 }
 
 #[test]
+fn a_followed_turn_is_sent_instead_of_terminal_output() {
+    let mut view = tracked_view(7);
+    view.agent_turn = Some(session_core::model::AgentTurn {
+        id: 4,
+        messages: 12,
+    });
+    let mut fixture = Fixture::enabled(true);
+    fixture.owner.apply_view(&view).unwrap();
+    let api = FakeSessionApi::user(view.clone(), TERMINAL_SECRET);
+    let messages: Vec<String> = (1..=12).map(|n| format!("Step {n}")).collect();
+    api.set_turn(session_core::api::TurnContent {
+        id: 4,
+        prompt: Some("Make the tests pass".into()),
+        messages,
+        total: 12,
+    });
+    let job = capture(&mut fixture.owner, 7);
+    let captured = capture_with(&mut fixture.owner, &api, &job).unwrap();
+    let get = format!("get {}", session(7));
+    assert_eq!(
+        api.calls(),
+        [get.clone(), format!("turn {}", session(7)), get]
+    );
+    assert!(api.reads().is_empty(), "the terminal isn't read");
+    let prepared = build_captured(&mut fixture.owner, &job, &captured).unwrap();
+    let worker = fixture.owner.commit(prepared).unwrap();
+    fixture.owner.finish(worker.run()).unwrap();
+    let context = sent_context(&fixture);
+    let sent = context["recent_output"].as_str().unwrap();
+    assert!(sent.starts_with("The user's last prompt:\nMake the tests pass\n"));
+    assert!(sent.contains("the last 10 of 12, oldest first):\nStep 3\n"));
+    assert!(sent.ends_with("\nStep 12"));
+    assert!(!sent.contains(TERMINAL_SECRET));
+    assert_eq!(context["lifecycle"], "working");
+
+    // A turn that moved on during the read is read again later.
+    let mut moved = view.clone();
+    moved.agent_turn = Some(session_core::model::AgentTurn { id: 5, messages: 0 });
+    fixture.owner.apply_view(&moved).unwrap();
+    let next = capture(&mut fixture.owner, 7);
+    let api = FakeSessionApi::user(moved, "");
+    api.set_turn(session_core::api::TurnContent {
+        id: 6,
+        prompt: Some("Another".into()),
+        messages: vec![],
+        total: 0,
+    });
+    changed(capture_with(&mut fixture.owner, &api, &next).unwrap_err());
+    fixture.owner.acknowledge_capture(&next).unwrap();
+}
+
+#[test]
 fn output_during_capture_keeps_the_job_but_fencing_changes_cancel_it() {
     let mut fixture = tracked(true, 7);
     let api = FakeSessionApi::user(tracked_view(7), OUTPUT);

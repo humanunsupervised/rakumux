@@ -18,7 +18,7 @@ use crate::dispatch::{
     DispatchCompletion, DispatchError, DispatchPreparation, FeaturesCompletion, FeaturesJob,
     StatusCaptureJob, StatusConsentOffer, StatusDispatchJob, StatusDispatchService,
 };
-use crate::source::{CaptureError, CaptureExpectation, SessionCapture};
+use crate::source::{CaptureError, CaptureExpectation, SessionCapture, TurnSettings};
 use crate::status::{
     ConsentPolicy, ConsentRevision, ConsentSnapshot, FolderConsent, InputSelection, SourceStamp,
     StatusStore, StatusView,
@@ -26,6 +26,8 @@ use crate::status::{
 
 /// How often the account's feature switches are read again while signed in.
 const FEATURES_INTERVAL: Duration = Duration::from_secs(120);
+/// How often the turn settings are read again, so an edited config applies.
+const SETTINGS_INTERVAL: Duration = Duration::from_secs(60);
 /// The wait before reading them again after a failure.
 const FEATURES_RETRY: Duration = Duration::from_secs(60);
 /// The consent model's limit on folders.
@@ -145,6 +147,10 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     reconcile: bool,
     /// The last failure logged, so a retried one isn't logged every tick.
     last_note: Option<String>,
+    /// Where the turn settings come from, if not the defaults, and when to read
+    /// them next.
+    turn_settings: Option<Box<dyn Fn() -> TurnSettings + Send>>,
+    settings_due: Duration,
 }
 
 impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> {
@@ -164,7 +170,15 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             shared_for: Vec::new(),
             reconcile: true,
             last_note: None,
+            turn_settings: None,
+            settings_due: Duration::ZERO,
         }
+    }
+
+    /// Read the turn settings from `read` now and every [`SETTINGS_INTERVAL`].
+    pub fn with_turn_settings(mut self, read: impl Fn() -> TurnSettings + Send + 'static) -> Self {
+        self.turn_settings = Some(Box::new(read));
+        self
     }
 
     /// Let the account's AI session summaries switch (read from the service) decide
@@ -232,6 +246,14 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// off this thread and pass the result to `captured`.
     pub fn tick(&mut self, now: Duration) -> Vec<CaptureWork> {
         let mut work = Vec::new();
+        if let Some(read) = self
+            .turn_settings
+            .as_ref()
+            .filter(|_| now >= self.settings_due)
+        {
+            self.service.set_turn_settings(read());
+            self.settings_due = now.saturating_add(SETTINGS_INTERVAL);
+        }
         if self.connected {
             self.follow_summaries_switch();
         }

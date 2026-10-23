@@ -11,5 +11,5 @@ pub(crate) mod fake;
 mod tracker;
 
 pub use capture::{CaptureError, CaptureExpectation, SessionCapture, OUTPUT_LINES};
-pub use tracker::SourceError;
 pub(crate) use tracker::{Candidate, SourceTracker, SourceUpdate};
+pub use tracker::{SourceError, TurnSettings};

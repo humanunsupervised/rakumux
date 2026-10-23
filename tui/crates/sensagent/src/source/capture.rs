@@ -2,19 +2,26 @@ use std::fmt;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use session_core::api::{ApiError, CallerInfo, ErrorCode, ReadRequest, ReadSource, TextFormat};
+use session_core::api::{
+    ApiError, CallerInfo, ErrorCode, ReadRequest, ReadSource, TextFormat, TurnContent,
+};
 use session_core::client::SessionApi;
 use session_core::ids::SessionId;
 use session_core::model::{Reported, SessionView};
 use thiserror::Error;
 
-use super::tracker::Facts;
+use super::tracker::{Facts, Progress, TurnSettings, TurnState};
 use crate::cloud::{CaptureInput, CaptureMetadata, MAX_INSPECTION_BYTES};
 use crate::dispatch::StatusCaptureJob;
 use crate::status::{InputSelection, SourceStamp};
 
 /// Rows of history plus screen read for one output window, before byte bounds.
 pub const OUTPUT_LINES: u32 = 200;
+
+/// A turn's window: the prompt and the newest messages that fit, well inside the
+/// context builder's output bound (8 KiB after redaction), whose tail selection would
+/// otherwise cut the prompt.
+const TURN_BYTES: usize = 6 * 1024;
 
 /// Emoji joiners and presentation selectors, common in agent TUIs, which the context
 /// builder rejects. Deleting them only joins neighbouring text, so redaction sees
@@ -67,6 +74,7 @@ pub struct CaptureExpectation {
     stamp: SourceStamp,
     selection: InputSelection,
     facts: Facts,
+    turns: TurnSettings,
     reports: bool,
     output: bool,
 }
@@ -133,13 +141,20 @@ impl SessionCapture {
 }
 
 impl CaptureExpectation {
-    pub(super) fn new(job: &StatusCaptureJob, facts: Facts, reports: bool, output: bool) -> Self {
+    pub(super) fn new(
+        job: &StatusCaptureJob,
+        facts: Facts,
+        turns: TurnSettings,
+        reports: bool,
+        output: bool,
+    ) -> Self {
         Self {
             request: job.request_id().to_owned(),
             session: job.session_id().clone(),
             stamp: job.source_stamp(),
             selection: job.input_selection(),
             facts,
+            turns,
             reports,
             output,
         }
@@ -149,7 +164,8 @@ impl CaptureExpectation {
     /// run it off the owner's control thread. The session must show the expected facts
     /// before and after the read, otherwise `Changed`. Reports-only jobs never read
     /// terminal output. Output written during the read stays under this stamp; the
-    /// tracker marks the session dirty for a later revision.
+    /// tracker marks the session dirty for a later revision. A followed agent turn is
+    /// read instead of the terminal: the user's prompt and the agent's messages.
     pub fn capture<Api: SessionApi + ?Sized>(
         &self,
         api: &Api,
@@ -183,15 +199,30 @@ impl CaptureExpectation {
             if job.is_canceled() {
                 return Err(CaptureError::Canceled);
             }
-            let read = api
-                .read(ReadRequest {
-                    id: self.session.clone(),
-                    source: ReadSource::RecentUnwrapped,
-                    lines: Some(OUTPUT_LINES),
-                    format: TextFormat::Text,
-                })
-                .map_err(failure)?;
-            window(&read.text)?
+            match self.facts.progress(self.turns.every) {
+                Progress::Turn { id, state, .. } => {
+                    let turn = api.turn(&self.session).map_err(failure)?;
+                    if turn.id != id {
+                        return Err(CaptureError::Changed);
+                    }
+                    let recent = match state {
+                        TurnState::Finished => usize::MAX,
+                        _ => self.turns.recent as usize,
+                    };
+                    window(&turn_text(&turn, recent))?
+                }
+                Progress::Lifecycle(_) => {
+                    let read = api
+                        .read(ReadRequest {
+                            id: self.session.clone(),
+                            source: ReadSource::RecentUnwrapped,
+                            lines: Some(OUTPUT_LINES),
+                            format: TextFormat::Text,
+                        })
+                        .map_err(failure)?;
+                    window(&read.text)?
+                }
+            }
         } else {
             None
         };
@@ -201,7 +232,7 @@ impl CaptureExpectation {
             session: self.session.clone(),
             stamp: self.stamp,
             metadata: CaptureMetadata {
-                lifecycle: self.facts.lifecycle,
+                lifecycle: after.lifecycle,
                 activity_phase: after.activity.map(|activity| activity.phase),
             },
             read_report,
@@ -220,7 +251,7 @@ impl CaptureExpectation {
             return Err(CaptureError::Canceled);
         }
         let view = api.get(&self.session).map_err(failure)?;
-        if view.id != self.session || Facts::of(&view) != self.facts {
+        if view.id != self.session || !Facts::of(&view).same(&self.facts, self.turns.every) {
             return Err(CaptureError::Changed);
         }
         if job.is_canceled() {
@@ -257,6 +288,50 @@ pub(super) fn report_text(reported: &Reported) -> Option<String> {
     .filter(|part| !part.is_empty())
     .collect();
     (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
+/// A turn as the context builder's output window: the user's prompt, then the newest
+/// `recent` of the agent's messages that fit [`TURN_BYTES`], oldest first, one a line.
+fn turn_text(turn: &TurnContent, recent: usize) -> String {
+    let line = |text: &str| -> String { text.chars().filter(|c| !c.is_control()).collect() };
+    let mut text = String::from("The user's last prompt:\n");
+    let prompt = turn.prompt.as_deref().map(line).unwrap_or_default();
+    text.push_str(if prompt.trim().is_empty() {
+        "(not known)"
+    } else {
+        &prompt
+    });
+    let mut budget = TURN_BYTES.saturating_sub(text.len() + 120);
+    let mut kept: Vec<String> = Vec::new();
+    for message in turn.messages.iter().rev().take(recent) {
+        let message = line(message);
+        if message.trim().is_empty() {
+            continue;
+        }
+        if message.len() + 1 > budget {
+            break;
+        }
+        budget -= message.len() + 1;
+        kept.push(message);
+    }
+    let total = turn.total as usize;
+    if kept.is_empty() {
+        text.push_str("\n\nThe agent hasn't written anything since.");
+        return text;
+    }
+    let count = if kept.len() < total {
+        format!("the last {} of {total}", kept.len())
+    } else {
+        format!("all {total}")
+    };
+    text.push_str(&format!(
+        "\n\nThe agent's messages since (reasoning, tool calls and replies; {count}, oldest first):"
+    ));
+    for message in kept.iter().rev() {
+        text.push('\n');
+        text.push_str(message);
+    }
+    text
 }
 
 /// The text's tail within the builder's inspection bound, starting at a whole line

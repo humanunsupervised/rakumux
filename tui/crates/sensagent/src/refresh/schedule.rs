@@ -145,9 +145,9 @@ impl RefreshScheduler {
                     continue;
                 }
             }
-            // A finished turn is described at once; backoff and the global budget
-            // still apply.
-            let immediate = urgent && candidate.finished;
+            // A finished turn, or a followed turn's trigger point, is described at
+            // once; backoff and the global budget still apply.
+            let immediate = urgent && (candidate.finished || candidate.follows_turn);
             let waiting = timing.retry_at.is_some_and(|at| now < at)
                 || (!immediate
                     && timing

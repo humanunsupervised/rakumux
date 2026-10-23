@@ -570,3 +570,117 @@ fn daemon_event_sequences_advance_once_per_fencing_change() {
     assert_eq!(source.stamp, stamp(1, 5));
     assert!(!source.live);
 }
+
+fn turn_view(number: u32, turn: u64, messages: u32, lifecycle: Lifecycle) -> SessionView {
+    let mut view = view(number);
+    view.lifecycle = lifecycle;
+    view.agent_turn = Some(AgentTurn { id: turn, messages });
+    view
+}
+
+fn candidate(tracker: &SourceTracker, number: u32) -> Candidate {
+    tracker
+        .candidates()
+        .find(|candidate| candidate.session == id(number))
+        .unwrap()
+}
+
+#[test]
+fn a_followed_turn_advances_at_its_prompt_every_fifth_message_and_its_reply() {
+    let mut tracker = SourceTracker::new();
+    assert_eq!(
+        observed(tracker.apply_view(&turn_view(1, 7, 0, Lifecycle::Working))).stamp,
+        stamp(1, 1)
+    );
+    let first = candidate(&tracker, 1);
+    assert!(first.follows_turn && !first.finished);
+    for messages in 1..5 {
+        unchanged(tracker.apply_view(&turn_view(1, 7, messages, Lifecycle::Working)));
+    }
+    // Terminal output and activity phases don't count while a turn is followed.
+    unchanged(tracker.apply_event(&envelope(1, SessionEvent::Activity)));
+    let mut busy = turn_view(1, 7, 4, Lifecycle::Working);
+    busy.activity = Some(AgentActivity {
+        phase: ActivityPhase::RunningTool,
+        active_subagents: 0,
+        updated_at: 4,
+    });
+    unchanged(tracker.apply_view(&busy));
+    assert!(!tracker.is_dirty(&id(1)));
+
+    let fifth = observed(tracker.apply_view(&turn_view(1, 7, 5, Lifecycle::Working)));
+    assert_eq!(fifth.stamp, stamp(1, 2));
+    assert!(fifth.context.recent_output);
+    unchanged(tracker.apply_view(&turn_view(1, 7, 9, Lifecycle::Working)));
+    assert_eq!(
+        observed(tracker.apply_view(&turn_view(1, 7, 10, Lifecycle::Working))).stamp,
+        stamp(1, 3)
+    );
+    // Waiting for the user, and working again.
+    assert_eq!(
+        observed(tracker.apply_view(&turn_view(1, 7, 10, Lifecycle::Blocked))).stamp,
+        stamp(1, 4)
+    );
+    assert_eq!(
+        observed(tracker.apply_view(&turn_view(1, 7, 11, Lifecycle::Working))).stamp,
+        stamp(1, 5)
+    );
+    // The final reply, and one the daemon read after the lifecycle changed.
+    let done = SessionEvent::Lifecycle {
+        lifecycle: Lifecycle::Done,
+    };
+    assert_eq!(
+        observed(tracker.apply_event(&envelope(1, done))).stamp,
+        stamp(1, 6)
+    );
+    assert!(candidate(&tracker, 1).finished);
+    assert_eq!(
+        observed(tracker.apply_view(&turn_view(1, 7, 12, Lifecycle::Done))).stamp,
+        stamp(1, 7)
+    );
+    // Looked at: still the same reply.
+    unchanged(tracker.apply_view(&turn_view(1, 7, 12, Lifecycle::Idle)));
+    // The next prompt.
+    assert_eq!(
+        observed(tracker.apply_view(&turn_view(1, 8, 0, Lifecycle::Working))).stamp,
+        stamp(1, 8)
+    );
+}
+
+#[test]
+fn a_no_context_turn_is_read_again_once_it_moves_on() {
+    let mut tracker = SourceTracker::new();
+    observed(tracker.apply_view(&turn_view(1, 7, 0, Lifecycle::Working)));
+    let source = observed(tracker.no_context(&read(1, stamp(1, 1), false, true)));
+    assert!(!source.context.recent_output);
+    let source = observed(tracker.apply_view(&turn_view(1, 7, 5, Lifecycle::Working)));
+    assert!(source.context.recent_output);
+}
+
+#[test]
+fn turn_settings_choose_the_trigger_points() {
+    let mut tracker = SourceTracker::new();
+    tracker.set_turn_settings(TurnSettings {
+        every: 2,
+        recent: 0,
+    });
+    assert_eq!(
+        tracker.turns,
+        TurnSettings {
+            every: 2,
+            recent: 1
+        }
+    );
+    observed(tracker.apply_view(&turn_view(1, 7, 1, Lifecycle::Working)));
+    assert_eq!(
+        observed(tracker.apply_view(&turn_view(1, 7, 2, Lifecycle::Working))).stamp,
+        stamp(1, 2)
+    );
+    // Without a followed turn (an older daemon), output counts as before.
+    observed(tracker.apply_view(&view(2)));
+    tracker
+        .apply_event(&envelope(2, SessionEvent::Activity))
+        .unwrap();
+    assert!(tracker.is_dirty(&id(2)));
+    assert!(!candidate(&tracker, 2).follows_turn);
+}

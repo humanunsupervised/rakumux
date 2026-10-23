@@ -12,6 +12,7 @@ use crate::auth::{
 use crate::cloud::{CaptureInput, CaptureMetadata, CloudAIClient, CloudAIError, ContextBuilder};
 use crate::source::{
     Candidate, CaptureExpectation, SessionCapture, SourceError, SourceTracker, SourceUpdate,
+    TurnSettings,
 };
 use crate::status::{
     AISessionStatusService, AccountGate, AccountSessionGate, ConsentPolicy, ConsentRevision,
@@ -247,6 +248,11 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
     /// A tracked session's current source stamp.
     pub(crate) fn source_stamp(&self, session: &SessionId) -> Option<SourceStamp> {
         self.sources.stamp(session)
+    }
+
+    /// Summarize agents' followed turns with these settings from now on.
+    pub fn set_turn_settings(&mut self, settings: TurnSettings) {
+        self.sources.set_turn_settings(settings);
     }
 
     /// Fold a session's coalesced output and activity changes into one new revision.

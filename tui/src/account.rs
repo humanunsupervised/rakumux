@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use rakumux_sensagent::owner::protocol::{OwnerState, SignInReason, SignInView, StatusLine};
 use rakumux_sensagent::owner::{OwnerClient, OwnerError, OwnerLayout};
 use rakumux_sensagent::service::{self, ServiceConfig, ServiceError};
+use rakumux_sensagent::source::TurnSettings;
 use session_core::ids::SessionId;
 use session_core::paths::Layout;
 
@@ -210,7 +211,8 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
             );
         }
     }
-    let config = ServiceConfig::from_env()?;
+    let settings = layout.home.join("config.json");
+    let config = ServiceConfig::from_env()?.with_turn_settings(move || turn_settings(&settings));
     // Its HTTP clients block, which a thread of the async runtime may not do.
     std::thread::Builder::new()
         .name("rakumux-status-service".into())
@@ -222,6 +224,17 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
         .map_err(|_| ServiceError::Start)?
         .join()
         .map_err(|_| ServiceError::Start)?
+}
+
+/// `sessions.ai_summary` of `config.json`: the defaults when it can't be read.
+fn turn_settings(path: &std::path::Path) -> TurnSettings {
+    let summary = crate::app::config::Settings::load_from(path)
+        .map(|settings| settings.sessions.ai_summary)
+        .unwrap_or_default();
+    TurnSettings {
+        every: summary.every_messages,
+        recent: summary.recent_messages,
+    }
 }
 
 #[cfg(test)]

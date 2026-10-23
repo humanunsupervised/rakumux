@@ -107,6 +107,15 @@ pub struct SessionsConfig {
         skip_serializing_if = "is_your_message"
     )]
     pub description_content: DescriptionContent,
+    /// When an agent's turn gets an AI summary: at your prompt, then every
+    /// `every_messages` of its messages while it works (5), from your prompt
+    /// and its newest `recent_messages` (10); when it waits for you; and at its
+    /// final reply, from every message. Read by the status service each minute.
+    #[serde(
+        deserialize_with = "lenient_ai_summary",
+        skip_serializing_if = "AiSummaryConfig::is_default"
+    )]
+    pub ai_summary: AiSummaryConfig,
     /// Sidebar list width set by dragging the divider; `None` sizes the
     /// list to the screen. Ignored unless it's a number.
     #[serde(
@@ -156,6 +165,7 @@ impl Default for SessionsConfig {
             layout: SessionLayout::default(),
             icons: Icons::default(),
             description_content: DescriptionContent::default(),
+            ai_summary: AiSummaryConfig::default(),
             sidebar_width: None,
             stacked_list_percent: None,
             session_order: SessionOrder::new(),
@@ -215,6 +225,39 @@ fn lenient_description<'de, D: Deserializer<'de>>(
 
 fn is_your_message(content: &DescriptionContent) -> bool {
     *content == DescriptionContent::YourMessage
+}
+
+/// `sessions.ai_summary`: when agents' turns get AI summaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AiSummaryConfig {
+    /// While an agent works: a summary each time it has written this many
+    /// more messages since your prompt.
+    pub every_messages: u32,
+    /// The newest of its messages such a summary reads, after your prompt.
+    pub recent_messages: u32,
+}
+
+impl Default for AiSummaryConfig {
+    fn default() -> Self {
+        Self {
+            every_messages: 5,
+            recent_messages: 10,
+        }
+    }
+}
+
+impl AiSummaryConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+fn lenient_ai_summary<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<AiSummaryConfig, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
 /// What a session's description line (under its name) shows
@@ -586,6 +629,25 @@ mod tests {
         assert_eq!(
             read(r#"{"description_content":"sparkles"}"#).description_content,
             DescriptionContent::YourMessage
+        );
+    }
+
+    #[test]
+    fn ai_summary_triggers_default_to_five_and_ten() {
+        let read = |sessions: &str| -> SessionsConfig { serde_json::from_str(sessions).unwrap() };
+        let json = serde_json::to_value(SessionsConfig::default()).unwrap();
+        assert!(json.get("ai_summary").is_none());
+        assert_eq!(read("{}").ai_summary, AiSummaryConfig::default());
+        assert_eq!(
+            read(r#"{"ai_summary":{"every_messages":3}}"#).ai_summary,
+            AiSummaryConfig {
+                every_messages: 3,
+                recent_messages: 10
+            }
+        );
+        assert_eq!(
+            read(r#"{"ai_summary":{"every_messages":"often"}}"#).ai_summary,
+            AiSummaryConfig::default()
         );
     }
 }

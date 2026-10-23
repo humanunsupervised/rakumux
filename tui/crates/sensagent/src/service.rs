@@ -20,6 +20,7 @@ use crate::cloud::{CloudAIClient, CloudAIConfig};
 use crate::dispatch::StatusDispatchService;
 use crate::owner::{OwnerClaim, OwnerClient, OwnerError, OwnerLayout, OwnerServer};
 use crate::refresh::{RefreshRunner, StatusRefresher};
+use crate::source::TurnSettings;
 use crate::status::SqliteStatusStore;
 
 /// Rakumux's production Clerk instance and its public "Rakumux terminal" client.
@@ -75,6 +76,17 @@ pub enum ServiceError {
 pub struct ServiceConfig {
     auth: DeviceAuthConfig,
     cloud_origin: String,
+    turn_settings: Option<TurnSettingsSource>,
+}
+
+/// Reads the turn settings (the TUI's `config.json`), again every minute.
+#[derive(Clone)]
+struct TurnSettingsSource(Arc<dyn Fn() -> TurnSettings + Send + Sync>);
+
+impl std::fmt::Debug for TurnSettingsSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("TurnSettingsSource")
+    }
 }
 
 impl ServiceConfig {
@@ -102,7 +114,18 @@ impl ServiceConfig {
         Ok(Self {
             auth,
             cloud_origin: value(CLOUD_ORIGIN_ENV, CLOUD_ORIGIN),
+            turn_settings: None,
         })
+    }
+
+    /// When agents' turns get summaries: `read` gives the settings, at start and
+    /// every minute after. Without it, [`TurnSettings::default`].
+    pub fn with_turn_settings(
+        mut self,
+        read: impl Fn() -> TurnSettings + Send + Sync + 'static,
+    ) -> Self {
+        self.turn_settings = Some(TurnSettingsSource(Arc::new(read)));
+        self
     }
 }
 
@@ -140,7 +163,10 @@ pub fn serve(
         .map_err(|_| ServiceError::Setup)?;
 
     let api: Arc<dyn SessionApi> = Arc::new(connect_daemon(home, version)?);
-    let refresher = StatusRefresher::new(service).following_account_switch();
+    let mut refresher = StatusRefresher::new(service).following_account_switch();
+    if let Some(TurnSettingsSource(read)) = config.turn_settings {
+        refresher = refresher.with_turn_settings(move || read());
+    }
     let runner = RefreshRunner::spawn_with_website(refresher, api, website)
         .map_err(|_| ServiceError::Setup)?;
     let server = OwnerServer::start(&mut claim, runner.client(), version)
