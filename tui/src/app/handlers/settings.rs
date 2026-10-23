@@ -154,6 +154,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         }
         KeyAction::Help => open_help(app),
         KeyAction::Settings => open_settings(app),
+        KeyAction::Account => app.account_key(),
         KeyAction::Tour => app.open_welcome(),
         KeyAction::CheckForUpdate => app.open_upgrade_dialog(),
         KeyAction::TerminalPanel => {

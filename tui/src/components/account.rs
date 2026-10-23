@@ -15,7 +15,9 @@ use rakumux_sensagent::owner::protocol::SignInView;
 use super::phone_access::{detail, qr_lines};
 use crate::account::approval_link;
 use crate::app::types::{AccountDialog, AccountDialogState};
-use crate::components::dialogs::{dialog_frame, draw_keys, error_line, key_rows, text_rows};
+use crate::components::dialogs::{
+    dialog_frame, draw_keys, error_line, key_rows, padded, padding, text_rows,
+};
 use crate::components::utils::{get_spinner_char, popup_area_fixed_height, popup_width};
 use crate::qr::Qr;
 use crate::theme;
@@ -82,7 +84,7 @@ pub fn draw_account(f: &mut Frame, dialog: &AccountDialog, area: Rect) {
             (vec![error_line(error)], vec![("Enter", "Try again"), close])
         }
         AccountDialogState::Waiting(view) => {
-            let keys = vec![("Esc", "Cancel")];
+            let keys = vec![("c", "Copy link"), ("Esc", "Cancel")];
             if draw_sign_in(f, area, view, &keys) {
                 return;
             }
@@ -100,15 +102,21 @@ pub fn draw_account(f: &mut Frame, dialog: &AccountDialog, area: Rect) {
             )
         }
     };
+    let (pad_x, pad_y) = padding(area);
     let width = popup_width(area.width, 50);
     let keys_rows = if keys.is_empty() {
         0
     } else {
-        key_rows(&keys, width)
+        key_rows(&keys, width.saturating_sub(2 * pad_x))
     };
-    let height = (text_rows(&lines, width.saturating_sub(2)) + keys_rows + 3).max(8);
+    let text = text_rows(&lines, width.saturating_sub(2 + 2 * pad_x));
+    let height = (text + keys_rows + 3 + 2 * pad_y).max(8);
     let popup = popup_area_fixed_height(area, 50, height);
-    let inner = dialog_frame(f, popup, TITLE, p.accent_primary);
+    let inner = padded(
+        dialog_frame(f, popup, TITLE, p.accent_primary),
+        pad_x,
+        pad_y,
+    );
     let above = if keys.is_empty() {
         inner
     } else {
@@ -147,16 +155,18 @@ fn draw_sign_in(f: &mut Frame, area: Rect, view: &SignInView, keys: &[(&str, &st
         format!("{} Waiting for approval…", get_spinner_char()),
         Style::default().fg(p.accent_primary),
     ))];
-    let width = (qr.width() + 4)
+    let (pad_x, pad_y) = padding(area);
+    let width = (qr.width() + 4 + 2 * pad_x)
         .max(SIGN_IN_MIN_COLS)
         .min(area.width.saturating_sub(2));
-    let inner_cols = width.saturating_sub(2);
+    let inner_cols = width.saturating_sub(2 + 2 * pad_x);
     if qr.width() > inner_cols {
         return false;
     }
     let intro_rows = text_rows(&intro, inner_cols);
     let detail_rows = text_rows(&details, inner_cols);
-    let height = 2 + intro_rows + 1 + qr.height() + 1 + detail_rows + 1 + 1 + key_rows(keys, width);
+    let keys_rows = key_rows(keys, width.saturating_sub(2 * pad_x));
+    let height = 2 + 2 * pad_y + intro_rows + 1 + qr.height() + 1 + detail_rows + 1 + 1 + keys_rows;
     if height > area.height {
         return false;
     }
@@ -166,7 +176,11 @@ fn draw_sign_in(f: &mut Frame, area: Rect, view: &SignInView, keys: &[(&str, &st
         width,
         height,
     };
-    let inner = dialog_frame(f, popup, TITLE, p.accent_primary);
+    let inner = padded(
+        dialog_frame(f, popup, TITLE, p.accent_primary),
+        pad_x,
+        pad_y,
+    );
     let above = draw_keys(f, inner, keys);
     let text = Style::default().fg(p.text_primary);
     let mut y = above.y;

@@ -126,6 +126,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
             };
             app.mode = AppMode::Auth(AuthMenu { items, selected: 0 });
         }
+        KeyCode::Char('a') => app.account_key(),
         KeyCode::Char('c') => match app.selected_cwd() {
             Some(cwd) => return AppResult::SwitchDirectory(cwd),
             None => app.set_status("Select a session to cd into its folder."),

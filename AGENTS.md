@@ -652,7 +652,7 @@ folder header, a new session there), `Esc` (after cancelling a pending key or th
 running session in view), `Tab` last session, `1`-`9` go into that session,
 `n` new, `r` rename, `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
 screen, `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
-PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `U` Update, `R`
+PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
 build; daemon and sessions stay up), `S` ask to restart the server (in place with this build when
 it can: `y`/Enter, sessions keep running; otherwise `y` only, since that ends them; also Settings →
@@ -670,7 +670,7 @@ has (in Rakumux mode the selected session, else the one kept in view; the one ta
 session mode; none for the terminal panel), since the detail has no title row: the session's
 terminal fills it from its top row; and on the right buttons
 (a darker shade of the orange bar; dark chips on the blue one): `? Help` and `, Settings` in
-Rakumux mode, then `Sign in` at the bottom right while signed out of the Rakumux account (a tap
+Rakumux mode, then `a Sign in` at the bottom right while signed out of the Rakumux account (a tap
 asks for a sign-in code at once), `Ctrl-\ Rakumux mode` in session mode. When the row is short the
 session gives way first (off the centre, to its name alone, then nothing), then the message is
 cut, then buttons go from the right (Sign in, Settings, then Help).
@@ -819,10 +819,12 @@ Settings is one scrolling page without tabs (`help::ModalTab::Settings`): the se
 under a `Keys` rule every action and its keys, which `Enter` runs; `→` shows the selected row's
 note in a popover over the page (`←`, `Esc`, moving or `Enter` close it), so the rows never shift;
 the wheel moves the selection. Labels sit on the left and values and keys are
-pinned to the right. It's sized from its rows: centred, its widest row plus 16 columns (48–100),
+pinned to the right. It's sized from its rows: centred, its widest row plus 20 columns (48–100),
 capped by screen width with a side margin, and as tall as its rows, up to 80% of the screen's
 height, scrolling only as far as the selected row needs. Help retains its wider reading area
-and tabs. Dialogs stay above the one-row footer so the mode bar remains visible on short screens.
+and tabs. Settings and the account dialog keep two columns of padding inside their border and a
+row above and below (`components::dialogs::padding`: no columns on a phone, no rows under 20
+rows). Dialogs stay above the one-row footer so the mode bar remains visible on short screens.
 
 Embedded terminals (the detail, Grid cards, the terminal panel) draw a program's default colours
 in the outer terminal's own (`terminal_view::DefaultColors::NATIVE`), not the Rakumux theme;

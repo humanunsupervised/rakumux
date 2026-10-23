@@ -4286,7 +4286,7 @@ async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
     };
     let (mut h, account) = account_harness(testing::FakeAccount::default());
     assert!(
-        footer(&h).ends_with(" , Settings   Sign in  "),
+        footer(&h).ends_with(" , Settings   a Sign in  "),
         "{:?}",
         footer(&h)
     );
@@ -4424,4 +4424,35 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
         column(&screen[usize::from(pin.1)], '☆'),
         column(&screen[usize::from(header_line)], '★')
     );
+}
+
+#[tokio::test]
+async fn a_signs_in_and_c_copies_the_sign_in_link() {
+    use base64::Engine;
+    let (mut h, account) = account_harness(testing::FakeAccount::default());
+    h.press(KeyCode::Char('a')).await;
+    assert!(account.calls().contains(&"sign_in"));
+    assert!(matches!(
+        account_state(&h),
+        Some(super::types::AccountDialogState::Waiting(_))
+    ));
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("Copy link"), "{rows}");
+    h.app.take_terminal_output();
+    h.press(KeyCode::Char('c')).await;
+    let link = base64::engine::general_purpose::STANDARD
+        .encode("https://site.example/connect?code=WDJB-MJHT");
+    assert_eq!(
+        String::from_utf8(h.app.take_terminal_output()).unwrap(),
+        format!("\x1b]52;c;{link}\x07")
+    );
+    assert_eq!(h.app.status(), Some("Copied the sign-in link."));
+    // Signed in, `a` shows the account.
+    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
+    h.press(KeyCode::Char('a')).await;
+    assert!(!account.calls().contains(&"sign_in"));
+    assert!(matches!(
+        account_state(&h),
+        Some(super::types::AccountDialogState::SignedIn(_))
+    ));
 }

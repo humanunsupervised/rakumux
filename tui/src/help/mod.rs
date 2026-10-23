@@ -229,6 +229,8 @@ pub enum KeyAction {
     TerminalPanel,
     Help,
     Settings,
+    /// Sign in to the Rakumux account, or see who's signed in.
+    Account,
     /// The welcome tour carousel.
     Tour,
     CheckForUpdate,
@@ -245,7 +247,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 39] = [
+    pub const ALL: [KeyAction; 40] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -278,6 +280,7 @@ impl KeyAction {
         KeyAction::TerminalPanel,
         KeyAction::Help,
         KeyAction::Settings,
+        KeyAction::Account,
         KeyAction::Tour,
         KeyAction::CheckForUpdate,
         KeyAction::Reload,
@@ -322,6 +325,7 @@ impl KeyAction {
             | KeyAction::TerminalPanel => "Sessions and folders",
             KeyAction::Help
             | KeyAction::Settings
+            | KeyAction::Account
             | KeyAction::Tour
             | KeyAction::CheckForUpdate
             | KeyAction::Reload
@@ -366,6 +370,7 @@ impl KeyAction {
             KeyAction::TerminalPanel => "Terminal panel (show, focus or hide)",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
+            KeyAction::Account => "Sign in, or your account",
             KeyAction::Tour => "Welcome tour",
             KeyAction::CheckForUpdate => "Update Rakumux (sessions keep running)",
             KeyAction::Reload => "Reconnect or reload the list",
@@ -420,6 +425,7 @@ impl KeyAction {
             KeyAction::TerminalPanel => plain(&["T"]),
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
+            KeyAction::Account => plain(&["a"]),
             KeyAction::Tour => "t (in Help)".into(),
             KeyAction::CheckForUpdate => plain(&["U"]),
             KeyAction::Reload => plain(&["Ctrl-r"]),
@@ -511,6 +517,10 @@ impl KeyAction {
                  sessions; drag the divider to resize the split."
                     .into()
             }
+            KeyAction::Account => "Signed out, it asks for a sign-in code to approve in any \
+                 browser (the footer's Sign in does too); signed in, it shows the account and \
+                 whether AI session summaries are on."
+                .into(),
             KeyAction::CheckForUpdate => {
                 "Shift+U checks the installed release channel. Enter confirms installation and \
                  restarts only this UI; Esc cancels before installation starts. Binary installs \
@@ -908,13 +918,17 @@ fn render_help(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext
 /// the keys.
 fn render_settings(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext) {
     let width = settings_width(area, ctx);
-    let text_width = usize::from(width.saturating_sub(2 + BODY_MARGIN)).max(1);
+    // Space inside the border, where the screen has room for it.
+    let (pad_x, pad_y) = crate::components::dialogs::padding(area);
+    let text_width = usize::from(width.saturating_sub(2 + BODY_MARGIN + 2 * pad_x)).max(1);
     let page = settings_lines(ctx, state.selected, text_width);
     let total = u16::try_from(page.lines.len()).unwrap_or(u16::MAX);
-    // The borders and the footer, within most of the screen: a long page
-    // scrolls rather than filling it.
+    // The borders, the padding and the footer, within most of the screen: a
+    // long page scrolls rather than filling it.
     let room = (u32::from(area.height) * SETTINGS_MAX_HEIGHT / 100) as u16;
-    let height = total.saturating_add(3).min(room.max(area.height.min(8)));
+    let height = total
+        .saturating_add(3 + 2 * pad_y)
+        .min(room.max(area.height.min(8)));
     let popup = Rect {
         x: area.x + (area.width - width) / 2,
         y: area.y + (area.height - height) / 2,
@@ -924,6 +938,7 @@ fn render_settings(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalCon
     let Some(inner) = draw_frame(f, popup, Modal::Settings, ctx) else {
         return;
     };
+    let inner = crate::components::dialogs::padded(inner, pad_x, pad_y);
     let footer_height = u16::from(inner.height >= 4);
     let body = Rect {
         height: inner.height - footer_height,
@@ -1120,9 +1135,11 @@ fn settings_width(area: Rect, ctx: &ModalContext) -> u16 {
         .unwrap_or(0);
     let actions = 2 + labels + 3 + keys;
     let title = str_width(" Settings ") + str_width(&format!(" Rakumux {} ", ctx.version)) + 2;
-    let preferred = (settings.max(actions) + SETTINGS_SPACE + usize::from(BODY_MARGIN) + 2)
-        .max(title)
-        .clamp(MIN_SETTINGS_WIDTH, MAX_SETTINGS_WIDTH);
+    let padding = 2 * usize::from(crate::components::dialogs::padding(area).0);
+    let preferred =
+        (settings.max(actions) + SETTINGS_SPACE + usize::from(BODY_MARGIN) + 2 + padding)
+            .max(title)
+            .clamp(MIN_SETTINGS_WIDTH, MAX_SETTINGS_WIDTH);
     let available = if area.width > 2 {
         area.width - 2
     } else {
@@ -2990,9 +3007,10 @@ mod tests {
         let popup = dialog(&buf);
         assert_eq!(popup.width, wide);
         assert_eq!(popup.x, (240 - wide) / 2);
-        let body = usize::from(wide - 2 - BODY_MARGIN);
+        // Two columns of padding either side, a row above and below.
+        let body = usize::from(wide - 2 - BODY_MARGIN - 4);
         let rows = settings_lines(&context, 0, body).lines.len();
-        assert_eq!(usize::from(popup.height), 2 + rows + 1);
+        assert_eq!(usize::from(popup.height), 2 + 2 + rows + 1);
         assert_eq!(popup.y, (120 - popup.height) / 2);
         let text = buffer_text(&buf);
         assert!(!text.contains('┃'), "everything fits: {text}");
@@ -3162,7 +3180,8 @@ mod tests {
         assert!(page_text(&context, 1, 72).contains("~/.rakumux/config.json"));
         // The selected row is white, with no background of its own.
         let p = theme::palette();
-        let (label_x, y) = (popup.x + 4, y as u16);
+        let (pad_x, _) = crate::components::dialogs::padding(buf.area);
+        let (label_x, y) = (popup.x + 4 + pad_x, y as u16);
         assert_eq!(buf.get(label_x, y).fg, p.text_bright);
         assert_eq!(buf.get(label_x, y).bg, p.background);
         assert_eq!(buf.get(label_x, y + 1).fg, p.text_primary);
@@ -3313,8 +3332,14 @@ mod tests {
         for tab in [ModalTab::Overview, ModalTab::Settings] {
             let buf = draw(40, 20, &ModalState::new(tab, ROWS), &context);
             let popup = dialog(&buf);
+            // Settings has a row of padding under its footer.
+            let below = if tab == ModalTab::Settings {
+                crate::components::dialogs::padding(buf.area).1
+            } else {
+                0
+            };
             let footer: String = (0..40)
-                .map(|x| buf.get(x, popup.bottom() - 2).symbol().to_string())
+                .map(|x| buf.get(x, popup.bottom() - 2 - below).symbol().to_string())
                 .collect();
             assert!(footer.contains("Esc close"), "{tab:?} {footer:?}");
         }

@@ -44,6 +44,34 @@ pub(crate) fn dialog_frame(
     inner
 }
 
+/// A dialog's padding inside its border on a screen of `area`: two columns
+/// on either side and a row above and below, without the columns on a
+/// phone (under [`crate::layout::PHONE_BELOW`] columns) or the rows on a
+/// screen under 20 rows, where they'd cost content.
+pub(crate) fn padding(area: Rect) -> (u16, u16) {
+    let x = if area.width >= crate::layout::PHONE_BELOW {
+        2
+    } else {
+        0
+    };
+    let y = u16::from(area.height >= 20);
+    (x, y)
+}
+
+/// `inner` less `x` columns on either side and `y` rows above and below, when
+/// it has room for that and a few rows and columns of its own; else `inner`.
+pub(crate) fn padded(inner: Rect, x: u16, y: u16) -> Rect {
+    if inner.width < 2 * x + 10 || inner.height < 2 * y + 2 {
+        return inner;
+    }
+    Rect {
+        x: inner.x + x,
+        y: inner.y + y,
+        width: inner.width - 2 * x,
+        height: inner.height - 2 * y,
+    }
+}
+
 /// `[key] action • [key] action` help line.
 fn key_help(pairs: &[(&str, &str)]) -> Line<'static> {
     let mut spans = Vec::new();

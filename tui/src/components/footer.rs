@@ -44,8 +44,7 @@ const GAP: usize = 1;
 /// [`theme::Palette::faded`]).
 const BUTTON_SHADE: f32 = 0.2;
 
-/// A footer button: its keys (none for one only tapped), what it opens, and
-/// what a tap on it does.
+/// A footer button: its keys, what it opens, and what a tap on it does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Button {
     pub keys: String,
@@ -62,11 +61,8 @@ impl Button {
         }
     }
 
-    /// Columns it takes: ` keys label `, or ` label ` without keys.
+    /// Columns it takes: ` keys label `.
     fn width(&self) -> usize {
-        if self.keys.is_empty() {
-            return str_width(self.label) + 2;
-        }
         str_width(&self.keys) + str_width(self.label) + 3
     }
 }
@@ -124,7 +120,7 @@ pub fn buttons(app: &App) -> Vec<Button> {
                 ),
             ];
             if app.account == AccountStatus::SignedOut {
-                buttons.push(Button::new("", "Sign in", FooterKey::SignIn));
+                buttons.push(Button::new("a", "Sign in", FooterKey::SignIn));
             }
             buttons
         }
@@ -180,11 +176,6 @@ fn push_buttons(
             Hit::FooterKey(button.target),
         ));
         x += width;
-        if button.keys.is_empty() {
-            // Only tapped: the label in the keys' bolder ink.
-            spans.push(Span::styled(format!(" {} ", button.label), key_style));
-            continue;
-        }
         spans.push(Span::styled(format!(" {}", button.keys), key_style));
         spans.push(Span::styled(format!(" {} ", button.label), label_style));
     }

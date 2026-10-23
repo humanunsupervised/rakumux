@@ -83,6 +83,34 @@ impl App {
         self.mode = AppMode::Account(AccountDialog { state });
     }
 
+    /// `a`: signed out, ask for a sign-in code; otherwise the account dialog.
+    pub fn account_key(&mut self) {
+        match self.account {
+            AccountStatus::SignedOut => self.start_sign_in(),
+            _ => self.open_account_dialog(),
+        }
+    }
+
+    /// `c` in the sign-in dialog: the link to approve the code, on the
+    /// clipboard of the terminal this window runs in (OSC 52, also over SSH
+    /// where the terminal allows it).
+    pub fn copy_sign_in_link(&mut self) {
+        use base64::Engine;
+        let AppMode::Account(dialog) = &self.mode else {
+            return;
+        };
+        let AccountDialogState::Waiting(view) = &dialog.state else {
+            return;
+        };
+        let Some(link) = account::approval_link(view) else {
+            return;
+        };
+        let data = base64::engine::general_purpose::STANDARD.encode(link);
+        self.terminal_output
+            .extend_from_slice(format!("\x1b]52;c;{data}\x07").as_bytes());
+        self.set_status("Copied the sign-in link.");
+    }
+
     /// Ask for a sign-in code (the service starts if it isn't running).
     pub fn start_sign_in(&mut self) {
         self.mode = AppMode::Account(AccountDialog {

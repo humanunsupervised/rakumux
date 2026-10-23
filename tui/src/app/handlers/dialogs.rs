@@ -145,8 +145,8 @@ fn handle_pairing_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// The account dialog: Enter signs in (or tries again), `o` signs out,
-/// Esc (`q`) closes and abandons a sign-in under way. Only Esc while waiting
+/// The account dialog: Enter signs in (or tries again), `c` copies the
+/// sign-in link, `o` signs out, Esc (`q`) closes and abandons a sign-in under way. Only Esc while waiting
 /// for the service.
 fn handle_account_key(app: &mut App, key: KeyEvent) {
     let AppMode::Account(dialog) = &app.mode else {
@@ -168,6 +168,9 @@ fn handle_account_key(app: &mut App, key: KeyEvent) {
             app.sign_out()
         }
         (AccountDialogState::SignedIn(_), KeyCode::Enter) => app.close_account_dialog(),
+        (AccountDialogState::Waiting(_), KeyCode::Char('c') | KeyCode::Char('C')) => {
+            app.copy_sign_in_link()
+        }
         _ => {}
     }
 }
