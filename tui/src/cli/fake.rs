@@ -19,6 +19,7 @@ use std::sync::Mutex;
 pub fn session(id: &str, name: &str) -> SessionView {
     SessionView {
         agent_output: None,
+        user_prompt: None,
         pinned: false,
         git: None,
         auto_named: false,

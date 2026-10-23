@@ -3,7 +3,7 @@
 //! reasoning, text and tool blocks in order; 1.x keeps the pieces as rows of
 //! `part`, the assistant's beside the user's. Subagents run in sessions of
 //! their own, so following one conversation never shows theirs.
-use super::{first_line, short_path, tool_line};
+use super::{first_line, prompt_line, short_path, tool_line};
 use serde_json::Value;
 use std::path::Path;
 
@@ -24,6 +24,79 @@ pub(super) fn latest(database: &Path, conversation: &str) -> Option<String> {
         .flatten()
         .max_by_key(|(updated, _)| *updated)
         .map(|(_, line)| line)
+}
+
+/// What the user last typed in `conversation`, whichever layout holds it.
+pub(super) fn latest_prompt(database: &Path, conversation: &str) -> Option<String> {
+    let connection = crate::resume::open_read_only(database)?;
+    let v2 = newest(
+        &connection,
+        &format!(
+            "SELECT data, time_updated FROM session_message \
+             WHERE session_id = ?1 AND type = 'user' ORDER BY seq DESC LIMIT {RECENT_REPLIES}"
+        ),
+        conversation,
+        |data| prompt_line(data.get("text")?.as_str()?),
+    );
+    let v1 = user_parts(&connection, conversation);
+    [v2, v1]
+        .into_iter()
+        .flatten()
+        .max_by_key(|(updated, _)| *updated)
+        .map(|(_, line)| line)
+}
+
+/// The first row of `query` (`data` JSON, `time_updated`) that makes a line.
+fn newest(
+    connection: &rusqlite::Connection,
+    query: &str,
+    conversation: &str,
+    line: impl Fn(&Value) -> Option<String>,
+) -> Option<(i64, String)> {
+    let mut statement = connection.prepare(query).ok()?;
+    let rows = statement
+        .query_map([conversation], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .ok()?;
+    let found = rows
+        .filter_map(Result::ok)
+        .find_map(|(data, updated)| Some((updated, line(&serde_json::from_str(&data).ok()?)?)));
+    found
+}
+
+/// The newest 1.x text the user typed (not text OpenCode added).
+fn user_parts(connection: &rusqlite::Connection, conversation: &str) -> Option<(i64, String)> {
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT part.data, message.data, part.time_updated FROM part \
+             JOIN message ON message.id = part.message_id \
+             WHERE part.session_id = ?1 ORDER BY part.time_updated DESC LIMIT {RECENT_PARTS}"
+        ))
+        .ok()?;
+    let rows = statement
+        .query_map([conversation], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .ok()?;
+    let found = rows
+        .filter_map(Result::ok)
+        .find_map(|(part, message, updated)| {
+            let message: Value = serde_json::from_str(&message).ok()?;
+            let part: Value = serde_json::from_str(&part).ok()?;
+            if message.get("role")?.as_str()? != "user"
+                || part.get("type")?.as_str()? != "text"
+                || part.get("synthetic").and_then(Value::as_bool) == Some(true)
+            {
+                return None;
+            }
+            Some((updated, prompt_line(part.get("text")?.as_str()?)?))
+        });
+    found
 }
 
 /// The newest OpenCode 2 reply that makes a line (one that ended in an
@@ -198,6 +271,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(latest(&database, "ses_a"), Some("Second answer".into()));
+        assert_eq!(latest_prompt(&database, "ses_a"), Some("my prompt".into()));
         assert_eq!(latest(&database, "ses_other"), None);
         // A 1.x conversation: the user's own text isn't a line.
         connection
@@ -213,5 +287,6 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(latest(&database, "ses_b"), Some("Fixed it.".into()));
+        assert_eq!(latest_prompt(&database, "ses_b"), Some("my prompt".into()));
     }
 }

@@ -305,6 +305,8 @@ pub enum SettingsItem {
     Layout,
     /// Plain, emoji or Nerd Font marks for folders and branches.
     Icons,
+    /// What the line under each session's name shows.
+    DescriptionContent,
     /// Option/Alt+↑/↓ also switch sessions inside a session.
     CycleInSessions,
     /// Install a new release and restart only this UI.
@@ -320,9 +322,10 @@ pub enum SettingsItem {
 }
 
 impl SettingsItem {
-    pub const ALL: [SettingsItem; 8] = [
+    pub const ALL: [SettingsItem; 9] = [
         SettingsItem::Layout,
         SettingsItem::Icons,
+        SettingsItem::DescriptionContent,
         SettingsItem::CycleInSessions,
         SettingsItem::Update,
         SettingsItem::RestartUi,
@@ -334,7 +337,9 @@ impl SettingsItem {
     /// The heading Settings lists it under.
     pub fn section(self) -> &'static str {
         match self {
-            SettingsItem::Layout | SettingsItem::Icons => "Appearance",
+            SettingsItem::Layout | SettingsItem::Icons | SettingsItem::DescriptionContent => {
+                "Appearance"
+            }
             SettingsItem::CycleInSessions => "Keyboard",
             SettingsItem::Update
             | SettingsItem::RestartUi

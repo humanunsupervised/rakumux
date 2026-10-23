@@ -253,6 +253,7 @@ fn every_stream_message_is_documented() {
     };
     let view = SessionView {
         agent_output: None,
+        user_prompt: None,
         id: SessionId::from_string("i"),
         name: "n".into(),
         scope: ScopeRoot::from_canonical("/p".into()),

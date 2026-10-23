@@ -14,10 +14,6 @@ use super::types::{AccountDialog, AccountDialogState, AccountStatus, AppMode};
 use super::App;
 use crate::account::{self, Account, LineState, MAX_SESSIONS};
 
-/// Whether the session list shows AI descriptions. Hidden for now: the
-/// agent's own latest output takes their place (`SessionView::agent_output`).
-pub const SHOW_AI_DESCRIPTIONS: bool = false;
-
 /// How often descriptions are read while signed in.
 const DESCRIPTIONS_EVERY: Duration = Duration::from_secs(2);
 /// How often the account is checked again while signed in (the AI session
@@ -219,7 +215,8 @@ impl App {
 
     fn read_descriptions(&mut self, now: Instant) {
         self.descriptions_at = Some(now + DESCRIPTIONS_EVERY);
-        if !self.show_ai_descriptions {
+        // Read only while the list shows them.
+        if !self.shows_ai_descriptions() {
             return;
         }
         let sessions: Vec<_> = self
@@ -284,12 +281,16 @@ impl App {
         self.account_check_at = None;
     }
 
-    /// The session's AI description, when shown ([`SHOW_AI_DESCRIPTIONS`]),
-    /// signed in, and one was written.
+    /// The session's AI description, when the list shows them
+    /// (`sessions.description_content`), signed in, and one was written.
     pub fn description(&self, session: &session_core::ids::SessionId) -> Option<&str> {
-        if !self.show_ai_descriptions {
+        if !self.shows_ai_descriptions() {
             return None;
         }
         self.descriptions.get(session).map(String::as_str)
+    }
+
+    fn shows_ai_descriptions(&self) -> bool {
+        self.settings.sessions.description_content == super::config::DescriptionContent::AiSummary
     }
 }

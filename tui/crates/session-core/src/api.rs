@@ -455,6 +455,9 @@ pub const CAPABILITY_WORKING_DIRECTORY: &str = "session.working_directory";
 /// `SessionView::agent_output`: a running agent's latest output line.
 pub const CAPABILITY_AGENT_OUTPUT: &str = "session.agent_output";
 
+/// `SessionView::user_prompt`: what the user last typed to a running agent.
+pub const CAPABILITY_USER_PROMPT: &str = "session.user_prompt";
+
 fn is_false(value: &bool) -> bool {
     !*value
 }

@@ -27,6 +27,7 @@ use super::format::{
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
+use crate::app::config::DescriptionContent;
 use crate::app::grouping::{Grouping, ReadPeriod, Section};
 use crate::app::{App, Connection, Hit, ListRow};
 use crate::layout::str_width;
@@ -50,11 +51,20 @@ fn row_height(row: &ListRow) -> u16 {
 fn row_height_in(app: &App, row: &ListRow) -> u16 {
     match row {
         ListRow::Session(session) => {
-            let extra = u16::from(session.agent_output.is_some())
-                + u16::from(app.description(&session.id).is_some());
-            row_height(row) + extra
+            row_height(row) + u16::from(description_line(app, session).is_some())
         }
         row => row_height(row),
+    }
+}
+
+/// The line under a session's name, as Settings chooses
+/// (`sessions.description_content`): your last message to its agent, the
+/// agent's latest message, or its AI summary.
+fn description_line<'a>(app: &'a App, session: &'a SessionView) -> Option<&'a str> {
+    match app.settings.sessions.description_content {
+        DescriptionContent::YourMessage => session.user_prompt.as_deref(),
+        DescriptionContent::AgentMessage => session.agent_output.as_deref(),
+        DescriptionContent::AiSummary => app.description(&session.id),
     }
 }
 
@@ -404,9 +414,8 @@ fn session_content(
         .spans,
     );
     let mut lines = vec![first];
-    // The agent's latest output, under its name: reasoning, a tool call or
-    // its reply, as the daemon reads it from the agent's log.
-    if let Some(output) = &session.agent_output {
+    // Under the name: your last message, the agent's, or its summary.
+    if let Some(output) = description_line(app, session) {
         // A terminal has one font size: italic and a shade quieter than the
         // details make it read as the smaller print.
         let quiet = if selected {
@@ -423,17 +432,6 @@ fn session_content(
         ]);
     }
     lines.push(second);
-    if let Some(description) = app.description(&session.id) {
-        lines.push(vec![
-            Span::raw("  "),
-            Span::styled(
-                truncate(description, column),
-                Style::default()
-                    .fg(detail_color)
-                    .add_modifier(Modifier::ITALIC),
-            ),
-        ]);
-    }
     lines
 }
 

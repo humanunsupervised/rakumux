@@ -1284,6 +1284,7 @@ mod tests {
     fn view() -> SessionView {
         SessionView {
             agent_output: None,
+            user_prompt: None,
             pinned: false,
             git: None,
             auto_named: false,

@@ -21,6 +21,7 @@ use session_core::model::{
 pub(crate) fn live_view(id: &SessionId, folder: &str, pid: u32) -> SessionView {
     SessionView {
         agent_output: None,
+        user_prompt: None,
         id: id.clone(),
         name: "synthetic-session-name".into(),
         scope: ScopeRoot::from_canonical(folder.into()),

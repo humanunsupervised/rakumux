@@ -169,6 +169,10 @@ pub struct SessionView {
     /// this machine. Live sessions running a known agent only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_output: Option<String>,
+    /// What the user last typed to the agent, as one line, read the same
+    /// way as `agent_output`. Live sessions running a known agent only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_prompt: Option<String>,
     pub created_by: Creator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<SessionId>,
@@ -307,6 +311,7 @@ mod tests {
             last_active_at: 2,
             terminal: None,
             agent_output: None,
+            user_prompt: None,
         };
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("exit_code"));

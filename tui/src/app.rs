@@ -267,8 +267,6 @@ pub struct App {
     descriptions_at: Option<Instant>,
     descriptions_busy: bool,
     descriptions_generation: u64,
-    /// The list shows AI descriptions (`account::SHOW_AI_DESCRIPTIONS`).
-    pub show_ai_descriptions: bool,
     pub connection: Connection,
     /// The daemon was reachable once; losing it triggers reconnects.
     was_connected: bool,
@@ -377,7 +375,6 @@ impl App {
             descriptions_at: None,
             descriptions_busy: false,
             descriptions_generation: 0,
-            show_ai_descriptions: account::SHOW_AI_DESCRIPTIONS,
             connection: Connection::Connecting,
             was_connected: false,
             checked_daemon_features: false,
@@ -699,6 +696,25 @@ impl App {
                         sample(I::Nerd)
                     ),
                 };
+            }
+            SettingsItem::DescriptionContent => {
+                let current = self.settings.sessions.description_content;
+                let value = config::DescriptionContent::ALL
+                    .iter()
+                    .map(|c| {
+                        if *c == current {
+                            format!("[{}]", c.label())
+                        } else {
+                            c.label().to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                (
+                    "Session description content",
+                    value,
+                    "What the line under each session's name shows: your last message to its agent, the agent's latest message (its reasoning, a tool call or its reply), or an AI summary of the session (with a Rakumux account: Settings → Account). Agents: Claude Code, Codex and OpenCode.",
+                )
             }
             SettingsItem::CycleInSessions => {
                 let keys = self
@@ -1254,7 +1270,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 7] = [
+const DAEMON_FEATURES: [(&str, &str); 8] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1273,6 +1289,10 @@ const DAEMON_FEATURES: [(&str, &str); 7] = [
     (
         session_core::api::CAPABILITY_AGENT_OUTPUT,
         "each agent's latest output",
+    ),
+    (
+        session_core::api::CAPABILITY_USER_PROMPT,
+        "your last message in each session",
     ),
 ];
 

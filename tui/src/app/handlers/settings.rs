@@ -187,6 +187,11 @@ fn open_item(app: &mut App, item: SettingsItem) {
             app.settings.sessions.icons = next;
             save_config(app, format!("Icons: {}", next.label()));
         }
+        SettingsItem::DescriptionContent => {
+            let next = app.settings.sessions.description_content.next();
+            app.settings.sessions.description_content = next;
+            save_config(app, format!("Session description: {}", next.label()));
+        }
         SettingsItem::Update => app.open_upgrade_dialog(),
         SettingsItem::Account => app.open_account_dialog(),
         SettingsItem::RestartUi => app.request_restart(),

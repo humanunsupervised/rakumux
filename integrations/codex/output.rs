@@ -1,5 +1,5 @@
 //! Codex's latest output, from the rollout file of its thread.
-use super::{first_line, tool_line};
+use super::{first_line, prompt_line, tool_line};
 use crate::host::ProcessInfo;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -34,6 +34,15 @@ pub(super) fn line(entry: &Value) -> Option<String> {
             }
         }
         ("response_item", "custom_tool_call") => tool_line(payload.get("name")?.as_str()?, None),
+        _ => None,
+    }
+}
+
+/// What the user typed (`user_message`), without the context Codex adds.
+pub(super) fn prompt(entry: &Value) -> Option<String> {
+    let payload = entry.get("payload")?;
+    match (entry.get("type")?.as_str()?, payload.get("type")?.as_str()?) {
+        ("event_msg", "user_message") => prompt_line(payload.get("message")?.as_str()?),
         _ => None,
     }
 }
@@ -89,6 +98,22 @@ mod tests {
                 &json!({"type": "event_msg", "payload": {"type": "agent_message", "message": "Done: tests pass."}})
             ),
             Some("Done: tests pass.".into())
+        );
+    }
+
+    #[test]
+    fn user_messages_are_prompts() {
+        assert_eq!(
+            prompt(
+                &json!({"type": "event_msg", "payload": {"type": "user_message", "message": "Run the tests"}})
+            ),
+            Some("Run the tests".into())
+        );
+        assert_eq!(
+            prompt(
+                &json!({"type": "event_msg", "payload": {"type": "agent_message", "message": "Done"}})
+            ),
+            None
         );
     }
 

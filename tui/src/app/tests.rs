@@ -696,13 +696,15 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
 #[tokio::test]
 async fn option_arrows_in_sessions_is_a_general_setting() {
     let mut h = harness(vec![view("A", "a", 30)]);
-    assert_eq!(h.app.modal_context(false).general[2].value, "On [Off]");
+    let row = SettingsItem::CycleInSessions.index();
+    assert_eq!(h.app.modal_context(false).general[row].value, "On [Off]");
     h.press(KeyCode::Char(',')).await;
-    h.press(KeyCode::Down).await;
-    h.press(KeyCode::Down).await;
+    for _ in 0..row {
+        h.press(KeyCode::Down).await;
+    }
     h.press(KeyCode::Enter).await;
     assert!(h.app.settings.sessions.cycle_keys_in_session);
-    assert_eq!(h.app.modal_context(false).general[2].value, "[On] Off");
+    assert_eq!(h.app.modal_context(false).general[row].value, "[On] Off");
     let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
     assert!(saved.sessions.cycle_keys_in_session);
 }
@@ -2638,7 +2640,8 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
                 "new folders live",
                 "the terminal panel",
                 "the branch an agent works on",
-                "each agent's latest output"
+                "each agent's latest output",
+                "your last message in each session"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -3154,7 +3157,8 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "new folders live",
                 "the terminal panel",
                 "the branch an agent works on",
-                "each agent's latest output"
+                "each agent's latest output",
+                "your last message in each session"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -4174,8 +4178,8 @@ fn account_tick(h: &mut Harness) {
 #[tokio::test]
 async fn signing_in_from_settings_shows_a_code_then_descriptions_under_sessions() {
     let (mut h, account) = account_harness(testing::FakeAccount::default());
-    // AI descriptions are hidden for now; this is how they work when shown.
-    h.app.show_ai_descriptions = true;
+    // With AI summaries chosen in Settings.
+    h.app.settings.sessions.description_content = config::DescriptionContent::AiSummary;
     assert_eq!(h.app.account, super::types::AccountStatus::SignedOut);
     assert_eq!(account.calls(), ["account"]);
     // Signed out: no descriptions are asked for.
@@ -4257,7 +4261,7 @@ async fn closing_the_dialog_abandons_the_sign_in() {
 #[tokio::test]
 async fn signing_out_stops_the_descriptions() {
     let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
-    h.app.show_ai_descriptions = true;
+    h.app.settings.sessions.description_content = config::DescriptionContent::AiSummary;
     account
         .descriptions
         .lock()
@@ -4466,7 +4470,17 @@ async fn a_signs_in_and_c_copies_the_sign_in_link() {
 async fn an_agents_latest_output_shows_under_its_name_above_its_details() {
     let mut with_output = view("A", "api", 20);
     with_output.agent_output = Some("Bash: Run the tests".into());
+    with_output.user_prompt = Some("Fix the flaky test".into());
     let mut h = harness(vec![with_output, view("B", "docs", 10)]).on_folders_tab();
+    // Your last message by default; the agent's when Settings says so.
+    let screen = screen_rows(&mut h, 160, 48);
+    let title = screen.iter().position(|row| row.contains(" api ")).unwrap();
+    assert!(
+        screen[title + 1].contains("Fix the flaky test"),
+        "{}",
+        screen.join("\n")
+    );
+    h.app.settings.sessions.description_content = config::DescriptionContent::AgentMessage;
     let screen = screen_rows(&mut h, 160, 48);
     let title = screen
         .iter()
@@ -4493,7 +4507,7 @@ async fn an_agents_latest_output_shows_under_its_name_above_its_details() {
 #[tokio::test]
 async fn the_lines_under_a_name_stop_short_of_its_age_and_mark() {
     let mut long = view("A", "api", 20);
-    long.agent_output = Some("word ".repeat(60));
+    long.user_prompt = Some("word ".repeat(60));
     let mut h = harness(vec![long]).on_folders_tab();
     let screen = screen_rows(&mut h, 160, 48);
     let title = screen.iter().position(|row| row.contains(" api ")).unwrap();
@@ -4509,4 +4523,34 @@ async fn the_lines_under_a_name_stop_short_of_its_age_and_mark() {
             row(&screen[below])
         );
     }
+}
+
+#[tokio::test]
+async fn settings_choose_what_the_session_description_shows() {
+    let mut h = harness(vec![view("A", "a", 30)]);
+    let row = SettingsItem::DescriptionContent.index();
+    assert_eq!(
+        h.app.modal_context(false).general[row].value,
+        "[Your last message] Agent message AI summaries"
+    );
+    h.press(KeyCode::Char(',')).await;
+    for _ in 0..row {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        h.app.settings.sessions.description_content,
+        config::DescriptionContent::AgentMessage
+    );
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert_eq!(
+        saved.sessions.description_content,
+        config::DescriptionContent::AgentMessage
+    );
+    h.press(KeyCode::Enter).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        h.app.settings.sessions.description_content,
+        config::DescriptionContent::YourMessage
+    );
 }

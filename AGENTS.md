@@ -243,7 +243,8 @@ within the scope), `scope`, `is_self`, `cwd`, `status`, `exit_code`, `lifecycle`
 `reported`, `created_by`, `parent_id`, `depth`, `children`, `launch`, `resume`, `created_at`,
 `last_active_at`, `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree}` of the
 current cwd), `agent_output` (a live Claude Code, Codex or OpenCode session's latest reasoning,
-tool call or reply as one line, from its conversation log or database: `integrations/output.rs`), and `terminal` (pid, foreground process, title, size, `controlled`,
+tool call or reply as one line, from its conversation log or database: `integrations/output.rs`),
+`user_prompt` (what the user last typed to that agent, read the same way), and `terminal` (pid, foreground process, title, size, `controlled`,
 `alternate_screen`) while live. Folders are `ProjectView {path, name, sessions, live,
 last_active_at, added_at, git}` on the wire.
 
@@ -409,7 +410,9 @@ accidents; they don't stop a hostile process running as the same user.
   ai_primary_provider, openai_model}` plus `sessions {rakumux_key ("ctrl+\\"; an older
   `prefix_key` other than "ctrl+b" still counts), cycle_keys (["alt+up", "alt+down"]),
   cycle_keys_in_session (false), icons ("plain" | "emoji" | "nerd":
-  the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
+  the folder and branch marks), description_content ("your_message" | "agent_message" |
+  "ai_summary": the line under each session's name; Settings → Session description content;
+  left out at the default, your message), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
   sidebar_width (dragged divider),
@@ -559,7 +562,8 @@ startup authorization. Success reloads only the UI through the new launcher, str
 fallback. Legacy npm/Homebrew installs use their package manager. On a protocol mismatch the TUI
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
-`session.working_directory`, `session.agent_output`, read with `SessionApi::daemon_capabilities`) it says what's missing
+`session.working_directory`, `session.agent_output`, `session.user_prompt`, read with
+`SessionApi::daemon_capabilities`) it says what's missing
 and offers a restart: in place when the daemon has `daemon.restart` (sessions keep running;
 `y`/Enter), otherwise by stopping it (`y` only, since running sessions end).
 

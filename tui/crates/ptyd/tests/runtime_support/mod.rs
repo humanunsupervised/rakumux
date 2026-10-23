@@ -195,6 +195,7 @@ impl FakeControl {
         };
         SessionView {
             agent_output: None,
+            user_prompt: None,
             pinned: false,
             git: None,
             auto_named: false,

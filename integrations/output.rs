@@ -1,7 +1,9 @@
-//! The latest thing a coding agent said or did, as one line for the session
-//! list: its reasoning, a tool call, or its reply. Read from the agent's own
-//! conversation on this machine as it grows; prompts and tool output are
-//! never taken, and nothing leaves the daemon but the line.
+//! The latest thing a coding agent said or did, and the user's latest
+//! prompt to it, each as one line for the session list: the agent's
+//! reasoning, a tool call or its reply; what the user last typed. Read from
+//! the agent's own conversation on this machine as it grows; tool output
+//! and subagents' messages are never taken, and nothing leaves the daemon
+//! but the lines.
 //!
 //! Provider implementations live beside their hooks in `integrations/<agent>`:
 //! - **Claude Code**: `<config dir>/projects/*/<conversation>.jsonl`, the
@@ -64,6 +66,7 @@ pub struct Follower {
     pid: u32,
     source: Source,
     latest: Option<String>,
+    prompt: Option<String>,
 }
 
 impl Follower {
@@ -95,6 +98,7 @@ impl Follower {
             pid: process.pid,
             source,
             latest: None,
+            prompt: None,
         })
     }
 
@@ -103,16 +107,21 @@ impl Follower {
         self.pid
     }
 
-    /// The latest line, once one was found.
+    /// The agent's latest line, once one was found.
     pub fn latest(&self) -> Option<&str> {
         self.latest.as_deref()
     }
 
-    /// Read what the agent added since the last time (a log from its tail
-    /// the first time). `bound` is the OpenCode conversation bound to the
-    /// session, if any. Returns whether the latest line changed.
+    /// The user's latest prompt, once one was found.
+    pub fn prompt(&self) -> Option<&str> {
+        self.prompt.as_deref()
+    }
+
+    /// Read what the conversation gained since the last time (a log from its
+    /// tail the first time). `bound` is the OpenCode conversation bound to
+    /// the session, if any. Returns whether either line changed.
     pub fn follow(&mut self, bound: Option<&str>) -> bool {
-        let line = match &mut self.source {
+        let (line, prompt) = match &mut self.source {
             Source::Log {
                 agent,
                 conversation,
@@ -127,13 +136,16 @@ impl Follower {
                 let Some(lines) = read(path, offset, partial) else {
                     return false;
                 };
-                lines.iter().rev().find_map(|line| {
-                    let entry: Value = serde_json::from_slice(line).ok()?;
-                    match agent {
-                        LogAgent::Claude => claude::line(&entry),
-                        LogAgent::Codex => codex::line(&entry),
-                    }
-                })
+                let entries: Vec<Value> = lines
+                    .iter()
+                    .filter_map(|line| serde_json::from_slice(line).ok())
+                    .collect();
+                let newest =
+                    |line: fn(&Value) -> Option<String>| entries.iter().rev().find_map(line);
+                match agent {
+                    LogAgent::Claude => (newest(claude::line), newest(claude::prompt)),
+                    LogAgent::Codex => (newest(codex::line), newest(codex::prompt)),
+                }
             }
             Source::OpenCode { database, cwd } => {
                 let conversation = match bound {
@@ -142,18 +154,24 @@ impl Follower {
                         .as_deref()
                         .and_then(crate::resume::opencode_recent_session),
                 };
-                conversation
-                    .filter(|id| crate::resume::is_conversation_id(id))
-                    .and_then(|id| opencode::latest(database, &id))
+                match conversation.filter(|id| crate::resume::is_conversation_id(id)) {
+                    Some(id) => (
+                        opencode::latest(database, &id),
+                        opencode::latest_prompt(database, &id),
+                    ),
+                    None => (None, None),
+                }
             }
         };
-        match line {
-            Some(line) if self.latest.as_deref() != Some(line.as_str()) => {
-                self.latest = Some(line);
-                true
+        // A read with nothing new keeps what was there.
+        let mut changed = false;
+        for (found, kept) in [(line, &mut self.latest), (prompt, &mut self.prompt)] {
+            if let Some(found) = found.filter(|found| kept.as_deref() != Some(found.as_str())) {
+                *kept = Some(found);
+                changed = true;
             }
-            _ => false,
         }
+        changed
     }
 }
 
@@ -249,6 +267,54 @@ fn first_line(text: &str) -> Option<String> {
     (!line.is_empty()).then_some(line)
 }
 
+/// What the user typed, as a line: the agents' own wrapped insertions
+/// (reminders, notifications, command output) dropped, a slash command as
+/// `/name args`, and a paste's first line only when nothing was typed
+/// around it.
+fn prompt_line(text: &str) -> Option<String> {
+    if let Some(command) = tagged(text, "command-name") {
+        let args = tagged(text, "command-args").unwrap_or_default();
+        return first_line(&format!("{} {}", command.trim(), args.trim()));
+    }
+    let mut typed = text.to_string();
+    for tag in [
+        "system-reminder",
+        "task-notification",
+        "local-command-stdout",
+        "local-command-stderr",
+        "local-command-caveat",
+        "user_instructions",
+        "environment_context",
+    ] {
+        while let Some(stripped) = without(&typed, tag) {
+            typed = stripped;
+        }
+    }
+    let paste = tagged(&typed, "pasted_content");
+    while let Some(stripped) = without(&typed, "pasted_content") {
+        typed = stripped;
+    }
+    first_line(&typed).or_else(|| paste.as_deref().and_then(first_line))
+}
+
+/// The text inside `text`'s first `<tag …>…</tag>`.
+fn tagged(text: &str, tag: &str) -> Option<String> {
+    let open = text.find(&format!("<{tag}"))?;
+    let start = open + text[open..].find('>')? + 1;
+    let end = start + text[start..].find(&format!("</{tag}>"))?;
+    Some(text[start..end].to_string())
+}
+
+/// `text` without its first `<tag …>…</tag>` (to its end when unclosed).
+fn without(text: &str, tag: &str) -> Option<String> {
+    let open = text.find(&format!("<{tag}"))?;
+    let close = format!("</{tag}>");
+    let end = text[open..]
+        .find(&close)
+        .map_or(text.len(), |at| open + at + close.len());
+    Some(format!("{}{}", &text[..open], &text[end..]))
+}
+
 /// A tool call as a line: `name: what it works on`, or the name alone.
 fn tool_line(name: &str, subject: Option<&str>) -> Option<String> {
     match subject.and_then(first_line) {
@@ -284,6 +350,7 @@ mod tests {
                 partial: Vec::new(),
             },
             latest: None,
+            prompt: None,
         }
     }
 
@@ -297,6 +364,34 @@ mod tests {
         assert_eq!(first_line("  \n---\n"), None);
         assert_eq!(first_line(&"x".repeat(500)).unwrap().len(), MAX_LINE);
         assert_eq!(short_path("/repo/tui/src/app.rs"), "src/app.rs");
+    }
+
+    #[test]
+    fn a_prompt_is_what_was_typed() {
+        assert_eq!(
+            prompt_line("Fix the parser\nthanks"),
+            Some("Fix the parser".into())
+        );
+        assert_eq!(
+            prompt_line("<command-name>/review</command-name>\n<command-args>src</command-args>"),
+            Some("/review src".into())
+        );
+        assert_eq!(
+            prompt_line("<task-notification>done</task-notification>"),
+            None
+        );
+        assert_eq!(
+            prompt_line("<system-reminder>x</system-reminder>\nShip it"),
+            Some("Ship it".into())
+        );
+        assert_eq!(
+            prompt_line("<pasted_content id=\"1\">\nerror: boom\n</pasted_content>\nWhy?"),
+            Some("Why?".into())
+        );
+        assert_eq!(
+            prompt_line("<pasted_content id=\"1\">\nerror: boom\n</pasted_content>"),
+            Some("error: boom".into())
+        );
     }
 
     #[test]

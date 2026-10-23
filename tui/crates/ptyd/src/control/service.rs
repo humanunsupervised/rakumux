@@ -103,6 +103,8 @@ struct LiveSession {
     output_checked_ms: i64,
     /// The agent's latest output line (`SessionView::agent_output`).
     agent_output: Option<String>,
+    /// The user's latest prompt (`SessionView::user_prompt`).
+    user_prompt: Option<String>,
 }
 
 impl LiveSession {
@@ -121,6 +123,7 @@ impl LiveSession {
             output: None,
             output_checked_ms: 0,
             agent_output: None,
+            user_prompt: None,
         }
     }
 }
@@ -1916,6 +1919,9 @@ impl Inner {
             live.agent_output = follower
                 .as_ref()
                 .and_then(|follower| follower.latest().map(String::from));
+            live.user_prompt = follower
+                .as_ref()
+                .and_then(|follower| follower.prompt().map(String::from));
             live.output = follower;
         }
     }
@@ -2370,6 +2376,14 @@ impl Inner {
                         .live
                         .get(&record.id)
                         .and_then(|live| live.agent_output.clone())
+                })
+                .flatten(),
+            user_prompt: (runtime.status == SessionStatus::Live)
+                .then(|| {
+                    state
+                        .live
+                        .get(&record.id)
+                        .and_then(|live| live.user_prompt.clone())
                 })
                 .flatten(),
             pinned: record.pinned,

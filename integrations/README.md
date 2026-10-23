@@ -100,11 +100,12 @@ The TUI animates busy states locally. Needs-input/done markers are static. Agent
 subagents are not Rakumux child sessions. These hook adapters forward metadata only, never
 prompts, tool arguments, output or transcripts.
 
-## Latest output
+## Latest output and prompt
 
-`output.rs` gives each live Claude Code, Codex or OpenCode session one line: what its agent
-last said or did (`SessionView.agent_output`), shown in the session list under the session's
-name.
+`output.rs` gives each live Claude Code, Codex or OpenCode session two lines: what its agent
+last said or did (`SessionView.agent_output`) and what the user last typed to it
+(`SessionView.user_prompt`). Settings → Session description content picks which the session
+list shows under the session's name (the user's message by default).
 - **Where it comes from:** the daemon reads it from the agent's own conversation on this
   machine, at most once a second while the terminal shows output:
   - Claude Code: `<config dir>/projects/*/<conversation>.jsonl` (the newest copy), for the
@@ -116,11 +117,13 @@ name.
     1.x's newest assistant pieces in `part`, for the conversation the Rakumux plugin bound to
     the session (else the folder's newest, as resume does). Without the plugin, two OpenCodes
     in one folder show the same conversation's line.
-- **What's taken:** only the last entry the main conversation's assistant wrote (its
-  reasoning, a tool call as `Tool: description` or a short path, or its reply), cut to its
-  first line: no control characters, at most 240 characters.
-- **What isn't:** prompts, tool output and subagents' entries are never taken, and the log is
-  read only from where it was last read, at most 256 KiB at a time.
+- **What's taken:** the last entry the main conversation's assistant wrote (its reasoning, a
+  tool call as `Tool: description` or a short path, or its reply), and the user's last typed
+  message (a slash command as `/name args`; the agents' own insertions such as reminders,
+  notifications and command output dropped), each cut to its first line: no control
+  characters, at most 240 characters.
+- **What isn't:** tool output and subagents' entries are never taken, and a log is read only
+  from where it was last read, at most 256 KiB at a time.
 - **Where it goes:** the line reaches the daemon's clients like the rest of the session's view
   (the TUI, `rakumux-api` and so the phone app). Nothing else reads it, and it isn't part of
   the AI description context.

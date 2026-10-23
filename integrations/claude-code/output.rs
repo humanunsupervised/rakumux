@@ -1,5 +1,5 @@
 //! Claude Code's latest output, from its conversation transcript.
-use super::{first_line, short_path, tool_line};
+use super::{first_line, prompt_line, short_path, tool_line};
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -82,6 +82,39 @@ pub(super) fn line(entry: &Value) -> Option<String> {
         .iter()
         .rev()
         .find_map(block)
+}
+
+/// An entry of what the user typed in the main conversation: not a tool
+/// result, nor what Claude Code adds itself (summaries, notices, commands'
+/// output).
+pub(super) fn prompt(entry: &Value) -> Option<String> {
+    let flagged = |key: &str| entry.get(key).and_then(Value::as_bool) == Some(true);
+    if entry.get("type")?.as_str()? != "user"
+        || flagged("isSidechain")
+        || flagged("isMeta")
+        || flagged("isCompactSummary")
+    {
+        return None;
+    }
+    let text = match entry.get("message")?.get("content")? {
+        Value::String(text) => text.clone(),
+        Value::Array(blocks) => {
+            let mut texts = Vec::new();
+            for block in blocks {
+                match block.get("type")?.as_str()? {
+                    "text" => texts.push(block.get("text")?.as_str()?),
+                    "tool_result" => return None,
+                    _ => {}
+                }
+            }
+            texts.join("\n")
+        }
+        _ => return None,
+    };
+    if text.starts_with("[Request interrupted") {
+        return None;
+    }
+    prompt_line(&text)
 }
 
 fn block(block: &Value) -> Option<String> {
@@ -189,6 +222,41 @@ mod tests {
         assert_eq!(
             transcript(config.path(), "job-conversation"),
             Some(config.path().join("projects/b/job-conversation.jsonl"))
+        );
+    }
+
+    #[test]
+    fn typed_prompts_are_prompts_but_claude_codes_own_entries_are_not() {
+        let user = |content: Value| json!({"type": "user", "message": {"role": "user", "content": content}});
+        assert_eq!(
+            prompt(&user(json!("Fix the login test"))),
+            Some("Fix the login test".into())
+        );
+        assert_eq!(
+            prompt(&user(json!([{"type": "text", "text": "And the docs"}]))),
+            Some("And the docs".into())
+        );
+        assert_eq!(
+            prompt(&user(
+                json!([{"type": "tool_result", "content": "secret output"}])
+            )),
+            None
+        );
+        let mut summary = user(json!("This session is being continued"));
+        summary["isCompactSummary"] = json!(true);
+        assert_eq!(prompt(&summary), None);
+        assert_eq!(prompt(&user(json!("[Request interrupted by user]"))), None);
+        assert_eq!(
+            prompt(&user(json!(
+                "<task-notification>finished</task-notification>"
+            ))),
+            None
+        );
+        assert_eq!(
+            prompt(
+                &json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}})
+            ),
+            None
         );
     }
 

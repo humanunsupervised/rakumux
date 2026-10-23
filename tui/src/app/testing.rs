@@ -34,6 +34,7 @@ use super::{App, AppOptions, Config, ExecMode, Settings};
 pub fn view(id: &str, name: &str, last_active_at: i64) -> SessionView {
     SessionView {
         agent_output: None,
+        user_prompt: None,
         pinned: false,
         git: None,
         auto_named: false,
@@ -433,6 +434,7 @@ impl SessionApi for FakeApi {
                 session_core::api::CAPABILITY_TERMINAL_PANE,
                 session_core::api::CAPABILITY_WORKING_DIRECTORY,
                 session_core::api::CAPABILITY_AGENT_OUTPUT,
+                session_core::api::CAPABILITY_USER_PROMPT,
             ]);
         }
         if state.restarts_in_place {
