@@ -13,8 +13,14 @@ fn isolated_process_test() -> MutexGuard<'static, ()> {
     TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner())
 }
 
+/// A temporary directory under the system's, canonical (macOS's is under the `/var`
+/// symlink).
+fn scratch() -> tempfile::TempDir {
+    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
 fn setup() -> (tempfile::TempDir, SqliteStatusStore) {
-    let directory = tempfile::tempdir_in("/tmp/opencode").unwrap();
+    let directory = scratch();
     let store = SqliteStatusStore::open(directory.path().join("private-status")).unwrap();
     (directory, store)
 }
@@ -180,7 +186,7 @@ fn disabled_wrong_account_auth_revision_folder_and_consent_revision_deny_cache()
     let mut wrong = cached.clone();
     wrong.auth_revision += 1;
     invalid_entries.push(wrong);
-    let other_folder = tempfile::tempdir_in("/tmp/opencode").unwrap();
+    let other_folder = scratch();
     let mut wrong = cached.clone();
     wrong.folder = folder(other_folder.path());
     invalid_entries.push(wrong);
@@ -205,7 +211,7 @@ fn disabled_wrong_account_auth_revision_folder_and_consent_revision_deny_cache()
 fn every_policy_mutation_clears_the_entire_cache_atomically() {
     let _isolation = isolated_process_test();
     let (directory, mut store) = setup();
-    let other_folder = tempfile::tempdir_in("/tmp/opencode").unwrap();
+    let other_folder = scratch();
     let mut enabled = policy(directory.path());
     if let ConsentPolicy::Enabled { folders, .. } = &mut enabled {
         folders.push(FolderConsent {
@@ -361,7 +367,7 @@ fn unsafe_existing_directory_and_file_modes_are_rejected_not_chmodded() {
 #[test]
 fn symlinked_directory_and_known_files_never_reach_an_external_target() {
     let _isolation = isolated_process_test();
-    let directory = tempfile::tempdir_in("/tmp/opencode").unwrap();
+    let directory = scratch();
     let external = directory.path().join("external");
     fs::DirBuilder::new().mode(0o700).create(&external).unwrap();
     let linked = directory.path().join("linked");
@@ -471,7 +477,7 @@ fn private_foreign_wal_state_is_refused_without_opening_or_removing_it() {
 #[test]
 fn missing_parent_is_not_created_and_existing_nondirectory_is_not_modified() {
     let _isolation = isolated_process_test();
-    let directory = tempfile::tempdir_in("/tmp/opencode").unwrap();
+    let directory = scratch();
     let missing = directory.path().join("missing").join("private-status");
     assert_eq!(
         open_error(&missing),
@@ -649,7 +655,7 @@ fn assert_orphan_journal_refusal(path: &Path, expected_journal: &[u8]) {
 #[test]
 fn orphan_oversized_journal_preserves_database_absence_and_journal_bytes() {
     let _isolation = isolated_process_test();
-    let directory = tempfile::tempdir_in("/tmp/opencode").unwrap();
+    let directory = scratch();
     let path = directory.path().join("private-status");
     fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
     let journal_path = path.join("status.sqlite3-journal");
@@ -699,7 +705,7 @@ fn orphan_valid_hot_journal_preserves_database_absence_and_recovery_evidence() {
 fn orphan_empty_and_stale_journals_are_never_initialized_away() {
     let _isolation = isolated_process_test();
     for bytes in [b"".as_slice(), b"PRIVATE-STALE-JOURNAL".as_slice()] {
-        let directory = tempfile::tempdir_in("/tmp/opencode").unwrap();
+        let directory = scratch();
         let path = directory.path().join("private-status");
         fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
         write_private(&path.join("status.sqlite3-journal"), bytes);
