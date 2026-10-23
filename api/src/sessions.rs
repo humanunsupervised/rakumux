@@ -264,6 +264,7 @@ mod tests {
         SessionView {
             agent_output: None,
             user_prompt: None,
+            agent_turn: None,
             id: SessionId::from_string(id),
             name: name.into(),
             scope: ScopeRoot::from_canonical(folder.to_path_buf()),

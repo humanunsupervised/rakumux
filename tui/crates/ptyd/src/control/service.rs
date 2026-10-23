@@ -105,6 +105,8 @@ struct LiveSession {
     agent_output: Option<String>,
     /// The user's latest prompt (`SessionView::user_prompt`).
     user_prompt: Option<String>,
+    /// The agent's current turn (`session_turn`, `SessionView::agent_turn`).
+    turn: Option<crate::agent_output::Turn>,
 }
 
 impl LiveSession {
@@ -124,6 +126,7 @@ impl LiveSession {
             output_checked_ms: 0,
             agent_output: None,
             user_prompt: None,
+            turn: None,
         }
     }
 }
@@ -435,6 +438,7 @@ impl Inner {
             Request::SessionSend(request) => self.send(caller, request),
             Request::SessionSubmit { id, text } => self.submit(caller, &id, &text),
             Request::SessionTouch { id } => self.touch(caller, &id),
+            Request::SessionTurn { id } => self.turn(caller, &id),
             Request::SessionPin { id, pinned } => self.pin(caller, &id, pinned),
             Request::SessionBind {
                 agent,
@@ -1478,6 +1482,25 @@ impl Inner {
     }
 
     /// Mark a session as just used: list ordering, and `done` → `idle`.
+    /// `session_turn`: the live agent's current turn, for user callers.
+    fn turn(&self, caller: &Caller, id: &SessionId) -> Result<Response, ApiError> {
+        let state = self.lock();
+        let record = self.target(&state, caller, Op::Turn, id)?;
+        let turn = state
+            .live
+            .get(&record.id)
+            .and_then(|live| live.turn.clone())
+            .unwrap_or_default();
+        Ok(Response::Turn {
+            turn: session_core::api::TurnContent {
+                id: turn.id,
+                prompt: turn.prompt,
+                messages: turn.messages.into(),
+                total: turn.total,
+            },
+        })
+    }
+
     fn touch(&self, caller: &Caller, id: &SessionId) -> Result<Response, ApiError> {
         let mut state = self.lock();
         let record = self.target(&state, caller, Op::Touch, id)?;
@@ -1922,6 +1945,10 @@ impl Inner {
             live.user_prompt = follower
                 .as_ref()
                 .and_then(|follower| follower.prompt().map(String::from));
+            live.turn = follower
+                .as_ref()
+                .map(|follower| follower.turn().clone())
+                .filter(|turn| turn.prompt.is_some() || turn.total > 0);
             live.output = follower;
         }
     }
@@ -2376,6 +2403,15 @@ impl Inner {
                         .live
                         .get(&record.id)
                         .and_then(|live| live.agent_output.clone())
+                })
+                .flatten(),
+            agent_turn: (runtime.status == SessionStatus::Live)
+                .then(|| {
+                    let turn = state.live.get(&record.id)?.turn.as_ref()?;
+                    Some(session_core::model::AgentTurn {
+                        id: turn.id,
+                        messages: turn.total,
+                    })
                 })
                 .flatten(),
             user_prompt: (runtime.status == SessionStatus::Live)

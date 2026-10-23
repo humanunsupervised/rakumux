@@ -1,5 +1,9 @@
 //! Claude Code's latest output, from its conversation transcript.
 use super::{first_line, prompt_line, short_path, tool_line};
+
+/// Thinking and replies longer than this are cut, in bytes, before they're
+/// shaped into a line or a summary's message.
+const MAX_BLOCK: usize = 8 * 1024;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -70,24 +74,37 @@ pub(super) fn transcript(config: &Path, id: &str) -> Option<PathBuf> {
 /// An entry of the main conversation's assistant (a subagent's are its own):
 /// its last thinking, tool call or text.
 pub(super) fn line(entry: &Value) -> Option<String> {
-    if entry.get("type")?.as_str()? != "assistant"
-        || entry.get("isSidechain").and_then(Value::as_bool) == Some(true)
-    {
-        return None;
-    }
-    entry
-        .get("message")?
-        .get("content")?
-        .as_array()?
+    messages(entry)
         .iter()
         .rev()
-        .find_map(block)
+        .find_map(|message| first_line(message))
 }
 
-/// An entry of what the user typed in the main conversation: not a tool
-/// result, nor what Claude Code adds itself (summaries, notices, commands'
-/// output).
+/// The messages of an assistant entry of the main conversation, oldest
+/// first: its thinking and replies as written, its tool calls as lines.
+pub(super) fn messages(entry: &Value) -> Vec<String> {
+    let main = entry.get("type").and_then(Value::as_str) == Some("assistant")
+        && entry.get("isSidechain").and_then(Value::as_bool) != Some(true);
+    if !main {
+        return Vec::new();
+    }
+    entry
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_array)
+        .map(|blocks| blocks.iter().filter_map(block).collect())
+        .unwrap_or_default()
+}
+
+/// An entry of what the user typed in the main conversation, as one line.
 pub(super) fn prompt(entry: &Value) -> Option<String> {
+    prompt_line(&typed(entry)?)
+}
+
+/// What the user typed in an entry of the main conversation, as written:
+/// not a tool result, nor what Claude Code adds itself (summaries, notices,
+/// commands' output).
+pub(super) fn typed(entry: &Value) -> Option<String> {
     let flagged = |key: &str| entry.get(key).and_then(Value::as_bool) == Some(true);
     if entry.get("type")?.as_str()? != "user"
         || flagged("isSidechain")
@@ -114,13 +131,22 @@ pub(super) fn prompt(entry: &Value) -> Option<String> {
     if text.starts_with("[Request interrupted") {
         return None;
     }
-    prompt_line(&text)
+    Some(text)
 }
 
+/// A block's message: thinking or a reply as written (cut at
+/// [`MAX_BLOCK`]), a tool call as a line.
 fn block(block: &Value) -> Option<String> {
+    let text = |key: &str| {
+        let text = block.get(key)?.as_str()?.trim();
+        let end = (0..=text.len().min(MAX_BLOCK))
+            .rev()
+            .find(|at| text.is_char_boundary(*at))?;
+        (!text.is_empty()).then(|| text[..end].to_string())
+    };
     match block.get("type")?.as_str()? {
-        "thinking" => first_line(block.get("thinking")?.as_str()?),
-        "text" => first_line(block.get("text")?.as_str()?),
+        "thinking" => text("thinking"),
+        "text" => text("text"),
         "tool_use" => {
             let name = block.get("name")?.as_str()?;
             let field = |key: &str| block.get("input")?.get(key)?.as_str();

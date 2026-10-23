@@ -117,6 +117,12 @@ pub trait SessionApi: Send + Sync {
         let _ = (agent, conversations);
         Err(unsupported("binding conversations"))
     }
+    /// The current turn of a live session's agent (user callers; capability
+    /// `session.turn`).
+    fn turn(&self, id: &SessionId) -> Result<crate::api::TurnContent> {
+        let _ = id;
+        Err(unsupported("reading an agent's turn"))
+    }
     /// The optional features the daemon announced in its hello; `None` when
     /// the implementation can't tell (adapters, fakes).
     fn daemon_capabilities(&self) -> Option<Vec<String>> {
@@ -383,6 +389,13 @@ impl SessionApi for Client {
             id: id.clone(),
             pinned,
         })
+    }
+
+    fn turn(&self, id: &SessionId) -> Result<crate::api::TurnContent> {
+        match self.request(&Request::SessionTurn { id: id.clone() })? {
+            Response::Turn { turn } => Ok(turn),
+            other => Err(unexpected(&other)),
+        }
     }
 
     fn bind(&self, agent: &str, conversations: &[String]) -> Result<()> {
@@ -960,6 +973,7 @@ fn is_idempotent(request: &Request) -> bool {
             | Request::SessionPin { .. }
             | Request::SessionGet { .. }
             | Request::SessionRead(_)
+            | Request::SessionTurn { .. }
             | Request::SessionTouch { .. }
             | Request::DaemonStatus
     )
@@ -1285,6 +1299,7 @@ mod tests {
         SessionView {
             agent_output: None,
             user_prompt: None,
+            agent_turn: None,
             pinned: false,
             git: None,
             auto_named: false,
@@ -1570,6 +1585,14 @@ mod tests {
                 | Request::SessionTouch { .. } => Response::Ok,
                 Request::SessionRevive(revive) => Response::Session {
                     session: named(revive.id.as_str(), "revived"),
+                },
+                Request::SessionTurn { id } => Response::Turn {
+                    turn: crate::api::TurnContent {
+                        id: 7,
+                        prompt: Some(format!("prompt of {id}")),
+                        messages: vec!["reading".into(), "done".into()],
+                        total: 2,
+                    },
                 },
                 Request::SessionRead(read) => Response::Read(ReadResult {
                     text: format!("screen of {}", read.id),

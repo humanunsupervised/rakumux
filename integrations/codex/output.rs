@@ -9,18 +9,55 @@ pub(super) fn log(process: &ProcessInfo) -> Option<PathBuf> {
     crate::resume::codex_open_rollout(process.pid)
 }
 
-/// Its reasoning summaries, tool calls and messages.
+/// Its reasoning summaries, tool calls and messages, as one line.
 pub(super) fn line(entry: &Value) -> Option<String> {
+    messages(entry)
+        .iter()
+        .rev()
+        .find_map(|message| first_line(message))
+}
+
+/// An entry's messages, oldest first: reasoning summaries and replies as
+/// written, tool calls as lines. Each counts once: a rollout records a
+/// reply both as an event and as an item, and the event is the one taken
+/// (the item for reasoning and tool calls).
+pub(super) fn messages(entry: &Value) -> Vec<String> {
+    let text = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(String::from)
+    };
+    let Some(payload) = entry.get("payload") else {
+        return Vec::new();
+    };
+    let kinds = (
+        entry.get("type").and_then(Value::as_str),
+        payload.get("type").and_then(Value::as_str),
+    );
+    match kinds {
+        (Some("event_msg"), Some("agent_message")) => {
+            text(payload.get("message")).into_iter().collect()
+        }
+        (Some("response_item"), Some("reasoning")) => payload
+            .get("summary")
+            .and_then(Value::as_array)
+            .map(|parts| {
+                parts
+                    .iter()
+                    .filter_map(|part| text(part.get("text")))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => call(entry).into_iter().collect(),
+    }
+}
+
+/// A tool call as a line.
+fn call(entry: &Value) -> Option<String> {
     let payload = entry.get("payload")?;
     match (entry.get("type")?.as_str()?, payload.get("type")?.as_str()?) {
-        ("event_msg", "agent_message") => first_line(payload.get("message")?.as_str()?),
-        ("event_msg", "agent_reasoning") => first_line(payload.get("text")?.as_str()?),
-        ("response_item", "reasoning") => payload
-            .get("summary")?
-            .as_array()?
-            .iter()
-            .rev()
-            .find_map(|part| first_line(part.get("text")?.as_str()?)),
         ("response_item", "function_call") => {
             let name = payload.get("name")?.as_str()?;
             let arguments: Option<Value> = payload
@@ -38,11 +75,16 @@ pub(super) fn line(entry: &Value) -> Option<String> {
     }
 }
 
-/// What the user typed (`user_message`), without the context Codex adds.
+/// What the user typed (`user_message`), as one line.
 pub(super) fn prompt(entry: &Value) -> Option<String> {
+    prompt_line(&typed(entry)?)
+}
+
+/// What the user typed (`user_message`), as written.
+pub(super) fn typed(entry: &Value) -> Option<String> {
     let payload = entry.get("payload")?;
     match (entry.get("type")?.as_str()?, payload.get("type")?.as_str()?) {
-        ("event_msg", "user_message") => prompt_line(payload.get("message")?.as_str()?),
+        ("event_msg", "user_message") => Some(payload.get("message")?.as_str()?.to_string()),
         _ => None,
     }
 }

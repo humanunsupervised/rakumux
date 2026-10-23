@@ -12,6 +12,123 @@ use std::path::Path;
 const RECENT_PARTS: usize = 16;
 /// The OpenCode 2 replies looked at, newest first, to pass empty ones.
 const RECENT_REPLIES: usize = 4;
+/// The most replies (OpenCode 2) or pieces (1.x) a turn is read from.
+const TURN_ROWS: usize = 500;
+
+/// A turn: what tells it from the next, the user's prompt and the agent's
+/// messages since, as written.
+type RawTurn = (u64, Option<String>, Vec<String>);
+
+/// The current turn of `conversation`, from whichever layout holds it.
+pub(super) fn turn(database: &Path, conversation: &str) -> Option<RawTurn> {
+    let connection = crate::resume::open_read_only(database)?;
+    turn_v2(&connection, conversation).or_else(|| turn_v1(&connection, conversation))
+}
+
+/// OpenCode 2: the newest `user` row and the `assistant` rows after it.
+fn turn_v2(connection: &rusqlite::Connection, conversation: &str) -> Option<RawTurn> {
+    let prompt: Option<(i64, String)> = connection
+        .query_row(
+            "SELECT seq, data FROM session_message \
+             WHERE session_id = ?1 AND type = 'user' ORDER BY seq DESC LIMIT 1",
+            [conversation],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok();
+    let after = prompt.as_ref().map_or(-1, |(seq, _)| *seq);
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT data FROM session_message WHERE session_id = ?1 AND type = 'assistant' \
+             AND seq > ?2 ORDER BY seq LIMIT {TURN_ROWS}"
+        ))
+        .ok()?;
+    let rows = statement
+        .query_map(rusqlite::params![conversation, after], |row| {
+            row.get::<_, String>(0)
+        })
+        .ok()?;
+    let messages: Vec<String> = rows
+        .filter_map(Result::ok)
+        .filter_map(|data| serde_json::from_str::<Value>(&data).ok())
+        .flat_map(|reply| reply_messages(&reply))
+        .collect();
+    if prompt.is_none() && messages.is_empty() {
+        return None;
+    }
+    let text = prompt.and_then(|(_, data)| {
+        let data: Value = serde_json::from_str(&data).ok()?;
+        Some(data.get("text")?.as_str()?.to_string())
+    });
+    Some((u64::try_from(after + 1).unwrap_or(0), text, messages))
+}
+
+/// OpenCode 1.x: the newest user message, and the assistant's pieces since.
+fn turn_v1(connection: &rusqlite::Connection, conversation: &str) -> Option<RawTurn> {
+    let mut statement = connection
+        .prepare(
+            "SELECT id, time_created, data FROM message \
+             WHERE session_id = ?1 ORDER BY time_created DESC LIMIT 200",
+        )
+        .ok()?;
+    let rows = statement
+        .query_map([conversation], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .ok()?;
+    let user = rows.filter_map(Result::ok).find_map(|(id, created, data)| {
+        let data: Value = serde_json::from_str(&data).ok()?;
+        (data.get("role")?.as_str()? == "user").then_some((id, created))
+    });
+    drop(statement);
+    let since = user.as_ref().map_or(i64::MIN, |(_, created)| *created);
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT part.data, message.data, message.id FROM part \
+             JOIN message ON message.id = part.message_id \
+             WHERE part.session_id = ?1 AND message.time_created >= ?2 \
+             ORDER BY message.time_created, part.time_created LIMIT {TURN_ROWS}"
+        ))
+        .ok()?;
+    let rows = statement
+        .query_map(rusqlite::params![conversation, since], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .ok()?;
+    let mut prompt = Vec::new();
+    let mut messages = Vec::new();
+    for (part, message, message_id) in rows.filter_map(Result::ok) {
+        let (Ok(part), Ok(message)) = (
+            serde_json::from_str::<Value>(&part),
+            serde_json::from_str::<Value>(&message),
+        ) else {
+            continue;
+        };
+        match message.get("role").and_then(Value::as_str) {
+            Some("assistant") => messages.extend(part_message(&part)),
+            Some("user") if user.as_ref().is_some_and(|(id, _)| *id == message_id) => {
+                let typed = part.get("type").and_then(Value::as_str) == Some("text")
+                    && part.get("synthetic").and_then(Value::as_bool) != Some(true);
+                if let Some(text) = part.get("text").and_then(Value::as_str).filter(|_| typed) {
+                    prompt.push(text.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    if user.is_none() && messages.is_empty() {
+        return None;
+    }
+    let prompt = (!prompt.is_empty()).then(|| prompt.join("\n"));
+    Some((since.max(0).unsigned_abs(), prompt, messages))
+}
 
 /// The latest line of `conversation`, whichever of the two layouts holds
 /// it (the newer one, when both do).
@@ -151,31 +268,52 @@ fn parts(connection: &rusqlite::Connection, conversation: &str) -> Option<(i64, 
 
 /// An OpenCode 2 reply's last block that makes a line.
 fn reply_line(reply: &Value) -> Option<String> {
-    reply
-        .get("content")?
-        .as_array()?
+    reply_messages(reply)
         .iter()
         .rev()
-        .find_map(|block| match block.get("type")?.as_str()? {
-            "reasoning" | "text" => first_line(block.get("text")?.as_str()?),
+        .find_map(|message| first_line(message))
+}
+
+/// An OpenCode 2 reply's messages, oldest first: reasoning and text as
+/// written, tool calls as lines.
+fn reply_messages(reply: &Value) -> Vec<String> {
+    let Some(blocks) = reply.get("content").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    blocks
+        .iter()
+        .filter_map(|block| match block.get("type")?.as_str()? {
+            "reasoning" | "text" => written(block.get("text")?.as_str()?),
             "tool" => {
                 let name = block.get("name")?.as_str()?;
                 tool(name, block.get("state")?.get("input"))
             }
             _ => None,
         })
+        .collect()
 }
 
-/// A 1.x piece: reasoning, text or a tool call.
+/// A 1.x piece as a line: reasoning, text or a tool call.
 fn part_line(part: &Value) -> Option<String> {
+    first_line(&part_message(part)?)
+}
+
+/// A 1.x piece's message: reasoning or text as written, a tool call as a line.
+fn part_message(part: &Value) -> Option<String> {
     match part.get("type")?.as_str()? {
-        "reasoning" | "text" => first_line(part.get("text")?.as_str()?),
+        "reasoning" | "text" => written(part.get("text")?.as_str()?),
         "tool" => {
             let name = part.get("tool")?.as_str()?;
             tool(name, part.get("state")?.get("input"))
         }
         _ => None,
     }
+}
+
+/// Text as written, when there is some.
+fn written(text: &str) -> Option<String> {
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
 }
 
 /// A tool call as a line, with what it works on when that's short to say.
@@ -288,5 +426,16 @@ mod tests {
             .unwrap();
         assert_eq!(latest(&database, "ses_b"), Some("Fixed it.".into()));
         assert_eq!(latest_prompt(&database, "ses_b"), Some("my prompt".into()));
+        // The turns: OpenCode 2's starts after its newest prompt.
+        let (_, prompt, messages) = turn(&database, "ses_a").unwrap();
+        assert_eq!(prompt.as_deref(), Some("my prompt"));
+        assert!(messages.is_empty(), "{messages:?}");
+        reply(5, "Working on it", 40);
+        let (_, _, messages) = turn(&database, "ses_a").unwrap();
+        assert_eq!(messages, ["Working on it"]);
+        // 1.x: the user's message and the assistant's pieces.
+        let (_, prompt, messages) = turn(&database, "ses_b").unwrap();
+        assert_eq!(prompt.as_deref(), Some("my prompt"));
+        assert_eq!(messages, ["Fixed it."]);
     }
 }

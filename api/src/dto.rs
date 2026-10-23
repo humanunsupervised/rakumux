@@ -654,6 +654,7 @@ mod tests {
         SessionView {
             agent_output: None,
             user_prompt: None,
+            agent_turn: None,
             id: SessionId::from_string("01J0000000000000000000000A"),
             name: "reviewer".into(),
             scope: ScopeRoot::from_canonical("/repo".into()),

@@ -35,6 +35,7 @@ pub fn view(id: &str, name: &str, last_active_at: i64) -> SessionView {
     SessionView {
         agent_output: None,
         user_prompt: None,
+        agent_turn: None,
         pinned: false,
         git: None,
         auto_named: false,

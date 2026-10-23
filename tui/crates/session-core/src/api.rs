@@ -150,6 +150,11 @@ pub enum Request {
     SessionTouch {
         id: SessionId,
     },
+    /// User only: the current turn of a live session's agent, for an AI
+    /// summary (capability `session.turn`).
+    SessionTurn {
+        id: SessionId,
+    },
     /// Pin or unpin (capability `session.pin`). User callers, or a session
     /// pinning itself.
     SessionPin {
@@ -458,6 +463,9 @@ pub const CAPABILITY_AGENT_OUTPUT: &str = "session.agent_output";
 /// `SessionView::user_prompt`: what the user last typed to a running agent.
 pub const CAPABILITY_USER_PROMPT: &str = "session.user_prompt";
 
+/// `session_turn` and `SessionView::agent_turn`: a running agent's current turn.
+pub const CAPABILITY_TURN: &str = "session.turn";
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -484,6 +492,10 @@ pub enum Response {
         project: ProjectView,
     },
     Read(ReadResult),
+    /// The answer to `session_turn`.
+    Turn {
+        turn: TurnContent,
+    },
     Wait(WaitResult),
     Killed {
         killed: Vec<SessionId>,
@@ -496,6 +508,23 @@ pub enum Response {
     Error {
         error: ApiError,
     },
+}
+
+/// A live agent's current turn (`session_turn`): the user's last prompt and
+/// the agent's messages since (reasoning, replies, tool calls), oldest
+/// first, each flattened to one line. Read from the agent's own
+/// conversation; terminal-like untrusted text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnContent {
+    /// The same as `SessionView::agent_turn`'s.
+    pub id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// The newest messages the daemon keeps (100), oldest first.
+    #[serde(default)]
+    pub messages: Vec<String>,
+    /// Every message of the turn, kept or not.
+    pub total: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

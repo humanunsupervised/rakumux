@@ -29,6 +29,7 @@ pub(crate) enum Op {
     Revive,
     Report,
     Read,
+    Turn,
     Wait,
     Send,
     Submit,
@@ -59,6 +60,7 @@ impl Op {
             Op::Revive => "session.revive",
             Op::Report => "session.report",
             Op::Read => "session.read",
+            Op::Turn => "session.turn",
             Op::Wait => "session.wait",
             Op::Send => "session.send",
             Op::Submit => "session.submit",
@@ -138,6 +140,7 @@ pub(crate) fn authorize(
             _ => Err(denied(op, "a session may only do this to itself")),
         },
         Op::Import => Err(denied(op, "importing saved sessions is for user clients")),
+        Op::Turn => Err(denied(op, "an agent's conversation is for user clients")),
         Op::TerminalOpen | Op::TerminalAttach => {
             Err(denied(op, "temporary terminals are for user clients"))
         }

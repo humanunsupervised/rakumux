@@ -310,6 +310,10 @@ fn session_caller_permission_matrix() {
         Request::ProjectRemove {
             path: h.scope.clone(),
         },
+        Request::SessionTurn { id: my_id.clone() },
+        Request::SessionTurn {
+            id: other.id.clone(),
+        },
     ];
     for request in denied {
         let err = error(h.handle(&me, request.clone()));

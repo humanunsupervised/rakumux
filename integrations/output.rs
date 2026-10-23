@@ -14,6 +14,7 @@
 
 use crate::host::ProcessInfo;
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -29,6 +30,45 @@ mod opencode;
 const MAX_READ: u64 = 256 * 1024;
 /// The longest line kept, in characters.
 pub const MAX_LINE: usize = 240;
+/// The longest prompt or message a turn keeps, in characters.
+pub const MAX_TURN_TEXT: usize = 600;
+/// The most messages a turn keeps: its newest.
+pub const MAX_TURN_MESSAGES: usize = 100;
+
+/// A conversation's current turn, for an AI summary: the user's last
+/// prompt and the agent's messages since (its reasoning, replies and tool
+/// calls), each flattened to one line of at most [`MAX_TURN_TEXT`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Turn {
+    /// Tells this turn from the next one: the prompts a log showed so far,
+    /// or OpenCode's prompt row.
+    pub id: u64,
+    pub prompt: Option<String>,
+    /// The newest [`MAX_TURN_MESSAGES`] messages, oldest first.
+    pub messages: VecDeque<String>,
+    /// Every message of the turn, kept or not.
+    pub total: u32,
+}
+
+impl Turn {
+    fn begin(&mut self, prompt: Option<String>) {
+        self.id = self.id.wrapping_add(1);
+        self.prompt = prompt;
+        self.messages.clear();
+        self.total = 0;
+    }
+
+    fn push(&mut self, message: &str) {
+        let Some(message) = flat(message) else {
+            return;
+        };
+        if self.messages.len() == MAX_TURN_MESSAGES {
+            self.messages.pop_front();
+        }
+        self.messages.push_back(message);
+        self.total = self.total.saturating_add(1);
+    }
+}
 
 /// An agent whose log is an append-only file of JSON lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +107,7 @@ pub struct Follower {
     source: Source,
     latest: Option<String>,
     prompt: Option<String>,
+    turn: Turn,
 }
 
 impl Follower {
@@ -99,6 +140,7 @@ impl Follower {
             source,
             latest: None,
             prompt: None,
+            turn: Turn::default(),
         })
     }
 
@@ -117,10 +159,16 @@ impl Follower {
         self.prompt.as_deref()
     }
 
+    /// The conversation's current turn.
+    pub fn turn(&self) -> &Turn {
+        &self.turn
+    }
+
     /// Read what the conversation gained since the last time (a log from its
     /// tail the first time). `bound` is the OpenCode conversation bound to
     /// the session, if any. Returns whether either line changed.
     pub fn follow(&mut self, bound: Option<&str>) -> bool {
+        let before = (self.turn.id, self.turn.total);
         let (line, prompt) = match &mut self.source {
             Source::Log {
                 agent,
@@ -130,8 +178,10 @@ impl Follower {
                 partial,
             } => {
                 let agent = *agent;
-                if agent == LogAgent::Claude {
-                    switch_conversation(self.pid, conversation, path, offset, partial);
+                if agent == LogAgent::Claude
+                    && switch_conversation(self.pid, conversation, path, offset, partial)
+                {
+                    self.turn.begin(None);
                 }
                 let Some(lines) = read(path, offset, partial) else {
                     return false;
@@ -140,6 +190,19 @@ impl Follower {
                     .iter()
                     .filter_map(|line| serde_json::from_slice(line).ok())
                     .collect();
+                // In order: a prompt starts a turn, the agent's messages join it.
+                for entry in &entries {
+                    let (typed, messages) = match agent {
+                        LogAgent::Claude => (claude::typed(entry), claude::messages(entry)),
+                        LogAgent::Codex => (codex::typed(entry), codex::messages(entry)),
+                    };
+                    if let Some(typed) = typed.filter(|typed| prompt_line(typed).is_some()) {
+                        self.turn.begin(prompt_text(&typed));
+                    }
+                    for message in &messages {
+                        self.turn.push(message);
+                    }
+                }
                 let newest =
                     |line: fn(&Value) -> Option<String>| entries.iter().rev().find_map(line);
                 match agent {
@@ -155,16 +218,32 @@ impl Follower {
                         .and_then(crate::resume::opencode_recent_session),
                 };
                 match conversation.filter(|id| crate::resume::is_conversation_id(id)) {
-                    Some(id) => (
-                        opencode::latest(database, &id),
-                        opencode::latest_prompt(database, &id),
-                    ),
+                    Some(id) => {
+                        if let Some((turn_id, prompt, messages)) = opencode::turn(database, &id) {
+                            if turn_id != self.turn.id {
+                                self.turn = Turn {
+                                    id: turn_id,
+                                    ..Turn::default()
+                                };
+                            }
+                            self.turn.prompt = prompt.as_deref().and_then(prompt_text);
+                            self.turn.messages.clear();
+                            self.turn.total = 0;
+                            for message in &messages {
+                                self.turn.push(message);
+                            }
+                        }
+                        (
+                            opencode::latest(database, &id),
+                            opencode::latest_prompt(database, &id),
+                        )
+                    }
                     None => (None, None),
                 }
             }
         };
         // A read with nothing new keeps what was there.
-        let mut changed = false;
+        let mut changed = before != (self.turn.id, self.turn.total);
         for (found, kept) in [(line, &mut self.latest), (prompt, &mut self.prompt)] {
             if let Some(found) = found.filter(|found| kept.as_deref() != Some(found.as_str())) {
                 *kept = Some(found);
@@ -176,29 +255,31 @@ impl Follower {
 }
 
 /// Follow Claude Code's conversation to wherever the process works now: a
-/// new transcript is read from its tail.
+/// new transcript is read from its tail. Returns whether it switched.
 fn switch_conversation(
     pid: u32,
     conversation: &mut Option<String>,
     path: &mut PathBuf,
     offset: &mut u64,
     partial: &mut Vec<u8>,
-) {
+) -> bool {
     let Some(config) = crate::resume::claude_config_dir() else {
-        return;
+        return false;
     };
     let Some(current) = claude::conversation(&config, pid) else {
-        return;
+        return false;
     };
     if conversation.as_deref() == Some(current.as_str()) {
-        return;
+        return false;
     }
-    if let Some(transcript) = claude::transcript(&config, &current) {
-        *path = transcript;
-        *offset = 0;
-        partial.clear();
-        *conversation = Some(current);
-    }
+    let Some(transcript) = claude::transcript(&config, &current) else {
+        return false;
+    };
+    *path = transcript;
+    *offset = 0;
+    partial.clear();
+    *conversation = Some(current);
+    true
 }
 
 /// The complete lines `path` gained since `offset` (moved past them); the
@@ -272,9 +353,31 @@ fn first_line(text: &str) -> Option<String> {
 /// `/name args`, and a paste's first line only when nothing was typed
 /// around it.
 fn prompt_line(text: &str) -> Option<String> {
+    first_line(&typed_text(text)?)
+}
+
+/// What the user typed, whole, flattened for a summary ([`flat`]).
+fn prompt_text(text: &str) -> Option<String> {
+    flat(&typed_text(text)?)
+}
+
+/// `text` flattened to one line for a summary: whitespace and control
+/// characters collapsed, at most [`MAX_TURN_TEXT`] characters.
+fn flat(text: &str) -> Option<String> {
+    let words: Vec<&str> = text
+        .split(|c: char| c.is_whitespace() || c.is_control())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let text: String = words.join(" ").chars().take(MAX_TURN_TEXT).collect();
+    (!text.is_empty()).then_some(text)
+}
+
+/// What the user typed in `text`, the agents' own insertions taken out (see
+/// [`prompt_line`]).
+fn typed_text(text: &str) -> Option<String> {
     if let Some(command) = tagged(text, "command-name") {
         let args = tagged(text, "command-args").unwrap_or_default();
-        return first_line(&format!("{} {}", command.trim(), args.trim()));
+        return Some(format!("{} {}", command.trim(), args.trim()));
     }
     let mut typed = text.to_string();
     for tag in [
@@ -294,7 +397,11 @@ fn prompt_line(text: &str) -> Option<String> {
     while let Some(stripped) = without(&typed, "pasted_content") {
         typed = stripped;
     }
-    first_line(&typed).or_else(|| paste.as_deref().and_then(first_line))
+    if first_line(&typed).is_some() {
+        Some(typed)
+    } else {
+        paste.filter(|paste| first_line(paste).is_some())
+    }
 }
 
 /// The text inside `text`'s first `<tag …>…</tag>`.
@@ -351,6 +458,7 @@ mod tests {
             },
             latest: None,
             prompt: None,
+            turn: Turn::default(),
         }
     }
 
@@ -424,6 +532,44 @@ mod tests {
             .unwrap();
         assert!(!follower.follow(None));
         assert_eq!(follower.latest(), Some("Second reply"));
+    }
+
+    #[test]
+    fn a_turn_starts_at_each_prompt_and_gathers_the_agents_messages() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("log.jsonl");
+        let mut file = File::create(&path).unwrap();
+        let event = |kind: &str, key: &str, text: &str| {
+            format!(
+                "{}\n",
+                serde_json::json!({"type":"event_msg","payload":{"type":kind, key:text}})
+            )
+        };
+        let mut follower = codex_log(path.clone());
+        file.write_all(event("user_message", "message", "Fix the parser").as_bytes())
+            .unwrap();
+        file.write_all(event("agent_message", "message", "Looking at it").as_bytes())
+            .unwrap();
+        assert!(follower.follow(None));
+        let first = follower.turn().clone();
+        assert_eq!(first.prompt.as_deref(), Some("Fix the parser"));
+        assert_eq!(first.messages, ["Looking at it"]);
+        assert_eq!(first.total, 1);
+        file.write_all(event("agent_message", "message", "Fixed:\n  two lines").as_bytes())
+            .unwrap();
+        assert!(follower.follow(None));
+        assert_eq!(
+            follower.turn().messages,
+            ["Looking at it", "Fixed: two lines"]
+        );
+        assert_eq!(follower.turn().total, 2);
+        // The next prompt starts the next turn.
+        file.write_all(event("user_message", "message", "Now the docs").as_bytes())
+            .unwrap();
+        assert!(follower.follow(None));
+        assert_ne!(follower.turn().id, first.id);
+        assert_eq!(follower.turn().prompt.as_deref(), Some("Now the docs"));
+        assert_eq!(follower.turn().total, 0);
     }
 
     #[test]

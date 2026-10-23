@@ -20,6 +20,7 @@ pub fn session(id: &str, name: &str) -> SessionView {
     SessionView {
         agent_output: None,
         user_prompt: None,
+        agent_turn: None,
         pinned: false,
         git: None,
         auto_named: false,

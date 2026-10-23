@@ -533,6 +533,27 @@ fn read_uses_the_live_screen_then_saved_output() {
 }
 
 #[test]
+fn a_session_without_an_agent_has_an_empty_turn() {
+    let h = Harness::new();
+    let s = h.create(Some("shell"));
+    h.host.show(&s.id, "$ echo hi\nhi\n$");
+    match h.handle(&h.user, Request::SessionTurn { id: s.id.clone() }) {
+        Response::Turn { turn } => {
+            assert_eq!(turn.prompt, None);
+            assert!(turn.messages.is_empty());
+            assert_eq!(turn.total, 0);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(h.get(&s.id).agent_turn, None);
+    let missing = SessionId::from_string("01MISSING");
+    match h.handle(&h.user, Request::SessionTurn { id: missing }) {
+        Response::Error { error } => assert_eq!(error.code, ErrorCode::NotFound),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn attach_requires_a_running_terminal() {
     let h = Harness::new();
     let s = h.create(Some("shell"));

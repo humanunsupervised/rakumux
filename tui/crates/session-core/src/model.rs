@@ -143,6 +143,15 @@ pub struct LaunchSpec {
 }
 
 /// A session as returned by the API.
+/// A live agent's current turn, as `SessionView::agent_turn` shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTurn {
+    /// Tells this turn from the next one (opaque).
+    pub id: u64,
+    /// The messages the agent wrote in it: reasoning, replies, tool calls.
+    pub messages: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionView {
     pub id: SessionId,
@@ -173,6 +182,11 @@ pub struct SessionView {
     /// way as `agent_output`. Live sessions running a known agent only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_prompt: Option<String>,
+    /// The agent's current turn: which one, and how many messages it has
+    /// written since the user's last prompt. Its content is
+    /// `session_turn`'s (capability `session.turn`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_turn: Option<AgentTurn>,
     pub created_by: Creator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<SessionId>,
@@ -312,6 +326,7 @@ mod tests {
             terminal: None,
             agent_output: None,
             user_prompt: None,
+            agent_turn: None,
         };
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("exit_code"));
