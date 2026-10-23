@@ -108,6 +108,7 @@ const KNOWN_OPS: &[&str] = &[
     "session_send",
     "session_submit",
     "session_touch",
+    "session_turn",
     "session_pin",
     "session_bind",
     "project_list",
@@ -1682,6 +1683,7 @@ mod tests {
                 text: "t".into(),
             },
             Request::SessionTouch { id: id.clone() },
+            Request::SessionTurn { id: id.clone() },
             Request::SessionPin {
                 id: id.clone(),
                 pinned: true,
@@ -1724,6 +1726,41 @@ mod tests {
             Request::DaemonRestart { binary: None },
         ];
         assert_eq!(requests.len(), KNOWN_OPS.len());
+        // A new variant breaks this match: list it above and in KNOWN_OPS.
+        for request in &requests {
+            match request {
+                Request::Hello(_)
+                | Request::Ping
+                | Request::SessionList { .. }
+                | Request::SessionGet { .. }
+                | Request::SessionImport { .. }
+                | Request::SessionCreate(_)
+                | Request::SessionRename { .. }
+                | Request::SessionKill { .. }
+                | Request::SessionDelete { .. }
+                | Request::SessionRevive(_)
+                | Request::SessionReport(_)
+                | Request::SessionRead(_)
+                | Request::SessionWait(_)
+                | Request::SessionSend(_)
+                | Request::SessionSubmit { .. }
+                | Request::SessionTouch { .. }
+                | Request::SessionTurn { .. }
+                | Request::SessionPin { .. }
+                | Request::SessionBind { .. }
+                | Request::ProjectList
+                | Request::ProjectAdd { .. }
+                | Request::ProjectRemove { .. }
+                | Request::ProjectRelocate { .. }
+                | Request::Attach(_)
+                | Request::TerminalOpen(_)
+                | Request::TerminalAttach(_)
+                | Request::Subscribe(_)
+                | Request::DaemonStatus
+                | Request::DaemonShutdown
+                | Request::DaemonRestart { .. } => {}
+            }
+        }
         // Every `Auth` kind is known too.
         for auth in [
             session_core::api::Auth::User { token: "t".into() },
