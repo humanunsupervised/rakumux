@@ -200,7 +200,7 @@ mod tests {
         assert!(wide.contains("Press n to start one in repo"), "{wide}");
         // The tabs head the list, Status active: where it starts.
         assert!(
-            wide.contains("\n   ◔ Status ▾   ▤ Folders   ◇ App"),
+            wide.contains("\n   ◔ Status ▾  ▤ Folders    ◇ App"),
             "{wide}"
         );
         assert!(wide.contains("RAKUMUX"), "{wide}");
@@ -900,7 +900,7 @@ mod tests {
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, width);
         assert!(
-            list[1].starts_with("   ◔ Status   ▤ Folders   ◇ App ▾"),
+            list[1].starts_with("   ◔ Status    ▤ Folders    ◇ App ▾"),
             "{wide}"
         );
         let at = |list: &[String], needle: &str| {
@@ -1139,12 +1139,13 @@ mod tests {
         // The tabs: a padded band above the sessions, the active tab
         // underlined on its last row.
         assert!(list[0].is_empty(), "{wide}");
-        let under = format!("   {}{}", " ".repeat(11), "▁".repeat(11));
+        // `◔ Status` and its arrow's room, then two columns.
+        let under = format!("   {}{}", " ".repeat(12), "▁".repeat(11));
         assert_eq!(list[2], under, "{wide}");
         // The Status tab, then a folder icon and Folders, with ▾: it opens
         // the Folders modal. Then the App tab.
-        assert!(list[1].starts_with("   ◔ Status   ▤ Folders ▾"), "{wide}");
-        assert!(list[1].ends_with("▤ Folders ▾   ◇ App"), "{wide}");
+        assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
+        assert!(list[1].ends_with("▤ Folders ▾  ◇ App"), "{wide}");
         // Pinned first, with its mark; subtext is program, then git.
         let docs = list.iter().position(|l| l.contains("docs")).unwrap();
         let refactor = list
@@ -1282,7 +1283,7 @@ mod tests {
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, crate::layout::sidebar_width(160).into());
-        assert!(list[1].starts_with("   ◔ Status   ▤ Folders ▾"), "{wide}");
+        assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
         let at = |needle: &str| {
             list.iter()
                 .position(|l| l.contains(needle))
@@ -1352,7 +1353,7 @@ mod tests {
         h.press(KeyCode::Char('P')).await;
         let wide = render(&mut h.app, 160, 48);
         let lines: Vec<&str> = wide.lines().collect();
-        assert!(lines[1].starts_with("   ◔ Status   ▤ Folders"), "{wide}");
+        assert!(lines[1].starts_with("   ◔ Status    ▤ Folders"), "{wide}");
         assert!(lines[1].contains("▴"), "{wide}");
         assert!(wide.contains("┌ Folders ─"), "{wide}");
         assert!(

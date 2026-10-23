@@ -663,7 +663,7 @@ build; daemon and sessions stay up), `S` ask to restart the server (in place wit
 it can: `y`/Enter, sessions keep running; otherwise `y` only, since that ends them; also Settings →
 Restart server, which shows the running server's version), `q`
 quit. There is no header: the panes start at the top row, and the list's first row (Sidebar) is
-its tabs, `◔ Status ▾   ▤ Folders   ◇ App` (Status is active at every start): the active one is bold, underlined and names its
+its tabs, `◔ Status ▾  ▤ Folders    ◇ App` (Status is active at every start; every tab keeps room for the active one's `▾`, and Folders shows its branch active or not, so switching tabs moves nothing): the active one is bold, underlined and names its
 filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`, `◔ 2 statuses ▾`); short rows narrow the gaps, then show
 the inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's
 filter at the left (`◔ Status ▾`); only Master detail shows the three tabs. The footer,

@@ -435,8 +435,13 @@ fn session_content(
     lines
 }
 
-/// Columns between two tabs when there's room for them (fewer otherwise).
-const TAB_GAP: usize = 3;
+/// Columns between two tabs when there's room for them (fewer otherwise),
+/// after the two every tab keeps for the active one's ` ▾`.
+const TAB_GAP: usize = 2;
+
+/// Columns every tab keeps after its label for the ` ▾` the active one ends
+/// in, so switching tabs moves nothing.
+const ARROW_SLOT: usize = 2;
 
 /// Columns the text filter keeps for itself at the right end of the band.
 const FILTER_MAX: usize = 12;
@@ -455,18 +460,19 @@ struct TabLayout {
 }
 
 /// Lay the tabs (`(tab, mark, label)`) out in `room` columns: full labels
-/// three columns apart, else two apart, else the inactive tabs as their
-/// marks alone, else the active tab's label cut. The active tab ends in
-/// ` ▾`.
+/// two columns apart, else one apart, else the inactive tabs as their marks
+/// alone, else the active tab's label cut. The active tab ends in ` ▾`, and
+/// every full-label tab keeps room for it, so which tab is active never
+/// moves the others.
 fn lay_out_tabs(tabs: &[(Grouping, &str, String)], active: Grouping, room: usize) -> TabLayout {
     let width = |gap: usize, compact: bool, active_label: usize| -> usize {
         let tabs_width: usize = tabs
             .iter()
             .map(
                 |(grouping, icon, label)| match (*grouping == active, compact) {
-                    (true, _) => str_width(icon) + 1 + active_label + 2,
+                    (true, _) => str_width(icon) + 1 + active_label + ARROW_SLOT,
                     (false, true) => str_width(icon),
-                    (false, false) => str_width(icon) + 1 + str_width(label),
+                    (false, false) => str_width(icon) + 1 + str_width(label) + ARROW_SLOT,
                 },
             )
             .sum();
@@ -478,7 +484,7 @@ fn lay_out_tabs(tabs: &[(Grouping, &str, String)], active: Grouping, room: usize
         .map(|(_, _, label)| label.clone())
         .unwrap_or_default();
     let label_width = str_width(&active_label);
-    for (gap, compact) in [(TAB_GAP, false), (2, false), (2, true), (1, true)] {
+    for (gap, compact) in [(TAB_GAP, false), (1, false), (2, true), (1, true)] {
         let used = width(gap, compact, label_width);
         if used <= room {
             return TabLayout {
@@ -534,9 +540,10 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
         })
         .collect();
     let layout = lay_out_tabs(&tabs, active, room);
-    // A single folder's branch goes after its name, when there's room.
-    let branch = match (active, app.list.folder_filter()) {
-        (Grouping::Folder, [only]) if filter.is_none() => {
+    // A single folder's branch goes after its name on the Folders tab,
+    // active or not (so switching tabs moves nothing), when there's room.
+    let branch = match app.list.folder_filter() {
+        [only] if filter.is_none() && !layout.compact => {
             folder_branch(app, only).unwrap_or_default()
         }
         _ => String::new(),
@@ -574,8 +581,13 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
                 layout.active_label.clone(),
                 Style::default().fg(label).add_modifier(Modifier::BOLD),
             ));
+            let branch = if *grouping == Grouping::Folder {
+                branch.as_str()
+            } else {
+                ""
+            };
             spans.push(Span::styled(
-                branch.clone(),
+                branch.to_string(),
                 Style::default().fg(p.text_muted),
             ));
             spans.push(Span::raw(" "));
@@ -583,20 +595,35 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
                 if open { "▴" } else { "▾" },
                 Style::default().fg(arrow),
             ));
-            x += str_width(icon) + 1 + str_width(&layout.active_label) + str_width(&branch) + 2;
+            x += str_width(icon)
+                + 1
+                + str_width(&layout.active_label)
+                + str_width(branch)
+                + ARROW_SLOT;
             underline = Some((start, x - start));
         } else {
             spans.push(Span::styled(*icon, Style::default().fg(other)));
             if !layout.compact {
+                let branch = if *grouping == Grouping::Folder {
+                    branch.as_str()
+                } else {
+                    ""
+                };
+                // The blank where the active tab's ` ▾` goes.
                 spans.push(Span::styled(
-                    format!(" {tab_label}"),
+                    format!(" {tab_label}{branch}{}", " ".repeat(ARROW_SLOT)),
                     Style::default().fg(other),
                 ));
             }
             x += if layout.compact {
                 str_width(icon)
             } else {
-                str_width(icon) + 1 + str_width(tab_label)
+                let branch = if *grouping == Grouping::Folder {
+                    str_width(&branch)
+                } else {
+                    0
+                };
+                str_width(icon) + 1 + str_width(tab_label) + branch + ARROW_SLOT
             };
         }
         let target = Rect {
@@ -925,15 +952,33 @@ mod tests {
     }
 
     #[test]
+    fn which_tab_is_active_never_moves_the_tabs() {
+        let shown = tabs(["▤", "◇", "◔"], ["web", "App", "Status"]);
+        for room in [40, 31] {
+            let layouts: Vec<TabLayout> = Grouping::ALL
+                .iter()
+                .map(|active| lay_out_tabs(&shown, *active, room))
+                .collect();
+            assert!(
+                layouts
+                    .windows(2)
+                    .all(|pair| (pair[0].gap, pair[0].width) == (pair[1].gap, pair[1].width)),
+                "{layouts:?}"
+            );
+        }
+    }
+
+    #[test]
     fn tabs_narrow_their_gaps_then_show_marks_alone_then_cut_the_active_label() {
         let plain = ["▤", "◇", "◔"];
         let shown = tabs(plain, ["Folders", "App", "Status"]);
         let at = |room| lay_out_tabs(&shown, Grouping::App, room);
-        // `◔ Status   ▤ Folders   ◇ App ▾`: 8 + 9 + 7, three apart.
-        assert_eq!((at(40).gap, at(40).compact, at(40).width), (3, false, 30));
-        assert_eq!((at(29).gap, at(29).compact, at(29).width), (2, false, 28));
+        // `◔ Status    ▤ Folders    ◇ App ▾`: 10 + 11 + 7 with every
+        // tab's arrow room, two apart.
+        assert_eq!((at(40).gap, at(40).compact, at(40).width), (2, false, 32));
+        assert_eq!((at(31).gap, at(31).compact, at(31).width), (1, false, 30));
         // `◔  ▤  ◇ App ▾`.
-        assert_eq!((at(27).gap, at(27).compact, at(27).width), (2, true, 13));
+        assert_eq!((at(29).gap, at(29).compact, at(29).width), (2, true, 13));
         assert_eq!((at(12).gap, at(12).compact, at(12).width), (1, true, 11));
         // Then the active label is cut.
         assert_eq!(at(10).active_label, "A…");
