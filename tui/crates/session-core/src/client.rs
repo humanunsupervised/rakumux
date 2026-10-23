@@ -1961,6 +1961,12 @@ mod tests {
             format: TextFormat::Text,
         };
         assert_eq!(client.read(read.clone()).unwrap().text, "screen of S1");
+        let turn = client.turn(&s1).unwrap();
+        assert_eq!(
+            (turn.id, turn.prompt.as_deref(), turn.total),
+            (7, Some("prompt of S1"), 2)
+        );
+        assert_eq!(turn.messages, ["reading", "done"]);
         let wait = WaitRequest {
             id: s1.clone(),
             until: WaitUntil::Settled,
@@ -2007,6 +2013,7 @@ mod tests {
                 Request::SessionRevive(revive),
                 Request::SessionReport(report),
                 Request::SessionRead(read),
+                Request::SessionTurn { id: s1.clone() },
                 Request::SessionWait(wait),
                 Request::SessionSend(send),
                 Request::SessionSubmit {
