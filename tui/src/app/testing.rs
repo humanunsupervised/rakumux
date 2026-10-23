@@ -792,6 +792,121 @@ impl crate::remote_access::PhoneAccess for FakePhone {
     }
 }
 
+/// The Rakumux account in tests: signed out unless set. `sign_in` waits for
+/// approval until `approve`; descriptions come from `descriptions` (missing
+/// ones are `pending`). Every call is recorded.
+#[derive(Default)]
+pub struct FakeAccount {
+    pub account: Mutex<Option<crate::account::Account>>,
+    /// What `sign_in_status` answers; `None` until `sign_in`.
+    pub sign_in: Mutex<Option<rakumux_sensagent::owner::protocol::SignInView>>,
+    pub descriptions: Mutex<HashMap<SessionId, String>>,
+    pub calls: Mutex<Vec<&'static str>>,
+}
+
+impl FakeAccount {
+    pub fn person() -> crate::account::Account {
+        crate::account::Account {
+            email: Some("person@example.com".into()),
+            subject: "user_synthetic".into(),
+            summaries: Some(true),
+        }
+    }
+
+    pub fn signed_in() -> Self {
+        let fake = Self::default();
+        *fake.account.lock().unwrap() = Some(Self::person());
+        fake
+    }
+
+    /// The code was approved in a browser.
+    pub fn approve(&self) {
+        *self.account.lock().unwrap() = Some(Self::person());
+        *self.sign_in.lock().unwrap() =
+            Some(rakumux_sensagent::owner::protocol::SignInView::SignedIn);
+    }
+
+    pub fn calls(&self) -> Vec<&'static str> {
+        self.calls.lock().unwrap().clone()
+    }
+
+    fn call(&self, name: &'static str) {
+        self.calls.lock().unwrap().push(name);
+    }
+}
+
+impl crate::account::AccountAccess for FakeAccount {
+    fn account(&self) -> std::result::Result<Option<crate::account::Account>, String> {
+        self.call("account");
+        Ok(self.account.lock().unwrap().clone())
+    }
+
+    fn sign_in(
+        &self,
+    ) -> std::result::Result<rakumux_sensagent::owner::protocol::SignInView, String> {
+        self.call("sign_in");
+        let waiting = rakumux_sensagent::owner::protocol::SignInView::Waiting {
+            user_code: "WDJB-MJHT".into(),
+            verification_uri: "https://accounts.example/device".into(),
+            verification_uri_complete: None,
+            connect_url: Some("https://site.example/connect?code=WDJB-MJHT".into()),
+            expires_in_seconds: 600,
+        };
+        *self.sign_in.lock().unwrap() = Some(waiting.clone());
+        Ok(waiting)
+    }
+
+    fn sign_in_status(
+        &self,
+    ) -> std::result::Result<rakumux_sensagent::owner::protocol::SignInView, String> {
+        self.call("sign_in_status");
+        Ok(self
+            .sign_in
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(rakumux_sensagent::owner::protocol::SignInView::Idle))
+    }
+
+    fn cancel_sign_in(&self) -> std::result::Result<(), String> {
+        self.call("cancel_sign_in");
+        *self.sign_in.lock().unwrap() = None;
+        Ok(())
+    }
+
+    fn sign_out(&self) -> std::result::Result<(), String> {
+        self.call("sign_out");
+        *self.account.lock().unwrap() = None;
+        Ok(())
+    }
+
+    fn descriptions(
+        &self,
+        sessions: &[SessionId],
+    ) -> std::result::Result<Vec<rakumux_sensagent::owner::protocol::StatusLine>, String> {
+        use rakumux_sensagent::owner::protocol::{LineState, StatusLine};
+        self.call("descriptions");
+        let descriptions = self.descriptions.lock().unwrap();
+        Ok(sessions
+            .iter()
+            .map(|id| {
+                let text = descriptions.get(id).cloned();
+                StatusLine {
+                    session: id.clone(),
+                    state: if text.is_some() {
+                        LineState::Ready
+                    } else {
+                        LineState::Pending
+                    },
+                    text,
+                    captured_at: None,
+                    failure: None,
+                }
+            })
+            .collect())
+    }
+}
+
 /// An `App` connected to a `FakeApi` with the inline executor, sized
 /// 160×48, with its config and data dirs in a temp dir.
 pub struct Harness {
@@ -852,6 +967,7 @@ pub fn options(fake: &Arc<FakeApi>, scope: ScopeRoot, dir: &tempfile::TempDir) -
         connector: Arc::new(move || Ok(api.clone())),
         namer: fake_namer,
         phone: Arc::new(FakePhone::default()),
+        account: Arc::new(FakeAccount::default()),
         updater: Arc::new(FakeUpdater::default()),
         exec_mode: ExecMode::Inline,
         debug: false,

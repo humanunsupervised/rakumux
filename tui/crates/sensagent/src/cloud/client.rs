@@ -14,15 +14,24 @@ use super::wire::{decode_error, decode_success, MAX_BODY_BYTES};
 use super::{CloudAIError, StatusResponse, ValidatedStatusRequest};
 
 const STATUS_PATH: &str = "/api/v1/ai/session-status";
+const FEATURES_PATH: &str = "/api/v1/features";
 const MAX_ORIGIN_BYTES: usize = 2048;
 const MAX_AUTHORIZATION_BYTES: usize = 8192;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Explicit reviewed public service origin, with one fixed endpoint and no fallback.
+/// Explicit reviewed public service origin, with fixed endpoints and no fallback.
 #[derive(Clone)]
 pub struct CloudAIConfig {
     endpoint: Url,
+    features: Url,
+}
+
+/// The account's feature switches, as the destination reports them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccountFeatures {
+    /// AI session summaries: on unless the user turned them off on the website.
+    pub ai_session_summaries: bool,
 }
 
 impl CloudAIConfig {
@@ -61,8 +70,10 @@ impl CloudAIConfig {
         {
             return Err(invalid());
         }
+        let mut features = endpoint.clone();
         endpoint.set_path(STATUS_PATH);
-        Ok(Self { endpoint })
+        features.set_path(FEATURES_PATH);
+        Ok(Self { endpoint, features })
     }
 }
 
@@ -197,9 +208,67 @@ impl CloudAIClient {
         result
     }
 
+    /// Read the signed-in account's feature switches (`GET /api/v1/features`) once,
+    /// with the same transport rules as `generate`.
+    pub fn features(
+        &self,
+        access_token: &SecretValue,
+        cancel: &Cancellation,
+    ) -> Result<AccountFeatures, CloudAIError> {
+        cancel.check()?;
+        let mut outgoing = Request::new(Method::GET, self.config.features.clone());
+        *outgoing.timeout_mut() = Some(TOTAL_TIMEOUT);
+        let headers = outgoing.headers_mut();
+        headers.insert(header::AUTHORIZATION, bearer_header(access_token)?);
+        headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("identity"),
+        );
+        let result = self.transport.send(outgoing);
+        cancel.check()?;
+        let reply = result?;
+        if (300..=399).contains(&reply.status) {
+            return Err(CloudAIError::HttpStatus(reply.status));
+        }
+        require_json_headers(&reply.headers)?;
+        let body = read_body(reply.body, cancel)?;
+        let result = if reply.status == 200 {
+            decode_features(&body)
+        } else {
+            remote_failure(reply.status, &reply.headers, &body)
+        };
+        cancel.check()?;
+        result
+    }
+
     fn with_transport(config: CloudAIConfig, transport: Box<dyn HttpTransport>) -> Self {
         Self { config, transport }
     }
+}
+
+fn decode_features(body: &[u8]) -> Result<AccountFeatures, CloudAIError> {
+    #[derive(serde::Deserialize)]
+    struct Wire {
+        version: u32,
+        features: Features,
+    }
+    #[derive(serde::Deserialize)]
+    struct Features {
+        // Newer switches are ignored; a missing one keeps the service default (on).
+        #[serde(default = "enabled")]
+        ai_session_summaries: bool,
+    }
+    fn enabled() -> bool {
+        true
+    }
+    let wire: Wire = serde_json::from_slice(body).map_err(|_| CloudAIError::InvalidResponse)?;
+    if wire.version != 1 {
+        return Err(CloudAIError::InvalidResponse);
+    }
+    Ok(AccountFeatures {
+        ai_session_summaries: wire.features.ai_session_summaries,
+    })
 }
 
 fn bearer_header(token: &SecretValue) -> Result<HeaderValue, CloudAIError> {
@@ -320,11 +389,7 @@ fn retry_after(headers: &HeaderMap) -> Option<Duration> {
         .then(|| Duration::from_secs(seconds))
 }
 
-fn remote_failure(
-    status: u16,
-    headers: &HeaderMap,
-    body: &[u8],
-) -> Result<StatusResponse, CloudAIError> {
+fn remote_failure<T>(status: u16, headers: &HeaderMap, body: &[u8]) -> Result<T, CloudAIError> {
     let (code, body_delay) = decode_error(body)?;
     if !code.accepts_status(status) {
         return Err(CloudAIError::InvalidResponse);

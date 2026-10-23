@@ -137,6 +137,18 @@ pub enum AppEvent {
     PhonePairing(Result<Option<crate::remote_access::Pairing>, String>),
     /// Phone access turned off.
     PhoneOff(Result<(), String>),
+    /// Who is signed in (`None`: signed out).
+    AccountChecked(Result<Option<crate::account::Account>, String>),
+    /// A sign-in started, or where it is up to.
+    SignIn(Result<rakumux_sensagent::owner::protocol::SignInView, String>),
+    /// An unfinished sign-in was abandoned.
+    SignInCancelled(Result<(), String>),
+    SignedOut(Result<(), String>),
+    /// The sessions' AI descriptions.
+    Descriptions {
+        generation: u64,
+        result: Result<Vec<rakumux_sensagent::owner::protocol::StatusLine>, String>,
+    },
     /// A background job panicked or couldn't run.
     JobFailed(String),
 }

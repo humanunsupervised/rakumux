@@ -9,7 +9,7 @@ use session_core::ids::SessionId;
 use super::layout::{current_uid, peer_uid};
 use super::protocol::{
     read_message, write_message, ConsentView, FolderChoice, Hello, OfferView, OwnerRequest,
-    OwnerResponse, OwnerState, StatusLine, MAX_SESSIONS, PROTOCOL,
+    OwnerResponse, OwnerState, SignInView, StatusLine, MAX_SESSIONS, PROTOCOL,
 };
 use super::{OwnerError, OwnerLayout, OwnerRegistration};
 
@@ -136,6 +136,31 @@ impl OwnerClient {
     /// Stop sharing and remove local credentials.
     pub fn sign_out(&self) -> Result<(), OwnerError> {
         match self.request(&OwnerRequest::SignOut)? {
+            OwnerResponse::Done => Ok(()),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Start a device sign-in, replacing any unfinished one. Poll `sign_in_status`
+    /// until it is `SignedIn` or `Failed`.
+    pub fn sign_in_start(&self) -> Result<SignInView, OwnerError> {
+        match self.request(&OwnerRequest::SignInStart)? {
+            OwnerResponse::SignIn { sign_in } => Ok(sign_in),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Where the current sign-in is up to.
+    pub fn sign_in_status(&self) -> Result<SignInView, OwnerError> {
+        match self.request(&OwnerRequest::SignInStatus)? {
+            OwnerResponse::SignIn { sign_in } => Ok(sign_in),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Abandon an unfinished sign-in.
+    pub fn sign_in_cancel(&self) -> Result<(), OwnerError> {
+        match self.request(&OwnerRequest::SignInCancel)? {
             OwnerResponse::Done => Ok(()),
             _ => Err(OwnerError::Protocol),
         }

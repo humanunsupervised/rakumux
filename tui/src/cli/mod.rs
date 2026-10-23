@@ -10,6 +10,7 @@
 //! Exit codes: 0 ok, 1 error (message on stderr; JSON for `session …`),
 //! 2 usage.
 
+mod account;
 mod args;
 mod attach;
 mod commands;
@@ -93,6 +94,12 @@ fn execute(cli: CliArgs) -> Result<i32, CliError> {
         } => hooks::configuration(agent, &mut out),
         Command::Daemon { command } => daemon::run(&globals, command, &mut out),
         Command::Remote { command } => remote::run(&globals, command, &mut out),
+        Command::Account { command } => {
+            // The account service follows the daemon's sessions: start it first.
+            let client = globals.connect(true)?;
+            account::run(&client, command, &mut out)
+        }
+        Command::StatusService => account::serve(),
         command => {
             let invocation = Invocation::from_process()?;
             let client = globals.connect(true)?;

@@ -4,7 +4,8 @@
 //! the sessions shown, under a header row per folder (app, status) when
 //! there are several, and "+ New session" last.
 //! Each session is a compact cell after a blank row: name (with a pin mark),
-//! its age and activity mark at the right; then its program, branch and state.
+//! its age and activity mark at the right; then its program, branch and state;
+//! then, when signed in to the Rakumux account, its AI description.
 //! The selected item's text is white and the others' muted; nothing has a
 //! background except the tabs' band. A session being dragged has a blue
 //! bar on its left.
@@ -41,6 +42,14 @@ fn row_height(row: &ListRow) -> u16 {
         | ListRow::SectionHeader(_)
         | ListRow::ReadPeriodHeader(_) => 2,
         ListRow::Session(_) => 3,
+    }
+}
+
+/// [`row_height`], plus a line for a session's AI description.
+fn row_height_in(app: &App, row: &ListRow) -> u16 {
+    match row {
+        ListRow::Session(session) if app.description(&session.id).is_some() => 4,
+        row => row_height(row),
     }
 }
 
@@ -281,7 +290,7 @@ pub fn section_header_line(
     ])
 }
 
-/// The two content lines of a session cell.
+/// The content lines of a session cell: two, and its AI description.
 fn session_content(
     app: &App,
     session: &SessionView,
@@ -354,7 +363,19 @@ fn session_content(
         )
         .spans,
     );
-    vec![first, second]
+    let mut lines = vec![first, second];
+    if let Some(description) = app.description(&session.id) {
+        lines.push(vec![
+            Span::raw("  "),
+            Span::styled(
+                truncate(description, width.saturating_sub(2)),
+                Style::default()
+                    .fg(detail_color)
+                    .add_modifier(Modifier::ITALIC),
+            ),
+        ]);
+    }
+    lines
 }
 
 /// Columns between two tabs when there's room for them (fewer otherwise).
@@ -590,7 +611,7 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         return;
     }
 
-    let heights: Vec<u16> = rows.iter().map(row_height).collect();
+    let heights: Vec<u16> = rows.iter().map(|row| row_height_in(app, row)).collect();
     let first = first_visible_row(&heights, selected.max(1), inner.height).max(1);
     // Content width: everything right of the indent, less a right margin.
     let width = (inner.width as usize).saturating_sub(INDENT + 1);

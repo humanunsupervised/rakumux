@@ -14,9 +14,10 @@ use thiserror::Error;
 
 use super::engine::{AIStatus, CaptureWork, Captured, Completed, Dispatch, RefreshState};
 use super::schedule::MAX_RUNNING;
+use super::sign_in::{self, SignInEvent, SignInFailure, SignInState};
 use super::StatusRefresher;
-use crate::auth::{AccountSession, CredentialStore, WallClock};
-use crate::dispatch::{DispatchError, StatusConsentOffer};
+use crate::auth::{AccountSession, AccountWebsite, CredentialStore, WallClock};
+use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
 /// How often the owner rechecks jobs and plans refreshes.
@@ -60,6 +61,9 @@ enum Command {
     Disable(ConsentRevision, Reply<ConsentSnapshot>),
     SetAccountSession(Option<AccountSession>, Reply<()>),
     SignOut(Reply<()>),
+    SignInStart(Sender<()>),
+    SignInStatus(Sender<SignInState>),
+    SignInCancel(Sender<()>),
 }
 
 enum Message {
@@ -68,6 +72,8 @@ enum Message {
     Disconnected,
     Captured(Box<Captured>),
     Completed(Completed),
+    FeaturesRead(FeaturesCompletion),
+    SignIn(u64, SignInEvent),
     Command(Command),
     Stop,
 }
@@ -75,6 +81,14 @@ enum Message {
 enum Work<A, C> {
     Capture(CaptureWork),
     Dispatch(Dispatch<A, C>),
+    Features(FeaturesJob<A, C>),
+}
+
+/// The current device sign-in, held by the owner thread.
+struct SignIn {
+    attempt: u64,
+    cancel: Arc<AtomicBool>,
+    state: SignInState,
 }
 
 /// Runs a [`StatusRefresher`] for one Rakumux home: an owner thread holding the
@@ -109,6 +123,20 @@ impl RefreshRunner {
         A: CredentialStore + 'static,
         C: WallClock + 'static,
     {
+        Self::spawn_with_website(refresher, api, None)
+    }
+
+    /// Like `spawn`; sign-in prompts also carry `website`'s sign-in-then-approve link.
+    pub fn spawn_with_website<S, A, C>(
+        refresher: StatusRefresher<S, A, C>,
+        api: Arc<dyn SessionApi>,
+        website: Option<AccountWebsite>,
+    ) -> Result<Self, RefreshError>
+    where
+        S: StatusStore + 'static,
+        A: CredentialStore + 'static,
+        C: WallClock + 'static,
+    {
         if !matches!(api.caller(), CallerInfo::User) {
             return Err(RefreshError::NotPermitted);
         }
@@ -127,8 +155,9 @@ impl RefreshRunner {
                 perform(&queue, &*api, &messages)
             })?;
         }
+        let owner_messages = messages.clone();
         runner.owner = Some(spawn("rakumux-status-owner", move || {
-            own(refresher, &inbox, &work)
+            own(refresher, &inbox, &work, &owner_messages, website.as_ref())
         })?);
         // Not joined: a daemon request can block for its whole timeout. The thread ends
         // at its next check of `stop`, or once the owner is gone.
@@ -215,6 +244,29 @@ impl RefreshClient {
         self.call(Command::SignOut)
     }
 
+    /// Start a device sign-in, replacing any unfinished one. Follow it with
+    /// `sign_in_status`; on success the account is adopted and summaries follow the
+    /// account's switch.
+    pub fn sign_in_start(&self) -> Result<(), RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::SignInStart(reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
+    /// Where the current sign-in is up to.
+    pub fn sign_in_status(&self) -> Result<SignInState, RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::SignInStatus(reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
+    /// Abandon an unfinished sign-in; an existing account stays signed in.
+    pub fn sign_in_cancel(&self) -> Result<(), RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::SignInCancel(reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
     fn call<T>(&self, command: impl FnOnce(Reply<T>) -> Command) -> Result<T, RefreshError> {
         let (reply, answer) = mpsc::channel();
         self.send(command(reply))?;
@@ -252,19 +304,29 @@ fn own<S, A, C>(
     mut refresher: StatusRefresher<S, A, C>,
     inbox: &Receiver<Message>,
     work: &Sender<Work<A, C>>,
+    messages: &Sender<Message>,
+    website: Option<&AccountWebsite>,
 ) where
     S: StatusStore,
-    A: CredentialStore,
-    C: WallClock,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
 {
     let origin = Instant::now();
     let mut next_tick = Duration::ZERO;
+    let mut sign_in = SignIn {
+        attempt: 0,
+        cancel: Arc::new(AtomicBool::new(false)),
+        state: SignInState::Idle,
+    };
     loop {
         let now = origin.elapsed();
         if now >= next_tick {
             for capture in refresher.tick(now) {
                 // Workers outlive the owner, so the queue only closes with it.
                 let _ = work.send(Work::Capture(capture));
+            }
+            if let Some(job) = refresher.features_job(now) {
+                let _ = work.send(Work::Features(job));
             }
             next_tick = now.saturating_add(TICK);
         }
@@ -289,16 +351,44 @@ fn own<S, A, C>(
                 }
             }
             Message::Completed(completed) => refresher.completed(completed, now),
-            Message::Command(command) => control(&mut refresher, command, now),
+            Message::FeaturesRead(completion) => refresher.features_read(completion, now),
+            // A replaced attempt's progress is ignored; its login was fenced anyway.
+            Message::SignIn(attempt, event) if attempt == sign_in.attempt => {
+                sign_in.state = match event {
+                    SignInEvent::Prompt(prompt) => SignInState::Waiting(prompt),
+                    SignInEvent::SignedIn(session) => {
+                        match refresher.set_account_session(Some(session)) {
+                            Ok(()) => SignInState::SignedIn,
+                            Err(_) => SignInState::Failed(SignInFailure::Failed),
+                        }
+                    }
+                    SignInEvent::Failed(failure) => SignInState::Failed(failure),
+                };
+            }
+            Message::SignIn(..) => {}
+            Message::Command(command) => control(
+                &mut refresher,
+                command,
+                now,
+                &mut sign_in,
+                messages,
+                website,
+            ),
         }
     }
 }
 
-fn control<S, A, C>(refresher: &mut StatusRefresher<S, A, C>, command: Command, now: Duration)
-where
+fn control<S, A, C>(
+    refresher: &mut StatusRefresher<S, A, C>,
+    command: Command,
+    now: Duration,
+    sign_in: &mut SignIn,
+    messages: &Sender<Message>,
+    website: Option<&AccountWebsite>,
+) where
     S: StatusStore,
-    A: CredentialStore,
-    C: WallClock,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
 {
     // A caller that stopped waiting is not an error.
     match command {
@@ -331,9 +421,48 @@ where
             let _ = reply.send(refresher.set_account_session(session));
         }
         Command::SignOut(reply) => {
+            replace_sign_in(sign_in, SignInState::Idle);
             let _ = reply.send(refresher.sign_out());
         }
+        Command::SignInStart(reply) => {
+            replace_sign_in(sign_in, SignInState::Starting);
+            let attempt = sign_in.attempt;
+            let owner = messages.clone();
+            let started = sign_in::spawn(
+                refresher.account_service(),
+                website.cloned(),
+                sign_in.cancel.clone(),
+                move |event| {
+                    let _ = owner.send(Message::SignIn(attempt, event));
+                },
+            );
+            if started.is_err() {
+                sign_in.state = SignInState::Failed(SignInFailure::Failed);
+            }
+            let _ = reply.send(());
+        }
+        Command::SignInStatus(reply) => {
+            let _ = reply.send(sign_in.state.clone());
+        }
+        Command::SignInCancel(reply) => {
+            let state = match sign_in.state {
+                SignInState::Starting | SignInState::Waiting(_) => {
+                    SignInState::Failed(SignInFailure::Canceled)
+                }
+                ref other => other.clone(),
+            };
+            replace_sign_in(sign_in, state);
+            let _ = reply.send(());
+        }
     }
+}
+
+/// Cancel the current sign-in thread (if any) and start a new attempt generation.
+fn replace_sign_in(sign_in: &mut SignIn, state: SignInState) {
+    sign_in.cancel.store(true, Ordering::Release);
+    sign_in.cancel = Arc::new(AtomicBool::new(false));
+    sign_in.attempt += 1;
+    sign_in.state = state;
 }
 
 /// A worker: captures and requests, one at a time, returned to the owner.
@@ -357,6 +486,10 @@ where
                     Err(_) => continue,
                 }
             }
+            Ok(Work::Features(job)) => match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                Ok(completion) => Message::FeaturesRead(completion),
+                Err(_) => continue,
+            },
         };
         if owner.send(message).is_err() {
             return;

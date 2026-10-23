@@ -7,7 +7,7 @@
 //! observer and takes control when the user focuses it. Other TUIs and CLI
 //! calls may act on the same sessions at any time.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -19,11 +19,13 @@ use session_core::model::ScopeRoot;
 use session_core::paths::Layout;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use crate::account::AccountAccess;
 use crate::auth::service::AuthService;
 use crate::help::{ModalContext, SettingRow};
 use crate::layout::SessionLayout;
 use crate::remote_access::PhoneAccess;
 
+mod account;
 mod auto_name;
 pub mod config;
 mod connection;
@@ -202,6 +204,8 @@ pub struct AppOptions {
     pub namer: Namer,
     /// Remote access for the phone app (`LocalPhoneAccess` in production).
     pub phone: Arc<dyn PhoneAccess>,
+    /// The Rakumux account and AI descriptions (`LocalAccount` in production).
+    pub account: Arc<dyn AccountAccess>,
     /// Update checks and installation, replaced by a fake in tests.
     pub updater: Arc<dyn crate::updater::UpdateService>,
     pub exec_mode: ExecMode,
@@ -244,6 +248,20 @@ pub struct App {
     /// The one-time phone access offer waits for nothing else to be on
     /// screen.
     phone_offer_pending: bool,
+    account_access: Arc<dyn AccountAccess>,
+    /// Who is signed in (Settings → Account).
+    pub account: AccountStatus,
+    /// The account was asked for and hasn't answered; when to ask again.
+    account_checking: bool,
+    account_check_at: Option<Instant>,
+    /// When to ask where a sign-in is up to; a question is outstanding.
+    sign_in_poll_at: Option<Instant>,
+    sign_in_polling: bool,
+    /// Each session's latest AI description, shown under its name.
+    descriptions: HashMap<SessionId, String>,
+    descriptions_at: Option<Instant>,
+    descriptions_busy: bool,
+    descriptions_generation: u64,
     pub connection: Connection,
     /// The daemon was reachable once; losing it triggers reconnects.
     was_connected: bool,
@@ -339,6 +357,16 @@ impl App {
             update_generation: 0,
             phone_enabled: None,
             phone_offer_pending: false,
+            account_access: options.account,
+            account: AccountStatus::Unknown,
+            account_checking: false,
+            account_check_at: None,
+            sign_in_poll_at: None,
+            sign_in_polling: false,
+            descriptions: HashMap::new(),
+            descriptions_at: None,
+            descriptions_busy: false,
+            descriptions_generation: 0,
             connection: Connection::Connecting,
             was_connected: false,
             checked_daemon_features: false,
@@ -706,6 +734,18 @@ impl App {
                     "Restart the Rakumux server in place with this build, e.g. after an update: sessions and their programs keep running and every window reconnects. Same as `rakumux daemon restart`.",
                 )
             }
+            SettingsItem::Account => {
+                let value = match &self.account {
+                    AccountStatus::SignedIn(account) => account.name().to_string(),
+                    AccountStatus::SignedOut => "Sign in".into(),
+                    AccountStatus::Unknown => "…".into(),
+                };
+                (
+                    "Account",
+                    value,
+                    "Sign in to your Rakumux account to see a short AI description under each session. Recent session activity is sent to rakumux.com to write them; turn AI session summaries off on rakumux.com/features. Same as `rakumux account login`.",
+                )
+            }
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
                 if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
@@ -741,6 +781,7 @@ impl App {
                 AppMode::DaemonRestart(d) => d.restarting,
                 AppMode::Upgrade(d) => d.checking || d.installing,
                 AppMode::Pairing(d) => d.busy(),
+                AppMode::Account(d) => d.busy(),
                 _ => false,
             }
     }
@@ -766,6 +807,7 @@ impl App {
                 changed = true;
             }
         }
+        self.account_timers(now);
         changed
     }
 
@@ -850,6 +892,17 @@ impl App {
             AppEvent::PhoneChecked { enabled, offer } => self.on_phone_checked(enabled, offer),
             AppEvent::PhonePairing(result) => self.on_phone_pairing(result),
             AppEvent::PhoneOff(result) => self.on_phone_off(result),
+            AppEvent::AccountChecked(result) => self.on_account_checked(result),
+            AppEvent::SignIn(result) => self.on_sign_in(result),
+            AppEvent::SignInCancelled(result) => {
+                if let Err(error) = result {
+                    self.set_status(format!("Couldn't cancel the sign-in: {error}"));
+                }
+            }
+            AppEvent::SignedOut(result) => self.on_signed_out(result),
+            AppEvent::Descriptions { generation, result } => {
+                self.on_descriptions(generation, result)
+            }
             AppEvent::JobFailed(message) => {
                 self.set_status(format!("Background task failed: {message}"))
             }
@@ -1012,6 +1065,10 @@ impl App {
         self.was_connected = true;
         self.reconnect_attempts = 0;
         self.reconnect_at = None;
+        // The account service follows the daemon, so it starts once one runs.
+        if self.account == AccountStatus::Unknown {
+            self.check_account();
+        }
         if !std::mem::replace(&mut self.checked_daemon_features, true) && !missing.is_empty() {
             let in_place = api_restarts_in_place(self.api().as_deref());
             self.offer_daemon_upgrade(missing, in_place);

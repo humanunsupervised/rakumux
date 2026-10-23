@@ -145,10 +145,14 @@ impl RefreshScheduler {
                     continue;
                 }
             }
+            // A finished turn is described at once; backoff and the global budget
+            // still apply.
+            let immediate = urgent && candidate.finished;
             let waiting = timing.retry_at.is_some_and(|at| now < at)
-                || timing
-                    .last_start
-                    .is_some_and(|at| now < at.saturating_add(SESSION_INTERVAL));
+                || (!immediate
+                    && timing
+                        .last_start
+                        .is_some_and(|at| now < at.saturating_add(SESSION_INTERVAL)));
             if waiting {
                 continue;
             }

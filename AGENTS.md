@@ -126,6 +126,21 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `api.json` and starts `rakumux-api --detach` when needed; forwards `RAKUMUX_SESSION_ID`/
    `RAKUMUX_SESSION_TOKEN` as identity headers; returns terminal text sanitized, capped and inside
    a nonce-delimited untrusted block. See `mcp/README.md`.
+10. **Account and AI session descriptions** (`tui/crates/sensagent`, `tui/src/account.rs`): a
+   per-home service, the hidden `rakumux status-service` (`rakumux_sensagent::service::serve`),
+   holds the Rakumux account (Clerk OAuth device sign-in, credentials under
+   `~/.rakumux/sensagent/credentials`), follows the daemon's sessions as a user client and asks
+   `https://rakumux.com/api/v1/ai/session-status` for a short description of each live session
+   (cached in `~/.rakumux/sensagent/status/status.sqlite3`). It is started detached (`setsid`)
+   on demand: by `rakumux account login` or the TUI's sign-in, or when the home has a saved
+   account; it then runs until SIGTERM. Clients talk to it over a private Unix socket
+   (`rakumux_sensagent::owner`). It shares sessions only while the account's AI session summaries
+   switch (`GET /api/v1/features`, read every 5 minutes) is on: then it consents for the folders
+   of live sessions (never private ones), and off it stops. A finished agent turn is described at
+   once; otherwise at most once a minute per session. Settings → Account signs in (a code, link
+   and QR code), the session list shows each description as a third line, and
+   `rakumux account status` lists them. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
+   `RAKUMUX_CLERK_CLIENT_ID`, `RAKUMUX_CLERK_DEVICE_PAGE`, `RAKUMUX_CLOUD_ORIGIN`.
 
 ## File structure
 
@@ -193,7 +208,9 @@ tui/
       log.rs                 # ~/.rakumux/logs/ptyd.log
   src/
     main.rs                  # cli::dispatch, else the TUI event loop
-    cli/                     # new, ls, attach, rename, kill, rm, daemon, remote, session (JSON)
+    cli/                     # new, ls, attach, rename, kill, rm, daemon, remote, account, session (JSON)
+    account.rs               # the account service's clients: AccountAccess (the TUI's port), LocalAccount
+                             # (starts `rakumux status-service`), `status-service` itself
     remote_access.rs         # phone access: remote.json on/off/rotate, (re)starting rakumux-api, pairing
                              # (URLs, token, rakumux://connect link), autostart; PhoneAccess (the TUI's port)
     qr.rs                    # QR codes drawn with ▀ (pairing: `rakumux remote pair`, the pairing dialog)
@@ -365,6 +382,9 @@ accidents; they don't stop a hostile process running as the same user.
                                  after a crash or reboot; removed by `daemon stop`
   update_state.json              UpdateState {last_check, latest_version, pending_upgrade, install_method}
   session.json                   auth SessionRecord {session_id, token, email} (Clerk; deferred, unrelated to Rakumux sessions)
+  sensagent/                     the account service (`rakumux status-service`): credentials/
+                                 (the sign-in, 0600), status/ (descriptions and sharing consent,
+                                 SQLite), its registration and private socket
 ~/.rakumux/run/                ($RAKUMUX_HOME/run), 0700: the same from every login
   service.json                   Registration {instance_id, pid, protocol, version, socket, token}, 0600
   service.lock                   flock held by the running daemon (kept across a restart in place)
@@ -607,6 +627,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
 | `rakumux daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
+| `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session descriptions (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in, whether AI session summaries are on (rakumux.com/features) and each described session |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux-api [--port N] [--detach] [--remote-listen ADDR:PORT]...` | External HTTP API on 127.0.0.1, plus the remote listener when remote access is on (`api/README.md`) |
 | `rakumux-mcp` | MCP server for agents, e.g. `claude mcp add --scope user rakumux -- rakumux-mcp` (`mcp/README.md`) |

@@ -10,5 +10,6 @@ pub mod cloud;
 pub mod dispatch;
 pub mod owner;
 pub mod refresh;
+pub mod service;
 pub mod source;
 pub mod status;

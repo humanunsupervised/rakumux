@@ -28,13 +28,16 @@ impl HttpTransport for FakeTransport {
     fn send(&self, mut request: Request) -> Result<HttpReply, CloudAIError> {
         // Capture the production request's replay properties before consuming
         // its reader. Only this no-network fake buffers a detached body.
-        let body_was_streaming = request.body().unwrap().as_bytes().is_none();
+        // A GET (features) has no body.
+        let body_was_streaming = request.body().is_some_and(|body| body.as_bytes().is_none());
         let request_was_cloneable = request.try_clone().is_some();
-        let mut body = request.body_mut().take().unwrap();
-        let body = body
-            .buffer()
-            .expect("synthetic request reader failed")
-            .to_vec();
+        let body = match request.body_mut().take() {
+            Some(mut body) => body
+                .buffer()
+                .expect("synthetic request reader failed")
+                .to_vec(),
+            None => Vec::new(),
+        };
         self.requests.lock().unwrap().push(RecordedRequest {
             request,
             body,
@@ -814,3 +817,80 @@ fn cancellation_wins_over_late_other_wrapped_reqwest_timeouts() {
     );
 }
 mod dispatch;
+
+fn features_with(reply: HttpReply) -> Result<AccountFeatures, CloudAIError> {
+    let (client, _) = client_with(Ok(reply), None);
+    client.features(&token(), &Cancellation::new())
+}
+
+#[test]
+fn features_are_one_bodyless_get_with_the_bearer() {
+    let (client, recorded) = client_with(
+        Ok(reply(
+            200,
+            r#"{"version":1,"features":{"ai_session_summaries":false}}"#,
+        )),
+        None,
+    );
+    let features = client.features(&token(), &Cancellation::new()).unwrap();
+    assert!(!features.ai_session_summaries);
+    let recorded = recorded.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    let outgoing = &recorded[0].request;
+    assert_eq!(outgoing.method(), Method::GET);
+    assert_eq!(
+        outgoing.url().as_str(),
+        "https://reviewed.example:8443/api/v1/features"
+    );
+    assert_eq!(
+        outgoing.headers()[header::AUTHORIZATION],
+        format!("Bearer {SECRET}")
+    );
+    assert!(outgoing.headers()[header::AUTHORIZATION].is_sensitive());
+    assert!(outgoing.headers().get(header::CONTENT_TYPE).is_none());
+    assert!(recorded[0].body.is_empty());
+}
+
+#[test]
+fn features_decode_strictly_and_default_a_missing_switch_on() {
+    let on = |body: &str| features_with(reply(200, body.to_owned()));
+    assert!(
+        on(r#"{"version":1,"features":{"ai_session_summaries":true}}"#)
+            .unwrap()
+            .ai_session_summaries
+    );
+    assert!(
+        on(r#"{"version":1,"features":{"newer_switch":false}}"#)
+            .unwrap()
+            .ai_session_summaries
+    );
+    for body in [
+        r#"{"version":2,"features":{"ai_session_summaries":true}}"#,
+        r#"{"version":1}"#,
+        r#"{"version":1,"features":{"ai_session_summaries":"no"}}"#,
+        "not json",
+    ] {
+        assert_eq!(on(body), Err(CloudAIError::InvalidResponse), "{body}");
+    }
+}
+
+#[test]
+fn features_failures_are_the_service_errors() {
+    assert!(matches!(
+        features_with(error_reply(401, RemoteErrorCode::Unauthenticated, None)),
+        Err(CloudAIError::Remote { status: 401, .. })
+    ));
+    assert_eq!(
+        features_with(reply(302, Vec::new())),
+        Err(CloudAIError::HttpStatus(302))
+    );
+    let cancel = Cancellation::new();
+    let (client, _) = client_with(
+        Ok(reply(200, r#"{"version":1,"features":{}}"#)),
+        Some(cancel.clone()),
+    );
+    assert_eq!(
+        client.features(&token(), &cancel),
+        Err(CloudAIError::Canceled)
+    );
+}

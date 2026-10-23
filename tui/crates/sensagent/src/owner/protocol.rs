@@ -14,7 +14,7 @@ use session_core::ids::SessionId;
 use session_core::model::ScopeRoot;
 
 use crate::dispatch::DispatchError;
-use crate::refresh::{AIStatus, RefreshError, RefreshFailure};
+use crate::refresh::{AIStatus, RefreshError, RefreshFailure, SignInFailure, SignInState};
 use crate::status::{
     ConsentPolicy, ConsentSnapshot, FolderConsent, StatusError, StatusStoreError, StatusView,
     MAX_CACHE_ENTRIES,
@@ -72,6 +72,12 @@ pub enum OwnerRequest {
     Disable { revision: u64 },
     /// Stop sharing and remove local credentials.
     SignOut,
+    /// Start a device sign-in, replacing any unfinished one; answered with its state.
+    SignInStart,
+    /// Where the current sign-in is up to.
+    SignInStatus,
+    /// Abandon an unfinished sign-in; an existing account stays signed in.
+    SignInCancel,
 }
 
 /// The owner's answers.
@@ -93,6 +99,9 @@ pub enum OwnerResponse {
     },
     Consent {
         consent: ConsentView,
+    },
+    SignIn {
+        sign_in: SignInView,
     },
     Done,
     Error {
@@ -118,6 +127,74 @@ pub struct OwnerState {
     /// The account was refused; sign in or confirm consent again.
     #[serde(default)]
     pub unauthorized: bool,
+    /// The account's AI session summaries switch (on the website), once read;
+    /// absent when signed out or not yet known.
+    #[serde(default)]
+    pub summaries: Option<bool>,
+}
+
+/// A device sign-in as the TUI shows it. Holds no device code or token.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SignInView {
+    Idle,
+    Starting,
+    /// Open one of the links in any browser and confirm `user_code`.
+    Waiting {
+        user_code: String,
+        verification_uri: String,
+        #[serde(default)]
+        verification_uri_complete: Option<String>,
+        /// rakumux.com's sign-in-then-approve page, when configured.
+        #[serde(default)]
+        connect_url: Option<String>,
+        expires_in_seconds: u64,
+    },
+    SignedIn,
+    Failed {
+        reason: SignInReason,
+    },
+    #[serde(other)]
+    Unknown,
+}
+
+/// Why a sign-in ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignInReason {
+    Denied,
+    Expired,
+    Unavailable,
+    Canceled,
+    Failed,
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<&SignInState> for SignInView {
+    fn from(state: &SignInState) -> Self {
+        match state {
+            SignInState::Idle => Self::Idle,
+            SignInState::Starting => Self::Starting,
+            SignInState::Waiting(prompt) => Self::Waiting {
+                user_code: prompt.user_code.clone(),
+                verification_uri: prompt.verification_uri.clone(),
+                verification_uri_complete: prompt.verification_uri_complete.clone(),
+                connect_url: prompt.connect_url.clone(),
+                expires_in_seconds: prompt.expires_in_seconds,
+            },
+            SignInState::SignedIn => Self::SignedIn,
+            SignInState::Failed(failure) => Self::Failed {
+                reason: match failure {
+                    SignInFailure::Denied => SignInReason::Denied,
+                    SignInFailure::Expired => SignInReason::Expired,
+                    SignInFailure::Unavailable => SignInReason::Unavailable,
+                    SignInFailure::Canceled => SignInReason::Canceled,
+                    SignInFailure::Failed => SignInReason::Failed,
+                },
+            },
+        }
+    }
 }
 
 /// An account as a trusted control shows it.

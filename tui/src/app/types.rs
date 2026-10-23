@@ -315,10 +315,12 @@ pub enum SettingsItem {
     RestartServer,
     /// Independent shell below the main detail pane.
     TerminalPanel,
+    /// Sign in to the Rakumux account (AI session descriptions).
+    Account,
 }
 
 impl SettingsItem {
-    pub const ALL: [SettingsItem; 7] = [
+    pub const ALL: [SettingsItem; 8] = [
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
@@ -326,6 +328,7 @@ impl SettingsItem {
         SettingsItem::RestartUi,
         SettingsItem::RestartServer,
         SettingsItem::TerminalPanel,
+        SettingsItem::Account,
     ];
 
     /// The heading Settings lists it under.
@@ -337,6 +340,7 @@ impl SettingsItem {
             | SettingsItem::RestartUi
             | SettingsItem::RestartServer
             | SettingsItem::TerminalPanel => "App",
+            SettingsItem::Account => "Account",
         }
     }
 
@@ -429,6 +433,57 @@ pub enum PairingState {
     Failed(String),
 }
 
+/// The account dialog: signing in to the Rakumux account (a code approved
+/// in any browser), who is signed in, and signing out.
+#[derive(Debug, Clone)]
+pub struct AccountDialog {
+    pub state: AccountDialogState,
+}
+
+impl AccountDialog {
+    /// Waiting for the account service (a spinner shows).
+    pub fn busy(&self) -> bool {
+        matches!(
+            self.state,
+            AccountDialogState::Loading
+                | AccountDialogState::Starting
+                | AccountDialogState::SigningOut
+        )
+    }
+
+    /// A sign-in is under way (its status is polled).
+    pub fn signing_in(&self) -> bool {
+        matches!(
+            self.state,
+            AccountDialogState::Starting | AccountDialogState::Waiting(_)
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccountDialogState {
+    /// Asking the service who is signed in.
+    Loading,
+    SignedOut,
+    /// Asking for a sign-in code.
+    Starting,
+    /// Waiting for the code to be approved: a `SignInView::Waiting`.
+    Waiting(rakumux_sensagent::owner::protocol::SignInView),
+    SignedIn(crate::account::Account),
+    SigningOut,
+    Failed(String),
+}
+
+/// Who is signed in, as far as this window knows.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum AccountStatus {
+    /// Not checked yet.
+    #[default]
+    Unknown,
+    SignedOut,
+    SignedIn(crate::account::Account),
+}
+
 /// Where the welcome tour is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WelcomeState {
@@ -464,6 +519,8 @@ pub enum AppMode {
     PhoneOffer,
     /// The pairing dialog (the offer).
     Pairing(PairingDialog),
+    /// The account dialog (Settings → Account).
+    Account(AccountDialog),
     Auth(AuthMenu),
     AuthEmail(AuthEmailDialog),
     AuthCode(AuthCodeDialog),

@@ -2,13 +2,15 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::types::{AppMode, AppResult, PairingState};
+use crate::app::types::{AccountDialogState, AppMode, AppResult, PairingState};
 use crate::app::App;
 
 pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
         // Ctrl-c always closes the dialog (it never quits from one).
-        if !dialog_busy(&app.mode) {
+        if matches!(app.mode, AppMode::Account(_)) {
+            app.close_account_dialog();
+        } else if !dialog_busy(&app.mode) {
             app.mode = AppMode::Normal;
         }
         return AppResult::Continue;
@@ -26,6 +28,7 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
         AppMode::Welcome(_) => handle_welcome_key(app, key),
         AppMode::PhoneOffer => handle_phone_offer_key(app, key),
         AppMode::Pairing(_) => handle_pairing_key(app, key),
+        AppMode::Account(_) => handle_account_key(app, key),
         AppMode::Auth(_) | AppMode::AuthEmail(_) | AppMode::AuthCode(_) => {
             super::auth::handle_auth_key(app, key).await
         }
@@ -138,6 +141,33 @@ fn handle_pairing_key(app: &mut App, key: KeyEvent) {
         {
             app.turn_phone_access_off()
         }
+        _ => {}
+    }
+}
+
+/// The account dialog: Enter signs in (or tries again), `o` signs out,
+/// Esc (`q`) closes and abandons a sign-in under way. Only Esc while waiting
+/// for the service.
+fn handle_account_key(app: &mut App, key: KeyEvent) {
+    let AppMode::Account(dialog) = &app.mode else {
+        return;
+    };
+    let close = matches!(key.code, KeyCode::Esc | KeyCode::Char('q'));
+    if dialog.busy() {
+        if key.code == KeyCode::Esc {
+            app.close_account_dialog();
+        }
+        return;
+    }
+    match (&dialog.state, key.code) {
+        _ if close => app.close_account_dialog(),
+        (AccountDialogState::SignedOut | AccountDialogState::Failed(_), KeyCode::Enter) => {
+            app.start_sign_in()
+        }
+        (AccountDialogState::SignedIn(_), KeyCode::Char('o') | KeyCode::Char('O')) => {
+            app.sign_out()
+        }
+        (AccountDialogState::SignedIn(_), KeyCode::Enter) => app.close_account_dialog(),
         _ => {}
     }
 }

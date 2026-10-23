@@ -4143,3 +4143,133 @@ async fn a_small_window_shows_the_link_instead_of_the_code() {
     assert!(text.contains("rakumux://connect?url="), "{text}");
     assert!(text.contains("abcdefghijklmnopqrstuvwx27"), "{text}");
 }
+
+// ---------------------------------------------------------------- account
+
+fn account_harness(account: testing::FakeAccount) -> (Harness, Arc<testing::FakeAccount>) {
+    let fake = FakeApi::new(vec![view("A", "a", 20), view("B", "b", 10)]);
+    let dir = tempfile::tempdir().unwrap();
+    let account = Arc::new(account);
+    let mut options = options(&fake, scope(), &dir);
+    options.account = account.clone();
+    (start(options, fake, dir), account)
+}
+
+fn account_state(h: &Harness) -> Option<super::types::AccountDialogState> {
+    match &h.app.mode {
+        AppMode::Account(dialog) => Some(dialog.state.clone()),
+        _ => None,
+    }
+}
+
+/// A tick far enough ahead for every account timer.
+fn account_tick(h: &mut Harness) {
+    h.app
+        .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(120));
+    h.app.process_pending();
+}
+
+#[tokio::test]
+async fn signing_in_from_settings_shows_a_code_then_descriptions_under_sessions() {
+    let (mut h, account) = account_harness(testing::FakeAccount::default());
+    assert_eq!(h.app.account, super::types::AccountStatus::SignedOut);
+    assert_eq!(account.calls(), ["account"]);
+    // Signed out: no descriptions are asked for.
+    account_tick(&mut h);
+    assert!(!account.calls().contains(&"descriptions"));
+
+    h.press(KeyCode::Char('o')).await;
+    for _ in 0..SettingsItem::Account.index() {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        account_state(&h),
+        Some(super::types::AccountDialogState::SignedOut)
+    );
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(
+        account_state(&h),
+        Some(super::types::AccountDialogState::Waiting(_))
+    ));
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("WDJB-MJHT"), "{rows}");
+    assert!(
+        rows.contains("https://site.example/connect?code=WDJB-MJHT"),
+        "{rows}"
+    );
+    assert!(rows.contains("▀▀▀▀▀▀▀▀▀▀"), "{rows}");
+
+    // Not approved yet: still waiting.
+    account_tick(&mut h);
+    assert!(matches!(
+        account_state(&h),
+        Some(super::types::AccountDialogState::Waiting(_))
+    ));
+    account.approve();
+    account_tick(&mut h);
+    assert_eq!(
+        account_state(&h),
+        Some(super::types::AccountDialogState::SignedIn(
+            testing::FakeAccount::person()
+        ))
+    );
+    assert_eq!(
+        h.app.account,
+        super::types::AccountStatus::SignedIn(testing::FakeAccount::person())
+    );
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("Signed in as person@example.com."), "{rows}");
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+
+    account.descriptions.lock().unwrap().insert(
+        SessionId::from_string("A"),
+        "Fixing the flaky login test".into(),
+    );
+    account_tick(&mut h);
+    assert_eq!(
+        h.app.description(&SessionId::from_string("A")),
+        Some("Fixing the flaky login test")
+    );
+    assert_eq!(h.app.description(&SessionId::from_string("B")), None);
+    let rows = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(rows.contains("Fixing the flaky login test"), "{rows}");
+}
+
+#[tokio::test]
+async fn closing_the_dialog_abandons_the_sign_in() {
+    let (mut h, account) = account_harness(testing::FakeAccount::default());
+    h.app.open_account_dialog();
+    h.press(KeyCode::Enter).await;
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(account.calls().contains(&"cancel_sign_in"));
+    account.approve();
+    account_tick(&mut h);
+    assert!(!account.calls().contains(&"sign_in_status"));
+}
+
+#[tokio::test]
+async fn signing_out_stops_the_descriptions() {
+    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
+    account
+        .descriptions
+        .lock()
+        .unwrap()
+        .insert(SessionId::from_string("A"), "Reviewing the parser".into());
+    account_tick(&mut h);
+    assert_eq!(
+        h.app.description(&SessionId::from_string("A")),
+        Some("Reviewing the parser")
+    );
+    h.app.open_account_dialog();
+    h.press(KeyCode::Char('o')).await;
+    assert!(account.calls().contains(&"sign_out"));
+    assert_eq!(h.app.account, super::types::AccountStatus::SignedOut);
+    assert_eq!(
+        account_state(&h),
+        Some(super::types::AccountDialogState::SignedOut)
+    );
+    assert_eq!(h.app.description(&SessionId::from_string("A")), None);
+}

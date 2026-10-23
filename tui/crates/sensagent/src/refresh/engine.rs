@@ -6,22 +6,30 @@ use std::time::Duration;
 use session_core::api::{EventEnvelope, SessionEvent};
 use session_core::client::SessionApi;
 use session_core::ids::SessionId;
-use session_core::model::SessionView;
+use session_core::model::{ScopeRoot, SessionView};
 
 use super::schedule::{Outcome, RefreshFailure, RefreshScheduler, MAX_RUNNING};
 use crate::auth::{
-    AccountError, AccountSession, ApplyResult, CredentialStore, SystemClock, WallClock,
+    AccountError, AccountService, AccountSession, ApplyResult, CredentialStore, SystemClock,
+    WallClock,
 };
-use crate::cloud::{CloudAIError, RemoteErrorCode};
+use crate::cloud::{AccountFeatures, CloudAIError, RemoteErrorCode};
 use crate::dispatch::{
-    DispatchCompletion, DispatchError, DispatchPreparation, StatusCaptureJob, StatusConsentOffer,
-    StatusDispatchJob, StatusDispatchService,
+    DispatchCompletion, DispatchError, DispatchPreparation, FeaturesCompletion, FeaturesJob,
+    StatusCaptureJob, StatusConsentOffer, StatusDispatchJob, StatusDispatchService,
 };
 use crate::source::{CaptureError, CaptureExpectation, SessionCapture};
 use crate::status::{
-    ConsentRevision, ConsentSnapshot, FolderConsent, InputSelection, SourceStamp, StatusStore,
-    StatusView,
+    ConsentPolicy, ConsentRevision, ConsentSnapshot, FolderConsent, InputSelection, SourceStamp,
+    StatusStore, StatusView,
 };
+
+/// How often the account's feature switches are read again while signed in.
+const FEATURES_INTERVAL: Duration = Duration::from_secs(300);
+/// The wait before reading them again after a failure.
+const FEATURES_RETRY: Duration = Duration::from_secs(60);
+/// The consent model's limit on folders.
+const MAX_SHARED_FOLDERS: usize = 64;
 
 /// A session's AI status as the refresher sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,6 +49,9 @@ pub struct RefreshState {
     pub rate_limited: bool,
     /// The account was refused; nothing refreshes until it or consent changes.
     pub unauthorized: bool,
+    /// The account's AI session summaries switch, once read; `None` when signed out
+    /// or not yet known.
+    pub summaries: Option<bool>,
 }
 
 /// One scoped capture to run off the owner thread.
@@ -122,6 +133,16 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     connected: bool,
     /// Sharing is off, signed out or unconfirmed: nothing to plan until a control.
     idle: bool,
+    /// Whether sharing follows the account's AI session summaries switch.
+    follow_switch: bool,
+    /// The account's feature switches, once read for the adopted account.
+    features: Option<AccountFeatures>,
+    /// When to read them next; `None` while a read is out.
+    features_due: Option<Duration>,
+    /// Folders shared at the last reconciliation, and whether sharing must be
+    /// reconciled again (the switches, the account or the live folders changed).
+    shared_for: Vec<ScopeRoot>,
+    reconcile: bool,
 }
 
 impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> {
@@ -135,7 +156,21 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             observed: HashSet::new(),
             connected: false,
             idle: false,
+            follow_switch: false,
+            features: None,
+            features_due: Some(Duration::ZERO),
+            shared_for: Vec::new(),
+            reconcile: true,
         }
+    }
+
+    /// Let the account's AI session summaries switch (read from the service) decide
+    /// sharing: on, the folders of live sessions are shared, terminal output
+    /// included, private sessions never; off, sharing stops. Without this, sharing
+    /// changes only through explicit consent controls.
+    pub fn following_account_switch(mut self) -> Self {
+        self.follow_switch = true;
+        self
     }
 
     /// Apply a fresh daemon `list` after (re)subscribing; refreshing may start.
@@ -194,6 +229,9 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// off this thread and pass the result to `captured`.
     pub fn tick(&mut self, now: Duration) -> Vec<CaptureWork> {
         let mut work = Vec::new();
+        if self.connected {
+            self.follow_summaries_switch();
+        }
         if self.service.recheck().is_err() || !self.connected || self.idle {
             return work;
         }
@@ -320,7 +358,60 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             connected: self.connected,
             rate_limited: self.scheduler.rate_limited(now),
             unauthorized: self.scheduler.unauthorized(),
+            summaries: self
+                .service
+                .account_session()
+                .and(self.features)
+                .map(|features| features.ai_session_summaries),
         }
+    }
+
+    /// A read of the account's feature switches, when one is due (soon after sign-in,
+    /// then every five minutes). Run it with `FeaturesJob::run` off this thread and
+    /// pass the result to `features_read`.
+    pub fn features_job(&mut self, now: Duration) -> Option<FeaturesJob<A, C>> {
+        if !self.follow_switch {
+            return None;
+        }
+        self.service.account_session()?;
+        if !self.features_due.is_some_and(|due| now >= due) {
+            return None;
+        }
+        match self.service.features_job() {
+            Ok(Some(job)) => {
+                self.features_due = None;
+                Some(job)
+            }
+            _ => {
+                self.features_due = Some(now.saturating_add(FEATURES_RETRY));
+                None
+            }
+        }
+    }
+
+    /// Apply a finished features read, if it is for the current account.
+    pub fn features_read(&mut self, completion: FeaturesCompletion, now: Duration) {
+        let current = self.service.account_session().map(AccountSession::revision);
+        if current != Some(completion.revision) {
+            // Read for an older sign-in: read again for the current one.
+            self.features_due.get_or_insert(now);
+            return;
+        }
+        match completion.outcome {
+            Ok(features) => {
+                if self.features != Some(features) {
+                    self.features = Some(features);
+                    self.reconcile = true;
+                }
+                self.features_due = Some(now.saturating_add(FEATURES_INTERVAL));
+            }
+            Err(_) => self.features_due = Some(now.saturating_add(FEATURES_RETRY)),
+        }
+    }
+
+    /// The account service, for a device sign-in run off this thread.
+    pub fn account_service(&self) -> std::sync::Arc<AccountService<A, C>> {
+        self.service.account_service()
     }
 
     /// The adopted account view, for display.
@@ -356,12 +447,14 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         result
     }
 
-    /// Adopt a verified account view; consent must be confirmed again.
+    /// Adopt a verified account view; consent must be confirmed again, and the
+    /// account's switches are read afresh.
     pub fn set_account_session(
         &mut self,
         session: Option<AccountSession>,
     ) -> Result<(), DispatchError> {
         let result = self.service.set_account_session(session);
+        self.forget_features();
         self.reconsider();
         result
     }
@@ -369,8 +462,77 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Stop sharing and remove local credentials.
     pub fn sign_out(&mut self) -> Result<(), DispatchError> {
         let result = self.service.sign_out();
+        self.forget_features();
         self.reconsider();
         result
+    }
+
+    fn forget_features(&mut self) {
+        self.features = None;
+        self.features_due = Some(Duration::ZERO);
+        self.shared_for.clear();
+        self.reconcile = true;
+    }
+
+    /// Follow the account's AI session summaries switch. On: share the folders of the
+    /// live sessions (recent terminal output included; private sessions never) and
+    /// keep earlier ones, within the consent model's 64-folder limit. Off: stop
+    /// sharing. Runs only when the switch, the account or the live folders changed,
+    /// or this instance hasn't confirmed consent yet.
+    fn follow_summaries_switch(&mut self) {
+        let Some(features) = self.features else {
+            return;
+        };
+        if self.service.account_session().is_none() {
+            return;
+        }
+        let live = self.service.live_folders();
+        if !self.reconcile && live == self.shared_for {
+            return;
+        }
+        let Ok(consent) = self.service.consent() else {
+            return;
+        };
+        if !features.ai_session_summaries {
+            if consent.policy != ConsentPolicy::Disabled && self.disable(consent.revision).is_err()
+            {
+                return;
+            }
+            self.shared_for = live;
+            self.reconcile = false;
+            return;
+        }
+        let shared: Vec<ScopeRoot> = match &consent.policy {
+            ConsentPolicy::Enabled { folders, .. } => {
+                folders.iter().map(|choice| choice.folder.clone()).collect()
+            }
+            ConsentPolicy::Disabled => Vec::new(),
+        };
+        let covered = live.iter().all(|folder| shared.contains(folder));
+        if !(self.service.is_confirmed() && covered) && !live.is_empty() {
+            let mut folders = live.clone();
+            for folder in shared {
+                if !folders.contains(&folder) {
+                    folders.push(folder);
+                }
+            }
+            folders.truncate(MAX_SHARED_FOLDERS);
+            let choices = folders
+                .into_iter()
+                .map(|folder| FolderConsent {
+                    folder,
+                    include_terminal_output: true,
+                })
+                .collect();
+            let enabled = self
+                .consent_offer()
+                .and_then(|offer| self.enable(&offer, choices));
+            if enabled.is_err() {
+                return;
+            }
+        }
+        self.shared_for = live;
+        self.reconcile = false;
     }
 
     #[cfg(test)]

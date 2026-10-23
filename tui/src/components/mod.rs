@@ -1,6 +1,7 @@
 //! Drawing code. Components read `App` state and never change it, except
 //! for recording click targets.
 
+pub mod account;
 pub mod auth;
 pub mod dialogs;
 pub mod folder_picker;

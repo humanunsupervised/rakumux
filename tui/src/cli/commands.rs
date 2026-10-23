@@ -38,6 +38,9 @@ pub(crate) fn run(
         Command::Session { command } => session::run(api, invocation, command, out),
         Command::Daemon { .. } => Err(CliError::internal("daemon commands need no session")),
         Command::Remote { .. } => Err(CliError::internal("remote commands need no session")),
+        Command::Account { .. } | Command::StatusService => {
+            Err(CliError::internal("account commands need no session"))
+        }
     }
 }
 

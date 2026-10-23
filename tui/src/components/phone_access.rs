@@ -205,7 +205,7 @@ fn draw_with_qr(
 }
 
 /// The code as lines of `▀`, dark and light from the 256-colour palette.
-fn qr_lines(code: &Qr) -> Vec<Line<'static>> {
+pub(crate) fn qr_lines(code: &Qr) -> Vec<Line<'static>> {
     let colour = |dark: bool| Color::Indexed(if dark { DARK } else { LIGHT });
     code.cells()
         .into_iter()
@@ -236,7 +236,7 @@ fn qr_lines(code: &Qr) -> Vec<Line<'static>> {
 }
 
 /// `Label  value`, the label muted.
-fn detail(label: &str, value: &str) -> Line<'static> {
+pub(crate) fn detail(label: &str, value: &str) -> Line<'static> {
     let p = theme::palette();
     Line::from(vec![
         Span::styled(format!("{label:<7}"), Style::default().fg(p.text_muted)),

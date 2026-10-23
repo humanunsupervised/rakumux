@@ -8,8 +8,22 @@ use std::path::PathBuf;
 /// Subcommand names that make `dispatch` handle the invocation instead of
 /// starting the TUI.
 pub const SUBCOMMANDS: &[&str] = &[
-    "new", "ls", "attach", "rename", "pin", "unpin", "kill", "rm", "folders", "projects", "daemon",
-    "remote", "session", "help",
+    "new",
+    "ls",
+    "attach",
+    "rename",
+    "pin",
+    "unpin",
+    "kill",
+    "rm",
+    "folders",
+    "projects",
+    "daemon",
+    "remote",
+    "account",
+    "status-service",
+    "session",
+    "help",
 ];
 
 #[derive(Parser, Debug)]
@@ -108,6 +122,18 @@ pub enum Command {
         #[command(subcommand)]
         command: RemoteCommand,
     },
+    /// Your Rakumux account: sign in for AI session descriptions
+    ///
+    /// Signed in, a background service describes each session in a few
+    /// words. AI session summaries can be turned off on rakumux.com/features.
+    Account {
+        #[command(subcommand)]
+        command: AccountCommand,
+    },
+    /// Run the account and AI description service for this Rakumux home
+    /// (started on demand)
+    #[command(hide = true)]
+    StatusService,
     /// JSON interface for agents and scripts
     Session {
         #[command(subcommand)]
@@ -233,6 +259,21 @@ pub enum RemoteCommand {
         /// Make a new token (apps paired with the old one must be updated)
         #[arg(long)]
         rotate: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+pub enum AccountCommand {
+    /// Sign in with a code approved in any browser
+    Login,
+    /// Sign out on this machine (AI descriptions stop)
+    Logout,
+    /// Show who is signed in, whether AI session summaries are on, and the
+    /// sessions described
+    Status {
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 

@@ -13,7 +13,7 @@ use session_core::ids::{SessionId, Token};
 use super::layout::{current_uid, peer_uid};
 use super::protocol::{
     read_payload, write_message, AccountView, ConsentView, Hello, OfferView, OwnerErrorCode,
-    OwnerRequest, OwnerResponse, OwnerState, StatusLine, MAX_CLIENT_NAME, MAX_MESSAGE,
+    OwnerRequest, OwnerResponse, OwnerState, SignInView, StatusLine, MAX_CLIENT_NAME, MAX_MESSAGE,
     MAX_SESSIONS, PROTOCOL,
 };
 use super::{OwnerClaim, OwnerError};
@@ -322,6 +322,26 @@ fn handle(
                 .map(|()| OwnerResponse::Done)
                 .map_err(|error| OwnerErrorCode::from(&error))
         }
+        OwnerRequest::SignInStart => {
+            *offer = None;
+            client
+                .sign_in_start()
+                .and_then(|()| client.sign_in_status())
+                .map(|state| OwnerResponse::SignIn {
+                    sign_in: SignInView::from(&state),
+                })
+                .map_err(|error| OwnerErrorCode::from(&error))
+        }
+        OwnerRequest::SignInStatus => client
+            .sign_in_status()
+            .map(|state| OwnerResponse::SignIn {
+                sign_in: SignInView::from(&state),
+            })
+            .map_err(|error| OwnerErrorCode::from(&error)),
+        OwnerRequest::SignInCancel => client
+            .sign_in_cancel()
+            .map(|()| OwnerResponse::Done)
+            .map_err(|error| OwnerErrorCode::from(&error)),
     };
     result.unwrap_or_else(refuse)
 }
@@ -345,6 +365,7 @@ fn state(client: &RefreshClient) -> Result<OwnerResponse, OwnerErrorCode> {
             connected: refresh.connected,
             rate_limited: refresh.rate_limited,
             unauthorized: refresh.unauthorized,
+            summaries: refresh.summaries,
         },
     })
 }

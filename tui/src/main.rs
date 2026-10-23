@@ -1,3 +1,4 @@
+mod account;
 mod app;
 mod auth;
 mod cli;
@@ -79,7 +80,7 @@ fn print_cli_help() {
     println!("Usage: rakumux [OPTIONS]            Open the session screen for this folder");
     println!("       rakumux <COMMAND> [ARGS]     See `rakumux help`; commands: new, ls, attach,");
     println!("                                      rename, pin, unpin, kill, rm, folders, session, daemon,");
-    println!("                                      remote");
+    println!("                                      remote, account");
     println!();
     println!("Options:");
     println!("  -d, --debug              Enable debug output");
@@ -188,6 +189,7 @@ async fn main() -> Result<()> {
     // after a reboot: start one in the background.
     remote_access::autostart(&paths, cli.ptyd_path.clone());
     let phone_layout = paths.clone();
+    let account_layout = paths.clone();
     let config_path = Settings::config_file_path().ok();
     let (settings, config_error) = match config_path.as_deref().map(Settings::load_from) {
         Some(Ok(settings)) => (settings, None),
@@ -211,6 +213,11 @@ async fn main() -> Result<()> {
             layout: phone_layout,
             ptyd_path: cli.ptyd_path.clone(),
         }),
+        account: std::sync::Arc::new(account::LocalAccount::new(
+            account_layout,
+            std::env::current_exe().unwrap_or_else(|_| PathBuf::from("rakumux")),
+            "tui",
+        )),
         updater: std::sync::Arc::new(updater::SystemUpdateService),
         exec_mode: ExecMode::Threaded,
         debug,

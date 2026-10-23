@@ -45,6 +45,9 @@ pub(crate) struct Candidate {
     pub(crate) stamp: SourceStamp,
     /// Output or activity changed since `stamp`.
     pub(crate) dirty: bool,
+    /// The agent just finished a turn (native lifecycle `Done`), so a new stamp should
+    /// be described now rather than after the per-session interval.
+    pub(crate) finished: bool,
 }
 
 /// Daemon facts that supersede a source revision at once: incarnation, liveness,
@@ -214,6 +217,19 @@ impl SourceTracker {
             .map(|(id, tracked)| observation(id, tracked))
     }
 
+    /// The folders of live, non-private sessions, sorted and without duplicates.
+    pub fn live_folders(&self) -> Vec<ScopeRoot> {
+        let mut folders: Vec<ScopeRoot> = self
+            .sessions
+            .values()
+            .filter(|tracked| tracked.facts.live && !tracked.facts.private)
+            .map(|tracked| tracked.facts.scope.clone())
+            .collect();
+        folders.sort_by(|a, b| a.path().cmp(b.path()));
+        folders.dedup();
+        folders
+    }
+
     /// Live, non-private sessions: the only ones a refresh could capture.
     pub fn candidates(&self) -> impl Iterator<Item = Candidate> + '_ {
         self.sessions
@@ -223,6 +239,7 @@ impl SourceTracker {
                 session: id.clone(),
                 stamp: tracked.stamp,
                 dirty: tracked.dirty,
+                finished: tracked.facts.lifecycle == Lifecycle::Done,
             })
     }
 

@@ -126,6 +126,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         AppMode::Pairing(dialog) => {
             crate::components::phone_access::draw_pairing(f, dialog, modal_area)
         }
+        AppMode::Account(dialog) => crate::components::account::draw_account(f, dialog, modal_area),
         AppMode::Auth(menu) => draw_auth_menu(f, menu, modal_area),
         AppMode::AuthEmail(dialog) => draw_auth_email_dialog(f, dialog, modal_area),
         AppMode::AuthCode(dialog) => draw_auth_code_dialog(f, dialog, modal_area),

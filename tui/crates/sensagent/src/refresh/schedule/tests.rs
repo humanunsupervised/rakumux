@@ -16,6 +16,14 @@ fn candidate(number: u8, revision: u64, dirty: bool) -> Candidate {
         session: session(number),
         stamp: stamp(revision),
         dirty,
+        finished: false,
+    }
+}
+
+fn finished(number: u8, revision: u64) -> Candidate {
+    Candidate {
+        finished: true,
+        ..candidate(number, revision, false)
     }
 }
 
@@ -79,6 +87,26 @@ fn a_changed_stamp_waits_for_the_session_interval() {
         plan(&mut scheduler, 70, vec![candidate(1, 2, false)]),
         [(1, false)]
     );
+}
+
+#[test]
+fn a_finished_turn_is_described_at_once_but_still_backs_off() {
+    let mut scheduler = RefreshScheduler::new();
+    attempt(&mut scheduler, 1, 1, 10, Outcome::Done);
+    // The agent finished a turn two seconds later: no interval wait.
+    assert_eq!(plan(&mut scheduler, 12, vec![finished(1, 2)]), [(1, false)]);
+    // The same finished stamp, once described, is settled like any other.
+    attempt(&mut scheduler, 1, 2, 12, Outcome::Done);
+    assert!(plan(&mut scheduler, 13, vec![finished(1, 2)]).is_empty());
+    // After a failure, backoff still applies to a finished turn.
+    attempt(
+        &mut scheduler,
+        1,
+        3,
+        14,
+        Outcome::Failed(RefreshFailure::Unavailable),
+    );
+    assert!(plan(&mut scheduler, 15, vec![finished(1, 4)]).is_empty());
 }
 
 #[test]

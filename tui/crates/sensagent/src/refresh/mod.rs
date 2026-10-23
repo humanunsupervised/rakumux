@@ -8,6 +8,7 @@
 mod engine;
 mod runner;
 mod schedule;
+mod sign_in;
 
 pub use engine::{
     AIStatus, CaptureWork, Captured, Completed, Dispatch, RefreshState, StatusRefresher,
@@ -17,3 +18,4 @@ pub use schedule::{
     RefreshFailure, BUDGET_STARTS, BUDGET_WINDOW, ERROR_BACKOFF, MAX_ERROR_BACKOFF, MAX_RUNNING,
     QUIET_PERIOD, SESSION_INTERVAL,
 };
+pub use sign_in::{SignInFailure, SignInPrompt, SignInState};

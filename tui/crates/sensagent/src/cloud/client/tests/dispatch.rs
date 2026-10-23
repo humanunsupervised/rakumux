@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{mpsc, Mutex};
 use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -172,10 +172,27 @@ enum ReplyMode {
 struct FakeTransport {
     requests: Requests,
     mode: Mutex<Option<ReplyMode>>,
+    /// The account's AI session summaries switch, for `GET /api/v1/features`.
+    summaries: Arc<AtomicBool>,
 }
 
 impl HttpTransport for FakeTransport {
     fn send(&self, mut request: Request) -> Result<HttpReply, CloudAIError> {
+        if request.method() == Method::GET {
+            // Feature reads are not recorded: `requests` holds status dispatches.
+            let features = json!({
+                "version": 1,
+                "features": {"ai_session_summaries": self.summaries.load(Ordering::SeqCst)},
+            });
+            return Ok(HttpReply {
+                status: 200,
+                headers: HeaderMap::from_iter([(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                )]),
+                body: Box::new(Cursor::new(serde_json::to_vec(&features).unwrap())),
+            });
+        }
         let streaming = request.body().unwrap().as_bytes().is_none();
         let cloneable = request.try_clone().is_some();
         // reqwest 0.11's blocking Body is not Read. Buffer only the detached
@@ -244,11 +261,21 @@ impl Read for BlockedBody {
 }
 
 fn cloud(origin: &str, requests: Requests, mode: ReplyMode) -> CloudAIClient {
+    cloud_switched(origin, requests, mode, Arc::new(AtomicBool::new(true)))
+}
+
+fn cloud_switched(
+    origin: &str,
+    requests: Requests,
+    mode: ReplyMode,
+    summaries: Arc<AtomicBool>,
+) -> CloudAIClient {
     CloudAIClient::with_transport(
         CloudAIConfig::new(origin).unwrap(),
         Box::new(FakeTransport {
             requests,
             mode: Mutex::new(Some(mode)),
+            summaries,
         }),
     )
 }
@@ -264,6 +291,8 @@ struct Fixture {
     clock: FakeClock,
     store: MemoryStatusStore,
     requests: Requests,
+    /// The account's AI session summaries switch the fake service reports.
+    summaries: Arc<AtomicBool>,
     owner: Owner,
 }
 
@@ -283,10 +312,11 @@ impl Fixture {
         let session = login(&account, SUBJECT);
         let store = MemoryStatusStore::default();
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let summaries = Arc::new(AtomicBool::new(true));
         let mut owner = StatusDispatchService::new(
             account.clone(),
             store.clone(),
-            cloud(ORIGIN, requests.clone(), mode),
+            cloud_switched(ORIGIN, requests.clone(), mode, summaries.clone()),
         );
         owner.set_account_session(Some(session.clone())).unwrap();
         owner.observe(source(1)).unwrap();
@@ -298,6 +328,7 @@ impl Fixture {
             clock,
             store,
             requests,
+            summaries,
             owner,
         }
     }

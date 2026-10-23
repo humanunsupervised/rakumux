@@ -21,8 +21,10 @@ type Refresher = StatusRefresher<MemoryStatusStore, FileCredentialStore, FakeClo
 
 struct Harness {
     _directory: tempfile::TempDir,
+    account: Arc<AccountService<FileCredentialStore, FakeClock>>,
     store: MemoryStatusStore,
     requests: Requests,
+    summaries: Arc<AtomicBool>,
     refresher: Refresher,
 }
 
@@ -42,16 +44,44 @@ impl Harness {
     fn from(fixture: Fixture) -> Self {
         let Fixture {
             directory,
+            account,
             store,
             requests,
+            summaries,
             owner,
             ..
         } = fixture;
         Self {
             _directory: directory,
+            account,
             store,
             requests,
+            summaries,
             refresher: StatusRefresher::new(owner),
+        }
+    }
+
+    /// Let the account's AI session summaries switch decide sharing.
+    fn following(self) -> Self {
+        Self {
+            refresher: self.refresher.following_account_switch(),
+            ..self
+        }
+    }
+
+    /// Read the account's switches inline when a read is due; whether one ran.
+    fn read_features(&mut self, now: u64) -> bool {
+        let Some(job) = self.refresher.features_job(secs(now)) else {
+            return false;
+        };
+        self.refresher.features_read(job.run(), secs(now));
+        true
+    }
+
+    fn shared(&mut self) -> Option<Vec<FolderConsent>> {
+        match self.refresher.consent().unwrap().policy {
+            ConsentPolicy::Enabled { folders, .. } => Some(folders),
+            ConsentPolicy::Disabled => None,
         }
     }
 
@@ -136,8 +166,69 @@ fn refreshing_waits_for_the_daemon_list_and_confirmed_consent() {
             connected: true,
             rate_limited: false,
             unauthorized: false,
+            summaries: None,
         }
     );
+}
+
+#[test]
+fn only_a_refresher_following_the_switch_reads_it() {
+    let mut harness = Harness::from(Fixture::new(ReplyMode::Success));
+    assert!(!harness.read_features(0));
+    assert_eq!(harness.refresher.state(secs(0)).summaries, None);
+}
+
+#[test]
+fn the_account_switch_shares_live_folders_and_stops_when_turned_off() {
+    let mut private = tracked_view(3);
+    private.scope = ScopeRoot::from_canonical("/synthetic/private-folder".into());
+    private.private = true;
+    let views = vec![tracked_view(2), private];
+    let api = api(&views);
+    let mut harness = Harness::from(Fixture::new(ReplyMode::Success)).following();
+    harness.resync(&api, views, 0);
+    // Nothing is shared before the account's switch is known.
+    assert_eq!(harness.round(&api, 0), 0);
+    assert_eq!(harness.shared(), None);
+
+    assert!(harness.read_features(0));
+    assert_eq!(harness.refresher.state(secs(0)).summaries, Some(true));
+    assert_eq!(harness.round(&api, 0), 1);
+    assert_eq!(harness.shared(), Some(folders(true)));
+    assert!(ready(&harness.status(2)));
+    assert_eq!(harness.calls(), 1);
+    // Read again only every five minutes.
+    assert!(!harness.read_features(299));
+
+    harness.summaries.store(false, Ordering::SeqCst);
+    assert!(harness.read_features(300));
+    assert_eq!(harness.refresher.state(secs(300)).summaries, Some(false));
+    assert_eq!(harness.round(&api, 300), 0);
+    assert_eq!(harness.shared(), None);
+    assert_eq!(harness.status(2).view, StatusView::Disabled);
+
+    harness.summaries.store(true, Ordering::SeqCst);
+    assert!(harness.read_features(600));
+    harness.round(&api, 600);
+    assert_eq!(harness.shared(), Some(folders(true)));
+}
+
+#[test]
+fn a_switch_read_for_an_earlier_sign_in_is_not_applied() {
+    let api = api(&[tracked_view(2)]);
+    let mut harness = Harness::from(Fixture::new(ReplyMode::Success)).following();
+    harness.resync(&api, vec![tracked_view(2)], 0);
+    let job = harness.refresher.features_job(secs(0)).unwrap();
+    let other = login(&harness.account, "synthetic-other-subject");
+    harness.refresher.set_account_session(Some(other)).unwrap();
+    harness.refresher.features_read(job.run(), secs(0));
+    assert_eq!(harness.refresher.state(secs(0)).summaries, None);
+    assert_eq!(harness.round(&api, 0), 0);
+    assert_eq!(harness.shared(), None);
+    // The new account's switch is read at once.
+    assert!(harness.read_features(0));
+    harness.round(&api, 0);
+    assert_eq!(harness.shared(), Some(folders(true)));
 }
 
 #[test]

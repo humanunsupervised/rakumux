@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use session_core::api::EventEnvelope;
 use session_core::ids::SessionId;
-use session_core::model::SessionView;
+use session_core::model::{ScopeRoot, SessionView};
 
 use crate::auth::SecretValue;
 use crate::auth::{
@@ -21,7 +21,7 @@ use crate::status::{
 
 use super::job::JobKey;
 use super::{
-    DispatchCompletion, DispatchError, DispatchPreparation, PreparedStatusDispatch,
+    DispatchCompletion, DispatchError, DispatchPreparation, FeaturesJob, PreparedStatusDispatch,
     StatusCaptureJob, StatusConsentOffer, StatusDispatchJob,
 };
 
@@ -101,6 +101,40 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
     /// The adopted account view, for display. Current-account checks still apply.
     pub fn account_session(&self) -> Option<&AccountSession> {
         self.session.as_ref()
+    }
+
+    /// Whether this instance confirmed consent since it started or since the last
+    /// account or consent change. Stored consent alone is never confirmation.
+    pub fn is_confirmed(&self) -> bool {
+        self.confirmed
+    }
+
+    /// Folders of the live, non-private sessions this coordinator observes, sorted.
+    pub fn live_folders(&self) -> Vec<ScopeRoot> {
+        self.sources.live_folders()
+    }
+
+    /// The account service, for a device sign-in run on the embedding service's own
+    /// thread; adopt its result with `set_account_session`.
+    pub fn account_service(&self) -> Arc<AccountService<A, C>> {
+        self.account.clone()
+    }
+
+    /// Prepare one read of the adopted account's feature switches. It sends no
+    /// session data, so it needs no consent. `None` when signed out or stale.
+    pub fn features_job(&self) -> Result<Option<FeaturesJob<A, C>>, DispatchError> {
+        let Some(session) = &self.session else {
+            return Ok(None);
+        };
+        let Some(lease) = self.account.lease_access_token(session)? else {
+            return Ok(None);
+        };
+        Ok(Some(FeaturesJob {
+            account: self.account.clone(),
+            cloud: self.cloud.clone(),
+            lease,
+            revision: session.revision(),
+        }))
     }
 
     /// Stop local sharing before attempting credential removal, even if storage fails.

@@ -13,12 +13,13 @@ use super::source::tracked_view;
 use super::*;
 use crate::owner::protocol::{
     read_message, write_message, FolderChoice, Hello, LineState, OwnerRequest, OwnerResponse,
-    MAX_MESSAGE, MAX_SESSIONS, PROTOCOL,
+    SignInReason, SignInView, MAX_MESSAGE, MAX_SESSIONS, PROTOCOL,
 };
 use crate::owner::{
     OwnerClaim, OwnerClient, OwnerError, OwnerErrorCode, OwnerLayout, OwnerRegistration,
     OwnerServer,
 };
+use crate::refresh::{SignInFailure, SignInPrompt, SignInState};
 
 struct Served {
     background: Background,
@@ -286,4 +287,49 @@ fn a_slow_hello_is_cut_off_and_clients_past_the_limit_are_told_busy() {
     );
     drop(held);
     eventually(|| OwnerClient::connect(&served.layout, "synthetic-test").is_ok());
+}
+
+#[test]
+fn sign_in_is_idle_until_started_and_its_view_holds_only_public_values() {
+    let served = Served::start();
+    let client = served.client();
+    assert_eq!(client.sign_in_status().unwrap(), SignInView::Idle);
+    client.sign_in_cancel().unwrap();
+    assert_eq!(client.sign_in_status().unwrap(), SignInView::Idle);
+
+    let waiting = SignInView::from(&SignInState::Waiting(SignInPrompt {
+        user_code: "WDJB-MJHT".into(),
+        verification_uri: "https://accounts.example/device".into(),
+        verification_uri_complete: None,
+        connect_url: Some("https://cloud.example/connect?code=WDJB-MJHT".into()),
+        expires_in_seconds: 600,
+    }));
+    assert_eq!(
+        serde_json::to_value(&waiting).unwrap(),
+        json!({
+            "state": "waiting",
+            "user_code": "WDJB-MJHT",
+            "verification_uri": "https://accounts.example/device",
+            "verification_uri_complete": null,
+            "connect_url": "https://cloud.example/connect?code=WDJB-MJHT",
+            "expires_in_seconds": 600,
+        })
+    );
+    assert_eq!(
+        SignInView::from(&SignInState::Failed(SignInFailure::Expired)),
+        SignInView::Failed {
+            reason: SignInReason::Expired
+        }
+    );
+    // A newer service's states and reasons stay readable.
+    let newer: SignInView = serde_json::from_value(json!({"state": "newer"})).unwrap();
+    assert_eq!(newer, SignInView::Unknown);
+    let reason: SignInView =
+        serde_json::from_value(json!({"state": "failed", "reason": "newer"})).unwrap();
+    assert_eq!(
+        reason,
+        SignInView::Failed {
+            reason: SignInReason::Unknown
+        }
+    );
 }

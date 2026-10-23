@@ -185,6 +185,13 @@ new-session flow, and code boundaries.
     (`App::offer_phone_access`, also on every tick) and saves `sessions.phone_offer_seen` as it
     opens; the pairing dialog (`AppMode::Pairing`) turns it on, shows the QR code and turns it off
     (`AppEvent::PhonePairing`, `PhoneOff`). Settings has no phone row (`rakumux remote`).
+  - The account (`account.rs`, over `crate::account::AccountAccess`, a fake `FakeAccount` in
+    tests): checked once the daemon connects (`AppEvent::AccountChecked`), which starts the
+    service only for a saved account. Settings → Account opens `AppMode::Account`: Enter asks for
+    a code (`AppEvent::SignIn`), its status is polled every second, Esc abandons it, `o` signs
+    out. Signed in, the visible live sessions' AI descriptions are read every 2 s
+    (`AppEvent::Descriptions`, generation-checked) into `App::description`, the session list's
+    third line; a refresh in progress keeps the last one.
   - the prefix commands work in both panes (`handlers/list.rs` routes them too).
 
 ## Data flow

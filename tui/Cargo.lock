@@ -2155,6 +2155,7 @@ dependencies = [
  "futures-util",
  "libc",
  "qrcodegen",
+ "rakumux-sensagent",
  "rakumux-session-core",
  "rakumux-vt",
  "ratatui",
