@@ -41,6 +41,8 @@ type Connections = Arc<Mutex<HashMap<u64, UnixStream>>>;
 /// process can read the registration file, as with the daemon's user token.
 pub struct OwnerServer {
     stop: Arc<AtomicBool>,
+    /// A client asked the embedding service to stop.
+    shutdown: Arc<AtomicBool>,
     /// Written on stop to wake the accept loop, which polls its other end.
     waker: UnixStream,
     connections: Connections,
@@ -61,11 +63,13 @@ impl OwnerServer {
         let (waker, woken) = UnixStream::pair().map_err(|_| OwnerError::Socket)?;
         let token = claim.token().clone();
         let stop = Arc::new(AtomicBool::new(false));
+        let shutdown = Arc::new(AtomicBool::new(false));
         let connections: Connections = Arc::default();
         let context = Arc::new(Context {
             token,
             client,
             version: version.to_owned(),
+            shutdown: shutdown.clone(),
         });
         let accept = {
             let (stop, connections) = (stop.clone(), connections.clone());
@@ -76,10 +80,17 @@ impl OwnerServer {
         };
         Ok(Self {
             stop,
+            shutdown,
             waker,
             connections,
             accept: Some(accept),
         })
+    }
+
+    /// Whether a client asked the service to stop (`OwnerRequest::Shutdown`). The
+    /// embedding service then stops this server and itself.
+    pub fn shutdown_requested(&self) -> bool {
+        self.shutdown.load(Ordering::SeqCst)
     }
 
     /// Close every connection and stop accepting.
@@ -126,6 +137,7 @@ struct Context {
     token: Token,
     client: RefreshClient,
     version: String,
+    shutdown: Arc<AtomicBool>,
 }
 
 fn accept(
@@ -277,6 +289,10 @@ fn serve(mut stream: UnixStream, context: &Context) {
     loop {
         let response = match read_payload(&mut stream, MAX_MESSAGE) {
             Ok(Some(payload)) => match serde_json::from_slice::<OwnerRequest>(&payload) {
+                Ok(OwnerRequest::Shutdown) => {
+                    context.shutdown.store(true, Ordering::SeqCst);
+                    OwnerResponse::Done
+                }
                 Ok(request) => handle(request, &context.client, &mut offer),
                 Err(_) => refuse(OwnerErrorCode::InvalidRequest),
             },
@@ -342,6 +358,8 @@ fn handle(
             .sign_in_cancel()
             .map(|()| OwnerResponse::Done)
             .map_err(|error| OwnerErrorCode::from(&error)),
+        // Answered by the connection itself.
+        OwnerRequest::Shutdown => Ok(OwnerResponse::Done),
         OwnerRequest::Renew => client
             .renew()
             .map(|()| OwnerResponse::Done)

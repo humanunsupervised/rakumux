@@ -26,7 +26,7 @@ pub(crate) fn run(
 ) -> Result<i32, CliError> {
     let program = std::env::current_exe()
         .map_err(|error| CliError::internal(format!("can't find this program: {error}")))?;
-    let access = LocalAccount::new(layout()?, program, "cli");
+    let access = LocalAccount::new(layout()?, program, "cli", version());
     match command {
         AccountCommand::Login => login(&access, atty::is(atty::Stream::Stdout), out),
         AccountCommand::Logout => logout(&access, out),

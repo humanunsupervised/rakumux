@@ -142,7 +142,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `rakumux account status` lists them. Its stderr, static failure codes only, goes to
    `~/.rakumux/logs/status-service.log`. Clerk has no custom scopes, so production names
    `profile` as the AI status scope (`DeviceAuthConfig::with_status_scope`), matching the
-   website's check. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
+   website's check. Clerk's access tokens last 24 hours: the service renews them with the
+   refresh token once a fifth of the lifetime is left (`refresh/renewal.rs`), and a restore
+   renews one that expired meanwhile. A client that finds a service from an older release
+   asks it to stop (`Shutdown`) and starts its own; a newer one is used as it is. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
    `RAKUMUX_CLERK_CLIENT_ID`, `RAKUMUX_CLERK_DEVICE_PAGE`, `RAKUMUX_CLOUD_ORIGIN`.
 
 ## File structure

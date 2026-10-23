@@ -80,6 +80,8 @@ pub enum OwnerRequest {
     SignInCancel,
     /// Renew the account's access token now rather than when it's due.
     Renew,
+    /// Stop serving (a newer client replaces an older service); answered first.
+    Shutdown,
 }
 
 /// The owner's answers.

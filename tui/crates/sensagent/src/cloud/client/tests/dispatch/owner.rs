@@ -333,3 +333,11 @@ fn sign_in_is_idle_until_started_and_its_view_holds_only_public_values() {
         }
     );
 }
+
+#[test]
+fn a_client_can_ask_the_service_to_stop() {
+    let served = Served::start();
+    assert!(!served.server.shutdown_requested());
+    served.client().shutdown().unwrap();
+    assert!(served.server.shutdown_requested());
+}

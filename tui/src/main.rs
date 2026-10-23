@@ -217,6 +217,7 @@ async fn main() -> Result<()> {
             account_layout,
             std::env::current_exe().unwrap_or_else(|_| PathBuf::from("rakumux")),
             "tui",
+            app::app_version(),
         )),
         updater: std::sync::Arc::new(updater::SystemUpdateService),
         exec_mode: ExecMode::Threaded,

@@ -45,6 +45,8 @@ const START_WAIT: Duration = Duration::from_secs(20);
 const START_POLL: Duration = Duration::from_millis(100);
 /// The service's log, under the home's `logs/`.
 pub const LOG_FILE: &str = "status-service.log";
+/// How long a client waits for an older service it asked to stop.
+const STOP_WAIT: Duration = Duration::from_secs(10);
 /// How long the service waits for the session daemon to accept it.
 const DAEMON_WAIT: Duration = Duration::from_secs(3);
 
@@ -104,7 +106,8 @@ impl ServiceConfig {
     }
 }
 
-/// Serve AI status for `home` until `stopping` returns true (checked every second).
+/// Serve AI status for `home` until `stopping` returns true or a client asks it to
+/// stop (both checked every second).
 /// Restores a saved account (online; offline it starts signed out), follows the
 /// daemon's sessions and answers user clients on this home's private socket.
 pub fn serve(
@@ -142,7 +145,7 @@ pub fn serve(
         .map_err(|_| ServiceError::Setup)?;
     let server = OwnerServer::start(&mut claim, runner.client(), version)
         .map_err(|_| ServiceError::Setup)?;
-    while !stopping() {
+    while !stopping() && !server.shutdown_requested() {
         thread::sleep(Duration::from_secs(1));
     }
     server.stop();
@@ -186,15 +189,23 @@ pub fn has_saved_account(home: &Layout) -> bool {
 
 /// Connect to this home's service, starting `program status-service` detached (new
 /// session, stdin and stdout on /dev/null, stderr appended to `logs/status-service.log`,
-/// cwd `/`) when none answers, then waiting for it.
+/// cwd `/`) when none answers, then waiting for it. A service older than `version`
+/// (this build's) is asked to stop and replaced; a newer one is used as it is, so
+/// clients of two builds never replace each other's.
 pub fn connect_or_start(
     home: &Layout,
     program: &Path,
     client_name: &str,
+    version: &str,
 ) -> Result<OwnerClient, ServiceError> {
     let layout = OwnerLayout::new(home);
     match OwnerClient::connect(&layout, client_name) {
-        Ok(client) => return Ok(client),
+        Ok(client) if !older(client.version(), version) => return Ok(client),
+        Ok(client) => {
+            client.shutdown().map_err(|_| ServiceError::Start)?;
+            drop(client);
+            wait_until_stopped(&layout, client_name)?;
+        }
         Err(OwnerError::NotRunning) => {}
         Err(_) => return Err(ServiceError::Start),
     }
@@ -220,6 +231,31 @@ fn log_file(home: &Layout) -> io::Result<std::fs::File> {
         .append(true)
         .mode(0o600)
         .open(directory.join(LOG_FILE))
+}
+
+/// Wait for a service that was asked to stop to release this home.
+fn wait_until_stopped(layout: &OwnerLayout, client_name: &str) -> Result<(), ServiceError> {
+    let deadline = Instant::now() + STOP_WAIT;
+    loop {
+        match OwnerClient::connect(layout, client_name) {
+            Err(OwnerError::NotRunning) => return Ok(()),
+            _ if Instant::now() < deadline => thread::sleep(START_POLL),
+            _ => return Err(ServiceError::Start),
+        }
+    }
+}
+
+/// Whether `running` is an earlier release than `ours` ("0.7.1" < "0.8.0"). Unreadable
+/// versions are never older: nothing is replaced on a guess.
+fn older(running: &str, ours: &str) -> bool {
+    fn release(version: &str) -> Option<Vec<u64>> {
+        let core = version.split(['-', '+']).next()?;
+        core.split('.').map(|part| part.parse().ok()).collect()
+    }
+    match (release(running), release(ours)) {
+        (Some(running), Some(ours)) => running < ours,
+        _ => false,
+    }
 }
 
 fn start_detached(home: &Layout, program: &Path) -> io::Result<()> {
@@ -277,6 +313,18 @@ mod tests {
         assert_eq!(auth.status_scope(), "profile");
         assert!(CloudAIConfig::new(CLOUD_ORIGIN).is_ok());
         assert!(AccountWebsite::new(CLOUD_ORIGIN).is_ok());
+    }
+
+    #[test]
+    fn only_an_earlier_release_is_older() {
+        assert!(older("0.7.1", "0.8.0"));
+        assert!(older("0.9.9", "0.10.0"));
+        assert!(older("0.8.0-beta.1", "0.8.1"));
+        assert!(!older("0.8.0", "0.8.0"));
+        assert!(!older("0.8.1", "0.8.0"));
+        assert!(!older("0.8.0", "0.8.0-beta.2"));
+        assert!(!older("dev", "0.8.0"));
+        assert!(!older("0.8.0", "dev"));
     }
 
     #[test]

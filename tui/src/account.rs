@@ -68,15 +68,23 @@ pub struct LocalAccount {
     layout: Layout,
     program: PathBuf,
     client_name: &'static str,
+    /// This build's version: an older running service is replaced.
+    version: &'static str,
     client: Mutex<Option<OwnerClient>>,
 }
 
 impl LocalAccount {
-    pub fn new(layout: Layout, program: PathBuf, client_name: &'static str) -> Self {
+    pub fn new(
+        layout: Layout,
+        program: PathBuf,
+        client_name: &'static str,
+        version: &'static str,
+    ) -> Self {
         Self {
             layout,
             program,
             client_name,
+            version,
             client: Mutex::new(None),
         }
     }
@@ -99,7 +107,7 @@ impl LocalAccount {
             }
         }
         let client = if start {
-            service::connect_or_start(&self.layout, &self.program, self.client_name)
+            service::connect_or_start(&self.layout, &self.program, self.client_name, self.version)
                 .map_err(|error| error.to_string())?
         } else {
             match OwnerClient::connect(&OwnerLayout::new(&self.layout), self.client_name) {
@@ -260,6 +268,7 @@ mod tests {
             Layout::with_home(home.path().to_path_buf()),
             PathBuf::from("/nonexistent/rakumux"),
             "test",
+            "0.0.0",
         );
         assert_eq!(account.account(), Ok(None));
         assert_eq!(

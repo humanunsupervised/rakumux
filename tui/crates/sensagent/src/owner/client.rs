@@ -158,6 +158,14 @@ impl OwnerClient {
         }
     }
 
+    /// Ask the service to stop, e.g. to replace it with a newer build.
+    pub fn shutdown(&self) -> Result<(), OwnerError> {
+        match self.request(&OwnerRequest::Shutdown)? {
+            OwnerResponse::Done => Ok(()),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
     /// Renew the account's access token now rather than when it's due.
     pub fn renew(&self) -> Result<(), OwnerError> {
         match self.request(&OwnerRequest::Renew)? {
