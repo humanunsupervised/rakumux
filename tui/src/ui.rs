@@ -928,7 +928,7 @@ mod tests {
         assert!(at(&list, "release-notes") < at(&list, "api-refactor"));
         assert!(at(&list, "api-refactor") < at(&list, "styles"));
         assert!(headers[1] < at(&list, "storybook") && at(&list, "storybook") < headers[2]);
-        assert!(at(&list, "docs 📌") > headers[4], "{wide}");
+        assert!(at(&list, " docs ") > headers[4], "{wide}");
 
         h.app.show_tab(Grouping::Status);
         let wide = render(&mut h.app, 160, 48);
@@ -1152,7 +1152,8 @@ mod tests {
             .position(|l| l.contains("api-refactor"))
             .unwrap();
         assert!(docs < refactor, "{wide}");
-        assert!(list[docs].contains("docs 📌"), "{wide}");
+        assert!(list[docs].contains(" docs "), "{wide}");
+        assert!(!list[docs].contains('★'), "{wide}");
         assert!(list[docs + 1].contains("⎇ main"), "{wide}");
         assert!(
             list[refactor + 1].contains("claude · ⎇ sessions-refactor"),
@@ -1166,7 +1167,7 @@ mod tests {
         assert!(wide.lines().last().unwrap().starts_with(" RAKUMUX "));
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("▤ Folders"), "{narrow}");
-        assert!(narrow.contains("docs 📌"), "{narrow}");
+        assert!(narrow.contains(" docs "), "{narrow}");
     }
 
     #[test]
@@ -1292,8 +1293,10 @@ mod tests {
         assert!(repo < api && api < web, "{wide}");
         assert!(list[repo].ends_with("2/2 live"), "{wide}");
         assert!(list[web].ends_with("1/2 live"), "{wide}");
-        // Inside a group: pinned first, then oldest first.
-        assert!(at("docs 📌") < at("api-refactor"), "{wide}");
+        // Inside a group: pinned first, then oldest first. Pins show only
+        // under the pointer.
+        assert!(at(" docs ") < at("api-refactor"), "{wide}");
+        assert!(!wide.contains('★'), "{wide}");
         assert!(
             web < at("storybook") && at("storybook") < at("frontend"),
             "{wide}"
@@ -1493,7 +1496,7 @@ mod tests {
         // first, then the other folders' by name.
         let screen = render(&mut h.app, 160, 48);
         let bar = screen.lines().next().unwrap();
-        assert!(bar.starts_with(" ▤ Folders ▾   1 ● docs 📌 "), "{bar:?}");
+        assert!(bar.starts_with(" ▤ Folders ▾   1 ● docs ★ "), "{bar:?}");
         let at = |name: &str| bar.find(name).unwrap();
         assert!(at("api-refactor") < at("server") && at("server") < at("frontend"));
         assert!(h

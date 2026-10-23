@@ -4363,7 +4363,7 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     let screen = screen_rows(&mut h, 160, 48);
     let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
     assert!(
-        screen[usize::from(pin.1)].starts_with(" 📌"),
+        screen[usize::from(pin.1)].starts_with(" ☆ "),
         "{:?}",
         screen[usize::from(pin.1)]
     );
@@ -4385,7 +4385,7 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     mouse(&mut h, MouseEventKind::Moved, over);
     let screen = screen_rows(&mut h, 160, 48);
     let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
-    assert!(screen[usize::from(pin.1)].starts_with(" 📌"));
+    assert!(screen[usize::from(pin.1)].starts_with(" ★ "));
     mouse(&mut h, MouseEventKind::Down(MouseButton::Left), pin);
     assert!(h.fake.calls().contains(&"pin B false".to_string()));
     // Off the list, no pin shows.
@@ -4393,4 +4393,30 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     assert_eq!(h.app.hovered_row, None);
     screen_rows(&mut h, 160, 48);
     assert_eq!(target(&h, Hit::PinToggle(row)), None);
+
+    // Under Status (two statuses, so each has a header) the pin is in the
+    // column of its header's mark.
+    let mut working = view("A", "a", 20);
+    working.lifecycle = Lifecycle::Working;
+    let mut h = harness(vec![working, view("B", "b", 10)]);
+    screen_rows(&mut h, 160, 48);
+    let rows = h.app.list.rows();
+    let header = rows
+        .iter()
+        .position(|row| matches!(row, ListRow::SectionHeader(_)))
+        .unwrap();
+    let row = rows
+        .iter()
+        .position(|row| matches!(row, ListRow::Session(_)))
+        .unwrap();
+    let over = target(&h, Hit::ListRow(row)).unwrap();
+    mouse(&mut h, MouseEventKind::Moved, over);
+    let screen = screen_rows(&mut h, 160, 48);
+    let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
+    let header_line = target(&h, Hit::ListRow(header)).unwrap().1;
+    let column = |line: &str, mark: char| line.chars().position(|c| c == mark);
+    let header_mark = screen[usize::from(header_line)]
+        .chars()
+        .position(|c| !c.is_whitespace());
+    assert_eq!(column(&screen[usize::from(pin.1)], '☆'), header_mark);
 }

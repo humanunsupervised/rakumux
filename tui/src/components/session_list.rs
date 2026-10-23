@@ -99,19 +99,22 @@ fn cell_lines(content: Vec<Vec<Span<'_>>>, height: u16) -> Vec<Line<'_>> {
     lines
 }
 
+/// Shown in the indent of a hovered unpinned session's first line: a tap
+/// pins it.
+const PIN_TOGGLE: &str = "☆";
+
 /// The hovered session's pin toggle, in the indent of its first content
-/// line: the pin, dimmed to pin the session, whole to unpin it. Returns
-/// where it is.
+/// line, in the column of the headers' marks: `☆` to pin it, the gold `★`
+/// to unpin it. Returns where it is.
 fn mark_hovered(lines: &mut [Line<'_>], pinned: bool, area: Rect) -> Option<Rect> {
+    let p = theme::palette();
     let first = lines.iter().position(|line| !line.spans.is_empty())?;
-    let style = if pinned {
-        Style::default()
+    let (mark, style) = if pinned {
+        (PIN_MARK, Style::default().fg(p.accent_gold))
     } else {
-        Style::default().add_modifier(Modifier::DIM)
+        (PIN_TOGGLE, Style::default().fg(p.text_muted))
     };
-    // The indent's width: a space, then the pin padded to fill it.
-    let pad = INDENT.saturating_sub(1 + str_width(PIN_MARK));
-    lines[first].spans[0] = Span::styled(format!(" {PIN_MARK}{}", " ".repeat(pad)), style);
+    lines[first].spans[0] = Span::styled(format!(" {mark} "), style);
     Some(Rect {
         y: area.y + u16::try_from(first).ok()?,
         width: u16::try_from(INDENT).ok()?.min(area.width),
@@ -331,25 +334,20 @@ fn session_content(
     } else {
         status_glyph(session)
     };
-    let pin = if session.pinned {
-        1 + str_width(PIN_MARK)
-    } else {
-        0
-    };
     let badge_width = badge.as_ref().map_or(0, |span| span.width() + 1);
     let age = truncate(
         &relative_time(now, session.last_active_at),
-        width.saturating_sub(3 + pin + badge_width),
+        width.saturating_sub(3 + badge_width),
     );
     let right_width = badge_width + str_width(&age);
     let mut name = session.name.clone();
     if app.is_self_session(&session.id) {
         name.push_str(" (this)");
     }
-    // Leading marker slot, name, optional pin, at least one space, age +
-    // badge.
-    let name = truncate(&name, width.saturating_sub(right_width + 3 + pin));
-    let pad = width.saturating_sub(2 + str_width(&name) + pin + right_width);
+    // Leading marker slot, name, at least one space, age + badge. A pin
+    // shows only under the pointer, left of the row (`mark_hovered`).
+    let name = truncate(&name, width.saturating_sub(right_width + 3));
+    let pad = width.saturating_sub(2 + str_width(&name) + right_width);
     let (name_style, detail_color, age_color) = if selected {
         (
             Style::default()
@@ -372,10 +370,6 @@ fn session_content(
         Span::raw(" "),
         Span::styled(name, name_style),
     ];
-    if session.pinned {
-        first.push(Span::raw(" "));
-        first.push(Span::styled(PIN_MARK, Style::default().fg(p.accent_gold)));
-    }
     first.push(Span::raw(" ".repeat(pad)));
     first.push(Span::styled(age, Style::default().fg(age_color)));
     if let Some(badge) = badge {

@@ -1391,7 +1391,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
              sessions in the order you keep them (a new one goes at the bottom), each with a \
              status mark, a bold title, and its app name in muted blue before the git branch; \
              the selected title is white, the others a softer foreground colour. With \
-             several folders, each has a header row; pinned sessions (📌) lead their folder.",
+             several folders, each has a header row; pinned sessions lead their folder.",
             ctx.icons.folder()
         )),
         SessionLayout::Grid => doc.bullet(
@@ -1402,7 +1402,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         SessionLayout::Tabs => doc.bullet(format!(
             "Tab bar, along the top: the folder filter ({} Folders) at the left, then the \
              sessions as numbered tabs, each with a status mark, in the order you keep them. \
-             Pinned tabs (📌) come first.",
+             Pinned tabs (★) come first.",
             ctx.icons.folder()
         )),
     }
@@ -1687,9 +1687,10 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
 
     doc.heading("Pinning");
     doc.text(
-        "`p` pins the selected session, or unpins it (or click the pin that shows left of a \
-         session's name under the pointer). Pinned sessions show 📌 after their name \
-         and come first in their folder, in both layouts, in the order you give them. \
+        "`p` pins the selected session, or unpins it. With the mouse, the session under the \
+         pointer shows ☆ left of its name (★ when pinned): a click pins or unpins it. Pinned \
+         sessions come first in their folder (tabs show ★ after their name), in both layouts, \
+         in the order you give them. \
          Unpinned, a session goes back to its place among the others. Every Rakumux window \
          sees the same pins.",
     );
@@ -3567,7 +3568,7 @@ mod tests {
             "folder",
             "All folders",
             "Pinning",
-            "📌",
+            "★",
             "using a session never moves it",
             "sessions.session_order",
             "Drag a session up or down the list",

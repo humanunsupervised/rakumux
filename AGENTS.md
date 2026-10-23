@@ -731,11 +731,12 @@ list never reorders by itself: activity doesn't move a session or a group. The l
 group comes first, then the others by folder name, then path. In a folder, pinned sessions lead;
 both they and the others follow the order the user set, and sessions without a place go last,
 oldest first, so a new session appears just above "+ New session". All layouts share it.
-Pinned sessions show 📌 after their name (`layout::PIN_MARK`, two columns: an emoji, since
-there's no plain-text pin). In terminals that report pointer movement (desktop terminals, also
-over SSH; not phones), the session row under the pointer shows a 📌 in its indent, left of its
-mark and name: dimmed to pin it, whole to unpin it; a click there (`Hit::PinToggle`) does that
-without selecting the row, and `p` still pins the selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
+Pinned sessions lead their folder; in the list they show no mark, while the tab bar and Grid
+show ★ after their name (`layout::PIN_MARK`). In terminals that report pointer movement (desktop
+terminals, also over SSH; not phones), the session row under the pointer shows its pin toggle in
+its indent, left of its mark and name and in the column of the headers' marks: `☆` to pin it,
+the gold `★` to unpin it; a click there (`Hit::PinToggle`) does that without selecting the row,
+and `p` still pins the selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
 held); `J`/`K` move it one place. Moves stay in the session's folder and its pinned or unpinned
 part, and are saved as `sessions.session_order`. A click without movement still just selects.
 The first load still selects the most recently used session.
@@ -756,7 +757,7 @@ another header, and never change the folders' order. Done is the exception
 under a sub-header per period (`grouping::ReadPeriod`, `ListRow::ReadPeriodHeader`: `◷ last hour`,
 last day, older, the clock from `Icons::clock`, tinted like its sessions' marks; with a session
 count; selectable, Enter opens the Status modal on done), so reading one moves it to the top.
-Pinned sessions (`p`) lead done under their own `📌 pinned` sub-header (`ReadPeriod::Pinned`),
+Pinned sessions (`p`) lead done under their own `★ pinned` sub-header (`ReadPeriod::Pinned`),
 whenever they were read, most recent first; unpinning puts one back in its period. The periods are measured from
 the list's clock (`SessionList::set_clock`, every tick), so sessions move down them as time
 passes. Nothing there can be moved (`J`/`K` say so). A done session's mark (`○`, wherever it's
