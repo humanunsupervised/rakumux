@@ -135,7 +135,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    on demand: by `rakumux account login` or the TUI's sign-in, or when the home has a saved
    account; it then runs until SIGTERM. Clients talk to it over a private Unix socket
    (`rakumux_sensagent::owner`). It shares sessions only while the account's AI session summaries
-   switch (`GET /api/v1/features`, read every 5 minutes) is on: then it consents for the folders
+   switch (`GET /api/v1/features`, read every 2 minutes) is on: then it consents for the folders
    of live sessions (never private ones), and off it stops. A finished agent turn is described at
    once; otherwise at most once a minute per session. Settings → Account signs in (a code, link
    and QR code), the session list shows each description as a third line, and

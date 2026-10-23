@@ -25,7 +25,7 @@ use crate::status::{
 };
 
 /// How often the account's feature switches are read again while signed in.
-const FEATURES_INTERVAL: Duration = Duration::from_secs(300);
+const FEATURES_INTERVAL: Duration = Duration::from_secs(120);
 /// The wait before reading them again after a failure.
 const FEATURES_RETRY: Duration = Duration::from_secs(60);
 /// The consent model's limit on folders.
@@ -370,7 +370,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     }
 
     /// A read of the account's feature switches, when one is due (soon after sign-in,
-    /// then every five minutes). Run it with `FeaturesJob::run` off this thread and
+    /// then every two minutes). Run it with `FeaturesJob::run` off this thread and
     /// pass the result to `features_read`.
     pub fn features_job(&mut self, now: Duration) -> Option<FeaturesJob<A, C>> {
         if !self.follow_switch {

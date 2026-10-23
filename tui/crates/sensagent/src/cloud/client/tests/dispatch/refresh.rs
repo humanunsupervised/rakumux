@@ -197,19 +197,19 @@ fn the_account_switch_shares_live_folders_and_stops_when_turned_off() {
     assert_eq!(harness.shared(), Some(folders(true)));
     assert!(ready(&harness.status(2)));
     assert_eq!(harness.calls(), 1);
-    // Read again only every five minutes.
-    assert!(!harness.read_features(299));
+    // Read again only every two minutes.
+    assert!(!harness.read_features(119));
 
     harness.summaries.store(false, Ordering::SeqCst);
-    assert!(harness.read_features(300));
-    assert_eq!(harness.refresher.state(secs(300)).summaries, Some(false));
-    assert_eq!(harness.round(&api, 300), 0);
+    assert!(harness.read_features(120));
+    assert_eq!(harness.refresher.state(secs(120)).summaries, Some(false));
+    assert_eq!(harness.round(&api, 120), 0);
     assert_eq!(harness.shared(), None);
     assert_eq!(harness.status(2).view, StatusView::Disabled);
 
     harness.summaries.store(true, Ordering::SeqCst);
-    assert!(harness.read_features(600));
-    harness.round(&api, 600);
+    assert!(harness.read_features(240));
+    harness.round(&api, 240);
     assert_eq!(harness.shared(), Some(folders(true)));
 }
 
