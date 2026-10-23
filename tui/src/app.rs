@@ -1270,7 +1270,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 8] = [
+const DAEMON_FEATURES: [(&str, &str); 9] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1293,6 +1293,10 @@ const DAEMON_FEATURES: [(&str, &str); 8] = [
     (
         session_core::api::CAPABILITY_USER_PROMPT,
         "your last message in each session",
+    ),
+    (
+        session_core::api::CAPABILITY_TURN,
+        "AI summaries of each agent's turn",
     ),
 ];
 

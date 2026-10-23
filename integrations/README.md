@@ -124,9 +124,15 @@ list shows under the session's name (the user's message by default).
   characters, at most 240 characters.
 - **What isn't:** tool output and subagents' entries are never taken, and a log is read only
   from where it was last read, at most 256 KiB at a time.
-- **Where it goes:** the line reaches the daemon's clients like the rest of the session's view
-  (the TUI, `rakumux-api` and so the phone app). Nothing else reads it, and it isn't part of
-  the AI description context.
+- **The turn:** the daemon also keeps the agent's current turn: the user's last prompt and
+  every message the agent wrote since (reasoning, replies, tool calls), each flattened to one
+  line of at most 600 characters, the newest 100. `SessionView.agent_turn` counts them;
+  `session_turn` (user callers only) returns them.
+- **Where it goes:** the lines reach the daemon's clients like the rest of the session's view
+  (the TUI, `rakumux-api` and so the phone app). The turn goes only to user clients that ask:
+  the AI status service, which, while you're signed in and share the folder, summarizes it
+  (the prompt and the newest 10 messages while the agent works, every 5 messages; the prompt
+  and every message at its final reply; `sessions.ai_summary` in `config.json`).
  Native input is capped at 1 MiB and never
 logged. Outside a Rakumux session hooks do nothing and never spawn a daemon. Errors emit a
 generic diagnostic and empty JSON with success; activity cannot approve/deny/continue work.

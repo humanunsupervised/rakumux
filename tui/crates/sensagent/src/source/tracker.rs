@@ -265,6 +265,7 @@ impl SourceTracker {
             SessionEvent::Exited { .. } => {
                 facts.live = false;
                 facts.pid = None;
+                facts.turn = None;
                 phase = None;
             }
             SessionEvent::Lifecycle { lifecycle } => facts.lifecycle = *lifecycle,
@@ -306,6 +307,7 @@ impl SourceTracker {
             let mut facts = tracked.facts.clone();
             facts.live = false;
             facts.pid = None;
+            facts.turn = None;
             match self.apply(&id, facts, None) {
                 Ok(SourceUpdate::Unchanged) => {}
                 Ok(update) => updates.push(update),

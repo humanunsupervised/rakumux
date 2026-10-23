@@ -49,6 +49,10 @@ instead of sent.
   visible. It is refreshed once output pauses for `QUIET_PERIOD` (5 s), or after a whole
   interval of continuous output, and never inside the interval. The stamp is advanced
   only when the refresh starts.
+- **Followed turns.** A session whose agent turn the daemon follows is refreshed at once
+  at each of the turn's trigger points (see the source tracker), never for terminal
+  output; backoff, the budget and the two slots still apply. The turn settings are read
+  again every minute (`with_turn_settings`).
 - **Order.** Sessions whose stamp changed at once (lifecycle such as blocked/done, the
   session's report, a new terminal, privacy or folder) come first, then sessions with
   pending output; within each, the one refreshed longest ago, new sessions first.

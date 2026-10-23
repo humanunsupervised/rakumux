@@ -244,7 +244,9 @@ within the scope), `scope`, `is_self`, `cwd`, `status`, `exit_code`, `lifecycle`
 `last_active_at`, `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree}` of the
 current cwd), `agent_output` (a live Claude Code, Codex or OpenCode session's latest reasoning,
 tool call or reply as one line, from its conversation log or database: `integrations/output.rs`),
-`user_prompt` (what the user last typed to that agent, read the same way), and `terminal` (pid, foreground process, title, size, `controlled`,
+`user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
+messages}`: that agent's current turn, the user's last prompt and every message since, whose
+content `session_turn` returns), and `terminal` (pid, foreground process, title, size, `controlled`,
 `alternate_screen`) while live. Folders are `ProjectView {path, name, sessions, live,
 last_active_at, added_at, git}` on the wire.
 
@@ -306,7 +308,9 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   (user callers get the union), or `all` (user callers: every scope, including ones that get
   their first session after a `subscribe`; `scope`/`scopes` are then ignored). Capabilities
   `projects`, `session.pin`, `session.git`, `auth.delegated`, `sessions.all` and `daemon.restart`
-  advertise the additions.
+  advertise the additions. `session_turn {id}` (user only, capability `session.turn`) returns a
+  live agent's current turn: `TurnContent {id, prompt?, messages, total}`, the newest 100
+  messages, each one line of at most 600 characters, for AI summaries.
 - `session_import {source}` (user only, capability `session.import`) restores an archive directory
   containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.
   The daemon preserves ids and metadata, refuses existing ids or names, stages files privately,
@@ -562,7 +566,7 @@ startup authorization. Success reloads only the UI through the new launcher, str
 fallback. Legacy npm/Homebrew installs use their package manager. On a protocol mismatch the TUI
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
-`session.working_directory`, `session.agent_output`, `session.user_prompt`, read with
+`session.working_directory`, `session.agent_output`, `session.user_prompt`, `session.turn`, read with
 `SessionApi::daemon_capabilities`) it says what's missing
 and offers a restart: in place when the daemon has `daemon.restart` (sessions keep running;
 `y`/Enter), otherwise by stopping it (`y` only, since running sessions end).
