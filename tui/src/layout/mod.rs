@@ -44,15 +44,15 @@ pub const PHONE_BELOW: u16 = 80;
 /// Rakumux mode, and a focused session fills the area.
 pub const SINGLE_PANE_BELOW: u16 = 100;
 
-/// Fewest rows a stacked list gets: the folder filter (three rows) and two
-/// sessions (three rows each).
-pub const LIST_MIN_ROWS: u16 = 9;
+/// Fewest rows a stacked list gets: the tabs (three rows), a folder's
+/// header (one) and two sessions (three rows each).
+pub const LIST_MIN_ROWS: u16 = 10;
 /// Fewest rows a stacked detail gets: its title row and three rows of the
 /// session.
 pub const PREVIEW_MIN_ROWS: u16 = 4;
 /// Shortest area that stacks the list above the detail on a narrow screen:
-/// 14 rows, the list's and the detail's minimums and the divider (a
-/// 15-row terminal, with the footer). Shorter ones show the list alone in
+/// 15 rows, the list's and the detail's minimums and the divider (a
+/// 16-row terminal, with the footer). Shorter ones show the list alone in
 /// Rakumux mode.
 pub const STACK_MIN_ROWS: u16 = LIST_MIN_ROWS + 1 + PREVIEW_MIN_ROWS;
 /// Share of the area a stacked list gets until its divider is dragged, in

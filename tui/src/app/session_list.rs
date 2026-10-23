@@ -22,6 +22,7 @@
 //! (its status changed), until something else is selected.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use session_core::api::{EventEnvelope, SessionEvent};
 use session_core::ids::SessionId;
@@ -29,7 +30,9 @@ use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
 use super::config::{SectionOrder, SessionOrder};
 use super::folders::compare_folders;
-use super::grouping::{sort_sections, AppKey, Grouping, Section, StatusGroup};
+use super::grouping::{
+    linked_worktree, sort_sections, worktree_label, AppKey, Grouping, Section, StatusGroup,
+};
 use super::text_input::TextInput;
 
 /// What is selected in the list: the top row (the tabs), a folder's or a
@@ -40,9 +43,12 @@ pub enum Selection {
     /// Enter opens the active tab's modal (the Folders modal for All
     /// folders).
     Folders,
-    /// A folder's header row (several folders shown): new sessions go in
-    /// that folder.
+    /// A folder's header row: new sessions go in that folder.
     FolderHeader(ScopeRoot),
+    /// The header of a linked worktree inside a folder (its root): new
+    /// sessions go in that folder, starting in the worktree when it's
+    /// inside it.
+    WorktreeHeader(ScopeRoot, PathBuf),
     /// An app's or a status's header row (App or Status tab, several
     /// shown): Enter opens that tab's modal there.
     SectionHeader(Section),
@@ -55,8 +61,11 @@ pub enum Selection {
 pub enum ListRow<'a> {
     /// The tabs at the top: what the list is grouped and filtered by.
     Folders,
-    /// A folder's header row (several folders shown).
+    /// A folder's header row.
     FolderHeader(&'a ScopeRoot),
+    /// A linked worktree's header inside a folder (its root), above the
+    /// folder's sessions working in it.
+    WorktreeHeader(&'a ScopeRoot, &'a Path),
     /// An app's or a status's header row (several shown).
     SectionHeader(&'a Section),
     NewSession,
@@ -245,10 +254,25 @@ impl SessionList {
         }
     }
 
-    /// Several folders (or apps, or statuses) are shown, under header rows.
+    /// Where a new session starts when it's made from the selection: the
+    /// worktree a selected worktree header names, when it's inside its
+    /// folder (a session's working directory must be); else the folder.
+    pub fn new_session_cwd(&self) -> Option<&Path> {
+        match &self.selection {
+            Selection::WorktreeHeader(folder, root) if root.starts_with(folder.path()) => {
+                Some(root.as_path())
+            }
+            _ => None,
+        }
+    }
+
+    /// The sessions are shown under header rows: under Folders always (a
+    /// lone folder's header names it), under App or Status when several
+    /// apps or statuses are shown.
     pub fn is_grouped(&self) -> bool {
         match self.grouping {
-            Grouping::Folder => self.groups.len() > 1,
+            // A lone folder still gets its header: its name and branch.
+            Grouping::Folder => !self.groups.is_empty(),
             Grouping::App | Grouping::Status => self.sections.len() > 1,
         }
     }
@@ -352,7 +376,8 @@ impl SessionList {
         let moving = visible[from];
         let section = Section::of(self.grouping, moving);
         let in_part = |s: &&SessionView| {
-            (section.is_some() || s.scope == moving.scope)
+            (section.is_some()
+                || (s.scope == moving.scope && linked_worktree(s) == linked_worktree(moving)))
                 && s.pinned == moving.pinned
                 && Section::of(self.grouping, s) == section
         };
@@ -425,6 +450,7 @@ impl SessionList {
             Selection::NewSession if first => self.selection = self.default_selection(),
             Selection::Folders
             | Selection::FolderHeader(_)
+            | Selection::WorktreeHeader(..)
             | Selection::SectionHeader(_)
             | Selection::NewSession => {}
         }
@@ -521,6 +547,32 @@ impl SessionList {
         counts
     }
 
+    /// `(live, total)` sessions of `folder` working in its linked worktree
+    /// `root`, whatever the filters.
+    pub fn worktree_counts(&self, folder: &ScopeRoot, root: &Path) -> (usize, usize) {
+        let mut counts = (0, 0);
+        let mine = self
+            .sessions
+            .iter()
+            .filter(|s| &s.scope == folder && linked_worktree(s) == Some(root));
+        for session in mine {
+            counts.1 += 1;
+            if session.status == SessionStatus::Live {
+                counts.0 += 1;
+            }
+        }
+        counts
+    }
+
+    /// The branch checked out in `folder`'s linked worktree `root`, as its
+    /// sessions see it.
+    pub fn worktree_branch(&self, folder: &ScopeRoot, root: &Path) -> Option<&str> {
+        self.sessions
+            .iter()
+            .filter(|s| &s.scope == folder && linked_worktree(s) == Some(root))
+            .find_map(|s| s.git.as_ref()?.branch.as_deref())
+    }
+
     /// `(live, total)` sessions of an app or a status, whatever the
     /// filters.
     pub fn section_counts(&self, section: &Section) -> (usize, usize) {
@@ -578,12 +630,7 @@ impl SessionList {
         let grouping = self.grouping;
         if grouping == Grouping::Folder {
             for group in &self.groups {
-                visible.extend(
-                    self.sessions
-                        .iter()
-                        .filter(|s| &s.scope == group)
-                        .filter(matching),
-                );
+                visible.extend(self.in_folder_order(group).into_iter().filter(matching));
             }
             return visible;
         }
@@ -597,6 +644,37 @@ impl SessionList {
             );
         }
         visible
+    }
+
+    /// A folder's sessions in display order: those in its own working tree,
+    /// then those in each linked worktree (by label), each part in the
+    /// folder's order (pinned first).
+    fn in_folder_order(&self, folder: &ScopeRoot) -> Vec<&SessionView> {
+        let mine: Vec<&SessionView> = self
+            .sessions
+            .iter()
+            .filter(|s| &s.scope == folder)
+            .collect();
+        let mut roots: Vec<(String, &Path)> = mine
+            .iter()
+            .filter_map(|s| linked_worktree(s))
+            .map(|root| (worktree_label(folder, root), root))
+            .collect();
+        roots.sort();
+        roots.dedup();
+        let mut ordered: Vec<&SessionView> = mine
+            .iter()
+            .copied()
+            .filter(|s| linked_worktree(s).is_none())
+            .collect();
+        for (_, root) in roots {
+            ordered.extend(
+                mine.iter()
+                    .copied()
+                    .filter(|s| linked_worktree(s) == Some(root)),
+            );
+        }
+        ordered
     }
 
     /// Every session of an app or a status, in its order: pinned ones
@@ -643,13 +721,35 @@ impl SessionList {
             return rows;
         }
         let grouping = self.grouping;
+        let filtering = self.is_filtering();
+        if grouping == Grouping::Folder {
+            // Each folder's header, its own sessions, then a header above
+            // each linked worktree's.
+            for folder in &self.groups {
+                let start = rows.len();
+                rows.push(ListRow::FolderHeader(folder));
+                let mut worktree: Option<&Path> = None;
+                for session in visible.iter().copied().filter(|s| &s.scope == folder) {
+                    let root = linked_worktree(session);
+                    if let Some(root) = root.filter(|root| Some(*root) != worktree) {
+                        rows.push(ListRow::WorktreeHeader(folder, root));
+                        worktree = Some(root);
+                    }
+                    rows.push(ListRow::Session(session));
+                }
+                if filtering && rows.len() == start + 1 {
+                    rows.pop();
+                }
+            }
+            rows.push(ListRow::NewSession);
+            return rows;
+        }
         let headers: Vec<ListRow<'_>> = match grouping {
             Grouping::Folder => self.groups.iter().map(ListRow::FolderHeader).collect(),
             Grouping::App | Grouping::Status => {
                 self.sections.iter().map(ListRow::SectionHeader).collect()
             }
         };
-        let filtering = self.is_filtering();
         for header in headers {
             let start = rows.len();
             rows.push(header);
@@ -661,7 +761,10 @@ impl SessionList {
                         ListRow::SectionHeader(section) => {
                             Section::of(grouping, s).as_ref() == Some(section)
                         }
-                        ListRow::Folders | ListRow::NewSession | ListRow::Session(_) => false,
+                        ListRow::Folders
+                        | ListRow::WorktreeHeader(..)
+                        | ListRow::NewSession
+                        | ListRow::Session(_) => false,
                     })
                     .map(|s| ListRow::Session(s)),
             );
@@ -707,6 +810,7 @@ impl SessionList {
             Selection::Session(id) => Some(id),
             Selection::Folders
             | Selection::FolderHeader(_)
+            | Selection::WorktreeHeader(..)
             | Selection::SectionHeader(_)
             | Selection::NewSession => None,
         }
@@ -727,6 +831,9 @@ impl SessionList {
             Selection::FolderHeader(folder) => rows
                 .iter()
                 .position(|row| matches!(row, ListRow::FolderHeader(f) if *f == folder)),
+            Selection::WorktreeHeader(folder, root) => rows.iter().position(
+                |row| matches!(row, ListRow::WorktreeHeader(f, r) if *f == folder && *r == root),
+            ),
             Selection::SectionHeader(section) => rows
                 .iter()
                 .position(|row| matches!(row, ListRow::SectionHeader(s) if *s == section)),
@@ -742,6 +849,9 @@ impl SessionList {
         let selection = match self.rows().get(row) {
             Some(ListRow::Folders) => Selection::Folders,
             Some(ListRow::FolderHeader(folder)) => Selection::FolderHeader((*folder).clone()),
+            Some(ListRow::WorktreeHeader(folder, root)) => {
+                Selection::WorktreeHeader((*folder).clone(), root.to_path_buf())
+            }
             Some(ListRow::SectionHeader(section)) => Selection::SectionHeader((*section).clone()),
             Some(ListRow::NewSession) => Selection::NewSession,
             Some(ListRow::Session(s)) => Selection::Session(s.id.clone()),
@@ -770,7 +880,14 @@ impl SessionList {
         let headers: Vec<usize> = rows
             .iter()
             .enumerate()
-            .filter(|(_, row)| matches!(row, ListRow::FolderHeader(_) | ListRow::SectionHeader(_)))
+            .filter(|(_, row)| {
+                matches!(
+                    row,
+                    ListRow::FolderHeader(_)
+                        | ListRow::WorktreeHeader(..)
+                        | ListRow::SectionHeader(_)
+                )
+            })
             .map(|(index, _)| index)
             .collect();
         if headers.is_empty() {
@@ -791,6 +908,9 @@ impl SessionList {
             (Some(ListRow::Session(s)), _) => Selection::Session(s.id.clone()),
             (_, ListRow::SectionHeader(section)) => Selection::SectionHeader(section.clone()),
             (_, ListRow::FolderHeader(folder)) => Selection::FolderHeader(folder.clone()),
+            (_, ListRow::WorktreeHeader(folder, root)) => {
+                Selection::WorktreeHeader(folder.clone(), root.to_path_buf())
+            }
             (_, ListRow::Folders | ListRow::NewSession | ListRow::Session(_)) => return None,
         })
     }
@@ -809,7 +929,9 @@ impl SessionList {
     fn remember_selected_folder(&mut self) {
         let folder = match &self.selection {
             Selection::Session(_) => self.selected_session().map(|session| session.scope.clone()),
-            Selection::FolderHeader(folder) => Some(folder.clone()),
+            Selection::FolderHeader(folder) | Selection::WorktreeHeader(folder, _) => {
+                Some(folder.clone())
+            }
             Selection::Folders | Selection::SectionHeader(_) | Selection::NewSession => {
                 match self.active_folder_filter() {
                     [only] => Some(only.clone()),
@@ -827,7 +949,9 @@ impl SessionList {
     pub fn ensure_selection_visible(&mut self) {
         let shown = match &self.selection {
             Selection::Session(id) => self.visible().iter().any(|s| &s.id == id),
-            Selection::FolderHeader(_) | Selection::SectionHeader(_) => self.header_shown(),
+            Selection::FolderHeader(_)
+            | Selection::WorktreeHeader(..)
+            | Selection::SectionHeader(_) => self.header_shown(),
             Selection::Folders | Selection::NewSession => true,
         };
         if !shown {
@@ -846,6 +970,9 @@ impl SessionList {
         let rows = self.rows();
         match &self.selection {
             Selection::FolderHeader(folder) => rows.contains(&ListRow::FolderHeader(folder)),
+            Selection::WorktreeHeader(folder, root) => {
+                rows.contains(&ListRow::WorktreeHeader(folder, root))
+            }
             Selection::SectionHeader(section) => rows.contains(&ListRow::SectionHeader(section)),
             Selection::Folders | Selection::NewSession | Selection::Session(_) => true,
         }
@@ -858,7 +985,9 @@ impl SessionList {
         self.sort_groups();
         let kept = match &self.selection {
             Selection::Session(id) => self.visible_keeping(None).iter().any(|s| &s.id == id),
-            Selection::FolderHeader(_) | Selection::SectionHeader(_) => self.header_shown(),
+            Selection::FolderHeader(_)
+            | Selection::WorktreeHeader(..)
+            | Selection::SectionHeader(_) => self.header_shown(),
             Selection::Folders | Selection::NewSession => !leave_top_row,
         };
         if !kept {
@@ -1028,6 +1157,9 @@ mod tests {
                 ListRow::Folders => "^".to_string(),
                 ListRow::NewSession => "+".to_string(),
                 ListRow::FolderHeader(scope) => format!("# {}", scope.path().display()),
+                ListRow::WorktreeHeader(folder, root) => {
+                    format!("  ⎇ {}", worktree_label(folder, root))
+                }
                 ListRow::SectionHeader(section) => format!("## {}", section.label()),
                 ListRow::Session(s) => s.name.clone(),
             })
@@ -1060,7 +1192,8 @@ mod tests {
         assert_eq!(names(&list), ["first", "second", "third"]);
         // Selection, not order: the most recently used.
         assert_eq!(list.selected_id().unwrap().as_str(), "B");
-        assert_eq!(list.selected_row(), 2);
+        // Under the tabs and the folder's header.
+        assert_eq!(list.selected_row(), 3);
     }
 
     #[test]
@@ -1092,7 +1225,7 @@ mod tests {
         );
         assert_eq!(names(&list), ["a", "b", "c"]);
         assert_eq!(list.selected_id().unwrap().as_str(), "B");
-        assert_eq!(list.selected_row(), 2);
+        assert_eq!(list.selected_row(), 3);
     }
 
     #[test]
@@ -1235,7 +1368,7 @@ mod tests {
         assert_eq!(names(&list), ["api-refactor"]);
         list.filter.set("login");
         assert_eq!(names(&list), ["spike"]);
-        list.select_row(1);
+        list.select_row(2);
         list.filter.set("spike");
         list.ensure_selection_visible();
         assert_eq!(list.selected_id().unwrap().as_str(), "C");
@@ -1248,20 +1381,22 @@ mod tests {
     #[test]
     fn movement_is_clamped() {
         let mut list = loaded(vec![view("A", "a", 20), view("B", "b", 30)]);
-        // ^ / a / b / +
+        // ^ / # / a / b / +
         assert!(list.move_selection(5));
-        assert_eq!(list.selected_row(), 3);
+        assert_eq!(list.selected_row(), 4);
         assert_eq!(list.selection(), &Selection::NewSession);
         assert!(!list.move_selection(1));
         assert!(list.move_selection(-2));
         assert_eq!(list.selected_id().unwrap().as_str(), "A");
-        // Up from the first session: the folder filter.
+        // Up from the first session: the folder's header, then the tabs.
+        assert!(list.move_selection(-1));
+        assert_eq!(list.selection(), &Selection::FolderHeader(scope()));
         assert!(list.move_selection(-1));
         assert_eq!(list.selection(), &Selection::Folders);
         assert_eq!(list.selected_row(), 0);
         assert_eq!(list.selected_id(), None);
         assert!(!list.move_selection(-1));
-        assert!(list.move_selection(1));
+        assert!(list.move_selection(2));
         assert_eq!(list.selected_id().unwrap().as_str(), "A");
         assert!(list.move_selection(-10));
         assert_eq!(list.selection(), &Selection::Folders);
@@ -1449,17 +1584,115 @@ mod tests {
         assert_eq!(names(&list), ["mid", "old", "newest-pinned"]);
     }
 
+    /// `session` working in the linked worktree at `root`, on `branch`.
+    fn in_worktree(mut session: SessionView, root: &str, branch: &str) -> SessionView {
+        let name = Path::new(root)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        session.git = Some(session_core::model::GitInfo {
+            repo_root: PathBuf::from(root),
+            branch: Some(branch.into()),
+            detached_at: None,
+            worktree: Some(name),
+        });
+        session
+    }
+
     #[test]
-    fn one_folder_has_no_headers() {
+    fn worktrees_get_a_section_inside_their_folder() {
+        let mut list = loaded(vec![
+            view("A", "main-work", 1),
+            in_worktree(
+                view("B", "feature", 2),
+                "/repo/worktrees/feature",
+                "feature",
+            ),
+            in_worktree(
+                view("C", "agent", 3),
+                "/repo/.claude/worktrees/agent-x",
+                "a",
+            ),
+            in_worktree(view("D", "elsewhere", 4), "/tmp/wt-other", "other"),
+            view("E", "more-main", 5),
+        ]);
+        // The folder's own sessions, then each worktree's under its header,
+        // by path (one elsewhere by its own name).
+        assert_eq!(
+            row_names(&list),
+            [
+                "^",
+                "# /repo",
+                "main-work",
+                "more-main",
+                "  ⎇ .claude/worktrees/agent-x",
+                "agent",
+                "  ⎇ worktrees/feature",
+                "feature",
+                "  ⎇ wt-other",
+                "elsewhere",
+                "+"
+            ]
+        );
+        assert_eq!(
+            names(&list),
+            ["main-work", "more-main", "agent", "feature", "elsewhere"]
+        );
+        let feature = Path::new("/repo/worktrees/feature");
+        assert_eq!(list.worktree_counts(&scope(), feature), (1, 1));
+        assert_eq!(list.worktree_branch(&scope(), feature), Some("feature"));
+        // A worktree's header: new sessions go in the folder, starting in
+        // the worktree when it's inside it.
+        list.select_row(6);
+        assert_eq!(
+            list.selection(),
+            &Selection::WorktreeHeader(scope(), feature.to_path_buf())
+        );
+        assert_eq!(list.current_folder(), Some(&scope()));
+        assert_eq!(list.new_session_cwd(), Some(feature));
+        list.select_row(8);
+        assert_eq!(list.new_session_cwd(), None);
+        assert_eq!(list.current_folder(), Some(&scope()));
+        // Moves stay in a worktree's part.
+        let b = SessionId::from_string("B");
+        assert!(!list.move_session(&b, 0));
+        assert!(list.move_session(&SessionId::from_string("E"), 0));
+        assert_eq!(names(&list)[..2], ["more-main", "main-work"]);
+        // The section follows the agent: back in the main checkout, B
+        // joins the folder's own sessions.
+        let mut back = list.get(&b).unwrap().clone();
+        back.git = None;
+        list.upsert(back);
+        assert!(!row_names(&list).contains(&"  ⎇ worktrees/feature".to_string()));
+        assert_eq!(names(&list)[..3], ["more-main", "main-work", "feature"]);
+        // A session started in a worktree has it as its folder: no
+        // worktree header there.
+        let own = folder("/repo/worktrees/feature");
+        list.upsert(in_worktree(
+            view_in(&own, "F", "own", 6),
+            "/repo/worktrees/feature",
+            "feature",
+        ));
+        let rows = row_names(&list);
+        let at = rows
+            .iter()
+            .position(|r| r == "# /repo/worktrees/feature")
+            .unwrap();
+        assert_eq!(rows[at + 1], "own");
+    }
+
+    #[test]
+    fn one_folder_still_has_its_header() {
         let mut list = loaded(vec![view("A", "a", 1)]);
-        assert!(!list.is_grouped());
-        assert_eq!(row_names(&list), ["^", "a", "+"]);
-        // Filtered to one folder of several: no headers either.
+        assert!(list.is_grouped());
+        assert_eq!(row_names(&list), ["^", "# /repo", "a", "+"]);
+        // Filtered to one folder of several: that one's header.
         list.upsert(view_in(&folder("/web"), "W1", "w", 2));
         assert!(list.is_grouped());
         list.set_folder_filter(vec![folder("/web")]);
-        assert!(!list.is_grouped());
-        assert_eq!(row_names(&list), ["^", "w", "+"]);
+        assert!(list.is_grouped());
+        assert_eq!(row_names(&list), ["^", "# /web", "w", "+"]);
     }
 
     #[test]
@@ -1647,10 +1880,10 @@ mod tests {
         assert_eq!(row_names(&list), ["^", "# /repo", "alpha", "# /web", "+"]);
         list.filter.set("alp");
         assert_eq!(row_names(&list), ["^", "# /repo", "alpha", "+"]);
-        // Only the empty folder: no header, nothing to show.
+        // Only the empty folder: its header, nothing under it.
         list.filter.set("");
         list.set_folder_filter(vec![web]);
-        assert_eq!(row_names(&list), ["^", "+"]);
+        assert_eq!(row_names(&list), ["^", "# /web", "+"]);
         assert_eq!(list.selection(), &Selection::NewSession);
     }
 
@@ -1940,7 +2173,7 @@ mod tests {
         assert_eq!(list.selected_id().unwrap().as_str(), "W1");
         list.set_folder_filter(vec![scope()]);
         assert_eq!(list.folder_filter(), [scope()]);
-        assert!(!list.is_grouped());
+        assert!(list.is_grouped());
         assert_eq!(names(&list), ["r"]);
         assert_eq!(list.selected_id().unwrap().as_str(), "R1");
         // A session that stays shown stays selected.

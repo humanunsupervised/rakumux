@@ -8,9 +8,10 @@
 //! Everything here is derived from a `SessionView` alone; nothing draws.
 
 use std::cmp::Ordering;
+use std::path::Path;
 
 use session_core::activity::ActivityPhase;
-use session_core::model::{Lifecycle, SessionStatus, SessionView};
+use session_core::model::{Lifecycle, ScopeRoot, SessionStatus, SessionView};
 
 /// A tab of the list's top row: what the list is grouped and filtered by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -51,6 +52,29 @@ impl Grouping {
             Grouping::App => "apps",
             Grouping::Status => "statuses",
         }
+    }
+}
+
+/// The linked git worktree a session works in when it isn't its folder's
+/// own working tree (one inside the repo, like `worktrees/feature`, or one
+/// elsewhere): that worktree's root. Under the Folders tab such sessions
+/// go under a header for their worktree, inside their folder. Follows the
+/// session's git context, so it moves with the agent.
+pub fn linked_worktree(session: &SessionView) -> Option<&Path> {
+    let git = session.git.as_ref()?;
+    git.worktree.as_ref()?;
+    (!session.scope.path().starts_with(&git.repo_root)).then_some(git.repo_root.as_path())
+}
+
+/// How a worktree's header names `root` inside `folder`: its path there
+/// (`worktrees/feature`), or for one elsewhere its own directory's name.
+pub fn worktree_label(folder: &ScopeRoot, root: &Path) -> String {
+    match root.strip_prefix(folder.path()) {
+        Ok(inside) if !inside.as_os_str().is_empty() => inside.display().to_string(),
+        _ => root.file_name().map_or_else(
+            || root.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        ),
     }
 }
 

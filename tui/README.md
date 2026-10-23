@@ -112,7 +112,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   terminal): in Rakumux mode the list sits on top and the selected session below it, so you see
   it while you pick one. The list takes 40% of the height (at least the folder filter and two
   sessions); drag the line between them up or down to change it (saved as
-  `sessions.stacked_list_percent`). In session mode the session fills the screen. Under 15 rows only
+  `sessions.stacked_list_percent`). In session mode the session fills the screen. Under 16 rows only
   the list shows in Rakumux mode. Dialogs keep at least 48 columns (or the screen less two).
 - **Selecting** a session shows it live (observer). **Enter** takes control: keys go to the program
   and the terminal is sized to the pane. Other TUIs on the same session keep watching. Ending
@@ -138,8 +138,11 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   Settings runs any of them.
 - **Folders**: a session belongs to the folder it was started in (a repo, a worktree, any
   folder). The list shows every folder, live: sessions another window, the CLI or an agent start
-  in any folder (a new worktree too) appear as they start. With more than one folder shown, each
-  has a header row (name, branch, live/total).
+  in any folder (a new worktree too) appear as they start. Each folder shown has a header row
+  (name, branch, live/total), even when it's the only one. Inside a folder, sessions working in
+  a linked git worktree (one inside the repo, like `worktrees/feature`, or elsewhere) get a
+  header of their own for that worktree, and follow their agent between worktrees. Enter on a
+  worktree's header starts a new session in it.
 - **Order**: the list never reorders by itself; using a session doesn't move it. The folder you
   started in leads, then the others by name. A new session goes last in its folder, and pinned
   sessions come first. Drag a session (or a tab) up and down to move it, or press `J`/`K`; it

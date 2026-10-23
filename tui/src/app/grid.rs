@@ -209,7 +209,10 @@ impl App {
         }
         if matches!(
             self.list.selection(),
-            Selection::Folders | Selection::FolderHeader(_) | Selection::SectionHeader(_)
+            Selection::Folders
+                | Selection::FolderHeader(_)
+                | Selection::WorktreeHeader(..)
+                | Selection::SectionHeader(_)
         ) {
             let first = self.list.visible().first().map(|s| s.id.clone());
             self.list.select(

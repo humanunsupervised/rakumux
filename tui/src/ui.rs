@@ -1162,12 +1162,44 @@ mod tests {
             "{wide}"
         );
         assert!(!wide.contains("worktree"), "branch only: {wide}");
-        assert!(!wide.contains("──"), "no folder headers: {wide}");
+        // The lone folder still has its header, with its name.
+        assert!(wide.contains("──"), "the folder's header: {wide}");
+        assert!(list.iter().any(|l| l.ends_with(" live")), "{wide}");
         // No header above the list: the folder filter says what's shown.
         assert!(wide.lines().last().unwrap().starts_with(" RAKUMUX "));
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("▤ Folders"), "{narrow}");
         assert!(narrow.contains("docs ★"), "{narrow}");
+    }
+
+    #[test]
+    fn a_worktree_inside_the_folder_gets_a_header_with_its_path_and_count() {
+        let mut feature = view("B", "feature-work", 20);
+        feature.git = Some(session_core::model::GitInfo {
+            repo_root: "/repo/worktrees/feature".into(),
+            branch: Some("feat/login".into()),
+            detached_at: None,
+            worktree: Some("feature".into()),
+        });
+        let mut h = harness(vec![view("A", "main-work", 10), feature]);
+        let wide = render(&mut h.app, 160, 48);
+        let list = list_column(&wide, crate::layout::sidebar_width(160).into());
+        let header = list
+            .iter()
+            .position(|l| l.contains("⎇ worktrees/feature"))
+            .unwrap_or_else(|| panic!("no worktree header: {wide}"));
+        assert!(
+            list[header].starts_with("   ⎇ worktrees/feature  feat/login "),
+            "{wide}"
+        );
+        assert!(list[header].ends_with("1/1 live"), "{wide}");
+        // Below the folder's own sessions, above the worktree's.
+        let main = list.iter().position(|l| l.contains("main-work")).unwrap();
+        let work = list
+            .iter()
+            .position(|l| l.contains("feature-work"))
+            .unwrap();
+        assert!(main < header && header < work, "{wide}");
     }
 
     #[test]
@@ -1678,6 +1710,8 @@ mod tests {
         for (width, height) in [(90, 40), (90, 20)] {
             h.press(KeyCode::Char('g')).await;
             h.press(KeyCode::Char('g')).await;
+            // The folder's header comes first.
+            h.press(KeyCode::Char('j')).await;
             for i in 1..=6 {
                 h.press(KeyCode::Char('j')).await;
                 let screen = render(&mut h.app, width, height);

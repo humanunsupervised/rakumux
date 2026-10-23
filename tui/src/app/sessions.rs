@@ -3,6 +3,7 @@
 //! cycling, and the results of create/rename/delete/kill/revive.
 
 use std::cmp::Ordering;
+use std::path::Path;
 use std::sync::Arc;
 
 use base64::Engine;
@@ -523,16 +524,19 @@ impl App {
 
     /// Enter / `l` / `→` / click: open the active tab's modal for the tabs
     /// (the Folders modal for All folders) and the App or Status modal for
-    /// one of their headers, create immediately for a folder header or "+
-    /// New session", focus a live session, revive a dead one, restart an
-    /// exited one.
+    /// one of their headers, create immediately for a folder's or a
+    /// worktree's header or "+ New session", focus a live session, revive a
+    /// dead one, restart an exited one.
     pub fn activate_selected(&mut self) {
         match self.list.selection().clone() {
             Selection::Folders => return self.open_tab_picker(),
             Selection::SectionHeader(section) => {
                 return self.open_section_picker(section.grouping(), Some(section))
             }
-            Selection::FolderHeader(_) | Selection::NewSession | Selection::Session(_) => {}
+            Selection::FolderHeader(_)
+            | Selection::WorktreeHeader(..)
+            | Selection::NewSession
+            | Selection::Session(_) => {}
         }
         let Some(session) = self.list.selected_session().cloned() else {
             self.open_new_session();
@@ -1557,6 +1561,7 @@ impl App {
         };
         let request = super::new_session::request(
             self.current_folder(),
+            self.list.new_session_cwd().map(Path::to_path_buf),
             env_snapshot(),
             self.terminal_size(),
         );

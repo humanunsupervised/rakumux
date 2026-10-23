@@ -1634,9 +1634,12 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     );
     doc.text(
         "The list shows the sessions of every folder, including sessions started from another \
-         window, the command line or an agent, as they appear. With more than one folder shown, \
-         each folder has a header row with its name, git branch and how many of its sessions \
-         are running (live/total). The folder you started Rakumux in comes first, then the \
+         window, the command line or an agent, as they appear. Each folder shown has a header \
+         row with its name, git branch and how many of its sessions are running (live/total), \
+         even when it's the only one. Sessions whose agent works in a git worktree (one inside \
+         the repo, like worktrees/feature, or elsewhere) go under that worktree's own header \
+         in the folder, and move as the agent changes worktree; Enter on that header starts a \
+         new session in the worktree. The folder you started Rakumux in comes first, then the \
          others by name. `{` and `}` jump between folders.",
     );
     doc.text(

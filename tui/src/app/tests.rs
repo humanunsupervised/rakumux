@@ -723,6 +723,8 @@ async fn vim_keys_move_and_gg_goes_to_the_top() {
     assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
     h.ctrl('u').await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
+    // Past the folder's header to the second session.
+    h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     assert_eq!(h.selected().as_deref(), Some("B"));
@@ -806,7 +808,7 @@ async fn dragging_the_stacked_divider_resizes_the_list_and_saves_its_height() {
     assert_eq!(saved["sessions"]["stacked_list_percent"], 64);
     assert!(saved["sessions"].get("sidebar_width").is_none(), "{saved}");
     // Past either end, both panes keep their minimum.
-    for (row, list, preview) in [(38, 34, 4), (1, 9, 29)] {
+    for (row, list, preview) in [(38, 34, 4), (1, 10, 28)] {
         let divider = h.app.screen().divider.unwrap().y;
         h.app
             .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), divider));
@@ -821,7 +823,7 @@ async fn dragging_the_stacked_divider_resizes_the_list_and_saves_its_height() {
     // The setting comes back on the next start.
     let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
     // Dragged past the top: the share of the smallest list.
-    assert_eq!(saved.sessions.stacked_list_percent, Some(23));
+    assert_eq!(saved.sessions.stacked_list_percent, Some(26));
     // Wide screens ignore it.
     h.app.resize(160, 48);
     assert_eq!(h.app.screen().list.unwrap().height, 47);
@@ -1999,10 +2001,9 @@ async fn clicking_new_session_creates_once_and_enters_the_shell_without_a_keyboa
                 });
                 h.app.resize(width, height);
                 h.app.set_layout(layout);
-                // On short grids the action may be on a later page.
-                if layout == SessionLayout::Grid {
-                    h.app.list.select(Selection::NewSession);
-                }
+                // On short grids the action may be on a later page, and
+                // below a short list's fold.
+                h.app.list.select(Selection::NewSession);
                 h.app.process_pending();
                 let mut terminal =
                     ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
@@ -2084,7 +2085,7 @@ async fn clicking_a_row_selects_it_and_paste_goes_to_the_focused_session() {
         .app
         .hits
         .iter()
-        .find(|(_, hit)| *hit == Hit::ListRow(2))
+        .find(|(_, hit)| *hit == Hit::ListRow(3))
         .unwrap();
     h.app.handle_mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
@@ -2391,7 +2392,8 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
     h.press(KeyCode::Home).await;
     shift(&mut h, 'J').await;
     assert_eq!(h.app.status(), Some("Select a session to move."));
-    // Inside a session J is the program's.
+    // Inside a session J is the program's (past the folder's header).
+    h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Enter).await;
     let (index, _) = h.last_attach();
@@ -2694,7 +2696,8 @@ async fn enter_on_the_folder_filter_opens_the_modal_and_enter_shows_one_folder()
     assert_eq!(h.app.folder_label(), "api");
     assert!(list_calls(&h).is_empty(), "{:?}", h.fake.calls());
     assert_eq!(visible_ids(&h), ["A1"]);
-    assert!(!h.app.list.is_grouped());
+    // One folder, under its header.
+    assert!(h.app.list.is_grouped());
     // The cursor leaves the folder filter for the folder's session.
     assert_eq!(h.selected().as_deref(), Some("A1"));
     assert_eq!(h.app.detail.view.session_id(), Some(&id("A1")));

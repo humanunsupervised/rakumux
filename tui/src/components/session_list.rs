@@ -35,7 +35,10 @@ use crate::theme;
 fn row_height(row: &ListRow) -> u16 {
     match row {
         ListRow::Folders => 0,
-        ListRow::NewSession | ListRow::FolderHeader(_) | ListRow::SectionHeader(_) => 2,
+        ListRow::NewSession
+        | ListRow::FolderHeader(_)
+        | ListRow::WorktreeHeader(..)
+        | ListRow::SectionHeader(_) => 2,
         ListRow::Session(_) => 3,
     }
 }
@@ -132,6 +135,62 @@ pub fn folder_header_line(
         Span::styled(
             name,
             Style::default().fg(name_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(branch_part, Style::default().fg(p.text_muted)),
+        Span::raw(" "),
+        Span::styled("─".repeat(rule), Style::default().fg(rule_color)),
+        Span::raw(" "),
+        Span::styled(count, Style::default().fg(p.text_muted)),
+    ])
+}
+
+/// A linked worktree's header inside a folder, indented under the folder's
+/// own: the branch mark, its path in the folder (`worktrees/feature`), its
+/// branch when that says more, a rule, then `live/total`. Selected, the
+/// label is white and the rule blue.
+pub fn worktree_header_line(
+    app: &App,
+    folder: &ScopeRoot,
+    root: &std::path::Path,
+    width: usize,
+    selected: bool,
+) -> Line<'static> {
+    let p = theme::palette();
+    let label = format!(
+        "{} {}",
+        app.icons().branch(),
+        crate::app::grouping::worktree_label(folder, root)
+    );
+    let branch = app
+        .list
+        .worktree_branch(folder, root)
+        .filter(|branch| !label.ends_with(branch))
+        .unwrap_or_default()
+        .to_string();
+    let (live, total) = app.list.worktree_counts(folder, root);
+    let count = count_label(live, total);
+    // "   label  branch ─── count": the indent, then as for a folder.
+    let fixed = 5 + str_width(&count);
+    let label = truncate(&label, width.saturating_sub(fixed + 2));
+    let room = width.saturating_sub(fixed + str_width(&label) + 2);
+    let branch_part = if !branch.is_empty() && room >= 6 {
+        format!("  {}", truncate(&branch, room - 2))
+    } else {
+        String::new()
+    };
+    let rule = width.saturating_sub(fixed + str_width(&label) + str_width(&branch_part));
+    let (label_color, rule_color) = if selected {
+        (p.text_bright, p.accent_primary)
+    } else {
+        (p.label_blue, p.border_dim)
+    };
+    Line::from(vec![
+        Span::raw("   "),
+        Span::styled(
+            label,
+            Style::default()
+                .fg(label_color)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(branch_part, Style::default().fg(p.text_muted)),
         Span::raw(" "),
@@ -540,6 +599,17 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 lines.push(folder_header_line(
                     app,
                     folder,
+                    (inner.width as usize).saturating_sub(1),
+                    is_selected,
+                ));
+                lines
+            }
+            ListRow::WorktreeHeader(folder, root) => {
+                let mut lines = vec![Line::default(); height as usize - 1];
+                lines.push(worktree_header_line(
+                    app,
+                    folder,
+                    root,
                     (inner.width as usize).saturating_sub(1),
                     is_selected,
                 ));

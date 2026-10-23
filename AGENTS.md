@@ -663,9 +663,9 @@ there.
 Narrow windows (Sidebar from 80 to `layout::SINGLE_PANE_BELOW` = 100 columns): in Rakumux mode
 the list is stacked on top, a one-row divider under it, and the selected session's detail (title
 row and faded preview) below, so switching sessions shows them. The list gets 40% of the rows above
-the footer, at least `LIST_MIN_ROWS` (9: the folder filter and two sessions) and leaving the detail
+the footer, at least `LIST_MIN_ROWS` (10: the tabs, a folder's header and two sessions) and leaving the detail
 `PREVIEW_MIN_ROWS` (4); dragging the divider sets that share (`sessions.stacked_list_percent`).
-Below `STACK_MIN_ROWS` (14 rows above the footer, a 15-row screen) Rakumux mode shows the list
+Below `STACK_MIN_ROWS` (15 rows above the footer, a 16-row screen) Rakumux mode shows the list
 alone. Session mode fills everything above the footer. Taps arrive as clicks, so the footer is a
 tap target too (`Hit::ModeBadge`, `Hit::FooterKey`, recorded by `components/footer.rs`): the
 SESSION badge and the `Ctrl-\ Rakumux` button switch to Rakumux mode like `Ctrl-\`, the RAKUMUX
@@ -684,8 +684,14 @@ as controller, `Fit` as observer). The daemon ignores an observer's `Fit` only w
 typed in the last 5 s (`CONTROLLER_TYPING`), so whoever is typing keeps their size. Nobody fits
 back by itself, so two windows never resize a session back and forth.
 
-The list (`app/session_list.rs`) holds every folder's sessions; with more than one folder shown
-each has a header row (name, branch, live/total; selectable), and with one there are none. The
+The list (`app/session_list.rs`) holds every folder's sessions; under the Folders tab each folder
+shown has a header row (name, branch, live/total; selectable), a lone folder too. Inside a folder,
+sessions whose git context is a linked worktree other than the folder's own working tree
+(`grouping::linked_worktree`: one inside the repo, like `worktrees/feature`, or elsewhere) go
+under a header for that worktree (`ListRow::WorktreeHeader`: its path in the folder, its branch,
+live/total; selectable, Enter starts a new session there when it's inside the folder), after the
+folder's own sessions and ordered by path. The section follows the agent's working directory, so
+a session moves between them as its agent changes worktree; moves stay within one. The
 list never reorders by itself: activity doesn't move a session or a group. The launch folder's
 group comes first, then the others by folder name, then path. In a folder, pinned sessions lead;
 both they and the others follow the order the user set, and sessions without a place go last,
