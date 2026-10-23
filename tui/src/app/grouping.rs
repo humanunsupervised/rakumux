@@ -137,7 +137,7 @@ impl AppKey {
 
 /// What a session is doing as the user reads it: the Status tab's
 /// sections, in the order they're shown (what wants the user first,
-/// unread replies among it, then what's busy, then what's over, and done
+/// unread replies among it, then what's busy, then what's over, and ready
 /// sessions last). Derived from a running session's
 /// lifecycle, with the agent's activity phase telling a wait for the model
 /// apart from other work; else its status.
@@ -157,10 +157,10 @@ pub enum StatusGroup {
     Exited,
     Dead,
     Unknown,
-    /// `Idle`: nothing to do until the user says so (a reply that's been
-    /// read). Listed by when each was last read, not in an order the user
-    /// sets ([`StatusGroup::by_last_read`]).
-    Done,
+    /// Ready: `Idle`, nothing to do until the user says so (a reply that's
+    /// been read). Listed by when each was last read, not in an order the
+    /// user sets ([`StatusGroup::by_last_read`]).
+    Ready,
 }
 
 impl StatusGroup {
@@ -174,7 +174,7 @@ impl StatusGroup {
         StatusGroup::Exited,
         StatusGroup::Dead,
         StatusGroup::Unknown,
-        StatusGroup::Done,
+        StatusGroup::Ready,
     ];
 
     /// The status `session` is in (see [`StatusGroup`]).
@@ -189,7 +189,7 @@ impl StatusGroup {
                     Lifecycle::Working => StatusGroup::Working,
                     Lifecycle::Blocked => StatusGroup::WaitingForYou,
                     Lifecycle::Done => StatusGroup::Unread,
-                    Lifecycle::Idle => StatusGroup::Done,
+                    Lifecycle::Idle => StatusGroup::Ready,
                     Lifecycle::Unknown | Lifecycle::None => StatusGroup::Running,
                 }
             }
@@ -201,9 +201,9 @@ impl StatusGroup {
 
     /// Whether its sessions are listed by when each was last read
     /// (`last_active_at`, which going into a session sets), most recent
-    /// first, instead of in an order the user sets: done.
+    /// first, instead of in an order the user sets: ready.
     pub fn by_last_read(self) -> bool {
-        self == StatusGroup::Done
+        self == StatusGroup::Ready
     }
 
     /// How its order is saved (`sessions.section_order`): the name it had
@@ -211,7 +211,7 @@ impl StatusGroup {
     pub fn saved_name(self) -> &'static str {
         match self {
             StatusGroup::Unread => "done",
-            StatusGroup::Done => "idle",
+            StatusGroup::Ready => "idle",
             status => status.label(),
         }
     }
@@ -223,7 +223,7 @@ impl StatusGroup {
             StatusGroup::Unread => "unread",
             StatusGroup::Working => "working",
             StatusGroup::WaitingForResponse => "waiting for response",
-            StatusGroup::Done => "done",
+            StatusGroup::Ready => "ready",
             StatusGroup::Running => "running",
             StatusGroup::Exited => "exited",
             StatusGroup::Dead => "dead",
@@ -232,7 +232,7 @@ impl StatusGroup {
     }
 }
 
-/// Done's sub-sections under Status, in order: pinned sessions first, then
+/// Ready's sub-sections under Status, in order: pinned sessions first, then
 /// the others by when each was last read, most recent first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ReadPeriod {
@@ -260,7 +260,7 @@ impl ReadPeriod {
         }
     }
 
-    /// The sub-section of `session` at `now` when it's done: pinned, else by
+    /// The sub-section of `session` at `now` when it's ready: pinned, else by
     /// its last read (`last_active_at`, which going in sets); `None` for any
     /// other status.
     pub fn of_done(now: i64, session: &SessionView) -> Option<ReadPeriod> {
@@ -434,7 +434,7 @@ mod tests {
             (Lifecycle::Blocked, StatusGroup::WaitingForYou),
             (Lifecycle::Done, StatusGroup::Unread),
             (Lifecycle::Working, StatusGroup::Working),
-            (Lifecycle::Idle, StatusGroup::Done),
+            (Lifecycle::Idle, StatusGroup::Ready),
             (Lifecycle::Unknown, StatusGroup::Running),
             (Lifecycle::None, StatusGroup::Running),
         ] {
@@ -497,14 +497,14 @@ mod tests {
     #[test]
     fn unread_and_done_keep_the_orders_saved_as_done_and_idle() {
         assert_eq!(StatusGroup::Unread.label(), "unread");
-        assert_eq!(StatusGroup::Done.label(), "done");
+        assert_eq!(StatusGroup::Ready.label(), "ready");
         assert_eq!(Section::Status(StatusGroup::Unread).key(), "status:done");
-        assert_eq!(Section::Status(StatusGroup::Done).key(), "status:idle");
+        assert_eq!(Section::Status(StatusGroup::Ready).key(), "status:idle");
         assert_eq!(
             Section::Status(StatusGroup::Working).key(),
             "status:working"
         );
-        assert_eq!(StatusGroup::ALL.last(), Some(&StatusGroup::Done));
+        assert_eq!(StatusGroup::ALL.last(), Some(&StatusGroup::Ready));
     }
 
     #[test]

@@ -103,9 +103,10 @@ fn cell_lines(content: Vec<Vec<Span<'_>>>, height: u16) -> Vec<Line<'_>> {
 /// pins it.
 const PIN_TOGGLE: &str = "☆";
 
-/// The hovered session's pin toggle, in the indent of its first content
-/// line, in the column of the headers' marks: `☆` to pin it, the gold `★`
-/// to unpin it. Returns where it is.
+/// The hovered session's pin toggle, just left of its name: in its status
+/// mark's place (which it covers while hovered), the column of ready's
+/// `★ pinned` header's star. `☆` to pin it, the gold `★` to unpin it.
+/// Returns where it is: the mark and the space after it.
 fn mark_hovered(lines: &mut [Line<'_>], pinned: bool, area: Rect) -> Option<Rect> {
     let p = theme::palette();
     let first = lines.iter().position(|line| !line.spans.is_empty())?;
@@ -114,12 +115,15 @@ fn mark_hovered(lines: &mut [Line<'_>], pinned: bool, area: Rect) -> Option<Rect
     } else {
         (PIN_TOGGLE, Style::default().fg(p.text_muted))
     };
-    lines[first].spans[0] = Span::styled(format!(" {mark} "), style);
+    // After the indent, the status mark (see `session_content`).
+    let slot = lines[first].spans.get_mut(1)?;
+    *slot = Span::styled(mark, style);
+    let x = area.x + u16::try_from(INDENT).ok()?;
     Some(Rect {
+        x,
         y: area.y + u16::try_from(first).ok()?,
-        width: u16::try_from(INDENT).ok()?.min(area.width),
+        width: 2.min(area.right().saturating_sub(x)),
         height: 1,
-        ..area
     })
 }
 
@@ -234,7 +238,7 @@ pub fn worktree_header_line(
     ])
 }
 
-/// The header of one of done's sub-sections, indented under done like a
+/// The header of one of ready's sub-sections, indented under ready like a
 /// worktree's under its folder: a clock and when its sessions were last
 /// read (a pin for the pinned ones), a rule, then how many it has, in
 /// `width` columns.

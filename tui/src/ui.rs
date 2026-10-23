@@ -941,7 +941,7 @@ mod tests {
             " waiting for response ─",
             " ● running ─",
             " ○ dead ─",
-            " ○ done ─",
+            " ○ ready ─",
         ]
         .iter()
         .map(|header| at(&list, header))

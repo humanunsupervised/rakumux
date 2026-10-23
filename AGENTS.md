@@ -733,8 +733,8 @@ both they and the others follow the order the user set, and sessions without a p
 oldest first, so a new session appears just above "+ New session". All layouts share it.
 Pinned sessions lead their folder; in the list they show no mark, while the tab bar and Grid
 show ★ after their name (`layout::PIN_MARK`). In terminals that report pointer movement (desktop
-terminals, also over SSH; not phones), the session row under the pointer shows its pin toggle in
-its indent, left of its mark and name and in the column of the headers' marks: `☆` to pin it,
+terminals, also over SSH; not phones), the session row under the pointer shows its pin toggle just left of its name, in its status
+mark's place (covering it while hovered) and the column of ready's `★ pinned` header's star: `☆` to pin it,
 the gold `★` to unpin it; a click there (`Hit::PinToggle`) does that without selecting the row,
 and `p` still pins the selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
 held); `J`/`K` move it one place. Moves stay in the session's folder and its pinned or unpinned
@@ -747,22 +747,22 @@ app (`AppKey::of`: the session's `agent.kind`, else its foreground program unles
 then other programs, then `shell`, each by name, with live/total. Status: a header per status
 (`StatusGroup::of`, like the rows' status marks: waiting for you, unread (a finished turn not yet
 looked at), working, waiting for response (the `WaitingForResponse` activity phase), running
-(live, nothing reported), exited, dead, then done (idle: a reply that's been read)), in that order, with a session count. Each app and status has an order of its
+(live, nothing reported), exited, dead, then ready (idle: a reply that's been read)), in that order, with a session count. Each app and status has an order of its
 own (`sessions.section_order`, by `Section::key`: `app:claude`, `status:working`): pinned sessions
 first, then the order the user gave them there, then the rest folder by folder (launch folder
 first). Dragging and `J`/`K` reorder a session within its header across folders, never into
-another header, and never change the folders' order. Done is the exception
+another header, and never change the folders' order. Ready is the exception
 (`StatusGroup::by_last_read`): its sessions are listed by when each was last read
-(`last_active_at`, which going in sets, as it turns an unread reply done), most recent first,
+(`last_active_at`, which going in sets, as it turns an unread reply ready), most recent first,
 under a sub-header per period (`grouping::ReadPeriod`, `ListRow::ReadPeriodHeader`: `◷ last hour`,
 last day, older, the clock from `Icons::clock`, tinted like its sessions' marks; with a session
-count; selectable, Enter opens the Status modal on done), so reading one moves it to the top.
-Pinned sessions (`p`) lead done under their own `★ pinned` sub-header (`ReadPeriod::Pinned`),
+count; selectable, Enter opens the Status modal on ready), so reading one moves it to the top.
+Pinned sessions (`p`) lead ready under their own `★ pinned` sub-header (`ReadPeriod::Pinned`),
 whenever they were read, most recent first; unpinning puts one back in its period. The periods are measured from
 the list's clock (`SessionList::set_clock`, every tick), so sessions move down them as time
-passes. Nothing there can be moved (`J`/`K` say so). A done session's mark (`○`, wherever it's
+passes. Nothing there can be moved (`J`/`K` say so). A ready session's mark (`○`, wherever it's
 shown) is amber like an unread reply's `●` but quieter (`format::read_period_style`: the amber
-faded 30% when read within the hour, 50% within the day, then muted), and done's header has the
+faded 30% when read within the hour, 50% within the day, then muted), and ready's header has the
 last hour's. A row's description has no status words
 (its mark on the right says it): the app, branch, subagents and report; an ended session still
 says `exited · ⏎ restart` or `dead · ⏎ revive`. A status

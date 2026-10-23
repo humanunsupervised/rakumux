@@ -1656,8 +1656,8 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     doc.text(
         "The list's top row has three tabs: Status (where the list starts), a header per \
          state (waiting for you, unread, working, waiting for response, running, exited, \
-         dead, then done: the sessions you've read, most recently read first, under last \
-         hour, last day and older), Folders, and App, a header per agent or program (claude, codex, \
+         dead, then ready: the sessions you've read, pinned ones first, then the rest most \
+         recently read first, under last hour, last day and older), Folders, and App, a header per agent or program (claude, codex, \
          opencode, …, then other programs, then shell); `←`/`→` there (or a click) switch \
          them. One tab is active \
          at a time: it decides the headers and the only filter that applies, and each tab \
@@ -1787,7 +1787,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     doc.text(
         "Optional OpenCode, Claude Code and Codex hooks report tool phases, input requests \
          and active subagent counts without an AI key. Busy markers animate locally; \
-         needs-input and done stay still. Without fresh hooks, Rakumux uses screen/process \
+         needs-input and ready stay still. Without fresh hooks, Rakumux uses screen/process \
          detection. Running subagents show as a count after the status (◈ 3). See \
          integrations/README.md in the repository for setup. Agent subagents are not Rakumux \
          child sessions.",

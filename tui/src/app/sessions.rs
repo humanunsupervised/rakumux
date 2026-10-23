@@ -534,7 +534,7 @@ impl App {
                 return self.open_section_picker(section.grouping(), Some(section))
             }
             Selection::ReadPeriodHeader(_) => {
-                let done = Section::Status(StatusGroup::Done);
+                let done = Section::Status(StatusGroup::Ready);
                 return self.open_section_picker(Grouping::Status, Some(done));
             }
             Selection::FolderHeader(_)

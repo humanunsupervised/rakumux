@@ -80,7 +80,7 @@ pub fn status_group_glyph(status: StatusGroup) -> (&'static str, Style) {
             super::utils::get_spinner_char(),
             Style::default().fg(p.accent_primary),
         ),
-        StatusGroup::Done => ("○", read_period_style(ReadPeriod::LastHour)),
+        StatusGroup::Ready => ("○", read_period_style(ReadPeriod::LastHour)),
         StatusGroup::Dead => ("○", Style::default().fg(p.text_muted)),
         StatusGroup::Running => ("●", Style::default().fg(p.accent_green)),
         StatusGroup::Exited => ("✕", Style::default().fg(p.accent_pink)),
@@ -92,7 +92,7 @@ pub fn status_group_glyph(status: StatusGroup) -> (&'static str, Style) {
 /// session read within the last hour, and within the last day.
 const DONE_FADE: (f32, f32) = (0.3, 0.5);
 
-/// The colour of a done session's mark (and of done's sub-headers' clocks)
+/// The colour of a ready session's mark (and of ready's sub-headers' clocks)
 /// by when it was last read: the amber of an unread reply, quieter within
 /// the hour, quieter still within the day, and muted after that.
 pub fn read_period_style(period: ReadPeriod) -> Style {
@@ -118,7 +118,7 @@ pub fn activity_badge(session: &SessionView) -> Option<(&'static str, Style)> {
     activity_badge_at(session, now_secs())
 }
 
-/// [`activity_badge`] at `now` (seconds), which a done session's colour
+/// [`activity_badge`] at `now` (seconds), which a ready session's colour
 /// depends on.
 pub fn activity_badge_at(session: &SessionView, now: i64) -> Option<(&'static str, Style)> {
     if session.status != SessionStatus::Live
@@ -576,9 +576,9 @@ mod tests {
             assert_ne!(day.1.fg, hour.1.fg);
             assert_ne!(hour.1.fg, unread);
         }
-        // Done's header has the last hour's amber; dead stays muted.
+        // Ready's header has the last hour's amber; dead stays muted.
         assert_eq!(
-            status_group_glyph(StatusGroup::Done).1,
+            status_group_glyph(StatusGroup::Ready).1,
             read_period_style(ReadPeriod::LastHour)
         );
         assert_eq!(

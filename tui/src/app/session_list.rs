@@ -53,8 +53,8 @@ pub enum Selection {
     /// An app's or a status's header row (App or Status tab, several
     /// shown): Enter opens that tab's modal there.
     SectionHeader(Section),
-    /// The header of one of done's sub-sections under Status (when its
-    /// sessions were last read): Enter opens the Status modal on done.
+    /// The header of one of ready's sub-sections under Status (when its
+    /// sessions were last read): Enter opens the Status modal on ready.
     ReadPeriodHeader(ReadPeriod),
     NewSession,
     Session(SessionId),
@@ -72,7 +72,7 @@ pub enum ListRow<'a> {
     WorktreeHeader(&'a ScopeRoot, &'a Path),
     /// An app's or a status's header row (several shown).
     SectionHeader(&'a Section),
-    /// A sub-section of done under Status: sessions last read in that
+    /// A sub-section of ready under Status: sessions last read in that
     /// period.
     ReadPeriodHeader(ReadPeriod),
     NewSession,
@@ -142,7 +142,7 @@ pub struct SessionList {
     /// The folder filter left nothing to select: the next snapshot selects
     /// the most recent session, like the first one.
     reselect: bool,
-    /// The wall clock (seconds) done's sub-sections are measured from
+    /// The wall clock (seconds) ready's sub-sections are measured from
     /// ([`Self::set_clock`]).
     now: i64,
 }
@@ -174,7 +174,7 @@ impl SessionList {
         }
     }
 
-    /// Set the wall clock (seconds) done's sub-sections are measured from.
+    /// Set the wall clock (seconds) ready's sub-sections are measured from.
     /// Returns whether a session went into another one, so the rows
     /// changed.
     pub fn set_clock(&mut self, now: i64) -> bool {
@@ -190,8 +190,8 @@ impl SessionList {
         moved
     }
 
-    /// The done sub-section `session` is listed under: under Status, when
-    /// it's done; `None` otherwise.
+    /// The ready sub-section `session` is listed under: under Status, when
+    /// it's ready; `None` otherwise.
     fn read_period(&self, session: &SessionView) -> Option<ReadPeriod> {
         if self.grouping == Grouping::Status {
             ReadPeriod::of_done(self.now, session)
@@ -200,7 +200,7 @@ impl SessionList {
         }
     }
 
-    /// How many of the sessions shown are under done's `period`.
+    /// How many of the sessions shown are under ready's `period`.
     pub fn read_period_count(&self, period: ReadPeriod) -> usize {
         self.visible()
             .into_iter()
@@ -412,7 +412,7 @@ impl SessionList {
     /// `J`/`K` take it. It stays in its part of the list: its folder's
     /// pinned sessions, or the others; under App or Status, its app's or
     /// status's (whatever their folders), which keep an order of their own,
-    /// except done's, listed by when each was last read. A `to` outside
+    /// except ready's, listed by when each was last read. A `to` outside
     /// that part means its first or last place. Returns whether it moved.
     pub fn move_session(&mut self, id: &SessionId, to: usize) -> bool {
         let visible = self.visible();
@@ -760,7 +760,7 @@ impl SessionList {
     }
 
     /// Whether `id` is in a section listed by when each session was last
-    /// read (done, under Status), where sessions can't be moved.
+    /// read (ready, under Status), where sessions can't be moved.
     pub fn listed_by_last_read(&self, id: &SessionId) -> bool {
         self.get(id)
             .and_then(|session| Section::of(self.grouping, session))
@@ -844,7 +844,7 @@ impl SessionList {
         rows
     }
 
-    /// `sessions` as rows, done ones under Status after a header for when
+    /// `sessions` as rows, ready ones under Status after a header for when
     /// they were last read (they come sorted by it).
     fn push_sessions<'a>(
         &'a self,
@@ -1418,7 +1418,7 @@ mod tests {
             ],
             Listed::All,
         );
-        // Every session is done, so there's no status header; the periods
+        // Every session is ready, so there's no status header; the periods
         // still have theirs.
         assert_eq!(
             row_names(&list),
@@ -2296,7 +2296,7 @@ mod tests {
                 "r2",
                 "## dead",
                 "w2",
-                "## done",
+                "## ready",
                 "  · last hour",
                 "w1",
                 "+"
