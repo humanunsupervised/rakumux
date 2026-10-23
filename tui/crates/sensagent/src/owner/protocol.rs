@@ -78,6 +78,8 @@ pub enum OwnerRequest {
     SignInStatus,
     /// Abandon an unfinished sign-in; an existing account stays signed in.
     SignInCancel,
+    /// Renew the account's access token now rather than when it's due.
+    Renew,
 }
 
 /// The owner's answers.
@@ -204,6 +206,9 @@ pub struct AccountView {
     pub subject: String,
     #[serde(default)]
     pub email: Option<String>,
+    /// When the current access token expires, Unix seconds; it is renewed before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
 }
 
 /// The durable sharing decision.

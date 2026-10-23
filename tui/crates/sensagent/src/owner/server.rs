@@ -342,6 +342,10 @@ fn handle(
             .sign_in_cancel()
             .map(|()| OwnerResponse::Done)
             .map_err(|error| OwnerErrorCode::from(&error)),
+        OwnerRequest::Renew => client
+            .renew()
+            .map(|()| OwnerResponse::Done)
+            .map_err(|error| OwnerErrorCode::from(&error)),
     };
     result.unwrap_or_else(refuse)
 }
@@ -360,6 +364,7 @@ fn state(client: &RefreshClient) -> Result<OwnerResponse, OwnerErrorCode> {
             account: account.map(|session| AccountView {
                 subject: session.account().subject().to_owned(),
                 email: session.account().email().map(str::to_owned),
+                expires_at: Some(session.expires_at()),
             }),
             consent: ConsentView::from(&consent),
             connected: refresh.connected,
@@ -406,7 +411,11 @@ fn consent_offer(
     let view = OfferView {
         id: id.clone(),
         origin: issued.origin().to_owned(),
-        account: AccountView { subject, email },
+        account: AccountView {
+            subject,
+            email,
+            expires_at: None,
+        },
         consent_revision: issued.consent_revision().0,
     };
     *offer = Some((id, issued));

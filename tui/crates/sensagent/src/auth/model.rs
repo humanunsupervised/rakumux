@@ -277,6 +277,13 @@ pub(crate) struct TokenResponse {
 }
 
 impl TokenResponse {
+    /// A refresh response may omit the refresh token: the current one stays valid.
+    pub(crate) fn keep_refresh_token(&mut self, current: &SecretValue) {
+        if self.refresh_token.is_none() {
+            self.refresh_token = Some(current.clone());
+        }
+    }
+
     pub(crate) fn validate(
         self,
         config: &DeviceAuthConfig,

@@ -30,6 +30,7 @@ Usage:\n\
   status_owner enable [--output] FOLDER...\n\
   status_owner disable\n\
   status_owner sign-out\n\
+  status_owner renew\n\
 \n\
 Uses $RAKUMUX_HOME (default ~/.rakumux): set it to a temporary directory to stay\n\
 away from your real sessions. `serve` needs a running rakumux-ptyd for that home\n\
@@ -71,6 +72,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         "sign-out" => {
             connect(&layout)?.sign_out()?;
             println!("Signed out; sharing stopped.");
+        }
+        "renew" => {
+            connect(&layout)?.renew()?;
+            println!("Renewing the sign-in; `state` shows the new expiry.");
         }
         _ => return Err(io::Error::other("unknown command; use --help").into()),
     }
@@ -165,8 +170,11 @@ fn state(client: &OwnerClient) -> Result<(), Box<dyn Error>> {
     let state = client.state()?;
     match &state.account {
         Some(account) => println!(
-            "Account: {}",
-            account.email.as_deref().unwrap_or("(no email)")
+            "Account: {} (token expires at {})",
+            account.email.as_deref().unwrap_or("(no email)"),
+            account
+                .expires_at
+                .map_or_else(|| "?".into(), |at| at.to_string())
         ),
         None => println!("Account: signed out"),
     }

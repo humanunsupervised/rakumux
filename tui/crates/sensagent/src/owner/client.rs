@@ -158,6 +158,14 @@ impl OwnerClient {
         }
     }
 
+    /// Renew the account's access token now rather than when it's due.
+    pub fn renew(&self) -> Result<(), OwnerError> {
+        match self.request(&OwnerRequest::Renew)? {
+            OwnerResponse::Done => Ok(()),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
     /// Abandon an unfinished sign-in.
     pub fn sign_in_cancel(&self) -> Result<(), OwnerError> {
         match self.request(&OwnerRequest::SignInCancel)? {

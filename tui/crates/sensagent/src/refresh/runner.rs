@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use session_core::api::{CallerInfo, EventEnvelope, SubscribeRequest};
 use session_core::client::SessionApi;
@@ -13,6 +13,7 @@ use session_core::model::SessionView;
 use thiserror::Error;
 
 use super::engine::{AIStatus, CaptureWork, Captured, Completed, Dispatch, RefreshState};
+use super::renewal::{self, Renewal, RenewalEvent};
 use super::schedule::MAX_RUNNING;
 use super::sign_in::{self, SignInEvent, SignInFailure, SignInState};
 use super::StatusRefresher;
@@ -64,6 +65,7 @@ enum Command {
     SignInStart(Sender<()>),
     SignInStatus(Sender<SignInState>),
     SignInCancel(Sender<()>),
+    Renew(Sender<()>),
 }
 
 enum Message {
@@ -74,6 +76,7 @@ enum Message {
     Completed(Completed),
     FeaturesRead(FeaturesCompletion),
     SignIn(u64, SignInEvent),
+    Renewed(RenewalEvent),
     Command(Command),
     Stop,
 }
@@ -260,6 +263,13 @@ impl RefreshClient {
         answer.recv().map_err(|_| RefreshError::Stopped)
     }
 
+    /// Renew the account's access token now rather than when it's due.
+    pub fn renew(&self) -> Result<(), RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::Renew(reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
     /// Abandon an unfinished sign-in; an existing account stays signed in.
     pub fn sign_in_cancel(&self) -> Result<(), RefreshError> {
         let (reply, answer) = mpsc::channel();
@@ -318,9 +328,11 @@ fn own<S, A, C>(
         cancel: Arc::new(AtomicBool::new(false)),
         state: SignInState::Idle,
     };
+    let mut renewal = Renewal::default();
     loop {
         let now = origin.elapsed();
         if now >= next_tick {
+            renew(&refresher, &mut renewal, messages);
             for capture in refresher.tick(now) {
                 // Workers outlive the owner, so the queue only closes with it.
                 let _ = work.send(Work::Capture(capture));
@@ -366,11 +378,27 @@ fn own<S, A, C>(
                 };
             }
             Message::SignIn(..) => {}
+            Message::Renewed(event) => {
+                let succeeded = match event {
+                    RenewalEvent::Renewed(Some(session)) => {
+                        refresher.set_account_session(Some(session)).is_ok()
+                    }
+                    // The account changed meanwhile: the new one is planned afresh.
+                    RenewalEvent::Renewed(None) => true,
+                    RenewalEvent::Failed(error) => {
+                        // Static codes only (see `AccountError`).
+                        eprintln!("rakumux-status: renewing the sign-in failed: {error:?}");
+                        false
+                    }
+                };
+                renewal.finished(succeeded, SystemTime::now());
+            }
             Message::Command(command) => control(
                 &mut refresher,
                 command,
                 now,
                 &mut sign_in,
+                &mut renewal,
                 messages,
                 website,
             ),
@@ -383,6 +411,7 @@ fn control<S, A, C>(
     command: Command,
     now: Duration,
     sign_in: &mut SignIn,
+    renewal: &mut Renewal,
     messages: &Sender<Message>,
     website: Option<&AccountWebsite>,
 ) where
@@ -444,6 +473,10 @@ fn control<S, A, C>(
         Command::SignInStatus(reply) => {
             let _ = reply.send(sign_in.state.clone());
         }
+        Command::Renew(reply) => {
+            renewal.request();
+            let _ = reply.send(());
+        }
         Command::SignInCancel(reply) => {
             let state = match sign_in.state {
                 SignInState::Starting | SignInState::Waiting(_) => {
@@ -454,6 +487,34 @@ fn control<S, A, C>(
             replace_sign_in(sign_in, state);
             let _ = reply.send(());
         }
+    }
+}
+
+/// Start renewing the adopted account's access token when it's due.
+fn renew<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    renewal: &mut Renewal,
+    messages: &Sender<Message>,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let now = SystemTime::now();
+    let session = refresher.account();
+    renewal.follow(session, now);
+    let Some(session) = session.cloned() else {
+        return;
+    };
+    if !renewal.start(now) {
+        return;
+    }
+    let owner = messages.clone();
+    let started = renewal::spawn(refresher.account_service(), session, move |event| {
+        let _ = owner.send(Message::Renewed(event));
+    });
+    if started.is_err() {
+        renewal.finished(false, now);
     }
 }
 

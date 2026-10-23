@@ -6,6 +6,7 @@
 //! Rakumux home, opens a store, holds a per-home lock or accepts connections.
 
 mod engine;
+mod renewal;
 mod runner;
 mod schedule;
 mod sign_in;

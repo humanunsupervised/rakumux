@@ -742,3 +742,146 @@ fn restoring_with_a_differently_pinned_client_never_transmits_the_stored_bearer(
     assert_eq!(recorded.lock().unwrap().len(), 1);
     assert_eq!(store.load().unwrap().revision(), revision);
 }
+
+fn renewed_json(access: &str, refresh: Option<&str>) -> Value {
+    let mut value = grant_json();
+    value["access_token"] = json!(access);
+    match refresh {
+        Some(refresh) => value["refresh_token"] = json!(refresh),
+        None => {
+            value.as_object_mut().unwrap().remove("refresh_token");
+        }
+    }
+    value
+}
+
+#[test]
+fn refresh_sends_only_the_refresh_token_and_keeps_it_unless_rotated() {
+    let (client, recorded) = client(vec![
+        reply(200, metadata()),
+        reply(
+            200,
+            renewed_json("PRIVATE-ACCESS-2", Some("PRIVATE-REFRESH-2")),
+        ),
+        reply(200, renewed_json("PRIVATE-ACCESS-3", None)),
+    ]);
+    let rotated = client.refresh(&grant()).unwrap();
+    assert_eq!(rotated.access_token().expose_secret(), "PRIVATE-ACCESS-2");
+    assert_eq!(
+        rotated.refresh_token().unwrap().expose_secret(),
+        "PRIVATE-REFRESH-2"
+    );
+    let kept = client.refresh(&rotated).unwrap();
+    assert_eq!(kept.access_token().expose_secret(), "PRIVATE-ACCESS-3");
+    assert_eq!(
+        kept.refresh_token().unwrap().expose_secret(),
+        "PRIVATE-REFRESH-2"
+    );
+    let requests = recorded.lock().unwrap();
+    assert_eq!(
+        requests[1].endpoint.as_str(),
+        "https://clerk.example.com/oauth/token"
+    );
+    assert!(requests[1].bearer.is_none());
+    let form = requests[1].form.as_ref().unwrap();
+    assert_eq!(form.len(), 3);
+    assert!(form.contains(&("client_id".into(), "public-client".into())));
+    assert!(form.contains(&("grant_type".into(), "refresh_token".into())));
+    assert!(form.contains(&("refresh_token".into(), "PRIVATE-REFRESH-TOKEN".into())));
+}
+
+#[test]
+fn a_refused_refresh_is_an_invalid_grant_and_other_failures_stay_distinct() {
+    let (client, _) = client(vec![
+        reply(200, metadata()),
+        reply(400, json!({"error": "invalid_grant"})),
+        reply(503, json!({})),
+    ]);
+    assert_eq!(
+        client.refresh(&grant()).unwrap_err(),
+        AuthError::InvalidGrant
+    );
+    assert_eq!(
+        client.refresh(&grant()).unwrap_err(),
+        AuthError::HttpStatus(503)
+    );
+    let mut without = grant();
+    without.refresh_token = None;
+    assert_eq!(
+        client.refresh(&without).unwrap_err(),
+        AuthError::InvalidGrant
+    );
+}
+
+#[test]
+fn renewal_saves_a_verified_token_for_the_same_account_under_a_new_revision() {
+    use crate::auth::{AccountError, AccountService, CredentialStore, FileCredentialStore};
+    let directory = tempfile::tempdir().unwrap();
+    let store = FileCredentialStore::new(directory.path().join("private-auth"));
+    let account = AccountService::new(config(), store.clone());
+    let ticket = account.begin_login().unwrap();
+    let session = account.commit_login(&ticket, verified("user_one")).unwrap();
+    let (client, recorded) = client(vec![
+        reply(200, account_metadata()),
+        reply(200, renewed_json("PRIVATE-ACCESS-2", None)),
+        reply(200, account_json("user_one")),
+        reply(200, renewed_json("PRIVATE-ACCESS-3", None)),
+        reply(200, account_json("user_other")),
+    ]);
+    let renewed = account.renew(&session, &client).unwrap().unwrap();
+    assert_eq!(renewed.account().subject(), "user_one");
+    assert_ne!(renewed.revision(), session.revision());
+    assert!(!account.is_current(&session).unwrap());
+    assert!(account.is_current(&renewed).unwrap());
+    let stored = store.load().unwrap();
+    let credentials = stored.credentials().unwrap();
+    assert_eq!(
+        credentials.access_token().expose_secret(),
+        "PRIVATE-ACCESS-2"
+    );
+    assert_eq!(
+        credentials.refresh_token().unwrap().expose_secret(),
+        "PRIVATE-REFRESH-TOKEN"
+    );
+    assert_eq!(
+        recorded.lock().unwrap()[2].bearer.as_deref(),
+        Some("PRIVATE-ACCESS-2")
+    );
+    // The replaced session renews nothing.
+    assert!(account.renew(&session, &client).unwrap().is_none());
+    // A token for another account is never saved.
+    assert!(matches!(
+        account.renew(&renewed, &client),
+        Err(AccountError::AccountMismatch)
+    ));
+    assert!(account.is_current(&renewed).unwrap());
+}
+
+#[test]
+fn restoring_an_expired_token_renews_it() {
+    use crate::auth::{AccountService, FileCredentialStore};
+    let directory = tempfile::tempdir().unwrap();
+    let store = FileCredentialStore::new(directory.path().join("private-auth"));
+    let account = AccountService::new(config(), store.clone());
+    let ticket = account.begin_login().unwrap();
+    let mut short = verified("user_one");
+    short.grant.expires_in = Duration::from_secs(2);
+    account.commit_login(&ticket, short).unwrap();
+    std::thread::sleep(Duration::from_secs(3));
+    // A later process: no monotonic deadline, only the saved expiry.
+    let restarted = AccountService::new(config(), store);
+    let (client, recorded) = client(vec![
+        reply(200, account_metadata()),
+        reply(200, renewed_json("PRIVATE-ACCESS-2", None)),
+        reply(200, account_json("user_one")),
+    ]);
+    let restored = restarted.restore(&client).unwrap().unwrap();
+    assert_eq!(restored.account().subject(), "user_one");
+    assert!(restarted.is_current(&restored).unwrap());
+    let requests = recorded.lock().unwrap();
+    assert!(requests[1]
+        .form
+        .as_ref()
+        .unwrap()
+        .contains(&("grant_type".into(), "refresh_token".into())));
+}

@@ -195,6 +195,7 @@ impl<S: CredentialStore, C: WallClock> AccountService<S, C> {
     }
 
     /// Restore only after live account verification and a successful revision check.
+    /// An access token that expired meanwhile is renewed with its refresh token.
     pub fn restore(
         &self,
         client: &ClerkDeviceClient,
@@ -203,10 +204,69 @@ impl<S: CredentialStore, C: WallClock> AccountService<S, C> {
         let Some(mut credentials) = snapshot.credentials else {
             return Ok(None);
         };
-        self.check_credentials(&mut credentials)?;
+        match self.check_credentials(&mut credentials) {
+            Err(AccountError::Expired) => {
+                return self
+                    .renew_credentials(snapshot.revision, credentials, client)
+                    .map(Some);
+            }
+            result => {
+                result?;
+            }
+        }
         let verified = client.verify_account(credentials.grant.clone())?;
         self.commit_restore(snapshot.revision, credentials, verified)
             .map(Some)
+    }
+
+    /// Renew `session` with its refresh token: a new access token, verified online
+    /// for the same account and saved over the session's revision (so the returned
+    /// session has a new one). Works after the access token expired; the refresh
+    /// token's own validity is the provider's. `None` when `session` is no longer
+    /// the stored account (signed out or replaced meanwhile).
+    pub fn renew(
+        &self,
+        session: &AccountSession,
+        client: &ClerkDeviceClient,
+    ) -> Result<Option<AccountSession>, AccountError> {
+        if !Arc::ptr_eq(&self.owner, &session.owner) {
+            return Err(AccountError::OwnerMismatch);
+        }
+        let snapshot = self.store.load()?;
+        let Some(credentials) = snapshot.credentials else {
+            return Ok(None);
+        };
+        if snapshot.revision != session.revision
+            || credentials.account.subject != session.account.subject
+        {
+            return Ok(None);
+        }
+        self.renew_credentials(snapshot.revision, credentials, client)
+            .map(Some)
+    }
+
+    fn renew_credentials(
+        &self,
+        revision: CredentialRevision,
+        credentials: SavedCredentials,
+        client: &ClerkDeviceClient,
+    ) -> Result<AccountSession, AccountError> {
+        if !credentials.matches_config(&self.config) {
+            return Err(AccountError::ProviderMismatch);
+        }
+        let observation = self.observe_time()?;
+        if unix_seconds(observation.wall)? < credentials.received_at {
+            return Err(AccountError::ClockChanged);
+        }
+        // Network work runs outside store locks; the save below is conditional.
+        let grant = client.refresh(&credentials.grant)?;
+        let verified = client.verify_account(grant)?;
+        if verified.identity.subject != credentials.account.subject {
+            return Err(AccountError::AccountMismatch);
+        }
+        let mut renewed = SavedCredentials::from_verified(verified)?;
+        self.check_credentials(&mut renewed)?;
+        self.save(revision, &mut renewed)
     }
 
     /// Whether a safe account view still matches disk state and cached expiry.

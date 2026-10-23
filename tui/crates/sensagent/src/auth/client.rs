@@ -13,6 +13,7 @@ use super::{
 };
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const REFRESH_GRANT_TYPE: &str = "refresh_token";
 
 /// Blocking Clerk OAuth public client. Construct and call it off the UI thread.
 ///
@@ -161,6 +162,35 @@ impl ClerkDeviceClient {
             },
             Err(error) => PollOutcome::Rejected(error),
         }
+    }
+
+    /// Exchange `grant`'s refresh token for a new grant (RFC 6749 §6), once. A
+    /// response without a refresh token keeps the old one; a new one replaces it.
+    /// The new grant must still be verified with `verify_account` before use.
+    pub fn refresh(&self, grant: &AuthorizationGrant) -> Result<AuthorizationGrant, AuthError> {
+        if *grant.provider != ProviderIdentity::from(&self.config) {
+            return Err(AuthError::UntrustedEndpoint);
+        }
+        let refresh_token = grant.refresh_token().ok_or(AuthError::InvalidGrant)?;
+        let form = [
+            ("client_id", self.config.client_id.as_str()),
+            ("grant_type", REFRESH_GRANT_TYPE),
+            ("refresh_token", refresh_token.expose_secret()),
+        ];
+        let response = self
+            .transport
+            .request(&self.token_endpoint, Some(&form), None)?;
+        if response.status == 200 {
+            let mut tokens = decode::<TokenResponse>(&response)?;
+            tokens.keep_refresh_token(refresh_token);
+            return tokens.validate(&self.config, response.receipt);
+        }
+        if response.status == 400 || response.status == 401 || response.status == 403 {
+            if let Ok(error) = decode::<OAuthError>(&response) {
+                return Err(oauth_rejection(&error.error));
+            }
+        }
+        Err(AuthError::HttpStatus(response.status))
     }
 
     /// Verify the exact access token against advertised, issuer-pinned UserInfo.
