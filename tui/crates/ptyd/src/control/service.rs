@@ -53,6 +53,9 @@ const ACTIVITY_INTERVAL_MS: i64 = 1000;
 /// How often a session's foreground is looked at for its resume command
 /// (`resume::plan`), unless the foreground process changed.
 const RESUME_CHECK_MS: i64 = 5_000;
+/// How often a running agent's conversation log is read for its latest
+/// line, at most (on its terminal's output).
+const OUTPUT_CHECK_MS: i64 = 1_000;
 /// A shell must sit at its prompt this long before the resume command is
 /// forgotten (programs killed during a reboot leave the prompt for a
 /// moment).
@@ -94,6 +97,12 @@ struct LiveSession {
     recorded_resume: Option<Option<ResumeSpec>>,
     /// Since when a shell sits at its prompt.
     shell_since_ms: Option<i64>,
+    /// The running agent's conversation log, followed for its latest line.
+    output: Option<crate::agent_output::Follower>,
+    /// When the log was last read.
+    output_checked_ms: i64,
+    /// The agent's latest output line (`SessionView::agent_output`).
+    agent_output: Option<String>,
 }
 
 impl LiveSession {
@@ -109,6 +118,9 @@ impl LiveSession {
             resume_checked_pid: None,
             recorded_resume: None,
             shell_since_ms: None,
+            output: None,
+            output_checked_ms: 0,
+            agent_output: None,
         }
     }
 }
@@ -1811,6 +1823,7 @@ impl Inner {
         let process = self.host.info(terminal).and_then(|info| info.foreground);
         let now = now_ms();
         let plan = self.resume_plan(terminal, session_id, now);
+        self.follow_output(terminal, session_id, process.as_ref(), now);
         let mut state = self.lock();
         if let Some(plan) = plan {
             self.record_resume(&mut state, session_id, terminal, plan, now);
@@ -1843,6 +1856,59 @@ impl Inner {
         }
         self.refresh(&mut state, session_id);
         self.changed.notify_all();
+    }
+
+    /// Read the running agent's conversation log for its latest line, at
+    /// most every [`OUTPUT_CHECK_MS`]: the log is found again when the
+    /// foreground process changes, and dropped when it isn't a known agent.
+    /// Reads files of other programs, so it runs without the state lock; a
+    /// changed line is published by the caller's `refresh`.
+    fn follow_output(
+        &self,
+        terminal: TerminalId,
+        session_id: &SessionId,
+        process: Option<&crate::host::ProcessInfo>,
+        now: i64,
+    ) {
+        let (follower, agent) = {
+            let mut state = self.lock();
+            let Some(live) = state
+                .live
+                .get_mut(session_id)
+                .filter(|live| live.terminal == terminal)
+            else {
+                return;
+            };
+            if now.saturating_sub(live.output_checked_ms) < OUTPUT_CHECK_MS {
+                return;
+            }
+            live.output_checked_ms = now;
+            let agent = live.tracker.detected_agent().map(String::from);
+            (live.output.take(), agent)
+        };
+        let follower = match (process, agent) {
+            (Some(process), Some(agent)) => {
+                let mut follower = follower
+                    .filter(|follower| follower.pid() == process.pid)
+                    .or_else(|| crate::agent_output::Follower::locate(process, &agent));
+                if let Some(follower) = follower.as_mut() {
+                    follower.follow();
+                }
+                follower
+            }
+            _ => None,
+        };
+        let mut state = self.lock();
+        if let Some(live) = state
+            .live
+            .get_mut(session_id)
+            .filter(|live| live.terminal == terminal)
+        {
+            live.agent_output = follower
+                .as_ref()
+                .and_then(|follower| follower.latest().map(String::from));
+            live.output = follower;
+        }
     }
 
     /// What to record as `session_id`'s resume command (`resume::plan`),
@@ -2289,6 +2355,14 @@ impl Inner {
             None => git::detect(&directory),
         };
         SessionView {
+            agent_output: (runtime.status == SessionStatus::Live)
+                .then(|| {
+                    state
+                        .live
+                        .get(&record.id)
+                        .and_then(|live| live.agent_output.clone())
+                })
+                .flatten(),
             pinned: record.pinned,
             git,
             id: record.id.clone(),

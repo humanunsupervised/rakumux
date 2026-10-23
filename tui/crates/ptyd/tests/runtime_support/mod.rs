@@ -194,6 +194,7 @@ impl FakeControl {
             None => SessionStatus::Dead,
         };
         SessionView {
+            agent_output: None,
             pinned: false,
             git: None,
             auto_named: false,

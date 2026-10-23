@@ -15,6 +15,8 @@
 //!   sessions come back in the same conversation.
 //! - `persist`, `procinfo`, `detect`, `git`: support modules.
 
+#[path = "../../../../integrations/output.rs"]
+pub mod agent_output;
 pub mod control;
 pub mod control_api;
 #[path = "../../../../integrations/detection.rs"]

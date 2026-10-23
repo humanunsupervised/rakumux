@@ -262,6 +262,7 @@ mod tests {
 
     fn view(id: &str, name: &str, folder: &Path, last_active_at: i64) -> SessionView {
         SessionView {
+            agent_output: None,
             id: SessionId::from_string(id),
             name: name.into(),
             scope: ScopeRoot::from_canonical(folder.to_path_buf()),

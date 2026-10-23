@@ -49,6 +49,11 @@ pub(super) fn codex_resume(process: &ProcessInfo, cwd: Option<&Path>) -> Option<
 }
 
 fn codex_open_thread(pid: u32) -> Option<String> {
+    codex_open_rollouts(pid).find_map(|path| codex_rollout_thread(&path))
+}
+
+/// The rollout files `pid` (or a process it started) has open.
+fn codex_open_rollouts(pid: u32) -> impl Iterator<Item = PathBuf> {
     let mut pids = vec![pid];
     pids.extend(crate::procinfo::descendants(pid));
     pids.into_iter()
@@ -58,7 +63,11 @@ fn codex_open_thread(pid: u32) -> Option<String> {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with("rollout-") && name.ends_with(".jsonl"))
         })
-        .find_map(|path| codex_rollout_thread(&path))
+}
+
+/// The rollout file of the interactive thread `pid` runs, when it has one open.
+pub(crate) fn codex_open_rollout(pid: u32) -> Option<PathBuf> {
+    codex_open_rollouts(pid).find(|path| codex_rollout_thread(path).is_some())
 }
 
 pub(super) fn codex_rollout_thread(path: &Path) -> Option<String> {

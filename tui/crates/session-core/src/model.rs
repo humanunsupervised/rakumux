@@ -164,6 +164,11 @@ pub struct SessionView {
     /// Fresh hook activity. Absent when unavailable, expired or not live.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<crate::activity::AgentActivity>,
+    /// The agent's latest output as one line (its reasoning, a tool call or
+    /// its reply), read by the daemon from the agent's conversation log on
+    /// this machine. Live sessions running a known agent only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_output: Option<String>,
     pub created_by: Creator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<SessionId>,
@@ -301,6 +306,7 @@ mod tests {
             created_at: 1,
             last_active_at: 2,
             terminal: None,
+            agent_output: None,
         };
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("exit_code"));

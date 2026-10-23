@@ -18,6 +18,7 @@ use std::sync::Mutex;
 /// A live session named `name` in scope `/scope`.
 pub fn session(id: &str, name: &str) -> SessionView {
     SessionView {
+        agent_output: None,
         pinned: false,
         git: None,
         auto_named: false,

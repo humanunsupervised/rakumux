@@ -652,6 +652,7 @@ mod tests {
 
     fn view() -> SessionView {
         SessionView {
+            agent_output: None,
             id: SessionId::from_string("01J0000000000000000000000A"),
             name: "reviewer".into(),
             scope: ScopeRoot::from_canonical("/repo".into()),

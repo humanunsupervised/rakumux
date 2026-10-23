@@ -4172,6 +4172,8 @@ fn account_tick(h: &mut Harness) {
 #[tokio::test]
 async fn signing_in_from_settings_shows_a_code_then_descriptions_under_sessions() {
     let (mut h, account) = account_harness(testing::FakeAccount::default());
+    // AI descriptions are hidden for now; this is how they work when shown.
+    h.app.show_ai_descriptions = true;
     assert_eq!(h.app.account, super::types::AccountStatus::SignedOut);
     assert_eq!(account.calls(), ["account"]);
     // Signed out: no descriptions are asked for.
@@ -4253,6 +4255,7 @@ async fn closing_the_dialog_abandons_the_sign_in() {
 #[tokio::test]
 async fn signing_out_stops_the_descriptions() {
     let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
+    h.app.show_ai_descriptions = true;
     account
         .descriptions
         .lock()
@@ -4455,4 +4458,32 @@ async fn a_signs_in_and_c_copies_the_sign_in_link() {
         account_state(&h),
         Some(super::types::AccountDialogState::SignedIn(_))
     ));
+}
+
+#[tokio::test]
+async fn an_agents_latest_output_shows_under_its_name_above_its_details() {
+    let mut with_output = view("A", "api", 20);
+    with_output.agent_output = Some("Bash: Run the tests".into());
+    let mut h = harness(vec![with_output, view("B", "docs", 10)]).on_folders_tab();
+    let screen = screen_rows(&mut h, 160, 48);
+    let title = screen
+        .iter()
+        .position(|row| row.contains(" api "))
+        .expect("the title");
+    assert!(
+        screen[title + 1].contains("Bash: Run the tests"),
+        "{}",
+        screen.join("\n")
+    );
+    // The details follow the output; a session without output has none.
+    assert!(
+        !screen[title + 2].trim().is_empty(),
+        "{}",
+        screen.join("\n")
+    );
+    let docs = screen
+        .iter()
+        .position(|row| row.contains(" docs "))
+        .unwrap();
+    assert!(!screen[docs + 1].contains("Bash:"));
 }

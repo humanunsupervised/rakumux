@@ -45,7 +45,9 @@ mod codex;
 mod opencode;
 #[cfg(test)]
 use claude::claude_flags;
-use claude::{claude_config_dir, claude_resume};
+use claude::claude_resume;
+pub(crate) use claude::{claude_config_dir, claude_conversation};
+pub(crate) use codex::codex_open_rollout;
 use codex::codex_resume;
 use opencode::opencode_resume;
 
@@ -104,7 +106,7 @@ fn command_line(process: &ProcessInfo) -> Option<Vec<String>> {
     (!argv.is_empty() && !argv[0].is_empty()).then_some(argv)
 }
 
-fn is_conversation_id(id: &str) -> bool {
+pub(crate) fn is_conversation_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
         && id

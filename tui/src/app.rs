@@ -267,6 +267,8 @@ pub struct App {
     descriptions_at: Option<Instant>,
     descriptions_busy: bool,
     descriptions_generation: u64,
+    /// The list shows AI descriptions (`account::SHOW_AI_DESCRIPTIONS`).
+    pub show_ai_descriptions: bool,
     pub connection: Connection,
     /// The daemon was reachable once; losing it triggers reconnects.
     was_connected: bool,
@@ -375,6 +377,7 @@ impl App {
             descriptions_at: None,
             descriptions_busy: false,
             descriptions_generation: 0,
+            show_ai_descriptions: account::SHOW_AI_DESCRIPTIONS,
             connection: Connection::Connecting,
             was_connected: false,
             checked_daemon_features: false,

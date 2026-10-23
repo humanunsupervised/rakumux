@@ -97,8 +97,27 @@ Compaction (`SessionStart` with `source: compact`, including idle compaction) ne
 nor ends a turn.
 
 The TUI animates busy states locally. Needs-input/done markers are static. Agent-internal
-subagents are not Rakumux child sessions. These adapters forward metadata only, never
-prompts, tool arguments, output or transcripts. Native input is capped at 1 MiB and never
+subagents are not Rakumux child sessions. These hook adapters forward metadata only, never
+prompts, tool arguments, output or transcripts.
+
+## Latest output
+
+`output.rs` gives each live Claude Code or Codex session one line: what its agent last said
+or did (`SessionView.agent_output`), shown in the session list under the session's name.
+- **Where it comes from:** the daemon reads it from the agent's own conversation log on this
+  machine, at most once a second while the terminal shows output. Claude Code's log is
+  `<config dir>/projects/*/<conversation>.jsonl`, for the conversation in
+  `sessions/<pid>.json`; Codex's is the `rollout-….jsonl` file the process has open.
+- **What's taken:** only the last entry the main conversation's assistant wrote (its
+  reasoning, a tool call as `Tool: description` or a short path, or its reply), cut to its
+  first line: no control characters, at most 240 characters.
+- **What isn't:** prompts, tool output and subagents' entries are never taken, and the log is
+  read only from where it was last read, at most 256 KiB at a time.
+- **Where it goes:** the line reaches the daemon's clients like the rest of the session's view
+  (the TUI, `rakumux-api` and so the phone app). Nothing else reads it, and it isn't part of
+  the AI description context.
+
+OpenCode has no line yet. Native input is capped at 1 MiB and never
 logged. Outside a Rakumux session hooks do nothing and never spawn a daemon. Errors emit a
 generic diagnostic and empty JSON with success; activity cannot approve/deny/continue work.
 

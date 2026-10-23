@@ -33,6 +33,7 @@ use super::{App, AppOptions, Config, ExecMode, Settings};
 /// A live session in `/repo` with the given recency.
 pub fn view(id: &str, name: &str, last_active_at: i64) -> SessionView {
     SessionView {
+        agent_output: None,
         pinned: false,
         git: None,
         auto_named: false,

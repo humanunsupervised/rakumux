@@ -1662,7 +1662,8 @@ mod tests {
             let layout = h.app.screen();
             assert!(!layout.stacked && layout.detail.is_none(), "{screen}");
             assert_eq!(layout.list.unwrap().height, height - 1);
-            for name in ["▤ Folders", "● api", "● docs", "+ New session"] {
+            // Status marks are on the right, after the age.
+            for name in ["▤ Folders", "  api ", "  docs ", "+ New session"] {
                 assert!(screen.contains(name), "{name}: {screen}");
             }
             // No session on screen.
@@ -1719,7 +1720,7 @@ mod tests {
                 let screen = render(&mut h.app, width, height);
                 let list = h.app.screen().list.unwrap();
                 let top = rows(&screen, 0, list.bottom());
-                let name = format!("● session-{i}");
+                let name = format!("  session-{i} ");
                 assert!(top.contains(&name), "{name} {width}x{height}: {screen}");
                 assert!(top.contains("▤ Folders"), "{screen}");
             }

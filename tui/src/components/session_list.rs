@@ -3,9 +3,10 @@
 //! its filter, `▤ web ▾`, and Enter or a click on it opens its modal), then
 //! the sessions shown, under a header row per folder (app, status) when
 //! there are several, and "+ New session" last.
-//! Each session is a compact cell after a blank row: name (with a pin mark),
-//! its age and activity mark at the right; then its program, branch and state;
-//! then, when signed in to the Rakumux account, its AI description.
+//! Each session is a compact cell after a blank row: its name, then its age
+//! and its mark (an agent's activity, else its status) at the right; then the
+//! agent's latest output, when the daemon has one; then its program, branch
+//! and state. A pin toggle shows left of the name under the pointer.
 //! The selected item's text is white and the others' muted; nothing has a
 //! background except the tabs' band. A session being dragged has a blue
 //! bar on its left.
@@ -48,7 +49,11 @@ fn row_height(row: &ListRow) -> u16 {
 /// [`row_height`], plus a line for a session's AI description.
 fn row_height_in(app: &App, row: &ListRow) -> u16 {
     match row {
-        ListRow::Session(session) if app.description(&session.id).is_some() => 4,
+        ListRow::Session(session) => {
+            let extra = u16::from(session.agent_output.is_some())
+                + u16::from(app.description(&session.id).is_some());
+            row_height(row) + extra
+        }
         row => row_height(row),
     }
 }
@@ -103,9 +108,8 @@ fn cell_lines(content: Vec<Vec<Span<'_>>>, height: u16) -> Vec<Line<'_>> {
 /// pins it.
 const PIN_TOGGLE: &str = "☆";
 
-/// The hovered session's pin toggle, just left of its name: in its status
-/// mark's place (which it covers while hovered), the column of ready's
-/// `★ pinned` header's star. `☆` to pin it, the gold `★` to unpin it.
+/// The hovered session's pin toggle, just left of its name (the slot every
+/// row keeps free there), the column of ready's `★ pinned` header's star. `☆` to pin it, the gold `★` to unpin it.
 /// Returns where it is: the mark and the space after it.
 fn mark_hovered(lines: &mut [Line<'_>], pinned: bool, area: Rect) -> Option<Rect> {
     let p = theme::palette();
@@ -331,13 +335,15 @@ fn session_content(
     now: i64,
 ) -> Vec<Vec<Span<'static>>> {
     let p = theme::palette();
+    // On the right after the age: an agent's activity, else the status (a
+    // program like nvim). The slot left of the name is the hover pin's.
     let badge = activity_badge_at(session, now)
-        .map(|(mark, style)| Span::styled(mark, style.add_modifier(Modifier::BOLD)));
-    let (glyph, glyph_style) = if badge.is_some() {
-        (" ", Style::default())
-    } else {
-        status_glyph(session)
-    };
+        .map(|(mark, style)| Span::styled(mark, style.add_modifier(Modifier::BOLD)))
+        .or_else(|| {
+            let (glyph, style) = status_glyph(session);
+            (!glyph.trim().is_empty()).then(|| Span::styled(glyph, style))
+        });
+    let (glyph, glyph_style) = (" ", Style::default());
     let badge_width = badge.as_ref().map_or(0, |span| span.width() + 1);
     let age = truncate(
         &relative_time(now, session.last_active_at),
@@ -390,7 +396,19 @@ fn session_content(
         )
         .spans,
     );
-    let mut lines = vec![first, second];
+    let mut lines = vec![first];
+    // The agent's latest output, under its name: reasoning, a tool call or
+    // its reply, as the daemon reads it from the agent's log.
+    if let Some(output) = &session.agent_output {
+        lines.push(vec![
+            Span::raw("  "),
+            Span::styled(
+                truncate(output, width.saturating_sub(2)),
+                Style::default().fg(detail_color),
+            ),
+        ]);
+    }
+    lines.push(second);
     if let Some(description) = app.description(&session.id) {
         lines.push(vec![
             Span::raw("  "),

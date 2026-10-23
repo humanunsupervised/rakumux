@@ -252,6 +252,7 @@ fn every_stream_message_is_documented() {
         Creator, LaunchSpec, ReportResult, Reported as ModelReported, ScopeRoot, SessionView,
     };
     let view = SessionView {
+        agent_output: None,
         id: SessionId::from_string("i"),
         name: "n".into(),
         scope: ScopeRoot::from_canonical("/p".into()),
