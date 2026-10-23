@@ -167,11 +167,11 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
       (`running_cargo_tests`-style, underscores only).
 - [ ] With no key configured, sessions keep their generated names and nothing errors.
 
-## 8. Shell wrapper
+## 8. Quit and cd
 
-- [ ] With the `rakumux` wrapper function from `AGENTS.md` installed, quitting with a session
-      selected can `cd` the calling shell into that session's folder, and the wrapper never hangs
-      (`rakumux --help`, `rakumux --version`, quitting immediately).
+- [ ] `c` with a session selected quits and prints `cd "<that session's folder>"` after the screen
+      is restored. No shell wrapper ships yet to run it (see "Shell wrapper integration" in
+      `AGENTS.md`).
 
 ## 9. List order
 

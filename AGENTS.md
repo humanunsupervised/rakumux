@@ -697,7 +697,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux` | TUI for the current folder |
 | `rakumux new [--name N] [--cwd P] [--cmd C]... [--detach] [-- ARGV...]` | Create a session and attach |
 | `rakumux ls [--json] [--dead] [--folder DIR]... \| --all` | Sessions of this folder, of the given folders, or of every folder (`--dead` includes dead ones; `--project` is a hidden alias of `--folder`; `--json` gives each session `folder` next to `scope`) |
-| `rakumux attach <name\|id>` | Full-screen attach (prefix `d` detaches) |
+| `rakumux attach <name\|id>` | Full-screen attach (prefix `Ctrl-\`: `d` detaches, `>`/`<` switch session, `n` new session) |
 | `rakumux rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
 | `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin first in its folder / unpin |
 | `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete |
@@ -927,10 +927,12 @@ alone, ready for new sessions. Forgetting a folder is CLI-only (`rakumux folders
 
 ## Shell wrapper integration
 
-A program can't change its parent shell's directory. When the TUI quits with a session selected it
-can print `cd "<session cwd>"`; a shell function around `rakumux` evals that line. The wrapper is
-documented at the top of `rakumux.sh`. The daemon is always spawned with its stdio detached, so a
-wrapper that captures Rakumux's output never waits on the daemon.
+A program can't change its parent shell's directory. When the TUI quits with `c` and a session
+selected, it prints `cd "<session cwd>"` on stdout after restoring the terminal
+(`RunOutcome::SwitchDirectory`, `main.rs`). No wrapper ships yet: the TUI draws on stdout, so a
+shell function that captures it (`$(rakumux)`) would hide the UI; a working wrapper needs the
+directory written elsewhere (for example a file named by a flag, not implemented). The daemon is
+always spawned with its stdio detached, so capturing a client's output never waits on the daemon.
 
 ## Local builds
 

@@ -119,7 +119,9 @@ place. Decline any warning that it would end sessions. Update has no stop/revive
 ```bash
 npm uninstall -g rakumux
 brew uninstall rakumux
-sudo rm -rf /usr/local/libexec/rakumux /usr/local/bin/rakumux /usr/local/bin/rakumux-local  # install.sh
+# install.sh (use your PREFIX in place of /usr/local, without sudo for a user-local install):
+sudo rm -rf /usr/local/libexec/rakumux /usr/local/bin/rakumux /usr/local/bin/rakumux-local \
+  /usr/local/bin/rakumux-mcp /usr/local/bin/rakumux-api
 ```
 
 Your sessions and settings live in `~/.rakumux`; remove it to start fresh.

@@ -25,9 +25,10 @@ bash tests/test-repository.sh
 
 ## Manual
 
-- **`manual-test-instructions.md`** - Checklist for the TUI, the daemon, the CLI, AI naming and the
-  shell wrapper.
-- **`test-wrappers.sh`** - Checks that the `rakumux` shell wrapper is defined.
+- **`manual-test-instructions.md`** - Checklist for the TUI, the daemon, the CLI, AI naming and
+  quit-and-cd.
+- **`test-wrappers.sh`** - Checks whether a `rakumux` shell function is defined in your shell
+  (none ships yet; see "Shell wrapper integration" in `AGENTS.md`).
 - **`test-tui-quick.sh`**, **`test-tui-keys.sh`** - Launch the TUI briefly from the repo root.
 - **`test-terminal-direct.sh`** - Alternate-screen and colour check for the terminal itself.
 - **`debug-tui-output.sh`** - Terminal capabilities when the TUI renders nothing.

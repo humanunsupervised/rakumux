@@ -550,7 +550,9 @@ impl KeyAction {
                 format!("Goes back into the session and sends it `{p}`, for programs that use it.")
             }
             KeyAction::QuitAndCd => {
-                "Needs the shell wrapper described at the top of rakumux.sh.".into()
+                "Quits, then prints `cd \"<folder>\"` for the selected session's folder, for a \
+                 shell function to run. Rakumux doesn't ship that function yet."
+                    .into()
             }
             _ => String::new(),
         }
@@ -2119,7 +2121,7 @@ fn agents_and_cli(doc: &mut Doc) {
     );
     doc.command(
         "rakumux attach <name|id>",
-        "One session full screen, outside this screen (works over SSH). `Ctrl-b` then `d` \
+        "One session full screen, outside this screen (works over SSH). `Ctrl-\\` then `d` \
          detaches, `>` / `<` switch session, `n` starts a new one.",
     );
     doc.command(
@@ -3874,6 +3876,14 @@ mod tests {
             .flat_map(|l| l.spans.iter())
             .any(|s| s.content.as_ref() == "Ctrl-` ?" && s.style == key_style);
         assert!(styled, "prefix mention should be one key-styled span");
+    }
+
+    #[test]
+    fn attach_help_names_its_fixed_prefix_whatever_the_rakumux_key() {
+        // `rakumux attach` always uses Ctrl-\ (cli/attach.rs), even with another Rakumux key.
+        let text = tab_text(ModalTab::AgentsCli, &ctx("Ctrl-a"), 200);
+        assert!(text.contains("Ctrl-\\ then d detaches"), "{text}");
+        assert!(!text.contains("Ctrl-b then d"), "{text}");
     }
 
     #[test]
