@@ -151,6 +151,9 @@ pub enum Hit {
     TerminalPanelDivider,
     /// Session list row (0 = the tabs; headers count).
     ListRow(usize),
+    /// The pin left of a hovered session row's name (that list row):
+    /// pins or unpins its session.
+    PinToggle(usize),
     /// Visible Grid card in filtered session order (last is New session).
     GridCell(usize),
     /// Previous/next Grid page.
@@ -297,6 +300,9 @@ pub struct App {
     pub divider: DividerState,
     /// A session being dragged to another place in the list.
     pub drag: Option<SessionDrag>,
+    /// The list row under the mouse pointer (terminals that report
+    /// movement): a session row there shows its pin toggle.
+    pub hovered_row: Option<usize>,
     pub mode: AppMode,
     /// Whole terminal area (kept current by the event loop and `draw`).
     pub area: Rect,
@@ -389,6 +395,7 @@ impl App {
             zoomed: false,
             divider: DividerState::default(),
             drag: None,
+            hovered_row: None,
             mode: AppMode::Normal,
             area: Rect::new(0, 0, 80, 24),
             hits: Vec::new(),

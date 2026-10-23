@@ -2226,9 +2226,9 @@ async fn dragging_a_session_moves_it_live_and_saves_the_order_on_release() {
     h.app
         .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, a.y + 1));
     assert_eq!(h.selected().as_deref(), Some("A"));
-    // Not dragged yet: no mark.
+    // Not dragged yet: no drag bar (the pointer's row shows its pin).
     let buffer = draw(&mut h);
-    assert_eq!(buffer.get(a.x + 1, a.y + 1).symbol(), " ");
+    assert_ne!(buffer.get(a.x + 1, a.y + 1).symbol(), "▎");
     // Over B: A takes its place, marked as dragged, still selected.
     h.app
         .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x, b.y + 1));
@@ -4324,4 +4324,73 @@ async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
         "{:?}",
         footer(&h)
     );
+}
+
+#[tokio::test]
+async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let mouse = |h: &mut Harness, kind, (column, row): (u16, u16)| {
+        h.app.handle_mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+        h.app.process_pending();
+    };
+    let target = |h: &Harness, wanted: Hit| -> Option<(u16, u16)> {
+        h.app
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == wanted)
+            .map(|(area, _)| (area.x + 1, area.y + area.height - 1))
+    };
+    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]).on_folders_tab();
+    let selected = h.app.list.selection().clone();
+    screen_rows(&mut h, 160, 48);
+    let row = h
+        .app
+        .list
+        .rows()
+        .iter()
+        .position(|row| matches!(row, ListRow::Session(s) if s.name == "b"))
+        .unwrap();
+    assert_eq!(target(&h, Hit::PinToggle(row)), None);
+    // The pointer over B's row: its pin shows left of its name.
+    let over = target(&h, Hit::ListRow(row)).unwrap();
+    mouse(&mut h, MouseEventKind::Moved, over);
+    assert_eq!(h.app.hovered_row, Some(row));
+    let screen = screen_rows(&mut h, 160, 48);
+    let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
+    assert!(
+        screen[usize::from(pin.1)].starts_with(" 📌"),
+        "{:?}",
+        screen[usize::from(pin.1)]
+    );
+    // A click on it pins B without selecting it.
+    mouse(&mut h, MouseEventKind::Down(MouseButton::Left), pin);
+    mouse(&mut h, MouseEventKind::Up(MouseButton::Left), pin);
+    assert!(h.fake.calls().contains(&"pin B true".to_string()));
+    assert_eq!(h.app.list.selection(), &selected);
+    // Pinned, it moves; hovered again, its pin is the gold one, which unpins.
+    screen_rows(&mut h, 160, 48);
+    let row = h
+        .app
+        .list
+        .rows()
+        .iter()
+        .position(|row| matches!(row, ListRow::Session(s) if s.name == "b"))
+        .unwrap();
+    let over = target(&h, Hit::ListRow(row)).unwrap();
+    mouse(&mut h, MouseEventKind::Moved, over);
+    let screen = screen_rows(&mut h, 160, 48);
+    let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
+    assert!(screen[usize::from(pin.1)].starts_with(" 📌"));
+    mouse(&mut h, MouseEventKind::Down(MouseButton::Left), pin);
+    assert!(h.fake.calls().contains(&"pin B false".to_string()));
+    // Off the list, no pin shows.
+    mouse(&mut h, MouseEventKind::Moved, (100, 2));
+    assert_eq!(h.app.hovered_row, None);
+    screen_rows(&mut h, 160, 48);
+    assert_eq!(target(&h, Hit::PinToggle(row)), None);
 }

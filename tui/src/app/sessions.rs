@@ -1103,6 +1103,7 @@ impl App {
             return;
         }
         if !matches!(self.mode, AppMode::Normal) {
+            self.hovered_row = None;
             self.terminal_panel.dragging = false;
             // A dialog opened: a held session is let go.
             self.end_session_drag();
@@ -1161,6 +1162,11 @@ impl App {
                 return;
             }
         }
+        // The session row under the pointer shows its pin toggle.
+        self.hovered_row = self.hits.iter().find_map(|(area, hit)| match hit {
+            Hit::ListRow(row) | Hit::PinToggle(row) if inside(Some(*area)) => Some(*row),
+            _ => None,
+        });
         self.divider.hover = inside(screen.divider);
         if self.divider.hover {
             if event.kind == MouseEventKind::Down(MouseButton::Left) {
@@ -1216,6 +1222,15 @@ impl App {
                 }
                 Some(Hit::GridPage(delta)) => {
                     self.move_grid_page(delta);
+                    return;
+                }
+                // The selection stays where it is.
+                Some(Hit::PinToggle(row)) => {
+                    if let Some(ListRow::Session(session)) = self.list.rows().get(row) {
+                        let id = session.id.clone();
+                        let pinned = !session.pinned;
+                        self.pin_session(id, pinned);
+                    }
                     return;
                 }
                 Some(Hit::ListRow(row)) => {
@@ -1613,6 +1628,11 @@ impl App {
             return;
         };
         let (id, pinned) = (session.id.clone(), !session.pinned);
+        self.pin_session(id, pinned);
+    }
+
+    /// Pin or unpin `id` (`pinned`), off the UI thread.
+    pub(super) fn pin_session(&mut self, id: SessionId, pinned: bool) {
         let Some(api) = self.api() else {
             self.set_status("Not connected to the daemon.");
             return;

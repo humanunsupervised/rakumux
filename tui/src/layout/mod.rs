@@ -410,9 +410,10 @@ pub struct TabItem {
     pub badge: Option<(String, Style)>,
 }
 
-/// Mark after a pinned session's name (tab bar and session list). One
-/// column wide in every common terminal font.
-pub const PIN_MARK: &str = "★";
+/// Mark after a pinned session's name (tab bar, session list, Grid): a pushpin,
+/// two columns wide (there's no plain-text pin; it needs a colour emoji font,
+/// which macOS, Windows and Linux desktops have).
+pub const PIN_MARK: &str = "📌";
 
 /// Draw a one-row tab bar into the first row of `area` and return click
 /// targets as `(item index, rect)`.
@@ -519,7 +520,7 @@ pub fn tab_at(hits: &[(usize, Rect)], column: u16, row: u16) -> Option<usize> {
         .map(|(index, _)| *index)
 }
 
-/// Text pieces of one tab: ` 1 ● name ★ `.
+/// Text pieces of one tab: ` 1 ● name 📌 `.
 struct TabLabel {
     number: Option<String>,
     glyph: String,
@@ -1080,8 +1081,9 @@ mod tests {
         let mut items = tabs(&["api", "docs"], 0);
         items[0].pinned = true;
         let hits = render_tabs(area, &mut buf, &items, 0);
-        assert_eq!(row_text(&buf, 0).trim_end(), " 1 ● api ★   2 ● docs");
-        assert_eq!(hits[0].1.width, 11);
+        // The pin is two columns wide (the buffer's second cell is blank).
+        assert_eq!(row_text(&buf, 0).trim_end(), " 1 ● api 📌    2 ● docs");
+        assert_eq!(hits[0].1.width, 12);
         assert_eq!(buf.get(9, 0).fg, theme::palette().accent_gold);
     }
 
@@ -1101,7 +1103,7 @@ mod tests {
                 };
                 let hits = render_tabs(area, &mut buf, &[item], 0);
                 let text = row_text(&buf, 0);
-                assert!(text.trim_end().ends_with("★ ●"), "{text:?}");
+                assert!(text.trim_end().ends_with("📌  ●"), "{text:?}");
                 let badge = (0..width).find(|&x| buf.get(x, 0).symbol() == "●").unwrap();
                 assert_eq!(buf.get(badge, 0).fg, palette.accent_gold);
                 assert!(hits[0].1.right() <= area.right());

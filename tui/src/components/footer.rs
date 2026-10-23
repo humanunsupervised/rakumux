@@ -130,7 +130,7 @@ pub fn buttons(app: &App) -> Vec<Button> {
         }
         Focus::Session | Focus::Terminal => vec![Button::new(
             app.rakumux_key.label(),
-            "Rakumux",
+            "Rakumux mode",
             FooterKey::Rakumux,
         )],
     }
@@ -597,7 +597,7 @@ mod tests {
         let line = footer_line(&h.app, 80);
         let shown = text(&line);
         assert!(shown.starts_with(" SESSION "), "{shown:?}");
-        assert!(shown.ends_with(" Ctrl-\\ Rakumux  "), "{shown:?}");
+        assert!(shown.ends_with(" Ctrl-\\ Rakumux mode  "), "{shown:?}");
         assert!(
             !shown.contains("Help") && !shown.contains("Settings"),
             "{shown:?}"
@@ -693,7 +693,7 @@ mod tests {
         assert!(line.contains("Renamed"), "{line:?}");
         expire(&mut h);
         let line = text(&footer_line(&h.app, 40));
-        assert!(line.ends_with(" Ctrl-\\ Rakumux  "), "{line:?}");
+        assert!(line.ends_with(" Ctrl-\\ Rakumux mode  "), "{line:?}");
     }
 
     #[tokio::test]
@@ -712,7 +712,7 @@ mod tests {
         h.press(KeyCode::Enter).await;
         let line = text(&footer_line(&h.app, 40));
         assert!(line.starts_with(" SESSION "), "{line:?}");
-        assert!(line.ends_with(" Ctrl-\\ Rakumux  "), "{line:?}");
+        assert!(line.ends_with(" Ctrl-\\ Rakumux mode  "), "{line:?}");
         // The targets match what's shown.
         let (line, targets) = footer(&h.app, 40);
         let shown: Vec<char> = text(&line).chars().collect();
@@ -724,7 +724,7 @@ mod tests {
         assert_eq!(targets.len(), 2);
         assert_eq!(at(&targets[0]), " SESSION ");
         assert_eq!(targets[0].2, Hit::ModeBadge);
-        assert_eq!(at(&targets[1]), " Ctrl-\\ Rakumux ");
+        assert_eq!(at(&targets[1]), " Ctrl-\\ Rakumux mode ");
         assert_eq!(targets[1].2, Hit::FooterKey(FooterKey::Rakumux));
     }
 

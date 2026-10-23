@@ -99,6 +99,27 @@ fn cell_lines(content: Vec<Vec<Span<'_>>>, height: u16) -> Vec<Line<'_>> {
     lines
 }
 
+/// The hovered session's pin toggle, in the indent of its first content
+/// line: the pin, dimmed to pin the session, whole to unpin it. Returns
+/// where it is.
+fn mark_hovered(lines: &mut [Line<'_>], pinned: bool, area: Rect) -> Option<Rect> {
+    let first = lines.iter().position(|line| !line.spans.is_empty())?;
+    let style = if pinned {
+        Style::default()
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    };
+    // The indent's width: a space, then the pin padded to fill it.
+    let pad = INDENT.saturating_sub(1 + str_width(PIN_MARK));
+    lines[first].spans[0] = Span::styled(format!(" {PIN_MARK}{}", " ".repeat(pad)), style);
+    Some(Rect {
+        y: area.y + u16::try_from(first).ok()?,
+        width: u16::try_from(INDENT).ok()?.min(area.width),
+        height: 1,
+        ..area
+    })
+}
+
 /// The session being dragged: a bar in the indent of its content lines.
 fn mark_dragged(lines: &mut [Line<'_>]) {
     let bar = Span::styled(
@@ -310,7 +331,11 @@ fn session_content(
     } else {
         status_glyph(session)
     };
-    let pin = if session.pinned { 2 } else { 0 };
+    let pin = if session.pinned {
+        1 + str_width(PIN_MARK)
+    } else {
+        0
+    };
     let badge_width = badge.as_ref().map_or(0, |span| span.width() + 1);
     let age = truncate(
         &relative_time(now, session.last_active_at),
@@ -706,6 +731,11 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 );
                 if app.dragged_session() == Some(&session.id) {
                     mark_dragged(&mut lines);
+                } else if app.hovered_row == Some(index) {
+                    // Before the row's own target, which would take the tap.
+                    if let Some(pin) = mark_hovered(&mut lines, session.pinned, row_area) {
+                        hits.push((pin, Hit::PinToggle(index)));
+                    }
                 }
                 lines
             }

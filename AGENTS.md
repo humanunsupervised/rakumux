@@ -671,7 +671,7 @@ session mode; none for the terminal panel), since the detail has no title row: t
 terminal fills it from its top row; and on the right buttons
 (a darker shade of the orange bar; dark chips on the blue one): `? Help` and `, Settings` in
 Rakumux mode, then `Sign in` at the bottom right while signed out of the Rakumux account (a tap
-asks for a sign-in code at once), `Ctrl-\ Rakumux` in session mode. When the row is short the
+asks for a sign-in code at once), `Ctrl-\ Rakumux mode` in session mode. When the row is short the
 session gives way first (off the centre, to its name alone, then nothing), then the message is
 cut, then buttons go from the right (Sign in, Settings, then Help).
 Help and Settings list every key; Settings runs them. A welcome tour
@@ -703,7 +703,7 @@ the footer, at least `LIST_MIN_ROWS` (10: the tabs, a folder's header and two se
 Below `STACK_MIN_ROWS` (15 rows above the footer, a 16-row screen) Rakumux mode shows the list
 alone. Session mode fills everything above the footer. Taps arrive as clicks, so the footer is a
 tap target too (`Hit::ModeBadge`, `Hit::FooterKey`, recorded by `components/footer.rs`): the
-SESSION badge and the `Ctrl-\ Rakumux` button switch to Rakumux mode like `Ctrl-\`, the RAKUMUX
+SESSION badge and the `Ctrl-\ Rakumux mode` button switch to Rakumux mode like `Ctrl-\`, the RAKUMUX
 badge goes back to the session you came from like `Esc`, and `? Help` and `, Settings` open
 them. Dialogs are at least
 min(screen width − 2, 48) columns (`components/utils.rs::popup_width`), wrap their key lines and
@@ -731,7 +731,11 @@ list never reorders by itself: activity doesn't move a session or a group. The l
 group comes first, then the others by folder name, then path. In a folder, pinned sessions lead;
 both they and the others follow the order the user set, and sessions without a place go last,
 oldest first, so a new session appears just above "+ New session". All layouts share it.
-Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
+Pinned sessions show 📌 after their name (`layout::PIN_MARK`, two columns: an emoji, since
+there's no plain-text pin). In terminals that report pointer movement (desktop terminals, also
+over SSH; not phones), the session row under the pointer shows a 📌 in its indent, left of its
+mark and name: dimmed to pin it, whole to unpin it; a click there (`Hit::PinToggle`) does that
+without selecting the row, and `p` still pins the selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
 held); `J`/`K` move it one place. Moves stay in the session's folder and its pinned or unpinned
 part, and are saved as `sessions.session_order`. A click without movement still just selects.
 The first load still selects the most recently used session.
@@ -752,7 +756,7 @@ another header, and never change the folders' order. Done is the exception
 under a sub-header per period (`grouping::ReadPeriod`, `ListRow::ReadPeriodHeader`: `◷ last hour`,
 last day, older, the clock from `Icons::clock`, tinted like its sessions' marks; with a session
 count; selectable, Enter opens the Status modal on done), so reading one moves it to the top.
-Pinned sessions (`p`) lead done under their own `★ pinned` sub-header (`ReadPeriod::Pinned`),
+Pinned sessions (`p`) lead done under their own `📌 pinned` sub-header (`ReadPeriod::Pinned`),
 whenever they were read, most recent first; unpinning puts one back in its period. The periods are measured from
 the list's clock (`SessionList::set_clock`, every tick), so sessions move down them as time
 passes. Nothing there can be moved (`J`/`K` say so). A done session's mark (`○`, wherever it's
