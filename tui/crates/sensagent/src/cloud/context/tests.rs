@@ -334,6 +334,7 @@ fn environment_assignments_bearers_and_known_token_formats_are_masked() {
         "Authorization: Bearer synthetic-bearer-value",
         "\"access_token\": \"synthetic-json-token\"",
         "sk-abcdefghijklmnopqrstuvwxyz123456",
+        // Split so secret scanners don't take these synthetic keys for real ones.
         concat!("sk_live_", "abcdefghijklmnopqrstuvwxyz"),
         concat!("ghp_", "abcdefghijklmnopqrstuvwxyz1234"),
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.syntheticSignature",
