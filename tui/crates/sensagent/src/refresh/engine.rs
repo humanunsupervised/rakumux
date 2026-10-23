@@ -143,6 +143,8 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     /// reconciled again (the switches, the account or the live folders changed).
     shared_for: Vec<ScopeRoot>,
     reconcile: bool,
+    /// The last failure logged, so a retried one isn't logged every tick.
+    last_note: Option<String>,
 }
 
 impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> {
@@ -161,6 +163,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             features_due: Some(Duration::ZERO),
             shared_for: Vec::new(),
             reconcile: true,
+            last_note: None,
         }
     }
 
@@ -405,7 +408,10 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 }
                 self.features_due = Some(now.saturating_add(FEATURES_INTERVAL));
             }
-            Err(_) => self.features_due = Some(now.saturating_add(FEATURES_RETRY)),
+            Err(error) => {
+                self.note("reading the account's features", &error);
+                self.features_due = Some(now.saturating_add(FEATURES_RETRY));
+            }
         }
     }
 
@@ -490,13 +496,15 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         if !self.reconcile && live == self.shared_for {
             return;
         }
-        let Ok(consent) = self.service.consent() else {
-            return;
+        let consent = match self.service.consent() {
+            Ok(consent) => consent,
+            Err(error) => return self.note("reading consent", &error),
         };
         if !features.ai_session_summaries {
-            if consent.policy != ConsentPolicy::Disabled && self.disable(consent.revision).is_err()
-            {
-                return;
+            if consent.policy != ConsentPolicy::Disabled {
+                if let Err(error) = self.disable(consent.revision) {
+                    return self.note("stopping sharing", &error);
+                }
             }
             self.shared_for = live;
             self.reconcile = false;
@@ -527,12 +535,22 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             let enabled = self
                 .consent_offer()
                 .and_then(|offer| self.enable(&offer, choices));
-            if enabled.is_err() {
-                return;
+            if let Err(error) = enabled {
+                return self.note("sharing the live folders", &error);
             }
         }
         self.shared_for = live;
         self.reconcile = false;
+    }
+
+    /// Log a failure on the embedding service's stderr, once until it changes.
+    /// Errors here are static codes: never tokens, URLs, account or session text.
+    fn note(&mut self, what: &str, error: &DispatchError) {
+        let line = format!("rakumux-status: {what} failed: {error:?}");
+        if self.last_note.as_deref() != Some(line.as_str()) {
+            eprintln!("{line}");
+            self.last_note = Some(line);
+        }
     }
 
     #[cfg(test)]

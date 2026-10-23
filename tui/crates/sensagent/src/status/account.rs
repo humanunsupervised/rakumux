@@ -58,12 +58,11 @@ impl<S: CredentialStore, C: WallClock> AccountGate for AccountSessionGate<S, C> 
             }
             Err(_) => return Err(StatusError::AccountUnavailable),
         }
-        if !self
-            .account
-            .config()
+        let config = self.account.config();
+        if !config
             .scopes()
             .iter()
-            .any(|scope| scope == "ai:session-status")
+            .any(|scope| scope == config.status_scope())
         {
             return Err(StatusError::FeatureUnauthorized);
         }

@@ -151,6 +151,23 @@ fn public_configuration_rejects_unsafe_urls_and_scopes() {
 }
 
 #[test]
+fn the_ai_status_scope_defaults_and_must_be_requested() {
+    assert_eq!(config().status_scope(), AI_STATUS_SCOPE);
+    let profile = DeviceAuthConfig::new(
+        "https://clerk.example.com",
+        "public-client",
+        "https://accounts.example.com/device",
+        &["openid", "profile", "offline_access"],
+    )
+    .unwrap();
+    assert!(profile.clone().with_status_scope("email").is_err());
+    assert_eq!(
+        profile.with_status_scope("profile").unwrap().status_scope(),
+        "profile"
+    );
+}
+
+#[test]
 fn device_response_preserves_provider_timings_and_safe_prompt() {
     let mut value = device_json();
     value["interval"] = json!(13);

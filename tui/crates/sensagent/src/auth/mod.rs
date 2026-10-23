@@ -23,7 +23,7 @@ pub use account::{
     WallClock,
 };
 pub use client::ClerkDeviceClient;
-pub use config::DeviceAuthConfig;
+pub use config::{DeviceAuthConfig, AI_STATUS_SCOPE};
 pub use continuation::{AccountWebsite, BrowserContinuationError};
 pub use credentials::{
     CredentialRevision, CredentialSnapshot, CredentialStore, CredentialStoreError, SavedCredentials,

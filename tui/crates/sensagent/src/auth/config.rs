@@ -2,6 +2,9 @@ use reqwest::Url;
 
 use super::AuthError;
 
+/// The scope that authorizes AI session status unless another is configured.
+pub const AI_STATUS_SCOPE: &str = "ai:session-status";
+
 /// Public configuration only. A distributed terminal client never has a client secret.
 #[derive(Clone, Debug)]
 pub struct DeviceAuthConfig {
@@ -10,6 +13,8 @@ pub struct DeviceAuthConfig {
     pub(crate) verification_uri: Url,
     pub(crate) scopes: Vec<String>,
     pub(crate) userinfo_endpoint: Option<Url>,
+    /// The requested scope the AI status service authorizes.
+    pub(crate) status_scope: String,
 }
 
 impl DeviceAuthConfig {
@@ -51,6 +56,7 @@ impl DeviceAuthConfig {
             verification_uri,
             scopes: configured,
             userinfo_endpoint: None,
+            status_scope: AI_STATUS_SCOPE.to_owned(),
         })
     }
 
@@ -72,6 +78,24 @@ impl DeviceAuthConfig {
     /// The requested scopes; feature authorization is also enforced by the API.
     pub fn scopes(&self) -> &[String] {
         &self.scopes
+    }
+
+    /// The requested scope the AI status service authorizes: [`AI_STATUS_SCOPE`]
+    /// unless [`with_status_scope`](Self::with_status_scope) chose another.
+    pub fn status_scope(&self) -> &str {
+        &self.status_scope
+    }
+
+    /// Name the requested scope the AI status service authorizes, for a provider
+    /// without custom scopes. It must be one of the requested scopes.
+    pub fn with_status_scope(mut self, scope: &str) -> Result<Self, AuthError> {
+        if !self.scopes.iter().any(|requested| requested == scope) {
+            return Err(AuthError::InvalidConfiguration(
+                "the AI status scope must be requested",
+            ));
+        }
+        self.status_scope = scope.to_owned();
+        Ok(self)
     }
 
     /// Pin UserInfo from reviewed OAuth application settings when metadata omits it.

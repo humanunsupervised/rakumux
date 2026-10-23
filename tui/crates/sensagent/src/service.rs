@@ -28,6 +28,8 @@ const CLIENT_ID: &str = "PXOxFYwfkwKh2qjO";
 const DEVICE_PAGE: &str = "https://accounts.rakumux.com/device";
 const USERINFO: &str = "https://clerk.rakumux.com/oauth/userinfo";
 const SCOPES: [&str; 4] = ["openid", "profile", "email", "offline_access"];
+/// The requested scope rakumux.com's AI status API requires of this client.
+const STATUS_SCOPE: &str = "profile";
 /// rakumux.com: the AI status API and the sign-in-then-approve page.
 const CLOUD_ORIGIN: &str = "https://rakumux.com";
 
@@ -41,6 +43,8 @@ pub const CLOUD_ORIGIN_ENV: &str = "RAKUMUX_CLOUD_ORIGIN";
 /// restores a saved account online (provider discovery, a token refresh) first.
 const START_WAIT: Duration = Duration::from_secs(20);
 const START_POLL: Duration = Duration::from_millis(100);
+/// The service's log, under the home's `logs/`.
+pub const LOG_FILE: &str = "status-service.log";
 /// How long the service waits for the session daemon to accept it.
 const DAEMON_WAIT: Duration = Duration::from_secs(3);
 
@@ -83,6 +87,9 @@ impl ServiceConfig {
             &value(DEVICE_PAGE_ENV, DEVICE_PAGE),
             &SCOPES,
         )
+        .map_err(|_| ServiceError::Configuration)?
+        // Clerk has no custom scopes: rakumux.com authorizes this client's `profile`.
+        .with_status_scope(STATUS_SCOPE)
         .map_err(|_| ServiceError::Configuration)?;
         // The production userinfo endpoint belongs to the production issuer only.
         if issuer == ISSUER {
@@ -178,7 +185,8 @@ pub fn has_saved_account(home: &Layout) -> bool {
 }
 
 /// Connect to this home's service, starting `program status-service` detached (new
-/// session, stdio on /dev/null, cwd `/`) when none answers, then waiting for it.
+/// session, stdin and stdout on /dev/null, stderr appended to `logs/status-service.log`,
+/// cwd `/`) when none answers, then waiting for it.
 pub fn connect_or_start(
     home: &Layout,
     program: &Path,
@@ -201,6 +209,19 @@ pub fn connect_or_start(
     }
 }
 
+/// The service's log: static failure codes only (see `refresh`), private to the user.
+fn log_file(home: &Layout) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let directory = home.home.join("logs");
+    std::fs::create_dir_all(&directory)?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(directory.join(LOG_FILE))
+}
+
 fn start_detached(home: &Layout, program: &Path) -> io::Result<()> {
     use std::os::unix::process::CommandExt;
 
@@ -210,7 +231,7 @@ fn start_detached(home: &Layout, program: &Path) -> io::Result<()> {
         .arg("status-service")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(log_file(home).map_or_else(|_| Stdio::null(), Stdio::from))
         .current_dir("/")
         .env(session_core::env::HOME, std::path::absolute(&home.home)?);
     // The service acts for the user, never as the session that started it.
@@ -249,8 +270,11 @@ mod tests {
     fn the_production_settings_are_valid() {
         let auth = DeviceAuthConfig::new(ISSUER, CLIENT_ID, DEVICE_PAGE, &SCOPES)
             .unwrap()
-            .with_userinfo_endpoint(USERINFO);
-        assert!(auth.is_ok());
+            .with_status_scope(STATUS_SCOPE)
+            .unwrap()
+            .with_userinfo_endpoint(USERINFO)
+            .unwrap();
+        assert_eq!(auth.status_scope(), "profile");
         assert!(CloudAIConfig::new(CLOUD_ORIGIN).is_ok());
         assert!(AccountWebsite::new(CLOUD_ORIGIN).is_ok());
     }

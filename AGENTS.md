@@ -139,7 +139,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    of live sessions (never private ones), and off it stops. A finished agent turn is described at
    once; otherwise at most once a minute per session. Settings → Account signs in (a code, link
    and QR code), the session list shows each description as a third line, and
-   `rakumux account status` lists them. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
+   `rakumux account status` lists them. Its stderr, static failure codes only, goes to
+   `~/.rakumux/logs/status-service.log`. Clerk has no custom scopes, so production names
+   `profile` as the AI status scope (`DeviceAuthConfig::with_status_scope`), matching the
+   website's check. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
    `RAKUMUX_CLERK_CLIENT_ID`, `RAKUMUX_CLERK_DEVICE_PAGE`, `RAKUMUX_CLOUD_ORIGIN`.
 
 ## File structure
