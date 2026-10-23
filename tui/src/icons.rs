@@ -84,6 +84,17 @@ impl Icons {
         }
     }
 
+    /// Marks done's sub-sections, by when their sessions were last read:
+    /// `◷ last hour`.
+    pub fn clock(self) -> &'static str {
+        match self {
+            Icons::Plain => "◷",
+            Icons::Emoji => "🕒",
+            // nf-fa-clock_o
+            Icons::Nerd => "\u{f017}",
+        }
+    }
+
     /// The next style, wrapping.
     pub fn next(self) -> Self {
         let index = Self::ALL.iter().position(|i| *i == self).unwrap_or(0);
@@ -113,6 +124,11 @@ mod tests {
         }
         assert_eq!(str_width(Icons::Emoji.app()), 2);
         assert_eq!((Icons::Plain.app(), Icons::Plain.status()), ("◇", "◔"));
+        assert_eq!(
+            (Icons::Plain.clock(), str_width(Icons::Plain.clock())),
+            ("◷", 1)
+        );
+        assert_eq!(str_width(Icons::Emoji.clock()), 2);
         assert_eq!(
             serde_json::to_value(Icons::Nerd).unwrap(),
             serde_json::json!("nerd")

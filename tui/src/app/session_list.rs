@@ -31,7 +31,8 @@ use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 use super::config::{SectionOrder, SessionOrder};
 use super::folders::compare_folders;
 use super::grouping::{
-    linked_worktree, sort_sections, worktree_label, AppKey, Grouping, Section, StatusGroup,
+    linked_worktree, sort_sections, worktree_label, AppKey, Grouping, ReadPeriod, Section,
+    StatusGroup,
 };
 use super::text_input::TextInput;
 
@@ -52,6 +53,9 @@ pub enum Selection {
     /// An app's or a status's header row (App or Status tab, several
     /// shown): Enter opens that tab's modal there.
     SectionHeader(Section),
+    /// The header of one of done's sub-sections under Status (when its
+    /// sessions were last read): Enter opens the Status modal on done.
+    ReadPeriodHeader(ReadPeriod),
     NewSession,
     Session(SessionId),
 }
@@ -68,6 +72,9 @@ pub enum ListRow<'a> {
     WorktreeHeader(&'a ScopeRoot, &'a Path),
     /// An app's or a status's header row (several shown).
     SectionHeader(&'a Section),
+    /// A sub-section of done under Status: sessions last read in that
+    /// period.
+    ReadPeriodHeader(ReadPeriod),
     NewSession,
     Session(&'a SessionView),
 }
@@ -135,14 +142,18 @@ pub struct SessionList {
     /// The folder filter left nothing to select: the next snapshot selects
     /// the most recent session, like the first one.
     reselect: bool,
+    /// The wall clock (seconds) done's sub-sections are measured from
+    /// ([`Self::set_clock`]).
+    now: i64,
 }
 
 impl SessionList {
-    /// An empty list for a TUI started in `launch`, showing all folders.
+    /// An empty list for a TUI started in `launch`, showing every folder's
+    /// sessions under the Status tab.
     pub fn new(launch: ScopeRoot) -> Self {
         Self {
             launch,
-            grouping: Grouping::Folder,
+            grouping: Grouping::default(),
             folders: Vec::new(),
             apps: Vec::new(),
             statuses: Vec::new(),
@@ -159,7 +170,42 @@ impl SessionList {
             filter_editing: false,
             loaded: false,
             reselect: false,
+            now: 0,
         }
+    }
+
+    /// Set the wall clock (seconds) done's sub-sections are measured from.
+    /// Returns whether a session went into another one, so the rows
+    /// changed.
+    pub fn set_clock(&mut self, now: i64) -> bool {
+        let before = std::mem::replace(&mut self.now, now);
+        let moved = self.grouping == Grouping::Status
+            && self
+                .sessions
+                .iter()
+                .any(|s| ReadPeriod::of_done(before, s) != ReadPeriod::of_done(now, s));
+        if moved {
+            self.ensure_selection_visible();
+        }
+        moved
+    }
+
+    /// The done sub-section `session` is listed under: under Status, when
+    /// it's done; `None` otherwise.
+    fn read_period(&self, session: &SessionView) -> Option<ReadPeriod> {
+        if self.grouping == Grouping::Status {
+            ReadPeriod::of_done(self.now, session)
+        } else {
+            None
+        }
+    }
+
+    /// How many of the sessions shown are under done's `period`.
+    pub fn read_period_count(&self, period: ReadPeriod) -> usize {
+        self.visible()
+            .into_iter()
+            .filter(|s| self.read_period(s) == Some(period))
+            .count()
     }
 
     /// Show these folders (none: all folders). Nothing is fetched: the
@@ -365,9 +411,9 @@ impl SessionList {
     /// Move session `id` to visible position `to`, where a drag drops it or
     /// `J`/`K` take it. It stays in its part of the list: its folder's
     /// pinned sessions, or the others; under App or Status, its app's or
-    /// status's (whatever their folders), which keep an order of their own.
-    /// A `to` outside that part means its first or last place. Returns
-    /// whether it moved.
+    /// status's (whatever their folders), which keep an order of their own,
+    /// except done's, listed by when each was last read. A `to` outside
+    /// that part means its first or last place. Returns whether it moved.
     pub fn move_session(&mut self, id: &SessionId, to: usize) -> bool {
         let visible = self.visible();
         let Some(from) = visible.iter().position(|s| &s.id == id) else {
@@ -375,6 +421,9 @@ impl SessionList {
         };
         let moving = visible[from];
         let section = Section::of(self.grouping, moving);
+        if section.as_ref().is_some_and(Section::by_last_read) {
+            return false;
+        }
         let in_part = |s: &&SessionView| {
             (section.is_some()
                 || (s.scope == moving.scope && linked_worktree(s) == linked_worktree(moving)))
@@ -452,6 +501,7 @@ impl SessionList {
             | Selection::FolderHeader(_)
             | Selection::WorktreeHeader(..)
             | Selection::SectionHeader(_)
+            | Selection::ReadPeriodHeader(_)
             | Selection::NewSession => {}
         }
         self.ensure_selection_visible();
@@ -694,8 +744,27 @@ impl SessionList {
             .filter(|s| Section::of(self.grouping, s).as_ref() == Some(section))
             .collect();
         // Stable: unordered sessions keep their folder by folder order.
-        sessions.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(place(a).cmp(&place(b))));
+        if section.by_last_read() {
+            // By when each was last read, its sub-section first.
+            let period = |s: &SessionView| ReadPeriod::of(self.now, s.last_active_at);
+            sessions.sort_by(|a, b| {
+                period(a)
+                    .cmp(&period(b))
+                    .then(b.pinned.cmp(&a.pinned))
+                    .then(b.last_active_at.cmp(&a.last_active_at))
+            });
+        } else {
+            sessions.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(place(a).cmp(&place(b))));
+        }
         sessions
+    }
+
+    /// Whether `id` is in a section listed by when each session was last
+    /// read (done, under Status), where sessions can't be moved.
+    pub fn listed_by_last_read(&self, id: &SessionId) -> bool {
+        self.get(id)
+            .and_then(|session| Section::of(self.grouping, session))
+            .is_some_and(|section| section.by_last_read())
     }
 
     /// Whether the App or Status filter shows `section` (an empty one
@@ -716,7 +785,7 @@ impl SessionList {
             Vec::with_capacity(visible.len() + self.groups.len().max(self.sections.len()) + 2);
         rows.push(ListRow::Folders);
         if !self.is_grouped() {
-            rows.extend(visible.into_iter().map(ListRow::Session));
+            self.push_sessions(&mut rows, visible);
             rows.push(ListRow::NewSession);
             return rows;
         }
@@ -753,20 +822,19 @@ impl SessionList {
         for header in headers {
             let start = rows.len();
             rows.push(header);
-            rows.extend(
-                visible
-                    .iter()
-                    .filter(|s| match header {
-                        ListRow::FolderHeader(folder) => &s.scope == folder,
-                        ListRow::SectionHeader(section) => {
-                            Section::of(grouping, s).as_ref() == Some(section)
-                        }
-                        ListRow::Folders
-                        | ListRow::WorktreeHeader(..)
-                        | ListRow::NewSession
-                        | ListRow::Session(_) => false,
-                    })
-                    .map(|s| ListRow::Session(s)),
+            self.push_sessions(
+                &mut rows,
+                visible.iter().copied().filter(|s| match header {
+                    ListRow::FolderHeader(folder) => &s.scope == folder,
+                    ListRow::SectionHeader(section) => {
+                        Section::of(grouping, s).as_ref() == Some(section)
+                    }
+                    ListRow::Folders
+                    | ListRow::WorktreeHeader(..)
+                    | ListRow::ReadPeriodHeader(_)
+                    | ListRow::NewSession
+                    | ListRow::Session(_) => false,
+                }),
             );
             if filtering && rows.len() == start + 1 {
                 rows.pop();
@@ -774,6 +842,25 @@ impl SessionList {
         }
         rows.push(ListRow::NewSession);
         rows
+    }
+
+    /// `sessions` as rows, done ones under Status after a header for when
+    /// they were last read (they come sorted by it).
+    fn push_sessions<'a>(
+        &'a self,
+        rows: &mut Vec<ListRow<'a>>,
+        sessions: impl IntoIterator<Item = &'a SessionView>,
+    ) {
+        let mut period = None;
+        for session in sessions {
+            if let Some(read) = self.read_period(session) {
+                if period != Some(read) {
+                    rows.push(ListRow::ReadPeriodHeader(read));
+                    period = Some(read);
+                }
+            }
+            rows.push(ListRow::Session(session));
+        }
     }
 
     fn matches(&self, session: &SessionView, needle: &str) -> bool {
@@ -812,6 +899,7 @@ impl SessionList {
             | Selection::FolderHeader(_)
             | Selection::WorktreeHeader(..)
             | Selection::SectionHeader(_)
+            | Selection::ReadPeriodHeader(_)
             | Selection::NewSession => None,
         }
     }
@@ -837,6 +925,9 @@ impl SessionList {
             Selection::SectionHeader(section) => rows
                 .iter()
                 .position(|row| matches!(row, ListRow::SectionHeader(s) if *s == section)),
+            Selection::ReadPeriodHeader(period) => rows
+                .iter()
+                .position(|row| matches!(row, ListRow::ReadPeriodHeader(p) if p == period)),
             Selection::Session(id) => rows
                 .iter()
                 .position(|row| matches!(row, ListRow::Session(s) if &s.id == id)),
@@ -853,6 +944,7 @@ impl SessionList {
                 Selection::WorktreeHeader((*folder).clone(), root.to_path_buf())
             }
             Some(ListRow::SectionHeader(section)) => Selection::SectionHeader((*section).clone()),
+            Some(ListRow::ReadPeriodHeader(period)) => Selection::ReadPeriodHeader(*period),
             Some(ListRow::NewSession) => Selection::NewSession,
             Some(ListRow::Session(s)) => Selection::Session(s.id.clone()),
             None => return,
@@ -886,6 +978,7 @@ impl SessionList {
                     ListRow::FolderHeader(_)
                         | ListRow::WorktreeHeader(..)
                         | ListRow::SectionHeader(_)
+                        | ListRow::ReadPeriodHeader(_)
                 )
             })
             .map(|(index, _)| index)
@@ -911,6 +1004,7 @@ impl SessionList {
             (_, ListRow::WorktreeHeader(folder, root)) => {
                 Selection::WorktreeHeader(folder.clone(), root.to_path_buf())
             }
+            (_, ListRow::ReadPeriodHeader(period)) => Selection::ReadPeriodHeader(period),
             (_, ListRow::Folders | ListRow::NewSession | ListRow::Session(_)) => return None,
         })
     }
@@ -932,12 +1026,13 @@ impl SessionList {
             Selection::FolderHeader(folder) | Selection::WorktreeHeader(folder, _) => {
                 Some(folder.clone())
             }
-            Selection::Folders | Selection::SectionHeader(_) | Selection::NewSession => {
-                match self.active_folder_filter() {
-                    [only] => Some(only.clone()),
-                    _ => None,
-                }
-            }
+            Selection::Folders
+            | Selection::SectionHeader(_)
+            | Selection::ReadPeriodHeader(_)
+            | Selection::NewSession => match self.active_folder_filter() {
+                [only] => Some(only.clone()),
+                _ => None,
+            },
         };
         if let Some(folder) = folder {
             self.folder_context = Some(folder);
@@ -951,7 +1046,8 @@ impl SessionList {
             Selection::Session(id) => self.visible().iter().any(|s| &s.id == id),
             Selection::FolderHeader(_)
             | Selection::WorktreeHeader(..)
-            | Selection::SectionHeader(_) => self.header_shown(),
+            | Selection::SectionHeader(_)
+            | Selection::ReadPeriodHeader(_) => self.header_shown(),
             Selection::Folders | Selection::NewSession => true,
         };
         if !shown {
@@ -974,6 +1070,9 @@ impl SessionList {
                 rows.contains(&ListRow::WorktreeHeader(folder, root))
             }
             Selection::SectionHeader(section) => rows.contains(&ListRow::SectionHeader(section)),
+            Selection::ReadPeriodHeader(period) => {
+                rows.contains(&ListRow::ReadPeriodHeader(*period))
+            }
             Selection::Folders | Selection::NewSession | Selection::Session(_) => true,
         }
     }
@@ -987,7 +1086,8 @@ impl SessionList {
             Selection::Session(id) => self.visible_keeping(None).iter().any(|s| &s.id == id),
             Selection::FolderHeader(_)
             | Selection::WorktreeHeader(..)
-            | Selection::SectionHeader(_) => self.header_shown(),
+            | Selection::SectionHeader(_)
+            | Selection::ReadPeriodHeader(_) => self.header_shown(),
             Selection::Folders | Selection::NewSession => !leave_top_row,
         };
         if !kept {
@@ -1137,9 +1237,17 @@ mod tests {
         }
     }
 
-    /// A first snapshot of every folder.
-    fn loaded(sessions: Vec<SessionView>) -> SessionList {
+    /// An empty list under the Folders tab, which most of these tests are
+    /// about (the list starts under Status).
+    fn on_folders() -> SessionList {
         let mut list = SessionList::new(scope());
+        list.set_grouping(Grouping::Folder);
+        list
+    }
+
+    /// A first snapshot of every folder, under the Folders tab.
+    fn loaded(sessions: Vec<SessionView>) -> SessionList {
+        let mut list = on_folders();
         list.replace_all(sessions, Listed::All);
         list
     }
@@ -1161,6 +1269,7 @@ mod tests {
                     format!("  ⎇ {}", worktree_label(folder, root))
                 }
                 ListRow::SectionHeader(section) => format!("## {}", section.label()),
+                ListRow::ReadPeriodHeader(period) => format!("  · {}", period.label()),
                 ListRow::Session(s) => s.name.clone(),
             })
             .collect()
@@ -1178,8 +1287,153 @@ mod tests {
     }
 
     #[test]
-    fn orders_by_creation_and_selects_the_most_recent_on_first_load() {
+    fn a_new_list_starts_under_the_status_tab_on_the_most_recent_session() {
         let mut list = SessionList::new(scope());
+        assert_eq!(list.grouping(), Grouping::Status);
+        let mut done = aged("B", "second", 2, 30);
+        done.lifecycle = Lifecycle::Done;
+        list.replace_all(
+            vec![aged("A", "first", 1, 10), done, aged("C", "third", 3, 20)],
+            Listed::All,
+        );
+        assert_eq!(list.selected_id().unwrap().as_str(), "B");
+        // Unread comes before running.
+        assert_eq!(names(&list), ["second", "first", "third"]);
+    }
+
+    #[test]
+    fn done_lists_sessions_by_when_they_were_last_read_and_they_cannot_be_moved() {
+        let read = |id: &str, name: &str, created: i64, read_at: i64| {
+            let mut session = aged(id, name, created, read_at);
+            session.lifecycle = Lifecycle::Idle;
+            session
+        };
+        let mut working = aged("W", "working", 4, 5);
+        working.lifecycle = Lifecycle::Working;
+        let mut list = SessionList::new(scope());
+        list.replace_all(
+            vec![
+                read("A", "a", 1, 30),
+                read("B", "b", 2, 10),
+                read("C", "c", 3, 20),
+                working,
+            ],
+            Listed::All,
+        );
+        // Most recently read first, whatever the creation order.
+        assert_eq!(names(&list), ["working", "a", "c", "b"]);
+        // Going into B (the daemon's touch) puts it on top.
+        list.apply(&envelope(
+            "B",
+            SessionEvent::Updated {
+                session: read("B", "b", 2, 40),
+            },
+        ));
+        assert_eq!(names(&list), ["working", "b", "a", "c"]);
+        // No order of the user's applies, and none can be made there.
+        let id = SessionId::from_string;
+        list.set_section_order(&SectionOrder::from([(
+            "status:idle".into(),
+            vec![id("C"), id("A"), id("B")],
+        )]));
+        assert_eq!(names(&list), ["working", "b", "a", "c"]);
+        assert!(list.listed_by_last_read(&id("A")));
+        assert!(!list.listed_by_last_read(&id("W")));
+        assert!(!list.move_session(&id("A"), 1));
+        assert!(!list.move_session(&id("C"), 0));
+        // Pinned sessions still lead.
+        let mut pinned = read("C", "c", 3, 20);
+        pinned.pinned = true;
+        list.apply(&envelope("C", SessionEvent::Updated { session: pinned }));
+        assert_eq!(names(&list), ["working", "c", "b", "a"]);
+        // Under Folders the same sessions move as usual.
+        list.set_grouping(Grouping::Folder);
+        assert!(!list.listed_by_last_read(&id("A")));
+        assert!(list.move_session(&id("A"), 2));
+    }
+
+    #[test]
+    fn done_has_a_sub_section_for_the_last_hour_the_last_day_and_older() {
+        let now = 1_000_000;
+        let read = |id: &str, ago: i64| {
+            let mut session = aged(id, &id.to_lowercase(), 1, now - ago);
+            session.lifecycle = Lifecycle::Idle;
+            session
+        };
+        let mut list = SessionList::new(scope());
+        list.set_clock(now);
+        list.replace_all(
+            vec![
+                read("A", 10 * 86_400),
+                read("B", 60),
+                read("C", 7_200),
+                read("D", 600),
+            ],
+            Listed::All,
+        );
+        // Every session is done, so there's no status header; the periods
+        // still have theirs.
+        assert_eq!(
+            row_names(&list),
+            [
+                "^",
+                "  · last hour",
+                "b",
+                "d",
+                "  · last day",
+                "c",
+                "  · older",
+                "a",
+                "+"
+            ]
+        );
+        assert_eq!(list.read_period_count(ReadPeriod::LastHour), 2);
+        assert_eq!(list.read_period_count(ReadPeriod::Older), 1);
+        // The headers are rows like any other.
+        list.select_row(1);
+        assert_eq!(
+            list.selection(),
+            &Selection::ReadPeriodHeader(ReadPeriod::LastHour)
+        );
+        assert_eq!(list.selected_row(), 1);
+        assert_eq!(
+            list.group_target(1),
+            Some(Selection::Session(SessionId::from_string("C")))
+        );
+        // Time passing moves D into the last day; nothing else changes.
+        assert!(list.set_clock(now + 3_100));
+        assert_eq!(
+            row_names(&list),
+            [
+                "^",
+                "  · last hour",
+                "b",
+                "  · last day",
+                "d",
+                "c",
+                "  · older",
+                "a",
+                "+"
+            ]
+        );
+        assert!(!list.set_clock(now + 3_200));
+        // A day on, the last hour is empty: its header goes, and the
+        // selection with it.
+        assert!(list.set_clock(now + 100_000));
+        assert_eq!(
+            row_names(&list),
+            ["^", "  · older", "b", "d", "c", "a", "+"]
+        );
+        assert!(matches!(list.selection(), Selection::Session(_)));
+        // Only under Status.
+        list.set_grouping(Grouping::Folder);
+        assert!(!row_names(&list).iter().any(|row| row.starts_with("  ·")));
+        assert!(!list.set_clock(now + 200_000));
+    }
+
+    #[test]
+    fn orders_by_creation_and_selects_the_most_recent_on_first_load() {
+        let mut list = on_folders();
         assert_eq!(list.selection(), &Selection::NewSession);
         list.replace_all(
             vec![
@@ -1230,7 +1484,7 @@ mod tests {
 
     #[test]
     fn new_sessions_go_at_the_bottom_of_their_folder() {
-        let mut list = SessionList::new(scope());
+        let mut list = on_folders();
         list.set_session_order(&order_of("/repo", &["B", "A"]));
         list.replace_all(
             vec![aged("A", "a", 1, 1), aged("B", "b", 2, 2)],
@@ -1426,7 +1680,7 @@ mod tests {
 
     #[test]
     fn the_saved_order_is_applied_and_sessions_without_a_place_go_last() {
-        let mut list = SessionList::new(scope());
+        let mut list = on_folders();
         // "X" is gone; C and D have no place, so they follow, oldest first.
         list.set_session_order(&order_of("/repo", &["B", "X", "A"]));
         list.replace_all(
@@ -1532,7 +1786,7 @@ mod tests {
 
     #[test]
     fn the_saved_order_drops_sessions_that_are_gone() {
-        let mut list = SessionList::new(scope());
+        let mut list = on_folders();
         let mut saved = order_of("/repo", &["B", "A", "GONE"]);
         saved.extend(order_of("/web", &["W9", "W8"]));
         saved.extend(order_of("/elsewhere", &["E1"]));
@@ -1987,7 +2241,7 @@ mod tests {
                 "^",
                 "## waiting for you",
                 "r3",
-                "## done",
+                "## unread",
                 "r4",
                 "## working",
                 "r1",
@@ -1995,7 +2249,8 @@ mod tests {
                 "r2",
                 "## dead",
                 "w2",
-                "## idle",
+                "## done",
+                "  · last hour",
                 "w1",
                 "+"
             ]

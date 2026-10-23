@@ -213,6 +213,7 @@ impl App {
                 | Selection::FolderHeader(_)
                 | Selection::WorktreeHeader(..)
                 | Selection::SectionHeader(_)
+                | Selection::ReadPeriodHeader(_)
         ) {
             let first = self.list.visible().first().map(|s| s.id.clone());
             self.list.select(

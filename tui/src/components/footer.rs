@@ -2,14 +2,15 @@
 //! bar, orange while keys drive Rakumux and a muted blue while they go to a
 //! program. The mode badge (`RAKUMUX`, `SESSION` or `TERMINAL`) is at the
 //! left, then the connection state and a message (a status message, why
-//! the daemon is unreachable, zoom, a pending upgrade); `session: <name>`
-//! in the centre (the selected session in Rakumux mode, the one taking the
-//! keys in session mode); and buttons on the right: Help (`?`) and Settings
+//! the daemon is unreachable, zoom, a pending upgrade); `session: ● <name>`
+//! in the centre (in Rakumux mode the selected session, else the one kept in
+//! view; in session mode the one taking the keys; with the status mark its
+//! list row has, since the detail has no title row); and buttons on the right: Help (`?`) and Settings
 //! (`,`) in Rakumux mode, the way to Rakumux mode (the Rakumux key) in
 //! session mode. Settings lists every key.
 //!
 //! The footer never wraps or grows: when the row is short the session
-//! gives way first (to its name alone, then nothing), then the message is
+//! gives way first (to its mark and name, then nothing), then the message is
 //! cut (down to [`MIN_MESSAGE`] columns), then buttons are dropped from the
 //! right (Settings first); the badge always shows.
 //!
@@ -26,6 +27,7 @@ use ratatui::{
 };
 use session_core::model::SessionView;
 
+use super::format::{activity_badge, status_glyph};
 use super::utils::get_spinner_char;
 use crate::app::types::{AppMode, Focus};
 use crate::app::{App, Connection, FooterKey, Hit};
@@ -173,21 +175,34 @@ fn push_buttons(
     targets
 }
 
-/// The session the footer names in its centre: the selected one in Rakumux
-/// mode, the one taking the keys in session mode; none for the terminal
-/// panel, which isn't a session.
+/// The session the footer names in its centre: in Rakumux mode the
+/// selected one, else the one the detail keeps in view (the tabs, a header
+/// or + New session selected); the one taking the keys in session mode;
+/// none for the terminal panel, which isn't a session.
 fn centred_session(app: &App) -> Option<&SessionView> {
+    let in_view = || app.detail.session_id().and_then(|id| app.list.get(id));
     match app.focus {
-        Focus::List => app.list.selected_session(),
-        Focus::Session => app.detail.session_id().and_then(|id| app.list.get(id)),
+        Focus::List => app.list.selected_session().or_else(in_view),
+        Focus::Session => in_view(),
         Focus::Terminal => None,
     }
 }
 
-/// `session: name` in at most `room` columns: the name alone when that's
-/// all that fits, nothing under a few columns of it.
-fn session_label(name: &str, room: usize, focus: Focus) -> Vec<Span<'static>> {
+/// `session: ● name`, the mark being the one its list row shows (its
+/// activity, else its status), in at most `room` columns: the mark and the
+/// name when that's all that fits, nothing under a few columns of it.
+fn session_label(session: &SessionView, room: usize, focus: Focus) -> Vec<Span<'static>> {
     let p = theme::palette();
+    let (mark, mark_style) = activity_badge(session).unwrap_or_else(|| status_glyph(session));
+    // Its own colour on the blue bar, a muted one lifted to stay readable
+    // there; the orange bar inks everything dark.
+    let mark_style = if mark_style.fg == Some(p.text_muted) {
+        mark_style.fg(p.neutral_gray)
+    } else {
+        mark_style
+    };
+    let name = session.name.as_str();
+    let mark_width = str_width(mark) + 1;
     let (label, strong) = if focus == Focus::List {
         (
             Style::default(),
@@ -201,14 +216,20 @@ fn session_label(name: &str, room: usize, focus: Focus) -> Vec<Span<'static>> {
                 .add_modifier(Modifier::BOLD),
         )
     };
-    if str_width("session: ") + str_width(name) <= room {
+    if str_width("session: ") + mark_width + str_width(name) <= room {
         return vec![
             Span::styled("session: ", label),
+            Span::styled(mark, mark_style),
+            Span::raw(" "),
             Span::styled(name.to_string(), strong),
         ];
     }
-    if room >= 3 {
-        return vec![Span::styled(truncate(name, room), strong)];
+    if room >= mark_width + 3 {
+        return vec![
+            Span::styled(mark, mark_style),
+            Span::raw(" "),
+            Span::styled(truncate(name, room - mark_width), strong),
+        ];
     }
     Vec::new()
 }
@@ -358,7 +379,7 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
         // A column clear on either side of the session.
         let left = spans_width(&spans);
         let (start, end) = (left + 1, right.saturating_sub(1));
-        let label = session_label(&session.name, end.saturating_sub(start), app.focus);
+        let label = session_label(session, end.saturating_sub(start), app.focus);
         if !label.is_empty() {
             let label_width = spans_width(&label);
             let x = (width.saturating_sub(label_width) / 2).clamp(start, end - label_width);
@@ -577,7 +598,7 @@ mod tests {
         assert!(buttons(&h.app).is_empty());
         let line = text(&footer_line(&h.app, 60));
         assert!(line.starts_with(" RAKUMUX  "), "{line:?}");
-        assert!(centred_in(&line, "session: api", 60), "{line:?}");
+        assert!(centred_in(&line, "session: ● api", 60), "{line:?}");
     }
 
     #[tokio::test]
@@ -586,12 +607,12 @@ mod tests {
         h.app.set_status("Layout: Tabs");
         let line = text(&footer_line(&h.app, 80));
         assert!(line.starts_with(" RAKUMUX  Layout: Tabs "), "{line:?}");
-        assert!(centred(&line, "session: api"), "{line:?}");
+        assert!(centred(&line, "session: ● api"), "{line:?}");
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         // Short of room the session gives way first: off the centre, then
         // its name alone, then nothing.
         let line = text(&footer_line(&h.app, 52));
-        assert!(line.contains("  api  "), "{line:?}");
+        assert!(line.contains("Layout: Tabs ● api "), "{line:?}");
         assert!(!line.contains("session:"), "{line:?}");
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         let line = text(&footer_line(&h.app, 46));
@@ -615,7 +636,7 @@ mod tests {
         // With room to spare the session comes back.
         let line = text(&footer_line(&h.app, 200));
         assert!(line.starts_with(" RAKUMUX  A status message"), "{line:?}");
-        assert!(line.contains("session: api"), "{line:?}");
+        assert!(line.contains("session: ● api"), "{line:?}");
     }
 
     #[tokio::test]
@@ -698,7 +719,7 @@ mod tests {
         let line = text(&footer_line(&h.app, 80));
         assert!(line.starts_with(" RAKUMUX  "), "{line:?}");
         assert!(line.contains(" connecting "), "{line:?}");
-        assert!(centred(&line, "session: api"), "{line:?}");
+        assert!(centred(&line, "session: ● api"), "{line:?}");
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         h.app.connection = Connection::Failed(ApiError::new(
             ErrorCode::DaemonUnavailable,
@@ -723,30 +744,36 @@ mod tests {
         let mut h = harness(vec![view("A", "api", 20), view("B", "docs", 10)]);
         let p = theme::palette();
         let line = footer_line(&h.app, 80);
-        assert!(centred(&text(&line), "session: api"), "{:?}", text(&line));
+        assert!(centred(&text(&line), "session: ● api"), "{:?}", text(&line));
         let name = line.spans.iter().find(|s| s.content == "api").unwrap();
         assert!(name.style.add_modifier.contains(Modifier::BOLD));
         assert_eq!(name.style.fg, Some(p.background));
         h.press(KeyCode::Up).await;
-        assert!(centred(&text(&footer_line(&h.app, 80)), "session: docs"));
-        // No session selected (+ New session): just the badge.
+        assert!(centred(&text(&footer_line(&h.app, 80)), "session: ● docs"));
+        // No session selected (+ New session): the one still in view.
         h.press(KeyCode::Down).await;
         h.press(KeyCode::Down).await;
         assert_eq!(h.app.list.selected_session(), None);
+        let in_view = h.app.detail.session_id().cloned().expect("in view");
+        let name = &h.app.list.get(&in_view).unwrap().name;
         let shown = text(&footer_line(&h.app, 80));
         assert!(shown.starts_with(" RAKUMUX  "), "{shown:?}");
-        assert!(
-            !shown.contains("api") && !shown.contains("docs"),
-            "{shown:?}"
-        );
+        assert!(centred(&shown, &format!("session: ● {name}")), "{shown:?}");
         // In a session: the one taking the keys, bright on the blue bar.
         h.press(KeyCode::Up).await;
         h.press(KeyCode::Up).await;
         h.press(KeyCode::Enter).await;
         let line = footer_line(&h.app, 80);
-        assert!(centred(&text(&line), "session: docs"), "{:?}", text(&line));
+        assert!(
+            centred(&text(&line), "session: ● docs"),
+            "{:?}",
+            text(&line)
+        );
         let name = line.spans.iter().find(|s| s.content == "docs").unwrap();
         assert_eq!(name.style.fg, Some(p.text_bright));
+        // The mark keeps its own colour on the blue bar.
+        let mark = line.spans.iter().find(|s| s.content == "●").unwrap();
+        assert_eq!(mark.style.fg, Some(p.accent_green));
         // The terminal panel isn't a session: nothing in the centre.
         h.app.focus = Focus::Terminal;
         assert!(!text(&footer_line(&h.app, 80)).contains("session:"));

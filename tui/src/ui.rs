@@ -197,8 +197,11 @@ mod tests {
         // launch folder.
         assert!(wide.contains("No sessions yet"), "{wide}");
         assert!(wide.contains("Press n to start one in repo"), "{wide}");
-        // The folder filter heads the list.
-        assert!(wide.contains("\n   ◔ Status   ▤ Folders ▾"), "{wide}");
+        // The tabs head the list, Status active: where it starts.
+        assert!(
+            wide.contains("\n   ◔ Status ▾   ▤ Folders   ◇ App"),
+            "{wide}"
+        );
         assert!(wide.contains("RAKUMUX"), "{wide}");
         // Narrow: the list, and the detail stacked below it.
         let narrow = render(&mut h.app, 80, 24);
@@ -244,15 +247,16 @@ mod tests {
     #[tokio::test]
     async fn live_session_observed_then_controlled() {
         let mut h = harness(vec![view("A", "api-refactor", 10)]);
+        let role =
+            |h: &crate::app::testing::Harness| h.app.detail.attachment.as_ref().map(|a| a.role);
         let wide = render(&mut h.app, 160, 48);
         assert!(wide.contains("api-refactor"), "{wide}");
         assert!(wide.contains("hello from the fake"), "{wide}");
-        assert!(wide.contains("observing"), "{wide}");
+        assert_eq!(role(&h), Some(session_core::api::Role::Observer));
         // Narrow: the session is previewed under the list.
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("api-refactor"), "{narrow}");
         assert!(narrow.contains("hello from the fake"), "{narrow}");
-        assert!(narrow.contains("observing"), "{narrow}");
         // Too short for both: the list alone.
         let short = render(&mut h.app, 80, 14);
         assert!(short.contains("api-refactor"), "{short}");
@@ -263,7 +267,7 @@ mod tests {
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("hello from the fake"), "{screen}");
-            assert!(screen.contains("controlling"), "{screen}");
+            assert_eq!(role(&h), Some(session_core::api::Role::Controller));
             let footer = screen.lines().last().unwrap();
             assert!(footer.starts_with(" SESSION "), "{footer:?}");
             // The way to Rakumux mode is the only button.
@@ -371,9 +375,10 @@ mod tests {
             let list = h.app.screen().list.unwrap();
             assert_eq!(list.y, 0);
         }
-        // Wide: the detail's title is the first row.
+        // Wide: the session's terminal starts on the first row too.
         let wide = render(&mut h.app, 160, 48);
-        assert!(wide.lines().next().unwrap().contains("api"), "{wide}");
+        let first = wide.lines().next().unwrap();
+        assert!(first.contains("hello from the fake"), "{wide}");
     }
 
     #[tokio::test]
@@ -397,7 +402,7 @@ mod tests {
         let screen = render(&mut h.app, 80, 24);
         let footer = screen.lines().last().unwrap();
         assert!(footer.starts_with(" RAKUMUX  Layout: Tabs "), "{footer:?}");
-        assert!(footer.contains("session: api"), "{footer:?}");
+        assert!(footer.contains("session: ● api"), "{footer:?}");
         assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
     }
 
@@ -532,32 +537,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_preview_title_is_faded_until_session_mode_restores_its_emphasis() {
+    async fn the_detail_has_no_title_row_and_the_footer_names_the_session_with_its_mark() {
         let mut h = harness(vec![view("A", "color-check", 10)]);
-        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
-        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
-        let title = h.app.screen().detail_title.unwrap();
-        let name = terminal.backend().buffer().get(title.x + 3, title.y);
-        assert_eq!(name.symbol(), "c");
-        let p = theme::palette();
-        let amount = crate::components::utils::PREVIEW_FADE;
-        match p.faded(p.text_primary, amount) {
-            Some(fg) => {
-                assert_eq!(name.fg, fg);
-                assert!(!name.modifier.contains(ratatui::style::Modifier::DIM));
+        for focus_session in [false, true] {
+            if focus_session {
+                h.press(KeyCode::Enter).await;
             }
-            None => assert!(name.modifier.contains(ratatui::style::Modifier::DIM)),
+            let screen = render(&mut h.app, 160, 48);
+            let detail = h.app.screen().detail.unwrap();
+            assert_eq!(h.app.screen().terminal, Some(detail));
+            assert_eq!(detail.y, 0);
+            // The program's first row is the screen's first.
+            let top = screen.lines().next().unwrap();
+            assert!(top.contains("hello from the fake"), "{top:?}");
+            let footer = screen.lines().last().unwrap();
+            assert!(footer.contains("session: ● color-check"), "{footer:?}");
         }
-        assert_eq!(name.bg, p.faded(p.panel, amount).unwrap_or(p.panel));
-        assert!(name.modifier.contains(ratatui::style::Modifier::BOLD));
-        h.press(KeyCode::Enter).await;
-        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
-        let title = h.app.screen().detail_title.unwrap();
-        let active_name = terminal.backend().buffer().get(title.x + 3, title.y);
-        assert_eq!(active_name.fg, p.text_bright);
-        assert!(active_name
-            .modifier
-            .contains(ratatui::style::Modifier::BOLD));
     }
 
     #[test]
@@ -642,9 +637,10 @@ mod tests {
             assert!(screen.contains("api"), "{screen}");
             assert!(screen.contains("docs"), "{screen}");
             assert!(screen.contains("hello from the fake"), "{screen}");
-            // The folder filter sits at the left end of the tab bar.
+            // The active tab's filter (Status, where the list starts)
+            // sits at the left end of the tab bar.
             let bar = screen.lines().next().unwrap();
-            assert!(bar.starts_with(" ▤ Folders ▾   1 ● docs "), "{bar:?}");
+            assert!(bar.starts_with(" ◔ Status ▾   1 ● docs "), "{bar:?}");
             assert!(!h.app.tab_hits.is_empty());
         }
         let mut empty = with_layout(vec![], SessionLayout::Tabs);
@@ -687,7 +683,7 @@ mod tests {
             assert!(screen.starts_with("hello from the fake"), "{screen}");
             let footer = screen.lines().last().unwrap();
             assert!(footer.starts_with(" SESSION  zoomed "), "{footer:?}");
-            assert!(footer.contains("session: api"), "{footer:?}");
+            assert!(footer.contains("session: ● api"), "{footer:?}");
             assert!(footer.ends_with(" Ctrl-\\ Rakumux  "), "{footer:?}");
         }
         // Back in Rakumux mode the list returns, and the badge says so.
@@ -939,12 +935,12 @@ mod tests {
         assert!(list[1].starts_with("   ◔ Status ▾"), "{wide}");
         let headers: Vec<usize> = [
             " ◐ waiting for you ─",
-            " ● done ─",
+            " ● unread ─",
             " working ─",
             " waiting for response ─",
             " ● running ─",
             " ○ dead ─",
-            " ○ idle ─",
+            " ○ done ─",
         ]
         .iter()
         .map(|header| at(&list, header))
@@ -1181,7 +1177,7 @@ mod tests {
             detached_at: None,
             worktree: Some("feature".into()),
         });
-        let mut h = harness(vec![view("A", "main-work", 10), feature]);
+        let mut h = harness(vec![view("A", "main-work", 10), feature]).on_folders_tab();
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, crate::layout::sidebar_width(160).into());
         let header = list
@@ -1337,8 +1333,10 @@ mod tests {
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("▤ Folders"), "{narrow}");
         assert!(narrow.contains(" api ──"), "{narrow}");
-        assert!(narrow.contains("frontend · waiting for you"), "{narrow}");
         assert!(narrow.contains("hello from the fake"), "{narrow}");
+        // The footer names the session in view under the header.
+        let footer = narrow.lines().last().unwrap();
+        assert!(footer.contains("session: ◐ frontend"), "{footer:?}");
         h.app.list.select(crate::app::Selection::Folders);
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains(" repo  ⎇ sessions-refactor"), "{narrow}");
@@ -1729,8 +1727,9 @@ mod tests {
             assert!(top.contains("+ New session"), "{screen}");
             let detail = layout.detail.unwrap();
             let below = rows(&screen, detail.y, detail.bottom());
-            assert!(below.contains("session-6"), "{screen}");
             assert!(below.contains("hello from the fake"), "{screen}");
+            let footer = screen.lines().last().unwrap();
+            assert!(footer.contains("session-6"), "{footer:?}");
         }
     }
 

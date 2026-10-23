@@ -20,12 +20,12 @@ use session_core::model::{ScopeRoot, SessionView};
 
 use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
 use super::format::{
-    activity_badge, now_secs, relative_time, secondary_line, status_glyph, status_group_glyph,
-    truncate, PIN_MARK,
+    activity_badge_at, now_secs, read_period_style, relative_time, secondary_line, status_glyph,
+    status_group_glyph, truncate, PIN_MARK,
 };
-use super::section_picker::section_count;
+use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
-use crate::app::grouping::{Grouping, Section};
+use crate::app::grouping::{Grouping, ReadPeriod, Section};
 use crate::app::{App, Connection, Hit, ListRow};
 use crate::layout::str_width;
 use crate::theme;
@@ -38,7 +38,8 @@ fn row_height(row: &ListRow) -> u16 {
         ListRow::NewSession
         | ListRow::FolderHeader(_)
         | ListRow::WorktreeHeader(..)
-        | ListRow::SectionHeader(_) => 2,
+        | ListRow::SectionHeader(_)
+        | ListRow::ReadPeriodHeader(_) => 2,
         ListRow::Session(_) => 3,
     }
 }
@@ -200,6 +201,44 @@ pub fn worktree_header_line(
     ])
 }
 
+/// The header of one of done's sub-sections, indented under done like a
+/// worktree's under its folder: a clock and when its sessions were last
+/// read, a rule, then how many it has, in `width` columns.
+pub fn read_period_header_line(
+    app: &App,
+    period: ReadPeriod,
+    width: usize,
+    selected: bool,
+) -> Line<'static> {
+    let p = theme::palette();
+    let count = sessions_label(app.list.read_period_count(period));
+    // "   ◷ label ─── count": the indent, and at least two rule columns.
+    let clock = format!("{} ", app.icons().clock());
+    let fixed = 5 + str_width(&clock) + str_width(&count);
+    let label = truncate(period.label(), width.saturating_sub(fixed + 2));
+    let rule = width.saturating_sub(fixed + str_width(&label));
+    let (label_color, rule_color) = if selected {
+        (p.text_bright, p.accent_primary)
+    } else {
+        (p.label_blue, p.border_dim)
+    };
+    Line::from(vec![
+        Span::raw("   "),
+        // The clock in the amber its sessions' marks have.
+        Span::styled(clock, read_period_style(period)),
+        Span::styled(
+            label,
+            Style::default()
+                .fg(label_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled("─".repeat(rule), Style::default().fg(rule_color)),
+        Span::raw(" "),
+        Span::styled(count, Style::default().fg(p.text_muted)),
+    ])
+}
+
 /// An app's or a status's header, like a folder's: its name (a status
 /// after its mark), a rule, then how many sessions it has (`2/3 live` for
 /// an app, `3 sessions` for a status), in `width` columns. Selected, the
@@ -251,7 +290,7 @@ fn session_content(
     now: i64,
 ) -> Vec<Vec<Span<'static>>> {
     let p = theme::palette();
-    let badge = activity_badge(session)
+    let badge = activity_badge_at(session, now)
         .map(|(mark, style)| Span::styled(mark, style.add_modifier(Modifier::BOLD)));
     let (glyph, glyph_style) = if badge.is_some() {
         (" ", Style::default())
@@ -625,6 +664,16 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 ));
                 lines
             }
+            ListRow::ReadPeriodHeader(period) => {
+                let mut lines = vec![Line::default(); height as usize - 1];
+                lines.push(read_period_header_line(
+                    app,
+                    *period,
+                    (inner.width as usize).saturating_sub(1),
+                    is_selected,
+                ));
+                lines
+            }
             ListRow::Session(session) => {
                 let mut lines = cell_lines(
                     session_content(app, session, width, is_selected, now),
@@ -753,7 +802,7 @@ mod tests {
                         for now in [0, 45, 1_000_000_000] {
                             let lines = session_content(&h.app, &session, width, selected, now);
                             let first = &lines[0];
-                            let (mark, style) = activity_badge(&session).unwrap();
+                            let (mark, style) = activity_badge_at(&session, now).unwrap();
                             let badge = first.last().unwrap();
                             assert_eq!(badge.content, mark);
                             assert_eq!(badge.style.fg, style.fg);

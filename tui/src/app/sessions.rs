@@ -19,7 +19,7 @@ use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
 use super::detail::{classify_output, Attachment, DetailView, OutputAction};
 use super::folders::{self, SyncResult};
-use super::grouping::Grouping;
+use super::grouping::{Grouping, Section, StatusGroup};
 use super::runtime::{cancel_flag, AppEvent};
 use super::screen::Screen;
 use super::session_list::{ListChange, ListRow, Selection};
@@ -533,6 +533,10 @@ impl App {
             Selection::SectionHeader(section) => {
                 return self.open_section_picker(section.grouping(), Some(section))
             }
+            Selection::ReadPeriodHeader(_) => {
+                let done = Section::Status(StatusGroup::Done);
+                return self.open_section_picker(Grouping::Status, Some(done));
+            }
             Selection::FolderHeader(_)
             | Selection::WorktreeHeader(..)
             | Selection::NewSession
@@ -768,6 +772,10 @@ impl App {
             self.set_status("Select a session to move.");
             return;
         };
+        if self.list.listed_by_last_read(&id) {
+            self.set_status("Done lists sessions by when you last read them.");
+            return;
+        }
         let Some(from) = self.list.visible_position(&id) else {
             return;
         };
@@ -1286,11 +1294,6 @@ impl App {
                     Hit::FolderMenu | Hit::FolderRow(_) | Hit::SectionMenu | Hit::SectionRow(_),
                 )
                 | None => {}
-            }
-            // The session's title row, like its terminal: go in.
-            if self.focus != Focus::Session && inside(screen.detail_title) {
-                self.click_preview();
-                return;
             }
         }
         if inside(screen.terminal_panel) {

@@ -223,7 +223,7 @@ async fn protocol_mismatch_asks_before_restarting_the_daemon() {
 
 #[tokio::test]
 async fn events_from_other_clients_keep_the_list_live() {
-    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]).on_folders_tab();
     h.event(
         "C",
         SessionEvent::Created {
@@ -680,9 +680,10 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
         .collect();
     assert!(footer.starts_with(" RAKUMUX  "), "the mode: {footer:?}");
     // A in the middle, then the buttons.
-    let at = footer.find("session: a ").expect("the session");
+    let at = footer.find("session: ● a ").expect("the session");
+    let label = crate::layout::str_width("session: ● a");
     assert!(
-        at.abs_diff((120 - "session: a".len()) / 2) <= 1,
+        crate::layout::str_width(&footer[..at]).abs_diff((120 - label) / 2) <= 1,
         "{footer:?}"
     );
     assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
@@ -712,7 +713,8 @@ async fn vim_keys_move_and_gg_goes_to_the_top() {
         aged("A", "a", 1, 30),
         aged("B", "b", 2, 20),
         aged("C", "c", 3, 10),
-    ]);
+    ])
+    .on_folders_tab();
     h.press(KeyCode::Char('G')).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
     h.press(KeyCode::Char('g')).await;
@@ -2077,7 +2079,7 @@ async fn clicking_new_session_creates_once_and_enters_the_shell_without_a_keyboa
 
 #[tokio::test]
 async fn clicking_a_row_selects_it_and_paste_goes_to_the_focused_session() {
-    let mut h = harness(vec![aged("A", "a", 1, 20), aged("B", "b", 2, 10)]);
+    let mut h = harness(vec![aged("A", "a", 1, 20), aged("B", "b", 2, 10)]).on_folders_tab();
     let backend = ratatui::backend::TestBackend::new(160, 48);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
     terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
@@ -2216,7 +2218,8 @@ async fn dragging_a_session_moves_it_live_and_saves_the_order_on_release() {
         view("A", "alpha", 10),
         view("B", "bravo", 20),
         view("C", "charlie", 30),
-    ]);
+    ])
+    .on_folders_tab();
     draw(&mut h);
     let (a, b, c) = (list_row(&h, "A"), list_row(&h, "B"), list_row(&h, "C"));
     let x = a.x + 4;
@@ -2365,7 +2368,8 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
         view("A", "a", 10),
         view("B", "b", 20),
         view("C", "c", 30),
-    ]);
+    ])
+    .on_folders_tab();
     // The newest is last and selected (most recently used).
     assert_eq!(h.selected().as_deref(), Some("C"));
     shift(&mut h, 'K').await;
@@ -2410,13 +2414,59 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
     fake.state.lock().unwrap().sessions.push(view("D", "d", 1));
     let mut options = options(&fake, scope(), &home);
     options.settings = Settings::load_from(&home.path().join("config.json")).unwrap();
-    let h = start(options, fake, home);
+    let h = start(options, fake, home).on_folders_tab();
     assert_eq!(visible_ids(&h), ["A", "C", "B", "D"]);
 }
 
 #[tokio::test]
+async fn j_and_k_leave_the_done_section_in_the_order_it_was_read() {
+    let read = |id: &str, at: i64| {
+        let mut session = view(id, &id.to_lowercase(), at);
+        session.lifecycle = Lifecycle::Idle;
+        session
+    };
+    let mut h = harness(vec![read("A", 10), read("B", 20)]);
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    assert_eq!(visible_ids(&h), ["B", "A"]);
+    shift(&mut h, 'J').await;
+    assert_eq!(visible_ids(&h), ["B", "A"]);
+    assert_eq!(
+        h.app.status(),
+        Some("Done lists sessions by when you last read them.")
+    );
+    assert!(!h.home.path().join("config.json").exists(), "nothing saved");
+}
+
+#[tokio::test]
+async fn done_periods_have_headers_with_counts_and_enter_opens_the_status_modal_on_done() {
+    use grouping::{Grouping, ReadPeriod, Section, StatusGroup};
+    let now = crate::components::format::now_secs();
+    let read = |id: &str, at: i64| {
+        let mut session = view(id, &id.to_lowercase(), at);
+        session.lifecycle = Lifecycle::Idle;
+        session
+    };
+    let mut h = harness(vec![read("A", now - 30), read("B", now - 3 * 86_400)]);
+    let screen = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(screen.contains("   ◷ last hour ─"), "{screen}");
+    assert!(screen.contains("─ 1 session"), "{screen}");
+    assert!(screen.contains("   ◷ older ─"), "{screen}");
+    h.app
+        .list
+        .select(session_list::Selection::ReadPeriodHeader(ReadPeriod::Older));
+    h.press(KeyCode::Enter).await;
+    assert_eq!(section_picker(&h).grouping, Grouping::Status);
+    assert_eq!(
+        section_picker(&h).current_row(),
+        Some(&types::SectionRow::Section(Section::Status(
+            StatusGroup::Done
+        )))
+    );
+}
+
+#[tokio::test]
 async fn the_keys_tab_lists_and_runs_the_move_actions() {
-    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]).on_folders_tab();
     let row = |action: crate::help::KeyAction| {
         crate::help::KeyAction::ALL
             .iter()
@@ -3431,6 +3481,24 @@ fn section_rows(h: &Harness) -> Vec<String> {
 
 fn app_section(name: &str) -> grouping::Section {
     grouping::Section::App(grouping::AppKey::new(name))
+}
+
+#[tokio::test]
+async fn every_start_opens_the_status_tab_on_the_most_recent_session() {
+    use grouping::Grouping;
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]);
+    assert_eq!(h.app.list.grouping(), Grouping::Status);
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    // The tab isn't saved: after another was picked, the next start (a
+    // restart or a UI reload) is under Status again.
+    h.app.show_tab(Grouping::App);
+    shift(&mut h, 'K').await;
+    let Harness { fake, home, .. } = h;
+    let mut options = options(&fake, scope(), &home);
+    options.settings = Settings::load_from(&home.path().join("config.json")).unwrap();
+    let h = start(options, fake, home);
+    assert_eq!(h.app.list.grouping(), Grouping::Status);
+    assert_eq!(h.selected().as_deref(), Some("B"));
 }
 
 #[tokio::test]

@@ -878,7 +878,7 @@ pub fn harness(sessions: Vec<SessionView>) -> Harness {
 }
 
 /// Started in `/repo` on a daemon that knows `known` (with their git
-/// context) and the sessions' folders.
+/// context) and the sessions' folders, under the Folders tab.
 pub fn harness_with_folders(
     sessions: Vec<SessionView>,
     known: &[(&str, Option<GitInfo>)],
@@ -891,10 +891,18 @@ pub fn harness_with_folders(
     let dir = tempfile::tempdir().unwrap();
     let mut options = options(&fake, scope(), &dir);
     options.settings.sessions.layout = layout;
-    start(options, fake, dir)
+    start(options, fake, dir).on_folders_tab()
 }
 
 impl Harness {
+    /// The Folders tab made active, as if picked after the start (which is
+    /// under Status).
+    pub fn on_folders_tab(mut self) -> Self {
+        self.app.show_tab(crate::app::grouping::Grouping::Folder);
+        self.app.process_pending();
+        self
+    }
+
     pub async fn key(&mut self, key: KeyEvent) -> AppResult {
         let result = self.app.handle_key(key).await;
         self.app.process_pending();

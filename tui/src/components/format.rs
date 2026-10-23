@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use session_core::model::{GitInfo, Lifecycle, SessionStatus, SessionView};
 
-use crate::app::grouping::{is_shell, StatusGroup};
+use crate::app::grouping::{is_shell, ReadPeriod, StatusGroup};
 use crate::icons::Icons;
 use crate::layout::{char_width, str_width};
 use crate::theme;
@@ -75,21 +75,51 @@ pub fn status_group_glyph(status: StatusGroup) -> (&'static str, Style) {
     let p = theme::palette();
     match status {
         StatusGroup::WaitingForYou => ("◐", Style::default().fg(p.accent_orange)),
-        StatusGroup::Done => ("●", Style::default().fg(p.accent_gold)),
+        StatusGroup::Unread => ("●", Style::default().fg(p.accent_gold)),
         StatusGroup::Working | StatusGroup::WaitingForResponse => (
             super::utils::get_spinner_char(),
             Style::default().fg(p.accent_primary),
         ),
-        StatusGroup::Idle | StatusGroup::Dead => ("○", Style::default().fg(p.text_muted)),
+        StatusGroup::Done => ("○", read_period_style(ReadPeriod::LastHour)),
+        StatusGroup::Dead => ("○", Style::default().fg(p.text_muted)),
         StatusGroup::Running => ("●", Style::default().fg(p.accent_green)),
         StatusGroup::Exited => ("✕", Style::default().fg(p.accent_pink)),
         StatusGroup::Unknown => ("?", Style::default().fg(p.text_muted)),
     }
 }
 
-/// Right-side agent activity: busy, idle, unread reply, or needs input.
+/// How far [`read_period_style`] fades the unread amber for a done
+/// session read within the last hour, and within the last day.
+const DONE_FADE: (f32, f32) = (0.3, 0.5);
+
+/// The colour of a done session's mark (and of done's sub-headers' clocks)
+/// by when it was last read: the amber of an unread reply, quieter within
+/// the hour, quieter still within the day, and muted after that.
+pub fn read_period_style(period: ReadPeriod) -> Style {
+    let p = theme::palette();
+    let amber = |amount: f32| match p.faded(p.accent_gold, amount) {
+        Some(color) => Style::default().fg(color),
+        // 16 colours have no shades in between: the amber, dimmed.
+        None => Style::default()
+            .fg(p.accent_gold)
+            .add_modifier(Modifier::DIM),
+    };
+    match period {
+        ReadPeriod::LastHour => amber(DONE_FADE.0),
+        ReadPeriod::LastDay => amber(DONE_FADE.1),
+        ReadPeriod::Older => Style::default().fg(p.text_muted),
+    }
+}
+
+/// Right-side agent activity: busy, done, unread reply, or needs input.
 /// Terminal presence/exit markers remain separate for non-agent sessions.
 pub fn activity_badge(session: &SessionView) -> Option<(&'static str, Style)> {
+    activity_badge_at(session, now_secs())
+}
+
+/// [`activity_badge`] at `now` (seconds), which a done session's colour
+/// depends on.
+pub fn activity_badge_at(session: &SessionView, now: i64) -> Option<(&'static str, Style)> {
     if session.status != SessionStatus::Live
         || (session.agent.is_none() && session.activity.is_none())
     {
@@ -97,7 +127,10 @@ pub fn activity_badge(session: &SessionView) -> Option<(&'static str, Style)> {
     }
     match session.lifecycle {
         Lifecycle::Working | Lifecycle::Blocked | Lifecycle::Done => Some(status_glyph(session)),
-        Lifecycle::Idle => Some(("○", Style::default().fg(theme::palette().text_muted))),
+        Lifecycle::Idle => Some((
+            "○",
+            read_period_style(ReadPeriod::of(now, session.last_active_at)),
+        )),
         Lifecycle::None | Lifecycle::Unknown => None,
     }
 }
@@ -108,48 +141,8 @@ pub fn needs_attention(session: &SessionView) -> bool {
         && matches!(session.lifecycle, Lifecycle::Blocked | Lifecycle::Done)
 }
 
-pub fn lifecycle_label(lifecycle: Lifecycle) -> Option<&'static str> {
-    match lifecycle {
-        Lifecycle::Working => Some("working"),
-        Lifecycle::Blocked => Some("waiting for you"),
-        Lifecycle::Done => Some("done"),
-        Lifecycle::Idle => Some("idle"),
-        Lifecycle::Unknown | Lifecycle::None => None,
-    }
-}
-
-/// `working`, `exited (code 1)`, `dead`; nothing for a running session
-/// that hasn't said what it's doing.
-pub fn status_label(session: &SessionView) -> Option<String> {
-    match session.status {
-        SessionStatus::Live => {
-            let label = match (
-                session.lifecycle,
-                session.activity.as_ref().map(|activity| activity.phase),
-            ) {
-                (
-                    Lifecycle::Working,
-                    Some(session_core::activity::ActivityPhase::WaitingForResponse),
-                ) => Some("waiting for response"),
-                (Lifecycle::Working, Some(session_core::activity::ActivityPhase::RunningTool)) => {
-                    Some("running tool")
-                }
-                (Lifecycle::Done, _) => Some("unread reply"),
-                _ => lifecycle_label(session.lifecycle),
-            };
-            label.map(str::to_string)
-        }
-        SessionStatus::Exited => Some(match session.exit_code {
-            Some(code) => format!("exited (code {code})"),
-            None => "exited".into(),
-        }),
-        SessionStatus::Dead => Some("dead".into()),
-        SessionStatus::Unknown => None,
-    }
-}
-
 /// The subagents a running agent has working, as an agent mark and their
-/// number (`◈ 3`, after the status); nothing without any.
+/// number (`◈ 3`, after the app and branch); nothing without any.
 pub fn subagent_badge(session: &SessionView, icons: Icons) -> Option<String> {
     let count = session
         .activity
@@ -245,12 +238,9 @@ fn session_facts(session: &SessionView, icons: Icons) -> Vec<String> {
     match session.status {
         SessionStatus::Dead => parts.push("dead · ⏎ revive".into()),
         SessionStatus::Exited => parts.push("exited · ⏎ restart".into()),
-        _ => {
-            if let Some(label) = status_label(session) {
-                parts.push(label);
-            }
-            parts.extend(subagent_badge(session, icons));
-        }
+        // A live session's status is its mark on the right; only
+        // subagents are said here.
+        _ => parts.extend(subagent_badge(session, icons)),
     }
     parts
 }
@@ -370,17 +360,15 @@ mod tests {
     }
 
     #[test]
-    fn secondary_text_shows_program_then_git_then_state_and_never_the_folder() {
+    fn secondary_text_shows_program_then_git_and_never_the_folder_or_a_live_status() {
         let mut session = view("A", "a", 0);
         session.cwd = "/repo/docs".into();
+        // Working: the mark on the right says so, the line doesn't.
         session.lifecycle = Lifecycle::Working;
-        assert_eq!(secondary_text(&session, 80, Icons::Plain), "working");
+        assert_eq!(secondary_text(&session, 80, Icons::Plain), "shell");
         // The branch, not the worktree.
         session.git = Some(git(Some("main"), None, None));
-        assert_eq!(
-            secondary_text(&session, 80, Icons::Plain),
-            "⎇ main · working"
-        );
+        assert_eq!(secondary_text(&session, 80, Icons::Plain), "⎇ main");
         session.git = Some(git(None, Some("1a2b3c4"), Some("feature-x")));
         session.agent = Some(session_core::model::AgentInfo {
             kind: "claude".into(),
@@ -388,8 +376,9 @@ mod tests {
         });
         assert_eq!(
             secondary_text(&session, 80, Icons::Plain),
-            "claude · ⎇ @1a2b3c4 · working"
+            "claude · ⎇ @1a2b3c4"
         );
+        // An ended session, with no mark on the right, says so.
         session.status = SessionStatus::Dead;
         assert_eq!(
             secondary_text(&session, 80, Icons::Plain),
@@ -417,7 +406,7 @@ mod tests {
             let line = secondary_line(&session, 80, Icons::Plain, detail_style);
             assert_eq!(line.spans[0].content, program);
             assert_eq!(line.spans[0].style.fg, Some(color));
-            assert_eq!(line.spans[1].content, " · ⎇ main · working");
+            assert_eq!(line.spans[1].content, " · ⎇ main");
             assert_eq!(line.spans[1].style, detail_style);
         }
     }
@@ -458,18 +447,15 @@ mod tests {
         });
         assert_eq!(
             secondary_text(&session, 80, Icons::Plain),
-            "⎇ main · unread reply · Tests green, ready for review"
+            "⎇ main · Tests green, ready for review"
         );
         assert_eq!(
-            secondary_text(&session, 38, Icons::Plain),
-            "⎇ main · unread reply · Tests green, …"
+            secondary_text(&session, 23, Icons::Plain),
+            "⎇ main · Tests green, …"
         );
         // Too little room for the report: the facts alone.
-        assert_eq!(
-            secondary_text(&session, 27, Icons::Plain),
-            "⎇ main · unread reply"
-        );
-        assert_eq!(secondary_text(&session, 10, Icons::Plain), "⎇ main · …");
+        assert_eq!(secondary_text(&session, 15, Icons::Plain), "⎇ main");
+        assert_eq!(secondary_text(&session, 5, Icons::Plain), "⎇ ma…");
         // With nothing else, the report is the whole line.
         session.git = None;
         session.lifecycle = Lifecycle::None;
@@ -479,15 +465,12 @@ mod tests {
     #[test]
     fn labels_and_glyphs() {
         let mut session = view("A", "a", 0);
-        assert_eq!(status_label(&session), None);
         session.lifecycle = Lifecycle::Blocked;
         assert_eq!(status_glyph(&session).0, "◐");
         assert!(needs_attention(&session));
-        assert_eq!(status_label(&session).as_deref(), Some("waiting for you"));
         session.status = SessionStatus::Exited;
         session.exit_code = Some(2);
         assert_eq!(status_glyph(&session).0, "✕");
-        assert_eq!(status_label(&session).as_deref(), Some("exited (code 2)"));
         session.status = SessionStatus::Dead;
         assert_eq!(status_glyph(&session).0, "○");
         assert!(!needs_attention(&session));
@@ -507,11 +490,6 @@ mod tests {
             active_subagents: 3,
             updated_at: 1,
         });
-        // The count is a badge of its own, not part of the status.
-        assert_eq!(
-            status_label(&session).as_deref(),
-            Some("waiting for response")
-        );
         assert_eq!(
             subagent_badge(&session, Icons::Plain).as_deref(),
             Some("◈ 3")
@@ -519,14 +497,13 @@ mod tests {
         assert!("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(status_glyph(&session).0));
         session.lifecycle = Lifecycle::Blocked;
         assert_eq!(status_glyph(&session).0, "◐");
-        assert_eq!(status_label(&session).as_deref(), Some("waiting for you"));
         session.lifecycle = Lifecycle::Done;
         session.activity = None;
         assert_eq!(status_glyph(&session).0, "●");
     }
 
     #[test]
-    fn the_subagent_badge_follows_the_status_in_the_description() {
+    fn the_description_says_no_status_and_the_subagent_badge_follows_the_app() {
         use session_core::activity::{ActivityPhase, AgentActivity};
         let mut session = view("A", "agent", 0);
         session.agent = Some(session_core::model::AgentInfo {
@@ -542,16 +519,17 @@ mod tests {
                 .map(|span| span.content.as_ref())
                 .collect()
         };
-        // None running: no badge.
-        assert_eq!(text(&session, Icons::Plain), "claude · working");
+        // None running: no badge, and no status words (the mark on the
+        // right says it).
+        assert_eq!(text(&session, Icons::Plain), "claude");
         assert_eq!(subagent_badge(&session, Icons::Plain), None);
         session.activity = Some(AgentActivity {
             phase: ActivityPhase::RunningTool,
             active_subagents: 2,
             updated_at: 1,
         });
-        assert_eq!(text(&session, Icons::Plain), "claude · running tool · ◈ 2");
-        assert_eq!(text(&session, Icons::Emoji), "claude · running tool · 🤖 2");
+        assert_eq!(text(&session, Icons::Plain), "claude · ◈ 2");
+        assert_eq!(text(&session, Icons::Emoji), "claude · 🤖 2");
         assert!(text(&session, Icons::Nerd).ends_with("\u{f06a9} 2"));
         // A report comes after it, room allowing.
         session.reported = Some(session_core::model::Reported {
@@ -562,11 +540,50 @@ mod tests {
         });
         assert_eq!(
             text(&session, Icons::Plain),
-            "claude · running tool · ◈ 2 · reviewing the diff"
+            "claude · ◈ 2 · reviewing the diff"
         );
         // An ended session has nothing running.
         session.status = SessionStatus::Exited;
         assert_eq!(subagent_badge(&session, Icons::Plain), None);
+    }
+
+    #[test]
+    fn done_marks_are_a_quieter_amber_than_unread_and_fade_with_the_read() {
+        let p = theme::palette();
+        let now = 1_000_000;
+        let mut session = view("A", "agent", now - 60);
+        session.agent = Some(session_core::model::AgentInfo {
+            kind: "claude".into(),
+            ..Default::default()
+        });
+        session.lifecycle = Lifecycle::Done;
+        let unread = activity_badge_at(&session, now).unwrap().1.fg;
+        assert_eq!(unread, Some(p.accent_gold));
+        session.lifecycle = Lifecycle::Idle;
+        let at = |ago: i64| {
+            let mut read = session.clone();
+            read.last_active_at = now - ago;
+            activity_badge_at(&read, now).unwrap()
+        };
+        let (hour, day, older) = (at(60), at(7_200), at(3 * 86_400));
+        assert!([hour.0, day.0, older.0].iter().all(|mark| *mark == "○"));
+        assert_eq!(hour.1, read_period_style(ReadPeriod::LastHour));
+        assert_eq!(day.1, read_period_style(ReadPeriod::LastDay));
+        assert_eq!(older.1.fg, Some(p.text_muted));
+        if let Some(shade) = p.faded(p.accent_gold, 0.3) {
+            assert_eq!(hour.1.fg, Some(shade));
+            assert_ne!(day.1.fg, hour.1.fg);
+            assert_ne!(hour.1.fg, unread);
+        }
+        // Done's header has the last hour's amber; dead stays muted.
+        assert_eq!(
+            status_group_glyph(StatusGroup::Done).1,
+            read_period_style(ReadPeriod::LastHour)
+        );
+        assert_eq!(
+            status_group_glyph(StatusGroup::Dead).1.fg,
+            Some(p.text_muted)
+        );
     }
 
     #[test]
@@ -581,7 +598,6 @@ mod tests {
         assert_eq!(activity_badge(&session).unwrap().0, "○");
         session.lifecycle = Lifecycle::Done;
         assert_eq!(activity_badge(&session).unwrap().0, "●");
-        assert_eq!(status_label(&session).as_deref(), Some("unread reply"));
         session.lifecycle = Lifecycle::Working;
         assert!("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(activity_badge(&session).unwrap().0));
         session.lifecycle = Lifecycle::Blocked;
@@ -614,9 +630,6 @@ mod tests {
             ..Default::default()
         });
         session.lifecycle = Lifecycle::Blocked;
-        assert_eq!(
-            secondary_text(&session, 40, Icons::Plain),
-            "claude · waiting for you"
-        );
+        assert_eq!(secondary_text(&session, 40, Icons::Plain), "claude");
     }
 }

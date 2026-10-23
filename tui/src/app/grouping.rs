@@ -17,11 +17,12 @@ use session_core::model::{Lifecycle, ScopeRoot, SessionStatus, SessionView};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Grouping {
     /// All folders: a section per folder, narrowed by the folder filter.
-    #[default]
     Folder,
     /// A section per app: the agent or program a session runs.
     App,
-    /// A section per status: what a session is doing.
+    /// A section per status: what a session is doing; where the list
+    /// starts.
+    #[default]
     Status,
 }
 
@@ -135,9 +136,9 @@ impl AppKey {
 }
 
 /// What a session is doing as the user reads it: the Status tab's
-/// sections, in the order they're shown (what wants the user first, then
-/// what's busy, then what's over, and idle sessions last). Derived like the list's status
-/// words (`components::format::status_label`): a running session's
+/// sections, in the order they're shown (what wants the user first,
+/// unread replies among it, then what's busy, then what's over, and done
+/// sessions last). Derived from a running session's
 /// lifecycle, with the agent's activity phase telling a wait for the model
 /// apart from other work; else its status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -145,7 +146,7 @@ pub enum StatusGroup {
     /// `Blocked`: a question or a permission prompt.
     WaitingForYou,
     /// `Done`: a finished turn nobody has looked at (an unread reply).
-    Done,
+    Unread,
     /// `Working`, running a tool included.
     Working,
     /// `Working`, waiting for the model's response.
@@ -156,22 +157,24 @@ pub enum StatusGroup {
     Exited,
     Dead,
     Unknown,
-    /// Nothing to do until the user says so.
-    Idle,
+    /// `Idle`: nothing to do until the user says so (a reply that's been
+    /// read). Listed by when each was last read, not in an order the user
+    /// sets ([`StatusGroup::by_last_read`]).
+    Done,
 }
 
 impl StatusGroup {
     /// Every status, in display order.
     pub const ALL: [StatusGroup; 9] = [
         StatusGroup::WaitingForYou,
-        StatusGroup::Done,
+        StatusGroup::Unread,
         StatusGroup::Working,
         StatusGroup::WaitingForResponse,
         StatusGroup::Running,
         StatusGroup::Exited,
         StatusGroup::Dead,
         StatusGroup::Unknown,
-        StatusGroup::Idle,
+        StatusGroup::Done,
     ];
 
     /// The status `session` is in (see [`StatusGroup`]).
@@ -185,8 +188,8 @@ impl StatusGroup {
                     }
                     Lifecycle::Working => StatusGroup::Working,
                     Lifecycle::Blocked => StatusGroup::WaitingForYou,
-                    Lifecycle::Done => StatusGroup::Done,
-                    Lifecycle::Idle => StatusGroup::Idle,
+                    Lifecycle::Done => StatusGroup::Unread,
+                    Lifecycle::Idle => StatusGroup::Done,
                     Lifecycle::Unknown | Lifecycle::None => StatusGroup::Running,
                 }
             }
@@ -196,18 +199,79 @@ impl StatusGroup {
         }
     }
 
+    /// Whether its sessions are listed by when each was last read
+    /// (`last_active_at`, which going into a session sets), most recent
+    /// first, instead of in an order the user sets: done.
+    pub fn by_last_read(self) -> bool {
+        self == StatusGroup::Done
+    }
+
+    /// How its order is saved (`sessions.section_order`): the name it had
+    /// when orders were first saved, so renaming it keeps them.
+    pub fn saved_name(self) -> &'static str {
+        match self {
+            StatusGroup::Unread => "done",
+            StatusGroup::Done => "idle",
+            status => status.label(),
+        }
+    }
+
     /// The words the list uses for it.
     pub fn label(self) -> &'static str {
         match self {
             StatusGroup::WaitingForYou => "waiting for you",
-            StatusGroup::Done => "done",
+            StatusGroup::Unread => "unread",
             StatusGroup::Working => "working",
             StatusGroup::WaitingForResponse => "waiting for response",
-            StatusGroup::Idle => "idle",
+            StatusGroup::Done => "done",
             StatusGroup::Running => "running",
             StatusGroup::Exited => "exited",
             StatusGroup::Dead => "dead",
             StatusGroup::Unknown => "unknown",
+        }
+    }
+}
+
+/// When a done session was last read: done's sub-sections under Status,
+/// most recent first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ReadPeriod {
+    /// Within the last hour.
+    LastHour,
+    /// Within the last day.
+    LastDay,
+    /// Longer ago.
+    Older,
+}
+
+impl ReadPeriod {
+    /// The period, at `now`, of a session last read at `last_read` (both
+    /// in seconds); a clock behind the read counts it as just now.
+    pub fn of(now: i64, last_read: i64) -> ReadPeriod {
+        let age = now.saturating_sub(last_read);
+        if age <= 3_600 {
+            ReadPeriod::LastHour
+        } else if age <= 86_400 {
+            ReadPeriod::LastDay
+        } else {
+            ReadPeriod::Older
+        }
+    }
+
+    /// The period of `session` at `now` when it's done (its last read is
+    /// `last_active_at`, which going in sets); `None` for any other status.
+    pub fn of_done(now: i64, session: &SessionView) -> Option<ReadPeriod> {
+        StatusGroup::of(session)
+            .by_last_read()
+            .then(|| ReadPeriod::of(now, session.last_active_at))
+    }
+
+    /// Its name in its header.
+    pub fn label(self) -> &'static str {
+        match self {
+            ReadPeriod::LastHour => "last hour",
+            ReadPeriod::LastDay => "last day",
+            ReadPeriod::Older => "older",
         }
     }
 }
@@ -220,12 +284,18 @@ pub enum Section {
 }
 
 impl Section {
+    /// Whether its sessions are listed by when each was last read
+    /// ([`StatusGroup::by_last_read`]), so they can't be moved.
+    pub fn by_last_read(&self) -> bool {
+        matches!(self, Section::Status(status) if status.by_last_read())
+    }
+
     /// How the order of its sessions is saved (`sessions.section_order`):
     /// `app:claude`, `status:working`.
     pub fn key(&self) -> String {
         match self {
             Section::App(app) => format!("app:{}", app.as_str()),
-            Section::Status(status) => format!("status:{}", status.label()),
+            Section::Status(status) => format!("status:{}", status.saved_name()),
         }
     }
 
@@ -307,8 +377,8 @@ mod tests {
 
     #[test]
     fn tabs_step_without_wrapping() {
-        // Status leads; the list starts on Folders.
-        assert_eq!(Grouping::default(), Grouping::Folder);
+        // Status leads, and the list starts there.
+        assert_eq!(Grouping::default(), Grouping::Status);
         assert_eq!(Grouping::Status.step(1), Grouping::Folder);
         assert_eq!(Grouping::Folder.step(1), Grouping::App);
         assert_eq!(Grouping::App.step(1), Grouping::App);
@@ -354,9 +424,9 @@ mod tests {
         assert_eq!(status(&session), StatusGroup::Running);
         for (lifecycle, group) in [
             (Lifecycle::Blocked, StatusGroup::WaitingForYou),
-            (Lifecycle::Done, StatusGroup::Done),
+            (Lifecycle::Done, StatusGroup::Unread),
             (Lifecycle::Working, StatusGroup::Working),
-            (Lifecycle::Idle, StatusGroup::Idle),
+            (Lifecycle::Idle, StatusGroup::Done),
             (Lifecycle::Unknown, StatusGroup::Running),
             (Lifecycle::None, StatusGroup::Running),
         ] {
@@ -395,6 +465,38 @@ mod tests {
             StatusGroup::WaitingForResponse.label(),
             "waiting for response"
         );
+    }
+
+    #[test]
+    fn done_sessions_fall_in_the_last_hour_the_last_day_or_older() {
+        let now = 1_000_000;
+        assert_eq!(ReadPeriod::of(now, now), ReadPeriod::LastHour);
+        assert_eq!(ReadPeriod::of(now, now - 3_600), ReadPeriod::LastHour);
+        assert_eq!(ReadPeriod::of(now, now - 3_601), ReadPeriod::LastDay);
+        assert_eq!(ReadPeriod::of(now, now - 86_400), ReadPeriod::LastDay);
+        assert_eq!(ReadPeriod::of(now, now - 86_401), ReadPeriod::Older);
+        assert_eq!(ReadPeriod::of(now, now + 60), ReadPeriod::LastHour);
+        let mut session = view("A", "a", now - 7_200);
+        assert_eq!(ReadPeriod::of_done(now, &session), None);
+        session.lifecycle = Lifecycle::Idle;
+        assert_eq!(
+            ReadPeriod::of_done(now, &session),
+            Some(ReadPeriod::LastDay)
+        );
+        assert_eq!(ReadPeriod::LastDay.label(), "last day");
+    }
+
+    #[test]
+    fn unread_and_done_keep_the_orders_saved_as_done_and_idle() {
+        assert_eq!(StatusGroup::Unread.label(), "unread");
+        assert_eq!(StatusGroup::Done.label(), "done");
+        assert_eq!(Section::Status(StatusGroup::Unread).key(), "status:done");
+        assert_eq!(Section::Status(StatusGroup::Done).key(), "status:idle");
+        assert_eq!(
+            Section::Status(StatusGroup::Working).key(),
+            "status:working"
+        );
+        assert_eq!(StatusGroup::ALL.last(), Some(&StatusGroup::Done));
     }
 
     #[test]

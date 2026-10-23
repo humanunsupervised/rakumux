@@ -17,7 +17,8 @@ new-session flow, and code boundaries.
 - Settings is one page (settings, then every action; values and keys pinned right), sized from
   its rows, at most 80% of the screen's height; `→` shows the selected row's note in a popover
   (the rows never shift) and the wheel moves the selection. Help keeps a reading width and tabs. All dialogs leave the footer row visible.
-  The footer is a full-width bar with `session: <name>` in its centre: orange with dark text in
+  The detail has no title row: the footer names the session in view (`session: ● <name>`, the
+  mark its list row has). The footer is a full-width bar with that in its centre: orange with dark text in
   Rakumux mode (`? Help` and `, Settings` buttons in a darker orange), muted blue in session and
   terminal input modes (a `Ctrl-\ Rakumux` button); the badge and buttons are hit targets.
 - A session the user exits from inside (controller, session mode) is deleted on its `exited`
@@ -51,11 +52,13 @@ new-session flow, and code boundaries.
   rows (`PickerRow::Suggestion`): `↑`/`↓` choose, Tab or `→` completes, Enter adds, a click
   completes.
 - `grouping.rs`: the list tabs, pure derivations over `SessionView` (no drawing). `Grouping`
-  (Status, Folders, App; `step` for ←/→, no wrap), `AppKey::of` (agent kind, else a
+  (Status, Folders, App; `step` for ←/→, no wrap; the default, where every start opens, is
+  Status), `AppKey::of` (agent kind, else a
   non-shell foreground program while live, else a non-shell `launch.argv[0]`, else `shell`;
-  lowercase; dead sessions keep their agent), `StatusGroup::of` (mirrors
-  `components::format::status_label`: waiting for you, done, working, waiting for response by
-  activity phase, running, exited, dead, unknown, idle; display order = enum order), `Section`
+  lowercase; dead sessions keep their agent), `StatusGroup::of` (like the
+  status marks, `components::format::status_glyph`: waiting for you, unread (a `done` turn not yet looked at),
+  working, waiting for response by activity phase, running, exited, dead, unknown, done (`idle`);
+  display order = enum order; `saved_name` keeps the old `status:done`/`status:idle` keys), `Section`
   (an app or a status) and `sort_sections` (agents first, then programs, then `shell`, by name).
   `is_shell` is the one shell list (`format.rs` uses it too).
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
@@ -89,7 +92,7 @@ new-session flow, and code boundaries.
   last row, zoom included, so modes, selection and messages never move a pane. Phones
   (`layout::is_phone`, under 80 columns, `App::phone`) show the list alone in Rakumux mode
   (or Grid cards when Grid is selected) and the session under a tab bar in session mode
-  (no title row; `App::list_layout` is Sidebar there except for Grid).
+  (`App::list_layout` is Sidebar there except for Grid).
   Narrow Sidebar windows (80–99 columns) stack the list above the detail in Rakumux mode
   (`Screen::stacked`, the divider a row) and give the session everything above the footer in
   session mode; `terminal_size` is always the session-mode pane.
@@ -118,7 +121,7 @@ new-session flow, and code boundaries.
   (`Hit::FooterKey`: what the keys do). The divider drags side to side, or up and down when
   stacked. Clicking "+ New session" creates and enters its shell immediately at any width,
   using the current folder; pending creation ignores repeated clicks.
-  A click on the previewed session (its title row or terminal) goes in. On a phone a
+  A click on the previewed session's terminal goes in. On a phone a
   tap on a session row (or "+ New session") opens it, and a tap on a tab switches session in
   session mode.
 - `constants.rs`: timings and UI constants. `feature_flags.rs`: code-only flags (`auth: false`).

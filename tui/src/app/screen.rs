@@ -6,9 +6,12 @@
 //! mode badge never moves and nothing above it shifts when the mode, the
 //! selection or a message changes.
 //!
+//! The detail is the session's terminal alone, with no title row: the
+//! footer names the session in view and its status.
+//!
 //! Phones (under [`layout::PHONE_BELOW`] columns) show one thing at a
-//! time: the list in Rakumux mode, the session under a row of tabs (no
-//! title row) in session mode. Narrow Sidebar screens up to
+//! time: the list in Rakumux mode, the session under a row of tabs in
+//! session mode. Narrow Sidebar screens up to
 //! [`layout::SINGLE_PANE_BELOW`] stack the list above the session in
 //! Rakumux mode, and give the session everything above the footer in
 //! session mode; see [`crate::layout`].
@@ -38,10 +41,8 @@ pub struct Screen {
     pub stacked: bool,
     /// Session tab bar (Tabs).
     pub tabs: Option<Rect>,
-    /// Detail pane: its title row, then the terminal.
+    /// Detail pane: the session's terminal.
     pub detail: Option<Rect>,
-    /// Top row of the detail: session name, status, controlling/observing.
-    pub detail_title: Option<Rect>,
     /// Where the terminal view draws.
     pub terminal: Option<Rect>,
     /// Independent shell panel below the detail; includes its title row.
@@ -96,22 +97,9 @@ pub fn compute(
     // A zero-width detail means a short narrow Sidebar shows the list
     // alone.
     if !areas.detail.is_empty() {
-        let detail = areas.detail;
-        screen.detail = Some(detail);
-        // On a phone the tab bar names the session; every row counts.
-        if layout::is_phone(area.width) && focus != Focus::List {
-            screen.terminal = Some(detail);
-        } else if detail.height > 1 {
-            screen.detail_title = Some(Rect {
-                height: 1,
-                ..detail
-            });
-            screen.terminal = Some(Rect {
-                y: detail.y + 1,
-                height: detail.height - 1,
-                ..detail
-            });
-        }
+        // The footer names the session; every row is its terminal's.
+        screen.detail = Some(areas.detail);
+        screen.terminal = Some(areas.detail);
     }
     screen
 }
@@ -129,7 +117,6 @@ pub fn with_terminal_panel(mut screen: Screen, open: bool, focused: bool, percen
         if focused {
             screen.terminal_panel = Some(detail);
             screen.detail = None;
-            screen.detail_title = None;
             screen.terminal = None;
         }
         return screen;
@@ -199,7 +186,6 @@ mod tests {
             screen.list,
             screen.divider,
             screen.tabs,
-            screen.detail_title,
             screen.terminal,
             screen.terminal_panel_divider,
             screen.terminal_panel,
@@ -229,9 +215,8 @@ mod tests {
         assert_eq!((list.y, list.height), (0, 47));
         assert_eq!((detail.y, detail.height), (0, 47));
         let terminal = screen.terminal.unwrap();
-        assert_eq!(terminal.y, detail.y + 1);
-        assert_eq!(terminal.height, detail.height - 1);
-        assert_eq!(terminal.width, detail.width);
+        // No title row either: the terminal is the whole detail.
+        assert_eq!(terminal, detail);
         assert_eq!(screen.divider.unwrap().x, list.width);
         assert_eq!(
             terminal_size(
@@ -240,7 +225,7 @@ mod tests {
                 false,
                 PaneSizes::default()
             ),
-            (terminal.width, 46)
+            (terminal.width, 47)
         );
     }
 
@@ -290,8 +275,7 @@ mod tests {
                 SessionLayout::Tabs => {
                     assert_eq!(screen.list, None);
                     assert_eq!(screen.tabs, Some(Rect::new(0, 0, 45, 1)));
-                    assert_eq!(screen.detail_title, Some(Rect::new(0, 1, 45, 1)));
-                    assert_eq!(screen.terminal, Some(Rect::new(0, 2, 45, 37)));
+                    assert_eq!(screen.terminal, Some(Rect::new(0, 1, 45, 38)));
                 }
             }
             if layout != SessionLayout::Tabs {
@@ -302,11 +286,10 @@ mod tests {
             assert_eq!(screen.footer, Some(Rect::new(0, 39, 45, 1)));
             assert_tiled(&screen, "45x40 list");
 
-            // Session mode: a row of tabs, then the session, no title row.
+            // Session mode: a row of tabs, then the session.
             let session = at(45, 40, layout, Focus::Session);
             assert_eq!((session.list, session.divider), (None, None));
             assert_eq!(session.tabs, Some(Rect::new(0, 0, 45, 1)));
-            assert_eq!(session.detail_title, None);
             assert_eq!(session.terminal, Some(Rect::new(0, 1, 45, 38)));
             assert_tiled(&session, "45x40 session");
             assert_eq!(
@@ -319,14 +302,13 @@ mod tests {
     #[test]
     fn narrow_sidebar_stacks_the_list_over_the_session_in_rakumux_mode() {
         // A narrow window: the list on top, a divider row, then the
-        // session's title row and its terminal, then the footer.
+        // session's terminal, then the footer.
         let screen = at(90, 40, SessionLayout::Sidebar, Focus::List);
         assert!(screen.stacked);
         assert_eq!(screen.list, Some(Rect::new(0, 0, 90, 15)));
         assert_eq!(screen.divider, Some(Rect::new(0, 15, 90, 1)));
         assert_eq!(screen.detail, Some(Rect::new(0, 16, 90, 23)));
-        assert_eq!(screen.detail_title, Some(Rect::new(0, 16, 90, 1)));
-        assert_eq!(screen.terminal, Some(Rect::new(0, 17, 90, 22)));
+        assert_eq!(screen.terminal, screen.detail);
         assert_eq!(screen.footer, Some(Rect::new(0, 39, 90, 1)));
         assert_tiled(&screen, "90x40");
 
@@ -335,7 +317,7 @@ mod tests {
         assert!(!session.stacked);
         assert_eq!((session.list, session.divider), (None, None));
         assert_eq!(session.detail, Some(Rect::new(0, 0, 90, 39)));
-        assert_eq!(session.terminal, Some(Rect::new(0, 1, 90, 38)));
+        assert_eq!(session.terminal, session.detail);
         assert_eq!(session.footer, screen.footer);
         // Only the session-mode pane sizes the terminal; the stacked
         // preview shows a window of it.
@@ -346,7 +328,7 @@ mod tests {
                 false,
                 PaneSizes::default()
             ),
-            (90, 38)
+            (90, 39)
         );
     }
 
@@ -382,17 +364,11 @@ mod tests {
                     let narrow = layout == SessionLayout::Sidebar && !phone && width < 100;
                     assert_eq!(screen.stacked, narrow && focus == Focus::List, "{label}");
                     if narrow && focus == Focus::Session {
-                        assert_eq!(terminal, Rect::new(0, 1, width, height - 2), "{label}");
+                        assert_eq!(terminal, Rect::new(0, 0, width, height - 1), "{label}");
                     }
                     if phone {
-                        // Under a row of tabs; in Rakumux mode with the
-                        // session's title row too.
-                        let top = if focus == Focus::List { 2 } else { 1 };
-                        assert_eq!(
-                            terminal,
-                            Rect::new(0, top, width, height - 1 - top),
-                            "{label}"
-                        );
+                        // Under a row of tabs.
+                        assert_eq!(terminal, Rect::new(0, 1, width, height - 2), "{label}");
                         assert_eq!(screen.tabs, Some(Rect::new(0, 0, width, 1)), "{label}");
                     }
                     if screen.stacked {
@@ -441,7 +417,7 @@ mod tests {
             sizes(64),
         );
         assert_eq!(screen.list.unwrap().height, 25);
-        assert_eq!(screen.terminal.unwrap().height, 39 - 25 - 2);
+        assert_eq!(screen.terminal.unwrap().height, 39 - 25 - 1);
         // The keyboard comes up: the same share, so the session keeps room.
         let screen = compute(
             area(90, 20),
@@ -467,7 +443,7 @@ mod tests {
         // The session-mode size doesn't depend on it.
         assert_eq!(
             terminal_size(area(90, 40), SessionLayout::Sidebar, false, sizes(64)),
-            (90, 38)
+            (90, 39)
         );
     }
 

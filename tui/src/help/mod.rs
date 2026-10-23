@@ -1654,9 +1654,10 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          it and `Enter` adds it.",
     );
     doc.text(
-        "The list's top row has three tabs: Status, a header per state (waiting for you, \
-         done, working, waiting for response, running, exited, dead, then idle), Folders \
-         (where the list starts), and App, a header per agent or program (claude, codex, \
+        "The list's top row has three tabs: Status (where the list starts), a header per \
+         state (waiting for you, unread, working, waiting for response, running, exited, \
+         dead, then done: the sessions you've read, most recently read first, under last \
+         hour, last day and older), Folders, and App, a header per agent or program (claude, codex, \
          opencode, …, then other programs, then shell); `←`/`→` there (or a click) switch \
          them. One tab is active \
          at a time: it decides the headers and the only filter that applies, and each tab \
@@ -1667,7 +1668,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     );
     doc.text(
         "The filter only narrows what this window shows; it isn't saved, so Rakumux always \
-         starts on every folder.",
+         starts on every folder, under the Status tab.",
     );
 
     filter_and_switcher_keys(doc);
@@ -1742,7 +1743,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     ));
     doc.text(
         "One client controls a session at a time. When another Rakumux window or `rakumux \
-         attach` takes control, you become an observer again and the pane says so.",
+         attach` takes control, you become an observer again and the footer says so.",
     );
 
     doc.heading("Exited and dead sessions");

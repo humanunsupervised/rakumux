@@ -18,6 +18,10 @@ and contract code retains its license when copied privately. Run
 `node tests/public-source-boundary.mjs` before source publication; it is not a complete
 secret/history audit. See `PUBLISHING.md` for that release boundary.
 
+## Speculative edge cases (read first)
+
+- Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.
+
 ## Architectural requirements
 
 1. **One server, many clients.** Exactly one `rakumux-ptyd` per user owns every session's
@@ -546,8 +550,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Folder filter**: the Folders tab's filter (`▤ Folders ▾`, `▤ web ▾`, `▤ 3 folders ▾`)
   and the Folders modal it opens; local to one window and not saved.
 - **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, Status, Folders and
-  Status. The active one decides the list's headers (per folder, per app, per status) and the one
-  filter that applies; each keeps its own filter while another is active; none is saved.
+  App. The active one decides the list's headers (per folder, per app, per status) and the one
+  filter that applies; each keeps its own filter while another is active; none is saved, and
+  every start (a restart or a UI reload) opens Status.
 - **Pin**: a user mark that lists a session first in its folder.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
@@ -626,15 +631,17 @@ build; daemon and sessions stay up), `S` ask to restart the server (in place wit
 it can: `y`/Enter, sessions keep running; otherwise `y` only, since that ends them; also Settings →
 Restart server, which shows the running server's version), `q`
 quit. There is no header: the panes start at the top row, and the list's first row (Sidebar) is
-its tabs, `◔ Status   ▤ Folders ▾   ◇ App`: the active one is bold, underlined and names its
+its tabs, `◔ Status ▾   ▤ Folders   ◇ App` (Status is active at every start): the active one is bold, underlined and names its
 filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`, `◔ 2 statuses ▾`); short rows narrow the gaps, then show
 the inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's
-filter at the left (`▤ Folders ▾`); only Master detail shows the three tabs. The footer,
+filter at the left (`◔ Status ▾`); only Master detail shows the three tabs. The footer,
 always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
 while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
 SESSION/TERMINAL), then messages and the daemon connection while it isn't up (`⠋ connecting`,
-`✕ daemon unavailable`); `session: <name>` in the centre (the selected session in Rakumux mode,
-the one taking the keys in session mode; none for the terminal panel); and on the right buttons
+`✕ daemon unavailable`); `session: ● <name>` in the centre with the status mark its list row
+has (in Rakumux mode the selected session, else the one kept in view; the one taking the keys in
+session mode; none for the terminal panel), since the detail has no title row: the session's
+terminal fills it from its top row; and on the right buttons
 (a darker shade of the orange bar; dark chips on the blue one): `? Help` and `, Settings` in
 Rakumux mode, `Ctrl-\ Rakumux` in session mode. When the row is short the session gives way
 first (off the centre, to its name alone, then nothing), then the message is cut, then buttons go
@@ -654,15 +661,15 @@ Phones (under `layout::PHONE_BELOW` = 80 columns; phone terminals
 are about 40–60 columns in portrait) offer Master detail and Tabs, not Grid (a chosen Grid shows
 as Master detail there, and `v` skips it). Master detail shows one thing at a time: Rakumux mode is
 the session list alone, full screen; a tap on a session (or `Enter`) goes into it, and session mode
-gives it the screen under a row of tabs, one per session (no folder filter, no title row; a tap on
+gives it the screen under a row of tabs, one per session (no folder filter; a tap on
 a tab switches session and stays in session mode). Tabs keeps that row of tabs over the selected
 session in Rakumux mode too. `Ctrl-\` (or a tap on the SESSION badge) goes back to Rakumux mode.
 Moving through Master detail's list on a phone doesn't resize anything: no session is on screen
 there.
 
 Narrow windows (Sidebar from 80 to `layout::SINGLE_PANE_BELOW` = 100 columns): in Rakumux mode
-the list is stacked on top, a one-row divider under it, and the selected session's detail (title
-row and faded preview) below, so switching sessions shows them. The list gets 40% of the rows above
+the list is stacked on top, a one-row divider under it, and the selected session's detail (its
+faded preview) below, so switching sessions shows them. The list gets 40% of the rows above
 the footer, at least `LIST_MIN_ROWS` (10: the tabs, a folder's header and two sessions) and leaving the detail
 `PREVIEW_MIN_ROWS` (4); dragging the divider sets that share (`sessions.stacked_list_percent`).
 Below `STACK_MIN_ROWS` (15 rows above the footer, a 16-row screen) Rakumux mode shows the list
@@ -705,13 +712,26 @@ The App and Status tabs group the same list differently (`app/grouping.rs`). App
 app (`AppKey::of`: the session's `agent.kind`, else its foreground program unless a shell, else
 `launch.argv[0]` unless a shell, else `shell`; an ended session keeps its agent), agents first,
 then other programs, then `shell`, each by name, with live/total. Status: a header per status
-(`StatusGroup::of`, like `format::status_label`: waiting for you, done, working, waiting for
-response (the `WaitingForResponse` activity phase), running (live, nothing reported), exited,
-dead, then idle), in that order, with a session count. Each app and status has an order of its
+(`StatusGroup::of`, like the rows' status marks: waiting for you, unread (a finished turn not yet
+looked at), working, waiting for response (the `WaitingForResponse` activity phase), running
+(live, nothing reported), exited, dead, then done (idle: a reply that's been read)), in that order, with a session count. Each app and status has an order of its
 own (`sessions.section_order`, by `Section::key`: `app:claude`, `status:working`): pinned sessions
 first, then the order the user gave them there, then the rest folder by folder (launch folder
 first). Dragging and `J`/`K` reorder a session within its header across folders, never into
-another header, and never change the folders' order. A status
+another header, and never change the folders' order. Done is the exception
+(`StatusGroup::by_last_read`): its sessions are listed by when each was last read
+(`last_active_at`, which going in sets, as it turns an unread reply done), most recent first,
+under a sub-header per period (`grouping::ReadPeriod`, `ListRow::ReadPeriodHeader`: `◷ last hour`,
+last day, older, the clock from `Icons::clock`, tinted like its sessions' marks; with a session
+count; selectable, Enter opens the Status modal on done), pinned
+sessions first within theirs, so reading one moves it to the top. The periods are measured from
+the list's clock (`SessionList::set_clock`, every tick), so sessions move down them as time
+passes. Nothing there can be moved (`J`/`K` say so). A done session's mark (`○`, wherever it's
+shown) is amber like an unread reply's `●` but quieter (`format::read_period_style`: the amber
+faded 30% when read within the hour, 50% within the day, then muted), and done's header has the
+last hour's. A row's description has no status words
+(its mark on the right says it): the app, branch, subagents and report; an ended session still
+says `exited · ⏎ restart` or `dead · ⏎ revive`. A status
 change moves a session to another header, but the selected session stays shown when it stops
 matching the filter (an answered question), until something else is selected. Their modals
 (`AppMode::Sections`, `components/section_picker.rs`) work like the Folders modal: All, then each

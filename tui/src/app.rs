@@ -47,6 +47,13 @@ mod text_input;
 pub mod types;
 mod upgrade;
 
+/// Seconds since the Unix epoch, what session times are in.
+fn wall_clock() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
 #[cfg(test)]
 pub mod testing;
 #[cfg(test)]
@@ -306,6 +313,7 @@ impl App {
             });
         let cycle_keys = parse_cycle_keys(&options.settings, &mut warnings);
         let mut list = SessionList::new(options.scope.clone());
+        list.set_clock(wall_clock());
         list.set_session_order(&options.settings.sessions.session_order);
         list.set_section_order(&options.settings.sessions.section_order);
         let folders = Folders::new(options.scope.clone());
@@ -737,11 +745,13 @@ impl App {
             }
     }
 
-    /// Timers: status expiry and reconnects. Returns whether to redraw.
+    /// Timers: status expiry, reconnects and done's sub-sections as time
+    /// passes. Returns whether to redraw.
     pub fn on_tick(&mut self, now: Instant) -> bool {
         self.sync_grid();
         self.sync_terminal_panel();
         let mut changed = self.is_animating();
+        changed |= self.list.set_clock(wall_clock());
         changed |= self.offer_phone_access();
         if let Some((_, at)) = &self.status {
             if now.duration_since(*at) >= STATUS_TTL {

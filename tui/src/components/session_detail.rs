@@ -1,27 +1,25 @@
 //! Right pane: the selected session's terminal (running, or its saved
 //! screen), with placeholders for no sessions, loading, the session
-//! Rakumux runs in, errors and the daemon being unreachable. Live previews
-//! and their title areas recede in Rakumux mode; dialogs and saved
-//! output use a stronger fade. The cursor appears only while the session
-//! takes keys.
+//! Rakumux runs in, errors and the daemon being unreachable. There's no
+//! title row: the footer names the session and its status. Live previews
+//! recede in Rakumux mode; dialogs and saved output use a stronger fade.
+//! The cursor appears only while the session takes keys.
 
 use ratatui::{
-    layout::{Alignment, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{block::Title, Block, Paragraph, Wrap},
+    widgets::{Block, Paragraph, Wrap},
     Frame,
 };
-use session_core::api::Role;
 use session_core::model::SessionStatus;
 
-use super::format::{abbreviate_home, status_glyph, status_label, subagent_badge, truncate};
+use super::format::abbreviate_home;
 use super::utils::{fade, fade_preview, get_spinner_char};
 use crate::app::grouping::Grouping;
 use crate::app::screen::Screen;
 use crate::app::types::{AppMode, Focus};
 use crate::app::{App, Connection, DetailView, Selection};
-use crate::layout::str_width;
 use crate::terminal_view::DefaultColors;
 use crate::theme;
 
@@ -29,9 +27,6 @@ use crate::theme;
 /// session shows its cursor.
 pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<(u16, u16)> {
     let p = theme::palette();
-    // The session in view: the selected one, or the one kept in view while
-    // the folder filter, a folder header or + New session is selected.
-    let session = app.detail.session_id().and_then(|id| app.list.get(id));
     let focused = app.focus == Focus::Session && matches!(app.mode, AppMode::Normal);
 
     if let Some(detail) = screen.detail {
@@ -40,78 +35,11 @@ pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<
             detail,
         );
     }
-    if let Some(title_area) = screen.detail_title {
-        let name_color = if focused {
-            p.text_bright
-        } else {
-            p.text_primary
-        };
-        let role = match app.detail.attachment.as_ref().map(|a| a.role) {
-            Some(Role::Controller) => Some(("● controlling", p.accent_green)),
-            Some(Role::Observer) => Some(("observing", p.text_muted)),
-            None => None,
-        };
-        let title = match session {
-            Some(session) => {
-                let (glyph, glyph_style) = status_glyph(session);
-                let mut spans = vec![
-                    Span::raw(" "),
-                    Span::styled(glyph, glyph_style),
-                    Span::raw(" "),
-                    Span::styled(
-                        session.name.clone(),
-                        Style::default().fg(name_color).add_modifier(Modifier::BOLD),
-                    ),
-                ];
-                if let Some(status) = status_label(session) {
-                    spans.push(Span::styled(
-                        format!(" · {status}"),
-                        Style::default().fg(p.text_muted),
-                    ));
-                }
-                if let Some(badge) = subagent_badge(session, app.icons()) {
-                    spans.push(Span::styled(
-                        format!(" · {badge}"),
-                        Style::default().fg(p.text_muted),
-                    ));
-                }
-                // The program's title in what's left beside the role (a
-                // narrow pane keeps the role), when there's room for it.
-                let used = Line::from(spans.clone()).width()
-                    + role.map_or(0, |(label, _)| str_width(label) + 2);
-                let room = usize::from(title_area.width).saturating_sub(used + 3);
-                if let Some(title) = app.detail.title.as_deref().filter(|t| !t.is_empty()) {
-                    if room >= 8 {
-                        spans.push(Span::styled(
-                            format!(" · {}", truncate(title, room.min(40))),
-                            Style::default().fg(p.text_muted),
-                        ));
-                    }
-                }
-                Line::from(spans)
-            }
-            None => Line::from(Span::styled(" Rakumux", Style::default().fg(p.text_muted))),
-        };
-        let mut block = Block::default()
-            .title(title)
-            .style(Style::default().bg(p.panel));
-        if let Some((label, color)) = role {
-            block = block.title(
-                Title::from(Span::styled(
-                    format!("{label} "),
-                    Style::default().fg(color),
-                ))
-                .alignment(Alignment::Right),
-            );
-        }
-        f.render_widget(block, title_area);
-        fade_inactive_detail(f, app, title_area, focused);
-    }
     let area = screen.terminal?;
     draw_terminal(f, app, area, focused)
 }
 
-/// Apply one consistent inactive treatment to the terminal and title.
+/// Apply one consistent inactive treatment to the terminal.
 /// Each freshly rendered area is faded once, never layered on a prior fade.
 fn fade_inactive_detail(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     if !matches!(app.mode, AppMode::Normal) || matches!(app.detail.view, DetailView::Saved { .. }) {
