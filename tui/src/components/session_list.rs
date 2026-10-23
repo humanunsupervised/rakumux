@@ -212,7 +212,8 @@ pub fn worktree_header_line(
 
 /// The header of one of done's sub-sections, indented under done like a
 /// worktree's under its folder: a clock and when its sessions were last
-/// read, a rule, then how many it has, in `width` columns.
+/// read (a pin for the pinned ones), a rule, then how many it has, in
+/// `width` columns.
 pub fn read_period_header_line(
     app: &App,
     period: ReadPeriod,
@@ -222,7 +223,10 @@ pub fn read_period_header_line(
     let p = theme::palette();
     let count = sessions_label(app.list.read_period_count(period));
     // "   ◷ label ─── count": the indent, and at least two rule columns.
-    let clock = format!("{} ", app.icons().clock());
+    let clock = match period {
+        ReadPeriod::Pinned => format!("{PIN_MARK} "),
+        _ => format!("{} ", app.icons().clock()),
+    };
     let fixed = 5 + str_width(&clock) + str_width(&count);
     let label = truncate(period.label(), width.saturating_sub(fixed + 2));
     let rule = width.saturating_sub(fixed + str_width(&label));

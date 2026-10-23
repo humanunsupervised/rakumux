@@ -745,12 +745,12 @@ impl SessionList {
             .collect();
         // Stable: unordered sessions keep their folder by folder order.
         if section.by_last_read() {
-            // By when each was last read, its sub-section first.
-            let period = |s: &SessionView| ReadPeriod::of(self.now, s.last_active_at);
+            // Its sub-section first (pinned, then by when each was last
+            // read), then the most recently read.
+            let period = |s: &SessionView| ReadPeriod::of_done(self.now, s);
             sessions.sort_by(|a, b| {
                 period(a)
                     .cmp(&period(b))
-                    .then(b.pinned.cmp(&a.pinned))
                     .then(b.last_active_at.cmp(&a.last_active_at))
             });
         } else {
@@ -1350,6 +1350,53 @@ mod tests {
         list.set_grouping(Grouping::Folder);
         assert!(!list.listed_by_last_read(&id("A")));
         assert!(list.move_session(&id("A"), 2));
+    }
+
+    #[test]
+    fn pinned_done_sessions_lead_done_under_their_own_header() {
+        let now = 1_000_000;
+        let read = |id: &str, ago: i64, pinned: bool| {
+            let mut session = aged(id, &id.to_lowercase(), 1, now - ago);
+            session.lifecycle = Lifecycle::Idle;
+            session.pinned = pinned;
+            session
+        };
+        let mut list = SessionList::new(scope());
+        list.set_clock(now);
+        list.replace_all(
+            vec![
+                read("A", 10 * 86_400, true),
+                read("B", 60, false),
+                read("C", 7_200, true),
+            ],
+            Listed::All,
+        );
+        // Pinned first however long ago they were read, most recent first.
+        assert_eq!(
+            row_names(&list),
+            ["^", "  · pinned", "c", "a", "  · last hour", "b", "+"]
+        );
+        assert_eq!(list.read_period_count(ReadPeriod::Pinned), 2);
+        // Unpinned, a session goes back to when it was read.
+        list.apply(&envelope(
+            "A",
+            SessionEvent::Updated {
+                session: read("A", 10 * 86_400, false),
+            },
+        ));
+        assert_eq!(
+            row_names(&list),
+            [
+                "^",
+                "  · pinned",
+                "c",
+                "  · last hour",
+                "b",
+                "  · older",
+                "a",
+                "+"
+            ]
+        );
     }
 
     #[test]

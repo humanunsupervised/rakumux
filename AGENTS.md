@@ -751,8 +751,9 @@ another header, and never change the folders' order. Done is the exception
 (`last_active_at`, which going in sets, as it turns an unread reply done), most recent first,
 under a sub-header per period (`grouping::ReadPeriod`, `ListRow::ReadPeriodHeader`: `◷ last hour`,
 last day, older, the clock from `Icons::clock`, tinted like its sessions' marks; with a session
-count; selectable, Enter opens the Status modal on done), pinned
-sessions first within theirs, so reading one moves it to the top. The periods are measured from
+count; selectable, Enter opens the Status modal on done), so reading one moves it to the top.
+Pinned sessions (`p`) lead done under their own `★ pinned` sub-header (`ReadPeriod::Pinned`),
+whenever they were read, most recent first; unpinning puts one back in its period. The periods are measured from
 the list's clock (`SessionList::set_clock`, every tick), so sessions move down them as time
 passes. Nothing there can be moved (`J`/`K` say so). A done session's mark (`○`, wherever it's
 shown) is amber like an unread reply's `●` but quieter (`format::read_period_style`: the amber

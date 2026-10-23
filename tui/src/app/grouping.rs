@@ -232,10 +232,12 @@ impl StatusGroup {
     }
 }
 
-/// When a done session was last read: done's sub-sections under Status,
-/// most recent first.
+/// Done's sub-sections under Status, in order: pinned sessions first, then
+/// the others by when each was last read, most recent first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ReadPeriod {
+    /// Pinned, however long ago it was read.
+    Pinned,
     /// Within the last hour.
     LastHour,
     /// Within the last day.
@@ -258,17 +260,23 @@ impl ReadPeriod {
         }
     }
 
-    /// The period of `session` at `now` when it's done (its last read is
-    /// `last_active_at`, which going in sets); `None` for any other status.
+    /// The sub-section of `session` at `now` when it's done: pinned, else by
+    /// its last read (`last_active_at`, which going in sets); `None` for any
+    /// other status.
     pub fn of_done(now: i64, session: &SessionView) -> Option<ReadPeriod> {
-        StatusGroup::of(session)
-            .by_last_read()
-            .then(|| ReadPeriod::of(now, session.last_active_at))
+        StatusGroup::of(session).by_last_read().then(|| {
+            if session.pinned {
+                ReadPeriod::Pinned
+            } else {
+                ReadPeriod::of(now, session.last_active_at)
+            }
+        })
     }
 
     /// Its name in its header.
     pub fn label(self) -> &'static str {
         match self {
+            ReadPeriod::Pinned => "pinned",
             ReadPeriod::LastHour => "last hour",
             ReadPeriod::LastDay => "last day",
             ReadPeriod::Older => "older",

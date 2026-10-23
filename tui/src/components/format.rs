@@ -105,7 +105,8 @@ pub fn read_period_style(period: ReadPeriod) -> Style {
             .add_modifier(Modifier::DIM),
     };
     match period {
-        ReadPeriod::LastHour => amber(DONE_FADE.0),
+        // Pinned sessions are any age; their header has the brightest.
+        ReadPeriod::Pinned | ReadPeriod::LastHour => amber(DONE_FADE.0),
         ReadPeriod::LastDay => amber(DONE_FADE.1),
         ReadPeriod::Older => Style::default().fg(p.text_muted),
     }
