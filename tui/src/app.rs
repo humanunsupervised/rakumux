@@ -1254,7 +1254,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 6] = [
+const DAEMON_FEATURES: [(&str, &str); 7] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1269,6 +1269,10 @@ const DAEMON_FEATURES: [(&str, &str); 6] = [
     (
         session_core::api::CAPABILITY_WORKING_DIRECTORY,
         "the branch an agent works on",
+    ),
+    (
+        session_core::api::CAPABILITY_AGENT_OUTPUT,
+        "each agent's latest output",
     ),
 ];
 

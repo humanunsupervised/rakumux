@@ -41,6 +41,9 @@ enum Source {
     /// An append-only log, read from where it was last read.
     Log {
         agent: LogAgent,
+        /// Claude Code's conversation, checked on every read: the process
+        /// can clear it, resume another or park it in a background job.
+        conversation: Option<String>,
         path: PathBuf,
         /// How far the log has been read.
         offset: u64,
@@ -67,15 +70,21 @@ impl Follower {
     /// Where `process`'s output can be read, when it runs `agent` (as
     /// detected, `claude`, `codex` or `opencode`, or as its hooks name it).
     pub fn locate(process: &ProcessInfo, agent: &str) -> Option<Self> {
-        let log = |agent, path| Source::Log {
+        let log = |agent, conversation, path| Source::Log {
             agent,
+            conversation,
             path,
             offset: 0,
             partial: Vec::new(),
         };
         let source = match agent {
-            "claude" | "claude-code" => log(LogAgent::Claude, claude::log(process)?),
-            "codex" => log(LogAgent::Codex, codex::log(process)?),
+            "claude" | "claude-code" => {
+                let config = crate::resume::claude_config_dir()?;
+                let id = claude::conversation(&config, process.pid)?;
+                let path = claude::transcript(&config, &id)?;
+                log(LogAgent::Claude, Some(id), path)
+            }
+            "codex" => log(LogAgent::Codex, None, codex::log(process)?),
             "opencode" | "opencode2" => Source::OpenCode {
                 database: crate::resume::opencode_database()?,
                 cwd: crate::procinfo::cwd_of(process.pid),
@@ -106,11 +115,15 @@ impl Follower {
         let line = match &mut self.source {
             Source::Log {
                 agent,
+                conversation,
                 path,
                 offset,
                 partial,
             } => {
                 let agent = *agent;
+                if agent == LogAgent::Claude {
+                    switch_conversation(self.pid, conversation, path, offset, partial);
+                }
                 let Some(lines) = read(path, offset, partial) else {
                     return false;
                 };
@@ -141,6 +154,32 @@ impl Follower {
             }
             _ => false,
         }
+    }
+}
+
+/// Follow Claude Code's conversation to wherever the process works now: a
+/// new transcript is read from its tail.
+fn switch_conversation(
+    pid: u32,
+    conversation: &mut Option<String>,
+    path: &mut PathBuf,
+    offset: &mut u64,
+    partial: &mut Vec<u8>,
+) {
+    let Some(config) = crate::resume::claude_config_dir() else {
+        return;
+    };
+    let Some(current) = claude::conversation(&config, pid) else {
+        return;
+    };
+    if conversation.as_deref() == Some(current.as_str()) {
+        return;
+    }
+    if let Some(transcript) = claude::transcript(&config, &current) {
+        *path = transcript;
+        *offset = 0;
+        partial.clear();
+        *conversation = Some(current);
     }
 }
 
@@ -239,6 +278,7 @@ mod tests {
             pid: 1,
             source: Source::Log {
                 agent: LogAgent::Codex,
+                conversation: None,
                 path,
                 offset: 0,
                 partial: Vec::new(),

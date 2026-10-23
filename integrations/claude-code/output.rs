@@ -1,24 +1,70 @@
 //! Claude Code's latest output, from its conversation transcript.
 use super::{first_line, short_path, tool_line};
-use crate::host::ProcessInfo;
+use serde::Deserialize;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The most project directories searched for a transcript.
 const MAX_PROJECTS: usize = 4096;
 
-/// The transcript of the conversation `process` runs:
-/// `<config dir>/projects/<project>/<conversation>.jsonl`.
-pub(super) fn log(process: &ProcessInfo) -> Option<PathBuf> {
-    let config = crate::resume::claude_config_dir()?;
-    let id = crate::resume::claude_conversation(process, &config)?;
+/// `<config dir>/sessions/<pid>.json`: the conversation a process shows,
+/// and the background job it parked it in, if any.
+#[derive(Deserialize)]
+struct SessionFile {
+    #[serde(rename = "sessionId")]
+    session_id: String,
+    #[serde(default)]
+    pid: Option<u32>,
+    #[serde(default, rename = "parkedJobId")]
+    parked_job_id: Option<String>,
+}
+
+/// `<config dir>/jobs/<job>/state.json`: the conversation a background job runs.
+#[derive(Deserialize)]
+struct JobState {
+    #[serde(rename = "sessionId")]
+    session_id: String,
+}
+
+/// The conversation process `pid` is working in, under `config`: the one
+/// a background job runs when the process parked its conversation there
+/// (the work goes on in the job's transcript), else its own.
+pub(super) fn conversation(config: &Path, pid: u32) -> Option<String> {
+    let path = config.join("sessions").join(format!("{pid}.json"));
+    let file: SessionFile = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    if file.pid.is_some_and(|recorded| recorded != pid) {
+        return None;
+    }
+    let parked = file
+        .parked_job_id
+        .filter(|job| crate::resume::is_conversation_id(job))
+        .and_then(|job| {
+            let path = config.join("jobs").join(job).join("state.json");
+            let state: JobState = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+            Some(state.session_id)
+        });
+    parked
+        .into_iter()
+        .chain([file.session_id])
+        .find(|id| crate::resume::is_conversation_id(id))
+}
+
+/// The transcript of conversation `id` under `config`:
+/// `projects/<project>/<id>.jsonl`, the most recently written one when a
+/// conversation was copied to another project.
+pub(super) fn transcript(config: &Path, id: &str) -> Option<PathBuf> {
     let name = format!("{id}.jsonl");
     std::fs::read_dir(config.join("projects"))
         .ok()?
         .filter_map(Result::ok)
         .take(MAX_PROJECTS)
         .map(|entry| entry.path().join(&name))
-        .find(|path| path.is_file())
+        .filter_map(|path| {
+            let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+            Some((modified, path))
+        })
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, path)| path)
 }
 
 /// An entry of the main conversation's assistant (a subagent's are its own):
@@ -100,6 +146,49 @@ mod tests {
                 json!([{"type": "tool_use", "name": "TodoWrite", "input": {}}])
             )),
             Some("TodoWrite".into())
+        );
+    }
+
+    #[test]
+    fn a_parked_conversation_is_followed_in_its_background_job() {
+        let config = tempfile::tempdir().unwrap();
+        let write = |path: &str, value: Value| {
+            let path = config.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, value.to_string()).unwrap();
+        };
+        write(
+            "sessions/42.json",
+            json!({"pid": 42, "sessionId": "own-conversation"}),
+        );
+        assert_eq!(
+            conversation(config.path(), 42),
+            Some("own-conversation".into())
+        );
+        // Parked in a job: the job's conversation.
+        write(
+            "sessions/42.json",
+            json!({"pid": 42, "sessionId": "own-conversation", "parkedJobId": "job1"}),
+        );
+        write(
+            "jobs/job1/state.json",
+            json!({"sessionId": "job-conversation"}),
+        );
+        assert_eq!(
+            conversation(config.path(), 42),
+            Some("job-conversation".into())
+        );
+        // Another process's file, or no file: nothing.
+        assert_eq!(conversation(config.path(), 7), None);
+        write("sessions/7.json", json!({"pid": 8, "sessionId": "x"}));
+        assert_eq!(conversation(config.path(), 7), None);
+        // The transcript is the newest copy.
+        write("projects/a/job-conversation.jsonl", json!({}));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write("projects/b/job-conversation.jsonl", json!({}));
+        assert_eq!(
+            transcript(config.path(), "job-conversation"),
+            Some(config.path().join("projects/b/job-conversation.jsonl"))
         );
     }
 

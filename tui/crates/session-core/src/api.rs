@@ -452,6 +452,9 @@ pub const CAPABILITY_TERMINAL_PANE: &str = "terminal.pane";
 /// Self-reported logical agent directories, separate from the terminal cwd.
 pub const CAPABILITY_WORKING_DIRECTORY: &str = "session.working_directory";
 
+/// `SessionView::agent_output`: a running agent's latest output line.
+pub const CAPABILITY_AGENT_OUTPUT: &str = "session.agent_output";
+
 fn is_false(value: &bool) -> bool {
     !*value
 }

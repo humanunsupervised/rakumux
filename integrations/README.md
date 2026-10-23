@@ -107,8 +107,10 @@ last said or did (`SessionView.agent_output`), shown in the session list under t
 name.
 - **Where it comes from:** the daemon reads it from the agent's own conversation on this
   machine, at most once a second while the terminal shows output:
-  - Claude Code: `<config dir>/projects/*/<conversation>.jsonl`, for the conversation in
-    `sessions/<pid>.json`.
+  - Claude Code: `<config dir>/projects/*/<conversation>.jsonl` (the newest copy), for the
+    conversation in `sessions/<pid>.json`. When the process parked its conversation in a
+    background job (`parkedJobId`), it's the job's (`jobs/<job>/state.json`). It's checked on
+    every read, so `/clear`, resuming another conversation, or parking switch the transcript.
   - Codex: the `rollout-….jsonl` file the process has open.
   - OpenCode: `opencode.db`, read-only. OpenCode 2's newest replies in `session_message`, or
     1.x's newest assistant pieces in `part`, for the conversation the Rakumux plugin bound to

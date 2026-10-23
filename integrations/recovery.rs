@@ -43,10 +43,10 @@ mod claude;
 mod codex;
 #[path = "open-code/recovery.rs"]
 mod opencode;
+pub(crate) use claude::claude_config_dir;
 #[cfg(test)]
 use claude::claude_flags;
 use claude::claude_resume;
-pub(crate) use claude::{claude_config_dir, claude_conversation};
 pub(crate) use codex::codex_open_rollout;
 use codex::codex_resume;
 use opencode::opencode_resume;

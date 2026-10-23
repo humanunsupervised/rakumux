@@ -2637,7 +2637,8 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
             [
                 "new folders live",
                 "the terminal panel",
-                "the branch an agent works on"
+                "the branch an agent works on",
+                "each agent's latest output"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -3152,7 +3153,8 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "pins",
                 "new folders live",
                 "the terminal panel",
-                "the branch an agent works on"
+                "the branch an agent works on",
+                "each agent's latest output"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -4486,4 +4488,25 @@ async fn an_agents_latest_output_shows_under_its_name_above_its_details() {
         .position(|row| row.contains(" docs "))
         .unwrap();
     assert!(!screen[docs + 1].contains("Bash:"));
+}
+
+#[tokio::test]
+async fn the_lines_under_a_name_stop_short_of_its_age_and_mark() {
+    let mut long = view("A", "api", 20);
+    long.agent_output = Some("word ".repeat(60));
+    let mut h = harness(vec![long]).on_folders_tab();
+    let screen = screen_rows(&mut h, 160, 48);
+    let title = screen.iter().position(|row| row.contains(" api ")).unwrap();
+    let list_width = usize::from(crate::layout::sidebar_width(160));
+    let row = |line: &str| -> String { line.chars().take(list_width).collect() };
+    let mark_end = row(&screen[title]).trim_end().chars().count();
+    for below in [title + 1, title + 2] {
+        let end = row(&screen[below]).trim_end().chars().count();
+        assert!(
+            end + 6 <= mark_end,
+            "{:?}\n{:?}",
+            row(&screen[title]),
+            row(&screen[below])
+        );
+    }
 }

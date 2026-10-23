@@ -559,7 +559,7 @@ startup authorization. Success reloads only the UI through the new launcher, str
 fallback. Legacy npm/Homebrew installs use their package manager. On a protocol mismatch the TUI
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
-`session.working_directory`, read with `SessionApi::daemon_capabilities`) it says what's missing
+`session.working_directory`, `session.agent_output`, read with `SessionApi::daemon_capabilities`) it says what's missing
 and offers a restart: in place when the daemon has `daemon.restart` (sessions keep running;
 `y`/Enter), otherwise by stopping it (`y` only, since running sessions end).
 

@@ -71,6 +71,10 @@ fn folder_item_height(pane: u16) -> u16 {
 /// Columns left of the content: room for the drag mark, and a gap.
 const INDENT: usize = 3;
 
+/// A session's right column: its age (at most four columns, `52w`) and its
+/// mark, which the lines under its name stay clear of, with a gap.
+const RIGHT_COLUMN: usize = 7;
+
 /// Shown left of a session while it's dragged.
 const DRAG_MARK: &str = "▎";
 
@@ -386,11 +390,13 @@ fn session_content(
         first.push(Span::raw(" "));
         first.push(badge);
     }
+    // The lines under the name end where the right column starts.
+    let column = width.saturating_sub(2 + RIGHT_COLUMN);
     let mut second = vec![Span::raw("  ")];
     second.extend(
         secondary_line(
             session,
-            width.saturating_sub(2),
+            column,
             app.icons(),
             Style::default().fg(detail_color),
         )
@@ -400,11 +406,18 @@ fn session_content(
     // The agent's latest output, under its name: reasoning, a tool call or
     // its reply, as the daemon reads it from the agent's log.
     if let Some(output) = &session.agent_output {
+        // A terminal has one font size: italic and a shade quieter than the
+        // details make it read as the smaller print.
+        let quiet = if selected {
+            p.neutral_gray
+        } else {
+            p.text_muted
+        };
         lines.push(vec![
             Span::raw("  "),
             Span::styled(
-                truncate(output, width.saturating_sub(2)),
-                Style::default().fg(detail_color),
+                truncate(output, column),
+                Style::default().fg(quiet).add_modifier(Modifier::ITALIC),
             ),
         ]);
     }
@@ -413,7 +426,7 @@ fn session_content(
         lines.push(vec![
             Span::raw("  "),
             Span::styled(
-                truncate(description, width.saturating_sub(2)),
+                truncate(description, column),
                 Style::default()
                     .fg(detail_color)
                     .add_modifier(Modifier::ITALIC),
