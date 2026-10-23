@@ -43,12 +43,18 @@ fn opencode_program(process: &ProcessInfo) -> &'static str {
     }
 }
 
-fn opencode_recent_session(cwd: &Path) -> Option<String> {
+/// OpenCode's database: `$XDG_DATA_HOME/opencode/opencode.db`.
+pub(crate) fn opencode_database() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .or_else(|| home_dir().map(|home| home.join(".local/share")))?;
-    let connection = open_read_only(&data.join("opencode/opencode.db"))?;
+    Some(data.join("opencode/opencode.db"))
+}
+
+/// The newest top-level conversation of the folder `cwd`.
+pub(crate) fn opencode_recent_session(cwd: &Path) -> Option<String> {
+    let connection = open_read_only(&opencode_database()?)?;
     let cwd = cwd.to_str()?;
     ["session_v2", "session"].into_iter().filter_map(|table| {
         connection.query_row(&format!(

@@ -242,8 +242,8 @@ tui/
 within the scope), `scope`, `is_self`, `cwd`, `status`, `exit_code`, `lifecycle`, `agent`,
 `reported`, `created_by`, `parent_id`, `depth`, `children`, `launch`, `resume`, `created_at`,
 `last_active_at`, `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree}` of the
-current cwd), `agent_output` (a live Claude Code or Codex session's latest reasoning, tool call
-or reply as one line, from its conversation log: `integrations/output.rs`), and `terminal` (pid, foreground process, title, size, `controlled`,
+current cwd), `agent_output` (a live Claude Code, Codex or OpenCode session's latest reasoning,
+tool call or reply as one line, from its conversation log or database: `integrations/output.rs`), and `terminal` (pid, foreground process, title, size, `controlled`,
 `alternate_screen`) while live. Folders are `ProjectView {path, name, sessions, live,
 last_active_at, added_at, git}` on the wire.
 

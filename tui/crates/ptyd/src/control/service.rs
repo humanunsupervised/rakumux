@@ -1870,7 +1870,7 @@ impl Inner {
         process: Option<&crate::host::ProcessInfo>,
         now: i64,
     ) {
-        let (follower, agent) = {
+        let (follower, agent, bound) = {
             let mut state = self.lock();
             let Some(live) = state
                 .live
@@ -1884,7 +1884,16 @@ impl Inner {
             }
             live.output_checked_ms = now;
             let agent = live.tracker.detected_agent().map(String::from);
-            (live.output.take(), agent)
+            let output = live.output.take();
+            // The OpenCode conversation its plugin bound here, if any.
+            let bound = state.bindings.get(session_id).and_then(|bindings| {
+                bindings
+                    .iter()
+                    .filter(|binding| binding.agent == "opencode")
+                    .max_by_key(|binding| binding.seq)
+                    .map(|binding| binding.conversation.clone())
+            });
+            (output, agent, bound)
         };
         let follower = match (process, agent) {
             (Some(process), Some(agent)) => {
@@ -1892,7 +1901,7 @@ impl Inner {
                     .filter(|follower| follower.pid() == process.pid)
                     .or_else(|| crate::agent_output::Follower::locate(process, &agent));
                 if let Some(follower) = follower.as_mut() {
-                    follower.follow();
+                    follower.follow(bound.as_deref());
                 }
                 follower
             }

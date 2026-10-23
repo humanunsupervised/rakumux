@@ -1,8 +1,8 @@
 //! Claude Code's latest output, from its conversation transcript.
-use super::{first_line, tool_line};
+use super::{first_line, short_path, tool_line};
 use crate::host::ProcessInfo;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// The most project directories searched for a transcript.
 const MAX_PROJECTS: usize = 4096;
@@ -63,17 +63,6 @@ fn block(block: &Value) -> Option<String> {
         }
         _ => None,
     }
-}
-
-/// A file's last two path components: `app/account.rs`.
-fn short_path(path: &str) -> String {
-    let parts: Vec<_> = Path::new(path)
-        .components()
-        .rev()
-        .take(2)
-        .map(|part| part.as_os_str().to_string_lossy().into_owned())
-        .collect();
-    parts.into_iter().rev().collect::<Vec<_>>().join("/")
 }
 
 #[cfg(test)]

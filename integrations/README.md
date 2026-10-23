@@ -102,12 +102,18 @@ prompts, tool arguments, output or transcripts.
 
 ## Latest output
 
-`output.rs` gives each live Claude Code or Codex session one line: what its agent last said
-or did (`SessionView.agent_output`), shown in the session list under the session's name.
-- **Where it comes from:** the daemon reads it from the agent's own conversation log on this
-  machine, at most once a second while the terminal shows output. Claude Code's log is
-  `<config dir>/projects/*/<conversation>.jsonl`, for the conversation in
-  `sessions/<pid>.json`; Codex's is the `rollout-….jsonl` file the process has open.
+`output.rs` gives each live Claude Code, Codex or OpenCode session one line: what its agent
+last said or did (`SessionView.agent_output`), shown in the session list under the session's
+name.
+- **Where it comes from:** the daemon reads it from the agent's own conversation on this
+  machine, at most once a second while the terminal shows output:
+  - Claude Code: `<config dir>/projects/*/<conversation>.jsonl`, for the conversation in
+    `sessions/<pid>.json`.
+  - Codex: the `rollout-….jsonl` file the process has open.
+  - OpenCode: `opencode.db`, read-only. OpenCode 2's newest replies in `session_message`, or
+    1.x's newest assistant pieces in `part`, for the conversation the Rakumux plugin bound to
+    the session (else the folder's newest, as resume does). Without the plugin, two OpenCodes
+    in one folder show the same conversation's line.
 - **What's taken:** only the last entry the main conversation's assistant wrote (its
   reasoning, a tool call as `Tool: description` or a short path, or its reply), cut to its
   first line: no control characters, at most 240 characters.
@@ -116,8 +122,7 @@ or did (`SessionView.agent_output`), shown in the session list under the session
 - **Where it goes:** the line reaches the daemon's clients like the rest of the session's view
   (the TUI, `rakumux-api` and so the phone app). Nothing else reads it, and it isn't part of
   the AI description context.
-
-OpenCode has no line yet. Native input is capped at 1 MiB and never
+ Native input is capped at 1 MiB and never
 logged. Outside a Rakumux session hooks do nothing and never spawn a daemon. Errors emit a
 generic diagnostic and empty JSON with success; activity cannot approve/deny/continue work.
 

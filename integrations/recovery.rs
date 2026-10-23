@@ -50,6 +50,7 @@ pub(crate) use claude::{claude_config_dir, claude_conversation};
 pub(crate) use codex::codex_open_rollout;
 use codex::codex_resume;
 use opencode::opencode_resume;
+pub(crate) use opencode::{opencode_database, opencode_recent_session};
 
 /// What to record for a session's foreground process.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,7 +123,7 @@ fn home_dir() -> Option<PathBuf> {
 
 /// Another program's SQLite database, read-only, without waiting long for
 /// its writers.
-fn open_read_only(path: &Path) -> Option<Connection> {
+pub(crate) fn open_read_only(path: &Path) -> Option<Connection> {
     if !path.is_file() {
         return None;
     }
