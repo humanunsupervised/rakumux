@@ -280,7 +280,8 @@ fn card_meta(entry: &FeedEntry) -> String {
     parts.join(" · ")
 }
 
-/// A status's mark and colour on a card.
+/// A status's mark and colour on a card, the colours rakumux.com's Feed
+/// gives them.
 fn status_mark(status: EntryStatus) -> (String, Style) {
     let p = theme::palette();
     let (mark, colour) = match status {
@@ -288,7 +289,7 @@ fn status_mark(status: EntryStatus) -> (String, Style) {
         EntryStatus::Done => ("●".into(), p.accent_green),
         EntryStatus::ReplyWaiting => ("◐".into(), p.accent_gold),
         EntryStatus::ReplyTypedIn => ("●".into(), p.accent_primary),
-        EntryStatus::Answered => ("✓".into(), p.accent_green),
+        EntryStatus::Answered => ("✓".into(), p.accent_purple),
         EntryStatus::ReplyNotSent => ("✕".into(), p.accent_pink),
     };
     (mark, Style::default().fg(colour))
