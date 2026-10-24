@@ -1891,7 +1891,10 @@ async fn settings_switch_layout_live_without_saving_it() {
     let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
     h.press(KeyCode::Char('o')).await;
     assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
-    h.press(KeyCode::Enter).await; // Layout is the first entry
+    for _ in 0..SettingsItem::Layout.index() {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
     assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
     assert_eq!(h.app.session_layout(), SessionLayout::Grid);
     h.press(KeyCode::Enter).await;

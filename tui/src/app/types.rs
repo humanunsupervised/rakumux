@@ -324,7 +324,11 @@ pub enum SettingsItem {
 }
 
 impl SettingsItem {
+    /// In Settings' order: signing in first, then what it brings, then the rest.
     pub const ALL: [SettingsItem; 10] = [
+        SettingsItem::Account,
+        SettingsItem::AiSummaries,
+        SettingsItem::AgentFeed,
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
@@ -332,9 +336,6 @@ impl SettingsItem {
         SettingsItem::RestartUi,
         SettingsItem::RestartServer,
         SettingsItem::TerminalPanel,
-        SettingsItem::Account,
-        SettingsItem::AiSummaries,
-        SettingsItem::AgentFeed,
     ];
 
     /// The heading Settings lists it under.

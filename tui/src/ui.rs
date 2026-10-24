@@ -454,7 +454,16 @@ mod tests {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("Settings"), "{screen}");
             assert!(!screen.contains("1 General"), "no tabs: {screen}");
-            assert!(screen.contains("▶ Layout"), "{screen}");
+            // Signing in first, then what it brings, then the rest.
+            let at = |text: &str| {
+                screen
+                    .find(text)
+                    .unwrap_or_else(|| panic!("{text}: {screen}"))
+            };
+            assert!(screen.contains("▶ Account"), "{screen}");
+            assert!(at("▶ Account") < at("Available on sign-in"));
+            assert!(at("Available on sign-in") < at("Agent feed"));
+            assert!(at("Agent feed") < at("Appearance"));
             assert!(screen.contains("[Master detail] Grid Tabs"), "{screen}");
             // The selected setting's note waits for `→`.
             assert!(!screen.contains("Session list on the left"), "{screen}");
@@ -1635,10 +1644,15 @@ mod tests {
             h.app.mode = AppMode::Normal;
             // Settings shows every choice; Help and the Folders modal open.
             h.press(KeyCode::Char(',')).await;
+            for c in "layout".chars() {
+                h.press(KeyCode::Char(c)).await;
+            }
             let screen = render(&mut h.app, width, height);
             // (A phone has no Grid.)
             assert!(screen.contains("[Master detail] Tabs"), "{screen}");
             assert!(!screen.contains("Grid"), "{screen}");
+            // Esc clears the search, then closes.
+            h.press(KeyCode::Esc).await;
             h.press(KeyCode::Esc).await;
             h.press(KeyCode::Char('?')).await;
             let screen = render(&mut h.app, width, height);

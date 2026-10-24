@@ -894,7 +894,8 @@ restart is needed; no fallback creates a normal or hidden session.
 Settings is one scrolling page without tabs (`help::ModalTab::Settings`) under a search field:
 typing narrows it to the settings and actions whose section or name has every word typed
 (`Backspace` deletes, `Esc` clears, then closes; `Space` changes the selected row while nothing
-is typed), and the dialog keeps its size meanwhile. The settings come first, then under a `Keys`
+is typed), and the dialog keeps its size meanwhile. The settings come first (Account, where you
+sign in, then Available on sign-in, then Appearance, Keyboard and App), then under a `Keys`
 rule every action and its keys, which `Enter` runs; `↑`/`↓` select among the rows shown; `→`
 shows the selected row's note in a popover over the page (`←`, `Esc`, moving or `Enter` close
 it), so the rows never shift; the wheel moves the selection. A setting that can't be changed
