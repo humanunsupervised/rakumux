@@ -1298,7 +1298,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 9] = [
+const DAEMON_FEATURES: [(&str, &str); 10] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1326,6 +1326,7 @@ const DAEMON_FEATURES: [(&str, &str); 9] = [
         session_core::api::CAPABILITY_TURN,
         "AI summaries of each agent's turn",
     ),
+    (session_core::api::CAPABILITY_REPLIES, "the agent feed"),
 ];
 
 /// The daemon restarts in place, keeping the sessions (`daemon.restart`).

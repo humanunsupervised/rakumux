@@ -2642,7 +2642,8 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
                 "the branch an agent works on",
                 "each agent's latest output",
                 "your last message in each session",
-                "AI summaries of each agent's turn"
+                "AI summaries of each agent's turn",
+                "the agent feed"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -3160,7 +3161,8 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "the branch an agent works on",
                 "each agent's latest output",
                 "your last message in each session",
-                "AI summaries of each agent's turn"
+                "AI summaries of each agent's turn",
+                "the agent feed"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),

@@ -437,6 +437,7 @@ impl SessionApi for FakeApi {
                 session_core::api::CAPABILITY_AGENT_OUTPUT,
                 session_core::api::CAPABILITY_USER_PROMPT,
                 session_core::api::CAPABILITY_TURN,
+                session_core::api::CAPABILITY_REPLIES,
             ]);
         }
         if state.restarts_in_place {
