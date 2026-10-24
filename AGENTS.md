@@ -140,7 +140,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    conversation the daemon follows (`session_turn`) is described once, when its agent has
    written 5 messages (`sessions.ai_summary.every_messages`) or its turn finishes sooner, from
    the prompt and its messages (never the screen); after that only when asked:
-   `OwnerRequest::Summarize` (the ↻ that hovering an AI description shows, or `s`), from the
+   `OwnerRequest::Summarize` (the ↻ that hovering a session's description shows just before it, or `s`), from the
    latest prompt and the newest messages, or the screen for other programs. Nothing refreshes on
    a timer, and shown text stays through lifecycle changes, renewals and consent that only adds
    folders, until that terminal ends. Settings → Account signs in (a code, link and QR code),
@@ -746,10 +746,11 @@ has (in Rakumux mode the selected session, else the one kept in view; the one ta
 session mode; none for the terminal panel), since the detail has no title row: the session's
 terminal fills it from its top row; and on the right buttons
 (a darker shade of the orange bar; dark chips on the blue one): `? Help` and `, Settings` in
-Rakumux mode, then `a Sign in` at the bottom right while signed out of the Rakumux account (a tap
-asks for a sign-in code at once), `Ctrl-\ Rakumux mode` in session mode. When the row is short the
+Rakumux mode, then the Rakumux account at the bottom right: `a Sign in` while signed out (a tap
+asks for a sign-in code at once), `a ✓ Signed in` while signed in (a tap opens the account
+dialog); `Ctrl-\ Rakumux mode` in session mode. When the row is short the
 session gives way first (off the centre, to its name alone, then nothing), then the message is
-cut, then buttons go from the right (Sign in, Settings, then Help).
+cut, then buttons go from the right (the account, Settings, then Help).
 Help and Settings list every key; Settings runs them. A welcome tour
 (`components/welcome.rs`, `AppMode::Welcome`) opens on startup until its "Don't show this on
 startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the list.

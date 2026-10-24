@@ -431,54 +431,39 @@ fn session_content(
     lines
 }
 
-/// Columns at the right end of a session's description line for its ↻ or
-/// spinner (in the room the right column leaves): a space and the mark.
-const SUMMARY_SLOT: usize = 2;
-
-/// Shown at the end of a hovered session's AI description: a click or tap
-/// makes a new summary.
+/// Shown before a hovered session's AI description: a click or tap makes a
+/// new summary.
 const SUMMARY_REFRESH: &str = "↻";
 
-/// The right end of a session's description line (`line`): a spinner while a
-/// new summary is being made, else the ↻ when `hovered`. Returns where the ↻ is.
+/// The start of a session's description line (`line`), in the two columns
+/// before its text: a spinner while a new summary is being made, else the ↻
+/// when `hovered`. Returns where the ↻ is.
 fn mark_summary(
     lines: &mut [Line<'_>],
     line: usize,
     refreshing: bool,
     hovered: bool,
     area: Rect,
-    width: usize,
 ) -> Option<Rect> {
     let p = theme::palette();
     let (mark, style) = if refreshing {
         (get_spinner_char(), Style::default().fg(p.accent_primary))
     } else if hovered {
-        (SUMMARY_REFRESH, Style::default().fg(p.text_muted))
+        (SUMMARY_REFRESH, Style::default().fg(p.accent_primary))
     } else {
         return None;
     };
-    let target = lines.get_mut(line)?;
-    let used: usize = target
-        .spans
-        .iter()
-        .map(|span| str_width(&span.content))
-        .sum();
-    let at = width.saturating_sub(SUMMARY_SLOT) + 1;
-    if used >= at {
-        return None;
-    }
-    target.spans.push(Span::raw(" ".repeat(at - used)));
-    target.spans.push(Span::styled(mark, style));
+    // After the indent, the two columns before the text (see `session_content`).
+    let slot = lines.get_mut(line)?.spans.get_mut(1)?;
+    *slot = Span::styled(format!("{mark} "), style);
     if refreshing {
         return None;
     }
-    let x = area.x + u16::try_from(INDENT + width.saturating_sub(SUMMARY_SLOT)).ok()?;
+    let x = area.x + u16::try_from(INDENT).ok()?;
     Some(Rect {
         x,
         y: area.y + u16::try_from(line).ok()?,
-        width: u16::try_from(SUMMARY_SLOT)
-            .ok()?
-            .min(area.right().saturating_sub(x)),
+        width: 2.min(area.right().saturating_sub(x)),
         height: 1,
     })
 }
@@ -872,14 +857,9 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                     let refreshing = app.summary_refreshing(&session.id);
                     let dragged = app.dragged_session() == Some(&session.id);
                     let line = lines.len().saturating_sub(2);
-                    if let Some(refresh) = mark_summary(
-                        &mut lines,
-                        line,
-                        refreshing,
-                        hovered && !dragged,
-                        row_area,
-                        width,
-                    ) {
+                    if let Some(refresh) =
+                        mark_summary(&mut lines, line, refreshing, hovered && !dragged, row_area)
+                    {
                         hits.push((refresh, Hit::SummaryRefresh(index)));
                     }
                 }

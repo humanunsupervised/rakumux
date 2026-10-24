@@ -686,7 +686,10 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
         crate::layout::str_width(&footer[..at]).abs_diff((120 - label) / 2) <= 1,
         "{footer:?}"
     );
-    assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
+    assert!(
+        footer.ends_with(" ? Help   , Settings   a ✓ Signed in  "),
+        "{footer:?}"
+    );
     let screen: String = buffer.content().iter().map(|c| c.symbol()).collect();
     for hint in ["go in", "Esc back", "last session"] {
         assert!(!screen.contains(hint), "{hint}");
@@ -4367,15 +4370,16 @@ async fn hovering_a_description_shows_a_refresh_that_a_click_sends() {
         mouse_at(&mut h, MouseEventKind::Moved, (over_b.0 + 5, over_b.1));
         screen_rows(&mut h, width, 48);
         assert_eq!(hit_at(&h, Hit::SummaryRefresh(b)), None);
-        // Over A: the ↻ at the end of its description, the row as tall as before.
+        // Over A: the ↻ just before its description, the row as tall as before.
         let over_a = hit_at(&h, Hit::ListRow(a)).unwrap();
         mouse_at(&mut h, MouseEventKind::Moved, (over_a.0 + 5, over_a.1));
         let screen = screen_rows(&mut h, width, 48);
         let refresh = hit_at(&h, Hit::SummaryRefresh(a)).expect("the refresh");
         // The list's column: left of the divider when the detail is beside it.
         let line = screen[usize::from(refresh.1)].split('│').next().unwrap();
-        assert!(line.contains("Fixing the flaky login test"), "{line:?}");
-        assert!(line.trim_end().ends_with('↻'), "{line:?}");
+        assert!(line.contains("↻ Fixing the flaky login test"), "{line:?}");
+        let at = line.chars().position(|c| c == '↻').unwrap();
+        assert_eq!(at, usize::from(refresh.0), "{line:?}");
         assert!(line.chars().count() <= usize::from(width));
         assert_eq!(
             height(&h, a),
@@ -4411,7 +4415,7 @@ async fn hovering_a_description_shows_a_refresh_that_a_click_sends() {
         .next()
         .unwrap();
     assert!(!line.contains('↻'), "{line:?}");
-    let spinner = line.trim_end().chars().last().unwrap();
+    let spinner = line.trim_start().chars().next().unwrap();
     assert!(('\u{2800}'..='\u{28ff}').contains(&spinner), "{line:?}");
     // The service says so until it's made.
     account_tick(&mut h);
@@ -4513,13 +4517,37 @@ async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
         account_state(&h),
         Some(super::types::AccountDialogState::Waiting(_))
     ));
-    // Signed in (or not yet checked) there's no button.
-    let (h, _) = account_harness(testing::FakeAccount::signed_in());
+    // Signed in, the same corner says so, and a tap there shows the account.
+    let (mut h, _) = account_harness(testing::FakeAccount::signed_in());
     assert!(
-        footer(&h).ends_with(" ? Help   , Settings  "),
+        footer(&h).ends_with(" , Settings   a ✓ Signed in  "),
         "{:?}",
         footer(&h)
     );
+    screen_rows(&mut h, 160, 48);
+    let (area, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::FooterKey(FooterKey::Account))
+        .expect("the Signed in button");
+    assert_eq!(area.x + area.width, 159);
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        h.app.handle_mouse(MouseEvent {
+            kind,
+            column: area.x + 1,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    h.app.process_pending();
+    assert!(matches!(
+        account_state(&h),
+        Some(super::types::AccountDialogState::SignedIn(_))
+    ));
 }
 
 #[tokio::test]

@@ -1319,6 +1319,7 @@ impl App {
                         FooterKey::Help => super::handlers::settings::open_help(self),
                         FooterKey::Settings => super::handlers::settings::open_settings(self),
                         FooterKey::SignIn => self.start_sign_in(),
+                        FooterKey::Account => self.open_account_dialog(),
                     }
                     return;
                 }

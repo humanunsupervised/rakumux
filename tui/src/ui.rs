@@ -385,6 +385,8 @@ mod tests {
     #[tokio::test]
     async fn the_footer_is_one_row_of_messages() {
         let mut h = harness(vec![view("A", "api", 10)]);
+        // The account's button has its own test.
+        h.app.account = crate::app::types::AccountStatus::Unknown;
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             let rows: Vec<&str> = screen.lines().collect();
@@ -616,6 +618,8 @@ mod tests {
     #[test]
     fn exited_session_offers_a_restart() {
         let mut h = harness(vec![view("A", "build", 10)]);
+        // The footer names it whole without the account's button.
+        h.app.account = crate::app::types::AccountStatus::Unknown;
         let (index, _) = h.last_attach();
         h.attach_event(
             index,
@@ -799,6 +803,8 @@ mod tests {
     fn connecting_shows_a_spinner_in_the_footer() {
         let mut h = harness(vec![]);
         h.app.connection = crate::app::Connection::Connecting;
+        // The account's button has its own test.
+        h.app.account = crate::app::types::AccountStatus::Unknown;
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             let footer = screen.lines().last().unwrap();
@@ -1926,6 +1932,7 @@ mod tests {
                         Hit::FooterKey(crate::app::FooterKey::Rakumux) => " Ctrl-\\ Rakumux mode ",
                         Hit::FooterKey(crate::app::FooterKey::Help) => " ? Help ",
                         Hit::FooterKey(crate::app::FooterKey::Settings) => " , Settings ",
+                        Hit::FooterKey(crate::app::FooterKey::Account) => " a ✓ Signed in ",
                         other => panic!("{other:?}"),
                     };
                     assert_eq!(shown, wanted);

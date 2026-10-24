@@ -6,13 +6,14 @@
 //! in the centre (in Rakumux mode the selected session, else the one kept in
 //! view; in session mode the one taking the keys; with the status mark its
 //! list row has, since the detail has no title row); and buttons on the right: Help (`?`) and Settings
-//! (`,`) in Rakumux mode, then Sign in while signed out of the Rakumux account; the
-//! way to Rakumux mode (the Rakumux key) in session mode. Settings lists every key.
+//! (`,`) in Rakumux mode, then the Rakumux account at the right: Sign in while signed out,
+//! `✓ Signed in` (the account dialog) while signed in; the way to Rakumux mode (the
+//! Rakumux key) in session mode. Settings lists every key.
 //!
 //! The footer never wraps or grows: when the row is short the session
 //! gives way first (to its mark and name, then nothing), then the message is
 //! cut (down to [`MIN_MESSAGE`] columns), then buttons are dropped from the
-//! right (Sign in, then Settings); the badge always shows.
+//! right (the account, then Settings); the badge always shows.
 //!
 //! The badge and the buttons are tap targets, for phones and the mouse: the
 //! `SESSION` badge switches to Rakumux mode, the `RAKUMUX` badge goes back
@@ -100,11 +101,11 @@ pub fn mode_badge(app: &App) -> Span<'static> {
     }
 }
 
-/// The footer's buttons: Help and Settings in Rakumux mode, and Sign in at
-/// the right while signed out of the Rakumux account (not before the account
-/// was checked); in session mode the Rakumux key, the way out (Help and
-/// Settings are a tap away from there). Nothing while typing a filter (those
-/// keys type) or while a dialog is open.
+/// The footer's buttons: Help and Settings in Rakumux mode, and the Rakumux
+/// account at the right (once it was checked): Sign in while signed out,
+/// `✓ Signed in` while signed in; in session mode the Rakumux key, the way out
+/// (Help and Settings are a tap away from there). Nothing while typing a
+/// filter (those keys type) or while a dialog is open.
 pub fn buttons(app: &App) -> Vec<Button> {
     if !matches!(app.mode, AppMode::Normal) || app.list.filter_editing {
         return Vec::new();
@@ -119,8 +120,14 @@ pub fn buttons(app: &App) -> Vec<Button> {
                     FooterKey::Settings,
                 ),
             ];
-            if app.account == AccountStatus::SignedOut {
-                buttons.push(Button::new("a", "Sign in", FooterKey::SignIn));
+            match app.account {
+                AccountStatus::SignedOut => {
+                    buttons.push(Button::new("a", "Sign in", FooterKey::SignIn))
+                }
+                AccountStatus::SignedIn(_) => {
+                    buttons.push(Button::new("a", "✓ Signed in", FooterKey::Account))
+                }
+                AccountStatus::Unknown => {}
             }
             buttons
         }
@@ -572,6 +579,8 @@ mod tests {
     #[tokio::test]
     async fn the_badge_leads_and_buttons_end_the_line() {
         let mut h = harness(vec![view("A", "api", 10)]);
+        // The account's button has its own test.
+        h.app.account = crate::app::types::AccountStatus::Unknown;
         let p = theme::palette();
         // Rakumux mode: the orange badge, then Help and Settings.
         let line = footer_line(&h.app, 60);
@@ -613,6 +622,8 @@ mod tests {
     #[tokio::test]
     async fn messages_follow_the_badge_and_are_cut_before_buttons_go() {
         let mut h = harness(vec![view("A", "api", 10)]);
+        // The account's button has its own test.
+        h.app.account = crate::app::types::AccountStatus::Unknown;
         h.app.set_status("Layout: Tabs");
         let line = text(&footer_line(&h.app, 80));
         assert!(line.starts_with(" RAKUMUX  Layout: Tabs "), "{line:?}");
@@ -724,6 +735,8 @@ mod tests {
     #[tokio::test]
     async fn connecting_and_an_unreachable_daemon_show_after_the_badge() {
         let mut h = harness(vec![view("A", "api", 10)]);
+        // The account's button has its own test.
+        h.app.account = crate::app::types::AccountStatus::Unknown;
         h.app.connection = Connection::Connecting;
         let line = text(&footer_line(&h.app, 80));
         assert!(line.starts_with(" RAKUMUX  "), "{line:?}");
@@ -751,6 +764,8 @@ mod tests {
     #[tokio::test]
     async fn the_centre_names_the_selected_session_or_the_one_taking_the_keys() {
         let mut h = harness(vec![view("A", "api", 20), view("B", "docs", 10)]);
+        // The account's button has its own test.
+        h.app.account = crate::app::types::AccountStatus::Unknown;
         let p = theme::palette();
         let line = footer_line(&h.app, 80);
         assert!(centred(&text(&line), "session: ● api"), "{:?}", text(&line));
