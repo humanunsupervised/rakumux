@@ -186,6 +186,21 @@ impl OwnerClient {
         }
     }
 
+    /// Turn the account's feature switches on or off; `None` leaves one as it is.
+    pub fn set_features(
+        &self,
+        ai_session_summaries: Option<bool>,
+        feed: Option<bool>,
+    ) -> Result<(), OwnerError> {
+        match self.request(&OwnerRequest::SetFeatures {
+            ai_session_summaries,
+            feed,
+        })? {
+            OwnerResponse::Done => Ok(()),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
     /// The feed entries that changed after `after` for a client holding
     /// `generation`; ask again at once while `more`.
     pub fn feed(

@@ -122,9 +122,13 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
         self.account.clone()
     }
 
-    /// Prepare one read of the adopted account's feature switches. It sends no
-    /// session data, so it needs no consent. `None` when signed out or stale.
-    pub fn features_job(&self) -> Result<Option<FeaturesJob<A, C>>, DispatchError> {
+    /// Prepare one read of the adopted account's feature switches, after `change`
+    /// when given. It sends no session data, so it needs no consent. `None` when
+    /// signed out or stale.
+    pub fn features_job(
+        &self,
+        change: Option<crate::cloud::FeatureChange>,
+    ) -> Result<Option<FeaturesJob<A, C>>, DispatchError> {
         let Some(session) = &self.session else {
             return Ok(None);
         };
@@ -136,6 +140,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
             cloud: self.cloud.clone(),
             lease,
             revision: session.revision(),
+            change,
         }))
     }
 

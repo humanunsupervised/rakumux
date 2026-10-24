@@ -17,6 +17,7 @@ use super::protocol::{
     MAX_SESSIONS, PROTOCOL,
 };
 use super::{OwnerClaim, OwnerError};
+use crate::cloud::FeatureChange;
 use crate::dispatch::StatusConsentOffer;
 use crate::refresh::{RefreshClient, RefreshError};
 use crate::status::ConsentRevision;
@@ -368,6 +369,16 @@ fn handle(
             .summarize(session)
             .map(|()| OwnerResponse::Done)
             .map_err(|error| OwnerErrorCode::from(&error)),
+        OwnerRequest::SetFeatures {
+            ai_session_summaries,
+            feed,
+        } => client
+            .set_features(FeatureChange {
+                ai_session_summaries,
+                feed,
+            })
+            .map(|()| OwnerResponse::Done)
+            .map_err(|error| OwnerErrorCode::from(&error)),
         OwnerRequest::Feed { after, generation } => client
             .feed(after, generation)
             .map(|feed| OwnerResponse::Feed { feed })
@@ -398,6 +409,7 @@ fn state(client: &RefreshClient) -> Result<OwnerResponse, OwnerErrorCode> {
             unauthorized: refresh.unauthorized,
             summaries: refresh.summaries,
             feed: refresh.feed,
+            features_unsaved: refresh.features_unsaved,
         },
     })
 }

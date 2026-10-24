@@ -28,7 +28,6 @@ use super::format::{
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
-use crate::app::config::DescriptionContent;
 use crate::app::grouping::{Grouping, ListTab, ReadPeriod, Section};
 use crate::app::{App, Connection, Hit, ListRow};
 use crate::layout::str_width;
@@ -58,15 +57,11 @@ fn row_height_in(app: &App, row: &ListRow) -> u16 {
     }
 }
 
-/// The line under a session's name, as Settings chooses
-/// (`sessions.description_content`): your last message to its agent, the
-/// agent's latest message, or its AI summary.
+/// The line under a session's name: its AI summary, or before one (signed
+/// out, or with AI summaries off) your last message to its agent.
 fn description_line<'a>(app: &'a App, session: &'a SessionView) -> Option<&'a str> {
-    match app.settings.sessions.description_content {
-        DescriptionContent::YourMessage => session.user_prompt.as_deref(),
-        DescriptionContent::AgentMessage => session.agent_output.as_deref(),
-        DescriptionContent::AiSummary => app.description(&session.id),
-    }
+    app.description(&session.id)
+        .or(session.user_prompt.as_deref())
 }
 
 /// Rows of the tabs' band: its line with a row of padding above and below
@@ -415,7 +410,7 @@ fn session_content(
         .spans,
     );
     let mut lines = vec![first];
-    // Under the name: your last message, the agent's, or its summary.
+    // Under the name: its summary, or your last message.
     if let Some(output) = description_line(app, session) {
         // A terminal has one font size: italic and a shade quieter than the
         // details make it read as the smaller print.
@@ -870,9 +865,10 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                     height,
                 );
                 let hovered = app.hovered_row == Some(index);
-                // An AI description is the line under the name, the second
-                // from the end (the program line comes last).
-                if app.description(&session.id).is_some() {
+                // The description is the line under the name, the second
+                // from the end (the program line comes last); with AI
+                // summaries on, its ↻ makes a new one.
+                if app.summaries_on() && description_line(app, session).is_some() {
                     let refreshing = app.summary_refreshing(&session.id);
                     let dragged = app.dragged_session() == Some(&session.id);
                     let line = lines.len().saturating_sub(2);

@@ -6,7 +6,7 @@ mod context;
 mod error;
 mod wire;
 
-pub use client::{AccountFeatures, Cancellation, CloudAIClient, CloudAIConfig};
+pub use client::{AccountFeatures, Cancellation, CloudAIClient, CloudAIConfig, FeatureChange};
 pub(crate) use client::{FeedHttp, FeedHttpReply};
 pub(crate) use context::{feed_text, MAX_INSPECTION_BYTES};
 pub use context::{CaptureInput, CaptureMetadata, ContextBuilder};

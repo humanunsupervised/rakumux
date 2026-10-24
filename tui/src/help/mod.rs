@@ -1,10 +1,12 @@
 //! The Settings and Help modals, which share their frame and keys.
 //!
 //! - **Settings** (`,` or `o` in Rakumux mode): one scrolling page, sized
-//!   to its contents: the settings (layout, icons, session keys, update,
-//!   terminal panel) for the caller to change, then every action and its
-//!   keys, built from the user's configured keys, where `Enter` runs the
-//!   selected action. `→` shows what the selected row does in a popover.
+//!   to its contents, under a search field that narrows it as you type: the
+//!   settings (layout, icons, session keys, update, terminal panel, the
+//!   account and what it offers) for the caller to change, then every
+//!   action and its keys, built from the user's configured keys, where
+//!   `Enter` runs the selected action. `→` shows what the selected row does
+//!   in a popover.
 //! - **Help** (`?` in Rakumux mode): sessions and
 //!   folders (the folder filter, All folders, multi-select, grouping, order,
 //!   pinning, git branch and worktree), the screen, moving around, the mouse, layouts, observer vs
@@ -576,6 +578,10 @@ pub struct ModalState {
     top: Cell<u16>,
     /// The selected Settings row's note shows in a popover (`→`).
     pub note_open: bool,
+    /// Typed in Settings' search field: only the rows it matches show.
+    pub query: String,
+    /// The settings' [`search_text`], in order (the actions' is known here).
+    settings: Vec<String>,
 }
 
 /// What the caller should do after [`ModalState::handle_key`].
@@ -597,19 +603,47 @@ pub enum ModalAction {
 }
 
 impl ModalState {
-    /// A modal opened on `tab`, with `general_rows` settings before the
-    /// actions on the Settings page (the first one selected).
-    pub fn new(tab: ModalTab, general_rows: usize) -> Self {
+    /// A modal opened on `tab`, with these settings (their [`search_text`])
+    /// before the actions on the Settings page (the first one selected).
+    pub fn new(tab: ModalTab, settings: Vec<String>) -> Self {
         Self {
             tab,
             scroll: 0,
             selected: 0,
-            general_rows,
+            general_rows: settings.len(),
             max_scroll: Cell::new(u16::MAX),
             page: Cell::new(DEFAULT_PAGE),
             top: Cell::new(0),
             note_open: false,
+            query: String::new(),
+            settings,
         }
+    }
+
+    /// The Settings rows the search shows, in order: every row while
+    /// nothing is typed.
+    pub fn shown_rows(&self) -> Vec<usize> {
+        (0..self.rows())
+            .filter(|row| {
+                let text = match self.settings.get(*row) {
+                    Some(text) => text.clone(),
+                    None => KeyAction::ALL
+                        .get(row - self.general_rows)
+                        .map(|action| search_text(action.section(), action.label()))
+                        .unwrap_or_default(),
+                };
+                matches_query(&text, &self.query)
+            })
+            .collect()
+    }
+
+    /// The search changed: the first row it shows is selected.
+    fn searched(&mut self) {
+        self.note_open = false;
+        if let Some(first) = self.shown_rows().first() {
+            self.selected = *first;
+        }
+        self.top.set(0);
     }
 
     /// Select Settings row `row` (clamped to the rows there are).
@@ -665,19 +699,28 @@ impl ModalState {
         }
     }
 
-    /// Move the Settings selection `delta` rows, stopping at either end. A
-    /// note in a popover closes.
+    /// Move the Settings selection `delta` of the rows shown, stopping at
+    /// either end. A note in a popover closes.
     fn move_selection(&mut self, delta: i32) {
-        let last = (self.rows() - 1) as i64;
-        self.selected = (self.selected as i64 + i64::from(delta)).clamp(0, last) as usize;
         self.note_open = false;
+        let shown = self.shown_rows();
+        let Some(last) = shown.len().checked_sub(1) else {
+            return;
+        };
+        let at = shown
+            .iter()
+            .position(|row| *row >= self.selected)
+            .unwrap_or(last);
+        let to = (at as i64 + i64::from(delta)).clamp(0, last as i64) as usize;
+        self.selected = shown[to];
     }
 
-    /// `Esc`/`q` close, and `?` (Help) or `o` (Settings). In Settings
-    /// `↑`/`↓` (`j`/`k`, `PgUp`/`PgDn`, `Home`/`End`) select a row,
-    /// `Enter`/`Space` change the setting or run the action, and `→` (`l`)
-    /// shows the row's note in a popover that `←` (`h`) or `Esc` closes,
-    /// as does moving or `Enter`. In Help
+    /// In Settings typing searches (`Backspace` deletes, `Esc` clears),
+    /// `↑`/`↓` (`PgUp`/`PgDn`, `Home`/`End`) select one of the rows shown,
+    /// `Enter` (and `Space` while nothing is typed) changes the setting or
+    /// runs the action, `→` shows the row's note in a popover that `←` or
+    /// `Esc` closes, as does moving or `Enter`, and `Esc` closes. In Help
+    /// `Esc`/`q` and `?` close, and
     /// `Tab`/`→` and `Shift-Tab`/`←` switch tabs, number keys jump to a tab,
     /// and `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` scroll (`j`/`k`/`g`/`G`
     /// too). Keys with Ctrl or Alt held are ignored.
@@ -691,21 +734,30 @@ impl ModalState {
         let page = i32::from(self.page.get().max(1));
         if self.tab == ModalTab::Settings {
             match key.code {
-                KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
-                KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
+                KeyCode::Up => self.move_selection(-1),
+                KeyCode::Down => self.move_selection(1),
                 KeyCode::PageUp => self.move_selection(-page),
                 KeyCode::PageDown => self.move_selection(page),
-                KeyCode::Home | KeyCode::Char('g') => self.move_selection(i32::MIN),
-                KeyCode::End | KeyCode::Char('G') => self.move_selection(i32::MAX),
-                KeyCode::Right | KeyCode::Char('l') => self.note_open = true,
-                KeyCode::Left | KeyCode::Char('h') => self.note_open = false,
+                KeyCode::Home => self.move_selection(i32::MIN),
+                KeyCode::End => self.move_selection(i32::MAX),
+                KeyCode::Right => self.note_open = true,
+                KeyCode::Left => self.note_open = false,
                 KeyCode::Esc if self.note_open => self.note_open = false,
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    self.note_open = false;
-                    return match self.selected_action() {
-                        Some(action) => ModalAction::Run(action),
-                        None => ModalAction::Change(self.selected),
-                    };
+                KeyCode::Esc if !self.query.is_empty() => {
+                    self.query.clear();
+                    self.searched();
+                }
+                KeyCode::Esc => return ModalAction::Close,
+                KeyCode::Backspace => {
+                    if self.query.pop().is_some() {
+                        self.searched();
+                    }
+                }
+                KeyCode::Enter => return self.choose(),
+                KeyCode::Char(' ') if self.query.is_empty() => return self.choose(),
+                KeyCode::Char(c) => {
+                    self.query.push(c);
+                    self.searched();
                 }
                 _ => return self.handle_common_key(key),
             }
@@ -721,6 +773,19 @@ impl ModalState {
             _ => return self.handle_common_key(key),
         }
         ModalAction::Handled
+    }
+
+    /// `Enter` in Settings: change the selected setting or run the action,
+    /// when the search shows it.
+    fn choose(&mut self) -> ModalAction {
+        self.note_open = false;
+        if !self.shown_rows().contains(&self.selected) {
+            return ModalAction::Handled;
+        }
+        match self.selected_action() {
+            Some(action) => ModalAction::Run(action),
+            None => ModalAction::Change(self.selected),
+        }
     }
 
     /// Keys that work on every tab: closing, and in Help switching tabs.
@@ -790,6 +855,20 @@ pub struct SettingRow {
     pub value: String,
     /// Shown below the rows while this one is selected.
     pub note: String,
+    /// Greyed out: it can't be changed now (signed out).
+    pub disabled: bool,
+}
+
+/// What Settings' search looks through for a row: its section and label.
+pub fn search_text(section: &str, label: &str) -> String {
+    format!("{section} {label}").to_lowercase()
+}
+
+/// Whether every word typed in `query` is in `text` (a [`search_text`]),
+/// ignoring case; an empty query matches everything.
+fn matches_query(text: &str, query: &str) -> bool {
+    let query = query.to_lowercase();
+    query.split_whitespace().all(|word| text.contains(word))
 }
 
 /// Draw Settings at its contents' size, or Help at its reading width. Both
@@ -927,20 +1006,28 @@ fn render_help(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext
     }
 }
 
-/// Settings: one page as tall as its rows (up to 80% of the screen), then
-/// the keys.
+/// Settings: the search field, then one page as tall as its rows (up to 80%
+/// of the screen), then the keys. The search narrows the page but not the
+/// dialog, so typing doesn't make it jump.
 fn render_settings(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalContext) {
     let width = settings_width(area, ctx);
     // Space inside the border, where the screen has room for it.
     let (pad_x, pad_y) = crate::components::dialogs::padding(area);
     let text_width = usize::from(width.saturating_sub(2 + BODY_MARGIN + 2 * pad_x)).max(1);
-    let page = settings_lines(ctx, state.selected, text_width);
+    let page = settings_lines(ctx, state.selected, &state.query, text_width);
     let total = u16::try_from(page.lines.len()).unwrap_or(u16::MAX);
-    // The borders, the padding and the footer, within most of the screen: a
-    // long page scrolls rather than filling it.
+    let whole = if state.query.is_empty() {
+        total
+    } else {
+        let lines = settings_lines(ctx, state.selected, "", text_width).lines;
+        u16::try_from(lines.len()).unwrap_or(u16::MAX)
+    };
+    // The borders, the padding, the search field and its gap and the
+    // footer, within most of the screen: a long page scrolls rather than
+    // filling it.
     let room = (u32::from(area.height) * SETTINGS_MAX_HEIGHT / 100) as u16;
-    let height = total
-        .saturating_add(3 + 2 * pad_y)
+    let height = whole
+        .saturating_add(5 + 2 * pad_y)
         .min(room.max(area.height.min(8)));
     let popup = Rect {
         x: area.x + (area.width - width) / 2,
@@ -953,6 +1040,15 @@ fn render_settings(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalCon
     };
     let inner = crate::components::dialogs::padded(inner, pad_x, pad_y);
     let footer_height = u16::from(inner.height >= 4);
+    // The search field, and a blank line under it when there's room.
+    let search_height = 1 + u16::from(inner.height >= 6);
+    draw_search(f, Rect { height: 1, ..inner }, &state.query);
+    let inner = Rect {
+        y: inner.y + search_height.min(inner.height),
+        height: inner.height.saturating_sub(search_height),
+        ..inner
+    };
+    let footer_height = footer_height.min(inner.height);
     let body = Rect {
         height: inner.height - footer_height,
         ..inner
@@ -974,7 +1070,11 @@ fn render_settings(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalCon
     draw_body(f, body, page.lines, top, max_scroll);
 
     let names = KeyNames::new(ctx);
-    let note = row_note(ctx, &names, state.selected);
+    let note = if page.has_selected {
+        row_note(ctx, &names, state.selected)
+    } else {
+        String::new()
+    };
     let showing = state.note_open && !note.is_empty();
     if showing {
         let row = body.y + to_line(end).saturating_sub(top);
@@ -1007,17 +1107,64 @@ fn render_settings(f: &mut Frame, area: Rect, state: &ModalState, ctx: &ModalCon
                 .filter(|(keys, _)| !keys.is_empty())
                 .collect()
         };
+        let esc = if state.query.is_empty() {
+            ("Esc", "close")
+        } else {
+            ("Esc", "clear")
+        };
         draw_footer(
             f,
             footer,
             [
-                &hints(&[("↑↓", "select"), about, ("Enter", enter), ("Esc", "close")]),
-                &hints(&[("↑↓", "select"), about, ("Enter", enter), ("Esc", "close")]),
-                &hints(&[about, ("Enter", enter), ("Esc", "close")]),
+                &hints(&[("↑↓", "select"), about, ("Enter", enter), esc]),
+                &hints(&[("↑↓", "select"), about, ("Enter", enter), esc]),
+                &hints(&[about, ("Enter", enter), esc]),
             ],
             "",
         );
     }
+}
+
+/// Settings' search field on `row`: what's typed and a cursor, or a hint.
+fn draw_search(f: &mut Frame, row: Rect, query: &str) {
+    let palette = theme::palette();
+    let mark = Span::styled(" ⌕ ", Style::default().fg(palette.accent_primary));
+    let text = if query.is_empty() {
+        vec![
+            mark,
+            Span::styled("█", Style::default().fg(palette.text_muted)),
+            Span::styled(
+                " Type to search settings and keys",
+                Style::default().fg(palette.text_muted),
+            ),
+        ]
+    } else {
+        // The end of a long query, so the cursor stays in view.
+        let room = usize::from(row.width).saturating_sub(5);
+        let shown: String = {
+            let mut used = 0;
+            let mut kept: Vec<char> = Vec::new();
+            for c in query.chars().rev() {
+                used += char_width(c);
+                if used > room {
+                    break;
+                }
+                kept.push(c);
+            }
+            kept.into_iter().rev().collect()
+        };
+        vec![
+            mark,
+            Span::styled(
+                shown,
+                Style::default()
+                    .fg(palette.text_bright)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("█", Style::default().fg(palette.accent_primary)),
+        ]
+    };
+    f.render_widget(Paragraph::new(fit(text, usize::from(row.width))), row);
 }
 
 /// The selected row's note in a popover over the Settings page, just below
@@ -1494,7 +1641,8 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
             "←, →",
             "Switch between the tabs, Feed, Status, Folders and App (h, l on the tabs too). \
              The Feed lists what agents said when they finished a turn, on every machine of \
-             your account (turn it on at rakumux.com/features); Enter on a reply made here \
+             your account (turn it on in Settings → Available on sign-in); Enter on a reply \
+             made here \
              goes into its session",
         ),
         row(
@@ -2179,30 +2327,46 @@ struct SettingsPage {
     /// The first and last lines of the selected row (from its heading when
     /// it starts a section), which the body keeps in view.
     selected: (usize, usize),
+    /// The selected row is on the page (the search shows it).
+    has_selected: bool,
 }
 
 /// The Settings page: one row per setting (its label, then its current
 /// value, or the value on the next line when both don't fit), then under a
 /// `Keys` rule one row per [`KeyAction`] with its keys, each under its
-/// heading; then where settings are saved. The selected row is marked and
-/// white; notes show in a popover ([`draw_note`]), so the page never moves.
-fn settings_lines(ctx: &ModalContext, selected: usize, width: usize) -> SettingsPage {
+/// heading; then where settings are saved. Only the rows `query` matches
+/// show. The selected row is marked and white; notes show in a popover
+/// ([`draw_note`]), so the page never moves.
+fn settings_lines(ctx: &ModalContext, selected: usize, query: &str, width: usize) -> SettingsPage {
     let styles = Styles::from_theme();
     let width = width.max(1);
     let mut page = SettingsPage {
         lines: Vec::new(),
         selected: (0, 0),
+        has_selected: false,
     };
-    push_setting_rows(&mut page, ctx, selected, width, &styles);
+    push_setting_rows(&mut page, ctx, selected, query, width, &styles);
     let action = selected.checked_sub(ctx.general.len());
-    push_action_rows(&mut page, ctx, action, width, &styles);
-    page.lines.push(Line::default());
-    let saved = words(
-        "Saved in ~/.rakumux/config.json. Help (`?`) explains how Rakumux works.",
-        styles.note,
-        styles.key,
-    );
-    page.lines.extend(wrap(&saved, width, Vec::new(), 0));
+    push_action_rows(&mut page, ctx, action, query, width, &styles);
+    if page.lines.is_empty() {
+        let none = format!("Nothing matches “{}”.", query.trim());
+        page.lines.extend(wrap(
+            &words(&none, styles.note, styles.key),
+            width,
+            Vec::new(),
+            0,
+        ));
+        return page;
+    }
+    if query.is_empty() {
+        page.lines.push(Line::default());
+        let saved = words(
+            "Saved in ~/.rakumux/config.json. Help (`?`) explains how Rakumux works.",
+            styles.note,
+            styles.key,
+        );
+        page.lines.extend(wrap(&saved, width, Vec::new(), 0));
+    }
     page
 }
 
@@ -2212,6 +2376,7 @@ fn push_setting_rows(
     page: &mut SettingsPage,
     ctx: &ModalContext,
     selected: usize,
+    query: &str,
     width: usize,
     styles: &Styles,
 ) {
@@ -2224,26 +2389,34 @@ fn push_setting_rows(
         .any(|row| 2 + label_width + str_width(&row.value) > width);
     let mut section = "";
     for (i, row) in ctx.general.iter().enumerate() {
+        if !matches_query(&search_text(row.section, &row.label), query) {
+            continue;
+        }
         let mut first = lines.len();
         if row.section != section {
             section = row.section;
             push_section(lines, section, width, styles);
             first = lines.len() - 1;
         }
-        let (marker, label_style, value_style) = if i == selected {
-            (
+        let (marker, label_style, value_style) = match (i == selected, row.disabled) {
+            (true, false) => (
                 "▶ ",
                 Style::default()
                     .fg(palette.text_bright)
                     .add_modifier(Modifier::BOLD),
                 Style::default().fg(palette.text_primary),
-            )
-        } else {
-            (
+            ),
+            (false, false) => (
                 "  ",
                 Style::default().fg(palette.text_primary),
                 Style::default().fg(palette.text_muted),
-            )
+            ),
+            // Greyed out, selected or not.
+            (chosen, true) => (
+                if chosen { "▶ " } else { "  " },
+                Style::default().fg(palette.text_subtle),
+                Style::default().fg(palette.text_subtle),
+            ),
         };
         let marker = Span::styled(marker, Style::default().fg(palette.accent_primary));
         if !values_below {
@@ -2278,6 +2451,7 @@ fn push_setting_rows(
         }
         if i == selected {
             page.selected = (first, lines.len() - 1);
+            page.has_selected = true;
         }
     }
 }
@@ -2303,6 +2477,7 @@ fn push_action_rows(
     page: &mut SettingsPage,
     ctx: &ModalContext,
     selected: Option<usize>,
+    query: &str,
     width: usize,
     styles: &Styles,
 ) {
@@ -2311,6 +2486,12 @@ fn push_action_rows(
     let palette = theme::palette();
     let lines = &mut page.lines;
     let names = KeyNames::new(ctx);
+    let shown =
+        |action: &KeyAction| matches_query(&search_text(action.section(), action.label()), query);
+    if !KeyAction::ALL.iter().any(shown) {
+        return;
+    }
+    // Sized from every action, so the columns stay put while searching.
     let rows: Vec<(&str, String)> = KeyAction::ALL
         .iter()
         .map(|action| (action.label(), action.keys(&names)))
@@ -2349,25 +2530,32 @@ fn push_action_rows(
         width,
     ));
     let p = &names.p;
-    let how = words(
-        &format!(
-            "`Enter` runs the selected action, as do its keys in Rakumux mode. From inside a \
-             session, press `{p}` first."
-        ),
-        styles.note,
-        styles.key,
-    );
-    lines.extend(wrap(&how, width, Vec::new(), 0));
+    if query.is_empty() {
+        let how = words(
+            &format!(
+                "`Enter` runs the selected action, as do its keys in Rakumux mode. From inside \
+                 a session, press `{p}` first."
+            ),
+            styles.note,
+            styles.key,
+        );
+        lines.extend(wrap(&how, width, Vec::new(), 0));
+    }
     let mut section = "";
+    let mut leading = true;
     for (i, (label, keys)) in rows.iter().enumerate() {
-        let mut first = lines.len();
         let action = KeyAction::ALL[i];
+        if !shown(&action) {
+            continue;
+        }
+        let mut first = lines.len();
         if action.section() != section {
             section = action.section();
             push_section(lines, section, width, styles);
             // The first heading keeps the rule above it in view.
-            first = if i == 0 { rule } else { lines.len() - 1 };
+            first = if leading { rule } else { lines.len() - 1 };
         }
+        leading = false;
         let (marker, label_style, key_style) = if Some(i) == selected {
             (
                 "▶ ",
@@ -2400,6 +2588,7 @@ fn push_action_rows(
         ));
         if Some(i) == selected {
             page.selected = (first, lines.len() - 1);
+            page.has_selected = true;
         }
     }
 }
@@ -2648,6 +2837,7 @@ mod tests {
             label: label.into(),
             value: value.into(),
             note: note.into(),
+            disabled: false,
         };
         ModalContext {
             rakumux_key: prefix.to_string(),
@@ -2668,7 +2858,15 @@ mod tests {
     }
 
     fn state(tab: ModalTab) -> ModalState {
-        ModalState::new(tab, ROWS)
+        ModalState::new(tab, searched(&ctx("Ctrl-b")))
+    }
+
+    /// The search text of `ctx`'s settings.
+    fn searched(ctx: &ModalContext) -> Vec<String> {
+        ctx.general
+            .iter()
+            .map(|row| search_text(row.section, &row.label))
+            .collect()
     }
 
     /// The Settings row of `action`.
@@ -2686,7 +2884,17 @@ mod tests {
 
     /// The Settings page's lines with `selected` chosen.
     fn page_text(ctx: &ModalContext, selected: usize, width: usize) -> String {
-        settings_lines(ctx, selected, width)
+        settings_lines(ctx, selected, "", width)
+            .lines
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The Settings page's lines as `state` shows them.
+    fn page_text_for(ctx: &ModalContext, state: &ModalState) -> String {
+        settings_lines(ctx, state.selected, &state.query, 80)
             .lines
             .iter()
             .map(line_text)
@@ -2777,27 +2985,30 @@ mod tests {
     #[test]
     fn close_keys() {
         for tab in ModalTab::ALL {
-            for code in [KeyCode::Esc, KeyCode::Char('q')] {
-                let mut state = state(tab);
-                assert_eq!(state.handle_key(&press(code)), ModalAction::Close);
-            }
-        }
-        // `o` closes Settings, `?` closes Help; each is left alone in the
-        // other modal.
-        for (tab, closes, other) in [
-            (ModalTab::Settings, 'o', '?'),
-            (ModalTab::Overview, '?', 'o'),
-        ] {
             let mut state = state(tab);
+            assert_eq!(state.handle_key(&press(KeyCode::Esc)), ModalAction::Close);
+        }
+        // Help closes with `q` and `?` too, and leaves `o` alone; in
+        // Settings they're typed into the search.
+        let mut help = state(ModalTab::Overview);
+        assert_eq!(
+            help.handle_key(&press(KeyCode::Char('o'))),
+            ModalAction::Ignored
+        );
+        for closes in ['q', '?'] {
             assert_eq!(
-                state.handle_key(&press(KeyCode::Char(other))),
-                ModalAction::Ignored
-            );
-            assert_eq!(
-                state.handle_key(&press(KeyCode::Char(closes))),
+                help.handle_key(&press(KeyCode::Char(closes))),
                 ModalAction::Close
             );
         }
+        let mut settings = state(ModalTab::Settings);
+        for typed in ['q', 'o', ',', '?'] {
+            assert_eq!(
+                settings.handle_key(&press(KeyCode::Char(typed))),
+                ModalAction::Handled
+            );
+        }
+        assert_eq!(settings.query, "qo,?");
         // `?` usually arrives with Shift held.
         let mut state = state(ModalTab::Sessions);
         let shifted = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT);
@@ -2809,21 +3020,11 @@ mod tests {
         // Settings has nothing to switch to; its arrows open and close a
         // row's note.
         let mut state = self::state(ModalTab::Settings);
-        for code in [
-            KeyCode::Tab,
-            KeyCode::BackTab,
-            KeyCode::Char('1'),
-            KeyCode::Char('2'),
-        ] {
+        for code in [KeyCode::Tab, KeyCode::BackTab] {
             assert_eq!(state.handle_key(&press(code)), ModalAction::Ignored);
             assert_eq!(state.tab, ModalTab::Settings);
         }
-        for (code, open) in [
-            (KeyCode::Right, true),
-            (KeyCode::Left, false),
-            (KeyCode::Char('l'), true),
-            (KeyCode::Char('h'), false),
-        ] {
+        for (code, open) in [(KeyCode::Right, true), (KeyCode::Left, false)] {
             assert_eq!(state.handle_key(&press(code)), ModalAction::Handled);
             assert_eq!((state.tab, state.note_open), (ModalTab::Settings, open));
         }
@@ -2875,9 +3076,9 @@ mod tests {
         state.handle_key(&press(KeyCode::Up));
         assert_eq!(state.selected, 0);
         state.handle_key(&press(KeyCode::Down));
-        state.handle_key(&press(KeyCode::Char('j')));
+        state.handle_key(&press(KeyCode::Down));
         assert_eq!(state.selected, 2);
-        state.handle_key(&press(KeyCode::Char('k')));
+        state.handle_key(&press(KeyCode::Up));
         assert_eq!(state.selected, 1);
         assert_eq!(state.selected_action(), None);
         assert_eq!(
@@ -2926,7 +3127,7 @@ mod tests {
         assert_eq!(state.selected, 0);
         // Without settings the actions come first.
         assert_eq!(
-            ModalState::new(ModalTab::Settings, 0).handle_key(&press(KeyCode::Enter)),
+            ModalState::new(ModalTab::Settings, Vec::new()).handle_key(&press(KeyCode::Enter)),
             ModalAction::Run(KeyAction::RakumuxMode)
         );
         let last = ROWS + KeyAction::ALL.len() - 1;
@@ -2941,6 +3142,96 @@ mod tests {
             state.handle_key(&press(KeyCode::Enter)),
             ModalAction::Ignored
         );
+    }
+
+    #[test]
+    fn typing_in_settings_narrows_its_rows_and_selects_the_first() {
+        let context = ctx("Ctrl-b");
+        let mut state = state(ModalTab::Settings);
+        for c in "openai".chars() {
+            state.handle_key(&press(KeyCode::Char(c)));
+        }
+        assert_eq!(state.query, "openai");
+        assert_eq!(state.shown_rows(), [2]);
+        assert_eq!(state.selected, 2);
+        let page = page_text_for(&context, &state);
+        assert!(page.contains("OpenAI model"), "{page}");
+        assert!(!page.contains("Layout"), "{page}");
+        assert!(!page.contains("Keys"), "{page}");
+        assert_eq!(
+            state.handle_key(&press(KeyCode::Enter)),
+            ModalAction::Change(2)
+        );
+        // Words in any order, any case, sections too; Space types once
+        // something is typed.
+        state.query.clear();
+        for c in "NAMING ai ".chars() {
+            state.handle_key(&press(KeyCode::Char(c)));
+        }
+        assert_eq!(state.query, "NAMING ai ");
+        assert_eq!(state.shown_rows(), [1, 2]);
+        state.handle_key(&press(KeyCode::Down));
+        assert_eq!(state.selected, 2);
+        state.handle_key(&press(KeyCode::Down));
+        assert_eq!(state.selected, 2);
+        state.handle_key(&press(KeyCode::Home));
+        assert_eq!(state.selected, 1);
+        // Actions are searched by name.
+        state.query.clear();
+        for c in "quit".chars() {
+            state.handle_key(&press(KeyCode::Char(c)));
+        }
+        assert_eq!(state.selected_action(), Some(KeyAction::QuitAndCd));
+        let page = page_text_for(&context, &state);
+        assert!(page.contains("Keys"), "{page}");
+        assert!(page.contains("Quit"), "{page}");
+        // Nothing matches: Enter does nothing.
+        state.handle_key(&press(KeyCode::Char('z')));
+        state.handle_key(&press(KeyCode::Char('z')));
+        assert!(state.shown_rows().is_empty());
+        assert_eq!(
+            state.handle_key(&press(KeyCode::Enter)),
+            ModalAction::Handled
+        );
+        assert!(page_text_for(&context, &state).contains("Nothing matches “quitzz”."));
+        // Backspace deletes; Esc clears, then closes.
+        state.handle_key(&press(KeyCode::Backspace));
+        assert_eq!(state.query, "quitz");
+        assert_eq!(state.handle_key(&press(KeyCode::Esc)), ModalAction::Handled);
+        assert_eq!(state.query, "");
+        assert_eq!(state.shown_rows().len(), ROWS + KeyAction::ALL.len());
+        assert_eq!(state.handle_key(&press(KeyCode::Esc)), ModalAction::Close);
+    }
+
+    #[test]
+    fn the_search_field_tops_settings_and_a_greyed_row_stays_listed() {
+        let mut context = ctx("Ctrl-b");
+        context.general[1].disabled = true;
+        let state = state(ModalTab::Settings);
+        let text = buffer_text(&draw(80, 30, &state, &context));
+        assert!(
+            text.contains("⌕ █ Type to search settings and keys"),
+            "{text}"
+        );
+        assert!(text.contains("Anthropic API key"), "{text}");
+        let page = settings_lines(&context, 1, "", 60);
+        let row = page
+            .lines
+            .iter()
+            .find(|line| line_text(line).contains("Anthropic API key"))
+            .unwrap();
+        let label = row
+            .spans
+            .iter()
+            .find(|span| span.content.contains("Anthropic"))
+            .unwrap();
+        assert_eq!(label.style.fg, Some(theme::palette().text_subtle));
+        // What's typed shows, with Esc to clear it.
+        let mut typed = state.clone();
+        typed.handle_key(&press(KeyCode::Char('l')));
+        let text = buffer_text(&draw(80, 30, &typed, &context));
+        assert!(text.contains("⌕ l█"), "{text}");
+        assert!(text.contains("Esc clear"), "{text}");
     }
 
     #[test]
@@ -3001,10 +3292,13 @@ mod tests {
                 state: KeyEventState::NONE,
             };
             assert_eq!(state.handle_key(&release), ModalAction::Ignored);
-            assert_eq!(
-                state.handle_key(&press(KeyCode::Char('x'))),
+            // A key Help has no use for; Settings types it into its search.
+            let plain = if tab == ModalTab::Settings {
+                ModalAction::Handled
+            } else {
                 ModalAction::Ignored
-            );
+            };
+            assert_eq!(state.handle_key(&press(KeyCode::Char('x'))), plain);
         }
     }
 
@@ -3017,8 +3311,8 @@ mod tests {
         let wide = settings_width(Rect::new(0, 0, 240, 60), &context);
         assert_eq!(narrow, wide);
         assert!(usize::from(wide) <= MAX_SETTINGS_WIDTH);
-        // Centred, and on a tall screen exactly as tall as its rows and the
-        // keys.
+        // Centred, and on a tall screen exactly as tall as the search field
+        // (and a blank line), its rows and the keys.
         let state = state(ModalTab::Settings);
         let buf = draw(240, 120, &state, &context);
         let popup = dialog(&buf);
@@ -3026,8 +3320,8 @@ mod tests {
         assert_eq!(popup.x, (240 - wide) / 2);
         // Two columns of padding either side, a row above and below.
         let body = usize::from(wide - 2 - BODY_MARGIN - 4);
-        let rows = settings_lines(&context, 0, body).lines.len();
-        assert_eq!(usize::from(popup.height), 2 + 2 + rows + 1);
+        let rows = settings_lines(&context, 0, "", body).lines.len();
+        assert_eq!(usize::from(popup.height), 2 + 2 + 2 + rows + 1);
         assert_eq!(popup.y, (120 - popup.height) / 2);
         let text = buffer_text(&buf);
         assert!(!text.contains('┃'), "everything fits: {text}");
@@ -3209,7 +3503,7 @@ mod tests {
         let context = ctx("Ctrl-b");
         for width in [1, 5, 12, 30, 76, 125] {
             for selected in 0..ROWS + KeyAction::ALL.len() {
-                let page = settings_lines(&context, selected, width);
+                let page = settings_lines(&context, selected, "", width);
                 let (lines, (start, end)) = (&page.lines, page.selected);
                 assert!(start <= end && end < lines.len());
                 if width > 1 {
@@ -3225,7 +3519,7 @@ mod tests {
         }
         // Too narrow for labels and values side by side (a phone): each
         // value goes under its label, whole.
-        let page = settings_lines(&context, 0, 30);
+        let page = settings_lines(&context, 0, "", 30);
         let text: Vec<String> = page.lines.iter().map(line_text).collect();
         let layout = text.iter().position(|l| l == "▶ Layout").unwrap();
         assert_eq!(
@@ -3237,7 +3531,7 @@ mod tests {
         assert_eq!(page.selected, (layout - 1, layout + 1));
         assert!(text.contains(&"    not set".to_string()), "{text:?}");
         // Wide enough: side by side.
-        let lines = settings_lines(&context, 0, 76).lines;
+        let lines = settings_lines(&context, 0, "", 76).lines;
         let layout = line_text(&lines[1]);
         assert!(layout.starts_with("▶ Layout  "), "{layout:?}");
         assert!(
@@ -3254,7 +3548,7 @@ mod tests {
         assert!(buffer_text(&buf).contains("▶ Quit Rakumux"));
         // The first action shows with the rule and heading above it.
         state.selected = ROWS;
-        let text = buffer_text(&draw(80, 12, &state, &context));
+        let text = buffer_text(&draw(80, 14, &state, &context));
         assert!(text.contains("── Keys"), "{text}");
         assert!(text.contains("Modes"), "{text}");
     }
@@ -3347,7 +3641,7 @@ mod tests {
         assert!(footer.contains(" 31-"), "{footer:?}");
         // A phone: fewer keys, Esc close still whole.
         for tab in [ModalTab::Overview, ModalTab::Settings] {
-            let buf = draw(40, 20, &ModalState::new(tab, ROWS), &context);
+            let buf = draw(40, 20, &self::state(tab), &context);
             let popup = dialog(&buf);
             // Settings has a row of padding under its footer.
             let below = if tab == ModalTab::Settings {
@@ -3481,7 +3775,7 @@ mod tests {
         let context = ctx("Ctrl-b");
         let mut state = state(ModalTab::Settings);
         state.selected = row_of(KeyAction::NextSession);
-        let closed = draw(100, 40, &state, &context);
+        let closed = draw(100, 44, &state, &context);
         let closed_text = buffer_text(&closed);
         assert!(
             !closed_text.contains("Use Option as Meta key"),
@@ -3490,7 +3784,7 @@ mod tests {
         assert!(closed_text.contains("→ about"), "{closed_text}");
         state.handle_key(&press(KeyCode::Right));
         assert!(state.note_open);
-        let open = draw(100, 40, &state, &context);
+        let open = draw(100, 44, &state, &context);
         let open_text = buffer_text(&open);
         // Wrapping may split the phrase over two lines.
         let words = open_text.split_whitespace().collect::<Vec<_>>().join(" ");

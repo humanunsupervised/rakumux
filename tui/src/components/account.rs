@@ -54,7 +54,7 @@ pub fn draw_account(f: &mut Frame, dialog: &AccountDialog, area: Rect) {
                 Line::from(Span::styled(
                     "Live sessions' recent terminal output and agent reports are sent to \
                      rakumux.com to write them (secrets it recognises are removed first). Turn \
-                     AI session summaries off any time at rakumux.com/features.",
+                     AI summaries off any time in Settings → Available on sign-in.",
                     muted,
                 )),
             ],
@@ -73,7 +73,7 @@ pub fn draw_account(f: &mut Frame, dialog: &AccountDialog, area: Rect) {
                     Line::from(format!("AI session summaries: {summaries}")),
                     Line::from(""),
                     Line::from(Span::styled(
-                        "Turn them on or off at rakumux.com/features.",
+                        "Turn them on or off in Settings → Available on sign-in.",
                         muted,
                     )),
                 ],

@@ -42,6 +42,38 @@ pub struct AccountFeatures {
     pub feed: bool,
 }
 
+/// Feature switches to change for the signed-in account; `None` leaves one as it is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FeatureChange {
+    pub ai_session_summaries: Option<bool>,
+    pub feed: Option<bool>,
+}
+
+impl FeatureChange {
+    /// Nothing to change.
+    pub fn is_empty(&self) -> bool {
+        self.ai_session_summaries.is_none() && self.feed.is_none()
+    }
+
+    /// `features` with this change made.
+    pub fn apply(&self, features: AccountFeatures) -> AccountFeatures {
+        AccountFeatures {
+            ai_session_summaries: self
+                .ai_session_summaries
+                .unwrap_or(features.ai_session_summaries),
+            feed: self.feed.unwrap_or(features.feed),
+        }
+    }
+
+    /// This change, then `later` over it.
+    pub fn then(self, later: FeatureChange) -> FeatureChange {
+        FeatureChange {
+            ai_session_summaries: later.ai_session_summaries.or(self.ai_session_summaries),
+            feed: later.feed.or(self.feed),
+        }
+    }
+}
+
 /// One agent feed request (`contracts/feed/`).
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum FeedHttp<'a> {
@@ -332,6 +364,63 @@ impl CloudAIClient {
             retry_after,
             body,
         })
+    }
+
+    /// Change the signed-in account's feature switches (`PATCH /api/v1/features`,
+    /// as the website's Features page does) and read them back, with the same
+    /// transport rules as `features`.
+    pub fn set_features(
+        &self,
+        access_token: &SecretValue,
+        change: FeatureChange,
+        cancel: &Cancellation,
+    ) -> Result<AccountFeatures, CloudAIError> {
+        cancel.check()?;
+        let mut features = serde_json::Map::new();
+        if let Some(on) = change.ai_session_summaries {
+            features.insert("ai_session_summaries".into(), on.into());
+        }
+        if let Some(on) = change.feed {
+            features.insert("feed".into(), on.into());
+        }
+        if features.is_empty() {
+            return Err(CloudAIError::InvalidRequest);
+        }
+        let body = serde_json::to_vec(&serde_json::json!({"version": 1, "features": features}))
+            .map_err(|_| CloudAIError::InvalidRequest)?;
+        let mut outgoing = Request::new(Method::PATCH, self.config.features.clone());
+        *outgoing.timeout_mut() = Some(TOTAL_TIMEOUT);
+        let headers = outgoing.headers_mut();
+        headers.insert(header::AUTHORIZATION, bearer_header(access_token)?);
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("identity"),
+        );
+        let length = body.len() as u64;
+        headers.insert(header::CONTENT_LENGTH, HeaderValue::from(length));
+        // A sized reader is never replayed (see `generate`).
+        *outgoing.body_mut() = Some(Body::sized(Cursor::new(body), length));
+        cancel.check()?;
+        let result = self.transport.send(outgoing);
+        cancel.check()?;
+        let reply = result?;
+        if (300..=399).contains(&reply.status) {
+            return Err(CloudAIError::HttpStatus(reply.status));
+        }
+        require_json_headers(&reply.headers)?;
+        let body = read_body(reply.body, cancel)?;
+        let result = if reply.status == 200 {
+            decode_features(&body)
+        } else {
+            remote_failure(reply.status, &reply.headers, &body)
+        };
+        cancel.check()?;
+        result
     }
 
     fn with_transport(config: CloudAIConfig, transport: Box<dyn HttpTransport>) -> Self {

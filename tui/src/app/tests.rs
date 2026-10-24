@@ -880,7 +880,7 @@ async fn from_a_session_the_rakumux_key_then_one_key_does_everything() {
     assert_eq!(h.app.focus, Focus::List);
     h.press(KeyCode::Char(',')).await;
     assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
-    h.press(KeyCode::Char(',')).await;
+    h.press(KeyCode::Esc).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
     h.press(KeyCode::Esc).await;
     assert_eq!(h.app.focus, Focus::Session);
@@ -1528,7 +1528,7 @@ async fn d_types_in_filters_and_sessions_without_opening_delete_confirmation() {
 fn settings_on_actions(in_session: bool) -> AppMode {
     let rows = SettingsItem::ALL.len();
     AppMode::Modal {
-        state: ModalState::new(ModalTab::Settings, rows).with_selected(rows),
+        state: ModalState::new(ModalTab::Settings, vec![String::new(); rows]).with_selected(rows),
         in_session,
     }
 }
@@ -1568,8 +1568,11 @@ async fn settings_and_help_open_from_the_list_with_their_keys() {
     let mut h = harness(vec![view("A", "a", 20)]);
     h.press(KeyCode::Char('o')).await;
     assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
-    // The key that opened it closes it.
+    // Typing searches it; Esc clears that, then closes it.
     h.press(KeyCode::Char('o')).await;
+    h.press(KeyCode::Esc).await;
+    assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
+    h.press(KeyCode::Esc).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
     h.press(KeyCode::Char('?')).await;
     assert_eq!(settings_tab(&h), Some(ModalTab::Overview));
@@ -4187,8 +4190,6 @@ fn account_tick(h: &mut Harness) {
 #[tokio::test]
 async fn signing_in_from_settings_shows_a_code_then_descriptions_under_sessions() {
     let (mut h, account) = account_harness(testing::FakeAccount::default());
-    // With AI summaries chosen in Settings.
-    h.app.settings.sessions.description_content = config::DescriptionContent::AiSummary;
     assert_eq!(h.app.account, super::types::AccountStatus::SignedOut);
     assert_eq!(account.calls(), ["account"]);
     // Signed out: no descriptions are asked for.
@@ -4270,7 +4271,6 @@ async fn closing_the_dialog_abandons_the_sign_in() {
 #[tokio::test]
 async fn signing_out_stops_the_descriptions() {
     let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
-    h.app.settings.sessions.description_content = config::DescriptionContent::AiSummary;
     account
         .descriptions
         .lock()
@@ -4323,8 +4323,6 @@ fn row_of(h: &Harness, name: &str) -> usize {
 /// Signed in, with A described.
 async fn described() -> (Harness, Arc<testing::FakeAccount>) {
     let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
-    // With AI summaries chosen in Settings.
-    h.app.settings.sessions.description_content = config::DescriptionContent::AiSummary;
     account.descriptions.lock().unwrap().insert(
         SessionId::from_string("A"),
         "Fixing the flaky login test".into(),
@@ -4447,7 +4445,7 @@ async fn s_says_how_to_turn_summaries_on() {
     h.press(KeyCode::Char('s')).await;
     assert_eq!(
         h.app.status(),
-        Some("Sign in and turn on AI session summaries (rakumux.com/features).")
+        Some("Sign in and turn on AI summaries: Settings → Available on sign-in.")
     );
     let off = testing::FakeAccount::default();
     *off.account.lock().unwrap() = Some(crate::account::Account {
@@ -4459,15 +4457,12 @@ async fn s_says_how_to_turn_summaries_on() {
     assert!(h.app.status().unwrap().starts_with("Sign in and turn on"));
     assert!(account.summarized.lock().unwrap().is_empty());
     assert!(off.summarized.lock().unwrap().is_empty());
-    // Signed in, but the list shows your messages: how to show summaries.
-    let (mut h, shown) = account_harness(testing::FakeAccount::signed_in());
+    // Signed in with them on: before its first summary, one is made.
+    let (mut h, on) = account_harness(testing::FakeAccount::signed_in());
     account_tick(&mut h);
     h.press(KeyCode::Char('s')).await;
-    assert_eq!(
-        h.app.status(),
-        Some("Show AI summaries first: Settings → Session description content.")
-    );
-    assert!(shown.summarized.lock().unwrap().is_empty());
+    assert_eq!(h.app.status(), Some("Summarising a…"));
+    assert_eq!(on.summarized.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -4659,7 +4654,7 @@ async fn an_agents_latest_output_shows_under_its_name_above_its_details() {
     with_output.agent_output = Some("Bash: Run the tests".into());
     with_output.user_prompt = Some("Fix the flaky test".into());
     let mut h = harness(vec![with_output, view("B", "docs", 10)]).on_folders_tab();
-    // Your last message by default; the agent's when Settings says so.
+    // Signed out, your last message: there's no AI summary.
     let screen = screen_rows(&mut h, 160, 48);
     let title = screen.iter().position(|row| row.contains(" api ")).unwrap();
     assert!(
@@ -4667,18 +4662,7 @@ async fn an_agents_latest_output_shows_under_its_name_above_its_details() {
         "{}",
         screen.join("\n")
     );
-    h.app.settings.sessions.description_content = config::DescriptionContent::AgentMessage;
-    let screen = screen_rows(&mut h, 160, 48);
-    let title = screen
-        .iter()
-        .position(|row| row.contains(" api "))
-        .expect("the title");
-    assert!(
-        screen[title + 1].contains("Bash: Run the tests"),
-        "{}",
-        screen.join("\n")
-    );
-    // The details follow the output; a session without output has none.
+    // The details follow it; a session without a message has none.
     assert!(
         !screen[title + 2].trim().is_empty(),
         "{}",
@@ -4688,7 +4672,7 @@ async fn an_agents_latest_output_shows_under_its_name_above_its_details() {
         .iter()
         .position(|row| row.contains(" docs "))
         .unwrap();
-    assert!(!screen[docs + 1].contains("Bash:"));
+    assert!(!screen[docs + 1].contains("Fix the"));
 }
 
 #[tokio::test]
@@ -4713,31 +4697,71 @@ async fn the_lines_under_a_name_stop_short_of_its_age_and_mark() {
 }
 
 #[tokio::test]
-async fn settings_choose_what_the_session_description_shows() {
-    let mut h = harness(vec![view("A", "a", 30)]);
-    let row = SettingsItem::DescriptionContent.index();
-    assert_eq!(
-        h.app.modal_context(false).general[row].value,
-        "[Your last message] Agent message AI summaries"
-    );
+async fn settings_turn_the_accounts_switches_on_and_off_once_signed_in() {
+    let row =
+        |item: SettingsItem, h: &Harness| h.app.modal_context(false).general[item.index()].clone();
+    // Signed out: both are greyed out and do nothing.
+    let (mut h, account) = account_harness(testing::FakeAccount::default());
+    for item in [SettingsItem::AiSummaries, SettingsItem::AgentFeed] {
+        let setting = row(item, &h);
+        assert_eq!(setting.section, "Available on sign-in");
+        assert!(setting.disabled);
+        assert_eq!(setting.value, "On Off");
+    }
     h.press(KeyCode::Char(',')).await;
-    for _ in 0..row {
-        h.press(KeyCode::Down).await;
+    for c in "agent feed".chars() {
+        h.press(KeyCode::Char(c)).await;
     }
     h.press(KeyCode::Enter).await;
+    assert!(!account.calls().contains(&"set_features"));
     assert_eq!(
-        h.app.settings.sessions.description_content,
-        config::DescriptionContent::AgentMessage
+        h.app.status(),
+        Some("Sign in to use Agent feed: Settings → Account.")
     );
-    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+
+    // Signed in: they show the account's and change it.
+    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
+    assert_eq!(row(SettingsItem::AiSummaries, &h).value, "[On] Off");
+    assert_eq!(row(SettingsItem::AgentFeed, &h).value, "On [Off]");
+    assert!(!row(SettingsItem::AgentFeed, &h).disabled);
+    h.press(KeyCode::Char(',')).await;
+    for c in "feed".chars() {
+        h.press(KeyCode::Char(c)).await;
+    }
+    h.press(KeyCode::Enter).await;
+    // Shown at once, saved by the service.
+    assert_eq!(row(SettingsItem::AgentFeed, &h).value, "[On] Off");
+    assert_eq!(h.app.status(), Some("Agent feed: on"));
+    h.app.process_pending();
+    assert!(account.calls().contains(&"set_features"));
     assert_eq!(
-        saved.sessions.description_content,
-        config::DescriptionContent::AgentMessage
+        account.account.lock().unwrap().as_ref().unwrap().feed,
+        Some(true)
     );
-    h.press(KeyCode::Enter).await;
-    h.press(KeyCode::Enter).await;
+    // Still in Settings; Esc clears the search, then closes.
+    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
+    h.press(KeyCode::Esc).await;
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+}
+
+#[tokio::test]
+async fn turning_ai_summaries_off_clears_the_descriptions_and_the_refresh() {
+    let (mut h, account) = described().await;
+    assert!(h.app.summaries_on());
+    h.app
+        .toggle_feature(super::types::AccountFeature::AiSummaries);
+    h.app.process_pending();
+    assert!(!h.app.summaries_on());
+    assert_eq!(h.app.description(&SessionId::from_string("A")), None);
     assert_eq!(
-        h.app.settings.sessions.description_content,
-        config::DescriptionContent::YourMessage
+        account.account.lock().unwrap().as_ref().unwrap().summaries,
+        Some(false)
+    );
+    h.app.summarize_selected();
+    assert_eq!(
+        h.app.status(),
+        Some("Sign in and turn on AI summaries: Settings → Available on sign-in.")
     );
 }

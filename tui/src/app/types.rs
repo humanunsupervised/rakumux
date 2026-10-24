@@ -305,8 +305,6 @@ pub enum SettingsItem {
     Layout,
     /// Plain, emoji or Nerd Font marks for folders and branches.
     Icons,
-    /// What the line under each session's name shows.
-    DescriptionContent,
     /// Option/Alt+↑/↓ also switch sessions inside a session.
     CycleInSessions,
     /// Install a new release and restart only this UI.
@@ -319,33 +317,37 @@ pub enum SettingsItem {
     TerminalPanel,
     /// Sign in to the Rakumux account (AI session descriptions).
     Account,
+    /// The account's AI session summaries switch (as on rakumux.com/features).
+    AiSummaries,
+    /// The account's Agent feed switch (likewise).
+    AgentFeed,
 }
 
 impl SettingsItem {
-    pub const ALL: [SettingsItem; 9] = [
+    pub const ALL: [SettingsItem; 10] = [
         SettingsItem::Layout,
         SettingsItem::Icons,
-        SettingsItem::DescriptionContent,
         SettingsItem::CycleInSessions,
         SettingsItem::Update,
         SettingsItem::RestartUi,
         SettingsItem::RestartServer,
         SettingsItem::TerminalPanel,
         SettingsItem::Account,
+        SettingsItem::AiSummaries,
+        SettingsItem::AgentFeed,
     ];
 
     /// The heading Settings lists it under.
     pub fn section(self) -> &'static str {
         match self {
-            SettingsItem::Layout | SettingsItem::Icons | SettingsItem::DescriptionContent => {
-                "Appearance"
-            }
+            SettingsItem::Layout | SettingsItem::Icons => "Appearance",
             SettingsItem::CycleInSessions => "Keyboard",
             SettingsItem::Update
             | SettingsItem::RestartUi
             | SettingsItem::RestartServer
             | SettingsItem::TerminalPanel => "App",
             SettingsItem::Account => "Account",
+            SettingsItem::AiSummaries | SettingsItem::AgentFeed => "Available on sign-in",
         }
     }
 
@@ -489,6 +491,32 @@ pub enum AccountStatus {
     SignedIn(crate::account::Account),
 }
 
+/// A switch of the Rakumux account that Settings → Available on sign-in
+/// turns on and off, as rakumux.com/features does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountFeature {
+    AiSummaries,
+    AgentFeed,
+}
+
+impl AccountFeature {
+    /// What Settings calls it.
+    pub fn label(self) -> &'static str {
+        match self {
+            AccountFeature::AiSummaries => "AI summaries",
+            AccountFeature::AgentFeed => "Agent feed",
+        }
+    }
+
+    /// Whether `account` has it on; `None` until read.
+    pub fn of(self, account: &crate::account::Account) -> Option<bool> {
+        match self {
+            AccountFeature::AiSummaries => account.summaries,
+            AccountFeature::AgentFeed => account.feed,
+        }
+    }
+}
+
 /// Where the welcome tour is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WelcomeState {
@@ -532,10 +560,11 @@ pub enum AppMode {
 }
 
 impl AppMode {
-    /// The Settings or Help modal (whichever has `tab`) opened on `tab`.
-    pub fn modal(tab: ModalTab, in_session: bool) -> Self {
+    /// The Settings or Help modal (whichever has `tab`) opened on `tab`;
+    /// `settings` are the settings' search text, in order.
+    pub fn modal(tab: ModalTab, in_session: bool, settings: Vec<String>) -> Self {
         AppMode::Modal {
-            state: ModalState::new(tab, SettingsItem::ALL.len()),
+            state: ModalState::new(tab, settings),
             in_session,
         }
     }

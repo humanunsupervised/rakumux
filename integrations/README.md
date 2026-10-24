@@ -104,8 +104,8 @@ prompts, tool arguments, output or transcripts.
 
 `output.rs` gives each live Claude Code, Codex or OpenCode session two lines: what its agent
 last said or did (`SessionView.agent_output`) and what the user last typed to it
-(`SessionView.user_prompt`). Settings → Session description content picks which the session
-list shows under the session's name (the user's message by default).
+(`SessionView.user_prompt`). The session list shows the user's message under the session's
+name until the session has an AI summary.
 - **Where it comes from:** the daemon reads it from the agent's own conversation on this
   machine, at most once a second while the terminal shows output:
   - Claude Code: `<config dir>/projects/*/<conversation>.jsonl` (the newest copy), for the

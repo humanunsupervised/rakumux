@@ -18,6 +18,7 @@ use super::schedule::MAX_RUNNING;
 use super::sign_in::{self, SignInEvent, SignInFailure, SignInState};
 use super::StatusRefresher;
 use crate::auth::{AccountSession, AccountWebsite, CredentialStore, WallClock};
+use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{FeedCompletion, FeedJob, FeedPage, FeedSync};
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
@@ -69,6 +70,7 @@ enum Command {
     Renew(Sender<()>),
     Feed(Option<u64>, Option<u64>, Sender<FeedPage>),
     Summarize(SessionId, Sender<()>),
+    SetFeatures(FeatureChange, Reply<()>),
 }
 
 enum Message {
@@ -295,6 +297,14 @@ impl RefreshClient {
         let (reply, answer) = mpsc::channel();
         self.send(Command::Summarize(session, reply))?;
         answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
+    /// Change the account's feature switches; `state` shows them changed at once,
+    /// and saving them to the account follows (see `StatusRefresher::change_features`).
+    pub fn set_features(&self, change: FeatureChange) -> Result<(), RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::SetFeatures(change, reply))?;
+        Ok(answer.recv().map_err(|_| RefreshError::Stopped)??)
     }
 
     /// The feed entries that changed after `after` for a TUI of `generation`.
@@ -540,6 +550,9 @@ fn control<S, A, C>(
         Command::Summarize(session, reply) => {
             refresher.request(&session);
             let _ = reply.send(());
+        }
+        Command::SetFeatures(change, reply) => {
+            let _ = reply.send(refresher.change_features(change, now));
         }
         Command::SignInCancel(reply) => {
             let state = match sign_in.state {

@@ -286,6 +286,9 @@ pub struct App {
     tab_chosen: bool,
     /// The account's Feed switch was seen on this run.
     feed_switch_seen: bool,
+    /// A switch was changed from Settings; the next account check says if
+    /// saving it failed.
+    features_saving: bool,
     pub connection: Connection,
     /// The daemon was reachable once; losing it triggers reconnects.
     was_connected: bool,
@@ -400,6 +403,7 @@ impl App {
             feed_tab: false,
             tab_chosen: false,
             feed_switch_seen: false,
+            features_saving: false,
             connection: Connection::Connecting,
             was_connected: false,
             checked_daemon_features: false,
@@ -720,26 +724,8 @@ impl App {
                         sample(I::Emoji),
                         sample(I::Nerd)
                     ),
+                    disabled: false,
                 };
-            }
-            SettingsItem::DescriptionContent => {
-                let current = self.settings.sessions.description_content;
-                let value = config::DescriptionContent::ALL
-                    .iter()
-                    .map(|c| {
-                        if *c == current {
-                            format!("[{}]", c.label())
-                        } else {
-                            c.label().to_string()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                (
-                    "Session description content",
-                    value,
-                    "What the line under each session's name shows: your last message to its agent, the agent's latest message (its reasoning, a tool call or its reply), or an AI summary of the session (with a Rakumux account: Settings → Account). Agents: Claude Code, Codex and OpenCode.",
-                )
             }
             SettingsItem::CycleInSessions => {
                 let keys = self
@@ -760,6 +746,7 @@ impl App {
                          there never gets them (OpenCode, Pi and Claude Code use them). Off: they \
                          switch sessions in Rakumux mode only."
                     ),
+                    disabled: false,
                 };
             }
             SettingsItem::Update => (
@@ -796,8 +783,33 @@ impl App {
                 (
                     "Account",
                     value,
-                    "Sign in to your Rakumux account to see a short AI description under each session. Recent session activity is sent to rakumux.com to write them; turn AI session summaries off on rakumux.com/features. Same as `rakumux account login`.",
+                    "Sign in to your Rakumux account for AI summaries under each session and the agent feed (Available on sign-in, below). Same as `rakumux account login`.",
                 )
+            }
+            SettingsItem::AiSummaries | SettingsItem::AgentFeed => {
+                let feature = match item {
+                    SettingsItem::AiSummaries => AccountFeature::AiSummaries,
+                    _ => AccountFeature::AgentFeed,
+                };
+                let (value, disabled) = match &self.account {
+                    AccountStatus::SignedIn(account) => match feature.of(account) {
+                        Some(true) => ("[On] Off", false),
+                        Some(false) => ("On [Off]", false),
+                        None => ("…", false),
+                    },
+                    _ => ("On Off", true),
+                };
+                let note = match feature {
+                    AccountFeature::AiSummaries => "A short AI summary of each agent chat under the session's name, made once the agent has written 5 messages or finished, then when you ask (the ↻ on a hovered summary, or `s`). Your prompt and the agent's messages since are sent to rakumux.com to write it; private sessions never are. Without one the line shows your last message. Saved to your account, as on rakumux.com/features.",
+                    AccountFeature::AgentFeed => "The Feed tab: what your agents said when they finished a turn, from every machine signed in to your account, newest first. Each finished reply is sent to rakumux.com, keys and tokens masked, private sessions never, and kept for 30 days. Saved to your account, as on rakumux.com/features.",
+                };
+                return SettingRow {
+                    section: item.section(),
+                    label: feature.label().into(),
+                    value: value.into(),
+                    note: note.into(),
+                    disabled,
+                };
             }
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
@@ -810,7 +822,19 @@ impl App {
             label: label.to_string(),
             value,
             note: note.to_string(),
+            disabled: false,
         }
+    }
+
+    /// Each setting's search text (Settings' search), in order.
+    pub fn settings_search_text(&self) -> Vec<String> {
+        SettingsItem::ALL
+            .iter()
+            .map(|item| {
+                let row = self.setting_row(*item);
+                crate::help::search_text(row.section, &row.label)
+            })
+            .collect()
     }
 
     /// Bytes the event loop must write to the real terminal.
@@ -958,6 +982,7 @@ impl App {
                 self.on_descriptions(generation, result)
             }
             AppEvent::Summarized { session, result } => self.on_summarized(session, result),
+            AppEvent::FeaturesSet(result) => self.on_features_set(result),
             AppEvent::Feed { generation, result } => self.on_feed(generation, result),
             AppEvent::JobFailed(message) => {
                 self.set_status(format!("Background task failed: {message}"))

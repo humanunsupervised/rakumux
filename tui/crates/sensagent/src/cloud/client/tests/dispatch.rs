@@ -184,15 +184,45 @@ struct FakeTransport {
     mode: Mutex<Option<ReplyMode>>,
     /// The account's AI session summaries switch, for `GET /api/v1/features`.
     summaries: Arc<AtomicBool>,
+    /// Whether `PATCH /api/v1/features` saves; refused with a 503 otherwise.
+    saves: Arc<AtomicBool>,
+    /// The account's Feed switch, which only a save changes.
+    feed: AtomicBool,
 }
 
 impl HttpTransport for FakeTransport {
     fn send(&self, mut request: Request) -> Result<HttpReply, CloudAIError> {
-        if request.method() == Method::GET {
+        if request.method() == Method::PATCH {
+            if !self.saves.load(Ordering::SeqCst) {
+                return Ok(super::error_reply(
+                    503,
+                    crate::cloud::RemoteErrorCode::UpstreamUnavailable,
+                    None,
+                ));
+            }
+            let body = request
+                .body_mut()
+                .take()
+                .unwrap()
+                .buffer()
+                .unwrap()
+                .to_vec();
+            let value: Value = serde_json::from_slice(&body).unwrap();
+            if let Some(on) = value["features"]["ai_session_summaries"].as_bool() {
+                self.summaries.store(on, Ordering::SeqCst);
+            }
+            if let Some(on) = value["features"]["feed"].as_bool() {
+                self.feed.store(on, Ordering::SeqCst);
+            }
+        }
+        if matches!(request.method(), &Method::GET | &Method::PATCH) {
             // Feature reads are not recorded: `requests` holds status dispatches.
             let features = json!({
                 "version": 1,
-                "features": {"ai_session_summaries": self.summaries.load(Ordering::SeqCst)},
+                "features": {
+                    "ai_session_summaries": self.summaries.load(Ordering::SeqCst),
+                    "feed": self.feed.load(Ordering::SeqCst),
+                },
             });
             return Ok(HttpReply {
                 status: 200,
@@ -271,7 +301,13 @@ impl Read for BlockedBody {
 }
 
 fn cloud(origin: &str, requests: Requests, mode: ReplyMode) -> CloudAIClient {
-    cloud_switched(origin, requests, mode, Arc::new(AtomicBool::new(true)))
+    cloud_switched(
+        origin,
+        requests,
+        mode,
+        Arc::new(AtomicBool::new(true)),
+        Arc::new(AtomicBool::new(true)),
+    )
 }
 
 fn cloud_switched(
@@ -279,6 +315,7 @@ fn cloud_switched(
     requests: Requests,
     mode: ReplyMode,
     summaries: Arc<AtomicBool>,
+    saves: Arc<AtomicBool>,
 ) -> CloudAIClient {
     CloudAIClient::with_transport(
         CloudAIConfig::new(origin).unwrap(),
@@ -286,6 +323,8 @@ fn cloud_switched(
             requests,
             mode: Mutex::new(Some(mode)),
             summaries,
+            saves,
+            feed: AtomicBool::new(false),
         }),
     )
 }
@@ -303,6 +342,8 @@ struct Fixture {
     requests: Requests,
     /// The account's AI session summaries switch the fake service reports.
     summaries: Arc<AtomicBool>,
+    /// Whether the fake service saves changes to the switches.
+    saves: Arc<AtomicBool>,
     owner: Owner,
 }
 
@@ -323,10 +364,17 @@ impl Fixture {
         let store = MemoryStatusStore::default();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let summaries = Arc::new(AtomicBool::new(true));
+        let saves = Arc::new(AtomicBool::new(true));
         let mut owner = StatusDispatchService::new(
             account.clone(),
             store.clone(),
-            cloud_switched(ORIGIN, requests.clone(), mode, summaries.clone()),
+            cloud_switched(
+                ORIGIN,
+                requests.clone(),
+                mode,
+                summaries.clone(),
+                saves.clone(),
+            ),
         );
         owner.set_account_session(Some(session.clone())).unwrap();
         owner.observe(source(1)).unwrap();
@@ -339,6 +387,7 @@ impl Fixture {
             store,
             requests,
             summaries,
+            saves,
             owner,
         }
     }

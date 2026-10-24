@@ -335,6 +335,31 @@ fn sign_in_is_idle_until_started_and_its_view_holds_only_public_values() {
 }
 
 #[test]
+fn switches_are_changed_for_the_signed_in_account_only() {
+    let served = Served::start();
+    let client = served.client();
+    client.set_features(Some(false), None).unwrap();
+    client.set_features(None, Some(true)).unwrap();
+    assert!(!client.state().unwrap().features_unsaved);
+    // Both absent is no change; the wire leaves them out.
+    let mut stream = served.hello(PROTOCOL, &served.token()).0;
+    let request = OwnerRequest::SetFeatures {
+        ai_session_summaries: None,
+        feed: None,
+    };
+    assert_eq!(
+        serde_json::to_value(&request).unwrap(),
+        serde_json::json!({"op": "set_features"})
+    );
+    assert_eq!(ask(&mut stream, &request), OwnerResponse::Done);
+    client.sign_out().unwrap();
+    assert_eq!(
+        client.set_features(Some(true), None).unwrap_err(),
+        OwnerError::Refused(OwnerErrorCode::SignedOut)
+    );
+}
+
+#[test]
 fn a_client_can_ask_the_service_to_stop() {
     let served = Served::start();
     assert!(!served.server.shutdown_requested());

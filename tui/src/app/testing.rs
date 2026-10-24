@@ -827,6 +827,7 @@ impl FakeAccount {
             subject: "user_synthetic".into(),
             summaries: Some(true),
             feed: Some(false),
+            features_unsaved: false,
         }
     }
 
@@ -947,6 +948,19 @@ impl crate::account::AccountAccess for FakeAccount {
         self.call("summarize");
         self.summarized.lock().unwrap().push(session.clone());
         self.refreshing.lock().unwrap().insert(session.clone());
+        Ok(())
+    }
+
+    fn set_features(
+        &self,
+        summaries: Option<bool>,
+        feed: Option<bool>,
+    ) -> std::result::Result<(), String> {
+        self.call("set_features");
+        let mut account = self.account.lock().unwrap();
+        let account = account.as_mut().ok_or("signed out")?;
+        account.summaries = summaries.or(account.summaries);
+        account.feed = feed.or(account.feed);
         Ok(())
     }
 

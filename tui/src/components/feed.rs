@@ -80,8 +80,8 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
             let lines = vec![
                 indented(vec![Span::styled("The feed is off.", strong)]),
                 indented(vec![
-                    Span::styled("Turn it on at ", muted),
-                    Span::styled("rakumux.com/features", key),
+                    Span::styled("Turn it on in ", muted),
+                    Span::styled("Settings → Available on sign-in", key),
                 ]),
             ];
             f.render_widget(message(lines), area);

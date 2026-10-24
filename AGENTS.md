@@ -144,8 +144,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    latest prompt and the newest messages, or the screen for other programs. Nothing refreshes on
    a timer, and shown text stays through lifecycle changes, renewals and consent that only adds
    folders, until that terminal ends. Settings → Account signs in (a code, link and QR code),
-   Settings → Session description content shows the summaries under each session's name (a
-   spinner while one is made), and `rakumux account status` lists them. Its stderr, static failure codes only, goes to
+   the summaries show under each session's name (before one, the user's last message; a
+   spinner while one is made), Settings → Available on sign-in turns the account's AI
+   summaries and Agent feed on and off (greyed out when signed out; `OwnerRequest::SetFeatures`,
+   applied at once and saved to the account with `PATCH /api/v1/features`, as the website's
+   Features page saves them), and `rakumux account status` lists them. Its stderr, static failure codes only, goes to
    `~/.rakumux/logs/status-service.log`. Clerk has no custom scopes, so production names
    `profile` as the AI status scope (`DeviceAuthConfig::with_status_scope`), matching the
    website's check. Clerk's access tokens last 24 hours: the service renews them with the
@@ -444,9 +447,7 @@ accidents; they don't stop a hostile process running as the same user.
   ai_primary_provider, openai_model}` plus `sessions {rakumux_key ("ctrl+\\"; an older
   `prefix_key` other than "ctrl+b" still counts), cycle_keys (["alt+up", "alt+down"]),
   cycle_keys_in_session (false), icons ("plain" | "emoji" | "nerd":
-  the folder and branch marks), description_content ("your_message" | "agent_message" |
-  "ai_summary": the line under each session's name; Settings → Session description content;
-  left out at the default, your message), welcome_seen (false: the welcome tour shows on startup until
+  the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
   sidebar_width (dragged divider),
@@ -863,10 +864,14 @@ daemon restarts preserve pane PTYs. Reconnects attach as observers until the use
 they never create replacement shells implicitly. An older daemon reports that an in-place
 restart is needed; no fallback creates a normal or hidden session.
 
-Settings is one scrolling page without tabs (`help::ModalTab::Settings`): the settings, then
-under a `Keys` rule every action and its keys, which `Enter` runs; `→` shows the selected row's
-note in a popover over the page (`←`, `Esc`, moving or `Enter` close it), so the rows never shift;
-the wheel moves the selection. Labels sit on the left and values and keys are
+Settings is one scrolling page without tabs (`help::ModalTab::Settings`) under a search field:
+typing narrows it to the settings and actions whose section or name has every word typed
+(`Backspace` deletes, `Esc` clears, then closes; `Space` changes the selected row while nothing
+is typed), and the dialog keeps its size meanwhile. The settings come first, then under a `Keys`
+rule every action and its keys, which `Enter` runs; `↑`/`↓` select among the rows shown; `→`
+shows the selected row's note in a popover over the page (`←`, `Esc`, moving or `Enter` close
+it), so the rows never shift; the wheel moves the selection. A setting that can't be changed
+now (Available on sign-in, signed out) is greyed out. Labels sit on the left and values and keys are
 pinned to the right. It's sized from its rows: centred, its widest row plus 20 columns (48–100),
 capped by screen width with a side margin, and as tall as its rows, up to 80% of the screen's
 height, scrolling only as far as the selected row needs. Help retains its wider reading area

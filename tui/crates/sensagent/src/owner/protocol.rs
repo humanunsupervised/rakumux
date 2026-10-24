@@ -96,6 +96,15 @@ pub enum OwnerRequest {
     /// outputs since, or its screen for other programs. Answered with `Done`;
     /// `Statuses` shows `refreshing` until it's made.
     Summarize { session: SessionId },
+    /// Turn the account's feature switches on or off (as rakumux.com/features
+    /// does); an absent one stays as it is. Answered with `Done`; `State` shows
+    /// them changed at once, and `features_unsaved` if saving them failed.
+    SetFeatures {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ai_session_summaries: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        feed: Option<bool>,
+    },
 }
 
 /// The owner's answers.
@@ -155,6 +164,9 @@ pub struct OwnerState {
     /// The account's Feed switch, likewise.
     #[serde(default)]
     pub feed: Option<bool>,
+    /// The last change to the switches couldn't be saved; they show the account's.
+    #[serde(default)]
+    pub features_unsaved: bool,
 }
 
 /// A device sign-in as the TUI shows it. Holds no device code or token.

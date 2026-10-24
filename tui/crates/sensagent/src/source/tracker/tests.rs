@@ -682,7 +682,7 @@ fn turn_settings_choose_the_trigger_points() {
     );
     // Without a followed turn (an older daemon), output counts as before.
     observed(tracker.apply_view(&view(2)));
-    tracker
+    let _ = tracker
         .apply_event(&envelope(2, SessionEvent::Activity))
         .unwrap();
     assert!(tracker.is_dirty(&id(2)));

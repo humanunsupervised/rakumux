@@ -4,14 +4,15 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::types::{AppMode, AppResult, Focus, SettingsItem};
+use crate::app::types::{AccountFeature, AppMode, AppResult, Focus, SettingsItem};
 use crate::app::App;
 use crate::help::{KeyAction, Modal, ModalAction, ModalTab};
 
 /// Open Settings or Help (whichever has `tab`) on `tab`, from whichever
 /// pane has focus.
 pub fn open_modal(app: &mut App, tab: ModalTab) {
-    app.mode = AppMode::modal(tab, app.focus == Focus::Session);
+    let settings = app.settings_search_text();
+    app.mode = AppMode::modal(tab, app.focus == Focus::Session, settings);
 }
 
 /// Open the Settings modal on its first tab.
@@ -188,11 +189,8 @@ fn open_item(app: &mut App, item: SettingsItem) {
             app.settings.sessions.icons = next;
             save_config(app, format!("Icons: {}", next.label()));
         }
-        SettingsItem::DescriptionContent => {
-            let next = app.settings.sessions.description_content.next();
-            app.settings.sessions.description_content = next;
-            save_config(app, format!("Session description: {}", next.label()));
-        }
+        SettingsItem::AiSummaries => app.toggle_feature(AccountFeature::AiSummaries),
+        SettingsItem::AgentFeed => app.toggle_feature(AccountFeature::AgentFeed),
         SettingsItem::Update => app.open_upgrade_dialog(),
         SettingsItem::Account => app.open_account_dialog(),
         SettingsItem::RestartUi => app.request_restart(),

@@ -29,16 +29,20 @@ pub struct Account {
     pub summaries: Option<bool>,
     /// The account's Feed switch (rakumux.com/features); `None` until read.
     pub feed: Option<bool>,
+    /// The last change to the switches couldn't be saved to the account.
+    pub features_unsaved: bool,
 }
 
 impl Account {
     fn from_state(state: OwnerState) -> Option<Self> {
         let (summaries, feed) = (state.summaries, state.feed);
+        let features_unsaved = state.features_unsaved;
         state.account.map(|account| Self {
             email: account.email,
             subject: account.subject,
             summaries,
             feed,
+            features_unsaved,
         })
     }
 
@@ -74,6 +78,11 @@ pub trait AccountAccess: Send + Sync {
     /// the service only when this home has a saved account; signed out without
     /// one, it does nothing.
     fn summarize(&self, session: &SessionId) -> Result<(), String>;
+    /// Turn the account's AI session summaries or Agent feed switch on or
+    /// off (`None` leaves one as it is), saved to the account as on
+    /// rakumux.com/features. The service applies it at once and saves it
+    /// next; [`Account::features_unsaved`] says when that failed.
+    fn set_features(&self, summaries: Option<bool>, feed: Option<bool>) -> Result<(), String>;
 }
 
 /// The feed of a home whose service isn't running: signed out.
@@ -196,6 +205,13 @@ impl AccountAccess for LocalAccount {
     fn summarize(&self, session: &SessionId) -> Result<(), String> {
         self.with(self.has_saved_account(), |client| client.summarize(session))
             .map(|_| ())
+    }
+
+    fn set_features(&self, summaries: Option<bool>, feed: Option<bool>) -> Result<(), String> {
+        self.with(self.has_saved_account(), |client| {
+            client.set_features(summaries, feed)
+        })?
+        .ok_or_else(|| "the account service isn't running".into())
     }
 }
 

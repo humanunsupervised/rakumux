@@ -99,14 +99,6 @@ pub struct SessionsConfig {
     /// this version doesn't know reads as plain.
     #[serde(deserialize_with = "lenient_icons", skip_serializing_if = "is_plain")]
     pub icons: Icons,
-    /// What the line under each session's name shows: your last message to
-    /// its agent (the default), the agent's latest message, or an AI
-    /// summary. A value this version doesn't know reads as the default.
-    #[serde(
-        deserialize_with = "lenient_description",
-        skip_serializing_if = "is_your_message"
-    )]
-    pub description_content: DescriptionContent,
     /// When an agent's turn gets an AI summary: at your prompt, then every
     /// `every_messages` of its messages while it works (5), from your prompt
     /// and its newest `recent_messages` (10); when it waits for you; and at its
@@ -164,7 +156,6 @@ impl Default for SessionsConfig {
             phone_offer_seen: false,
             layout: SessionLayout::default(),
             icons: Icons::default(),
-            description_content: DescriptionContent::default(),
             ai_summary: AiSummaryConfig::default(),
             sidebar_width: None,
             stacked_list_percent: None,
@@ -216,17 +207,6 @@ fn is_plain(icons: &Icons) -> bool {
     *icons == Icons::Plain
 }
 
-fn lenient_description<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<DescriptionContent, D::Error> {
-    let value = serde_json::Value::deserialize(deserializer)?;
-    Ok(serde_json::from_value(value).unwrap_or_default())
-}
-
-fn is_your_message(content: &DescriptionContent) -> bool {
-    *content == DescriptionContent::YourMessage
-}
-
 /// `sessions.ai_summary`: when agents' turns get AI summaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -258,44 +238,6 @@ fn lenient_ai_summary<'de, D: Deserializer<'de>>(
 ) -> Result<AiSummaryConfig, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
     Ok(serde_json::from_value(value).unwrap_or_default())
-}
-
-/// What a session's description line (under its name) shows
-/// (`sessions.description_content`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DescriptionContent {
-    /// What you last typed to the session's agent (`SessionView::user_prompt`).
-    #[default]
-    YourMessage,
-    /// The agent's latest message: reasoning, a tool call or its reply
-    /// (`SessionView::agent_output`).
-    AgentMessage,
-    /// An AI summary of the session (needs the Rakumux account).
-    AiSummary,
-}
-
-impl DescriptionContent {
-    /// In the order the setting cycles through them.
-    pub const ALL: [DescriptionContent; 3] = [
-        DescriptionContent::YourMessage,
-        DescriptionContent::AgentMessage,
-        DescriptionContent::AiSummary,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            DescriptionContent::YourMessage => "Your last message",
-            DescriptionContent::AgentMessage => "Agent message",
-            DescriptionContent::AiSummary => "AI summaries",
-        }
-    }
-
-    /// The next choice, after the last the first.
-    pub fn next(self) -> DescriptionContent {
-        let at = Self::ALL.iter().position(|c| *c == self).unwrap_or(0);
-        Self::ALL[(at + 1) % Self::ALL.len()]
-    }
 }
 
 /// `"cycle_keys": { "previous": "alt+up", "next": "alt+down" }`. Both
@@ -616,19 +558,11 @@ mod tests {
         assert!(json.get("cycle_keys_in_session").is_none());
         assert!(json.get("rakumux_key").is_none());
         assert!(json.get("icons").is_none());
-        // The session description: your last message unless chosen otherwise.
-        assert!(json.get("description_content").is_none());
+        // An older file's session description choice is kept as it was.
+        let older = read(r#"{"description_content":"agent_message"}"#);
         assert_eq!(
-            read("{}").description_content,
-            DescriptionContent::YourMessage
-        );
-        assert_eq!(
-            read(r#"{"description_content":"agent_message"}"#).description_content,
-            DescriptionContent::AgentMessage
-        );
-        assert_eq!(
-            read(r#"{"description_content":"sparkles"}"#).description_content,
-            DescriptionContent::YourMessage
+            serde_json::to_value(older).unwrap()["description_content"],
+            "agent_message"
         );
     }
 

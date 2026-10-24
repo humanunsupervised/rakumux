@@ -11,7 +11,7 @@ use session_core::model::{AgentTurn, Reported, SessionView};
 
 use super::source::{event, tracked_view as plain_view};
 use super::*;
-use crate::cloud::RemoteErrorCode;
+use crate::cloud::{FeatureChange, RemoteErrorCode};
 use crate::refresh::{
     AIStatus, RefreshClient, RefreshError, RefreshFailure, RefreshRunner, RefreshState,
     StatusRefresher, BUDGET_STARTS,
@@ -26,6 +26,7 @@ struct Harness {
     store: MemoryStatusStore,
     requests: Requests,
     summaries: Arc<AtomicBool>,
+    saves: Arc<AtomicBool>,
     refresher: Refresher,
 }
 
@@ -49,6 +50,7 @@ impl Harness {
             store,
             requests,
             summaries,
+            saves,
             owner,
             ..
         } = fixture;
@@ -58,6 +60,7 @@ impl Harness {
             store,
             requests,
             summaries,
+            saves,
             refresher: StatusRefresher::new(owner),
         }
     }
@@ -191,6 +194,7 @@ fn refreshing_waits_for_the_daemon_list_and_confirmed_consent() {
             unauthorized: false,
             summaries: None,
             feed: None,
+            features_unsaved: false,
         }
     );
 }
@@ -235,6 +239,74 @@ fn the_account_switch_shares_live_folders_and_stops_when_turned_off() {
     assert!(harness.read_features(240));
     harness.round(&api, 240);
     assert_eq!(harness.shared(), Some(folders(true)));
+}
+
+#[test]
+fn turning_a_switch_off_here_stops_sharing_at_once_and_saves_it() {
+    let api = api(&[tracked_view(2)]);
+    let mut harness = Harness::from(Fixture::new(ReplyMode::Success)).following();
+    harness.resync(&api, vec![tracked_view(2)], 0);
+    assert!(harness.read_features(0));
+    harness.round(&api, 0);
+    assert_eq!(harness.shared(), Some(folders(true)));
+
+    let off = FeatureChange {
+        ai_session_summaries: Some(false),
+        feed: None,
+    };
+    harness.refresher.change_features(off, secs(10)).unwrap();
+    // Shown changed before it's saved, and sharing follows.
+    let state = harness.refresher.state(secs(10));
+    assert_eq!((state.summaries, state.feed), (Some(false), Some(false)));
+    harness.round(&api, 10);
+    assert_eq!(harness.shared(), None);
+    assert!(harness.summaries.load(Ordering::SeqCst));
+    // Saved at once rather than at the next two-minute read.
+    assert!(harness.read_features(10));
+    assert!(!harness.summaries.load(Ordering::SeqCst));
+    assert_eq!(harness.refresher.state(secs(10)).summaries, Some(false));
+    assert!(!harness.read_features(129));
+    assert!(harness.read_features(130));
+    assert_eq!(harness.refresher.state(secs(130)).summaries, Some(false));
+}
+
+#[test]
+fn a_switch_that_fails_to_save_goes_back_to_the_accounts() {
+    let api = api(&[tracked_view(2)]);
+    let mut harness = Harness::from(Fixture::new(ReplyMode::Success)).following();
+    harness.resync(&api, vec![tracked_view(2)], 0);
+    assert!(harness.read_features(0));
+    harness.saves.store(false, Ordering::SeqCst);
+    let feed = FeatureChange {
+        ai_session_summaries: None,
+        feed: Some(true),
+    };
+    harness.refresher.change_features(feed, secs(5)).unwrap();
+    assert_eq!(harness.refresher.state(secs(5)).feed, Some(true));
+    assert!(harness.read_features(5));
+    let state = harness.refresher.state(secs(5));
+    assert_eq!(state.feed, Some(false));
+    assert!(state.features_unsaved);
+    // Asking again clears the failure; a save that works keeps it.
+    harness.saves.store(true, Ordering::SeqCst);
+    harness.refresher.change_features(feed, secs(6)).unwrap();
+    assert!(!harness.refresher.state(secs(6)).features_unsaved);
+    assert!(harness.read_features(6));
+    assert_eq!(harness.refresher.state(secs(6)).feed, Some(true));
+}
+
+#[test]
+fn switches_change_only_while_signed_in() {
+    let mut harness = Harness::from(Fixture::new(ReplyMode::Success)).following();
+    harness.refresher.sign_out().unwrap();
+    let change = FeatureChange {
+        ai_session_summaries: Some(false),
+        feed: None,
+    };
+    assert_eq!(
+        harness.refresher.change_features(change, secs(0)),
+        Err(DispatchError::Policy(StatusError::SignedOut))
+    );
 }
 
 #[test]

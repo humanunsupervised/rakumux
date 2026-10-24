@@ -2058,7 +2058,7 @@ mod tests {
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("The feed is off."), "{screen}");
         assert!(
-            screen.contains("Turn it on at rakumux.com/features"),
+            screen.contains("Turn it on in Settings → Available on sign-in"),
             "{screen}"
         );
         let mut h = feed_harness(FakeAccount::with_feed(), None);

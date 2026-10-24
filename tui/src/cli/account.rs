@@ -226,6 +226,7 @@ mod tests {
             subject: "user_1".into(),
             summaries: Some(false),
             feed: Some(true),
+            features_unsaved: false,
         };
         let text = describe(Some(&account));
         assert!(text.contains("Signed in as person@example.com."));

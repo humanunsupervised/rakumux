@@ -13,7 +13,7 @@ use crate::auth::{
     AccountError, AccountService, AccountSession, ApplyResult, CredentialRevision, CredentialStore,
     SystemClock, WallClock,
 };
-use crate::cloud::{AccountFeatures, CloudAIError, RemoteErrorCode};
+use crate::cloud::{AccountFeatures, CloudAIError, FeatureChange, RemoteErrorCode};
 use crate::dispatch::{
     DispatchCompletion, DispatchError, DispatchPreparation, FeaturesCompletion, FeaturesJob,
     StatusCaptureJob, StatusConsentOffer, StatusDispatchJob, StatusDispatchService,
@@ -58,6 +58,9 @@ pub struct RefreshState {
     pub summaries: Option<bool>,
     /// The account's Feed switch, likewise.
     pub feed: Option<bool>,
+    /// The last change to the switches couldn't be saved; they show what the
+    /// account has.
+    pub features_unsaved: bool,
 }
 
 /// One scoped capture to run off the owner thread.
@@ -138,9 +141,16 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     idle: bool,
     /// Whether sharing follows the account's AI session summaries switch.
     follow_switch: bool,
-    /// The account's feature switches, once read for the adopted account.
+    /// The account's feature switches, once read for the adopted account, with
+    /// `unsaved` made over them.
     features: Option<AccountFeatures>,
-    /// When to read them next; `None` while a read is out.
+    /// What the account last said they are.
+    confirmed: Option<AccountFeatures>,
+    /// Changes asked for here and not yet saved to the account.
+    unsaved: Option<FeatureChange>,
+    /// The last change failed to save.
+    unsaved_failed: bool,
+    /// When to read (or save) them next; `None` while a request is out.
     features_due: Option<Duration>,
     /// Folders shared at the last reconciliation, and whether sharing must be
     /// reconciled again (the switches, the account or the live folders changed).
@@ -167,6 +177,9 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             idle: false,
             follow_switch: false,
             features: None,
+            confirmed: None,
+            unsaved: None,
+            unsaved_failed: false,
             features_due: Some(Duration::ZERO),
             shared_for: Vec::new(),
             reconcile: true,
@@ -375,12 +388,13 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 .and(self.features)
                 .map(|features| features.ai_session_summaries),
             feed: self.feed_switch(),
+            features_unsaved: self.unsaved_failed,
         }
     }
 
     /// A read of the account's feature switches, when one is due (soon after sign-in,
-    /// then every two minutes). Run it with `FeaturesJob::run` off this thread and
-    /// pass the result to `features_read`.
+    /// then every two minutes), or a save of the changes asked for. Run it with
+    /// `FeaturesJob::run` off this thread and pass the result to `features_read`.
     pub fn features_job(&mut self, now: Duration) -> Option<FeaturesJob<A, C>> {
         if !self.follow_switch {
             return None;
@@ -389,7 +403,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         if !self.features_due.is_some_and(|due| now >= due) {
             return None;
         }
-        match self.service.features_job() {
+        match self.service.features_job(self.unsaved) {
             Ok(Some(job)) => {
                 self.features_due = None;
                 Some(job)
@@ -409,18 +423,71 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             self.features_due.get_or_insert(now);
             return;
         }
+        let saved = completion.change.is_some();
         match completion.outcome {
             Ok(features) => {
-                if self.features != Some(features) {
-                    self.features = Some(features);
-                    self.reconcile = true;
+                self.confirmed = Some(features);
+                if saved {
+                    self.unsaved_failed = false;
                 }
-                self.features_due = Some(now.saturating_add(FEATURES_INTERVAL));
+                if self.unsaved == completion.change {
+                    self.unsaved = None;
+                }
+                self.features_due = Some(match self.unsaved {
+                    // Changed again meanwhile: save that too.
+                    Some(_) => now,
+                    None => now.saturating_add(FEATURES_INTERVAL),
+                });
+            }
+            Err(error) if saved => {
+                self.note("saving the account's features", &error);
+                // Show what the account has; the user can try again.
+                self.unsaved = None;
+                self.unsaved_failed = true;
+                self.features_due = Some(now.saturating_add(FEATURES_RETRY));
             }
             Err(error) => {
                 self.note("reading the account's features", &error);
                 self.features_due = Some(now.saturating_add(FEATURES_RETRY));
             }
+        }
+        self.show_features();
+    }
+
+    /// Change the account's feature switches (as the website's Features page
+    /// does). They change here at once, so sharing and the feed follow, and are
+    /// saved to the account next; when that fails they go back to what the
+    /// account has and `state` says so.
+    pub fn change_features(
+        &mut self,
+        change: FeatureChange,
+        now: Duration,
+    ) -> Result<(), DispatchError> {
+        if self.service.account_session().is_none() {
+            return Err(DispatchError::Policy(crate::status::StatusError::SignedOut));
+        }
+        if change.is_empty() {
+            return Ok(());
+        }
+        self.unsaved = Some(self.unsaved.unwrap_or_default().then(change));
+        self.unsaved_failed = false;
+        // A request out now saves the change when it's back (`features_read`).
+        if let Some(due) = &mut self.features_due {
+            *due = now;
+        }
+        self.show_features();
+        Ok(())
+    }
+
+    /// `features` from what the account said and the changes not yet saved.
+    fn show_features(&mut self) {
+        let shown = self.confirmed.map(|features| {
+            self.unsaved
+                .map_or(features, |change| change.apply(features))
+        });
+        if self.features != shown {
+            self.features = shown;
+            self.reconcile = true;
         }
     }
 
@@ -505,6 +572,9 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
 
     fn forget_features(&mut self) {
         self.features = None;
+        self.confirmed = None;
+        self.unsaved = None;
+        self.unsaved_failed = false;
         self.features_due = Some(Duration::ZERO);
         self.shared_for.clear();
         self.reconcile = true;

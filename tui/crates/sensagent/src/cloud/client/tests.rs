@@ -852,6 +852,46 @@ fn features_are_one_bodyless_get_with_the_bearer() {
 }
 
 #[test]
+fn a_switch_change_is_one_patch_of_only_the_changed_switches() {
+    let (client, recorded) = client_with(
+        Ok(reply(
+            200,
+            r#"{"version":1,"features":{"ai_session_summaries":true,"feed":true}}"#,
+        )),
+        None,
+    );
+    let change = FeatureChange {
+        ai_session_summaries: None,
+        feed: Some(true),
+    };
+    let features = client
+        .set_features(&token(), change, &Cancellation::new())
+        .unwrap();
+    assert!(features.feed);
+    let recorded = recorded.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    let outgoing = &recorded[0].request;
+    assert_eq!(outgoing.method(), Method::PATCH);
+    assert_eq!(
+        outgoing.url().as_str(),
+        "https://reviewed.example:8443/api/v1/features"
+    );
+    assert_eq!(
+        outgoing.headers()[header::AUTHORIZATION],
+        format!("Bearer {SECRET}")
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&recorded[0].body).unwrap(),
+        serde_json::json!({"version": 1, "features": {"feed": true}})
+    );
+    drop(recorded);
+    assert_eq!(
+        client.set_features(&token(), FeatureChange::default(), &Cancellation::new()),
+        Err(CloudAIError::InvalidRequest)
+    );
+}
+
+#[test]
 fn features_decode_strictly_and_default_a_missing_switch_on() {
     let on = |body: &str| features_with(reply(200, body.to_owned()));
     assert!(
