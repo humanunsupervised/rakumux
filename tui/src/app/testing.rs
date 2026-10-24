@@ -821,6 +821,10 @@ pub struct FakeAccount {
     /// What `feed_turn` answers in turn, then an empty turn; and what it was asked.
     pub turns: Mutex<std::collections::VecDeque<rakumux_sensagent::feed::FeedTurn>>,
     pub turn_asks: Mutex<Vec<(String, Option<u64>)>>,
+    /// What `feed_reply` answers in turn (else that it was sent, with no
+    /// reply); and the entries and texts it was given.
+    pub reply_answers: Mutex<std::collections::VecDeque<rakumux_sensagent::feed::ReplyWrite>>,
+    pub replies_written: Mutex<Vec<(String, String)>>,
     pub calls: Mutex<Vec<&'static str>>,
 }
 
@@ -955,6 +959,24 @@ impl crate::account::AccountAccess for FakeAccount {
         Ok(())
     }
 
+    fn feed_reply(
+        &self,
+        entry: &str,
+        text: &str,
+    ) -> std::result::Result<rakumux_sensagent::feed::ReplyWrite, String> {
+        self.call("feed_reply");
+        self.replies_written
+            .lock()
+            .unwrap()
+            .push((entry.to_owned(), text.to_owned()));
+        Ok(self.reply_answers.lock().unwrap().pop_front().unwrap_or(
+            rakumux_sensagent::feed::ReplyWrite {
+                status: rakumux_sensagent::feed::ReplyWriteStatus::Sent,
+                reply: None,
+            },
+        ))
+    }
+
     fn feed_turn(
         &self,
         entry: &str,
@@ -1011,6 +1033,7 @@ impl crate::account::AccountAccess for FakeAccount {
             generation: generation.unwrap_or(1),
             revision: after.unwrap_or(0),
             entries: Vec::new(),
+            replies: Vec::new(),
             more: false,
         })
     }

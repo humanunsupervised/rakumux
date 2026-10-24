@@ -2,13 +2,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossterm::event::KeyCode;
-use rakumux_sensagent::feed::{FeedEntry, FeedPage, FeedStatus, FeedTurn, FeedTurnStatus};
+use rakumux_sensagent::feed::{
+    FeedEntry, FeedPage, FeedReply, FeedStatus, FeedTurn, FeedTurnStatus, ReplyStatus, ReplyWrite,
+    ReplyWriteStatus,
+};
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
-use super::{FeedStore, MAX_ENTRIES};
+use super::{FeedStore, ThreadItem, MAX_ENTRIES};
 use crate::app::grouping::{Grouping, ListTab};
 use crate::app::testing::{options, scope, start, view, FakeAccount, FakeApi, Harness};
-use crate::app::types::Focus;
+use crate::app::types::{AppMode, Focus};
 use crate::layout::SessionLayout;
 
 pub fn entry(id: &str, session: &str, finished_at: i64, seq: Option<u64>) -> FeedEntry {
@@ -19,12 +22,15 @@ pub fn entry(id: &str, session: &str, finished_at: i64, seq: Option<u64>) -> Fee
         session_id: session.into(),
         session_name: format!("session {session}"),
         folder: Some("repo".into()),
+        branch: None,
         agent: "claude-code".into(),
         conversation_id: None,
         text: format!("Reply {id}"),
         truncated: false,
         finished_at,
         position: None,
+        reply_to: None,
+        thread: None,
     }
 }
 
@@ -34,6 +40,7 @@ pub fn page(generation: u64, revision: u64, entries: Vec<FeedEntry>, more: bool)
         generation,
         revision,
         entries,
+        replies: Vec::new(),
         more,
     }
 }
@@ -369,4 +376,143 @@ async fn a_turn_that_cant_be_read_shows_the_reply_alone() {
     let text = screen(&mut h);
     assert!(text.contains("Reply A"), "{text}");
     assert!(!text.contains("Loading the whole turn"), "{text}");
+}
+
+fn written(id: &str, entry: &str, thread: &str, created_at: i64, status: ReplyStatus) -> FeedReply {
+    FeedReply {
+        seq: 1,
+        id: id.into(),
+        entry: entry.into(),
+        thread: thread.into(),
+        machine: "studio".into(),
+        session_id: "S".into(),
+        session_name: "session S".into(),
+        folder: Some("repo".into()),
+        agent: "claude-code".into(),
+        conversation_id: "c".into(),
+        text: format!("Reply back {id}"),
+        from: Some(rakumux_sensagent::feed::machine_name()),
+        status,
+        failure: None,
+        response: None,
+        created_at,
+        status_at: created_at,
+    }
+}
+
+#[test]
+fn a_thread_is_its_first_entry_the_replies_and_their_answers_in_order() {
+    let mut store = FeedStore::new("studio".into());
+    let root = entry("E1", "S", 1_000, Some(1));
+    let mut answer = entry("E2", "S", 3_000, Some(3));
+    answer.reply_to = Some("R1".into());
+    answer.thread = Some("E1".into());
+    let other = entry("E3", "S", 4_000, Some(4));
+    let mut p = page(1, 2, vec![root, answer, other], false);
+    p.replies = vec![written("R1", "E1", "E1", 2_000, ReplyStatus::Delivered)];
+    store.apply(p);
+    let steps = |store: &FeedStore, id: &str| -> Vec<String> {
+        let entry = store.entries().iter().find(|e| e.id == id).unwrap().clone();
+        store
+            .thread(&entry)
+            .into_iter()
+            .map(|item| match item {
+                ThreadItem::Entry(entry) => entry.id.clone(),
+                ThreadItem::Reply(reply) => reply.id.clone(),
+            })
+            .collect()
+    };
+    assert_eq!(steps(&store, "E1"), ["E1", "R1", "E2"]);
+    assert_eq!(steps(&store, "E2"), ["E1", "R1", "E2"]);
+    assert!(steps(&store, "E3").is_empty(), "nobody replied");
+    // A newer status replaces the held one; an older doesn't.
+    let mut answered = written("R1", "E1", "E1", 2_000, ReplyStatus::Delivered);
+    answered.seq = 5;
+    answered.response = Some("E2".into());
+    store.take_reply(answered);
+    store.take_reply(written("R1", "E1", "E1", 2_000, ReplyStatus::Pending));
+    let entry = store
+        .entries()
+        .iter()
+        .find(|e| e.id == "E1")
+        .unwrap()
+        .clone();
+    let thread = store.thread(&entry);
+    assert!(
+        matches!(thread[1], ThreadItem::Reply(reply) if reply.response.as_deref() == Some("E2"))
+    );
+}
+
+fn conversing(id: &str) -> FeedEntry {
+    let mut entry = entry(id, "S", 1_000, Some(1));
+    entry.conversation_id = Some("c".into());
+    entry
+}
+
+#[tokio::test]
+async fn r_writes_back_to_a_reply_which_then_shows_in_its_thread() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    account.queue_feed(page(1, 1, vec![conversing("A")], false));
+    tick(&mut h, Duration::from_secs(3));
+    account.reply_answers.lock().unwrap().push_back(ReplyWrite {
+        status: ReplyWriteStatus::Sent,
+        reply: Some(written("R1", "A", "A", 2_000, ReplyStatus::Pending)),
+    });
+    h.press(KeyCode::Char('r')).await;
+    assert!(matches!(h.app.mode, AppMode::FeedReply(_)));
+    // Empty, it isn't sent.
+    h.press(KeyCode::Enter).await;
+    assert!(account.replies_written.lock().unwrap().is_empty());
+    h.type_text("Now add a test").await;
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    assert_eq!(
+        *account.replies_written.lock().unwrap(),
+        [("A".to_owned(), "Now add a test".to_owned())]
+    );
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    let status = h.app.status().unwrap_or_default().to_owned();
+    assert!(status.contains("Sent"), "{status}");
+    let text = screen(&mut h);
+    assert!(text.contains("Thread"), "{text}");
+    assert!(text.contains("↩ you · "), "{text}");
+    assert!(text.contains("waiting for its agent"), "{text}");
+    assert!(text.contains("Reply back R1"), "{text}");
+}
+
+#[tokio::test]
+async fn a_reply_that_isnt_stored_keeps_its_box_open_and_says_why() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    let unknown = entry("U", "S", 2_000, Some(2));
+    account.queue_feed(page(1, 1, vec![conversing("A"), unknown], false));
+    tick(&mut h, Duration::from_secs(3));
+    // The newest has no known chat: nothing to write back to.
+    h.press(KeyCode::Char('r')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h
+        .app
+        .status()
+        .unwrap_or_default()
+        .contains("can't be answered"));
+
+    h.press(KeyCode::Down).await;
+    account.reply_answers.lock().unwrap().push_back(ReplyWrite {
+        status: ReplyWriteStatus::Off,
+        reply: None,
+    });
+    h.press(KeyCode::Char('r')).await;
+    h.type_text("Try again").await;
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    let AppMode::FeedReply(dialog) = &h.app.mode else {
+        panic!("the box closed");
+    };
+    assert!(dialog
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("feed is off"));
+    assert_eq!(dialog.input.value(), "Try again");
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
 }

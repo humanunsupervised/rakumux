@@ -45,6 +45,22 @@ pub struct RenameDialog {
     pub busy: bool,
 }
 
+/// Writing back to a feed entry (`r` in the Feed): typed into the entry's
+/// session on its machine once its agent waits.
+#[derive(Debug, Clone)]
+pub struct FeedReplyDialog {
+    pub entry: String,
+    /// Where it goes: the entry's session and machine (`None`: this one).
+    pub session_name: String,
+    pub machine: Option<String>,
+    /// The start of what's answered.
+    pub answering: String,
+    pub input: TextInput,
+    pub error_message: Option<String>,
+    /// The reply is being stored.
+    pub busy: bool,
+}
+
 /// Actions that need a yes/no confirmation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfirmAction {
@@ -321,14 +337,18 @@ pub enum SettingsItem {
     AiSummaries,
     /// The account's Agent feed switch (likewise).
     AgentFeed,
+    /// Type replies written on rakumux.com or other machines into this
+    /// machine's sessions (local, `sessions.remote_replies`).
+    RemoteReplies,
 }
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then what it brings, then the rest.
-    pub const ALL: [SettingsItem; 10] = [
+    pub const ALL: [SettingsItem; 11] = [
         SettingsItem::Account,
         SettingsItem::AiSummaries,
         SettingsItem::AgentFeed,
+        SettingsItem::RemoteReplies,
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
@@ -348,7 +368,9 @@ impl SettingsItem {
             | SettingsItem::RestartServer
             | SettingsItem::TerminalPanel => "App",
             SettingsItem::Account => "Account",
-            SettingsItem::AiSummaries | SettingsItem::AgentFeed => "Available on sign-in",
+            SettingsItem::AiSummaries | SettingsItem::AgentFeed | SettingsItem::RemoteReplies => {
+                "Available on sign-in"
+            }
         }
     }
 
@@ -536,6 +558,8 @@ pub enum AppMode {
     /// The App or Status modal: that tab's filter.
     Sections(SectionPicker),
     Renaming(RenameDialog),
+    /// Writing back to a feed entry.
+    FeedReply(FeedReplyDialog),
     Confirm(ConfirmDialog),
     DaemonRestart(DaemonRestartDialog),
     /// The Settings modal (one page: settings, then actions) or the Help

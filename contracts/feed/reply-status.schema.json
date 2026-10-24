@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:reply-status",
+  "title": "POST /api/v1/feed/replies/status request",
+  "description": "The reply's machine says it typed the reply into the session, or couldn't. Only a pending reply changes, and only for the machine it names; otherwise the stored reply comes back unchanged.",
+  "x-maxBodyBytes": 4096,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "machine", "status"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "status": { "type": "string", "enum": ["delivered", "failed"] },
+    "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/replyFailure" }
+  },
+  "oneOf": [
+    { "properties": { "status": { "const": "delivered" }, "failure": false } },
+    {
+      "required": ["failure"],
+      "properties": {
+        "status": { "const": "failed" },
+        "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/replyFailure" }
+      }
+    }
+  ]
+}

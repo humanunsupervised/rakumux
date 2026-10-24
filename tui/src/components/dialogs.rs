@@ -12,7 +12,7 @@ use ratatui::{
 
 use crate::app::types::{
     AuthCodeDialog, AuthEmailDialog, ConfirmAction, ConfirmDialog, DaemonRestartDialog,
-    RenameDialog, UpgradeDialog,
+    FeedReplyDialog, RenameDialog, UpgradeDialog,
 };
 use crate::components::utils::{
     draw_text_input, get_spinner_char, popup_area_fixed_height, popup_width, wrapped_rows,
@@ -224,6 +224,69 @@ pub fn draw_rename_dialog(f: &mut Frame, dialog: &RenameDialog, area: Rect) {
         Line::from("")
     };
     f.render_widget(Paragraph::new(message), rows[2]);
+}
+
+/// The reply box: what's answered and where the reply goes, then the field.
+pub fn draw_feed_reply_dialog(f: &mut Frame, dialog: &FeedReplyDialog, area: Rect) {
+    let keys = [("Enter", "Send"), ("Esc", "Cancel")];
+    let width = popup_width(area.width, 72);
+    let height = 9 + key_rows(&keys, width);
+    let popup = popup_area_fixed_height(area, 72, height);
+    let inner = dialog_frame(f, popup, "Reply", palette().accent_primary);
+    let above = draw_keys(f, inner, &keys);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(above);
+    let room = rows[0].width.saturating_sub(1) as usize;
+    let muted = Style::default().fg(palette().text_muted);
+    let target = match &dialog.machine {
+        None => format!(
+            " Typed into {} when its agent waits for you",
+            dialog.session_name
+        ),
+        Some(machine) => format!(" Typed into {} on {machine}", dialog.session_name),
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            crate::components::format::truncate(&target, room),
+            muted,
+        )),
+        rows[0],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            crate::components::format::truncate(&format!(" ↳ {}", dialog.answering), room),
+            muted,
+        )),
+        rows[1],
+    );
+    draw_text_input(
+        f,
+        rows[2],
+        "Your reply",
+        &dialog.input,
+        "Write back to the agent",
+        !dialog.busy,
+        false,
+    );
+    let message = if dialog.busy {
+        Line::from(Span::styled(
+            format!(" {} Sending…", get_spinner_char()),
+            Style::default().fg(palette().accent_primary),
+        ))
+    } else if let Some(error) = &dialog.error_message {
+        error_line(error)
+    } else {
+        Line::from("")
+    };
+    f.render_widget(Paragraph::new(message), rows[3]);
 }
 
 /// `a`, `a or b`, `a, b or c`.

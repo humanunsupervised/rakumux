@@ -3,10 +3,13 @@
 //! (`crate::account::AccountAccess::feed`) hands it out. Entries are kept
 //! newest first, with the selection, the scroll of the reply being read
 //! and where the service's pages are up to, and the whole turns of the
-//! entries read lately (`AccountAccess::feed_turn`). Nothing here draws or
+//! entries read lately (`AccountAccess::feed_turn`), and the replies written
+//! back to entries (`AccountAccess::feed_reply`, `r`), which with the entries
+//! that answer them make threads. Nothing here draws or
 //! knows where it's shown: the list's Feed tab hosts it today (`tab.rs`),
 //! and `components/feed.rs` draws it into any area.
 
+mod reply;
 mod tab;
 #[cfg(test)]
 mod tests;
@@ -15,7 +18,9 @@ use std::cmp::Reverse;
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use rakumux_sensagent::feed::{FeedEntry, FeedPage, FeedStatus, FeedTurn, FeedTurnStatus};
+use rakumux_sensagent::feed::{
+    FeedEntry, FeedPage, FeedReply, FeedStatus, FeedTurn, FeedTurnStatus, ReplyStatus,
+};
 use session_core::api::TranscriptMessage;
 
 /// Entries kept, newest first (the service keeps as many).
@@ -24,6 +29,16 @@ pub const MAX_ENTRIES: usize = 500;
 const MAX_TURNS: usize = 20;
 /// The most messages of one turn held (its start).
 const MAX_TURN_MESSAGES: usize = 2000;
+/// Replies kept (the service keeps as many).
+const MAX_REPLIES: usize = 500;
+
+/// One step of a thread: an entry (an agent's finished turn) or a reply
+/// written back to one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadItem<'a> {
+    Entry(&'a FeedEntry),
+    Reply(&'a FeedReply),
+}
 
 /// An entry's whole turn, as far as it was read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,12 +54,45 @@ pub enum TurnState {
     Unavailable,
 }
 
+/// Where a feed entry is up to, as its card says at the right of its top
+/// border (rakumux.com's Feed says the same words).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryStatus {
+    /// This machine's, not uploaded yet.
+    Sending,
+    /// The agent finished its turn and nobody wrote back.
+    Done,
+    /// The newest reply written back to it is waiting to be typed in.
+    ReplyWaiting,
+    /// It was typed into the session; no answer yet.
+    ReplyTypedIn,
+    /// The agent answered it.
+    Answered,
+    /// It failed or expired.
+    ReplyNotSent,
+}
+
+impl EntryStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            EntryStatus::Sending => "sending",
+            EntryStatus::Done => "done",
+            EntryStatus::ReplyWaiting => "reply waiting",
+            EntryStatus::ReplyTypedIn => "reply typed in",
+            EntryStatus::Answered => "answered",
+            EntryStatus::ReplyNotSent => "reply not sent",
+        }
+    }
+}
+
 /// The feed as this window has it.
 #[derive(Debug, Clone)]
 pub struct FeedStore {
     /// This machine's name, as the service names it in entries it uploads.
     machine: String,
     entries: Vec<FeedEntry>,
+    /// Replies written back to entries, by when they were written.
+    replies: Vec<FeedReply>,
     /// `None` until the service first answered.
     status: Option<FeedStatus>,
     /// The service's generation and revision these entries are at.
@@ -74,6 +122,7 @@ impl FeedStore {
         Self {
             machine,
             entries: Vec::new(),
+            replies: Vec::new(),
             status: None,
             generation: None,
             revision: None,
@@ -174,7 +223,11 @@ impl FeedStore {
         let selected = self.selected_index();
         if self.generation != Some(page.generation) {
             self.entries.clear();
+            self.replies.clear();
             self.scroll = 0;
+        }
+        for reply in page.replies {
+            self.take_reply(reply);
         }
         self.generation = Some(page.generation);
         self.revision = Some(page.revision);
@@ -197,6 +250,69 @@ impl FeedStore {
                 .map(|entry| entry.id.clone());
         }
         page.more
+    }
+
+    /// A reply as written or read back: one with a newer status replaces it.
+    pub fn take_reply(&mut self, reply: FeedReply) {
+        match self.replies.iter_mut().find(|held| held.id == reply.id) {
+            Some(held) if held.seq > reply.seq => {}
+            Some(held) => *held = reply,
+            None => self.replies.push(reply),
+        }
+        self.replies
+            .sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+        if self.replies.len() > MAX_REPLIES {
+            let over = self.replies.len() - MAX_REPLIES;
+            self.replies.drain(..over);
+        }
+    }
+
+    /// Where `entry` is up to: sending, done, or what became of the newest
+    /// reply written back to it.
+    pub fn status_of(&self, entry: &FeedEntry) -> EntryStatus {
+        if entry.seq.is_none() {
+            return EntryStatus::Sending;
+        }
+        let newest = self
+            .replies
+            .iter()
+            .rev()
+            .find(|reply| reply.entry == entry.id);
+        match newest.map(|reply| (reply.status, reply.response.is_some())) {
+            Some((ReplyStatus::Pending, _)) => EntryStatus::ReplyWaiting,
+            Some((ReplyStatus::Delivered, true)) => EntryStatus::Answered,
+            Some((ReplyStatus::Delivered, false)) => EntryStatus::ReplyTypedIn,
+            Some((ReplyStatus::Failed | ReplyStatus::Expired, _)) => EntryStatus::ReplyNotSent,
+            Some((ReplyStatus::Unknown, _)) | None => EntryStatus::Done,
+        }
+    }
+
+    /// `entry`'s thread, oldest first: the entry that started it, the
+    /// replies written back and the entries that answer them. Empty while
+    /// nobody replied.
+    pub fn thread(&self, entry: &FeedEntry) -> Vec<ThreadItem<'_>> {
+        let root = entry.thread.as_deref().unwrap_or(&entry.id);
+        let replies: Vec<&FeedReply> = self
+            .replies
+            .iter()
+            .filter(|reply| reply.thread == root)
+            .collect();
+        if replies.is_empty() && entry.reply_to.is_none() {
+            return Vec::new();
+        }
+        let mut items: Vec<(i64, ThreadItem)> = self
+            .entries
+            .iter()
+            .filter(|held| held.id == root || held.thread.as_deref() == Some(root))
+            .map(|held| (held.finished_at, ThreadItem::Entry(held)))
+            .chain(
+                replies
+                    .into_iter()
+                    .map(|reply| (reply.created_at, ThreadItem::Reply(reply))),
+            )
+            .collect();
+        items.sort_by_key(|(at, _)| *at);
+        items.into_iter().map(|(_, item)| item).collect()
     }
 
     /// The selected entry's position; `None` when there are none.

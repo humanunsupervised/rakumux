@@ -4780,6 +4780,33 @@ async fn settings_turn_the_accounts_switches_on_and_off_once_signed_in() {
 }
 
 #[tokio::test]
+async fn replies_from_rakumux_com_are_this_machines_own_setting() {
+    let row = |h: &Harness| {
+        h.app.modal_context(false).general[SettingsItem::RemoteReplies.index()].clone()
+    };
+    let (mut h, account) = account_harness(testing::FakeAccount::default());
+    assert!(row(&h).disabled);
+    assert_eq!(row(&h).section, "Available on sign-in");
+    h.press(KeyCode::Char(',')).await;
+    h.type_text("replies from").await;
+    h.press(KeyCode::Enter).await;
+    assert!(!h.app.settings.sessions.remote_replies);
+
+    let (mut h, _) = account_harness(testing::FakeAccount::signed_in());
+    assert_eq!(row(&h).value, "On [Off]");
+    h.press(KeyCode::Char(',')).await;
+    h.type_text("replies from").await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(row(&h).value, "[On] Off");
+    assert!(h.app.settings.sessions.remote_replies);
+    assert_eq!(h.app.status(), Some("Replies from rakumux.com: on"));
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert!(saved.sessions.remote_replies);
+    // Local: nothing is asked of the account.
+    assert!(!account.calls().contains(&"set_features"));
+}
+
+#[tokio::test]
 async fn turning_ai_summaries_off_clears_the_descriptions_and_the_refresh() {
     let (mut h, account) = described().await;
     assert!(h.app.summaries_on());

@@ -813,6 +813,21 @@ impl App {
                     disabled,
                 };
             }
+            SettingsItem::RemoteReplies => {
+                let signed_in = matches!(self.account, AccountStatus::SignedIn(_));
+                let value = match (signed_in, self.settings.sessions.remote_replies) {
+                    (false, _) => "On Off",
+                    (true, true) => "[On] Off",
+                    (true, false) => "On [Off]",
+                };
+                return SettingRow {
+                    section: item.section(),
+                    label: "Replies from rakumux.com".into(),
+                    value: value.into(),
+                    note: "Type replies written to the feed on rakumux.com, or on your other machines, into this machine's agent sessions, as if you typed them: only into the reply's own session, while it shows that chat and its agent waits for you. Replies can make your agents run commands here, so leave this off unless you want to steer them from elsewhere. Replies written in this window always go in. This machine only, never changed from the website.".into(),
+                    disabled: !signed_in,
+                };
+            }
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
                 if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
@@ -857,6 +872,7 @@ impl App {
             || match &self.mode {
                 AppMode::Folders(d) => d.busy,
                 AppMode::Renaming(d) => d.busy,
+                AppMode::FeedReply(d) => d.busy,
                 AppMode::DaemonRestart(d) => d.restarting,
                 AppMode::Upgrade(d) => d.checking || d.installing,
                 AppMode::Pairing(d) => d.busy(),
@@ -992,6 +1008,9 @@ impl App {
                 result,
             } => self.on_feed_turn(generation, entry, appended, result),
             AppEvent::Feed { generation, result } => self.on_feed(generation, result),
+            AppEvent::FeedReplied { generation, result } => {
+                self.on_feed_replied(generation, result)
+            }
             AppEvent::JobFailed(message) => {
                 self.set_status(format!("Background task failed: {message}"))
             }

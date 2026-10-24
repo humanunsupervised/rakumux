@@ -37,7 +37,7 @@
       "maxUtf8Bytes": 256
     },
     "session": {
-      "description": "The Rakumux session the reply was made in. `folder` is the folder's last path component only, never a path.",
+      "description": "The Rakumux session the reply was made in. `folder` is the folder's last path component only, never a path; `branch` is the git branch its agent worked on when the turn finished.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name"],
@@ -50,7 +50,8 @@
           "maxLength": 128,
           "maxUtf8Bytes": 512,
           "not": { "pattern": "/" }
-        }
+        },
+        "branch": { "type": "string", "$ref": "#/$defs/label", "maxLength": 128, "maxUtf8Bytes": 512 }
       }
     },
     "agent": {
@@ -93,6 +94,10 @@
         "position": {
           "description": "The position of the turn's last message in its chat (`chat-upload`), so the cloud can find the turn. Absent from older machines: the turn then ends at its chat's last message at or before `finished_at`.",
           "$ref": "#/$defs/position"
+        },
+        "reply_to": {
+          "description": "The feed reply (`reply`) this turn answers: the machine typed it into the session and this is the agent's next reply there.",
+          "$ref": "#/$defs/ulid"
         }
       }
     },
@@ -222,6 +227,52 @@
         "session": { "$ref": "#/$defs/session" }
       }
     },
+    "promptText": {
+      "description": "What the user writes back to an agent, as plain text of at most 8192 UTF-8 bytes. Tab, LF and CR are allowed; other terminal controls, format controls, default-ignorables and lone surrogates are not.",
+      "type": "string",
+      "minLength": 1,
+      "maxUtf8Bytes": 8192,
+      "pattern": "[\\p{L}\\p{N}\\p{P}\\p{S}]",
+      "not": {
+        "pattern": "[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\\p{Cf}\\p{Cs}\\p{Default_Ignorable_Code_Point}]"
+      }
+    },
+    "replyStatus": {
+      "description": "`pending` until the entry's machine types it into the session (`delivered`) or can't (`failed`); `expired` when it stayed pending an hour.",
+      "type": "string",
+      "enum": ["pending", "delivered", "failed", "expired"]
+    },
+    "replyFailure": {
+      "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`), or the session refused the text (`refused`).",
+      "type": "string",
+      "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused"]
+    },
+    "reply": {
+      "description": "What the user wrote back to a feed entry, for its machine to type into the entry's session, and where it is up to. The agent's next reply there names it as `reply_to`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "id", "entry", "thread", "machine", "session", "agent", "conversation_id", "text", "status", "created_at", "status_at"],
+      "properties": {
+        "seq": {
+          "description": "The account's order of reply changes: a reply takes a new seq whenever its status changes.",
+          "$ref": "#/$defs/seq"
+        },
+        "id": { "$ref": "#/$defs/ulid" },
+        "entry": { "description": "The entry replied to.", "$ref": "#/$defs/ulid" },
+        "thread": { "description": "The entry that started the thread.", "$ref": "#/$defs/ulid" },
+        "machine": { "description": "The entry's machine, which delivers it.", "$ref": "#/$defs/machine" },
+        "session": { "$ref": "#/$defs/session" },
+        "agent": { "$ref": "#/$defs/agent" },
+        "conversation_id": { "$ref": "#/$defs/conversationId" },
+        "text": { "$ref": "#/$defs/promptText" },
+        "from": { "description": "The machine it was written on; absent when written on rakumux.com.", "$ref": "#/$defs/machine" },
+        "status": { "$ref": "#/$defs/replyStatus" },
+        "failure": { "$ref": "#/$defs/replyFailure" },
+        "response": { "description": "The entry that answered it, once one did.", "$ref": "#/$defs/ulid" },
+        "created_at": { "$ref": "#/$defs/timestampMs" },
+        "status_at": { "$ref": "#/$defs/timestampMs" }
+      }
+    },
     "entry": {
       "description": "One feed entry as the cloud returns it.",
       "type": "object",
@@ -237,7 +288,15 @@
         "text": { "$ref": "#/$defs/replyText" },
         "truncated": { "type": "boolean" },
         "finished_at": { "$ref": "#/$defs/timestampMs" },
-        "received_at": { "$ref": "#/$defs/timestampMs" }
+        "received_at": { "$ref": "#/$defs/timestampMs" },
+        "reply_to": {
+          "description": "The feed reply this turn answers.",
+          "$ref": "#/$defs/ulid"
+        },
+        "thread": {
+          "description": "With `reply_to`: the entry that started the thread (the one first replied to).",
+          "$ref": "#/$defs/ulid"
+        }
       }
     }
   }

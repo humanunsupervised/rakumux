@@ -19,7 +19,7 @@ use super::protocol::{
 use super::{OwnerClaim, OwnerError};
 use crate::cloud::FeatureChange;
 use crate::dispatch::StatusConsentOffer;
-use crate::feed::FeedTurn;
+use crate::feed::{FeedTurn, ReplyWrite};
 use crate::refresh::{RefreshClient, RefreshError};
 use crate::status::ConsentRevision;
 
@@ -390,6 +390,13 @@ fn handle(
             })
             .map_err(|error| OwnerErrorCode::from(&error)),
         OwnerRequest::FeedTurn { .. } => Err(OwnerErrorCode::InvalidRequest),
+        OwnerRequest::FeedReply { entry, text } if crate::feed::is_entry_id(&entry) => client
+            .feed_reply(entry, text)
+            .map(|outcome| OwnerResponse::FeedReply {
+                reply: ReplyWrite::of(outcome),
+            })
+            .map_err(|error| OwnerErrorCode::from(&error)),
+        OwnerRequest::FeedReply { .. } => Err(OwnerErrorCode::InvalidRequest),
         OwnerRequest::Feed { after, generation } => client
             .feed(after, generation)
             .map(|feed| OwnerResponse::Feed { feed })

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use rakumux_sensagent::feed::{FeedPage, FeedStatus, FeedTurn};
+use rakumux_sensagent::feed::{FeedPage, FeedStatus, FeedTurn, ReplyWrite};
 use rakumux_sensagent::owner::protocol::{OwnerState, SignInReason, SignInView, StatusLine};
 use rakumux_sensagent::owner::{OwnerClient, OwnerError, OwnerLayout};
 use rakumux_sensagent::service::{self, ServiceConfig, ServiceError};
@@ -87,6 +87,9 @@ pub trait AccountAccess: Send + Sync {
     /// the prompt, the agent's text, reasoning and tool calls, and the tools'
     /// output, in order, as rakumux.com keeps it.
     fn feed_turn(&self, entry: &str, after: Option<u64>) -> Result<FeedTurn, String>;
+    /// Write `text` back to feed entry `entry`, for its machine to type into
+    /// the entry's session (this machine at once, when it runs here).
+    fn feed_reply(&self, entry: &str, text: &str) -> Result<ReplyWrite, String>;
 }
 
 /// The feed of a home whose service isn't running: signed out.
@@ -96,6 +99,7 @@ pub fn signed_out_feed() -> FeedPage {
         generation: 0,
         revision: 0,
         entries: Vec::new(),
+        replies: Vec::new(),
         more: false,
     }
 }
@@ -222,6 +226,11 @@ impl AccountAccess for LocalAccount {
         self.with(false, |client| client.feed_turn(entry, after))?
             .ok_or_else(|| "the account service isn't running".into())
     }
+
+    fn feed_reply(&self, entry: &str, text: &str) -> Result<ReplyWrite, String> {
+        self.with(false, |client| client.feed_reply(entry, text))?
+            .ok_or_else(|| "the account service isn't running".into())
+    }
 }
 
 /// Why a sign-in ended, for people.
@@ -274,7 +283,10 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
         }
     }
     let settings = layout.home.join("config.json");
-    let config = ServiceConfig::from_env()?.with_turn_settings(move || turn_settings(&settings));
+    let replies = settings.clone();
+    let config = ServiceConfig::from_env()?
+        .with_turn_settings(move || turn_settings(&settings))
+        .with_remote_replies(move || remote_replies(&replies));
     // Its HTTP clients block, which a thread of the async runtime may not do.
     std::thread::Builder::new()
         .name("rakumux-status-service".into())
@@ -286,6 +298,12 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
         .map_err(|_| ServiceError::Start)?
         .join()
         .map_err(|_| ServiceError::Start)?
+}
+
+/// `sessions.remote_replies` of `config.json`: off when it can't be read.
+fn remote_replies(path: &std::path::Path) -> bool {
+    crate::app::config::Settings::load_from(path)
+        .is_ok_and(|settings| settings.sessions.remote_replies)
 }
 
 /// `sessions.ai_summary` of `config.json`: the defaults when it can't be read.

@@ -24,8 +24,8 @@ use crate::auth::{AccountSession, AccountWebsite, CredentialStore, WallClock};
 use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
-    ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedRequest, FeedResult,
-    FeedSync, TurnRead,
+    ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
+    FeedResult, FeedSync, ReplySync, ReplyWork, TurnRead,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -78,6 +78,7 @@ enum Command {
     Summarize(SessionId, Sender<()>),
     SetFeatures(FeatureChange, Reply<()>),
     FeedTurn(String, Option<u64>, Sender<Result<TurnRead, FeedFailure>>),
+    FeedReply(String, String, Sender<Result<FeedReply, FeedFailure>>),
 }
 
 enum Message {
@@ -92,6 +93,15 @@ enum Message {
     Transcript(SessionId, Result<TranscriptPage, ErrorCode>),
     /// A chat upload finished.
     ChatDone(FeedCompletion),
+    /// A replies read or a reply's status report finished.
+    ReplyDone(FeedCompletion),
+    /// A reply was typed into its session, or the daemon refused it.
+    ReplySubmitted(String, Result<(), ErrorCode>),
+    /// A reply written in a TUI was stored (or not), for the TUI waiting on it.
+    ReplyWritten(
+        Result<FeedReply, FeedFailure>,
+        Sender<Result<FeedReply, FeedFailure>>,
+    ),
     /// The daemon was told to capture replies or not (or refused: an older one).
     CaptureSet(bool),
     /// Replies the daemon kept, for catching up.
@@ -113,6 +123,12 @@ enum Work<A, C> {
     ChatUpload(FeedJob<A, C>),
     /// Read a turn for a TUI, answered straight to it.
     Turn(FeedJob<A, C>, Sender<Result<TurnRead, FeedFailure>>),
+    /// Read replies, or report one's status.
+    ReplyRequest(FeedJob<A, C>),
+    /// Type a reply into its session.
+    Submit(String, SessionId, String),
+    /// Store a reply written in a TUI, then answer it.
+    WriteReply(FeedJob<A, C>, Sender<Result<FeedReply, FeedFailure>>),
     /// Turn the daemon's reply capture on or off.
     ReplyCapture(bool),
     /// Read the replies the daemon kept after this one (all of them for `None`).
@@ -324,6 +340,18 @@ impl RefreshClient {
         Ok(answer.recv().map_err(|_| RefreshError::Stopped)??)
     }
 
+    /// Write `text` back to feed entry `entry`: stored on rakumux.com for the
+    /// entry's machine to type into its session (here at once when it runs here).
+    pub fn feed_reply(
+        &self,
+        entry: String,
+        text: String,
+    ) -> Result<Result<FeedReply, FeedFailure>, RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::FeedReply(entry, text, reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
     /// The turn feed entry `entry` finished, from rakumux.com, past `after`
     /// when given.
     pub fn feed_turn(
@@ -402,7 +430,8 @@ fn own<S, A, C>(
     let mut renewal = Renewal::default();
     let machine = crate::feed::machine_name();
     let mut feed = FeedSync::new(machine.clone());
-    let mut chats = ChatSync::new(machine, refresher.chat_cursors());
+    let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
+    let mut replies = ReplySync::new(machine.clone(), refresher.accept_remote());
     loop {
         let now = origin.elapsed();
         if now >= next_tick {
@@ -416,6 +445,7 @@ fn own<S, A, C>(
             }
             follow_feed(&refresher, &mut feed, work, now);
             follow_chats(&refresher, &mut chats, work, now);
+            follow_replies(&refresher, &mut replies, work, now);
             next_tick = now.saturating_add(TICK);
         }
         let message = match inbox.recv_timeout(next_tick.saturating_sub(origin.elapsed())) {
@@ -430,23 +460,47 @@ fn own<S, A, C>(
                 let _ = refresher.resync(&views, now);
                 let after = feed.connected(&views);
                 chats.connected(&views);
+                replies.connected(&views);
                 let _ = work.send(Work::Replies(after));
             }
             Message::Event(event) => {
                 match &event.event {
-                    SessionEvent::Reply { reply } => feed.reply(reply.clone()),
+                    SessionEvent::Reply { reply } => {
+                        let reply_to = replies.answered(reply);
+                        feed.reply(reply.clone(), reply_to);
+                    }
                     SessionEvent::Created { session } | SessionEvent::Updated { session } => {
                         feed.observe(session);
                         chats.observe(session);
+                        replies.observe(session);
                     }
                     SessionEvent::Removed => {
                         feed.forget(&event.session_id);
                         chats.forget(&event.session_id);
+                        replies.forget(&event.session_id);
                     }
                     _ => {}
                 }
                 let _ = refresher.apply_event(&event, now);
                 follow_chats(&refresher, &mut chats, work, now);
+                follow_replies(&refresher, &mut replies, work, now);
+            }
+            Message::ReplyDone(completion) => {
+                let current = refresher.is_current(completion.revision);
+                feed.merge_replies(replies.request_done(current, completion.outcome, now));
+                follow_replies(&refresher, &mut replies, work, now);
+            }
+            Message::ReplySubmitted(reply, result) => {
+                replies.submitted(reply, result, wall_ms());
+                follow_replies(&refresher, &mut replies, work, now);
+            }
+            Message::ReplyWritten(outcome, answer) => {
+                if let Ok(reply) = &outcome {
+                    replies.written(reply);
+                    feed.merge_replies(vec![reply.clone()]);
+                }
+                let _ = answer.send(outcome);
+                follow_replies(&refresher, &mut replies, work, now);
             }
             Message::Transcript(session, result) => {
                 chats.read_done(session, result, now);
@@ -463,9 +517,10 @@ fn own<S, A, C>(
                 feed.completed(current, completion.outcome, now);
             }
             Message::CaptureSet(enabled) => feed.capture_changed(enabled),
-            Message::Replies(replies) => {
-                for reply in replies {
-                    feed.reply(reply);
+            Message::Replies(captured) => {
+                for reply in captured {
+                    let reply_to = replies.answered(&reply);
+                    feed.reply(reply, reply_to);
                 }
             }
             Message::Disconnected => refresher.disconnected(),
@@ -508,6 +563,23 @@ fn own<S, A, C>(
             Message::Command(Command::Feed(after, generation, reply)) => {
                 let _ = reply.send(feed.page(after, generation, now));
                 follow_feed(&refresher, &mut feed, work, now);
+            }
+            Message::Command(Command::FeedReply(entry, text, answer)) => {
+                let id = session_core::ids::ReplyId::generate();
+                let upload = crate::feed::is_entry_id(&entry)
+                    .then(|| crate::feed::reply_upload(id.as_str(), &entry, &text, &machine))
+                    .flatten();
+                match upload.map(|request| refresher.feed_job(request)) {
+                    Some(Some(job)) => {
+                        let _ = work.send(Work::WriteReply(job, answer));
+                    }
+                    Some(None) => {
+                        let _ = answer.send(Err(FeedFailure::Unauthorized));
+                    }
+                    None => {
+                        let _ = answer.send(Err(FeedFailure::Invalid));
+                    }
+                }
             }
             Message::Command(Command::FeedTurn(entry, after, reply)) => {
                 match refresher.feed_job(FeedRequest::Turn { entry, after }) {
@@ -604,7 +676,7 @@ fn control<S, A, C>(
             let _ = reply.send(());
         }
         // Answered by the owner loop, which holds the feed.
-        Command::Feed(..) | Command::FeedTurn(..) => {}
+        Command::Feed(..) | Command::FeedTurn(..) | Command::FeedReply(..) => {}
         Command::Summarize(session, reply) => {
             refresher.request(&session);
             let _ = reply.send(());
@@ -680,6 +752,53 @@ fn follow_chats<S, A, C>(
         },
         None => {}
     }
+}
+
+/// Start what replies need next: reports, typing pending ones into their
+/// sessions, reads. Only while signed in with the account's Feed switch on.
+fn follow_replies<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    replies: &mut ReplySync,
+    work: &Sender<Work<A, C>>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled = refresher.account().is_some() && refresher.feed_switch() == Some(true);
+    replies.set_enabled(enabled, now);
+    // Typing is local and needn't wait; requests go one at a time.
+    for _ in 0..16 {
+        match replies.next_work(now) {
+            Some(ReplyWork::Request(request)) => match refresher.feed_job(request) {
+                Some(job) => {
+                    let _ = work.send(Work::ReplyRequest(job));
+                }
+                None => {
+                    replies.request_done(false, Err(FeedFailure::Unauthorized), now);
+                    return;
+                }
+            },
+            Some(ReplyWork::Submit {
+                reply,
+                session,
+                text,
+            }) => {
+                let _ = work.send(Work::Submit(reply, session, text));
+            }
+            None => return,
+        }
+    }
+}
+
+/// The wall clock in Unix milliseconds, as replies' times are.
+fn wall_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+        })
 }
 
 /// Start renewing the adopted account's access token when it's due.
@@ -763,6 +882,31 @@ where
                         outcome: Err(FeedFailure::Unavailable(None)),
                     }),
                 }
+            }
+            Ok(Work::ReplyRequest(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::ReplyDone(completion),
+                    Err(_) => Message::ReplyDone(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
+            }
+            Ok(Work::Submit(reply, session, text)) => {
+                let result = api.submit(&session, &text).map_err(|error| error.code);
+                Message::ReplySubmitted(reply, result)
+            }
+            Ok(Work::WriteReply(job, answer)) => {
+                let outcome = match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => match completion.outcome {
+                        Ok(FeedResult::Reply(reply)) => Ok(reply),
+                        Ok(_) => Err(FeedFailure::Invalid),
+                        Err(failure) => Err(failure),
+                    },
+                    Err(_) => Err(FeedFailure::Unavailable(None)),
+                };
+                Message::ReplyWritten(outcome, answer)
             }
             Ok(Work::Turn(job, reply)) => {
                 let outcome = match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {

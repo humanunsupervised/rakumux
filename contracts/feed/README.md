@@ -15,13 +15,18 @@ conformance tests, not an HTTP server, database or local runtime.
 | `GET /api/v1/feed?before=SEQ&limit=N`, `GET /api/v1/feed?limit=N` | query only | [page](page.schema.json), decreasing seq |
 | `POST /api/v1/feed/messages` | [chat-upload](chat-upload.schema.json) | [chat-accepted](chat-accepted.schema.json) |
 | `GET /api/v1/feed/turn?entry=ID[&after=POSITION]` | query only | [turn](turn.schema.json), increasing position |
+| `POST /api/v1/feed/replies` | [reply-upload](reply-upload.schema.json) | [reply](reply.schema.json) |
+| `GET /api/v1/feed/replies?after=SEQ&limit=N` | query only | [replies](replies.schema.json), increasing seq |
+| `POST /api/v1/feed/replies/status` | [reply-status](reply-status.schema.json) | [reply](reply.schema.json) |
 
 - **Upload:** `{version:1, machine, entries}` with 1–50 entries. Each entry is
-  `{id, session:{id, name, folder?}, agent, conversation_id?, text, truncated, finished_at,
-  position?}`; `position` is the turn's last message's in its chat (below).
+  `{id, session:{id, name, folder?, branch?}, agent, conversation_id?, text, truncated,
+  finished_at, position?}`; `position` is the turn's last message's in its chat (below).
   `id` is the ULID the local daemon gave the reply; the cloud keeps the first upload of an
   id and answers a repeat with the same `seq`, so retries never duplicate. `folder` is a
-  folder's last path component, never a path. `text` is at most **32768 UTF-8 bytes**;
+  folder's last path component, never a path; `branch` is the git branch the session's agent
+  worked on when the turn finished (absent when detached or unknown; a chat upload leaves it
+  out). `text` is at most **32768 UTF-8 bytes**;
   `truncated` says the reply was longer. `finished_at` is the machine's clock (Unix ms);
   the cloud may clamp it to its own receipt time.
 - **Accepted:** every uploaded id with its `seq`, in upload order.
@@ -46,10 +51,25 @@ conformance tests, not an HTTP server, database or local runtime.
   increasing; `more` says it continues, and `after=POSITION` asks for the rest. An entry without
   `position` (an older machine) ends at its chat's last message at or before `finished_at`. No
   messages when the chat wasn't uploaded. At most 200 messages per answer.
+- **Replies and threads:** the user can write back to any entry with a conversation id, from
+  rakumux.com or a machine (`reply-upload`, `{version:1, id, entry, text, from}`; `text` at most
+  **8192 UTF-8 bytes**). The cloud stores it `pending` for the entry's machine, session, agent
+  and conversation, with its `thread`: the entry that started it (an entry that answers a reply
+  belongs to that reply's thread). The machine reads the account's replies after a seq
+  (`replies`; a reply takes a new seq whenever it changes, and pending ones older than an hour
+  are `expired` first), types each pending one into its session when the session still shows
+  that conversation and the agent waits for input, and reports `delivered` or `failed` with a
+  `failure` code (`reply-status`; only the reply's own machine, only a pending reply). The
+  agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as
+  the reply's `response`; page entries carry `reply_to` and `thread`. Machines take replies
+  written elsewhere only when the user turned that on there (`not_accepted` otherwise).
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
   message per code: `invalid_request` (400, or 413 for an oversized body), `unauthenticated`
   (401), `forbidden` (403: the account's Feed switch is off), `rate_limited` (429) and
-  `unavailable` (503). Retry delays are 1–86400 seconds, only for the last two.
+  `unavailable` (503). Retry delays are 1–86400 seconds, only for the last two. A turn, reply
+  upload or reply status naming an entry or reply the account doesn't have is
+  `invalid_request` with 404; a reply to an entry without a conversation id is
+  `invalid_request` (400).
 
 Every object rejects additional properties. Authorization is the terminal's Clerk OAuth
 access token in the `Authorization` header, never the body; browser cookies and `Origin`

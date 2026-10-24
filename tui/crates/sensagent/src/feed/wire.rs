@@ -9,7 +9,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
-use super::cache::FeedEntry;
+use super::cache::{FeedEntry, FeedReply, ReplyFailure, ReplyStatus};
 use super::chats::{ChatName, UploadMessage};
 use crate::cloud::FeedHttpReply;
 
@@ -27,6 +27,10 @@ pub(crate) const MAX_UPLOAD_MESSAGES: usize = 100;
 pub(crate) const CHAT_BUDGET: usize = 2 * 1024 * 1024;
 /// Messages per turn read (contract).
 pub(crate) const MAX_TURN_MESSAGES: usize = 200;
+/// Replies asked for per read (the contract allows 200).
+pub(crate) const REPLIES_LIMIT: u32 = 100;
+/// The longest reply text, in UTF-8 bytes (contract).
+pub(crate) const MAX_PROMPT_BYTES: usize = 8 * 1024;
 
 /// Why a feed request failed. Static: never reply text, URLs or tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +58,12 @@ pub(crate) enum FeedRequest {
     Messages { body: Vec<u8> },
     /// Read the turn an entry finished, past `after` when given.
     Turn { entry: String, after: Option<u64> },
+    /// Store a reply written here, as `body`.
+    ReplyUpload { body: Vec<u8> },
+    /// Read the account's replies changed after a seq.
+    Replies { after: u64 },
+    /// Say whether a reply was typed into its session, as `body`.
+    ReplyStatus { body: Vec<u8> },
 }
 
 impl FeedRequest {
@@ -63,6 +73,11 @@ impl FeedRequest {
             Some(after) => format!("after={after}&limit={PAGE_LIMIT}"),
             None => format!("limit={PAGE_LIMIT}"),
         }
+    }
+
+    /// `GET /api/v1/feed/replies`' query.
+    pub fn replies_query(after: u64) -> String {
+        format!("after={after}&limit={REPLIES_LIMIT}")
     }
 
     /// `GET /api/v1/feed/turn`'s query.
@@ -93,6 +108,8 @@ struct UploadEntry<'a> {
     finished_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     position: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_to: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -101,6 +118,8 @@ struct UploadSession<'a> {
     name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     folder: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch: Option<&'a str>,
 }
 
 fn upload_entry(entry: &FeedEntry) -> UploadEntry<'_> {
@@ -110,6 +129,7 @@ fn upload_entry(entry: &FeedEntry) -> UploadEntry<'_> {
             id: &entry.session_id,
             name: &entry.session_name,
             folder: entry.folder.as_deref(),
+            branch: entry.branch.as_deref(),
         },
         agent: &entry.agent,
         conversation_id: entry.conversation_id.as_deref(),
@@ -117,6 +137,7 @@ fn upload_entry(entry: &FeedEntry) -> UploadEntry<'_> {
         truncated: entry.truncated,
         finished_at: entry.finished_at,
         position: entry.position,
+        reply_to: entry.reply_to.as_deref(),
     }
 }
 
@@ -193,6 +214,8 @@ pub(crate) fn chat_upload(
                 id: &chat.session_id,
                 name: &chat.session_name,
                 folder: chat.folder.as_deref(),
+                // A chat outlives its branch: the entries say each turn's.
+                branch: None,
             },
         },
         messages: chosen,
@@ -336,6 +359,187 @@ pub(crate) fn label(text: &str, characters: usize) -> Option<String> {
     LABEL_VISIBLE.as_ref()?.is_match(&label).then_some(label)
 }
 
+#[derive(Serialize)]
+struct ReplyUpload<'a> {
+    version: u8,
+    id: &'a str,
+    entry: &'a str,
+    text: &'a str,
+    from: &'a str,
+}
+
+/// The upload of a reply written here, `id` its new ULID; `None` when `text`
+/// says nothing or is too long for the contract.
+pub(crate) fn reply_upload(id: &str, entry: &str, text: &str, from: &str) -> Option<FeedRequest> {
+    let text = crate::cloud::prompt_text(text)?;
+    if text.len() > MAX_PROMPT_BYTES {
+        return None;
+    }
+    let body = serde_json::to_vec(&ReplyUpload {
+        version: 1,
+        id,
+        entry,
+        text: &text,
+        from,
+    })
+    .ok()?;
+    Some(FeedRequest::ReplyUpload { body })
+}
+
+#[derive(Serialize)]
+struct ReplyStatusBody<'a> {
+    version: u8,
+    id: &'a str,
+    machine: &'a str,
+    status: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<ReplyFailure>,
+}
+
+/// A reply's machine saying it typed it into the session (`failure` absent)
+/// or couldn't.
+pub(crate) fn reply_status(
+    id: &str,
+    machine: &str,
+    failure: Option<ReplyFailure>,
+) -> Option<FeedRequest> {
+    let body = serde_json::to_vec(&ReplyStatusBody {
+        version: 1,
+        id,
+        machine,
+        status: if failure.is_some() {
+            "failed"
+        } else {
+            "delivered"
+        },
+        failure,
+    })
+    .ok()?;
+    Some(FeedRequest::ReplyStatus { body })
+}
+
+#[derive(Deserialize)]
+struct WireReply {
+    seq: u64,
+    id: String,
+    entry: String,
+    thread: String,
+    machine: String,
+    session: PageSession,
+    agent: String,
+    conversation_id: String,
+    text: String,
+    #[serde(default)]
+    from: Option<String>,
+    status: ReplyStatus,
+    #[serde(default)]
+    failure: Option<ReplyFailure>,
+    #[serde(default)]
+    response: Option<String>,
+    created_at: i64,
+    status_at: i64,
+}
+
+impl WireReply {
+    /// Within the contract's bounds, stripped of anything a terminal would act on.
+    fn checked(self) -> Option<FeedReply> {
+        let ids = [&self.id, &self.entry, &self.thread, &self.session.id];
+        let fits = self.seq > 0
+            && ids.iter().all(|id| crate::feed::is_entry_id(id))
+            && within(&self.machine, 256)
+            && within(&self.session.name, 256)
+            && self
+                .session
+                .folder
+                .as_deref()
+                .is_none_or(|f| within(f, 512))
+            && within(&self.agent, 32)
+            && conversation_id(&self.conversation_id)
+            && within(&self.text, MAX_PROMPT_BYTES)
+            && self.from.as_deref().is_none_or(|f| within(f, 256))
+            && self
+                .response
+                .as_deref()
+                .is_none_or(crate::feed::is_entry_id);
+        fits.then(|| FeedReply {
+            seq: self.seq,
+            id: self.id,
+            entry: self.entry,
+            thread: self.thread,
+            machine: line(&self.machine),
+            session_id: self.session.id,
+            session_name: line(&self.session.name),
+            folder: self.session.folder.map(|folder| line(&folder)),
+            agent: line(&self.agent),
+            conversation_id: self.conversation_id,
+            text: plain(&self.text),
+            from: self.from.map(|from| line(&from)),
+            status: self.status,
+            failure: self.failure,
+            response: self.response,
+            created_at: self.created_at,
+            status_at: self.status_at,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct ReplyAnswer {
+    version: u8,
+    reply: WireReply,
+}
+
+/// The stored reply a reply upload or status change answers with.
+pub(crate) fn reply(reply: &FeedHttpReply) -> Result<FeedReply, FeedFailure> {
+    if reply.status != 200 {
+        return Err(failure(reply));
+    }
+    let answer: ReplyAnswer =
+        serde_json::from_slice(&reply.body).map_err(|_| FeedFailure::Invalid)?;
+    if answer.version != 1 {
+        return Err(FeedFailure::Invalid);
+    }
+    answer.reply.checked().ok_or(FeedFailure::Invalid)
+}
+
+#[derive(Deserialize)]
+struct WireReplies {
+    version: u8,
+    replies: Vec<WireReply>,
+    latest_seq: u64,
+    more: bool,
+}
+
+/// Replies as read: those that fit the contract, the account's newest seq and
+/// whether more follow.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct RepliesRead {
+    pub replies: Vec<FeedReply>,
+    pub latest_seq: u64,
+    pub more: bool,
+}
+
+/// A page of the account's changed replies.
+pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure> {
+    if reply.status != 200 {
+        return Err(failure(reply));
+    }
+    let page: WireReplies =
+        serde_json::from_slice(&reply.body).map_err(|_| FeedFailure::Invalid)?;
+    if page.version != 1 || page.replies.len() > 200 {
+        return Err(FeedFailure::Invalid);
+    }
+    Ok(RepliesRead {
+        replies: page
+            .replies
+            .into_iter()
+            .filter_map(WireReply::checked)
+            .collect(),
+        latest_seq: page.latest_seq,
+        more: page.more,
+    })
+}
+
 #[derive(Deserialize)]
 struct Accepted {
     version: u8,
@@ -368,6 +572,10 @@ struct PageEntry {
     text: String,
     truncated: bool,
     finished_at: i64,
+    #[serde(default)]
+    reply_to: Option<String>,
+    #[serde(default)]
+    thread: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -376,6 +584,8 @@ struct PageSession {
     name: String,
     #[serde(default)]
     folder: Option<String>,
+    #[serde(default)]
+    branch: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -456,12 +666,15 @@ pub(crate) fn page(reply: &FeedHttpReply) -> Result<PageRead, FeedFailure> {
                 session_id: entry.session.id,
                 session_name: line(&entry.session.name),
                 folder: entry.session.folder.map(|folder| line(&folder)),
+                branch: entry.session.branch.map(|branch| line(&branch)),
                 agent: line(&entry.agent),
                 conversation_id: entry.conversation_id,
                 text: plain(&entry.text),
                 truncated: entry.truncated,
                 finished_at: entry.finished_at,
                 position: None,
+                reply_to: entry.reply_to.filter(|id| crate::feed::is_entry_id(id)),
+                thread: entry.thread.filter(|id| crate::feed::is_entry_id(id)),
             })
         })
         .collect();
@@ -546,12 +759,15 @@ mod tests {
             session_id: "01K89ZQ4D2F6H8J0K2M4N6P8R0".into(),
             session_name: "fix-tests".into(),
             folder: Some("rakumux".into()),
+            branch: None,
             agent: "claude-code".into(),
             conversation_id: None,
             text: text.into(),
             truncated: false,
             finished_at: 1_761_220_000_000,
             position: None,
+            reply_to: None,
+            thread: None,
         }
     }
 
@@ -719,6 +935,125 @@ mod tests {
             ))
             .unwrap(),
             [("A".to_owned(), 3)]
+        );
+    }
+
+    const REPLY: &str = r#"{"seq":3,"id":"01K8A1B2C3D4E5F6G7H8J9K0MN","entry":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+        "thread":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","machine":"studio",
+        "session":{"id":"01K89ZQ4D2F6H8J0K2M4N6P8R0","name":"fix-tests","folder":"rakumux"},
+        "agent":"claude-code","conversation_id":"5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+        "text":"Now run the tests \u001b[2J too.","status":"delivered","response":"01K8A1Z9Y8X7W6V5T4S3R2Q1P0",
+        "created_at":1761220100000,"status_at":1761220103000}"#;
+
+    #[test]
+    fn a_reply_upload_is_the_contracts_and_leaves_out_what_a_prompt_cant_hold() {
+        let Some(FeedRequest::ReplyUpload { body }) = reply_upload(
+            "01K8A1B2C3D4E5F6G7H8J9K0MN",
+            "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+            "  Now run the tests.\nThen open a PR.  ",
+            "laptop",
+        ) else {
+            panic!("expected an upload");
+        };
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN",
+                "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+                "text": "Now run the tests.\nThen open a PR.", "from": "laptop"})
+        );
+        let refused = |text: &str| {
+            reply_upload(
+                "01K8A1B2C3D4E5F6G7H8J9K0MN",
+                "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+                text,
+                "laptop",
+            )
+        };
+        assert_eq!(refused("   \n "), None);
+        assert_eq!(refused("\u{200d}\u{fe0f}"), None);
+        // What a prompt can't hold is left out: controls, bidi controls, and
+        // emoji's joiners and variation selectors, so ✔️ goes as ✔.
+        let text = |text: &str| match refused(text) {
+            Some(FeedRequest::ReplyUpload { body }) => {
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()["text"].clone()
+            }
+            other => panic!("expected an upload, got {other:?}"),
+        };
+        assert_eq!(text("run \u{1b}[2Jthis"), "run [2Jthis");
+        assert_eq!(text("\u{202e}txt.exe"), "txt.exe");
+        assert_eq!(
+            text("Done \u{2714}\u{fe0f} \u{1f469}\u{200d}\u{1f4bb}"),
+            "Done \u{2714} \u{1f469}\u{1f4bb}"
+        );
+        assert_eq!(refused(&"a".repeat(MAX_PROMPT_BYTES + 1)), None);
+        assert!(refused(&"a".repeat(MAX_PROMPT_BYTES)).is_some());
+    }
+
+    #[test]
+    fn a_reply_status_says_delivered_or_why_not() {
+        let body = |request: Option<FeedRequest>| match request {
+            Some(FeedRequest::ReplyStatus { body }) => {
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+            }
+            other => panic!("expected a status, got {other:?}"),
+        };
+        assert_eq!(
+            body(reply_status("01K8A1B2C3D4E5F6G7H8J9K0MN", "studio", None)),
+            serde_json::json!({"version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN",
+                "machine": "studio", "status": "delivered"})
+        );
+        assert_eq!(
+            body(reply_status(
+                "01K8A1B2C3D4E5F6G7H8J9K0MN",
+                "studio",
+                Some(ReplyFailure::ConversationChanged)
+            ))["failure"],
+            "conversation_changed"
+        );
+    }
+
+    #[test]
+    fn replies_read_back_cleaned_and_those_off_contract_are_left_out() {
+        let answer = format!(r#"{{"version":1,"reply":{REPLY}}}"#);
+        let stored = super::reply(&reply(200, &answer)).unwrap();
+        assert_eq!(stored.seq, 3);
+        assert_eq!(stored.status, ReplyStatus::Delivered);
+        assert_eq!(stored.text, "Now run the tests [2J too.");
+        assert_eq!(stored.folder.as_deref(), Some("rakumux"));
+        assert_eq!(
+            stored.response.as_deref(),
+            Some("01K8A1Z9Y8X7W6V5T4S3R2Q1P0")
+        );
+
+        let broken = REPLY.replace(r#""seq":3"#, r#""seq":0"#);
+        let unknown = REPLY
+            .replace(r#""delivered""#, r#""bounced""#)
+            .replace(r#""seq":3"#, r#""seq":5"#);
+        let page = format!(
+            r#"{{"version":1,"replies":[{REPLY},{broken},{unknown}],"latest_seq":9,"more":true}}"#
+        );
+        let read = replies(&reply(200, &page)).unwrap();
+        assert_eq!(read.latest_seq, 9);
+        assert!(read.more);
+        assert_eq!(
+            read.replies
+                .iter()
+                .map(|reply| (reply.seq, reply.status))
+                .collect::<Vec<_>>(),
+            [(3, ReplyStatus::Delivered), (5, ReplyStatus::Unknown)]
+        );
+        assert_eq!(
+            replies(&reply(
+                403,
+                r#"{"error":{"code":"forbidden","message":"x"}}"#
+            ))
+            .unwrap_err(),
+            FeedFailure::Off
+        );
+        assert_eq!(
+            super::reply(&reply(200, r#"{"version":2,"reply":{}}"#)).unwrap_err(),
+            FeedFailure::Invalid
         );
     }
 }

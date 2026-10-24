@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use session_core::ids::SessionId;
 
-use crate::feed::{FeedPage, FeedTurn};
+use crate::feed::{FeedPage, FeedTurn, ReplyWrite};
 
 use super::layout::{current_uid, peer_uid};
 use super::protocol::{
@@ -208,6 +208,17 @@ impl OwnerClient {
             after,
         })? {
             OwnerResponse::FeedTurn { turn } => Ok(turn),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Write `text` back to feed entry `entry`.
+    pub fn feed_reply(&self, entry: &str, text: &str) -> Result<ReplyWrite, OwnerError> {
+        match self.request(&OwnerRequest::FeedReply {
+            entry: entry.to_owned(),
+            text: text.to_owned(),
+        })? {
+            OwnerResponse::FeedReply { reply } => Ok(reply),
             _ => Err(OwnerError::Protocol),
         }
     }

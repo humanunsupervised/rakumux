@@ -12,14 +12,17 @@
 mod cache;
 mod chats;
 mod job;
+mod replies;
 mod sync;
 mod turn;
 mod wire;
 
-pub use cache::{FeedEntry, FeedPage, FeedStatus};
+pub use cache::{FeedEntry, FeedPage, FeedReply, FeedStatus, ReplyFailure, ReplyStatus};
 pub(crate) use chats::{ChatSync, ChatWork, READ_BYTES};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
+pub use replies::{AcceptRemote, ReplyWrite, ReplyWriteStatus};
+pub(crate) use replies::{ReplySync, ReplyWork};
 pub use sync::machine_name;
 pub(crate) use sync::FeedSync;
 pub use turn::{FeedTurn, FeedTurnStatus};
@@ -32,5 +35,5 @@ pub fn is_entry_id(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_digit() || (b.is_ascii_uppercase() && !b"ILOU".contains(&b)))
 }
-pub(crate) use wire::FeedRequest;
 pub use wire::TurnRead;
+pub(crate) use wire::{reply_upload, FeedRequest};

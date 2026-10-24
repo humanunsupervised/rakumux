@@ -3,7 +3,8 @@
 //! mode, the detail shows the selected reply's whole turn instead of a
 //! session (read from the service once it's shown, then kept). The service
 //! is asked for changes every 2 s, only while the feed is on screen; Enter
-//! on a reply made here goes into its session.
+//! on a reply made here goes into its session, and `r` writes back to it
+//! (`reply.rs`).
 
 use std::time::{Duration, Instant};
 
@@ -195,10 +196,9 @@ impl App {
             KeyCode::Char('h') => self.switch_tab(-1),
             KeyCode::Char('l') => self.switch_tab(1),
             KeyCode::Enter | KeyCode::Char('i') => self.open_feed_entry(),
+            KeyCode::Char('r') => self.open_feed_reply(),
             KeyCode::Esc if self.feed.reading => self.feed.reading = false,
-            KeyCode::Char(
-                'p' | 's' | 'J' | 'K' | 'r' | 'd' | 'x' | 'z' | 'c' | '/' | '{' | '}',
-            ) => {}
+            KeyCode::Char('p' | 's' | 'J' | 'K' | 'd' | 'x' | 'z' | 'c' | '/' | '{' | '}') => {}
             _ => return false,
         }
         true

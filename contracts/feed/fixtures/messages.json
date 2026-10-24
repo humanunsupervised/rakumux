@@ -9,7 +9,7 @@
           "entries": [
             {
               "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
-              "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" },
+              "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux", "branch": "feature/parser-fix" },
               "agent": "claude-code",
               "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
               "text": "The tests pass now.\n\n- Fixed the parser\n- Added a regression test",
@@ -56,6 +56,8 @@
       { "note": "a folder path", "session": { "folder": "/home/me/rakumux" } },
       { "note": "a relative folder path", "session": { "folder": "repos/rakumux" } },
       { "note": "extra session field", "session": { "cwd": "/home/me" } },
+      { "note": "a branch with a newline", "session": { "branch": "main\nx" } },
+      { "note": "a blank branch", "session": { "branch": "" } },
       { "note": "session name too long", "session": { "name": "n123456789n123456789n123456789n123456789n123456789n123456789n1234" } },
       { "note": "conversation id with a space", "entry": { "conversation_id": "a b" } }
     ],
@@ -86,7 +88,7 @@
             "seq": 42,
             "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
             "machine": "studio",
-            "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" },
+            "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux", "branch": "main" },
             "agent": "claude-code",
             "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
             "text": "The tests pass now.",

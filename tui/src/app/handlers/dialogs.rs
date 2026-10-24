@@ -20,6 +20,7 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
         AppMode::Folders(_) => super::folders::handle_folder_picker_key(app, key),
         AppMode::Sections(_) => super::sections::handle_section_picker_key(app, key),
         AppMode::Renaming(_) => handle_rename_key(app, key),
+        AppMode::FeedReply(_) => handle_feed_reply_key(app, key),
         AppMode::Confirm(_) => handle_confirm_key(app, key),
         AppMode::DaemonRestart(_) => return handle_daemon_restart_key(app, key),
         AppMode::Modal { .. } | AppMode::Upgrade(_) => {
@@ -65,6 +66,7 @@ fn dialog_busy(mode: &AppMode) -> bool {
     match mode {
         AppMode::Folders(d) => d.busy,
         AppMode::Renaming(d) => d.busy,
+        AppMode::FeedReply(d) => d.busy,
         AppMode::DaemonRestart(d) => d.restarting,
         AppMode::Upgrade(d) => d.installing,
         _ => false,
@@ -81,6 +83,25 @@ fn handle_rename_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => app.mode = AppMode::Normal,
         KeyCode::Enter => app.submit_rename(),
+        _ => {
+            if dialog.input.handle_key(&key) {
+                dialog.error_message = None;
+            }
+        }
+    }
+}
+
+/// The reply box: Enter sends, Esc closes (what was written is dropped).
+fn handle_feed_reply_key(app: &mut App, key: KeyEvent) {
+    let AppMode::FeedReply(dialog) = &mut app.mode else {
+        return;
+    };
+    if dialog.busy {
+        return;
+    }
+    match key.code {
+        KeyCode::Esc => app.mode = AppMode::Normal,
+        KeyCode::Enter => app.submit_feed_reply(),
         _ => {
             if dialog.input.handle_key(&key) {
                 dialog.error_message = None;

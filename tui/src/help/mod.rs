@@ -1644,8 +1644,8 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
             "Switch between the tabs, Feed, Status, Folders and App (h, l on the tabs too). \
              The Feed lists what agents said when they finished a turn, on every machine of \
              your account (turn it on in Settings → Available on sign-in); Enter on a reply \
-             made here \
-             goes into its session",
+             made here goes into its session, and r writes back to it: typed into its \
+             session when its agent waits, and shown with the answer as a thread",
         ),
         row(
             "gg, G, Home, End",

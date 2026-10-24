@@ -160,7 +160,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    Feed switch (off by default, same features read) is on, the service has the daemon capture
    replies (`reply_capture`), takes them from its `replies` subscription (and `reply_list` after
    reconnecting or starting late), leaves out private sessions, masks keys, credential
-   assignments and tokens, and uploads them (`POST /api/v1/feed/entries`, batches of up to 50,
+   assignments and tokens, and uploads them with the session's name, folder name and git
+   branch (`POST /api/v1/feed/entries`, batches of up to 50,
    idempotent on the reply id). It reads the account's feed back (`GET /api/v1/feed?after=SEQ`)
    every 10 s while a TUI shows it (an owner `feed` request in the last 30 s), else every 2
    minutes. Cache (the newest 500) and upload queue are memory only; the TUI asks the owner for
@@ -175,6 +176,24 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    entry's whole turn with `OwnerRequest::FeedTurn {entry, after?}` (`GET /api/v1/feed/turn`),
    each part cut to what a detail pane shows and the answer within one owner message (`next`
    continues).
+   **Replies and threads** (`feed/replies.rs`, `ReplySync`): the user
+   writes back to any entry with a conversation id, on rakumux.com or in a TUI (`r` in the
+   Feed: `OwnerRequest::FeedReply {entry, text}` → `POST /api/v1/feed/replies`, ≤ 8 KiB, no
+   controls). Under the same switch the service reads the account's replies as they change
+   (`GET /api/v1/feed/replies?after=SEQ`, every 5 s) and types each pending one addressed to
+   this machine into the entry's session with `session_submit` (a bracketed paste, then
+   Enter; the same for Claude Code, Codex and OpenCode, which have no API for a running
+   interactive session), only while it's live, not private, shows the entry's conversation
+   (`agent_turn.conversation_id`) and its agent waits (`idle`/`done`; `working`, `blocked` or an
+   unknown chat waits, the cloud expires a reply after an hour), one at a time per session.
+   It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
+   `private`, `not_accepted`, `refused`; `POST /api/v1/feed/replies/status`). A reply written
+   on rakumux.com or another machine is typed only when this machine's
+   `sessions.remote_replies` is on (Settings → Replies from rakumux.com, local, off by default,
+   read every 10 s); one written in this machine's TUI always is. The agent's next reply in that
+   session and conversation is uploaded with `reply_to`, and the cloud links it (`response`,
+   `thread`). Pages to TUIs carry the replies (`FeedPage.replies`), and the Feed detail shows an
+   entry's thread under its turn.
 
 ## File structure
 
@@ -473,6 +492,8 @@ accidents; they don't stop a hostile process running as the same user.
   the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
+  remote_replies (false: replies written to the feed on rakumux.com or other machines are typed
+  into this machine's sessions; Settings → Replies from rakumux.com),
   sidebar_width (dragged divider),
   stacked_list_percent (the list's share of the height on narrow screens, set by dragging the
   divider under it, so the split follows a phone keyboard coming and going;
@@ -655,6 +676,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Chat** (transcript): an agent conversation's messages in order (prompts, text,
   reasoning, tool calls, tools' output), uploaded under the same switch; the Feed detail shows
   a reply's whole turn from it.
+- **Reply written back** (`FeedReply`): what the user wrote back to a feed entry, typed into
+  the entry's session on its machine once its agent waits; with the entries that answer them
+  they make a **thread**.
 - **Daemon** (`rakumux-ptyd`): the single per-user server owning every session.
 - **Client**: anything connected to the daemon (TUI, CLI call, agent, `rakumux-api`).
 - **External API**: `rakumux-api`, HTTP on 127.0.0.1 over the daemon; found through `api.json`.
@@ -734,10 +758,15 @@ its tabs, `≡ Feed    ◔ Status ▾  ▤ Folders    ◇ App` (Status is active
 filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`, `◔ 2 statuses ▾`); short rows narrow the gaps, then show
 the inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's
 filter at the left (`◔ Status ▾`); only Master detail shows the four tabs. With Feed active,
-the list shows the replies of the account's machines, newest first (each with its age,
-session, folder, agent, machine when it isn't this one, and its first lines), and the detail
-the selected reply whole (`Ctrl-d`/`Ctrl-u`, PgUp/PgDn scroll it); Enter goes into its session
-when it runs here. The footer,
+the list shows the replies of the account's machines, newest first, each a card
+(`components/feed.rs`): on its top border the session's name, then quieter its agent and
+branch (the folder when no branch is known), and at the right its age and status (`done`,
+`sending`, or the newest reply written back to it: `reply waiting`, `reply typed in`,
+`answered`, `reply not sent`; only the mark when short of room), its first lines inside, the
+selected card's border in the accent; and the detail
+the selected reply whole (`Ctrl-d`/`Ctrl-u`, PgUp/PgDn scroll it), then its thread when
+someone wrote back; Enter goes into its session when it runs here, and `r` writes back to it
+(an entry answering a reply is marked `↳`). The footer,
 always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
 while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
 SESSION/TERMINAL), then messages and the daemon connection while it isn't up (`⠋ connecting`,

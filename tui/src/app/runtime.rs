@@ -163,6 +163,11 @@ pub enum AppEvent {
         appended: bool,
         result: Result<rakumux_sensagent::feed::FeedTurn, String>,
     },
+    /// A reply written back to a feed entry was stored, or not.
+    FeedReplied {
+        generation: u64,
+        result: Result<rakumux_sensagent::feed::ReplyWrite, String>,
+    },
     /// The feed entries that changed since this window last asked.
     Feed {
         generation: u64,

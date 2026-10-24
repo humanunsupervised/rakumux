@@ -14,7 +14,7 @@ use session_core::ids::SessionId;
 use session_core::model::ScopeRoot;
 
 use crate::dispatch::DispatchError;
-use crate::feed::{FeedPage, FeedTurn};
+use crate::feed::{FeedPage, FeedTurn, ReplyWrite};
 use crate::refresh::{AIStatus, RefreshError, RefreshFailure, SignInFailure, SignInState};
 use crate::status::{
     ConsentPolicy, ConsentSnapshot, FolderConsent, StatusError, StatusStoreError, StatusView,
@@ -114,6 +114,11 @@ pub enum OwnerRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after: Option<u64>,
     },
+    /// Write `text` back to feed entry `entry` (its ULID): stored on
+    /// rakumux.com for the entry's machine to type into its session, here at
+    /// once when the session runs here. Answered with `FeedReply`; later
+    /// `Feed` pages carry it as it changes.
+    FeedReply { entry: String, text: String },
 }
 
 /// The owner's answers.
@@ -144,6 +149,9 @@ pub enum OwnerResponse {
     },
     FeedTurn {
         turn: FeedTurn,
+    },
+    FeedReply {
+        reply: ReplyWrite,
     },
     Done,
     Error {

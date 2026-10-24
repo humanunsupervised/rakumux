@@ -1,0 +1,86 @@
+{
+  "replyUpload": {
+    "valid": [
+      {
+        "version": 1,
+        "id": "01K8A1B2C3D4E5F6G7H8J9K0MN",
+        "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+        "text": "Thanks. Now run the integration tests too.\nThen open a PR.",
+        "from": "laptop"
+      }
+    ],
+    "invalid": [
+      { "note": "no text", "patch": { "text": "" } },
+      { "note": "no machine", "patch": { "from": null } },
+      { "note": "an escape sequence", "patch": { "text": "run \u001b[2Jthis" } },
+      { "note": "a user id in the body", "patch": { "user_id": "user_1" } },
+      { "note": "not a ULID", "patch": { "entry": "entry-1" } }
+    ]
+  },
+  "replyStatus": {
+    "valid": [
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "delivered" },
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed", "failure": "conversation_changed" }
+    ],
+    "invalid": [
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed" },
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "delivered", "failure": "refused" },
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "expired" },
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed", "failure": "unknown_reason" }
+    ]
+  },
+  "reply": {
+    "valid": [
+      {
+        "version": 1,
+        "reply": {
+          "seq": 3,
+          "id": "01K8A1B2C3D4E5F6G7H8J9K0MN",
+          "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+          "thread": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+          "machine": "studio",
+          "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" },
+          "agent": "claude-code",
+          "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+          "text": "Now run the integration tests too.",
+          "status": "delivered",
+          "response": "01K8A1Z9Y8X7W6V5T4S3R2Q1P0",
+          "created_at": 1761220100000,
+          "status_at": 1761220103000
+        }
+      },
+      {
+        "version": 1,
+        "reply": {
+          "seq": 4,
+          "id": "01K8A1B2C3D4E5F6G7H8J9K0MP",
+          "entry": "01K8A1Z9Y8X7W6V5T4S3R2Q1P0",
+          "thread": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+          "machine": "studio",
+          "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests" },
+          "agent": "codex",
+          "conversation_id": "019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b",
+          "text": "And the docs.",
+          "from": "laptop",
+          "status": "failed",
+          "failure": "not_accepted",
+          "created_at": 1761220200000,
+          "status_at": 1761220201000
+        }
+      }
+    ],
+    "invalid": [
+      { "version": 1, "reply": { "seq": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN" } },
+      { "version": 1 }
+    ]
+  },
+  "replies": {
+    "valid": [
+      { "version": 1, "replies": [], "latest_seq": 0, "more": false }
+    ],
+    "invalid": [
+      { "version": 1, "replies": [], "more": false },
+      { "version": 1, "replies": [{ "seq": 1 }], "latest_seq": 1, "more": false }
+    ]
+  }
+}

@@ -8,7 +8,7 @@ mod wire;
 
 pub use client::{AccountFeatures, Cancellation, CloudAIClient, CloudAIConfig, FeatureChange};
 pub(crate) use client::{FeedHttp, FeedHttpReply};
-pub(crate) use context::{chat_text, feed_text, MAX_INSPECTION_BYTES};
+pub(crate) use context::{chat_text, feed_text, prompt_text, MAX_INSPECTION_BYTES};
 pub use context::{CaptureInput, CaptureMetadata, ContextBuilder};
 pub use error::CloudAIError;
 pub use wire::{RemoteErrorCode, StatusResponse, ValidatedStatusRequest};

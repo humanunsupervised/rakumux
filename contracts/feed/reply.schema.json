@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:reply-answer",
+  "title": "A reply, as stored",
+  "description": "The answer to a reply upload or a status change.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "reply"],
+  "properties": {
+    "version": { "const": 1 },
+    "reply": { "$ref": "urn:rakumux:feed:v1:common#/$defs/reply" }
+  }
+}

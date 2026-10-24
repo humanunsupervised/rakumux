@@ -1073,6 +1073,8 @@ impl App {
         }
         match &mut self.mode {
             AppMode::Renaming(dialog) => dialog.input.insert_str(text),
+            // Lines run on as one: the box holds one.
+            AppMode::FeedReply(dialog) => dialog.input.insert_str(&text.replace(['\r', '\n'], " ")),
             AppMode::AuthEmail(dialog) => dialog.input.insert_str(text),
             AppMode::AuthCode(dialog) => dialog.input.insert_str(text),
             AppMode::Normal if self.focus == Focus::Terminal => self.paste_terminal_panel(text),

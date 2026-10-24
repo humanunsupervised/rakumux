@@ -221,6 +221,18 @@ pub(crate) fn feed_text(input: &str) -> Option<String> {
     patterns.meaningful.is_match(text).then(|| text.to_owned())
 }
 
+/// What the user writes back to an agent, as the feed uploads it: without
+/// terminal and format controls or default-ignorables (an emoji's joiners and
+/// variation selectors among them, which the contract refuses), trimmed, or
+/// `None` when nothing meaningful is left. Nothing is masked: it's what the
+/// user means the agent to read.
+pub(crate) fn prompt_text(input: &str) -> Option<String> {
+    let patterns = PATTERNS.as_ref().ok()?;
+    let clean = patterns.prohibited.replace_all(input, "");
+    let text = clean.trim();
+    patterns.meaningful.is_match(text).then(|| text.to_owned())
+}
+
 /// Text of an agent's chat as the feed uploads it: without terminal escape
 /// sequences or controls (but tab, line feed and carriage return), with private
 /// keys, credential assignments and tokens masked. Paths stay, and it may be

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:reply-upload",
+  "title": "POST /api/v1/feed/replies request",
+  "description": "A reply to a feed entry, written on one of the account's machines. `id` is the ULID the machine gave it: sending it again returns the stored reply. The entry needs a conversation id, so its machine can tell the session still shows that chat.",
+  "x-maxBodyBytes": 65536,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "entry", "text", "from"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+    "entry": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+    "text": { "$ref": "urn:rakumux:feed:v1:common#/$defs/promptText" },
+    "from": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" }
+  }
+}

@@ -28,11 +28,12 @@ const OFF_WAIT: Duration = Duration::from_secs(120);
 /// The longest wait the cloud can ask for (a day's quota).
 const LONGEST_WAIT: Duration = Duration::from_secs(86_400);
 
-/// What the feed shows of a session: its name and folder name, and whether
-/// it's private (never uploaded).
+/// What the feed shows of a session: its name, folder name and branch, and
+/// whether it's private (never uploaded).
 struct SessionMeta {
     name: String,
     folder: Option<String>,
+    branch: Option<String>,
     private: bool,
 }
 
@@ -41,9 +42,23 @@ impl SessionMeta {
         Self {
             name: view.name.clone(),
             folder: folder_name(&view.scope),
+            branch: view
+                .git
+                .as_ref()
+                .and_then(|git| git.branch.as_deref())
+                .and_then(branch_name),
             private: view.private,
         }
     }
+}
+
+/// A branch as the feed shows it: one line of at most 128 characters, else
+/// none (a cut branch name would name another).
+fn branch_name(branch: &str) -> Option<String> {
+    let fits = !branch.trim().is_empty()
+        && branch.chars().count() <= 128
+        && !branch.chars().any(char::is_control);
+    fits.then(|| branch.to_owned())
 }
 
 /// `view`'s folder name, as the feed shows it.
@@ -164,9 +179,17 @@ impl FeedSync {
         self.capture = Some(enabled);
     }
 
+    /// Replies read back or written here, for TUIs' threads.
+    pub fn merge_replies(&mut self, replies: Vec<super::cache::FeedReply>) {
+        if self.enabled && !replies.is_empty() {
+            self.cache.merge_replies(replies);
+        }
+    }
+
     /// A reply the daemon captured: queued for upload unless its session is
-    /// private, unknown, or the feed is off.
-    pub fn reply(&mut self, reply: AgentReply) {
+    /// private, unknown, or the feed is off. `reply_to` is the feed reply it
+    /// answers, when one was typed into its session.
+    pub fn reply(&mut self, reply: AgentReply, reply_to: Option<String>) {
         if self.last_reply.as_ref().is_none_or(|last| reply.id > *last) {
             self.last_reply = Some(reply.id.clone());
         }
@@ -190,12 +213,15 @@ impl FeedSync {
             session_id: reply.session_id.as_str().to_owned(),
             session_name: meta.name.clone(),
             folder: meta.folder.clone(),
+            branch: meta.branch.clone(),
             agent: reply.agent,
             conversation_id: reply.conversation_id.filter(|id| wire::conversation_id(id)),
             text,
             truncated: reply.truncated || cut,
             finished_at: reply.finished_at,
             position: reply.position,
+            reply_to,
+            thread: None,
         });
     }
 
@@ -250,8 +276,13 @@ impl FeedSync {
                     now + self.read_interval(now)
                 };
             }
-            // Chats' requests, not the feed's.
-            Ok(FeedResult::Stored | FeedResult::Turn(_)) => {}
+            // Chats' and replies' requests, not the feed's.
+            Ok(
+                FeedResult::Stored
+                | FeedResult::Turn(_)
+                | FeedResult::Reply(_)
+                | FeedResult::Replies(_),
+            ) => {}
             Err(failure) => self.fail(failure, now),
         }
     }
@@ -408,9 +439,12 @@ mod tests {
         let mut feed = on();
         // Split so secret scanners don't take the fixture for a key.
         let key = concat!("sk-", "abcdefghijklmnopqrstuvwxyz");
-        feed.reply(reply("S", &format!("Done. The key was api_key={key}")));
-        feed.reply(reply("P", "private"));
-        feed.reply(reply("unknown", "who?"));
+        feed.reply(
+            reply("S", &format!("Done. The key was api_key={key}")),
+            None,
+        );
+        feed.reply(reply("P", "private"), None);
+        feed.reply(reply("unknown", "who?"), None);
         let Some(FeedRequest::Upload { ids, body }) = feed.next_request(NOW) else {
             panic!("expected an upload");
         };
@@ -429,6 +463,43 @@ mod tests {
             feed.next_request(NOW),
             Some(FeedRequest::Read { after: None })
         );
+    }
+
+    #[test]
+    fn an_entry_carries_the_branch_its_session_was_on() {
+        let mut feed = on();
+        let mut branched = view("S", false);
+        branched.git = Some(session_core::model::GitInfo {
+            branch: Some("feature/parser-fix".into()),
+            ..Default::default()
+        });
+        feed.observe(&branched);
+        feed.reply(reply("S", "Fixed."), None);
+        let Some(FeedRequest::Upload { body, .. }) = feed.next_request(NOW) else {
+            panic!("expected an upload");
+        };
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body["entries"][0]["session"]["branch"],
+            "feature/parser-fix"
+        );
+        // A detached HEAD, or a name that doesn't fit, gives none.
+        assert_eq!(branch_name(&"b".repeat(129)), None);
+        assert_eq!(branch_name("a\nb"), None);
+    }
+
+    #[test]
+    fn an_answer_to_a_reply_uploads_naming_it() {
+        let mut feed = on();
+        feed.reply(
+            reply("S", "Added the test."),
+            Some("01K8A1B2C3D4E5F6G7H8J9K0MN".into()),
+        );
+        let Some(FeedRequest::Upload { body, .. }) = feed.next_request(NOW) else {
+            panic!("expected an upload");
+        };
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["entries"][0]["reply_to"], "01K8A1B2C3D4E5F6G7H8J9K0MN");
     }
 
     #[test]
@@ -464,7 +535,7 @@ mod tests {
     #[test]
     fn failures_back_off_and_the_switch_turning_off_forgets_everything() {
         let mut feed = on();
-        feed.reply(reply("S", "hello"));
+        feed.reply(reply("S", "hello"), None);
         assert!(feed.next_request(NOW).is_some());
         feed.completed(true, Err(FeedFailure::Unavailable(None)), NOW);
         assert_eq!(feed.status(), FeedStatus::Unavailable);

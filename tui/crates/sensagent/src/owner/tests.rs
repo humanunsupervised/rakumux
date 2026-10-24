@@ -224,6 +224,30 @@ fn newer_answers_degrade_to_unknown() {
 }
 
 #[test]
+fn a_feed_reply_is_asked_and_answered_by_name() {
+    let request = OwnerRequest::FeedReply {
+        entry: "01K8A0RZ0V3X5Q2N9T7W4Y6M8B".into(),
+        text: "Now add a test.".into(),
+    };
+    assert_eq!(
+        serde_json::to_value(&request).unwrap(),
+        serde_json::json!({"op": "feed_reply", "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+            "text": "Now add a test."})
+    );
+    let response: OwnerResponse =
+        serde_json::from_str(r#"{"type":"feed_reply","reply":{"status":"off"}}"#).unwrap();
+    assert_eq!(
+        response,
+        OwnerResponse::FeedReply {
+            reply: crate::feed::ReplyWrite {
+                status: crate::feed::ReplyWriteStatus::Off,
+                reply: None,
+            }
+        }
+    );
+}
+
+#[test]
 fn folder_entries_accept_fields_a_newer_owner_adds() {
     let consent: ConsentView = serde_json::from_str(
         r#"{"revision":3,"enabled":true,"future":1,

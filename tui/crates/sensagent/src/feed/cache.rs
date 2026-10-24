@@ -1,11 +1,14 @@
 //! The feed entries the status service holds in memory: the account's newest,
-//! this machine's not yet uploaded, and a revision per change so a TUI asks
-//! only for what changed since it last asked.
+//! this machine's not yet uploaded, and the replies written back to them,
+//! with a revision per change so a TUI asks only for what changed since it
+//! last asked.
 
 use serde::{Deserialize, Serialize};
 
 /// Entries kept, newest by when they finished.
 pub(crate) const MAX_CACHED: usize = 500;
+/// Replies kept, the most recently changed.
+pub(crate) const MAX_REPLIES: usize = 500;
 /// Reply text per page to a TUI: within the owner protocol's message bound,
 /// even with every character escaped.
 pub(crate) const PAGE_TEXT_BUDGET: usize = 96 * 1024;
@@ -25,6 +28,9 @@ pub struct FeedEntry {
     /// The session's folder name (never a path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+    /// The git branch its agent worked on when the turn finished.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     /// `claude-code`, `codex` or `opencode`.
     pub agent: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -39,6 +45,77 @@ pub struct FeedEntry {
     /// never read back).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<u64>,
+    /// The reply ([`FeedReply`]) this turn answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
+    /// With `reply_to`: the entry that started the thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+}
+
+/// What the user wrote back to a feed entry, for the entry's machine to type
+/// into its session (`contracts/feed/` `reply`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FeedReply {
+    /// The account's order of reply changes.
+    pub seq: u64,
+    /// A ULID.
+    pub id: String,
+    /// The entry replied to, and the one that started its thread.
+    pub entry: String,
+    pub thread: String,
+    /// The entry's machine, which types it into the session.
+    pub machine: String,
+    pub session_id: String,
+    pub session_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    pub agent: String,
+    pub conversation_id: String,
+    pub text: String,
+    /// The machine it was written on; `None` when written on rakumux.com.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    pub status: ReplyStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<ReplyFailure>,
+    /// The entry that answered it, once one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<String>,
+    /// Unix milliseconds.
+    pub created_at: i64,
+    pub status_at: i64,
+}
+
+/// Where a reply is up to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplyStatus {
+    /// Waiting for its machine to type it into the session.
+    Pending,
+    Delivered,
+    Failed,
+    /// Stayed pending an hour.
+    Expired,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Why a reply wasn't typed into its session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplyFailure {
+    /// The session isn't running on its machine.
+    SessionGone,
+    /// It shows another conversation now.
+    ConversationChanged,
+    Private,
+    /// Its machine doesn't take replies written elsewhere.
+    NotAccepted,
+    /// The session refused the text.
+    Refused,
+    #[serde(other)]
+    Unknown,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -74,6 +151,9 @@ pub struct FeedPage {
     pub revision: u64,
     /// New or changed entries, in the order they changed.
     pub entries: Vec<FeedEntry>,
+    /// New or changed replies, in the order they changed.
+    #[serde(default)]
+    pub replies: Vec<FeedReply>,
     /// More changes than fit one page: ask again now.
     #[serde(default)]
     pub more: bool,
@@ -84,10 +164,16 @@ struct Cached {
     revision: u64,
 }
 
-/// The newest [`MAX_CACHED`] entries, by id.
+struct CachedReply {
+    reply: FeedReply,
+    revision: u64,
+}
+
+/// The newest [`MAX_CACHED`] entries, by id, and [`MAX_REPLIES`] replies.
 #[derive(Default)]
 pub(crate) struct FeedCache {
     entries: Vec<Cached>,
+    replies: Vec<CachedReply>,
     revision: u64,
     generation: u64,
     latest_seq: u64,
@@ -96,12 +182,56 @@ pub(crate) struct FeedCache {
 impl FeedCache {
     /// Forget every entry (sign-out, the switch turned off).
     pub fn clear(&mut self) {
-        if self.entries.is_empty() && self.latest_seq == 0 {
+        if self.entries.is_empty() && self.replies.is_empty() && self.latest_seq == 0 {
             return;
         }
         self.entries.clear();
+        self.replies.clear();
         self.latest_seq = 0;
         self.generation += 1;
+    }
+
+    /// Replies read back, or this machine's just written: a changed one
+    /// replaces what was held.
+    pub fn merge_replies(&mut self, replies: Vec<FeedReply>) {
+        for reply in replies {
+            match self
+                .replies
+                .iter()
+                .position(|held| held.reply.id == reply.id)
+            {
+                Some(index) if self.replies[index].reply == reply => {}
+                Some(index) if self.replies[index].reply.seq > reply.seq => {}
+                Some(index) => {
+                    self.revision += 1;
+                    self.replies[index] = CachedReply {
+                        reply,
+                        revision: self.revision,
+                    };
+                }
+                None => {
+                    self.revision += 1;
+                    self.replies.push(CachedReply {
+                        reply,
+                        revision: self.revision,
+                    });
+                }
+            }
+        }
+        while self.replies.len() > MAX_REPLIES {
+            let oldest = self
+                .replies
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, held)| held.reply.seq)
+                .map(|(index, _)| index);
+            match oldest {
+                Some(index) => {
+                    self.replies.swap_remove(index);
+                }
+                None => break,
+            }
+        }
     }
 
     /// The account's newest seq read so far: reads continue after it.
@@ -178,24 +308,42 @@ impl FeedCache {
         } else {
             0
         };
-        let mut changed: Vec<&Cached> = self
+        // Entries and replies in the order they changed, within the budget.
+        enum Changed<'a> {
+            Entry(&'a FeedEntry),
+            Reply(&'a FeedReply),
+        }
+        let mut changed: Vec<(u64, Changed)> = self
             .entries
             .iter()
             .filter(|cached| cached.revision > after)
+            .map(|cached| (cached.revision, Changed::Entry(&cached.entry)))
+            .chain(
+                self.replies
+                    .iter()
+                    .filter(|held| held.revision > after)
+                    .map(|held| (held.revision, Changed::Reply(&held.reply))),
+            )
             .collect();
-        changed.sort_by_key(|cached| cached.revision);
-        let mut entries = Vec::new();
+        changed.sort_by_key(|(revision, _)| *revision);
+        let (mut entries, mut replies) = (Vec::new(), Vec::new());
         let mut text = 0;
         let mut revision = self.revision;
         let mut more = false;
-        for cached in changed {
-            text += cached.entry.text.len();
-            if !entries.is_empty() && text > PAGE_TEXT_BUDGET {
+        for (at, change) in changed {
+            text += match &change {
+                Changed::Entry(entry) => entry.text.len(),
+                Changed::Reply(reply) => reply.text.len(),
+            };
+            if !(entries.is_empty() && replies.is_empty()) && text > PAGE_TEXT_BUDGET {
                 more = true;
                 break;
             }
-            revision = cached.revision;
-            entries.push(cached.entry.clone());
+            revision = at;
+            match change {
+                Changed::Entry(entry) => entries.push(entry.clone()),
+                Changed::Reply(reply) => replies.push(reply.clone()),
+            }
         }
         if !more {
             revision = self.revision;
@@ -205,6 +353,7 @@ impl FeedCache {
             generation: self.generation,
             revision,
             entries,
+            replies,
             more,
         }
     }
@@ -258,12 +407,15 @@ mod tests {
             session_id: "S".into(),
             session_name: "tests".into(),
             folder: None,
+            branch: None,
             agent: "codex".into(),
             conversation_id: None,
             text: format!("reply {id}"),
             truncated: false,
             finished_at: at,
             position: None,
+            reply_to: None,
+            thread: None,
         }
     }
 
@@ -357,5 +509,63 @@ mod tests {
         assert!(kept.contains(&"pending"));
         assert!(!kept.contains(&"E0"));
         assert_eq!(cache.pending().len(), 1);
+    }
+
+    fn held_reply(id: &str, seq: u64, status: ReplyStatus) -> FeedReply {
+        FeedReply {
+            seq,
+            id: id.into(),
+            entry: "E1".into(),
+            thread: "E1".into(),
+            machine: "studio".into(),
+            session_id: "S".into(),
+            session_name: "fix-tests".into(),
+            folder: None,
+            agent: "codex".into(),
+            conversation_id: "c".into(),
+            text: "And the docs.".into(),
+            from: None,
+            status,
+            failure: None,
+            response: None,
+            created_at: 1,
+            status_at: 1,
+        }
+    }
+
+    #[test]
+    fn replies_are_held_newest_status_first_and_paged_as_they_change() {
+        let mut cache = FeedCache::default();
+        cache.merge(vec![entry("E1", Some(1), 1)], 0);
+        cache.merge_replies(vec![held_reply("R1", 2, ReplyStatus::Pending)]);
+        let first = cache.page(FeedStatus::Ready, None, None);
+        assert_eq!((first.entries.len(), first.replies.len()), (1, 1));
+
+        // An older read changes nothing; a newer status replaces it.
+        cache.merge_replies(vec![held_reply("R1", 1, ReplyStatus::Failed)]);
+        let same = cache.page(
+            FeedStatus::Ready,
+            Some(first.revision),
+            Some(first.generation),
+        );
+        assert!(same.replies.is_empty());
+        cache.merge_replies(vec![held_reply("R1", 3, ReplyStatus::Delivered)]);
+        let next = cache.page(
+            FeedStatus::Ready,
+            Some(first.revision),
+            Some(first.generation),
+        );
+        assert!(next.entries.is_empty());
+        assert_eq!(next.replies.len(), 1);
+        assert_eq!(next.replies[0].status, ReplyStatus::Delivered);
+
+        cache.clear();
+        let cleared = cache.page(
+            FeedStatus::Ready,
+            Some(next.revision),
+            Some(next.generation),
+        );
+        assert!(cleared.replies.is_empty());
+        assert_ne!(cleared.generation, next.generation);
     }
 }

@@ -178,6 +178,17 @@ reasoning, its tool calls with their input, and the tools' output (the `tool` ro
 A log line longer than 8 MiB is passed over. Text is cut at 64 KiB per part and otherwise left
 as written: the status service cleans it before it leaves the machine.
 
+## Replies written back
+
+A reply the user writes back to a feed entry goes into the agent the same way for every
+integration: the status service types it into the session with `session_submit` (a bracketed
+paste, then Enter), as if the user typed it. None of the three has a supported way in from
+outside: Claude Code and Codex take prompts only from their terminal (their headless modes
+would run a second process on the same conversation), and OpenCode's server port belongs to
+its own TUI. So nothing here is agent-specific beyond what's already read: the conversation id
+(`agent_turn.conversation_id`) the reply must still match, and the lifecycle that says the
+agent waits for input. The agent's next captured reply answers it (`reply_to`).
+
 Native input is capped at 1 MiB and never
 logged. Outside a Rakumux session hooks do nothing and never spawn a daemon. Errors emit a
 generic diagnostic and empty JSON with success; activity cannot approve/deny/continue work.

@@ -16,7 +16,8 @@ use crate::components::{
     auth::draw_auth_menu,
     dialogs::{
         draw_auth_code_dialog, draw_auth_email_dialog, draw_confirm_dialog,
-        draw_daemon_restart_dialog, draw_rename_dialog, draw_upgrade_dialog,
+        draw_daemon_restart_dialog, draw_feed_reply_dialog, draw_rename_dialog,
+        draw_upgrade_dialog,
     },
     folder_picker::draw_folder_picker,
     footer::draw_footer,
@@ -113,6 +114,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             draw_section_picker(f, app, picker, modal_area, &mut menu_hits)
         }
         AppMode::Renaming(dialog) => draw_rename_dialog(f, dialog, modal_area),
+        AppMode::FeedReply(dialog) => draw_feed_reply_dialog(f, dialog, modal_area),
         AppMode::Confirm(dialog) => draw_confirm_dialog(f, dialog, modal_area),
         AppMode::DaemonRestart(dialog) => draw_daemon_restart_dialog(f, dialog, modal_area),
         AppMode::Modal { state, in_session } => {
@@ -1988,12 +1990,15 @@ mod tests {
             session_id: session.into(),
             session_name: name.into(),
             folder: Some("repo".into()),
+            branch: None,
             agent: "claude-code".into(),
             conversation_id: None,
             text: text.into(),
             truncated: false,
             finished_at: now - minutes_ago * 60_000,
             position: None,
+            reply_to: None,
+            thread: None,
         }
     }
 
@@ -2006,6 +2011,7 @@ mod tests {
             generation: 1,
             revision: 1,
             entries,
+            replies: Vec::new(),
             more: false,
         }
     }
@@ -2044,16 +2050,26 @@ mod tests {
             "{wide}"
         );
         assert_eq!(list[2], "   ▁▁▁▁▁▁", "{wide}");
-        // The newest first: its session, folder and agent, and `sending`
-        // while it isn't uploaded; another machine's says where it's from.
-        assert!(list[4].contains("api · repo · claude"), "{wide}");
-        assert!(list[4].ends_with("sending · now"), "{wide}");
-        assert!(list[5].contains("Done: the parser handles"), "{wide}");
+        // The newest first, each a card: its session, agent and folder (no
+        // branch known) on the top border, then its age and `sending` while
+        // it isn't uploaded, `done` once it is.
+        assert!(list[4].starts_with(" ╭ api  claude · repo ─"), "{wide}");
+        assert!(list[4].contains(" now · "), "{wide}");
+        assert!(list[4].ends_with(" sending ╮"), "{wide}");
+        assert!(list[5].starts_with(" │ Done: the parser handles"), "{wide}");
+        assert!(list[7].starts_with(" ╰─"), "{wide}");
         assert!(
-            list[8].contains("nightly-build · repo · claude · on lab"),
+            list[8].starts_with(" ╭ nightly-build  claude · repo ─"),
             "{wide}"
         );
-        assert!(list[8].ends_with("5m"), "{wide}");
+        assert!(list[8].ends_with(" 5m · ● done ╮"), "{wide}");
+        // The border's corners line up with its sides.
+        let right = |row: &str| row.chars().count();
+        assert_eq!(
+            right(list[4].as_str()),
+            right(list[5].trim_end_matches(' ')),
+            "{wide}"
+        );
         assert!(!wide.contains('\u{1b}'), "{wide}");
         // The detail reads the selected reply whole; it runs here.
         assert!(wide.contains("Enter goes into its session"), "{wide}");
@@ -2064,8 +2080,51 @@ mod tests {
             narrow.lines().nth(1).unwrap().contains("≡ Feed"),
             "{narrow}"
         );
-        assert!(narrow.contains("api · repo · claude"), "{narrow}");
+        assert!(narrow.contains("api  claude · repo"), "{narrow}");
         assert!(narrow.contains("Run cargo test to check."), "{narrow}");
+    }
+
+    #[test]
+    fn a_card_names_the_branch_and_what_became_of_a_reply() {
+        use rakumux_sensagent::feed::{FeedReply, FeedStatus, ReplyStatus};
+        let mut answered = reply("E1", "Z", "parser", "lab-box", 3, "Fixed the parser.");
+        answered.branch = Some("fix/csv".into());
+        answered.conversation_id = Some("c".into());
+        let mut page = feed_page(FeedStatus::Ready, vec![answered]);
+        page.replies = vec![FeedReply {
+            seq: 2,
+            id: "R1".into(),
+            entry: "E1".into(),
+            thread: "E1".into(),
+            machine: "lab-box".into(),
+            session_id: "Z".into(),
+            session_name: "parser".into(),
+            folder: None,
+            agent: "claude-code".into(),
+            conversation_id: "c".into(),
+            text: "Now the docs.".into(),
+            from: None,
+            status: ReplyStatus::Delivered,
+            failure: None,
+            response: Some("E2".into()),
+            created_at: 1,
+            status_at: 1,
+        }];
+        let mut h = feed_harness(crate::app::testing::FakeAccount::with_feed(), Some(page));
+        let wide = render(&mut h.app, 160, 48);
+        let list = list_column(&wide, usize::from(crate::layout::sidebar_width(160)));
+        assert!(
+            list[4].starts_with(" ╭ parser  claude · fix/csv ─"),
+            "{wide}"
+        );
+        assert!(list[4].ends_with(" 3m · ✓ answered ╮"), "{wide}");
+        // Short of room, the status's word goes first: the mark stays.
+        let phone = render(&mut h.app, 45, 30);
+        let top = phone
+            .lines()
+            .find(|line| line.contains("╭ parser"))
+            .unwrap_or_else(|| panic!("{phone}"));
+        assert!(top.trim_end().ends_with("3m · ✓ ╮"), "{phone}");
     }
 
     #[test]

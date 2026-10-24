@@ -19,6 +19,8 @@ const FEED_PATH: &str = "/api/v1/feed";
 const FEED_ENTRIES_PATH: &str = "/api/v1/feed/entries";
 const FEED_MESSAGES_PATH: &str = "/api/v1/feed/messages";
 const FEED_TURN_PATH: &str = "/api/v1/feed/turn";
+const FEED_REPLIES_PATH: &str = "/api/v1/feed/replies";
+const FEED_REPLY_STATUS_PATH: &str = "/api/v1/feed/replies/status";
 /// The largest feed page read (`contracts/feed/page.schema.json`).
 pub(crate) const MAX_FEED_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ORIGIN_BYTES: usize = 2048;
@@ -35,6 +37,8 @@ pub struct CloudAIConfig {
     feed_entries: Url,
     feed_messages: Url,
     feed_turn: Url,
+    feed_replies: Url,
+    feed_reply_status: Url,
 }
 
 /// The account's feature switches, as the destination reports them.
@@ -89,6 +93,12 @@ pub(crate) enum FeedHttp<'a> {
     Messages(&'a [u8]),
     /// `GET /api/v1/feed/turn` with this query (`entry=…`).
     Turn(&'a str),
+    /// `POST /api/v1/feed/replies` with this reply.
+    ReplyUpload(&'a [u8]),
+    /// `GET /api/v1/feed/replies` with this query (`after=…`).
+    Replies(&'a str),
+    /// `POST /api/v1/feed/replies/status` with this status.
+    ReplyStatus(&'a [u8]),
 }
 
 /// A feed reply as received: the feed module decodes it against its contract.
@@ -145,6 +155,8 @@ impl CloudAIConfig {
             path(FEED_ENTRIES_PATH),
         );
         let (feed_messages, feed_turn) = (path(FEED_MESSAGES_PATH), path(FEED_TURN_PATH));
+        let (feed_replies, feed_reply_status) =
+            (path(FEED_REPLIES_PATH), path(FEED_REPLY_STATUS_PATH));
         endpoint.set_path(STATUS_PATH);
         Ok(Self {
             endpoint,
@@ -153,6 +165,8 @@ impl CloudAIConfig {
             feed_entries,
             feed_messages,
             feed_turn,
+            feed_replies,
+            feed_reply_status,
         })
     }
 }
@@ -332,9 +346,14 @@ impl CloudAIClient {
     ) -> Result<FeedHttpReply, CloudAIError> {
         cancel.check()?;
         let mut outgoing = match request {
-            FeedHttp::Upload(body) | FeedHttp::Messages(body) => {
+            FeedHttp::Upload(body)
+            | FeedHttp::Messages(body)
+            | FeedHttp::ReplyUpload(body)
+            | FeedHttp::ReplyStatus(body) => {
                 let url = match request {
                     FeedHttp::Messages(_) => &self.config.feed_messages,
+                    FeedHttp::ReplyUpload(_) => &self.config.feed_replies,
+                    FeedHttp::ReplyStatus(_) => &self.config.feed_reply_status,
                     _ => &self.config.feed_entries,
                 };
                 let mut outgoing = Request::new(Method::POST, url.clone());
@@ -349,9 +368,10 @@ impl CloudAIClient {
                 *outgoing.body_mut() = Some(Body::sized(Cursor::new(body.to_vec()), length));
                 outgoing
             }
-            FeedHttp::Page(query) | FeedHttp::Turn(query) => {
+            FeedHttp::Page(query) | FeedHttp::Turn(query) | FeedHttp::Replies(query) => {
                 let mut url = match request {
                     FeedHttp::Turn(_) => self.config.feed_turn.clone(),
+                    FeedHttp::Replies(_) => self.config.feed_replies.clone(),
                     _ => self.config.feed.clone(),
                 };
                 url.set_query(Some(query));

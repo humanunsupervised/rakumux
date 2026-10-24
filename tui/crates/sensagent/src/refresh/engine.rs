@@ -164,6 +164,8 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     settings_due: Duration,
     /// Where the feed remembers how far each chat was uploaded.
     chat_cursors: Option<std::path::PathBuf>,
+    /// Whether replies written elsewhere are typed into this machine's sessions.
+    accept_remote: Option<crate::feed::AcceptRemote>,
 }
 
 impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> {
@@ -189,7 +191,21 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             turn_settings: None,
             settings_due: Duration::ZERO,
             chat_cursors: None,
+            accept_remote: None,
         }
+    }
+
+    /// Type replies written on rakumux.com or other machines into this
+    /// machine's sessions while `read` says so (it's read every few seconds);
+    /// without it, never.
+    pub fn with_remote_replies(mut self, read: crate::feed::AcceptRemote) -> Self {
+        self.accept_remote = Some(read);
+        self
+    }
+
+    /// The setting for replies written elsewhere, if any.
+    pub(crate) fn accept_remote(&self) -> Option<crate::feed::AcceptRemote> {
+        self.accept_remote.clone()
     }
 
     /// Remember how far each chat was uploaded in `path`, so a restarted

@@ -6,7 +6,8 @@ use crate::auth::{
 };
 use crate::cloud::{Cancellation, CloudAIClient, CloudAIError, FeedHttp};
 
-use super::wire::{self, FeedFailure, FeedRequest, PageRead, TurnRead};
+use super::cache::FeedReply;
+use super::wire::{self, FeedFailure, FeedRequest, PageRead, RepliesRead, TurnRead};
 
 /// One feed request, run off the owner thread. It borrows the bearer only for
 /// the one request, like a features read.
@@ -29,6 +30,10 @@ pub(crate) enum FeedResult {
     Stored,
     /// A turn read.
     Turn(TurnRead),
+    /// A reply as stored (after an upload or a status change).
+    Reply(FeedReply),
+    /// The account's changed replies.
+    Replies(RepliesRead),
 }
 
 /// A finished feed request, tagged with the account revision it was made for.
@@ -44,13 +49,20 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
         let query = match &self.request {
             FeedRequest::Read { after } => FeedRequest::query(*after),
             FeedRequest::Turn { entry, after } => FeedRequest::turn_query(entry, *after),
-            FeedRequest::Upload { .. } | FeedRequest::Messages { .. } => String::new(),
+            FeedRequest::Replies { after } => FeedRequest::replies_query(*after),
+            FeedRequest::Upload { .. }
+            | FeedRequest::Messages { .. }
+            | FeedRequest::ReplyUpload { .. }
+            | FeedRequest::ReplyStatus { .. } => String::new(),
         };
         let http = match &self.request {
             FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
             FeedRequest::Read { .. } => FeedHttp::Page(&query),
             FeedRequest::Messages { body } => FeedHttp::Messages(body),
             FeedRequest::Turn { .. } => FeedHttp::Turn(&query),
+            FeedRequest::ReplyUpload { body } => FeedHttp::ReplyUpload(body),
+            FeedRequest::Replies { .. } => FeedHttp::Replies(&query),
+            FeedRequest::ReplyStatus { body } => FeedHttp::ReplyStatus(body),
         };
         let outcome = self
             .account
@@ -64,6 +76,10 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                         wire::stored(&reply).map(|_| FeedResult::Stored)
                     }
                     FeedRequest::Turn { .. } => wire::turn(&reply).map(FeedResult::Turn),
+                    FeedRequest::ReplyUpload { .. } | FeedRequest::ReplyStatus { .. } => {
+                        wire::reply(&reply).map(FeedResult::Reply)
+                    }
+                    FeedRequest::Replies { .. } => wire::replies(&reply).map(FeedResult::Replies),
                 },
                 Some(Err(error)) => Err(transport(error)),
                 // The sign-in changed meanwhile; the owner fences this completion.
