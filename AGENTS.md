@@ -195,6 +195,13 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    session and conversation is uploaded with `reply_to`, and the cloud links it (`response`,
    `thread`). Pages to TUIs carry the replies (`FeedPage.replies`), and the Feed detail shows an
    entry's thread under its turn.
+   **Session list** (`feed/sessions.rs`, `SessionSync`): under the same switch the service
+   uploads the machine's whole list of sessions (`POST /api/v1/feed/sessions`, at most 200, never
+   private or dead ones): what the TUI's Status and Folders tabs group by (name, folder name,
+   branch, agent, `status`, `lifecycle`, activity `phase`, the conversation shown, `pinned`,
+   `last_active_at`), when it changes (at most every 3 s) and every 60 s meanwhile, so
+   rakumux.com's Status and Folder pages list the account's sessions, show a session's
+   conversation from the uploaded chats, and tell a machine that's away.
 
 ## File structure
 

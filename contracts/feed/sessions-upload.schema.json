@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:sessions-upload",
+  "title": "POST /api/v1/feed/sessions request",
+  "description": "A machine's whole list of sessions now, replacing what was stored for it: a session left out is gone. Sent when the list changes and every minute meanwhile, so a machine that stops sending is known to be away. `at` is the machine's clock (Unix ms).",
+  "x-maxBodyBytes": 262144,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "machine", "sessions", "at"],
+  "properties": {
+    "version": { "const": 1 },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "sessions": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/sessionState" }
+    },
+    "at": { "$ref": "urn:rakumux:feed:v1:common#/$defs/timestampMs" }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:sessions-stored",
+  "title": "POST /api/v1/feed/sessions success",
+  "description": "How many sessions are stored for the machine now.",
+  "x-maxBodyBytes": 1024,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "stored"],
+  "properties": {
+    "version": { "const": 1 },
+    "stored": { "type": "integer", "minimum": 0, "maximum": 200 }
+  }
+}

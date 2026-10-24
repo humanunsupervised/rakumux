@@ -21,6 +21,7 @@ const FEED_MESSAGES_PATH: &str = "/api/v1/feed/messages";
 const FEED_TURN_PATH: &str = "/api/v1/feed/turn";
 const FEED_REPLIES_PATH: &str = "/api/v1/feed/replies";
 const FEED_REPLY_STATUS_PATH: &str = "/api/v1/feed/replies/status";
+const FEED_SESSIONS_PATH: &str = "/api/v1/feed/sessions";
 /// The largest feed page read (`contracts/feed/page.schema.json`).
 pub(crate) const MAX_FEED_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ORIGIN_BYTES: usize = 2048;
@@ -39,6 +40,7 @@ pub struct CloudAIConfig {
     feed_turn: Url,
     feed_replies: Url,
     feed_reply_status: Url,
+    feed_sessions: Url,
 }
 
 /// The account's feature switches, as the destination reports them.
@@ -99,6 +101,8 @@ pub(crate) enum FeedHttp<'a> {
     Replies(&'a str),
     /// `POST /api/v1/feed/replies/status` with this status.
     ReplyStatus(&'a [u8]),
+    /// `POST /api/v1/feed/sessions` with this machine's session list.
+    Sessions(&'a [u8]),
 }
 
 /// A feed reply as received: the feed module decodes it against its contract.
@@ -157,6 +161,7 @@ impl CloudAIConfig {
         let (feed_messages, feed_turn) = (path(FEED_MESSAGES_PATH), path(FEED_TURN_PATH));
         let (feed_replies, feed_reply_status) =
             (path(FEED_REPLIES_PATH), path(FEED_REPLY_STATUS_PATH));
+        let feed_sessions = path(FEED_SESSIONS_PATH);
         endpoint.set_path(STATUS_PATH);
         Ok(Self {
             endpoint,
@@ -167,6 +172,7 @@ impl CloudAIConfig {
             feed_turn,
             feed_replies,
             feed_reply_status,
+            feed_sessions,
         })
     }
 }
@@ -349,11 +355,13 @@ impl CloudAIClient {
             FeedHttp::Upload(body)
             | FeedHttp::Messages(body)
             | FeedHttp::ReplyUpload(body)
-            | FeedHttp::ReplyStatus(body) => {
+            | FeedHttp::ReplyStatus(body)
+            | FeedHttp::Sessions(body) => {
                 let url = match request {
                     FeedHttp::Messages(_) => &self.config.feed_messages,
                     FeedHttp::ReplyUpload(_) => &self.config.feed_replies,
                     FeedHttp::ReplyStatus(_) => &self.config.feed_reply_status,
+                    FeedHttp::Sessions(_) => &self.config.feed_sessions,
                     _ => &self.config.feed_entries,
                 };
                 let mut outgoing = Request::new(Method::POST, url.clone());

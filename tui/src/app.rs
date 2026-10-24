@@ -805,7 +805,7 @@ impl App {
                 };
                 let note = match feature {
                     AccountFeature::AiSummaries => "A short AI summary of each agent chat under the session's name, made once the agent has written 5 messages or finished, then when you ask (the ↻ on a hovered summary, or `s`). Your prompt and the agent's messages since are sent to rakumux.com to write it; private sessions never are. Without one the line shows your last message. Saved to your account, as on rakumux.com/features.",
-                    AccountFeature::AgentFeed => "The Feed tab: what your agents said when they finished a turn, from every machine signed in to your account, newest first. Each finished reply is sent to rakumux.com, keys and tokens masked, private sessions never, and kept for 30 days. Saved to your account, as on rakumux.com/features.",
+                    AccountFeature::AgentFeed => "The Feed tab: what your agents said when they finished a turn, from every machine signed in to your account, newest first. Each finished reply and its chat are sent to rakumux.com, keys and tokens masked, private sessions never, and kept for 30 days; so is the list of this machine's sessions (names, folder names, branches, agents and what they're doing), for rakumux.com's Status and Folder pages. Saved to your account, as on rakumux.com/features.",
                 };
                 return SettingRow {
                     section: item.section(),

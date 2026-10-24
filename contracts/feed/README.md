@@ -18,6 +18,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/replies` | [reply-upload](reply-upload.schema.json) | [reply](reply.schema.json) |
 | `GET /api/v1/feed/replies?after=SEQ&limit=N` | query only | [replies](replies.schema.json), increasing seq |
 | `POST /api/v1/feed/replies/status` | [reply-status](reply-status.schema.json) | [reply](reply.schema.json) |
+| `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
 
 - **Upload:** `{version:1, machine, entries}` with 1–50 entries. Each entry is
   `{id, session:{id, name, folder?, branch?}, agent, conversation_id?, text, truncated,
@@ -63,6 +64,15 @@ conformance tests, not an HTTP server, database or local runtime.
   agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as
   the reply's `response`; page entries carry `reply_to` and `thread`. Machines take replies
   written elsewhere only when the user turned that on there (`not_accepted` otherwise).
+- **Sessions:** a machine's whole list of sessions now (`sessions-upload`, `{version:1,
+  machine, sessions, at}`, at most 200; `sessionState` in common), replacing what was stored for
+  it: a session left out is gone. Sent when the list changes and every minute meanwhile, so a
+  machine that stops sending is known to be away. Each session says what the TUI's Status and
+  Folders tabs group by: its name, folder name and branch, agent, `status` (`live` or
+  `exited`; dead sessions aren't listed), `lifecycle`, the agent's `phase` when it reports one,
+  the `conversation_id` it shows, `pinned` and `last_active_at`. Private sessions are never
+  listed. The answer says how many are stored (`sessions-stored`). Kept while the account's
+  Feed switch is on.
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
   message per code: `invalid_request` (400, or 413 for an oversized body), `unauthenticated`
   (401), `forbidden` (403: the account's Feed switch is off), `rate_limited` (429) and

@@ -42,11 +42,7 @@ impl SessionMeta {
         Self {
             name: view.name.clone(),
             folder: folder_name(&view.scope),
-            branch: view
-                .git
-                .as_ref()
-                .and_then(|git| git.branch.as_deref())
-                .and_then(branch_name),
+            branch: branch_of(view),
             private: view.private,
         }
     }
@@ -64,6 +60,14 @@ fn branch_name(branch: &str) -> Option<String> {
 /// `view`'s folder name, as the feed shows it.
 pub(super) fn folder_of(view: &SessionView) -> Option<String> {
     folder_name(&view.scope)
+}
+
+/// The branch `view`'s agent works on, as the feed shows it.
+pub(super) fn branch_of(view: &SessionView) -> Option<String> {
+    view.git
+        .as_ref()
+        .and_then(|git| git.branch.as_deref())
+        .and_then(branch_name)
 }
 
 fn folder_name(scope: &ScopeRoot) -> Option<String> {
@@ -285,7 +289,8 @@ impl FeedSync {
                 FeedResult::Stored
                 | FeedResult::Turn(_)
                 | FeedResult::Reply(_)
-                | FeedResult::Replies(_),
+                | FeedResult::Replies(_)
+                | FeedResult::SessionsStored(_),
             ) => {}
             Err(failure) => self.fail(failure, now),
         }

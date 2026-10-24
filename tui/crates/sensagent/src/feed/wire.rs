@@ -66,6 +66,8 @@ pub(crate) enum FeedRequest {
     Replies { after: u64 },
     /// Say whether a reply was typed into its session, as `body`.
     ReplyStatus { body: Vec<u8> },
+    /// Upload this machine's whole session list, as `body`.
+    Sessions { body: Vec<u8> },
 }
 
 impl FeedRequest {
@@ -242,6 +244,50 @@ pub(crate) fn stored(reply: &FeedHttpReply) -> Result<u32, FeedFailure> {
         return Err(FeedFailure::Invalid);
     }
     Ok(stored.accepted)
+}
+
+#[derive(Serialize)]
+struct SessionsUpload<'a> {
+    version: u8,
+    machine: &'a str,
+    sessions: &'a [super::sessions::SessionState],
+    at: i64,
+}
+
+/// This machine's session list as `sessions-upload`; `None` only when it
+/// can't be encoded.
+pub(crate) fn sessions_upload(
+    machine: &str,
+    sessions: &[super::sessions::SessionState],
+    at: i64,
+) -> Option<FeedRequest> {
+    let body = serde_json::to_vec(&SessionsUpload {
+        version: 1,
+        machine,
+        sessions,
+        at: at.max(1_577_836_800_000),
+    })
+    .ok()?;
+    Some(FeedRequest::Sessions { body })
+}
+
+#[derive(Deserialize)]
+struct SessionsStored {
+    version: u8,
+    stored: u32,
+}
+
+/// How many sessions rakumux.com holds for this machine now.
+pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<u32, FeedFailure> {
+    if reply.status != 200 {
+        return Err(failure(reply));
+    }
+    let stored: SessionsStored =
+        serde_json::from_slice(&reply.body).map_err(|_| FeedFailure::Invalid)?;
+    if stored.version != 1 || stored.stored > 200 {
+        return Err(FeedFailure::Invalid);
+    }
+    Ok(stored.stored)
 }
 
 #[derive(Deserialize)]

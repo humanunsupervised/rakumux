@@ -25,7 +25,7 @@ use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
     ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
-    FeedResult, FeedSync, ReplySync, ReplyWork, TurnRead,
+    FeedResult, FeedSync, ReplySync, ReplyWork, SessionSync, TurnRead,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -93,6 +93,8 @@ enum Message {
     Transcript(SessionId, Result<TranscriptPage, ErrorCode>),
     /// A chat upload finished.
     ChatDone(FeedCompletion),
+    /// The session list's upload finished.
+    SessionsDone(FeedCompletion),
     /// A replies read or a reply's status report finished.
     ReplyDone(FeedCompletion),
     /// A reply was typed into its session, or the daemon refused it.
@@ -125,6 +127,8 @@ enum Work<A, C> {
     Turn(FeedJob<A, C>, Sender<Result<TurnRead, FeedFailure>>),
     /// Read replies, or report one's status.
     ReplyRequest(FeedJob<A, C>),
+    /// Upload this machine's session list.
+    SessionsUpload(FeedJob<A, C>),
     /// Type a reply into its session.
     Submit(String, SessionId, String),
     /// Store a reply written in a TUI, then answer it.
@@ -432,6 +436,7 @@ fn own<S, A, C>(
     let mut feed = FeedSync::new(machine.clone());
     let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
     let mut replies = ReplySync::new(machine.clone(), refresher.accept_remote());
+    let mut sessions = SessionSync::new(machine.clone());
     loop {
         let now = origin.elapsed();
         if now >= next_tick {
@@ -446,6 +451,7 @@ fn own<S, A, C>(
             follow_feed(&refresher, &mut feed, work, now);
             follow_chats(&refresher, &mut chats, work, now);
             follow_replies(&refresher, &mut replies, work, now);
+            follow_sessions(&refresher, &mut sessions, work, now);
             next_tick = now.saturating_add(TICK);
         }
         let message = match inbox.recv_timeout(next_tick.saturating_sub(origin.elapsed())) {
@@ -461,6 +467,7 @@ fn own<S, A, C>(
                 let after = feed.connected(&views);
                 chats.connected(&views);
                 replies.connected(&views);
+                sessions.connected(&views);
                 let _ = work.send(Work::Replies(after));
             }
             Message::Event(event) => {
@@ -473,17 +480,28 @@ fn own<S, A, C>(
                         feed.observe(session);
                         chats.observe(session);
                         replies.observe(session);
+                        sessions.observe(session);
                     }
                     SessionEvent::Removed => {
                         feed.forget(&event.session_id);
                         chats.forget(&event.session_id);
                         replies.forget(&event.session_id);
+                        sessions.forget(&event.session_id);
                     }
                     _ => {}
                 }
                 let _ = refresher.apply_event(&event, now);
                 follow_chats(&refresher, &mut chats, work, now);
                 follow_replies(&refresher, &mut replies, work, now);
+                follow_sessions(&refresher, &mut sessions, work, now);
+            }
+            Message::SessionsDone(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::SessionsStored(stored) => Ok(stored),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                sessions.done(current, outcome, now);
             }
             Message::ReplyDone(completion) => {
                 let current = refresher.is_current(completion.revision);
@@ -792,6 +810,31 @@ fn follow_replies<S, A, C>(
     }
 }
 
+/// Upload the session list when it's due. Only while signed in with the
+/// account's Feed switch on.
+fn follow_sessions<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    sessions: &mut SessionSync,
+    work: &Sender<Work<A, C>>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled = refresher.account().is_some() && refresher.feed_switch() == Some(true);
+    sessions.set_enabled(enabled, now);
+    let Some(request) = sessions.next_request(now, wall_ms()) else {
+        return;
+    };
+    match refresher.feed_job(request) {
+        Some(job) => {
+            let _ = work.send(Work::SessionsUpload(job));
+        }
+        None => sessions.done(false, Err(FeedFailure::Unauthorized), now),
+    }
+}
+
 /// The wall clock in Unix milliseconds, as replies' times are.
 fn wall_ms() -> i64 {
     SystemTime::now()
@@ -878,6 +921,16 @@ where
                     Ok(completion) => Message::ChatDone(completion),
                     // Its chat is tried again rather than waiting forever.
                     Err(_) => Message::ChatDone(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
+            }
+            Ok(Work::SessionsUpload(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::SessionsDone(completion),
+                    Err(_) => Message::SessionsDone(FeedCompletion {
                         revision,
                         outcome: Err(FeedFailure::Unavailable(None)),
                     }),

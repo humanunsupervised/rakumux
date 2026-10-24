@@ -1,0 +1,50 @@
+{
+  "upload": {
+    "valid": [
+      {
+        "version": 1,
+        "machine": "studio",
+        "at": 1761220000000,
+        "sessions": [
+          {
+            "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+            "name": "fix-tests",
+            "folder": "rakumux",
+            "branch": "web-session",
+            "agent": "claude-code",
+            "status": "live",
+            "lifecycle": "working",
+            "phase": "waiting_for_response",
+            "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+            "pinned": true,
+            "last_active_at": 1761219990000
+          },
+          {
+            "id": "01K89ZQ4D2F6H8J0K2M4N6P8R1",
+            "name": "shell",
+            "status": "exited",
+            "lifecycle": "none",
+            "pinned": false,
+            "last_active_at": 1761210000000
+          }
+        ]
+      },
+      { "version": 1, "machine": "studio", "at": 1761220000000, "sessions": [] }
+    ],
+    "invalid": [
+      { "note": "a dead session", "session": { "status": "dead" } },
+      { "note": "an unknown lifecycle", "session": { "lifecycle": "sleeping" } },
+      { "note": "an unknown phase", "session": { "phase": "thinking" } },
+      { "note": "a folder path", "session": { "folder": "/home/me/rakumux" } },
+      { "note": "a cwd", "session": { "cwd": "/home/me/rakumux" } },
+      { "note": "no pinned", "session": { "pinned": null } },
+      { "note": "a name with a newline", "session": { "name": "fix\ntests" } },
+      { "note": "no machine", "patch": { "machine": null } },
+      { "note": "a user id", "patch": { "user_id": "user_1" } }
+    ]
+  },
+  "stored": {
+    "valid": [{ "version": 1, "stored": 2 }, { "version": 1, "stored": 0 }],
+    "invalid": [{ "version": 1, "stored": -1 }, { "version": 1 }, { "version": 1, "stored": 201 }]
+  }
+}

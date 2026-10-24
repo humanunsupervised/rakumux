@@ -34,6 +34,8 @@ pub(crate) enum FeedResult {
     Reply(FeedReply),
     /// The account's changed replies.
     Replies(RepliesRead),
+    /// This machine's session list was stored: how many sessions it holds.
+    SessionsStored(u32),
 }
 
 /// A finished feed request, tagged with the account revision it was made for.
@@ -53,7 +55,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::Upload { .. }
             | FeedRequest::Messages { .. }
             | FeedRequest::ReplyUpload { .. }
-            | FeedRequest::ReplyStatus { .. } => String::new(),
+            | FeedRequest::ReplyStatus { .. }
+            | FeedRequest::Sessions { .. } => String::new(),
         };
         let http = match &self.request {
             FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
@@ -63,6 +66,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::ReplyUpload { body } => FeedHttp::ReplyUpload(body),
             FeedRequest::Replies { .. } => FeedHttp::Replies(&query),
             FeedRequest::ReplyStatus { body } => FeedHttp::ReplyStatus(body),
+            FeedRequest::Sessions { body } => FeedHttp::Sessions(body),
         };
         let outcome = self
             .account
@@ -80,6 +84,9 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                         wire::reply(&reply).map(FeedResult::Reply)
                     }
                     FeedRequest::Replies { .. } => wire::replies(&reply).map(FeedResult::Replies),
+                    FeedRequest::Sessions { .. } => {
+                        wire::sessions_stored(&reply).map(FeedResult::SessionsStored)
+                    }
                 },
                 Some(Err(error)) => Err(transport(error)),
                 // The sign-in changed meanwhile; the owner fences this completion.
