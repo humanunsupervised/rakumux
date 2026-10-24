@@ -45,22 +45,22 @@ pub(crate) struct Candidate {
     pub(crate) stamp: SourceStamp,
     /// Output or activity changed since `stamp`.
     pub(crate) dirty: bool,
-    /// The agent just finished a turn (native lifecycle `Done`), so a new stamp should
-    /// be described now rather than after the per-session interval.
+    /// The agent just finished a turn (native lifecycle `Done`).
     pub(crate) finished: bool,
     /// The daemon follows the agent's turn: its stamps advance only at the turn's
-    /// trigger points, each described now (see [`TurnSettings`]).
+    /// trigger points (see [`TurnSettings`]).
     pub(crate) follows_turn: bool,
+    /// The followed turn: its chat and how many messages the agent wrote.
+    pub(crate) turn: Option<AgentTurn>,
 }
 
-/// When an agent's turn gets an AI summary, and from what (`sessions.ai_summary` in
-/// the TUI's `config.json`). Without a followed turn (another program, an older
-/// daemon), terminal output is summarized as before.
+/// AI summaries of agents' turns (`sessions.ai_summary` in the TUI's
+/// `config.json`). Without a followed turn (another program, an older daemon),
+/// terminal output is summarized, when asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TurnSettings {
-    /// While the agent works: a summary when the user gives it a prompt, then each
-    /// time it has written this many more messages. Waiting for the user and the
-    /// final reply always get one, the reply from the prompt and every message.
+    /// A chat's one automatic summary is made once its agent has written this
+    /// many messages, or when its turn finishes sooner.
     pub every: u32,
     /// The newest messages a working turn's summary reads, after the prompt.
     pub recent: u32,
@@ -139,7 +139,7 @@ impl Facts {
             private: view.private,
             lifecycle: view.lifecycle,
             reported: view.reported.clone(),
-            turn: view.agent_turn.filter(|_| live),
+            turn: view.agent_turn.clone().filter(|_| live),
         }
     }
 
@@ -148,7 +148,7 @@ impl Facts {
     }
 
     pub(super) fn progress(&self, every: u32) -> Progress {
-        let Some(turn) = self.turn else {
+        let Some(turn) = &self.turn else {
             return Progress::Lifecycle(self.lifecycle);
         };
         let state = match self.lifecycle {
@@ -250,7 +250,10 @@ impl SourceTracker {
                 }
                 return Ok(SourceUpdate::Unchanged);
             }
-            SessionEvent::Unknown => return Ok(SourceUpdate::Unchanged),
+            // Replies go to the feed, not the AI status source.
+            SessionEvent::Reply { .. } | SessionEvent::Unknown => {
+                return Ok(SourceUpdate::Unchanged)
+            }
             SessionEvent::Exited { .. }
             | SessionEvent::Lifecycle { .. }
             | SessionEvent::Reported { .. } => {}
@@ -355,10 +358,12 @@ impl SourceTracker {
                         }
                 ),
                 follows_turn: tracked.facts.follows_turn(),
+                turn: tracked.facts.turn.clone(),
             })
     }
 
     /// A tracked session's current stamp.
+    #[cfg(test)]
     pub fn stamp(&self, session: &SessionId) -> Option<SourceStamp> {
         self.sessions.get(session).map(|tracked| tracked.stamp)
     }
@@ -368,6 +373,14 @@ impl SourceTracker {
         self.sessions
             .get(session)
             .is_some_and(|tracked| tracked.dirty)
+    }
+
+    /// Make the next `advance` fold a new revision even without new output: a
+    /// summary was asked for, and the last one's text mustn't answer it.
+    pub fn freshen(&mut self, session: &SessionId) {
+        if let Some(tracked) = self.sessions.get_mut(session) {
+            tracked.dirty |= tracked.facts.live;
+        }
     }
 
     /// Fold coalesced output/phase changes into one new revision. Call only when the

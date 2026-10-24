@@ -44,6 +44,8 @@ pub(crate) enum Op {
     ProjectAdd,
     ProjectRemove,
     ProjectRelocate,
+    ReplyCapture,
+    ReplyList,
 }
 
 impl Op {
@@ -75,6 +77,8 @@ impl Op {
             Op::ProjectAdd => "project.add",
             Op::ProjectRemove => "project.remove",
             Op::ProjectRelocate => "project.relocate",
+            Op::ReplyCapture => "reply.capture",
+            Op::ReplyList => "reply.list",
         }
     }
 
@@ -99,6 +103,7 @@ impl Op {
                 | Op::ProjectAdd
                 | Op::ProjectRemove
                 | Op::ProjectRelocate
+                | Op::ReplyCapture
         )
     }
 }
@@ -147,6 +152,7 @@ pub(crate) fn authorize(
         Op::ProjectAdd | Op::ProjectRemove | Op::ProjectRelocate => {
             Err(denied(op, "folders are managed by the user"))
         }
+        Op::ReplyCapture | Op::ReplyList => Err(denied(op, "agent replies are for user clients")),
         Op::Kill | Op::Delete | Op::Revive | Op::Send | Op::Submit | Op::Attach => Err(denied(
             op,
             "agent control of other sessions arrives in a later release",

@@ -54,6 +54,16 @@ impl Icons {
         }
     }
 
+    /// Marks the list's Feed tab: what agents said when they finished.
+    pub fn feed(self) -> &'static str {
+        match self {
+            Icons::Plain => "≡",
+            Icons::Emoji => "📰",
+            // nf-fa-rss
+            Icons::Nerd => "\u{f09e}",
+        }
+    }
+
     /// Marks the list's Status tab: what sessions are doing.
     pub fn status(self) -> &'static str {
         match self {

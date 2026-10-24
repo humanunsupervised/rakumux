@@ -1,13 +1,14 @@
-//! The Rakumux account and AI session descriptions. A per-home service
-//! (`rakumux status-service`, `rakumux_sensagent::service`) holds the
-//! sign-in, follows the daemon's sessions and describes them; the TUI and
-//! `rakumux account` are its clients. It starts on demand: when someone
-//! signs in, or when this home has a saved account.
+//! The Rakumux account, AI session descriptions and the agent feed. A
+//! per-home service (`rakumux status-service`, `rakumux_sensagent::service`)
+//! holds the sign-in, follows the daemon's sessions, describes them and
+//! keeps the feed; the TUI and `rakumux account` are its clients. It starts
+//! on demand: when someone signs in, or when this home has a saved account.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
+use rakumux_sensagent::feed::{FeedPage, FeedStatus};
 use rakumux_sensagent::owner::protocol::{OwnerState, SignInReason, SignInView, StatusLine};
 use rakumux_sensagent::owner::{OwnerClient, OwnerError, OwnerLayout};
 use rakumux_sensagent::service::{self, ServiceConfig, ServiceError};
@@ -26,15 +27,18 @@ pub struct Account {
     /// The account's AI session summaries switch (rakumux.com/features);
     /// `None` until read.
     pub summaries: Option<bool>,
+    /// The account's Feed switch (rakumux.com/features); `None` until read.
+    pub feed: Option<bool>,
 }
 
 impl Account {
     fn from_state(state: OwnerState) -> Option<Self> {
-        let summaries = state.summaries;
+        let (summaries, feed) = (state.summaries, state.feed);
         state.account.map(|account| Self {
             email: account.email,
             subject: account.subject,
             summaries,
+            feed,
         })
     }
 
@@ -61,6 +65,26 @@ pub trait AccountAccess: Send + Sync {
     /// The AI descriptions of `sessions` (at most [`MAX_SESSIONS`]), in
     /// order; empty when the service isn't running.
     fn descriptions(&self, sessions: &[SessionId]) -> Result<Vec<StatusLine>, String>;
+    /// The feed entries that changed after `after` for a client holding
+    /// `generation`. Asking says the feed is shown (the service reads it
+    /// from rakumux.com more often). Starts the service only when this home
+    /// has a saved account; signed out without one.
+    fn feed(&self, after: Option<u64>, generation: Option<u64>) -> Result<FeedPage, String>;
+    /// Make a new AI summary of `session` now (the refresh icon or `s`). Starts
+    /// the service only when this home has a saved account; signed out without
+    /// one, it does nothing.
+    fn summarize(&self, session: &SessionId) -> Result<(), String>;
+}
+
+/// The feed of a home whose service isn't running: signed out.
+pub fn signed_out_feed() -> FeedPage {
+    FeedPage {
+        status: FeedStatus::SignedOut,
+        generation: 0,
+        revision: 0,
+        entries: Vec::new(),
+        more: false,
+    }
 }
 
 /// The service of this machine's Rakumux home, started from `program`
@@ -159,6 +183,19 @@ impl AccountAccess for LocalAccount {
         Ok(self
             .with(false, |client| client.statuses(sessions))?
             .unwrap_or_default())
+    }
+
+    fn feed(&self, after: Option<u64>, generation: Option<u64>) -> Result<FeedPage, String> {
+        Ok(self
+            .with(self.has_saved_account(), |client| {
+                client.feed(after, generation)
+            })?
+            .unwrap_or_else(signed_out_feed))
+    }
+
+    fn summarize(&self, session: &SessionId) -> Result<(), String> {
+        self.with(self.has_saved_account(), |client| client.summarize(session))
+            .map(|_| ())
     }
 }
 
@@ -289,5 +326,6 @@ mod tests {
             Ok(vec![])
         );
         assert_eq!(account.sign_in_status(), Ok(SignInView::Idle));
+        assert_eq!(account.feed(None, None), Ok(signed_out_feed()));
     }
 }

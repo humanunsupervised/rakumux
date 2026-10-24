@@ -126,14 +126,31 @@ list shows under the session's name (the user's message by default).
   from where it was last read, at most 256 KiB at a time.
 - **The turn:** the daemon also keeps the agent's current turn: the user's last prompt and
   every message the agent wrote since (reasoning, replies, tool calls), each flattened to one
-  line of at most 600 characters, the newest 100. `SessionView.agent_turn` counts them;
-  `session_turn` (user callers only) returns them.
+  line of at most 600 characters, the newest 100. `SessionView.agent_turn` counts them and
+  names the conversation (Claude Code's, or Codex's thread); `session_turn` (user callers
+  only) returns them.
 - **Where it goes:** the lines reach the daemon's clients like the rest of the session's view
   (the TUI, `rakumux-api` and so the phone app). The turn goes only to user clients that ask:
-  the AI status service, which, while you're signed in and share the folder, summarizes it
-  (the prompt and the newest 10 messages while the agent works, every 5 messages; the prompt
-  and every message at its final reply; `sessions.ai_summary` in `config.json`).
- Native input is capped at 1 MiB and never
+  the AI status service, which, while you're signed in and share the folder, makes one
+  summary per conversation, once its agent has written 5 messages or when its turn finishes
+  sooner (the prompt and the newest 10 messages; at a final reply every message that fits;
+  `sessions.ai_summary` in `config.json`), and others only when asked (the ↻ on a
+  description, or `s`).
+
+## Replies for the feed
+
+The same follower keeps the current turn's **reply** whole (`Reply`, at most 32 KiB): for
+Claude Code, the main conversation's text after its last tool call (a prompt or a tool call
+starts it over; one text block per log entry, keyed by the entry's `uuid`); for Codex, the
+`task_complete` event's `last_agent_message` (keyed by its `turn_id`; a `user_message` or
+`task_started` starts it over). The control layer takes it only while reply capture is on (the
+status service turns it on for an account whose Feed switch is on), when the session turns
+`Done` after it was seen working, from a read of the log made after that; a key already
+captured is never captured again. See the protocol section of `AGENTS.md` (`reply_capture`,
+`reply_list`, `replies` subscriptions). The hook adapters still forward metadata only.
+OpenCode has no reply yet.
+
+Native input is capped at 1 MiB and never
 logged. Outside a Rakumux session hooks do nothing and never spawn a daemon. Errors emit a
 generic diagnostic and empty JSON with success; activity cannot approve/deny/continue work.
 

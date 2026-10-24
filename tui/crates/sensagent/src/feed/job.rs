@@ -1,0 +1,90 @@
+use std::fmt;
+use std::sync::Arc;
+
+use crate::auth::{
+    AccessTokenLease, AccountService, CredentialRevision, CredentialStore, SystemClock, WallClock,
+};
+use crate::cloud::{Cancellation, CloudAIClient, CloudAIError, FeedHttp};
+
+use super::wire::{self, FeedFailure, FeedRequest, PageRead};
+
+/// One feed request, run off the owner thread. It borrows the bearer only for
+/// the one request, like a features read.
+pub struct FeedJob<A, C = SystemClock> {
+    pub(crate) account: Arc<AccountService<A, C>>,
+    pub(crate) cloud: Arc<CloudAIClient>,
+    pub(crate) lease: AccessTokenLease,
+    pub(crate) revision: CredentialRevision,
+    pub(crate) request: FeedRequest,
+}
+
+/// What a feed request brought back.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum FeedResult {
+    /// The seq of each uploaded id.
+    Accepted(Vec<(String, u64)>),
+    /// A page read.
+    Page(PageRead),
+}
+
+/// A finished feed request, tagged with the account revision it was made for.
+pub struct FeedCompletion {
+    pub(crate) revision: CredentialRevision,
+    pub(crate) outcome: Result<FeedResult, FeedFailure>,
+}
+
+impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
+    /// Make at most one request.
+    pub fn run(self) -> FeedCompletion {
+        let cancel = Cancellation::new();
+        let query = match &self.request {
+            FeedRequest::Read { after } => FeedRequest::query(*after),
+            FeedRequest::Upload { .. } => String::new(),
+        };
+        let http = match &self.request {
+            FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
+            FeedRequest::Read { .. } => FeedHttp::Page(&query),
+        };
+        let outcome = self
+            .account
+            .consume_access_token(self.lease, |token| self.cloud.feed(token, http, &cancel))
+            .map_err(|_| FeedFailure::Unauthorized)
+            .and_then(|result| match result {
+                Some(Ok(reply)) => match &self.request {
+                    FeedRequest::Upload { .. } => wire::accepted(&reply).map(FeedResult::Accepted),
+                    FeedRequest::Read { .. } => wire::page(&reply).map(FeedResult::Page),
+                },
+                Some(Err(error)) => Err(transport(error)),
+                // The sign-in changed meanwhile; the owner fences this completion.
+                None => Err(FeedFailure::Unavailable(None)),
+            });
+        FeedCompletion {
+            revision: self.revision,
+            outcome,
+        }
+    }
+}
+
+fn transport(error: CloudAIError) -> FeedFailure {
+    match error {
+        CloudAIError::Network(_) | CloudAIError::HttpStatus(_) | CloudAIError::Canceled => {
+            FeedFailure::Unavailable(None)
+        }
+        _ => FeedFailure::Invalid,
+    }
+}
+
+impl<A, C> fmt::Debug for FeedJob<A, C> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("FeedJob { bindings: [REDACTED] }")
+    }
+}
+
+impl fmt::Debug for FeedCompletion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FeedCompletion")
+            .field("ok", &self.outcome.is_ok())
+            .finish()
+    }
+}

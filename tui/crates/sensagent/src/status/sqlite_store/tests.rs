@@ -208,12 +208,13 @@ fn disabled_wrong_account_auth_revision_folder_and_consent_revision_deny_cache()
 }
 
 #[test]
-fn every_policy_mutation_clears_the_entire_cache_atomically() {
+fn every_policy_mutation_that_takes_anything_away_clears_the_entire_cache_atomically() {
     let _isolation = isolated_process_test();
     let (directory, mut store) = setup();
     let other_folder = scratch();
     let mut enabled = policy(directory.path());
     if let ConsentPolicy::Enabled { folders, .. } = &mut enabled {
+        folders[0].include_terminal_output = true;
         folders.push(FolderConsent {
             folder: folder(other_folder.path()),
             include_terminal_output: false,
@@ -227,8 +228,9 @@ fn every_policy_mutation_clears_the_entire_cache_atomically() {
     for cached in [&first, &second] {
         store.save_cache(snapshot.revision, cached).unwrap();
     }
+    // Less data for one folder.
     if let ConsentPolicy::Enabled { folders, .. } = &mut enabled {
-        folders[0].include_terminal_output = true;
+        folders[0].include_terminal_output = false;
     }
     let changed = store
         .compare_and_swap_consent(snapshot.revision, &enabled)
@@ -243,11 +245,13 @@ fn every_policy_mutation_clears_the_entire_cache_atomically() {
     let mut fresh = first.clone();
     fresh.consent_revision = changed.revision;
     store.save_cache(changed.revision, &fresh).unwrap();
-    // Reconfirming an identical policy is still a mutation and a new generation.
-    store
+    // Reconfirming an identical policy is a new generation that takes nothing
+    // away: the line is kept, moved to it.
+    let again = store
         .compare_and_swap_consent(changed.revision, &enabled)
         .unwrap();
-    assert_eq!(store.load_cache(&fresh.session_id).unwrap(), None);
+    let kept = store.load_cache(&fresh.session_id).unwrap().unwrap();
+    assert_eq!(kept.consent_revision, again.revision);
 }
 
 #[test]
@@ -1354,4 +1358,46 @@ fn sqlite_store_process_helper() {
         }
         _ => panic!("unknown isolated SQLite test action"),
     }
+}
+
+#[test]
+fn consent_that_only_adds_keeps_cached_text_and_anything_else_clears_it() {
+    let _isolation = isolated_process_test();
+    let (directory, mut store) = setup();
+    let entries = seed_cache(&mut store, directory.path(), 2);
+    let other = scratch();
+    let ConsentPolicy::Enabled { mut folders, .. } = policy(directory.path()) else {
+        unreachable!();
+    };
+    folders.push(FolderConsent {
+        folder: folder(other.path()),
+        include_terminal_output: true,
+    });
+    // A renewed sign-in of the same account sharing one more folder.
+    let wider = ConsentPolicy::Enabled {
+        account: account(),
+        auth_revision: 8,
+        folders,
+    };
+    let current = store.load_consent().unwrap();
+    let snapshot = store
+        .compare_and_swap_consent(current.revision, &wider)
+        .unwrap();
+    for cached in &entries {
+        let kept = store.load_cache(&cached.session_id).unwrap().unwrap();
+        assert_eq!(kept.text, cached.text);
+        assert_eq!(kept.consent_revision, snapshot.revision);
+        assert_eq!(kept.auth_revision, 8);
+    }
+    // Dropping a folder (or turning sharing off) clears every cached line.
+    let narrower = policy(other.path());
+    let snapshot = store
+        .compare_and_swap_consent(snapshot.revision, &narrower)
+        .unwrap();
+    for cached in &entries {
+        assert_eq!(store.load_cache(&cached.session_id).unwrap(), None);
+    }
+    store
+        .compare_and_swap_consent(snapshot.revision, &ConsentPolicy::Disabled)
+        .unwrap();
 }

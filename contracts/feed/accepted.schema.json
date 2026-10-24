@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:accepted",
+  "title": "POST /api/v1/feed/entries success",
+  "description": "Every uploaded id with the seq the cloud stored it under, in upload order.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "accepted"],
+  "properties": {
+    "version": { "const": 1 },
+    "accepted": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "seq"],
+        "properties": {
+          "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+          "seq": { "$ref": "urn:rakumux:feed:v1:common#/$defs/seq" }
+        }
+      }
+    }
+  }
+}

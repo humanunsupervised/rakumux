@@ -364,6 +364,14 @@ fn handle(
             .renew()
             .map(|()| OwnerResponse::Done)
             .map_err(|error| OwnerErrorCode::from(&error)),
+        OwnerRequest::Summarize { session } => client
+            .summarize(session)
+            .map(|()| OwnerResponse::Done)
+            .map_err(|error| OwnerErrorCode::from(&error)),
+        OwnerRequest::Feed { after, generation } => client
+            .feed(after, generation)
+            .map(|feed| OwnerResponse::Feed { feed })
+            .map_err(|error| OwnerErrorCode::from(&error)),
     };
     result.unwrap_or_else(refuse)
 }
@@ -389,6 +397,7 @@ fn state(client: &RefreshClient) -> Result<OwnerResponse, OwnerErrorCode> {
             rate_limited: refresh.rate_limited,
             unauthorized: refresh.unauthorized,
             summaries: refresh.summaries,
+            feed: refresh.feed,
         },
     })
 }

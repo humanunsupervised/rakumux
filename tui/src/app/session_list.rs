@@ -530,7 +530,9 @@ impl SessionList {
                 self.modify(id, |s| s.reported = Some(reported.clone()))
             }
             // Output is shown by the attached pane; nothing to update.
-            SessionEvent::Activity | SessionEvent::Unknown => ListChange::Ignored,
+            SessionEvent::Activity | SessionEvent::Reply { .. } | SessionEvent::Unknown => {
+                ListChange::Ignored
+            }
         }
     }
 

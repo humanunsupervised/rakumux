@@ -800,13 +800,22 @@ impl crate::remote_access::PhoneAccess for FakePhone {
 
 /// The Rakumux account in tests: signed out unless set. `sign_in` waits for
 /// approval until `approve`; descriptions come from `descriptions` (missing
-/// ones are `pending`). Every call is recorded.
+/// ones are `pending`), `refreshing` while in `refreshing`, which `summarize`
+/// adds the session to (and records it in `summarized`); the feed answers with `feed_pages` in turn, then an
+/// empty page at the asked revision (signed out, off or ready, as the
+/// account is). Every call is recorded, and each feed question in `feed_asks`.
 #[derive(Default)]
 pub struct FakeAccount {
     pub account: Mutex<Option<crate::account::Account>>,
     /// What `sign_in_status` answers; `None` until `sign_in`.
     pub sign_in: Mutex<Option<rakumux_sensagent::owner::protocol::SignInView>>,
     pub descriptions: Mutex<HashMap<SessionId, String>>,
+    pub feed_pages: Mutex<std::collections::VecDeque<rakumux_sensagent::feed::FeedPage>>,
+    pub feed_asks: Mutex<Vec<(Option<u64>, Option<u64>)>>,
+    /// Sessions whose description is being made (`refreshing`).
+    pub refreshing: Mutex<std::collections::HashSet<SessionId>>,
+    /// Sessions a summary was asked for, in order.
+    pub summarized: Mutex<Vec<SessionId>>,
     pub calls: Mutex<Vec<&'static str>>,
 }
 
@@ -816,7 +825,27 @@ impl FakeAccount {
             email: Some("person@example.com".into()),
             subject: "user_synthetic".into(),
             summaries: Some(true),
+            feed: Some(false),
         }
+    }
+
+    /// Signed in with the Feed switch on.
+    pub fn with_feed() -> Self {
+        let fake = Self::default();
+        *fake.account.lock().unwrap() = Some(crate::account::Account {
+            feed: Some(true),
+            ..Self::person()
+        });
+        fake
+    }
+
+    /// The feed answers `page` next.
+    pub fn queue_feed(&self, page: rakumux_sensagent::feed::FeedPage) {
+        self.feed_pages.lock().unwrap().push_back(page);
+    }
+
+    pub fn feed_asks(&self) -> Vec<(Option<u64>, Option<u64>)> {
+        self.feed_asks.lock().unwrap().clone()
     }
 
     pub fn signed_in() -> Self {
@@ -907,9 +936,42 @@ impl crate::account::AccountAccess for FakeAccount {
                     text,
                     captured_at: None,
                     failure: None,
+                    refreshing: self.refreshing.lock().unwrap().contains(id),
                 }
             })
             .collect())
+    }
+
+    fn summarize(&self, session: &SessionId) -> std::result::Result<(), String> {
+        self.call("summarize");
+        self.summarized.lock().unwrap().push(session.clone());
+        self.refreshing.lock().unwrap().insert(session.clone());
+        Ok(())
+    }
+
+    fn feed(
+        &self,
+        after: Option<u64>,
+        generation: Option<u64>,
+    ) -> std::result::Result<rakumux_sensagent::feed::FeedPage, String> {
+        use rakumux_sensagent::feed::{FeedPage, FeedStatus};
+        self.call("feed");
+        self.feed_asks.lock().unwrap().push((after, generation));
+        if let Some(page) = self.feed_pages.lock().unwrap().pop_front() {
+            return Ok(page);
+        }
+        let status = match &*self.account.lock().unwrap() {
+            None => return Ok(crate::account::signed_out_feed()),
+            Some(account) if account.feed == Some(true) => FeedStatus::Ready,
+            Some(_) => FeedStatus::Off,
+        };
+        Ok(FeedPage {
+            status,
+            generation: generation.unwrap_or(1),
+            revision: after.unwrap_or(0),
+            entries: Vec::new(),
+            more: false,
+        })
     }
 }
 

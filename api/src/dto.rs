@@ -524,7 +524,8 @@ impl EventMessage {
                 reported: reported.into(),
             },
             SessionEvent::Activity => SessionEventBody::Activity,
-            SessionEvent::Unknown => return None,
+            // Reply text is never offered over HTTP; the API doesn't ask for it.
+            SessionEvent::Reply { .. } | SessionEvent::Unknown => return None,
         };
         Some(EventMessage::Event {
             folder: envelope.scope.path().to_path_buf(),

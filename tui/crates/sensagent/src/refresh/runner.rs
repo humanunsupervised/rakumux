@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
-use session_core::api::{CallerInfo, EventEnvelope, SubscribeRequest};
+use session_core::api::{AgentReply, CallerInfo, EventEnvelope, SessionEvent, SubscribeRequest};
 use session_core::client::SessionApi;
-use session_core::ids::SessionId;
+use session_core::ids::{ReplyId, SessionId};
 use session_core::model::SessionView;
 use thiserror::Error;
 
@@ -19,6 +19,7 @@ use super::sign_in::{self, SignInEvent, SignInFailure, SignInState};
 use super::StatusRefresher;
 use crate::auth::{AccountSession, AccountWebsite, CredentialStore, WallClock};
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
+use crate::feed::{FeedCompletion, FeedJob, FeedPage, FeedSync};
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
 /// How often the owner rechecks jobs and plans refreshes.
@@ -66,6 +67,8 @@ enum Command {
     SignInStatus(Sender<SignInState>),
     SignInCancel(Sender<()>),
     Renew(Sender<()>),
+    Feed(Option<u64>, Option<u64>, Sender<FeedPage>),
+    Summarize(SessionId, Sender<()>),
 }
 
 enum Message {
@@ -75,6 +78,11 @@ enum Message {
     Captured(Box<Captured>),
     Completed(Completed),
     FeaturesRead(FeaturesCompletion),
+    FeedDone(FeedCompletion),
+    /// The daemon was told to capture replies or not (or refused: an older one).
+    CaptureSet(bool),
+    /// Replies the daemon kept, for catching up.
+    Replies(Vec<AgentReply>),
     SignIn(u64, SignInEvent),
     Renewed(RenewalEvent),
     Command(Command),
@@ -85,6 +93,11 @@ enum Work<A, C> {
     Capture(CaptureWork),
     Dispatch(Dispatch<A, C>),
     Features(FeaturesJob<A, C>),
+    Feed(FeedJob<A, C>),
+    /// Turn the daemon's reply capture on or off.
+    ReplyCapture(bool),
+    /// Read the replies the daemon kept after this one (all of them for `None`).
+    Replies(Option<ReplyId>),
 }
 
 /// The current device sign-in, held by the owner thread.
@@ -277,6 +290,25 @@ impl RefreshClient {
         answer.recv().map_err(|_| RefreshError::Stopped)
     }
 
+    /// Make a new summary of `session` now (the refresh icon or `s`).
+    pub fn summarize(&self, session: SessionId) -> Result<(), RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::Summarize(session, reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
+    /// The feed entries that changed after `after` for a TUI of `generation`.
+    /// Asking says a TUI shows the feed, so it is read more often.
+    pub fn feed(
+        &self,
+        after: Option<u64>,
+        generation: Option<u64>,
+    ) -> Result<FeedPage, RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::Feed(after, generation, reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
     fn call<T>(&self, command: impl FnOnce(Reply<T>) -> Command) -> Result<T, RefreshError> {
         let (reply, answer) = mpsc::channel();
         self.send(command(reply))?;
@@ -329,6 +361,7 @@ fn own<S, A, C>(
         state: SignInState::Idle,
     };
     let mut renewal = Renewal::default();
+    let mut feed = FeedSync::new(crate::feed::machine_name());
     loop {
         let now = origin.elapsed();
         if now >= next_tick {
@@ -340,6 +373,7 @@ fn own<S, A, C>(
             if let Some(job) = refresher.features_job(now) {
                 let _ = work.send(Work::Features(job));
             }
+            follow_feed(&refresher, &mut feed, work, now);
             next_tick = now.saturating_add(TICK);
         }
         let message = match inbox.recv_timeout(next_tick.saturating_sub(origin.elapsed())) {
@@ -352,9 +386,29 @@ fn own<S, A, C>(
             Message::Stop => return,
             Message::Resync(views) => {
                 let _ = refresher.resync(&views, now);
+                let after = feed.connected(&views);
+                let _ = work.send(Work::Replies(after));
             }
             Message::Event(event) => {
+                match &event.event {
+                    SessionEvent::Reply { reply } => feed.reply(reply.clone()),
+                    SessionEvent::Created { session } | SessionEvent::Updated { session } => {
+                        feed.observe(session)
+                    }
+                    SessionEvent::Removed => feed.forget(&event.session_id),
+                    _ => {}
+                }
                 let _ = refresher.apply_event(&event, now);
+            }
+            Message::FeedDone(completion) => {
+                let current = refresher.is_current(completion.revision);
+                feed.completed(current, completion.outcome, now);
+            }
+            Message::CaptureSet(enabled) => feed.capture_changed(enabled),
+            Message::Replies(replies) => {
+                for reply in replies {
+                    feed.reply(reply);
+                }
             }
             Message::Disconnected => refresher.disconnected(),
             Message::Captured(captured) => {
@@ -392,6 +446,10 @@ fn own<S, A, C>(
                     }
                 };
                 renewal.finished(succeeded, SystemTime::now());
+            }
+            Message::Command(Command::Feed(after, generation, reply)) => {
+                let _ = reply.send(feed.page(after, generation, now));
+                follow_feed(&refresher, &mut feed, work, now);
             }
             Message::Command(command) => control(
                 &mut refresher,
@@ -477,6 +535,12 @@ fn control<S, A, C>(
             renewal.request();
             let _ = reply.send(());
         }
+        // Answered by the owner loop, which holds the feed.
+        Command::Feed(..) => {}
+        Command::Summarize(session, reply) => {
+            refresher.request(&session);
+            let _ = reply.send(());
+        }
         Command::SignInCancel(reply) => {
             let state = match sign_in.state {
                 SignInState::Starting | SignInState::Waiting(_) => {
@@ -486,6 +550,35 @@ fn control<S, A, C>(
             };
             replace_sign_in(sign_in, state);
             let _ = reply.send(());
+        }
+    }
+}
+
+/// Keep the feed in step with the account: tell the daemon whether to capture,
+/// catch up on what it kept once the feed turns on, and start the request due.
+fn follow_feed<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    feed: &mut FeedSync,
+    work: &Sender<Work<A, C>>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    if feed.set_account(refresher.account().is_some(), refresher.feed_switch(), now) {
+        // Replies an earlier service had the daemon capture.
+        let _ = work.send(Work::Replies(None));
+    }
+    if let Some(enabled) = feed.capture_change() {
+        let _ = work.send(Work::ReplyCapture(enabled));
+    }
+    if let Some(request) = feed.next_request(now) {
+        match refresher.feed_job(request) {
+            Some(job) => {
+                let _ = work.send(Work::Feed(job));
+            }
+            None => feed.not_started(now),
         }
     }
 }
@@ -551,6 +644,22 @@ where
                 Ok(completion) => Message::FeaturesRead(completion),
                 Err(_) => continue,
             },
+            Ok(Work::Feed(job)) => match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                Ok(completion) => Message::FeedDone(completion),
+                Err(_) => continue,
+            },
+            Ok(Work::ReplyCapture(enabled)) => {
+                // An older daemon refuses; it isn't asked again until it reconnects.
+                let _ = api.set_reply_capture(enabled);
+                Message::CaptureSet(enabled)
+            }
+            Ok(Work::Replies(after)) => {
+                let replies = api
+                    .replies(after.as_ref())
+                    .map(|(replies, _)| replies)
+                    .unwrap_or_default();
+                Message::Replies(replies)
+            }
         };
         if owner.send(message).is_err() {
             return;
@@ -563,8 +672,10 @@ where
 fn follow(api: &dyn SessionApi, owner: &Sender<Message>, stop: &AtomicBool) {
     let mut delay = RECONNECT_MIN;
     while !stop.load(Ordering::SeqCst) {
+        // Replies arrive only while the feed has the daemon capture them.
         let request = SubscribeRequest {
             all: true,
+            replies: true,
             ..Default::default()
         };
         if let Ok(stream) = api.subscribe(request) {

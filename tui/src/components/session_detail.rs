@@ -1,6 +1,7 @@
 //! Right pane: the selected session's terminal (running, or its saved
 //! screen), with placeholders for no sessions, loading, the session
-//! Rakumux runs in, errors and the daemon being unreachable. There's no
+//! Rakumux runs in, errors and the daemon being unreachable; in Rakumux
+//! mode under the Feed tab, the selected reply (`feed.rs`). There's no
 //! title row: the footer names the session and its status. Live previews
 //! recede in Rakumux mode; dialogs and saved output use a stronger fade.
 //! The cursor appears only while the session takes keys.
@@ -36,6 +37,13 @@ pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<
         );
     }
     let area = screen.terminal?;
+    if app.feed_in_detail() {
+        super::feed::draw_feed_reply(f, app, area);
+        if !matches!(app.mode, AppMode::Normal) {
+            fade(f.buffer_mut(), area);
+        }
+        return None;
+    }
     draw_terminal(f, app, area, focused)
 }
 

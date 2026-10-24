@@ -40,7 +40,9 @@ pub enum StatusStoreError {
 pub trait StatusStore: Send {
     /// Load and validate the current explicit consent decision; missing means disabled/rev0.
     fn load_consent(&mut self) -> Result<ConsentSnapshot, StatusStoreError>;
-    /// Atomically advance only expected revision, replace policy and clear ALL cache rows.
+    /// Atomically advance only expected revision and replace policy. Clear ALL cache
+    /// rows, unless the new policy `extends` the current one: then move every row to
+    /// the new consent and credential revisions.
     fn compare_and_swap_consent(
         &mut self,
         expected: ConsentRevision,

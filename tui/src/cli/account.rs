@@ -155,6 +155,7 @@ fn status(
             "signed_in": account.is_some(),
             "email": account.as_ref().and_then(|a| a.email.clone()),
             "ai_session_summaries": account.as_ref().and_then(|a| a.summaries),
+            "feed": account.as_ref().and_then(|a| a.feed),
             "sessions": sessions,
         })
         .to_string()
@@ -202,8 +203,13 @@ fn describe(account: Option<&Account>) -> String {
         Some(false) => "off (turn them on at rakumux.com/features)",
         None => "not checked yet",
     };
+    let feed = match account.feed {
+        Some(true) => "on",
+        Some(false) => "off (turn it on at rakumux.com/features)",
+        None => "not checked yet",
+    };
     format!(
-        "Signed in as {}.\nAI session summaries: {summaries}.",
+        "Signed in as {}.\nAI session summaries: {summaries}.\nFeed: {feed}.",
         account.name()
     )
 }
@@ -219,10 +225,12 @@ mod tests {
             email: Some("person@example.com".into()),
             subject: "user_1".into(),
             summaries: Some(false),
+            feed: Some(true),
         };
         let text = describe(Some(&account));
         assert!(text.contains("Signed in as person@example.com."));
         assert!(text.contains("AI session summaries: off"));
+        assert!(text.contains("Feed: on."));
     }
 
     #[test]

@@ -1,16 +1,18 @@
-//! The tabs on the session list's top row (Folders, App, Status;
-//! `grouping`) and the App and Status modals. ←/→ on the top row, or a
-//! click, switch tabs; Enter there, or a click on the active tab, opens the
-//! active tab's modal (the Folders modal for All folders, `folders.rs`).
+//! The tabs on the session list's top row (Feed, then Status, Folders and
+//! App; `grouping`) and the App and Status modals. ←/→, or a click, switch
+//! tabs; Enter on the top row, or a click on the active tab, opens the
+//! active tab's modal (the Folders modal for All folders, `folders.rs`;
+//! the Feed has none, `feed/tab.rs`).
 //! The App and Status modals list All apps (All statuses), then each app
 //! (status) with its sessions; typing narrows the rows, Tab (Space, while
 //! nothing is typed) ticks several, Enter shows the one under the cursor
 //! (after ticking, the ticked ones) and makes the tab active, Esc closes
 //! without changes.
 
-use super::grouping::{sort_sections, Grouping, Section, StatusGroup};
+use super::grouping::{sort_sections, Grouping, ListTab, Section, StatusGroup};
 use super::types::{AppMode, SectionPicker, SectionRow};
 use super::App;
+use crate::layout::SessionLayout;
 
 impl App {
     /// What a tab of the top row says. The active one names its filter:
@@ -18,7 +20,7 @@ impl App {
     /// `working` or `2 statuses`. The others say what the list shows of them
     /// while they're inactive: Folders, App, Status.
     pub fn tab_label(&self, grouping: Grouping) -> String {
-        if grouping != self.list.grouping() {
+        if self.list_tab() != ListTab::Grouped(grouping) {
             return grouping.name().into();
         }
         match grouping {
@@ -32,30 +34,47 @@ impl App {
         }
     }
 
+    /// What `tab` says: the Feed, or [`App::tab_label`].
+    pub fn list_tab_label(&self, tab: ListTab) -> String {
+        match tab {
+            ListTab::Feed => tab.name().into(),
+            ListTab::Grouped(grouping) => self.tab_label(grouping),
+        }
+    }
+
     /// The active tab's label: what the list shows (the Tabs layout's
     /// selector and Grid's header say it).
     pub fn filter_label(&self) -> String {
-        self.tab_label(self.list.grouping())
+        self.list_tab_label(self.list_tab())
     }
 
-    /// ←/→ (`h`/`l`) on the top row: the previous or next tab.
+    /// ←/→ (`h`/`l` on the top row): the previous or next tab. The Feed
+    /// only where it can show (Master detail).
     pub fn switch_tab(&mut self, delta: isize) {
-        self.show_tab(self.list.grouping().step(delta));
+        let tab = self.list_tab().step(delta);
+        if tab == ListTab::Feed && self.session_layout() != SessionLayout::Sidebar {
+            return;
+        }
+        self.show_list_tab(tab);
     }
 
     /// Make `grouping`'s tab active: its sections and filter apply.
     pub fn show_tab(&mut self, grouping: Grouping) {
+        self.tab_chosen = true;
+        self.close_feed_tab();
         if grouping != self.list.grouping() {
             self.list.set_grouping(grouping);
             self.reconcile_detail();
         }
     }
 
-    /// Enter on the top row, or a click on the active tab: its modal.
+    /// Enter on the top row, or a click on the active tab: its modal (the
+    /// Feed has none).
     pub fn open_tab_picker(&mut self) {
-        match self.list.grouping() {
-            Grouping::Folder => self.open_folder_picker(),
-            grouping => self.open_section_picker(grouping, None),
+        match self.list_tab() {
+            ListTab::Feed => {}
+            ListTab::Grouped(Grouping::Folder) => self.open_folder_picker(),
+            ListTab::Grouped(grouping) => self.open_section_picker(grouping, None),
         }
     }
 
@@ -200,6 +219,8 @@ impl App {
     /// Show these apps or statuses (none: all of them) under their tab,
     /// which becomes the active one.
     pub fn show_sections(&mut self, grouping: Grouping, sections: Vec<Section>) {
+        self.tab_chosen = true;
+        self.close_feed_tab();
         self.list.set_grouping(grouping);
         self.list.set_section_filter(grouping, sections);
         self.reconcile_detail();

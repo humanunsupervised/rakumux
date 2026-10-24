@@ -93,11 +93,21 @@ impl StatusStore for MemoryStatusStore {
             .0
             .checked_add(1)
             .ok_or(StatusStoreError::RevisionExhausted)?;
+        if let (Some(auth_revision), true) = (
+            policy.auth_revision(),
+            policy.extends(&state.consent.policy),
+        ) {
+            for entry in state.cache.values_mut() {
+                entry.consent_revision = ConsentRevision(revision);
+                entry.auth_revision = auth_revision;
+            }
+        } else {
+            state.cache.clear();
+        }
         state.consent = ConsentSnapshot {
             revision: ConsentRevision(revision),
             policy: policy.clone(),
         };
-        state.cache.clear();
         state.consent_writes += 1;
         Ok(state.consent.clone())
     }
@@ -589,9 +599,13 @@ fn every_new_owner_requires_fresh_confirmation_even_with_matching_persisted_cach
         let offer = replacement.consent_offer().unwrap();
         assert_eq!(offer.origin(), origin);
         replacement.enable(&offer, folders(false)).unwrap();
-        fixture.assert_no_cache();
-        let capture = capture(&mut replacement, 1);
-        replacement.acknowledge_capture(&capture).unwrap();
+        // Confirming the same sharing again keeps what was described: a
+        // restarted service doesn't lose every line.
+        assert_eq!(fixture.store.0.lock().unwrap().cache.len(), 1);
+        assert!(matches!(
+            replacement.view(&session(1)).unwrap(),
+            StatusView::Ready(_)
+        ));
         assert_eq!(fixture.calls(), 1);
     }
 }

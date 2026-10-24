@@ -14,6 +14,7 @@ use session_core::ids::SessionId;
 use session_core::model::ScopeRoot;
 
 use crate::dispatch::DispatchError;
+use crate::feed::FeedPage;
 use crate::refresh::{AIStatus, RefreshError, RefreshFailure, SignInFailure, SignInState};
 use crate::status::{
     ConsentPolicy, ConsentSnapshot, FolderConsent, StatusError, StatusStoreError, StatusView,
@@ -82,6 +83,19 @@ pub enum OwnerRequest {
     Renew,
     /// Stop serving (a newer client replaces an older service); answered first.
     Shutdown,
+    /// The feed entries that changed after `after` for a client holding
+    /// `generation` (all of them for another generation or none). Asking
+    /// counts as showing the feed, so it's read from the cloud more often.
+    Feed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generation: Option<u64>,
+    },
+    /// Make a new AI summary of `session` now: its agent's latest prompt and
+    /// outputs since, or its screen for other programs. Answered with `Done`;
+    /// `Statuses` shows `refreshing` until it's made.
+    Summarize { session: SessionId },
 }
 
 /// The owner's answers.
@@ -106,6 +120,9 @@ pub enum OwnerResponse {
     },
     SignIn {
         sign_in: SignInView,
+    },
+    Feed {
+        feed: FeedPage,
     },
     Done,
     Error {
@@ -135,6 +152,9 @@ pub struct OwnerState {
     /// absent when signed out or not yet known.
     #[serde(default)]
     pub summaries: Option<bool>,
+    /// The account's Feed switch, likewise.
+    #[serde(default)]
+    pub feed: Option<bool>,
 }
 
 /// A device sign-in as the TUI shows it. Holds no device code or token.
@@ -292,6 +312,9 @@ pub struct StatusLine {
     /// Why the last refresh produced no text.
     #[serde(default)]
     pub failure: Option<FailureCode>,
+    /// A new summary was asked for or is being made.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub refreshing: bool,
 }
 
 impl StatusLine {
@@ -309,6 +332,7 @@ impl StatusLine {
             text,
             captured_at,
             failure: status.failure.map(FailureCode::from),
+            refreshing: status.refreshing,
         }
     }
 }

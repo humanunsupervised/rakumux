@@ -11,7 +11,7 @@
 //! Compatibility: new fields are optional; enums have an `Unknown` fallback;
 //! an op never changes meaning (add a new op instead).
 
-use crate::ids::{PaneId, SessionId};
+use crate::ids::{PaneId, ReplyId, SessionId};
 use crate::model::{
     AgentInfo, Lifecycle, ProjectView, ReportResult, Reported, ScopeRoot, SessionStatus,
     SessionView,
@@ -213,6 +213,20 @@ pub enum Request {
     DaemonRestart {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         binary: Option<PathBuf>,
+    },
+
+    /// User only (capability `session.replies`): start or stop capturing
+    /// what agents say when they finish a turn. Off by default and after a
+    /// daemon start or restart; turning it off forgets captured replies.
+    ReplyCapture {
+        enabled: bool,
+    },
+    /// User only (capability `session.replies`): captured replies, oldest
+    /// first; with `after`, only those captured after that one (all of them
+    /// when it was forgotten). Answered with `Replies`.
+    ReplyList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<ReplyId>,
     },
 }
 
@@ -416,6 +430,8 @@ pub enum EventKind {
     Lifecycle,
     Reported,
     Activity,
+    /// Only on subscriptions that ask for `replies`.
+    Reply,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -438,6 +454,11 @@ pub struct SubscribeRequest {
     /// get `out_of_scope`). `scope` and `scopes` are ignored when set.
     #[serde(default, skip_serializing_if = "is_false")]
     pub all: bool,
+    /// Also deliver [`SessionEvent::Reply`] (capability `session.replies`;
+    /// user callers only, session callers get `permission_denied`). Other
+    /// subscriptions never see reply text.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub replies: bool,
 }
 
 /// The capability a daemon announces when it accepts `all` on
@@ -456,6 +477,34 @@ pub const CAPABILITY_TERMINAL_PANE: &str = "terminal.pane";
 
 /// Self-reported logical agent directories, separate from the terminal cwd.
 pub const CAPABILITY_WORKING_DIRECTORY: &str = "session.working_directory";
+
+/// Captured agent replies: `reply_capture`, `reply_list` and `replies` on
+/// `subscribe`.
+pub const CAPABILITY_REPLIES: &str = "session.replies";
+
+/// What an agent said when it finished a turn, captured by the daemon from
+/// the agent's own conversation log on this machine. Kept in daemon memory
+/// only and delivered only to user callers that ask for replies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentReply {
+    pub id: ReplyId,
+    pub session_id: SessionId,
+    /// `claude-code`, `codex` or `opencode`.
+    pub agent: String,
+    /// The agent's own conversation id, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    /// The reply's text, at most [`MAX_REPLY_BYTES`].
+    pub text: String,
+    /// The reply was longer; `text` is its start.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
+    /// When the turn finished (Unix milliseconds).
+    pub finished_at: i64,
+}
+
+/// The longest reply text kept, in UTF-8 bytes.
+pub const MAX_REPLY_BYTES: usize = 32 * 1024;
 
 /// `SessionView::agent_output`: a running agent's latest output line.
 pub const CAPABILITY_AGENT_OUTPUT: &str = "session.agent_output";
@@ -505,6 +554,12 @@ pub enum Response {
     /// First message of an event stream.
     Subscribed,
     Status(DaemonStatusInfo),
+    /// Answer to `reply_list`.
+    Replies {
+        replies: Vec<AgentReply>,
+        /// Capture is on.
+        capturing: bool,
+    },
     Error {
         error: ApiError,
     },
@@ -743,6 +798,11 @@ pub enum SessionEvent {
     },
     /// New output (throttled to at most one event per second per session).
     Activity,
+    /// The session's agent finished a turn with this reply (subscriptions
+    /// with `replies` only).
+    Reply {
+        reply: AgentReply,
+    },
     #[serde(other)]
     Unknown,
 }

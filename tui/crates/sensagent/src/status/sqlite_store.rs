@@ -158,9 +158,24 @@ impl StatusStore for SqliteStatusStore {
                     policy_json=excluded.policy_json",
                 params![revision, bytes],
             ).map_err(database_error)?;
+            let kept = match policy.auth_revision() {
+                Some(auth_revision) if policy.extends(&current.policy) => {
+                    carried_cache(transaction, ConsentRevision(revision as u64), auth_revision)?
+                }
+                _ => Vec::new(),
+            };
             transaction
                 .execute("DELETE FROM status_cache", [])
                 .map_err(database_error)?;
+            for (session, captured_at, bytes) in kept {
+                transaction
+                    .execute(
+                        "INSERT INTO status_cache (session_id, captured_at, entry_json)
+                         VALUES (?1, ?2, ?3)",
+                        params![session, captured_at, bytes],
+                    )
+                    .map_err(database_error)?;
+            }
             Ok(ConsentSnapshot {
                 revision: ConsentRevision(revision as u64),
                 policy: policy.clone(),
@@ -530,6 +545,40 @@ fn decode_cache(row: &Row<'_>) -> Result<CachedStatus, StatusStoreError> {
         return Err(StatusStoreError::InvalidData);
     }
     Ok(entry)
+}
+
+/// Every valid cache row, moved to consent `revision` and credential
+/// `auth_revision`, ready to insert again. Rows that fail to decode are left
+/// out, as a later load would refuse them.
+fn carried_cache(
+    connection: &Connection,
+    revision: ConsentRevision,
+    auth_revision: u64,
+) -> Result<Vec<(String, i64, Vec<u8>)>, StatusStoreError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT CASE WHEN typeof(session_id)='text' AND octet_length(session_id) BETWEEN 1 AND 256
+                THEN session_id END, captured_at,
+             CASE WHEN typeof(entry_json)='blob' AND length(entry_json) BETWEEN 1 AND 65536
+             THEN entry_json END FROM status_cache LIMIT ?1",
+        )
+        .map_err(database_error)?;
+    let mut rows = statement
+        .query([MAX_CACHE_ENTRIES as i64])
+        .map_err(database_error)?;
+    let mut kept = Vec::new();
+    while let Some(row) = rows.next().map_err(database_error)? {
+        let Ok(mut entry) = decode_cache(row) else {
+            continue;
+        };
+        entry.consent_revision = revision;
+        entry.auth_revision = auth_revision;
+        let captured_at =
+            i64::try_from(entry.captured_at).map_err(|_| StatusStoreError::InvalidData)?;
+        let bytes = encode_json(&entry, MAX_CACHE_BYTES)?;
+        kept.push((entry.session_id.as_str().to_owned(), captured_at, bytes));
+    }
+    Ok(kept)
 }
 
 fn validate_cache_binding(

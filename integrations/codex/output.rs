@@ -1,5 +1,5 @@
 //! Codex's latest output, from the rollout file of its thread.
-use super::{first_line, prompt_line, tool_line};
+use super::{first_line, prompt_line, tool_line, Step};
 use crate::host::ProcessInfo;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -108,6 +108,36 @@ fn command(arguments: &Value) -> Option<String> {
     }
 }
 
+/// How an entry changes the turn's reply: a new turn starts it over, and its
+/// `task_complete` holds the whole reply (`last_agent_message`).
+pub(super) fn reply_step(entry: &Value) -> Step {
+    let Some(payload) = entry.get("payload") else {
+        return Step::Keep;
+    };
+    let kind = |value: &Value| value.get("type").and_then(Value::as_str).map(String::from);
+    if kind(entry).as_deref() != Some("event_msg") {
+        return Step::Keep;
+    }
+    match kind(payload).as_deref() {
+        Some("user_message" | "task_started") => Step::Reset,
+        Some("task_complete") => {
+            let text = payload
+                .get("last_agent_message")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty());
+            match (text, payload.get("turn_id").and_then(Value::as_str)) {
+                (Some(text), Some(turn)) => Step::Complete {
+                    key: turn.to_owned(),
+                    text: text.to_owned(),
+                },
+                _ => Step::Reset,
+            }
+        }
+        _ => Step::Keep,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +202,37 @@ mod tests {
                 &json!({"type": "response_item", "payload": {"type": "function_call_output", "output": "secret"}})
             ),
             None
+        );
+    }
+
+    fn event(payload: Value) -> Value {
+        json!({"timestamp": "2026-10-23T00:00:00Z", "type": "event_msg", "payload": payload})
+    }
+
+    #[test]
+    fn the_reply_is_the_finished_turns_last_message() {
+        assert_eq!(
+            reply_step(&event(json!({"type": "task_complete", "turn_id": "t1",
+                "last_agent_message": "All done.\n"}))),
+            Step::Complete {
+                key: "t1".into(),
+                text: "All done.".into()
+            }
+        );
+        assert_eq!(
+            reply_step(&event(json!({"type": "task_complete", "turn_id": "t2",
+                "last_agent_message": null}))),
+            Step::Reset
+        );
+        assert_eq!(
+            reply_step(&event(json!({"type": "user_message", "message": "next"}))),
+            Step::Reset
+        );
+        assert_eq!(
+            reply_step(&event(
+                json!({"type": "agent_message", "message": "Working on it"})
+            )),
+            Step::Keep
         );
     }
 }

@@ -184,11 +184,13 @@ fn push_buttons(
 
 /// The session the footer names in its centre: in Rakumux mode the
 /// selected one, else the one the detail keeps in view (the tabs, a header
-/// or + New session selected); the one taking the keys in session mode;
-/// none for the terminal panel, which isn't a session.
+/// or + New session selected), or with the feed shown the selected reply's
+/// when it runs here; the one taking the keys in session mode; none for the
+/// terminal panel, which isn't a session.
 fn centred_session(app: &App) -> Option<&SessionView> {
     let in_view = || app.detail.session_id().and_then(|id| app.list.get(id));
     match app.focus {
+        Focus::List if app.feed_shown() => app.feed_session(),
         Focus::List => app.list.selected_session().or_else(in_view),
         Focus::Session => in_view(),
         Focus::Terminal => None,

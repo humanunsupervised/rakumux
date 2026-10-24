@@ -197,6 +197,24 @@ fn select(
     Ok(Some(kept.to_owned()))
 }
 
+/// An agent reply as the feed uploads it: without terminal and format
+/// controls, with private keys, credential assignments and tokens masked, or
+/// `None` when nothing meaningful is left. Paths stay: the feed shows the
+/// user's own replies back to them.
+pub(crate) fn feed_text(input: &str) -> Option<String> {
+    let patterns = PATTERNS.as_ref().ok()?;
+    let clean = patterns.prohibited.replace_all(input, "");
+    let mut mask = vec![0u8; clean.len()];
+    for pattern in [&patterns.private_key, &patterns.assignment, &patterns.token] {
+        for found in pattern.find_iter(&clean) {
+            mark(&mut mask, found.start(), found.end(), SECRET_MASK);
+        }
+    }
+    let rendered = render_masks(&clean, &mask);
+    let text = rendered.trim();
+    patterns.meaningful.is_match(text).then(|| text.to_owned())
+}
+
 fn redact(input: &str, secrets: &[&SecretValue], patterns: &Patterns) -> String {
     // Mark original byte spans once. Rewriting text repeatedly can destroy key
     // delimiters or expand replacement labels when a short secret matches them.

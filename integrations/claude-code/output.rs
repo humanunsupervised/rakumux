@@ -1,5 +1,5 @@
 //! Claude Code's latest output, from its conversation transcript.
-use super::{first_line, prompt_line, short_path, tool_line};
+use super::{first_line, prompt_line, short_path, tool_line, Step};
 
 /// Thinking and replies longer than this are cut, in bytes, before they're
 /// shaped into a line or a summary's message.
@@ -170,6 +170,48 @@ fn block(block: &Value) -> Option<String> {
     }
 }
 
+/// How an entry changes the turn's reply: a prompt (or anything else the user
+/// side adds) or a tool call starts it over, and text of the main
+/// conversation's assistant adds to it. One entry holds one content block.
+pub(super) fn reply_step(entry: &Value) -> Step {
+    if entry.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+        return Step::Keep;
+    }
+    match entry.get("type").and_then(Value::as_str) {
+        Some("user") => Step::Reset,
+        Some("assistant") => {
+            let Some(blocks) = entry
+                .get("message")
+                .and_then(|message| message.get("content"))
+                .and_then(Value::as_array)
+            else {
+                return Step::Keep;
+            };
+            if blocks
+                .iter()
+                .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+            {
+                return Step::Reset;
+            }
+            let text: Vec<&str> = blocks
+                .iter()
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .collect();
+            match entry.get("uuid").and_then(Value::as_str) {
+                Some(key) if !text.is_empty() => Step::Text {
+                    key: key.to_owned(),
+                    text: text.join("\n\n"),
+                },
+                _ => Step::Keep,
+            }
+        }
+        _ => Step::Keep,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +340,64 @@ mod tests {
         sidechain["isSidechain"] = json!(true);
         assert_eq!(line(&sidechain), None);
         assert_eq!(line(&json!({"type": "attachment"})), None);
+    }
+
+    fn entry(uuid: &str, content: Value) -> Value {
+        let mut entry = assistant(content);
+        entry["uuid"] = json!(uuid);
+        entry
+    }
+
+    #[test]
+    fn the_reply_is_the_text_after_the_last_tool_call() {
+        let mut reply = None;
+        for step in [
+            reply_step(&json!({"type": "user", "message": {"content": "fix the test"}})),
+            reply_step(&entry(
+                "a",
+                json!([{"type": "text", "text": "Let me look."}]),
+            )),
+            reply_step(&entry(
+                "b",
+                json!([{"type": "tool_use", "name": "Bash", "input": {}}]),
+            )),
+            reply_step(&json!({"type": "user", "message": {"content": [{"type": "tool_result"}]}})),
+            reply_step(&entry(
+                "c",
+                json!([{"type": "thinking", "thinking": "Done."}]),
+            )),
+            reply_step(&entry(
+                "d",
+                json!([{"type": "text", "text": "Fixed it.\n\n- the parser"}]),
+            )),
+            reply_step(&entry(
+                "e",
+                json!([{"type": "text", "text": " Tests pass. "}]),
+            )),
+            reply_step(&json!({"type": "attachment"})),
+        ] {
+            reply = super::super::next_reply(reply, step);
+        }
+        let reply = reply.unwrap();
+        assert_eq!(reply.key, "e");
+        assert_eq!(reply.text, "Fixed it.\n\n- the parser\n\nTests pass.");
+        assert!(!reply.truncated);
+    }
+
+    #[test]
+    fn a_subagent_or_a_new_prompt_is_not_the_reply() {
+        let mut sidechain = entry("s", json!([{"type": "text", "text": "a subagent"}]));
+        sidechain["isSidechain"] = json!(true);
+        assert_eq!(reply_step(&sidechain), Step::Keep);
+        let reply = super::super::next_reply(
+            None,
+            reply_step(&entry("a", json!([{"type": "text", "text": "Answer"}]))),
+        );
+        assert!(reply.is_some());
+        let reply = super::super::next_reply(
+            reply,
+            reply_step(&json!({"type": "user", "message": {"content": "next"}})),
+        );
+        assert_eq!(reply, None);
     }
 }

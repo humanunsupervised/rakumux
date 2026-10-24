@@ -127,6 +127,43 @@ impl ConsentPolicy {
         Ok(())
     }
 
+    /// Whether this policy only adds to `earlier`: the same account (a renewed
+    /// sign-in has a new credential revision), every earlier folder still shared,
+    /// none with less data. Cached text survives such a change (a renewal, a
+    /// session started in a new folder), since summaries are made once per chat
+    /// and on request, not on every change.
+    pub fn extends(&self, earlier: &ConsentPolicy) -> bool {
+        match (self, earlier) {
+            (
+                Self::Enabled {
+                    account, folders, ..
+                },
+                Self::Enabled {
+                    account: earlier_account,
+                    folders: earlier_folders,
+                    ..
+                },
+            ) => {
+                account == earlier_account
+                    && earlier_folders.iter().all(|before| {
+                        folders.iter().any(|now| {
+                            now.folder == before.folder
+                                && (now.include_terminal_output || !before.include_terminal_output)
+                        })
+                    })
+            }
+            _ => false,
+        }
+    }
+
+    /// The credential revision an enabled policy binds.
+    pub fn auth_revision(&self) -> Option<u64> {
+        match self {
+            Self::Enabled { auth_revision, .. } => Some(*auth_revision),
+            Self::Disabled => None,
+        }
+    }
+
     /// Whether a cache record belongs to the exact currently approved account/folder.
     pub fn permits_cache(&self, entry: &CachedStatus) -> bool {
         match self {

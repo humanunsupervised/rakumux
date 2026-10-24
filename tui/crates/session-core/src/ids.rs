@@ -79,6 +79,33 @@ impl fmt::Display for PaneId {
     }
 }
 
+/// A finished agent reply the daemon captured: a ULID, so replies sort by
+/// when they were captured.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ReplyId(String);
+
+impl ReplyId {
+    pub fn generate() -> Self {
+        Self(SessionId::generate().0)
+    }
+
+    /// Wrap an id received from the wire.
+    pub fn from_string(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ReplyId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Daemon-assigned terminal (PTY) id. Not stable across daemon restarts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]

@@ -15,6 +15,10 @@ use super::{CloudAIError, StatusResponse, ValidatedStatusRequest};
 
 const STATUS_PATH: &str = "/api/v1/ai/session-status";
 const FEATURES_PATH: &str = "/api/v1/features";
+const FEED_PATH: &str = "/api/v1/feed";
+const FEED_ENTRIES_PATH: &str = "/api/v1/feed/entries";
+/// The largest feed page read (`contracts/feed/page.schema.json`).
+pub(crate) const MAX_FEED_BODY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ORIGIN_BYTES: usize = 2048;
 const MAX_AUTHORIZATION_BYTES: usize = 8192;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -25,6 +29,8 @@ const TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
 pub struct CloudAIConfig {
     endpoint: Url,
     features: Url,
+    feed: Url,
+    feed_entries: Url,
 }
 
 /// The account's feature switches, as the destination reports them.
@@ -32,6 +38,24 @@ pub struct CloudAIConfig {
 pub struct AccountFeatures {
     /// AI session summaries: on unless the user turned them off on the website.
     pub ai_session_summaries: bool,
+    /// The agent feed: off unless the user turned it on on the website.
+    pub feed: bool,
+}
+
+/// One agent feed request (`contracts/feed/`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum FeedHttp<'a> {
+    /// `POST /api/v1/feed/entries` with this upload body.
+    Upload(&'a [u8]),
+    /// `GET /api/v1/feed` with this query (`after=…&limit=…`).
+    Page(&'a str),
+}
+
+/// A feed reply as received: the feed module decodes it against its contract.
+pub(crate) struct FeedHttpReply {
+    pub status: u16,
+    pub retry_after: Option<Duration>,
+    pub body: Vec<u8>,
 }
 
 impl CloudAIConfig {
@@ -70,10 +94,23 @@ impl CloudAIConfig {
         {
             return Err(invalid());
         }
-        let mut features = endpoint.clone();
+        let path = |path: &str| {
+            let mut url = endpoint.clone();
+            url.set_path(path);
+            url
+        };
+        let (features, feed, feed_entries) = (
+            path(FEATURES_PATH),
+            path(FEED_PATH),
+            path(FEED_ENTRIES_PATH),
+        );
         endpoint.set_path(STATUS_PATH);
-        features.set_path(FEATURES_PATH);
-        Ok(Self { endpoint, features })
+        Ok(Self {
+            endpoint,
+            features,
+            feed,
+            feed_entries,
+        })
     }
 }
 
@@ -242,6 +279,61 @@ impl CloudAIClient {
         result
     }
 
+    /// Make one agent feed request with the same transport rules as `generate`.
+    /// Any JSON reply is returned for the feed module to decode, error or not.
+    pub(crate) fn feed(
+        &self,
+        access_token: &SecretValue,
+        request: FeedHttp<'_>,
+        cancel: &Cancellation,
+    ) -> Result<FeedHttpReply, CloudAIError> {
+        cancel.check()?;
+        let mut outgoing = match request {
+            FeedHttp::Upload(body) => {
+                let mut outgoing = Request::new(Method::POST, self.config.feed_entries.clone());
+                let headers = outgoing.headers_mut();
+                headers.insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                );
+                let length = body.len() as u64;
+                headers.insert(header::CONTENT_LENGTH, HeaderValue::from(length));
+                // A sized reader is never replayed (see `generate`).
+                *outgoing.body_mut() = Some(Body::sized(Cursor::new(body.to_vec()), length));
+                outgoing
+            }
+            FeedHttp::Page(query) => {
+                let mut url = self.config.feed.clone();
+                url.set_query(Some(query));
+                Request::new(Method::GET, url)
+            }
+        };
+        *outgoing.timeout_mut() = Some(TOTAL_TIMEOUT);
+        let headers = outgoing.headers_mut();
+        headers.insert(header::AUTHORIZATION, bearer_header(access_token)?);
+        headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("identity"),
+        );
+        cancel.check()?;
+        let result = self.transport.send(outgoing);
+        cancel.check()?;
+        let reply = result?;
+        if (300..=399).contains(&reply.status) {
+            return Err(CloudAIError::HttpStatus(reply.status));
+        }
+        require_json_headers(&reply.headers)?;
+        let retry_after = retry_after(&reply.headers);
+        let body = read_bounded(reply.body, cancel, MAX_FEED_BODY_BYTES)?;
+        cancel.check()?;
+        Ok(FeedHttpReply {
+            status: reply.status,
+            retry_after,
+            body,
+        })
+    }
+
     fn with_transport(config: CloudAIConfig, transport: Box<dyn HttpTransport>) -> Self {
         Self { config, transport }
     }
@@ -255,9 +347,11 @@ fn decode_features(body: &[u8]) -> Result<AccountFeatures, CloudAIError> {
     }
     #[derive(serde::Deserialize)]
     struct Features {
-        // Newer switches are ignored; a missing one keeps the service default (on).
+        // Newer switches are ignored; a missing one keeps the service default.
         #[serde(default = "enabled")]
         ai_session_summaries: bool,
+        #[serde(default)]
+        feed: bool,
     }
     fn enabled() -> bool {
         true
@@ -268,6 +362,7 @@ fn decode_features(body: &[u8]) -> Result<AccountFeatures, CloudAIError> {
     }
     Ok(AccountFeatures {
         ai_session_summaries: wire.features.ai_session_summaries,
+        feed: wire.features.feed,
     })
 }
 
@@ -307,7 +402,15 @@ impl HttpTransport for ReqwestTransport {
 }
 
 fn read_body(body: Box<dyn Read + Send>, cancel: &Cancellation) -> Result<Vec<u8>, CloudAIError> {
-    let mut bounded = body.take((MAX_BODY_BYTES + 1) as u64);
+    read_bounded(body, cancel, MAX_BODY_BYTES)
+}
+
+fn read_bounded(
+    body: Box<dyn Read + Send>,
+    cancel: &Cancellation,
+    maximum: usize,
+) -> Result<Vec<u8>, CloudAIError> {
+    let mut bounded = body.take((maximum + 1) as u64);
     let mut output = Vec::new();
     let mut buffer = [0u8; 4096];
     loop {
@@ -319,7 +422,7 @@ fn read_body(body: Box<dyn Read + Send>, cancel: &Cancellation) -> Result<Vec<u8
             return Ok(output);
         }
         output.extend_from_slice(&buffer[..count]);
-        if output.len() > MAX_BODY_BYTES {
+        if output.len() > maximum {
             return Err(CloudAIError::InvalidResponse);
         }
     }

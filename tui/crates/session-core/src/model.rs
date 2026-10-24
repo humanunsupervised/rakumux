@@ -142,15 +142,20 @@ pub struct LaunchSpec {
     pub startup_cmds: Vec<String>,
 }
 
-/// A session as returned by the API.
 /// A live agent's current turn, as `SessionView::agent_turn` shows it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentTurn {
     /// Tells this turn from the next one (opaque).
     pub id: u64,
     /// The messages the agent wrote in it: reasoning, replies, tool calls.
     pub messages: u32,
+    /// The agent's own conversation the turn belongs to, when known: one
+    /// chat, for its one automatic AI summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
 }
+
+/// A session as returned by the API.
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionView {

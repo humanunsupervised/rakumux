@@ -1,12 +1,16 @@
 //! The Rakumux account and AI session descriptions (`crate::account`).
-//! Checked once the daemon connects; signed in, every live session shown
-//! gets a short AI description under its name, refreshed every few seconds.
+//! Checked once the daemon connects; signed in, live sessions shown get a
+//! short AI description under them, read from the account service every few
+//! seconds. The service makes one per agent chat by itself; after that a new
+//! one is made only when asked: `s`, or the ↻ shown over a hovered
+//! description.
 //! Settings → Account opens the account dialog: sign in with a code
 //! approved in any browser, see who is signed in, sign out.
 
 use std::time::{Duration, Instant};
 
 use rakumux_sensagent::owner::protocol::{SignInView, StatusLine};
+use session_core::ids::SessionId;
 use session_core::model::SessionStatus;
 
 use super::runtime::AppEvent;
@@ -68,6 +72,7 @@ impl App {
             _ => self.forget_descriptions(),
         }
         self.account = status;
+        self.on_feed_switch();
     }
 
     /// Settings → Account.
@@ -181,6 +186,7 @@ impl App {
             Ok(()) => {
                 self.account = AccountStatus::SignedOut;
                 self.forget_descriptions();
+                self.on_feed_switch();
                 if let AppMode::Account(dialog) = &mut self.mode {
                     dialog.state = AccountDialogState::SignedOut;
                 }
@@ -251,6 +257,11 @@ impl App {
         // A failure (the service restarting) keeps what's shown.
         let Ok(lines) = result else { return };
         for line in lines {
+            if line.refreshing {
+                self.summaries_refreshing.insert(line.session.clone());
+            } else {
+                self.summaries_refreshing.remove(&line.session);
+            }
             match (line.state, line.text) {
                 (LineState::Ready, Some(text)) => {
                     self.descriptions.insert(line.session, text);
@@ -273,8 +284,82 @@ impl App {
         }
     }
 
+    /// `s`: a new AI summary of the selected session (live ones only; none is
+    /// selected under the Feed tab).
+    pub fn summarize_selected(&mut self) {
+        if self.feed_shown() {
+            return;
+        }
+        let Some(session) = self.list.selected_session() else {
+            self.set_status("Select a session to summarise.");
+            return;
+        };
+        if session.status != SessionStatus::Live {
+            self.set_status("Only running sessions are summarised.");
+            return;
+        }
+        let signed_in = matches!(
+            &self.account,
+            AccountStatus::SignedIn(account) if account.summaries != Some(false)
+        );
+        if signed_in && !self.shows_ai_descriptions() {
+            self.set_status("Show AI summaries first: Settings → Session description content.");
+            return;
+        }
+        let (id, name) = (session.id.clone(), session.name.clone());
+        if self.summarize(id.clone()) && self.description(&id).is_none() {
+            self.set_status(format!("Summarising {name}…"));
+        }
+    }
+
+    /// `s`, or a click on a description's ↻: the account service makes a new
+    /// AI summary of `session` (its agent's latest prompt and outputs since,
+    /// else its screen). Signed out or with summaries off, says how to turn
+    /// them on; while one is being made, does nothing. True when asked.
+    pub fn summarize(&mut self, session: SessionId) -> bool {
+        let on = matches!(
+            &self.account,
+            AccountStatus::SignedIn(account) if account.summaries != Some(false)
+        );
+        if !on {
+            self.set_status("Sign in and turn on AI session summaries (rakumux.com/features).");
+            return false;
+        }
+        if self.summary_refreshing(&session) {
+            return false;
+        }
+        self.summary_asks.insert(session.clone());
+        let access = self.account_access.clone();
+        self.exec.job(move || {
+            let result = access.summarize(&session);
+            AppEvent::Summarized { session, result }
+        });
+        true
+    }
+
+    pub(super) fn on_summarized(&mut self, session: SessionId, result: Result<(), String>) {
+        self.summary_asks.remove(&session);
+        match result {
+            Ok(()) => {
+                self.summaries_refreshing.insert(session);
+                // A read under way predates the request: read again now.
+                self.descriptions_generation += 1;
+                self.descriptions_busy = false;
+                self.descriptions_at = Some(Instant::now());
+            }
+            Err(error) => self.set_status(format!("Couldn't summarise: {error}")),
+        }
+    }
+
+    /// A new AI summary of `session` was asked for or is being made.
+    pub fn summary_refreshing(&self, session: &SessionId) -> bool {
+        self.summary_asks.contains(session) || self.summaries_refreshing.contains(session)
+    }
+
     fn forget_descriptions(&mut self) {
         self.descriptions.clear();
+        self.summaries_refreshing.clear();
+        self.summary_asks.clear();
         self.descriptions_at = None;
         self.descriptions_busy = false;
         self.descriptions_generation += 1;

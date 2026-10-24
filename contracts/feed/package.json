@@ -1,0 +1,16 @@
+{
+  "name": "@rakumux/feed-contract",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Development-only fixtures and conformance tests for the agent feed wire contract.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0"
+  }
+}

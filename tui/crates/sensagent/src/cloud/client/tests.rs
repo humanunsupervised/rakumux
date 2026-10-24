@@ -894,3 +894,75 @@ fn features_failures_are_the_service_errors() {
         Err(CloudAIError::Canceled)
     );
 }
+
+#[test]
+fn the_feed_switch_defaults_off() {
+    let features = features_with(reply(
+        200,
+        r#"{"version":1,"features":{"ai_session_summaries":true,"feed":true}}"#,
+    ))
+    .unwrap();
+    assert!(features.feed);
+    let features = features_with(reply(200, r#"{"version":1,"features":{}}"#)).unwrap();
+    assert!(!features.feed);
+}
+
+#[test]
+fn feed_uploads_are_one_sized_post_and_reads_one_get() {
+    let (client, recorded) = client_with(Ok(reply(200, r#"{"version":1,"accepted":[]}"#)), None);
+    let upload = client
+        .feed(
+            &token(),
+            FeedHttp::Upload(b"{\"version\":1}"),
+            &Cancellation::new(),
+        )
+        .unwrap();
+    assert_eq!(upload.status, 200);
+    {
+        let recorded = recorded.lock().unwrap();
+        let outgoing = &recorded[0].request;
+        assert_eq!(outgoing.method(), Method::POST);
+        assert_eq!(
+            outgoing.url().as_str(),
+            "https://reviewed.example:8443/api/v1/feed/entries"
+        );
+        assert_eq!(
+            outgoing.headers()[header::AUTHORIZATION],
+            format!("Bearer {SECRET}")
+        );
+        assert_eq!(outgoing.headers()[header::CONTENT_LENGTH], "13");
+        assert_eq!(recorded[0].body, b"{\"version\":1}");
+        assert!(recorded[0].body_was_streaming, "never replayed");
+    }
+
+    let (client, recorded) = client_with(
+        Ok(reply(
+            429,
+            r#"{"error":{"code":"rate_limited","message":"Too many feed requests."}}"#,
+        )),
+        None,
+    );
+    let page = client
+        .feed(
+            &token(),
+            FeedHttp::Page("after=12&limit=100"),
+            &Cancellation::new(),
+        )
+        .unwrap();
+    // Errors come back for the feed to decode against its own contract.
+    assert_eq!(page.status, 429);
+    let recorded = recorded.lock().unwrap();
+    assert_eq!(recorded[0].request.method(), Method::GET);
+    assert_eq!(
+        recorded[0].request.url().as_str(),
+        "https://reviewed.example:8443/api/v1/feed?after=12&limit=100"
+    );
+    assert!(recorded[0].body.is_empty());
+    assert_eq!(
+        client_with(Ok(reply(302, Vec::new())), None)
+            .0
+            .feed(&token(), FeedHttp::Page("limit=100"), &Cancellation::new())
+            .err(),
+        Some(CloudAIError::HttpStatus(302))
+    );
+}

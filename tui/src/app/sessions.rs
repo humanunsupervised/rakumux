@@ -702,7 +702,7 @@ impl App {
     }
 
     /// Select `id` and work in it (revive or restart it when it isn't live).
-    fn go_into(&mut self, id: SessionId) {
+    pub(super) fn go_into(&mut self, id: SessionId) {
         self.reveal(&id);
         self.list.select(Selection::Session(id));
         self.reconcile_detail();
@@ -871,7 +871,8 @@ impl App {
     /// refuses while someone types in the session elsewhere; this tries
     /// again at most every [`CLAIM_INTERVAL`].
     pub(super) fn claim_terminal_size(&mut self) {
-        if self.focus == Focus::Terminal {
+        // The feed covers the detail: no session is on screen to size.
+        if self.focus == Focus::Terminal || self.feed_in_detail() {
             return;
         }
         if self.screen().terminal.is_none() {
@@ -1164,7 +1165,11 @@ impl App {
         }
         // The session row under the pointer shows its pin toggle.
         self.hovered_row = self.hits.iter().find_map(|(area, hit)| match hit {
-            Hit::ListRow(row) | Hit::PinToggle(row) if inside(Some(*area)) => Some(*row),
+            Hit::ListRow(row) | Hit::PinToggle(row) | Hit::SummaryRefresh(row)
+                if inside(Some(*area)) =>
+            {
+                Some(*row)
+            }
             _ => None,
         });
         self.divider.hover = inside(screen.divider);
@@ -1225,6 +1230,13 @@ impl App {
                     return;
                 }
                 // The selection stays where it is.
+                Some(Hit::SummaryRefresh(row)) => {
+                    if let Some(ListRow::Session(session)) = self.list.rows().get(row) {
+                        let id = session.id.clone();
+                        self.summarize(id);
+                    }
+                    return;
+                }
                 Some(Hit::PinToggle(row)) => {
                     if let Some(ListRow::Session(session)) = self.list.rows().get(row) {
                         let id = session.id.clone();
@@ -1271,16 +1283,20 @@ impl App {
                 }
                 // A tab: the active one opens its modal, another becomes
                 // active. The top row is selected, so ←/→ go on from it.
-                Some(Hit::ListTab(grouping)) => {
+                Some(Hit::ListTab(tab)) => {
                     if self.focus != Focus::List {
                         self.enter_rakumux_mode();
                     }
                     self.list.select(Selection::Folders);
-                    if grouping == self.list.grouping() {
+                    if tab == self.list_tab() {
                         self.open_tab_picker();
                     } else {
-                        self.show_tab(grouping);
+                        self.show_list_tab(tab);
                     }
+                    return;
+                }
+                Some(Hit::FeedEntry(index)) => {
+                    self.click_feed_entry(index);
                     return;
                 }
                 Some(Hit::ModeBadge) => {
@@ -1314,6 +1330,21 @@ impl App {
         }
         if inside(screen.terminal_panel) {
             self.terminal_panel_mouse(event);
+        } else if (self.feed_shown() && inside(screen.list))
+            || (self.feed_in_detail() && inside(screen.terminal))
+        {
+            // The wheel scrolls the reply being read, else goes through
+            // the replies.
+            let step = match event.kind {
+                MouseEventKind::ScrollUp => -1,
+                MouseEventKind::ScrollDown => 1,
+                _ => return,
+            };
+            if self.feed.reading || inside(screen.terminal) {
+                self.feed.scroll_by(step * WHEEL_ROWS as isize);
+            } else {
+                self.move_feed_selection(step);
+            }
         } else if inside(screen.terminal) {
             self.terminal_mouse(event, screen.terminal.unwrap_or_default());
         } else if inside(screen.list) || inside(screen.grid) {

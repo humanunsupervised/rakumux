@@ -22,6 +22,7 @@ use super::policy::{self, Op, Target};
 use super::registry::{
     self, ProjectRecord, ProjectRemoval, ProjectSessions, Registry, SessionRecord,
 };
+use super::replies::{ReplyDue, ReplyRing};
 use super::saved;
 use super::waits::{self, Observed, Outcome};
 use super::{ControlConfig, Detector};
@@ -32,11 +33,11 @@ use crate::handoff::{BindingHandoff, ControlHandoff};
 use crate::host::{HostError, HostEvent, SpawnSpec, TerminalHost, TerminalState};
 use crate::persist::ScrollbackStore;
 use session_core::api::{
-    ApiError, AttachRequest, CallerInfo, CreateSession, ErrorCode, EventEnvelope, Hello,
-    ReadRequest, ReadSource, Report, Request, Response, ReviveSession, Role, SendRequest,
+    AgentReply, ApiError, AttachRequest, CallerInfo, CreateSession, ErrorCode, EventEnvelope,
+    Hello, ReadRequest, ReadSource, Report, Request, Response, ReviveSession, Role, SendRequest,
     SessionEvent, SubscribeRequest, TextFormat, WaitRequest, WaitResult, WaitUntil,
 };
-use session_core::ids::{SessionId, TerminalId, Token};
+use session_core::ids::{ReplyId, SessionId, TerminalId, Token};
 use session_core::model::{
     AgentInfo, Creator, LaunchSpec, Lifecycle, ProjectView, Reported, ResumeSource, ResumeSpec,
     ScopeRoot, SessionStatus, SessionView, TerminalView,
@@ -103,6 +104,12 @@ struct LiveSession {
     output_checked_ms: i64,
     /// The agent's latest output line (`SessionView::agent_output`).
     agent_output: Option<String>,
+    /// The agent was seen working since its last finished turn.
+    turn_started: bool,
+    /// A turn finished while reply capture was on; its reply isn't captured yet.
+    reply_due: Option<ReplyDue>,
+    /// The last reply captured (`agent_output::Reply::key`), never twice.
+    reply_key: Option<String>,
     /// The user's latest prompt (`SessionView::user_prompt`).
     user_prompt: Option<String>,
     /// The agent's current turn (`session_turn`, `SessionView::agent_turn`).
@@ -125,6 +132,9 @@ impl LiveSession {
             output: None,
             output_checked_ms: 0,
             agent_output: None,
+            turn_started: false,
+            reply_due: None,
+            reply_key: None,
             user_prompt: None,
             turn: None,
         }
@@ -155,6 +165,8 @@ struct State {
     /// session with the newest binding of a conversation.
     bindings: HashMap<SessionId, VecDeque<Binding>>,
     binding_seq: u64,
+    /// Reply capture and the replies captured (memory only).
+    replies: ReplyRing,
 }
 
 struct Binding {
@@ -215,6 +227,7 @@ impl Inner {
                 recent_creates: HashMap::new(),
                 bindings: HashMap::new(),
                 binding_seq: 0,
+                replies: ReplyRing::default(),
                 views: HashMap::new(),
                 git: GitContexts::default(),
             }),
@@ -448,6 +461,8 @@ impl Inner {
             Request::ProjectAdd { path } => self.add_project(caller, &path),
             Request::ProjectRemove { path } => self.remove_project(caller, &path),
             Request::ProjectRelocate { from, to } => self.relocate_project(caller, &from, &to),
+            Request::ReplyCapture { enabled } => self.reply_capture(caller, enabled),
+            Request::ReplyList { after } => self.reply_list(caller, after.as_ref()),
             Request::Hello(_)
             | Request::Attach(_)
             | Request::TerminalOpen(_)
@@ -536,6 +551,9 @@ impl Inner {
         caller: &Caller,
         request: &SubscribeRequest,
     ) -> Result<Receiver<EventEnvelope>, ApiError> {
+        if request.replies {
+            policy::authorize(caller, Op::ReplyList, None)?;
+        }
         let state = self.lock();
         let scopes = self.caller_scopes(
             &state,
@@ -564,6 +582,7 @@ impl Inner {
             session_ids: request.session_ids.clone(),
             kinds: request.kinds.clone(),
             self_id: caller.session_id().cloned(),
+            replies: request.replies,
         }))
     }
 
@@ -1826,10 +1845,22 @@ impl Inner {
             let live = &inner.live;
             inner.git.poll_due(now, |id| live.contains_key(id))
         };
+        let replies: Vec<(SessionId, TerminalId)> = state
+            .live
+            .iter()
+            .filter(|(_, live)| live.reply_due.is_some())
+            .map(|(id, live)| (id.clone(), live.terminal))
+            .collect();
         // The files are read without the lock.
         drop(state);
         if let Some(targets) = due {
             self.poll_git(targets);
+        }
+        // A finished turn's reply may reach its log after the screen settles.
+        for (id, terminal) in replies {
+            let process = self.host.info(terminal).and_then(|info| info.foreground);
+            self.follow_output(terminal, &id, process.as_ref(), now);
+            self.refresh(&mut self.lock(), &id);
         }
     }
 
@@ -1885,8 +1916,9 @@ impl Inner {
     }
 
     /// Read the running agent's conversation log for its latest line, at
-    /// most every [`OUTPUT_CHECK_MS`]: the log is found again when the
-    /// foreground process changes, and dropped when it isn't a known agent.
+    /// most every [`OUTPUT_CHECK_MS`] (sooner when a finished turn's reply is
+    /// due): the log is found again when the foreground process changes, and
+    /// dropped when it isn't a known agent.
     /// Reads files of other programs, so it runs without the state lock; a
     /// changed line is published by the caller's `refresh`.
     fn follow_output(
@@ -1905,7 +1937,10 @@ impl Inner {
             else {
                 return;
             };
-            if now.saturating_sub(live.output_checked_ms) < OUTPUT_CHECK_MS {
+            let reply_read = live
+                .reply_due
+                .is_some_and(|due| live.output_checked_ms < due.since);
+            if !reply_read && now.saturating_sub(live.output_checked_ms) < OUTPUT_CHECK_MS {
                 return;
             }
             live.output_checked_ms = now;
@@ -1951,6 +1986,7 @@ impl Inner {
                 .filter(|turn| turn.prompt.is_some() || turn.total > 0);
             live.output = follower;
         }
+        self.capture_reply(&mut state, session_id, now);
     }
 
     /// What to record as `session_id`'s resume command (`resume::plan`),
@@ -2407,10 +2443,15 @@ impl Inner {
                 .flatten(),
             agent_turn: (runtime.status == SessionStatus::Live)
                 .then(|| {
-                    let turn = state.live.get(&record.id)?.turn.as_ref()?;
+                    let live = state.live.get(&record.id)?;
+                    let turn = live.turn.as_ref()?;
                     Some(session_core::model::AgentTurn {
                         id: turn.id,
                         messages: turn.total,
+                        conversation_id: live
+                            .output
+                            .as_ref()
+                            .and_then(|follower| follower.conversation()),
                     })
                 })
                 .flatten(),
@@ -2499,8 +2540,107 @@ impl Inner {
         state.views.insert(id.clone(), view.clone());
         self.publish(&record.scope, id, SessionEvent::Updated { session: view });
         if lifecycle != old_lifecycle {
+            self.note_turn(state, id, record.private, lifecycle);
             self.publish(&record.scope, id, SessionEvent::Lifecycle { lifecycle });
         }
+    }
+
+    /// Follow turns for reply capture: a turn starts when the agent is seen
+    /// working and finishes when its session turns `Done`; a finished turn's
+    /// reply is then due, while capture is on and the session isn't private.
+    fn note_turn(&self, state: &mut State, id: &SessionId, private: bool, lifecycle: Lifecycle) {
+        let capturing = state.replies.enabled() && !private;
+        let Some(live) = state.live.get_mut(id) else {
+            return;
+        };
+        match lifecycle {
+            Lifecycle::Working => live.turn_started = true,
+            Lifecycle::Done if live.turn_started => {
+                live.turn_started = false;
+                live.reply_due = capturing.then(|| ReplyDue::new(now_ms()));
+            }
+            _ => {}
+        }
+    }
+
+    /// Capture the due reply of `id`'s finished turn once its log was read
+    /// after the turn finished and shows a reply not captured before; stop
+    /// waiting when [`ReplyDue::until`] passes.
+    fn capture_reply(&self, state: &mut State, id: &SessionId, now: i64) {
+        let State { live, replies, .. } = state;
+        let Some(live) = live.get_mut(id) else {
+            return;
+        };
+        let Some(due) = live.reply_due else {
+            return;
+        };
+        if !replies.enabled() {
+            live.reply_due = None;
+            return;
+        }
+        let found = live
+            .output
+            .as_ref()
+            .filter(|_| live.output_checked_ms >= due.since)
+            .and_then(|follower| {
+                let reply = follower.reply()?;
+                (live.reply_key.as_deref() != Some(reply.key.as_str()))
+                    .then(|| (follower.agent(), follower.conversation(), reply.clone()))
+            });
+        let Some((agent, conversation_id, reply)) = found else {
+            if now >= due.until {
+                live.reply_due = None;
+            }
+            return;
+        };
+        live.reply_due = None;
+        live.reply_key = Some(reply.key);
+        let reply = AgentReply {
+            id: ReplyId::generate(),
+            session_id: id.clone(),
+            agent: agent.to_owned(),
+            conversation_id,
+            text: reply.text,
+            truncated: reply.truncated,
+            finished_at: due.since,
+        };
+        let scope = live.scope.clone();
+        replies.push(reply.clone(), now);
+        self.publish(&scope, id, SessionEvent::Reply { reply });
+    }
+
+    /// Turn reply capture on or off (user only); off forgets the replies.
+    fn reply_capture(&self, caller: &Caller, enabled: bool) -> Result<Response, ApiError> {
+        let mut state = self.lock();
+        let result = policy::authorize(caller, Op::ReplyCapture, None);
+        if result.is_ok() && state.replies.enabled() != enabled {
+            state.replies.set_enabled(enabled);
+            if !enabled {
+                for live in state.live.values_mut() {
+                    live.reply_due = None;
+                }
+            }
+        }
+        let detail = Some(if enabled { "on" } else { "off" }.to_owned());
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::ReplyCapture,
+            None,
+            None,
+            detail,
+            &result,
+        );
+        result.map(|()| Response::Ok)
+    }
+
+    /// The replies captured after `after` (user only).
+    fn reply_list(&self, caller: &Caller, after: Option<&ReplyId>) -> Result<Response, ApiError> {
+        policy::authorize(caller, Op::ReplyList, None)?;
+        let mut state = self.lock();
+        let capturing = state.replies.enabled();
+        let replies = state.replies.after(after, now_ms());
+        Ok(Response::Replies { replies, capturing })
     }
 
     fn publish(&self, scope: &ScopeRoot, id: &SessionId, event: SessionEvent) {

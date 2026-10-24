@@ -52,9 +52,9 @@ new-session flow, and code boundaries.
   matches, capped reads; `expand` for `~` and relative paths). The Folders modal lists them as
   rows (`PickerRow::Suggestion`): `↑`/`↓` choose, Tab or `→` completes, Enter adds, a click
   completes.
-- `grouping.rs`: the list tabs, pure derivations over `SessionView` (no drawing). `Grouping`
-  (Status, Folders, App; `step` for ←/→, no wrap; the default, where every start opens, is
-  Status), `AppKey::of` (agent kind, else a
+- `grouping.rs`: the list tabs, pure derivations over `SessionView` (no drawing). `ListTab`
+  (`Feed`, then `Grouped(Grouping)`; `ALL` is the top row's order, `step` for ←/→, no wrap),
+  `Grouping` (Status, Folders, App; the default, where every start opens, is Status), `AppKey::of` (agent kind, else a
   non-shell foreground program while live, else a non-shell `launch.argv[0]`, else `shell`;
   lowercase; dead sessions keep their agent), `StatusGroup::of` (like the
   status marks, `components::format::status_glyph`: waiting for you, unread (a `done` turn not yet looked at),
@@ -62,8 +62,17 @@ new-session flow, and code boundaries.
   display order = enum order; `saved_name` keeps the old `status:done`/`status:idle` keys), `Section`
   (an app or a status) and `sort_sections` (agents first, then programs, then `shell`, by name).
   `is_shell` is the one shell list (`format.rs` uses it too).
+- `feed/`: the agent feed (`FeedStore`: state only, entries newest first by `finished_at`,
+  capped at 500, the selection kept by id, the reply's scroll, the service's generation and
+  revision) and `tab.rs`, the Feed tab hosting it: `list_tab`, `feed_shown`, `show_list_tab`,
+  polling `AccountAccess::feed` every 2 s off the UI thread only while the Feed is shown (again
+  at once while `more`), the first time the Feed switch is seen on bringing the Feed to the front
+  unless a tab was chosen, and its keys (`feed_key`) and Enter (`open_feed_entry`: a reply whose
+  session is listed here goes into it under Status; one from another machine says where it
+  runs; on phones it's read full screen). `components/feed.rs` draws a `FeedStore` into any
+  area. The Feed shows in Master detail only; Grid and Tabs keep sessions.
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
-  folders / App / Status), `filter_label` (the Tabs layout's selector, Grid's header),
+  folders / App / Status; Feed says Feed), `filter_label` (the Tabs layout's selector, Grid's header),
   `switch_tab`/`show_tab`, `open_tab_picker` (Folders: the Folders modal) and the App and
   Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
   then `picker_sections` (sessions' apps or every status but unknown, plus the filter's), typing
@@ -192,7 +201,11 @@ new-session flow, and code boundaries.
     a code (`AppEvent::SignIn`), its status is polled every second, Esc abandons it, `o` signs
     out. Signed in, the visible live sessions' AI descriptions are read every 2 s
     (`AppEvent::Descriptions`, generation-checked) into `App::description`, the session list's
-    third line; a refresh in progress keeps the last one.
+    italic description line (with whether the service is making a new one); a refresh in
+    progress keeps the last one. `summarize` asks for a new one (`AccountAccess::summarize`,
+    `AppEvent::Summarized`): the ↻ that hovering a described row shows at the line's right end
+    (`Hit::SummaryRefresh`, a 2-column slot that never moves the text, a spinner while making
+    one) or `s` (`summarize_selected`; a footer message when signed out or summaries are off).
   - the prefix commands work in both panes (`handlers/list.rs` routes them too).
 
 ## Data flow

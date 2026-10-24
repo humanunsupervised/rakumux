@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:common",
+  "title": "Agent feed shared definitions",
+  "$defs": {
+    "ulid": {
+      "description": "A ULID in Crockford base32 capitals: a Rakumux session id, or the id the daemon gave a reply.",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "seq": {
+      "description": "The cloud's arrival order for one user's entries: increasing, never reused.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "timestampMs": {
+      "description": "Unix time in milliseconds, 2020 to 2100.",
+      "type": "integer",
+      "minimum": 1577836800000,
+      "maximum": 4102444800000
+    },
+    "label": {
+      "description": "One visible line: no terminal, format, default-ignorable, surrogate or line/paragraph controls.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "[\\p{L}\\p{N}\\p{P}\\p{S}]",
+      "not": {
+        "pattern": "[\\p{Cc}\\p{Cf}\\p{Cs}\\p{Zl}\\p{Zp}\\p{Default_Ignorable_Code_Point}]"
+      }
+    },
+    "machine": {
+      "description": "The machine the reply was made on, as its owner names it (the host name).",
+      "type": "string",
+      "$ref": "#/$defs/label",
+      "maxLength": 64,
+      "maxUtf8Bytes": 256
+    },
+    "session": {
+      "description": "The Rakumux session the reply was made in. `folder` is the folder's last path component only, never a path.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/ulid" },
+        "name": { "type": "string", "$ref": "#/$defs/label", "maxLength": 64, "maxUtf8Bytes": 256 },
+        "folder": {
+          "type": "string",
+          "$ref": "#/$defs/label",
+          "maxLength": 128,
+          "maxUtf8Bytes": 512,
+          "not": { "pattern": "/" }
+        }
+      }
+    },
+    "agent": {
+      "type": "string",
+      "enum": ["claude-code", "codex", "opencode"]
+    },
+    "conversationId": {
+      "description": "The agent's own conversation id.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "replyText": {
+      "description": "What the agent said when it finished its turn, as plain text. Tab, LF and CR are allowed; other terminal controls, format controls, default-ignorables and lone surrogates are not.",
+      "type": "string",
+      "minLength": 1,
+      "maxUtf8Bytes": 32768,
+      "pattern": "[\\p{L}\\p{N}\\p{P}\\p{S}]",
+      "not": {
+        "pattern": "[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\\p{Cf}\\p{Cs}\\p{Default_Ignorable_Code_Point}]"
+      }
+    },
+    "upload": {
+      "description": "One finished reply as a machine uploads it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "session", "agent", "text", "truncated", "finished_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/ulid" },
+        "session": { "$ref": "#/$defs/session" },
+        "agent": { "$ref": "#/$defs/agent" },
+        "conversation_id": { "$ref": "#/$defs/conversationId" },
+        "text": { "$ref": "#/$defs/replyText" },
+        "truncated": {
+          "description": "The reply was longer and `text` is its start.",
+          "type": "boolean"
+        },
+        "finished_at": { "$ref": "#/$defs/timestampMs" }
+      }
+    },
+    "entry": {
+      "description": "One feed entry as the cloud returns it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "id", "machine", "session", "agent", "text", "truncated", "finished_at", "received_at"],
+      "properties": {
+        "seq": { "$ref": "#/$defs/seq" },
+        "id": { "$ref": "#/$defs/ulid" },
+        "machine": { "$ref": "#/$defs/machine" },
+        "session": { "$ref": "#/$defs/session" },
+        "agent": { "$ref": "#/$defs/agent" },
+        "conversation_id": { "$ref": "#/$defs/conversationId" },
+        "text": { "$ref": "#/$defs/replyText" },
+        "truncated": { "type": "boolean" },
+        "finished_at": { "$ref": "#/$defs/timestampMs" },
+        "received_at": { "$ref": "#/$defs/timestampMs" }
+      }
+    }
+  }
+}

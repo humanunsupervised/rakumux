@@ -18,7 +18,7 @@ use session_core::model::{ScopeRoot, SessionStatus};
 use super::format::{abbreviate_home, branch_label, truncate, truncate_middle};
 use super::utils::get_spinner_char;
 use crate::app::folders::looks_like_path;
-use crate::app::grouping::Grouping;
+use crate::app::grouping::{Grouping, ListTab};
 use crate::app::types::{AppMode, FolderPicker, NewFolder, PickerRow, PickerStage};
 use crate::app::{App, Hit};
 use crate::layout::str_width;
@@ -58,12 +58,20 @@ pub fn tab_icon(app: &App, grouping: Grouping) -> &'static str {
     }
 }
 
+/// The mark of a tab of the list's top row.
+pub fn list_tab_icon(app: &App, tab: ListTab) -> &'static str {
+    match tab {
+        ListTab::Feed => app.icons().feed(),
+        ListTab::Grouped(grouping) => tab_icon(app, grouping),
+    }
+}
+
 /// Whether the modal of the active tab (the Folders, App or Status modal)
 /// is open.
 pub fn tab_picker_open(app: &App) -> bool {
     match &app.mode {
-        AppMode::Folders(_) => app.list.grouping() == Grouping::Folder,
-        AppMode::Sections(picker) => picker.grouping == app.list.grouping(),
+        AppMode::Folders(_) => app.list_tab() == ListTab::Grouped(Grouping::Folder),
+        AppMode::Sections(picker) => app.list_tab() == ListTab::Grouped(picker.grouping),
         _ => false,
     }
 }

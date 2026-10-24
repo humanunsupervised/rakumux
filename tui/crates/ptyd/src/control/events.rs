@@ -48,6 +48,8 @@ pub(crate) struct Filter {
     pub kinds: Vec<EventKind>,
     /// The subscribing session, so views carry `is_self`.
     pub self_id: Option<SessionId>,
+    /// Deliver `Reply` events (user callers that asked for them).
+    pub replies: bool,
 }
 
 impl Filter {
@@ -56,6 +58,9 @@ impl Filter {
             return false;
         }
         if !self.session_ids.is_empty() && !self.session_ids.contains(&envelope.session_id) {
+            return false;
+        }
+        if matches!(envelope.event, SessionEvent::Reply { .. }) && !self.replies {
             return false;
         }
         match kind_of(&envelope.event) {
@@ -128,6 +133,7 @@ pub(crate) fn kind_of(event: &SessionEvent) -> Option<EventKind> {
         SessionEvent::Lifecycle { .. } => EventKind::Lifecycle,
         SessionEvent::Reported { .. } => EventKind::Reported,
         SessionEvent::Activity => EventKind::Activity,
+        SessionEvent::Reply { .. } => EventKind::Reply,
         SessionEvent::Unknown => return None,
     })
 }
@@ -161,7 +167,32 @@ mod tests {
             session_ids: ids.iter().map(|i| SessionId::from_string(*i)).collect(),
             kinds: kinds.to_vec(),
             self_id: None,
+            replies: false,
         }
+    }
+
+    #[test]
+    fn replies_reach_only_subscriptions_that_asked() {
+        let bus = EventBus::default();
+        let plain = bus.subscribe(filter("/s", &[], &[]));
+        let replies = bus.subscribe(Filter {
+            scopes: Scopes::All,
+            replies: true,
+            ..filter("/s", &[], &[])
+        });
+        let reply = session_core::api::AgentReply {
+            id: session_core::ids::ReplyId::generate(),
+            session_id: SessionId::from_string("A"),
+            agent: "codex".into(),
+            conversation_id: None,
+            text: "done".into(),
+            truncated: false,
+            finished_at: 1,
+        };
+        bus.publish(envelope("/s", "A", SessionEvent::Reply { reply }));
+        bus.publish(envelope("/s", "A", SessionEvent::Activity));
+        assert_eq!(plain.try_iter().count(), 1, "only the activity");
+        assert_eq!(replies.try_iter().count(), 2);
     }
 
     fn ids(rx: &Receiver<EventEnvelope>) -> Vec<String> {

@@ -8,20 +8,20 @@ use session_core::client::SessionApi;
 use session_core::ids::SessionId;
 use session_core::model::{ScopeRoot, SessionView};
 
-use super::schedule::{Outcome, RefreshFailure, RefreshScheduler, MAX_RUNNING};
+use super::schedule::{conversation, Outcome, RefreshFailure, RefreshScheduler, MAX_RUNNING};
 use crate::auth::{
-    AccountError, AccountService, AccountSession, ApplyResult, CredentialStore, SystemClock,
-    WallClock,
+    AccountError, AccountService, AccountSession, ApplyResult, CredentialRevision, CredentialStore,
+    SystemClock, WallClock,
 };
 use crate::cloud::{AccountFeatures, CloudAIError, RemoteErrorCode};
 use crate::dispatch::{
     DispatchCompletion, DispatchError, DispatchPreparation, FeaturesCompletion, FeaturesJob,
     StatusCaptureJob, StatusConsentOffer, StatusDispatchJob, StatusDispatchService,
 };
+use crate::feed::{FeedJob, FeedRequest};
 use crate::source::{CaptureError, CaptureExpectation, SessionCapture, TurnSettings};
 use crate::status::{
-    ConsentPolicy, ConsentRevision, ConsentSnapshot, FolderConsent, InputSelection, SourceStamp,
-    StatusStore, StatusView,
+    ConsentPolicy, ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore, StatusView,
 };
 
 /// How often the account's feature switches are read again while signed in.
@@ -40,6 +40,8 @@ pub struct AIStatus {
     pub view: StatusView,
     /// Why the last refresh produced no text, until one succeeds.
     pub failure: Option<RefreshFailure>,
+    /// A summary was asked for or is being made.
+    pub refreshing: bool,
 }
 
 /// Refreshing as a whole. Native session status never depends on it.
@@ -54,6 +56,8 @@ pub struct RefreshState {
     /// The account's AI session summaries switch, once read; `None` when signed out
     /// or not yet known.
     pub summaries: Option<bool>,
+    /// The account's Feed switch, likewise.
+    pub feed: Option<bool>,
 }
 
 /// One scoped capture to run off the owner thread.
@@ -95,7 +99,6 @@ pub struct Captured {
 /// One committed request to run off the owner thread.
 pub struct Dispatch<A, C = SystemClock> {
     session: SessionId,
-    stamp: SourceStamp,
     worker: StatusDispatchJob<A, C>,
 }
 
@@ -104,7 +107,6 @@ impl<A: CredentialStore, C: WallClock> Dispatch<A, C> {
     pub fn run(self) -> Completed {
         Completed {
             session: self.session,
-            stamp: self.stamp,
             completion: self.worker.run(),
         }
     }
@@ -113,7 +115,6 @@ impl<A: CredentialStore, C: WallClock> Dispatch<A, C> {
 /// A finished request for the owner to apply.
 pub struct Completed {
     session: SessionId,
-    stamp: SourceStamp,
     completion: DispatchCompletion,
 }
 
@@ -191,17 +192,30 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     }
 
     /// Apply a fresh daemon `list` after (re)subscribing; refreshing may start.
-    pub fn resync(&mut self, views: &[SessionView], now: Duration) -> Result<(), DispatchError> {
+    /// A chat whose session shows a summary already (this service restarted)
+    /// gets no automatic one.
+    pub fn resync(&mut self, views: &[SessionView], _now: Duration) -> Result<(), DispatchError> {
         let result = self.service.resync(views);
         self.observed.extend(self.running.iter().cloned());
-        // Missed output is assumed: resync left every live session dirty.
         for candidate in self.service.refresh_candidates() {
-            if candidate.dirty {
-                self.scheduler.output(&candidate.session, now);
+            let Some(turn) = &candidate.turn else {
+                continue;
+            };
+            if matches!(
+                self.service.view(&candidate.session),
+                Ok(StatusView::Ready(_))
+            ) {
+                self.scheduler
+                    .summarized(&candidate.session, conversation(turn));
             }
         }
         self.connected = true;
         result
+    }
+
+    /// The user asked for a new summary of `session` (the refresh icon or `s`).
+    pub fn request(&mut self, session: &SessionId) {
+        self.scheduler.request(session);
     }
 
     /// The event stream ended: no capture starts until the next `resync`.
@@ -210,33 +224,22 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     }
 
     /// Apply one daemon view (`get`, or a refreshed view after a changed capture).
-    pub fn apply_view(&mut self, view: &SessionView, now: Duration) -> Result<(), DispatchError> {
+    pub fn apply_view(&mut self, view: &SessionView, _now: Duration) -> Result<(), DispatchError> {
         self.observe(&view.id);
-        let dirty = self.service.is_dirty(&view.id);
-        let result = self.service.apply_view(view);
-        if !dirty {
-            self.note_output(&view.id, now);
-        }
-        result
+        self.service.apply_view(view)
     }
 
     /// Apply one subscribed daemon event.
     pub fn apply_event(
         &mut self,
         event: &EventEnvelope,
-        now: Duration,
+        _now: Duration,
     ) -> Result<(), DispatchError> {
         let session = &event.session_id;
         self.observe(session);
-        let dirty = self.service.is_dirty(session);
         let result = self.service.apply_event(event);
-        match event.event {
-            SessionEvent::Removed => self.scheduler.forget(session),
-            SessionEvent::Activity => self.note_output(session, now),
-            // A clean session that became dirty (a new activity phase) starts its quiet
-            // period; other view changes, such as titles, don't restart it.
-            _ if !dirty => self.note_output(session, now),
-            _ => {}
+        if event.event == SessionEvent::Removed {
+            self.scheduler.forget(session);
         }
         result
     }
@@ -251,7 +254,9 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             .as_ref()
             .filter(|_| now >= self.settings_due)
         {
-            self.service.set_turn_settings(read());
+            let settings = read().bounded();
+            self.service.set_turn_settings(settings);
+            self.scheduler.set_auto_at(settings.every);
             self.settings_due = now.saturating_add(SETTINGS_INTERVAL);
         }
         if self.connected {
@@ -265,15 +270,11 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             if self.running.len() >= MAX_RUNNING || !self.scheduler.has_budget(now) {
                 break;
             }
-            if due.advance {
-                if self.service.advance(&due.session).is_err() {
-                    break;
-                }
-                self.scheduler.advanced(&due.session);
+            // A new revision, so the last summary's text doesn't answer this one.
+            self.service.freshen(&due.session);
+            if self.service.advance(&due.session).is_err() {
+                break;
             }
-            let Some(stamp) = self.service.source_stamp(&due.session) else {
-                continue;
-            };
             let job = match self.service.prepare(&due.session) {
                 Ok(DispatchPreparation::Ready(job)) => job,
                 Ok(DispatchPreparation::Skipped(view)) => match view {
@@ -282,22 +283,14 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                         self.idle = true;
                         break;
                     }
-                    StatusView::Excluded => {
-                        self.scheduler.settle(&due.session, stamp, true);
-                        continue;
-                    }
                     _ => {
-                        self.scheduler.settle(&due.session, stamp, false);
+                        self.scheduler.settle(&due);
                         continue;
                     }
                 },
                 Err(_) => break,
             };
-            // Output can't change a reports-only job's input: ignore it until the
-            // stamp or consent changes.
-            let reports_only = job.input_selection() == InputSelection::ReportOnly;
-            self.scheduler
-                .started(&due.session, stamp, reports_only, now);
+            self.scheduler.started(&due, now);
             match self.service.expectation(&job) {
                 Ok(expectation) => {
                     self.observed.remove(&due.session);
@@ -306,8 +299,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 }
                 Err(error) => {
                     let _ = self.service.acknowledge_capture(&job);
-                    self.scheduler
-                        .finished(&due.session, stamp, outcome(&error), now);
+                    self.scheduler.finished(&due.session, outcome(&error), now);
                 }
             }
         }
@@ -324,7 +316,6 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             refreshed,
         } = captured;
         let session = job.session_id().clone();
-        let stamp = job.source_stamp();
         let committed = if self.scheduler.halted(now) {
             Err(DispatchError::Canceled)
         } else {
@@ -334,17 +325,12 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 .and_then(|prepared| self.service.commit(prepared))
         };
         match committed {
-            Ok(worker) => Some(Dispatch {
-                session,
-                stamp,
-                worker,
-            }),
+            Ok(worker) => Some(Dispatch { session, worker }),
             Err(error) => {
                 let _ = self.service.acknowledge_capture(&job);
                 self.running.remove(&session);
                 let observed = self.observed.remove(&session);
-                self.scheduler
-                    .finished(&session, stamp, outcome(&error), now);
+                self.scheduler.finished(&session, outcome(&error), now);
                 if let Some(view) = refreshed.filter(|_| !observed) {
                     let _ = self.apply_view(&view, now);
                 }
@@ -357,7 +343,6 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     pub fn completed(&mut self, completed: Completed, now: Duration) {
         let Completed {
             session,
-            stamp,
             completion,
         } = completed;
         self.running.remove(&session);
@@ -367,7 +352,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             Ok(ApplyResult::Ignored) => Outcome::Interrupted,
             Err(error) => outcome(&error),
         };
-        self.scheduler.finished(&session, stamp, result, now);
+        self.scheduler.finished(&session, result, now);
     }
 
     /// A session's status and its last refresh failure.
@@ -375,6 +360,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         Ok(AIStatus {
             view: self.service.view(session)?,
             failure: self.scheduler.failure(session),
+            refreshing: self.running.contains(session) || self.scheduler.requested(session),
         })
     }
 
@@ -388,6 +374,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 .account_session()
                 .and(self.features)
                 .map(|features| features.ai_session_summaries),
+            feed: self.feed_switch(),
         }
     }
 
@@ -437,6 +424,25 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         }
     }
 
+    /// The account's Feed switch, once read; `None` when signed out or not yet known.
+    pub fn feed_switch(&self) -> Option<bool> {
+        self.service
+            .account_session()
+            .and(self.features)
+            .map(|features| features.feed)
+    }
+
+    /// A feed request for the signed-in account, to run with `FeedJob::run` off
+    /// this thread; `None` without a usable sign-in.
+    pub(crate) fn feed_job(&self, request: FeedRequest) -> Option<FeedJob<A, C>> {
+        self.service.feed_job(request).ok().flatten()
+    }
+
+    /// Whether `revision` is the account signed in now.
+    pub fn is_current(&self, revision: CredentialRevision) -> bool {
+        self.service.account_session().map(AccountSession::revision) == Some(revision)
+    }
+
     /// The account service, for a device sign-in run off this thread.
     pub fn account_service(&self) -> std::sync::Arc<AccountService<A, C>> {
         self.service.account_service()
@@ -471,6 +477,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Stop sharing.
     pub fn disable(&mut self, expected: ConsentRevision) -> Result<ConsentSnapshot, DispatchError> {
         let result = self.service.disable(expected);
+        self.scheduler.forget_summaries();
         self.reconsider();
         result
     }
@@ -491,6 +498,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     pub fn sign_out(&mut self) -> Result<(), DispatchError> {
         let result = self.service.sign_out();
         self.forget_features();
+        self.scheduler.forget_summaries();
         self.reconsider();
         result
     }
@@ -576,7 +584,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     }
 
     #[cfg(test)]
-    pub(crate) fn source_stamp(&self, session: &SessionId) -> Option<SourceStamp> {
+    pub(crate) fn source_stamp(&self, session: &SessionId) -> Option<crate::status::SourceStamp> {
         self.service.source_stamp(session)
     }
 
@@ -588,12 +596,6 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     fn observe(&mut self, session: &SessionId) {
         if self.running.contains(session) {
             self.observed.insert(session.clone());
-        }
-    }
-
-    fn note_output(&mut self, session: &SessionId, now: Duration) {
-        if self.service.is_dirty(session) {
-            self.scheduler.output(session, now);
         }
     }
 }

@@ -8,13 +8,13 @@
 //! without blocking.
 
 use crate::api::{
-    ApiError, AttachRequest, Attached, Auth, CallerInfo, CreateSession, DaemonStatusInfo,
-    ErrorCode, EventEnvelope, Hello, HelloOk, ReadRequest, ReadResult, Report, Request, Response,
-    ReviveSession, SendRequest, StreamCommand, StreamEvent, SubscribeRequest, WaitRequest,
-    WaitResult,
+    AgentReply, ApiError, AttachRequest, Attached, Auth, CallerInfo, CreateSession,
+    DaemonStatusInfo, ErrorCode, EventEnvelope, Hello, HelloOk, ReadRequest, ReadResult, Report,
+    Request, Response, ReviveSession, SendRequest, StreamCommand, StreamEvent, SubscribeRequest,
+    WaitRequest, WaitResult,
 };
 use crate::frame::{self, Frame};
-use crate::ids::SessionId;
+use crate::ids::{ReplyId, SessionId};
 use crate::model::{ProjectView, ScopeRoot, SessionView};
 use crate::paths::{Layout, Registration};
 use std::io;
@@ -127,6 +127,18 @@ pub trait SessionApi: Send + Sync {
     /// the implementation can't tell (adapters, fakes).
     fn daemon_capabilities(&self) -> Option<Vec<String>> {
         None
+    }
+    /// Start or stop capturing agent replies (user only, capability
+    /// `session.replies`).
+    fn set_reply_capture(&self, enabled: bool) -> Result<()> {
+        let _ = enabled;
+        Err(unsupported("capturing agent replies"))
+    }
+    /// Captured replies, oldest first, after `after` when given; and whether
+    /// capture is on (user only, capability `session.replies`).
+    fn replies(&self, after: Option<&ReplyId>) -> Result<(Vec<AgentReply>, bool)> {
+        let _ = after;
+        Err(unsupported("reading agent replies"))
     }
 }
 
@@ -407,6 +419,19 @@ impl SessionApi for Client {
 
     fn daemon_capabilities(&self) -> Option<Vec<String>> {
         Some(self.capabilities.clone())
+    }
+
+    fn set_reply_capture(&self, enabled: bool) -> Result<()> {
+        self.expect_ok(&Request::ReplyCapture { enabled })
+    }
+
+    fn replies(&self, after: Option<&ReplyId>) -> Result<(Vec<AgentReply>, bool)> {
+        match self.request(&Request::ReplyList {
+            after: after.cloned(),
+        })? {
+            Response::Replies { replies, capturing } => Ok((replies, capturing)),
+            other => Err(unexpected(&other)),
+        }
     }
 
     fn get(&self, id: &SessionId) -> Result<SessionView> {
@@ -1626,6 +1651,8 @@ mod tests {
                 | Request::ProjectList
                 | Request::ProjectAdd { .. }
                 | Request::ProjectRemove { .. }
+                | Request::ReplyCapture { .. }
+                | Request::ReplyList { .. }
                 | Request::DaemonRestart { .. } => Response::Error {
                     error: ApiError::new(ErrorCode::Unsupported, "not in the fake daemon"),
                 },
@@ -2224,6 +2251,7 @@ mod tests {
                 session_ids: vec![],
                 kinds: vec![EventKind::Created, EventKind::Activity],
                 all: false,
+                replies: false,
             })
             .unwrap();
         let first = events

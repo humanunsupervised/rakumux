@@ -3516,8 +3516,8 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     assert_eq!(h.app.list.grouping(), Grouping::Folder);
     h.press(KeyCode::Home).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
-    // → and l go along the tabs (Status, Folders, App) and stop at the
-    // last; the top row stays selected; ← and h come back.
+    // → and l go along the tabs (Feed, Status, Folders, App) and stop at
+    // the last; the top row stays selected; ← and h come back.
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
@@ -3527,8 +3527,13 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     h.press(KeyCode::Left).await;
     h.press(KeyCode::Char('h')).await;
     assert_eq!(h.app.list.grouping(), Grouping::Status);
+    // The Feed comes first; there they stop.
     h.press(KeyCode::Left).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Status);
+    assert_eq!(h.app.list_tab(), grouping::ListTab::Feed);
+    h.press(KeyCode::Left).await;
+    assert_eq!(h.app.list_tab(), grouping::ListTab::Feed);
+    h.press(KeyCode::Right).await;
+    assert_eq!(h.app.list_tab(), Grouping::Status.into());
     h.press(KeyCode::Right).await;
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
@@ -3686,13 +3691,13 @@ async fn clicks_switch_tabs_open_the_active_ones_modal_and_pick_its_rows() {
     // From a session, a click on another tab: Rakumux mode, that tab.
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
-    click(&mut h, Hit::ListTab(Grouping::App));
+    click(&mut h, Hit::ListTab(Grouping::App.into()));
     assert_eq!(h.app.focus, Focus::List);
     assert_eq!(h.app.list.grouping(), Grouping::App);
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
     assert!(matches!(h.app.mode, AppMode::Normal));
     // On the active tab: its modal; a row picks it (All, claude, codex).
-    click(&mut h, Hit::ListTab(Grouping::App));
+    click(&mut h, Hit::ListTab(Grouping::App.into()));
     assert_eq!(section_picker(&h).grouping, Grouping::App);
     click(&mut h, Hit::SectionRow(2));
     assert!(matches!(h.app.mode, AppMode::Normal));
@@ -3701,8 +3706,8 @@ async fn clicks_switch_tabs_open_the_active_ones_modal_and_pick_its_rows() {
         [app_section("codex")]
     );
     // Another modal, closed by a click outside it: nothing changes.
-    click(&mut h, Hit::ListTab(Grouping::Status));
-    click(&mut h, Hit::ListTab(Grouping::Status));
+    click(&mut h, Hit::ListTab(Grouping::Status.into()));
+    click(&mut h, Hit::ListTab(Grouping::Status.into()));
     assert_eq!(section_picker(&h).grouping, Grouping::Status);
     h.app
         .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 1, 46));
@@ -3713,9 +3718,9 @@ async fn clicks_switch_tabs_open_the_active_ones_modal_and_pick_its_rows() {
     assert_eq!(section_picker(&h).grouping, Grouping::Status);
     h.press(KeyCode::Esc).await;
     // All folders' tab, clicked twice: the Folders modal, as before.
-    click(&mut h, Hit::ListTab(Grouping::Folder));
+    click(&mut h, Hit::ListTab(Grouping::Folder.into()));
     assert_eq!(h.app.list.grouping(), Grouping::Folder);
-    click(&mut h, Hit::ListTab(Grouping::Folder));
+    click(&mut h, Hit::ListTab(Grouping::Folder.into()));
     assert!(matches!(h.app.mode, AppMode::Folders(_)));
 }
 
@@ -4283,6 +4288,184 @@ async fn signing_out_stops_the_descriptions() {
         Some(super::types::AccountDialogState::SignedOut)
     );
     assert_eq!(h.app.description(&SessionId::from_string("A")), None);
+}
+
+fn mouse_at(h: &mut Harness, kind: crossterm::event::MouseEventKind, (column, row): (u16, u16)) {
+    h.app.handle_mouse(crossterm::event::MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    });
+    h.app.process_pending();
+}
+
+/// Where `wanted` was drawn: its area's first column, last row.
+fn hit_at(h: &Harness, wanted: Hit) -> Option<(u16, u16)> {
+    h.app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == wanted)
+        .map(|(area, _)| (area.x, area.y + area.height - 1))
+}
+
+fn row_of(h: &Harness, name: &str) -> usize {
+    h.app
+        .list
+        .rows()
+        .iter()
+        .position(|row| matches!(row, ListRow::Session(s) if s.name == name))
+        .unwrap()
+}
+
+/// Signed in, with A described.
+async fn described() -> (Harness, Arc<testing::FakeAccount>) {
+    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
+    // With AI summaries chosen in Settings.
+    h.app.settings.sessions.description_content = config::DescriptionContent::AiSummary;
+    account.descriptions.lock().unwrap().insert(
+        SessionId::from_string("A"),
+        "Fixing the flaky login test".into(),
+    );
+    account_tick(&mut h);
+    (h, account)
+}
+
+#[tokio::test]
+async fn hovering_a_description_shows_a_refresh_that_a_click_sends() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (mut h, account) = described().await;
+    let selected = h.app.list.selection().clone();
+    for width in [160, 80] {
+        // The pointer away from the list.
+        mouse_at(&mut h, MouseEventKind::Moved, (0, 0));
+        let screen = screen_rows(&mut h, width, 48);
+        let (a, b) = (row_of(&h, "a"), row_of(&h, "b"));
+        let height = |h: &Harness, row| {
+            h.app
+                .hits
+                .iter()
+                .find(|(_, hit)| *hit == Hit::ListRow(row))
+                .map(|(area, _)| area.height)
+        };
+        let before = height(&h, a);
+        assert!(screen
+            .iter()
+            .any(|line| line.contains("Fixing the flaky login test")));
+        assert_eq!(
+            hit_at(&h, Hit::SummaryRefresh(a)),
+            None,
+            "only when hovered"
+        );
+        // B has no description: nothing to refresh there.
+        let over_b = hit_at(&h, Hit::ListRow(b)).unwrap();
+        mouse_at(&mut h, MouseEventKind::Moved, (over_b.0 + 5, over_b.1));
+        screen_rows(&mut h, width, 48);
+        assert_eq!(hit_at(&h, Hit::SummaryRefresh(b)), None);
+        // Over A: the ↻ at the end of its description, the row as tall as before.
+        let over_a = hit_at(&h, Hit::ListRow(a)).unwrap();
+        mouse_at(&mut h, MouseEventKind::Moved, (over_a.0 + 5, over_a.1));
+        let screen = screen_rows(&mut h, width, 48);
+        let refresh = hit_at(&h, Hit::SummaryRefresh(a)).expect("the refresh");
+        // The list's column: left of the divider when the detail is beside it.
+        let line = screen[usize::from(refresh.1)].split('│').next().unwrap();
+        assert!(line.contains("Fixing the flaky login test"), "{line:?}");
+        assert!(line.trim_end().ends_with('↻'), "{line:?}");
+        assert!(line.chars().count() <= usize::from(width));
+        assert_eq!(
+            height(&h, a),
+            before,
+            "hovering never changes a row's height"
+        );
+    }
+    let refresh = hit_at(&h, Hit::SummaryRefresh(row_of(&h, "a"))).unwrap();
+    mouse_at(
+        &mut h,
+        MouseEventKind::Down(MouseButton::Left),
+        (refresh.0 + 1, refresh.1),
+    );
+    mouse_at(
+        &mut h,
+        MouseEventKind::Up(MouseButton::Left),
+        (refresh.0 + 1, refresh.1),
+    );
+    assert_eq!(
+        *account.summarized.lock().unwrap(),
+        [SessionId::from_string("A")]
+    );
+    assert_eq!(h.app.list.selection(), &selected, "the selection stays");
+    // Being made: a spinner where the ↻ was, hovered or not, the text kept.
+    assert!(h.app.summary_refreshing(&SessionId::from_string("A")));
+    mouse_at(&mut h, MouseEventKind::Moved, (100, 2));
+    let screen = screen_rows(&mut h, 160, 48);
+    let line = screen
+        .iter()
+        .find(|line| line.contains("Fixing the flaky login test"))
+        .unwrap()
+        .split('│')
+        .next()
+        .unwrap();
+    assert!(!line.contains('↻'), "{line:?}");
+    let spinner = line.trim_end().chars().last().unwrap();
+    assert!(('\u{2800}'..='\u{28ff}').contains(&spinner), "{line:?}");
+    // The service says so until it's made.
+    account_tick(&mut h);
+    assert!(h.app.summary_refreshing(&SessionId::from_string("A")));
+    account.refreshing.lock().unwrap().clear();
+    // Past the next read, every 2 s.
+    h.app
+        .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(240));
+    h.app.process_pending();
+    assert!(!h.app.summary_refreshing(&SessionId::from_string("A")));
+}
+
+#[tokio::test]
+async fn s_summarises_the_selected_session_once_at_a_time() {
+    let (mut h, account) = described().await;
+    let selected = h.app.list.selected_id().unwrap().clone();
+    h.press(KeyCode::Char('s')).await;
+    assert_eq!(*account.summarized.lock().unwrap(), [selected.clone()]);
+    // Already being made: nothing more.
+    h.press(KeyCode::Char('s')).await;
+    assert_eq!(account.summarized.lock().unwrap().len(), 1);
+    // A session without a description says it's on its way.
+    account.refreshing.lock().unwrap().clear();
+    account_tick(&mut h);
+    h.app.list.select(super::session_list::Selection::Session(
+        SessionId::from_string("B"),
+    ));
+    h.press(KeyCode::Char('s')).await;
+    assert_eq!(account.summarized.lock().unwrap().len(), 2);
+    assert_eq!(h.app.status(), Some("Summarising b…"));
+}
+
+#[tokio::test]
+async fn s_says_how_to_turn_summaries_on() {
+    let (mut h, account) = account_harness(testing::FakeAccount::default());
+    h.press(KeyCode::Char('s')).await;
+    assert_eq!(
+        h.app.status(),
+        Some("Sign in and turn on AI session summaries (rakumux.com/features).")
+    );
+    let off = testing::FakeAccount::default();
+    *off.account.lock().unwrap() = Some(crate::account::Account {
+        summaries: Some(false),
+        ..testing::FakeAccount::person()
+    });
+    let (mut h, off) = account_harness(off);
+    h.press(KeyCode::Char('s')).await;
+    assert!(h.app.status().unwrap().starts_with("Sign in and turn on"));
+    assert!(account.summarized.lock().unwrap().is_empty());
+    assert!(off.summarized.lock().unwrap().is_empty());
+    // Signed in, but the list shows your messages: how to show summaries.
+    let (mut h, shown) = account_harness(testing::FakeAccount::signed_in());
+    account_tick(&mut h);
+    h.press(KeyCode::Char('s')).await;
+    assert_eq!(
+        h.app.status(),
+        Some("Show AI summaries first: Settings → Session description content.")
+    );
+    assert!(shown.summarized.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

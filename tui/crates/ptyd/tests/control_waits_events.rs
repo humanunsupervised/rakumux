@@ -75,6 +75,7 @@ fn kinds(events: &[EventEnvelope]) -> Vec<(String, &'static str)> {
                 SessionEvent::Lifecycle { .. } => "lifecycle",
                 SessionEvent::Reported { .. } => "reported",
                 SessionEvent::Activity => "activity",
+                SessionEvent::Reply { .. } => "reply",
                 SessionEvent::Unknown => "unknown",
             };
             (e.session_id.to_string(), kind)
@@ -300,6 +301,7 @@ fn events_are_filtered_by_scope_ids_and_kinds() {
         session_ids: vec![first.id.clone()],
         kinds: vec![],
         all: false,
+        replies: false,
     });
     let exits = subscribe(SubscribeRequest {
         scopes: Vec::new(),
@@ -307,6 +309,7 @@ fn events_are_filtered_by_scope_ids_and_kinds() {
         session_ids: vec![],
         kinds: vec![EventKind::Exited, EventKind::Removed],
         all: false,
+        replies: false,
     });
     let other = subscribe(SubscribeRequest {
         scope: Some(h.other_scope()),
@@ -402,6 +405,7 @@ fn events_are_filtered_by_scope_ids_and_kinds() {
                 session_ids: vec![elsewhere.id.clone()],
                 kinds: vec![],
                 all: false,
+                replies: false,
             },
         )
         .unwrap_err();
@@ -435,6 +439,7 @@ fn activity_is_throttled_and_reports_publish_events() {
                     EventKind::Reported,
                 ],
                 all: false,
+                replies: false,
             },
         )
         .unwrap();

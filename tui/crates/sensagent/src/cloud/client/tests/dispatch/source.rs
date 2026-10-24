@@ -154,7 +154,11 @@ fn tracked_capture_feeds_dispatch_and_later_output_is_coalesced() {
     ));
     assert!(fixture.owner.advance(&session(7)).unwrap());
     assert!(!fixture.owner.advance(&session(7)).unwrap());
-    assert_eq!(fixture.owner.view(&session(7)).unwrap(), StatusView::Stale);
+    // Still shown: summaries are made when asked for, not on every change.
+    assert!(matches!(
+        fixture.owner.view(&session(7)).unwrap(),
+        StatusView::Ready(_)
+    ));
     let next = capture(&mut fixture.owner, 7);
     assert_eq!(next.source_stamp().source_revision, 2);
     fixture.owner.acknowledge_capture(&next).unwrap();
@@ -167,6 +171,7 @@ fn a_followed_turn_is_sent_instead_of_terminal_output() {
     view.agent_turn = Some(session_core::model::AgentTurn {
         id: 4,
         messages: 12,
+        conversation_id: None,
     });
     let mut fixture = Fixture::enabled(true);
     fixture.owner.apply_view(&view).unwrap();
@@ -199,7 +204,11 @@ fn a_followed_turn_is_sent_instead_of_terminal_output() {
 
     // A turn that moved on during the read is read again later.
     let mut moved = view.clone();
-    moved.agent_turn = Some(session_core::model::AgentTurn { id: 5, messages: 0 });
+    moved.agent_turn = Some(session_core::model::AgentTurn {
+        id: 5,
+        messages: 0,
+        conversation_id: None,
+    });
     fixture.owner.apply_view(&moved).unwrap();
     let next = capture(&mut fixture.owner, 7);
     let api = FakeSessionApi::user(moved, "");

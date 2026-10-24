@@ -136,10 +136,16 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    account; it then runs until SIGTERM. Clients talk to it over a private Unix socket
    (`rakumux_sensagent::owner`). It shares sessions only while the account's AI session summaries
    switch (`GET /api/v1/features`, read every 2 minutes) is on: then it consents for the folders
-   of live sessions (never private ones), and off it stops. A finished agent turn is described at
-   once; otherwise at most once a minute per session. Settings → Account signs in (a code, link
-   and QR code), the session list shows each description as a third line, and
-   `rakumux account status` lists them. Its stderr, static failure codes only, goes to
+   of live sessions (never private ones), and off it stops. **One summary per chat**: an agent
+   conversation the daemon follows (`session_turn`) is described once, when its agent has
+   written 5 messages (`sessions.ai_summary.every_messages`) or its turn finishes sooner, from
+   the prompt and its messages (never the screen); after that only when asked:
+   `OwnerRequest::Summarize` (the ↻ that hovering an AI description shows, or `s`), from the
+   latest prompt and the newest messages, or the screen for other programs. Nothing refreshes on
+   a timer, and shown text stays through lifecycle changes, renewals and consent that only adds
+   folders, until that terminal ends. Settings → Account signs in (a code, link and QR code),
+   Settings → Session description content shows the summaries under each session's name (a
+   spinner while one is made), and `rakumux account status` lists them. Its stderr, static failure codes only, goes to
    `~/.rakumux/logs/status-service.log`. Clerk has no custom scopes, so production names
    `profile` as the AI status scope (`DeviceAuthConfig::with_status_scope`), matching the
    website's check. Clerk's access tokens last 24 hours: the service renews them with the
@@ -147,6 +153,16 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    renews one that expired meanwhile. A client that finds a service from an older release
    asks it to stop (`Shutdown`) and starts its own; a newer one is used as it is. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
    `RAKUMUX_CLERK_CLIENT_ID`, `RAKUMUX_CLERK_DEVICE_PAGE`, `RAKUMUX_CLOUD_ORIGIN`.
+   **Agent feed** (`rakumux_sensagent::feed`, contract `contracts/feed/`): while the account's
+   Feed switch (off by default, same features read) is on, the service has the daemon capture
+   replies (`reply_capture`), takes them from its `replies` subscription (and `reply_list` after
+   reconnecting or starting late), leaves out private sessions, masks keys, credential
+   assignments and tokens, and uploads them (`POST /api/v1/feed/entries`, batches of up to 50,
+   idempotent on the reply id). It reads the account's feed back (`GET /api/v1/feed?after=SEQ`)
+   every 10 s while a TUI shows it (an owner `feed` request in the last 30 s), else every 2
+   minutes. Cache (the newest 500) and upload queue are memory only; the TUI asks the owner for
+   the entries changed since its revision (`OwnerRequest::Feed`). Signing out or turning the
+   switch off empties both.
 
 ## File structure
 
@@ -204,7 +220,8 @@ tui/
       main.rs, server.rs     # `rakumux-ptyd serve | --version`; accept loop, hello, dispatch, streams
       registration.rs        # single-instance claim, socket, service.json
       control_api.rs         # Control trait (server ↔ control)
-      control/               # ControlService: registry, scope, identity, permissions, waits, audit
+      control/               # ControlService: registry, scope, identity, permissions, waits, audit,
+                             # replies (reply capture's memory-only ring)
       host.rs                # TerminalHost trait (control ↔ terminals), SpawnSpec, HostEvent
       terminal/              # Host: PTY actors, emulators, replay ring, attach fan-out, adopt/handoff
       handoff.rs             # restart in place: HandoffState across exec, target check
@@ -245,8 +262,9 @@ within the scope), `scope`, `is_self`, `cwd`, `status`, `exit_code`, `lifecycle`
 current cwd), `agent_output` (a live Claude Code, Codex or OpenCode session's latest reasoning,
 tool call or reply as one line, from its conversation log or database: `integrations/output.rs`),
 `user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
-messages}`: that agent's current turn, the user's last prompt and every message since, whose
-content `session_turn` returns), and `terminal` (pid, foreground process, title, size, `controlled`,
+messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
+since, whose content `session_turn` returns; the conversation tells chats apart for their one
+automatic AI summary), and `terminal` (pid, foreground process, title, size, `controlled`,
 `alternate_screen`) while live. Folders are `ProjectView {path, name, sessions, live,
 last_active_at, added_at, git}` on the wire.
 
@@ -344,7 +362,19 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   conversation's newest worktree. Foreground cwd polling continues without terminal output;
   old OSC 7 reports lose priority when their process or actual process cwd changes.
 - Event stream: `EventEnvelope { scope, session_id, at, event }` with `created`, `updated`,
-  `removed`, `exited`, `lifecycle`, `reported`, `activity`.
+  `removed`, `exited`, `lifecycle`, `reported`, `activity`, and `reply` (below).
+- Agent replies (user only, capability `session.replies`; `control/replies.rs`,
+  `integrations/output.rs`): `reply_capture {enabled}` turns capture on or off (off at every
+  daemon start and restart; off forgets what was kept). While it's on, a live Claude Code or
+  Codex session whose lifecycle turns `Done` after it was seen working has its reply read from
+  the conversation log the daemon already follows for `agent_output` (Claude Code: the main
+  conversation's text after its last tool call; Codex: `task_complete`'s
+  `last_agent_message`), within 10 s, never twice and never for a private session:
+  `AgentReply {id, session_id, agent, conversation_id?, text (≤ 32 KiB), truncated,
+  finished_at}`. Replies are kept in daemon memory only (the last 200, 2 MiB of text, an
+  hour), listed by `reply_list {after?}` and delivered as `reply` events only to
+  subscriptions with `replies: true`. The audit log records turning capture on or off, never
+  reply text; session callers, delegated callers and `rakumux-api` never see replies.
 - **Compatibility**: new fields optional; enums carry an `Unknown` fallback; an op never changes
   meaning (add a new op); bump `PROTOCOL_VERSION` only for incompatible changes.
 
@@ -584,14 +614,19 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   own.
 - **Folder filter**: the Folders tab's filter (`▤ Folders ▾`, `▤ web ▾`, `▤ 3 folders ▾`)
   and the Folders modal it opens; local to one window and not saved.
-- **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, Status, Folders and
-  App. The active one decides the list's headers (per folder, per app, per status) and the one
-  filter that applies; each keeps its own filter while another is active; none is saved, and
-  every start (a restart or a UI reload) opens Status.
+- **List tabs** (`app/grouping.rs`, `ListTab`, `Grouping`): the session list's top row, Feed,
+  Status, Folders and App. Feed lists agents' replies (`app/feed`, Master detail only); the
+  others decide the list's headers (per folder, per app, per status) and the one filter that
+  applies; each keeps its own filter while another is active; none is saved, and every start (a
+  restart or a UI reload) opens Status, until the run first learns the account's Feed switch
+  is on and no tab was chosen yet: then Feed.
 - **Pin**: a user mark that lists a session first in its folder.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
 - **Git context**: a session's branch and linked worktree, read from `.git` files (never `git`).
+- **Reply** (agent reply): what an agent said when it finished a turn, captured by the daemon
+  only while the status service has reply capture on, for the **feed**: the replies of the
+  account's machines, kept on rakumux.com for 30 days while the account's Feed switch is on.
 - **Daemon** (`rakumux-ptyd`): the single per-user server owning every session.
 - **Client**: anything connected to the daemon (TUI, CLI call, agent, `rakumux-api`).
 - **External API**: `rakumux-api`, HTTP on 127.0.0.1 over the daemon; found through `api.json`.
@@ -652,14 +687,14 @@ which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_key
 on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the tabs, a header and + New session keep the last session in view,
-one the filters show), `←`/`→` switch between the tabs, Status, Folders and App, wherever the
+one the filters show), `←`/`→` switch between the tabs, Feed, Status, Folders and App, wherever the
 selection is (`h`/`l` on the tabs row),
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
 that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
 `Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
 running session in view), `Tab` last session, `1`-`9` go into that session,
-`n` new, `r` rename, `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
+`n` new, `r` rename, `s` a new AI summary of the session, `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
 screen, `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
@@ -667,10 +702,14 @@ build; daemon and sessions stay up), `S` ask to restart the server (in place wit
 it can: `y`/Enter, sessions keep running; otherwise `y` only, since that ends them; also Settings →
 Restart server, which shows the running server's version), `q`
 quit. There is no header: the panes start at the top row, and the list's first row (Sidebar) is
-its tabs, `◔ Status ▾  ▤ Folders    ◇ App` (Status is active at every start; every tab keeps room for the active one's `▾`, and Folders shows its branch active or not, so switching tabs moves nothing): the active one is bold, underlined and names its
+its tabs, `≡ Feed    ◔ Status ▾  ▤ Folders    ◇ App` (Status is active at every start; every tab keeps room for the active one's `▾` (the Feed's stays blank), and Folders shows its branch active or not, so switching tabs moves nothing): the active one is bold, underlined and names its
 filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`, `◔ 2 statuses ▾`); short rows narrow the gaps, then show
 the inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's
-filter at the left (`◔ Status ▾`); only Master detail shows the three tabs. The footer,
+filter at the left (`◔ Status ▾`); only Master detail shows the four tabs. With Feed active,
+the list shows the replies of the account's machines, newest first (each with its age,
+session, folder, agent, machine when it isn't this one, and its first lines), and the detail
+the selected reply whole (`Ctrl-d`/`Ctrl-u`, PgUp/PgDn scroll it); Enter goes into its session
+when it runs here. The footer,
 always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
 while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
 SESSION/TERMINAL), then messages and the daemon connection while it isn't up (`⠋ connecting`,

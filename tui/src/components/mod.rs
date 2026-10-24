@@ -4,6 +4,7 @@
 pub mod account;
 pub mod auth;
 pub mod dialogs;
+pub mod feed;
 pub mod folder_picker;
 pub mod footer;
 pub mod format;

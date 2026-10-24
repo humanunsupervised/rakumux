@@ -11,9 +11,15 @@
 //! - **Codex**: the `rollout-…-<thread>.jsonl` file the process keeps open.
 //! - **OpenCode**: its database (`opencode.db`), for the conversation its
 //!   Rakumux plugin bound to the session, else the folder's newest one.
+//!
+//! For the agent feed, the follower also keeps the current turn's reply
+//! whole ([`Reply`], Claude Code and Codex): what the agent said after its
+//! last tool call, or the turn's last message. The control layer captures it
+//! when the turn finishes, and only while reply capture is on.
 
 use crate::host::ProcessInfo;
 use serde_json::Value;
+use session_core::api::MAX_REPLY_BYTES;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -70,6 +76,31 @@ impl Turn {
     }
 }
 
+/// The current turn's reply, as far as the log has shown it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reply {
+    /// The id of the log entry or turn it came from: a reply already
+    /// captured is recognised by it.
+    pub key: String,
+    /// At most [`MAX_REPLY_BYTES`].
+    pub text: String,
+    /// The reply was longer than `text`.
+    pub truncated: bool,
+}
+
+/// How one log entry changes the reply being built.
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    /// Nothing to do with the reply (thinking, metadata, …).
+    Keep,
+    /// A prompt or a tool call: what was said before it isn't the reply.
+    Reset,
+    /// More of the reply (Claude Code: one text block per entry).
+    Text { key: String, text: String },
+    /// The whole reply of a finished turn (Codex's `task_complete`).
+    Complete { key: String, text: String },
+}
+
 /// An agent whose log is an append-only file of JSON lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LogAgent {
@@ -108,6 +139,7 @@ pub struct Follower {
     latest: Option<String>,
     prompt: Option<String>,
     turn: Turn,
+    reply: Option<Reply>,
 }
 
 impl Follower {
@@ -141,7 +173,54 @@ impl Follower {
             latest: None,
             prompt: None,
             turn: Turn::default(),
+            reply: None,
         })
+    }
+
+    /// The agent as replies and turns name it: `claude-code`, `codex` or
+    /// `opencode`.
+    pub fn agent(&self) -> &'static str {
+        match &self.source {
+            Source::Log {
+                agent: LogAgent::Claude,
+                ..
+            } => "claude-code",
+            Source::Log {
+                agent: LogAgent::Codex,
+                ..
+            } => "codex",
+            Source::OpenCode { .. } => "opencode",
+        }
+    }
+
+    /// The conversation the log belongs to: Claude Code's, or Codex's
+    /// thread from its `rollout-<time>-<thread>.jsonl`.
+    pub fn conversation(&self) -> Option<String> {
+        let Source::Log {
+            agent,
+            conversation,
+            path,
+            ..
+        } = &self.source
+        else {
+            return None;
+        };
+        let id = match agent {
+            LogAgent::Claude => conversation.clone()?,
+            LogAgent::Codex => {
+                let stem = path.file_stem()?.to_str()?;
+                stem.get(stem.len().checked_sub(36)?..)?.to_owned()
+            }
+        };
+        let valid = !id.is_empty()
+            && id.len() <= 128
+            && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+        valid.then_some(id)
+    }
+
+    /// The current turn's reply, once the log has shown one.
+    pub fn reply(&self) -> Option<&Reply> {
+        self.reply.as_ref()
     }
 
     /// The process whose conversation this is.
@@ -182,6 +261,7 @@ impl Follower {
                     && switch_conversation(self.pid, conversation, path, offset, partial)
                 {
                     self.turn.begin(None);
+                    self.reply = None;
                 }
                 let Some(lines) = read(path, offset, partial) else {
                     return false;
@@ -202,6 +282,11 @@ impl Follower {
                     for message in &messages {
                         self.turn.push(message);
                     }
+                    let step = match agent {
+                        LogAgent::Claude => claude::reply_step(entry),
+                        LogAgent::Codex => codex::reply_step(entry),
+                    };
+                    self.reply = next_reply(self.reply.take(), step);
                 }
                 let newest =
                     |line: fn(&Value) -> Option<String>| entries.iter().rev().find_map(line);
@@ -327,6 +412,40 @@ fn read(path: &Path, offset: &mut u64, partial: &mut Vec<u8>) -> Option<Vec<Vec<
             .map(<[u8]>::to_vec)
             .collect(),
     )
+}
+
+/// The reply after one more log entry.
+fn next_reply(reply: Option<Reply>, step: Step) -> Option<Reply> {
+    match step {
+        Step::Keep => reply,
+        Step::Reset => None,
+        Step::Text { key, text } => {
+            let text = match reply {
+                Some(reply) if !reply.truncated => format!("{}\n\n{text}", reply.text),
+                Some(reply) => return Some(Reply { key, ..reply }),
+                None => text,
+            };
+            Some(bounded(key, text))
+        }
+        Step::Complete { key, text } => Some(bounded(key, text)),
+    }
+}
+
+/// A reply of at most [`MAX_REPLY_BYTES`], cut at a character boundary.
+fn bounded(key: String, mut text: String) -> Reply {
+    let truncated = text.len() > MAX_REPLY_BYTES;
+    if truncated {
+        let mut end = MAX_REPLY_BYTES;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    Reply {
+        key,
+        text,
+        truncated,
+    }
 }
 
 /// `text`'s first meaningful line, for the list: Markdown marks and control
@@ -459,7 +578,54 @@ mod tests {
             latest: None,
             prompt: None,
             turn: Turn::default(),
+            reply: None,
         }
+    }
+
+    #[test]
+    fn the_follower_keeps_the_turns_reply_and_names_its_conversation() {
+        let directory = tempfile::tempdir().unwrap();
+        let thread = "019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b";
+        let path = directory
+            .path()
+            .join(format!("rollout-2026-10-23T10-00-00-{thread}.jsonl"));
+        let mut file = File::create(&path).unwrap();
+        let event = |payload: serde_json::Value| {
+            format!(
+                "{}\n",
+                serde_json::json!({"type": "event_msg", "payload": payload})
+            )
+        };
+        file.write_all(
+            event(serde_json::json!({"type": "user_message", "message": "go"})).as_bytes(),
+        )
+        .unwrap();
+        let mut follower = codex_log(path);
+        follower.follow(None);
+        assert_eq!(follower.reply(), None);
+        file.write_all(
+            event(serde_json::json!({"type": "task_complete", "turn_id": "t1",
+                "last_agent_message": "Done: the tests pass."}))
+            .as_bytes(),
+        )
+        .unwrap();
+        follower.follow(None);
+        let reply = follower.reply().unwrap();
+        assert_eq!(
+            (reply.key.as_str(), reply.text.as_str()),
+            ("t1", "Done: the tests pass.")
+        );
+        assert_eq!(follower.conversation().as_deref(), Some(thread));
+        assert_eq!(follower.agent(), "codex");
+    }
+
+    #[test]
+    fn a_long_reply_is_cut_at_a_character_boundary() {
+        let reply = bounded("k".into(), "é".repeat(MAX_REPLY_BYTES));
+        assert!(reply.truncated);
+        assert!(reply.text.len() <= MAX_REPLY_BYTES);
+        assert!(reply.text.chars().all(|c| c == 'é'));
+        assert!(!bounded("k".into(), "short".into()).truncated);
     }
 
     #[test]

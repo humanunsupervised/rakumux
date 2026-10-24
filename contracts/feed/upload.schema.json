@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:upload",
+  "title": "POST /api/v1/feed/entries request",
+  "description": "Up to 50 finished replies from one machine. Uploading an id again is not an error: the cloud keeps the first and answers with its seq.",
+  "x-maxBodyBytes": 1048576,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "machine", "entries"],
+  "properties": {
+    "version": { "const": 1 },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/upload" }
+    }
+  }
+}

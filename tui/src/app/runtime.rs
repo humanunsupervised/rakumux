@@ -149,6 +149,16 @@ pub enum AppEvent {
         generation: u64,
         result: Result<Vec<rakumux_sensagent::owner::protocol::StatusLine>, String>,
     },
+    /// A new AI summary of `session` was asked for.
+    Summarized {
+        session: session_core::ids::SessionId,
+        result: Result<(), String>,
+    },
+    /// The feed entries that changed since this window last asked.
+    Feed {
+        generation: u64,
+        result: Result<rakumux_sensagent::feed::FeedPage, String>,
+    },
     /// A background job panicked or couldn't run.
     JobFailed(String),
 }

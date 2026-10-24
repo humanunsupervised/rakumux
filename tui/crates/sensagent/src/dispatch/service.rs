@@ -10,14 +10,15 @@ use crate::auth::{
     AccountService, AccountSession, ApplyResult, CredentialStore, SystemClock, WallClock,
 };
 use crate::cloud::{CaptureInput, CaptureMetadata, CloudAIClient, CloudAIError, ContextBuilder};
+use crate::feed::{FeedJob, FeedRequest};
 use crate::source::{
     Candidate, CaptureExpectation, SessionCapture, SourceError, SourceTracker, SourceUpdate,
     TurnSettings,
 };
 use crate::status::{
     AISessionStatusService, AccountGate, AccountSessionGate, ConsentPolicy, ConsentRevision,
-    ConsentSnapshot, FolderConsent, GenerationTicket, Preparation, SourceStamp, StatusError,
-    StatusSource, StatusStore, StatusView,
+    ConsentSnapshot, FolderConsent, GenerationTicket, Preparation, StatusError, StatusSource,
+    StatusStore, StatusView,
 };
 
 use super::job::JobKey;
@@ -138,6 +139,27 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
         }))
     }
 
+    /// A feed request for the signed-in account, borrowing its access token for
+    /// the one request like `features_job`; `None` without a usable sign-in.
+    pub(crate) fn feed_job(
+        &self,
+        request: FeedRequest,
+    ) -> Result<Option<FeedJob<A, C>>, DispatchError> {
+        let Some(session) = &self.session else {
+            return Ok(None);
+        };
+        let Some(lease) = self.account.lease_access_token(session)? else {
+            return Ok(None);
+        };
+        Ok(Some(FeedJob {
+            account: self.account.clone(),
+            cloud: self.cloud.clone(),
+            lease,
+            revision: session.revision(),
+            request,
+        }))
+    }
+
     /// Stop local sharing before attempting credential removal, even if storage fails.
     /// Browser logout and remote grant revocation are separate unimplemented operations.
     pub fn sign_out(&mut self) -> Result<(), DispatchError> {
@@ -246,7 +268,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
     }
 
     /// A tracked session's current source stamp.
-    pub(crate) fn source_stamp(&self, session: &SessionId) -> Option<SourceStamp> {
+    #[cfg(test)]
+    pub(crate) fn source_stamp(&self, session: &SessionId) -> Option<crate::status::SourceStamp> {
         self.sources.stamp(session)
     }
 
@@ -258,6 +281,12 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
     /// Fold a session's coalesced output and activity changes into one new revision.
     /// Call only when the refresh budget allows another generation for it. Returns
     /// whether a new revision was observed (its cached text is then stale).
+    /// Make the next `advance` of `session` fold a new revision: a summary is
+    /// due, and the last one's text mustn't answer it.
+    pub fn freshen(&mut self, session: &SessionId) {
+        self.sources.freshen(session);
+    }
+
     pub fn advance(&mut self, session: &SessionId) -> Result<bool, DispatchError> {
         let update = self.sources.advance(session);
         let update = self.source_result(update)?;

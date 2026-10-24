@@ -1,0 +1,123 @@
+{
+  "upload": {
+    "valid": [
+      {
+        "note": "one Claude Code reply with every optional field",
+        "value": {
+          "version": 1,
+          "machine": "studio",
+          "entries": [
+            {
+              "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+              "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" },
+              "agent": "claude-code",
+              "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+              "text": "The tests pass now.\n\n- Fixed the parser\n- Added a regression test",
+              "truncated": false,
+              "finished_at": 1761220000000
+            }
+          ]
+        }
+      },
+      {
+        "note": "a Codex reply without a folder or conversation, cut short",
+        "value": {
+          "version": 1,
+          "machine": "build-box",
+          "entries": [
+            {
+              "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8C",
+              "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R1", "name": "codex 2" },
+              "agent": "codex",
+              "text": "Here is the start of a long answer\twith a tab.",
+              "truncated": true,
+              "finished_at": 1761220001000
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      { "note": "no entries", "value": { "version": 1, "machine": "studio", "entries": [] } },
+      { "note": "unknown version", "patch": { "version": 2 } },
+      { "note": "extra top-level field", "patch": { "user_id": "user_123" } },
+      { "note": "blank machine", "patch": { "machine": "   " } },
+      { "note": "machine with a newline", "patch": { "machine": "studio\nlab" } },
+      { "note": "extra entry field", "entry": { "prompt": "what the user asked" } },
+      { "note": "lowercase ULID", "entry": { "id": "01k8a0rz0v3x5q2n9t7w4y6m8b" } },
+      { "note": "ULID with an I", "entry": { "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8I" } },
+      { "note": "unknown agent", "entry": { "agent": "pi" } },
+      { "note": "empty text", "entry": { "text": "" } },
+      { "note": "whitespace-only text", "entry": { "text": " \n\t " } },
+      { "note": "terminal escape in text", "entry": { "text": "red \u001b[31mtext" } },
+      { "note": "bidi control in text", "entry": { "text": "abc\u202edef" } },
+      { "note": "finished before 2020", "entry": { "finished_at": 1000 } },
+      { "note": "finished as a string", "entry": { "finished_at": "1761220000000" } },
+      { "note": "a folder path", "session": { "folder": "/home/me/rakumux" } },
+      { "note": "a relative folder path", "session": { "folder": "repos/rakumux" } },
+      { "note": "extra session field", "session": { "cwd": "/home/me" } },
+      { "note": "session name too long", "session": { "name": "n123456789n123456789n123456789n123456789n123456789n123456789n1234" } },
+      { "note": "conversation id with a space", "entry": { "conversation_id": "a b" } }
+    ],
+    "bounds": [
+      { "note": "text at 32768 bytes", "text": "a", "count": 32768, "valid": true },
+      { "note": "text over 32768 bytes", "text": "a", "count": 32769, "valid": false },
+      { "note": "multibyte text at 32768 bytes", "text": "é", "count": 16384, "valid": true },
+      { "note": "multibyte text over 32768 bytes", "text": "é", "count": 16385, "valid": false }
+    ]
+  },
+  "accepted": {
+    "valid": [
+      { "version": 1, "accepted": [{ "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "seq": 1 }] }
+    ],
+    "invalid": [
+      { "version": 1, "accepted": [] },
+      { "version": 1, "accepted": [{ "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "seq": 0 }] },
+      { "version": 1, "accepted": [{ "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "seq": "1" }] }
+    ]
+  },
+  "page": {
+    "valid": [
+      { "version": 1, "entries": [], "latest_seq": 0, "more": false },
+      {
+        "version": 1,
+        "entries": [
+          {
+            "seq": 42,
+            "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+            "machine": "studio",
+            "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" },
+            "agent": "claude-code",
+            "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+            "text": "The tests pass now.",
+            "truncated": false,
+            "finished_at": 1761220000000,
+            "received_at": 1761220000400
+          }
+        ],
+        "latest_seq": 42,
+        "more": false
+      }
+    ],
+    "invalid": [
+      { "version": 1, "entries": [], "latest_seq": -1, "more": false },
+      { "version": 1, "entries": [], "latest_seq": 0 },
+      { "version": 1, "entries": [{ "seq": 1 }], "latest_seq": 1, "more": false }
+    ]
+  },
+  "error": {
+    "valid": [
+      { "error": { "code": "invalid_request", "message": "Invalid feed request." } },
+      { "error": { "code": "unauthenticated", "message": "Sign in to use the feed." } },
+      { "error": { "code": "forbidden", "message": "The feed is off for this account." } },
+      { "error": { "code": "rate_limited", "message": "Too many feed requests.", "retry_after_seconds": 60 } },
+      { "error": { "code": "unavailable", "message": "The feed is temporarily unavailable.", "retry_after_seconds": 5 } }
+    ],
+    "invalid": [
+      { "error": { "code": "forbidden", "message": "Feed disabled for user_123." } },
+      { "error": { "code": "invalid_request", "message": "Invalid feed request.", "retry_after_seconds": 5 } },
+      { "error": { "code": "rate_limited", "message": "Too many feed requests.", "retry_after_seconds": 0 } },
+      { "error": { "code": "teapot", "message": "Invalid feed request." } }
+    ]
+  }
+}

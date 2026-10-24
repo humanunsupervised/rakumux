@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use session_core::ids::SessionId;
 
+use crate::feed::FeedPage;
+
 use super::layout::{current_uid, peer_uid};
 use super::protocol::{
     read_message, write_message, ConsentView, FolderChoice, Hello, OfferView, OwnerRequest,
@@ -170,6 +172,29 @@ impl OwnerClient {
     pub fn renew(&self) -> Result<(), OwnerError> {
         match self.request(&OwnerRequest::Renew)? {
             OwnerResponse::Done => Ok(()),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Make a new AI summary of `session` now.
+    pub fn summarize(&self, session: &SessionId) -> Result<(), OwnerError> {
+        match self.request(&OwnerRequest::Summarize {
+            session: session.clone(),
+        })? {
+            OwnerResponse::Done => Ok(()),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// The feed entries that changed after `after` for a client holding
+    /// `generation`; ask again at once while `more`.
+    pub fn feed(
+        &self,
+        after: Option<u64>,
+        generation: Option<u64>,
+    ) -> Result<FeedPage, OwnerError> {
+        match self.request(&OwnerRequest::Feed { after, generation })? {
+            OwnerResponse::Feed { feed } => Ok(feed),
             _ => Err(OwnerError::Protocol),
         }
     }

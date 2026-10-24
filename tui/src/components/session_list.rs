@@ -1,8 +1,9 @@
-//! Left pane (Sidebar layout): the tabs at the top (All folders, App,
-//! Status: what the list is grouped and filtered by; the active one names
-//! its filter, `▤ web ▾`, and Enter or a click on it opens its modal), then
-//! the sessions shown, under a header row per folder (app, status) when
-//! there are several, and "+ New session" last.
+//! Left pane (Sidebar layout): the tabs at the top (Feed, then Status,
+//! Folders and App: what the list is grouped and filtered by; the active
+//! one names its filter, `▤ web ▾`, and Enter or a click on it opens its
+//! modal), then the sessions shown, under a header row per folder (app,
+//! status) when there are several, and "+ New session" last. Under the
+//! Feed tab the pane shows the feed instead (`feed.rs`).
 //! Each session is a compact cell after a blank row: its name, then its age
 //! and its mark (an agent's activity, else its status) at the right; then the
 //! agent's latest output, when the daemon has one; then its program, branch
@@ -20,7 +21,7 @@ use ratatui::{
 };
 use session_core::model::{ScopeRoot, SessionView};
 
-use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
+use super::folder_picker::{count_label, folder_branch, list_tab_icon, tab_picker_open};
 use super::format::{
     activity_badge_at, now_secs, read_period_style, relative_time, secondary_line, status_glyph,
     status_group_glyph, truncate, PIN_MARK,
@@ -28,7 +29,7 @@ use super::format::{
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
 use crate::app::config::DescriptionContent;
-use crate::app::grouping::{Grouping, ReadPeriod, Section};
+use crate::app::grouping::{Grouping, ListTab, ReadPeriod, Section};
 use crate::app::{App, Connection, Hit, ListRow};
 use crate::layout::str_width;
 use crate::theme;
@@ -435,6 +436,58 @@ fn session_content(
     lines
 }
 
+/// Columns at the right end of a session's description line for its ↻ or
+/// spinner (in the room the right column leaves): a space and the mark.
+const SUMMARY_SLOT: usize = 2;
+
+/// Shown at the end of a hovered session's AI description: a click or tap
+/// makes a new summary.
+const SUMMARY_REFRESH: &str = "↻";
+
+/// The right end of a session's description line (`line`): a spinner while a
+/// new summary is being made, else the ↻ when `hovered`. Returns where the ↻ is.
+fn mark_summary(
+    lines: &mut [Line<'_>],
+    line: usize,
+    refreshing: bool,
+    hovered: bool,
+    area: Rect,
+    width: usize,
+) -> Option<Rect> {
+    let p = theme::palette();
+    let (mark, style) = if refreshing {
+        (get_spinner_char(), Style::default().fg(p.accent_primary))
+    } else if hovered {
+        (SUMMARY_REFRESH, Style::default().fg(p.text_muted))
+    } else {
+        return None;
+    };
+    let target = lines.get_mut(line)?;
+    let used: usize = target
+        .spans
+        .iter()
+        .map(|span| str_width(&span.content))
+        .sum();
+    let at = width.saturating_sub(SUMMARY_SLOT) + 1;
+    if used >= at {
+        return None;
+    }
+    target.spans.push(Span::raw(" ".repeat(at - used)));
+    target.spans.push(Span::styled(mark, style));
+    if refreshing {
+        return None;
+    }
+    let x = area.x + u16::try_from(INDENT + width.saturating_sub(SUMMARY_SLOT)).ok()?;
+    Some(Rect {
+        x,
+        y: area.y + u16::try_from(line).ok()?,
+        width: u16::try_from(SUMMARY_SLOT)
+            .ok()?
+            .min(area.right().saturating_sub(x)),
+        height: 1,
+    })
+}
+
 /// Columns between two tabs when there's room for them (fewer otherwise),
 /// after the two every tab keeps for the active one's ` ▾`.
 const TAB_GAP: usize = 2;
@@ -442,6 +495,16 @@ const TAB_GAP: usize = 2;
 /// Columns every tab keeps after its label for the ` ▾` the active one ends
 /// in, so switching tabs moves nothing.
 const ARROW_SLOT: usize = 2;
+
+/// [`ARROW_SLOT`], or none for the Feed: it opens no modal, so it never shows
+/// a `▾` and its width never changes.
+fn arrow_slot(tab: ListTab) -> usize {
+    if tab == ListTab::Feed {
+        0
+    } else {
+        ARROW_SLOT
+    }
+}
 
 /// Columns the text filter keeps for itself at the right end of the band.
 const FILTER_MAX: usize = 12;
@@ -453,6 +516,9 @@ struct TabLayout {
     gap: usize,
     /// The inactive tabs show their mark alone.
     compact: bool,
+    /// The Feed shows its mark alone (while it isn't active): the first room
+    /// given up, so the grouped tabs keep their names on a phone.
+    feed_mark: bool,
     /// The active tab's label, cut when nothing else made room.
     active_label: String,
     /// Columns the tabs take.
@@ -460,55 +526,64 @@ struct TabLayout {
 }
 
 /// Lay the tabs (`(tab, mark, label)`) out in `room` columns: full labels
-/// two columns apart, else one apart, else the inactive tabs as their marks
-/// alone, else the active tab's label cut. The active tab ends in ` ▾`, and
+/// two columns apart, else one apart, else the Feed as its mark alone, else
+/// every inactive tab as its mark alone, else the active tab's label cut. The active tab ends in ` ▾`, and
 /// every full-label tab keeps room for it, so which tab is active never
 /// moves the others.
-fn lay_out_tabs(tabs: &[(Grouping, &str, String)], active: Grouping, room: usize) -> TabLayout {
-    let width = |gap: usize, compact: bool, active_label: usize| -> usize {
+fn lay_out_tabs(tabs: &[(ListTab, &str, String)], active: ListTab, room: usize) -> TabLayout {
+    let width = |gap: usize, compact: bool, feed_mark: bool, active_label: usize| -> usize {
         let tabs_width: usize = tabs
             .iter()
-            .map(
-                |(grouping, icon, label)| match (*grouping == active, compact) {
-                    (true, _) => str_width(icon) + 1 + active_label + ARROW_SLOT,
+            .map(|(tab, icon, label)| {
+                let mark_only = compact || (feed_mark && *tab == ListTab::Feed);
+                match (*tab == active, mark_only) {
+                    (true, _) => str_width(icon) + 1 + active_label + arrow_slot(*tab),
                     (false, true) => str_width(icon),
-                    (false, false) => str_width(icon) + 1 + str_width(label) + ARROW_SLOT,
-                },
-            )
+                    (false, false) => str_width(icon) + 1 + str_width(label) + arrow_slot(*tab),
+                }
+            })
             .sum();
         tabs_width + gap * tabs.len().saturating_sub(1)
     };
     let active_label = tabs
         .iter()
-        .find(|(grouping, _, _)| *grouping == active)
+        .find(|(tab, _, _)| *tab == active)
         .map(|(_, _, label)| label.clone())
         .unwrap_or_default();
     let label_width = str_width(&active_label);
-    for (gap, compact) in [(TAB_GAP, false), (1, false), (2, true), (1, true)] {
-        let used = width(gap, compact, label_width);
+    for (gap, compact, feed_mark) in [
+        (TAB_GAP, false, false),
+        (1, false, false),
+        (1, false, true),
+        (2, true, true),
+        (1, true, true),
+    ] {
+        let used = width(gap, compact, feed_mark, label_width);
         if used <= room {
             return TabLayout {
                 gap,
                 compact,
+                feed_mark,
                 active_label,
                 width: used,
             };
         }
     }
-    let active_label = truncate(&active_label, room.saturating_sub(width(1, true, 0)));
+    let active_label = truncate(&active_label, room.saturating_sub(width(1, true, true, 0)));
     TabLayout {
         gap: 1,
         compact: true,
-        width: width(1, true, str_width(&active_label)),
+        feed_mark: true,
+        width: width(1, true, true, str_width(&active_label)),
         active_label,
     }
 }
 
-/// The tabs on a raised band: Folders, App, Status. The active one is
+/// The tabs on a raised band: Feed, Status, Folders, App. The active one is
 /// bold, names its filter (`▤ web  ⎇ main`, `◇ claude`), ends in `▾` (it
-/// opens its modal) and is underlined; the text filter shows at the right
-/// end while there is one. White and blue when selected, muted otherwise.
-/// Records a click target per tab.
+/// opens its modal; the Feed has none) and is underlined; the text filter
+/// shows at the right end while there is one. White and blue when
+/// selected, muted otherwise. Records a click target per tab.
 fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Vec<(Rect, Hit)>) {
     let p = theme::palette();
     f.render_widget(Block::default().style(Style::default().bg(p.surface)), area);
@@ -517,7 +592,7 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
         height: 1,
         ..area
     };
-    let active = app.list.grouping();
+    let active = app.list_tab();
     let open = tab_picker_open(app);
     let highlighted = selected || open;
     // The text filter at the right end, while there is one.
@@ -529,25 +604,26 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
         .as_ref()
         .map_or(0, |filter| str_width(filter).min(FILTER_MAX) + 2);
     let room = (area.width as usize).saturating_sub(INDENT + 1 + reserve);
-    let tabs: Vec<(Grouping, &str, String)> = Grouping::ALL
+    let tabs: Vec<(ListTab, &str, String)> = ListTab::ALL
         .iter()
-        .map(|grouping| {
-            (
-                *grouping,
-                tab_icon(app, *grouping),
-                app.tab_label(*grouping),
-            )
-        })
+        .map(|tab| (*tab, list_tab_icon(app, *tab), app.list_tab_label(*tab)))
         .collect();
-    let layout = lay_out_tabs(&tabs, active, room);
+    let mut layout = lay_out_tabs(&tabs, active, room);
     // A single folder's branch goes after its name on the Folders tab,
-    // active or not (so switching tabs moves nothing), when there's room.
+    // active or not (so switching tabs moves nothing), when there's room:
+    // the gaps narrow for it, but the tabs keep their names.
     let branch = match app.list.folder_filter() {
         [only] if filter.is_none() && !layout.compact => {
             folder_branch(app, only).unwrap_or_default()
         }
         _ => String::new(),
     };
+    if !branch.is_empty() && room.saturating_sub(layout.width) < 8 {
+        let narrowed = lay_out_tabs(&tabs, active, room.saturating_sub(8));
+        if !narrowed.compact {
+            layout = narrowed;
+        }
+    }
     let spare = room.saturating_sub(layout.width);
     let branch = if !branch.is_empty() && spare >= 8 {
         format!("  {}", truncate(&branch, spare - 2))
@@ -568,20 +644,20 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
     let mut spans = vec![Span::raw(" ".repeat(INDENT))];
     let mut x = INDENT;
     let mut underline = None;
-    for (index, (grouping, icon, tab_label)) in tabs.iter().enumerate() {
+    for (index, (tab, icon, tab_label)) in tabs.iter().enumerate() {
         if index > 0 {
             spans.push(Span::raw(" ".repeat(layout.gap)));
             x += layout.gap;
         }
         let start = x;
-        if *grouping == active {
+        if *tab == active {
             spans.push(Span::styled(*icon, Style::default().fg(mark)));
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
                 layout.active_label.clone(),
                 Style::default().fg(label).add_modifier(Modifier::BOLD),
             ));
-            let branch = if *grouping == Grouping::Folder {
+            let branch = if *tab == ListTab::Grouped(Grouping::Folder) {
                 branch.as_str()
             } else {
                 ""
@@ -590,40 +666,44 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
                 branch.to_string(),
                 Style::default().fg(p.text_muted),
             ));
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                if open { "▴" } else { "▾" },
-                Style::default().fg(arrow),
-            ));
+            // The Feed opens no modal: no arrow.
+            if *tab != ListTab::Feed {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    if open { "▴" } else { "▾" },
+                    Style::default().fg(arrow),
+                ));
+            }
             x += str_width(icon)
                 + 1
                 + str_width(&layout.active_label)
                 + str_width(branch)
-                + ARROW_SLOT;
+                + arrow_slot(*tab);
             underline = Some((start, x - start));
         } else {
             spans.push(Span::styled(*icon, Style::default().fg(other)));
-            if !layout.compact {
-                let branch = if *grouping == Grouping::Folder {
+            let mark_only = layout.compact || (layout.feed_mark && *tab == ListTab::Feed);
+            if !mark_only {
+                let branch = if *tab == ListTab::Grouped(Grouping::Folder) {
                     branch.as_str()
                 } else {
                     ""
                 };
                 // The blank where the active tab's ` ▾` goes.
                 spans.push(Span::styled(
-                    format!(" {tab_label}{branch}{}", " ".repeat(ARROW_SLOT)),
+                    format!(" {tab_label}{branch}{}", " ".repeat(arrow_slot(*tab))),
                     Style::default().fg(other),
                 ));
             }
-            x += if layout.compact {
+            x += if mark_only {
                 str_width(icon)
             } else {
-                let branch = if *grouping == Grouping::Folder {
+                let branch = if *tab == ListTab::Grouped(Grouping::Folder) {
                     str_width(&branch)
                 } else {
                     0
                 };
-                str_width(icon) + 1 + str_width(tab_label) + branch + ARROW_SLOT
+                str_width(icon) + 1 + str_width(tab_label) + branch + arrow_slot(*tab)
             };
         }
         let target = Rect {
@@ -632,7 +712,7 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
             ..area
         }
         .intersection(area);
-        hits.push((target, Hit::ListTab(*grouping)));
+        hits.push((target, Hit::ListTab(*tab)));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), line);
     if let Some(filter) = filter {
@@ -684,7 +764,8 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         height: folder_item_height(area.height),
         ..area
     };
-    draw_tabs(f, app, item, selected == 0, hits);
+    let feed = app.feed_shown();
+    draw_tabs(f, app, item, selected == 0 && !feed, hits);
     hits.push((item, Hit::FolderSelector));
     let inner = Rect {
         y: item.bottom(),
@@ -692,6 +773,10 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         ..area
     };
     if inner.height == 0 {
+        return;
+    }
+    if feed {
+        super::feed::draw_feed_list(f, app, inner, hits);
         return;
     }
 
@@ -784,9 +869,27 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                     session_content(app, session, width, is_selected, now),
                     height,
                 );
+                let hovered = app.hovered_row == Some(index);
+                // An AI description is the line under the name, the second
+                // from the end (the program line comes last).
+                if app.description(&session.id).is_some() {
+                    let refreshing = app.summary_refreshing(&session.id);
+                    let dragged = app.dragged_session() == Some(&session.id);
+                    let line = lines.len().saturating_sub(2);
+                    if let Some(refresh) = mark_summary(
+                        &mut lines,
+                        line,
+                        refreshing,
+                        hovered && !dragged,
+                        row_area,
+                        width,
+                    ) {
+                        hits.push((refresh, Hit::SummaryRefresh(index)));
+                    }
+                }
                 if app.dragged_session() == Some(&session.id) {
                     mark_dragged(&mut lines);
-                } else if app.hovered_row == Some(index) {
+                } else if hovered {
                     // Before the row's own target, which would take the tap.
                     if let Some(pin) = mark_hovered(&mut lines, session.pinned, row_area) {
                         hits.push((pin, Hit::PinToggle(index)));
@@ -938,24 +1041,30 @@ mod tests {
         }
     }
 
-    /// The tabs with `labels` and `marks` (given for Folders, App, Status),
-    /// in the tabs' order.
-    fn tabs(marks: [&'static str; 3], labels: [&str; 3]) -> Vec<(Grouping, &'static str, String)> {
-        let given = [Grouping::Folder, Grouping::App, Grouping::Status];
-        Grouping::ALL
+    /// The tabs with `labels` and `marks` (given for Feed, Folders, App,
+    /// Status), in the tabs' order.
+    fn tabs(marks: [&'static str; 4], labels: [&str; 4]) -> Vec<(ListTab, &'static str, String)> {
+        let given = [
+            ListTab::Feed,
+            ListTab::Grouped(Grouping::Folder),
+            ListTab::Grouped(Grouping::App),
+            ListTab::Grouped(Grouping::Status),
+        ];
+        ListTab::ALL
             .iter()
-            .map(|grouping| {
-                let i = given.iter().position(|g| g == grouping).unwrap();
-                (*grouping, marks[i], labels[i].to_string())
+            .map(|tab| {
+                let i = given.iter().position(|t| t == tab).unwrap();
+                (*tab, marks[i], labels[i].to_string())
             })
             .collect()
     }
 
     #[test]
     fn which_tab_is_active_never_moves_the_tabs() {
-        let shown = tabs(["▤", "◇", "◔"], ["web", "App", "Status"]);
-        for room in [40, 31] {
-            let layouts: Vec<TabLayout> = Grouping::ALL
+        let shown = tabs(["≡", "▤", "◇", "◔"], ["Feed", "web", "App", "Status"]);
+        // Two apart at 40 columns, one apart at 34.
+        for room in [40, 34] {
+            let layouts: Vec<TabLayout> = ListTab::ALL
                 .iter()
                 .map(|active| lay_out_tabs(&shown, *active, room))
                 .collect();
@@ -970,32 +1079,38 @@ mod tests {
 
     #[test]
     fn tabs_narrow_their_gaps_then_show_marks_alone_then_cut_the_active_label() {
-        let plain = ["▤", "◇", "◔"];
-        let shown = tabs(plain, ["Folders", "App", "Status"]);
-        let at = |room| lay_out_tabs(&shown, Grouping::App, room);
-        // `◔ Status    ▤ Folders    ◇ App ▾`: 10 + 11 + 7 with every
-        // tab's arrow room, two apart.
-        assert_eq!((at(40).gap, at(40).compact, at(40).width), (2, false, 32));
-        assert_eq!((at(31).gap, at(31).compact, at(31).width), (1, false, 30));
-        // `◔  ▤  ◇ App ▾`.
-        assert_eq!((at(29).gap, at(29).compact, at(29).width), (2, true, 13));
-        assert_eq!((at(12).gap, at(12).compact, at(12).width), (1, true, 11));
+        let plain = ["≡", "▤", "◇", "◔"];
+        let shown = tabs(plain, ["Feed", "Folders", "App", "Status"]);
+        let at = |room| lay_out_tabs(&shown, Grouping::App.into(), room);
+        // `≡ Feed  ◔ Status    ▤ Folders    ◇ App ▾`: 6 + 10 + 11 + 7 with
+        // every tab's arrow room (the Feed has none), two apart.
+        assert_eq!((at(40).gap, at(40).compact, at(40).width), (2, false, 40));
+        assert_eq!((at(39).gap, at(39).compact, at(39).width), (1, false, 37));
+        // `≡ ◔ Status   ▤ Folders   ◇ App ▾`: the Feed's name goes first.
+        let phone = at(36);
+        assert_eq!(
+            (phone.gap, phone.compact, phone.feed_mark, phone.width),
+            (1, false, true, 32)
+        );
+        // `≡  ◔  ▤  ◇ App ▾`.
+        assert_eq!((at(31).gap, at(31).compact, at(31).width), (2, true, 16));
+        assert_eq!((at(15).gap, at(15).compact, at(15).width), (1, true, 13));
         // Then the active label is cut.
-        assert_eq!(at(10).active_label, "A…");
-        assert_eq!(at(10).width, 10);
+        assert_eq!(at(12).active_label, "A…");
+        assert_eq!(at(12).width, 12);
         // Whatever the room, marks, labels and their width, the tabs fit
         // it once there's room for the marks and the arrow.
-        let emoji = ["📁", "🤖", "🚦"];
+        let emoji = ["📰", "📁", "🤖", "🚦"];
         for marks in [plain, emoji] {
             for labels in [
-                ["Folders", "App", "Status"],
-                ["web", "App", "Status"],
-                ["Folders", "App", "waiting for response"],
-                ["12 folders", "opencode", "Status"],
+                ["Feed", "Folders", "App", "Status"],
+                ["Feed", "web", "App", "Status"],
+                ["Feed", "Folders", "App", "waiting for response"],
+                ["Feed", "12 folders", "opencode", "Status"],
             ] {
                 let shown = tabs(marks, labels);
-                for active in Grouping::ALL {
-                    for room in 12..80 {
+                for active in ListTab::ALL {
+                    for room in 14..80 {
                         let layout = lay_out_tabs(&shown, active, room);
                         assert!(layout.width <= room, "{labels:?} {active:?} {room}");
                     }

@@ -574,7 +574,11 @@ fn daemon_event_sequences_advance_once_per_fencing_change() {
 fn turn_view(number: u32, turn: u64, messages: u32, lifecycle: Lifecycle) -> SessionView {
     let mut view = view(number);
     view.lifecycle = lifecycle;
-    view.agent_turn = Some(AgentTurn { id: turn, messages });
+    view.agent_turn = Some(AgentTurn {
+        id: turn,
+        messages,
+        conversation_id: None,
+    });
     view
 }
 

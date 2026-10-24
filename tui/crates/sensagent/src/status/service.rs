@@ -311,7 +311,7 @@ impl<S: StatusStore, A: AccountGate, C: StatusClock> AISessionStatusService<S, A
         let decision = self.decision(session)?;
         match decision {
             Decision::Skipped(view) => Ok(view),
-            Decision::Eligible(eligible) => self.eligible_view(&eligible),
+            Decision::Eligible(eligible) => self.eligible_view(&eligible, false),
         }
     }
 
@@ -322,7 +322,7 @@ impl<S: StatusStore, A: AccountGate, C: StatusClock> AISessionStatusService<S, A
             Decision::Skipped(view) => return Ok(Preparation::Skipped(view)),
             Decision::Eligible(eligible) => eligible,
         };
-        let view = self.eligible_view(&eligible)?;
+        let view = self.eligible_view(&eligible, true)?;
         if !matches!(view, StatusView::Missing | StatusView::Stale) {
             return Ok(Preparation::Skipped(view));
         }
@@ -479,12 +479,22 @@ impl<S: StatusStore, A: AccountGate, C: StatusClock> AISessionStatusService<S, A
         })))
     }
 
-    fn eligible_view(&mut self, eligible: &Eligible) -> Result<StatusView, StatusError> {
-        if self.pending.values().any(|ticket| {
+    /// What a session shows, or (`exact`) whether its current source is
+    /// described already. Shown text stays while the same terminal process
+    /// runs, through lifecycle and report changes: summaries are made once per
+    /// chat and when asked for, not on every change. Only `exact` text keeps a
+    /// new summary from being made.
+    fn eligible_view(
+        &mut self,
+        eligible: &Eligible,
+        exact: bool,
+    ) -> Result<StatusView, StatusError> {
+        let pending = self.pending.values().any(|ticket| {
             ticket.source == eligible.source
                 && ticket.binding == eligible.binding
                 && ticket.consent == eligible.consent
-        }) {
+        });
+        if pending && exact {
             return Ok(StatusView::Pending);
         }
         let cached = self.store.load_cache(&eligible.source.session_id)?;
@@ -506,15 +516,28 @@ impl<S: StatusStore, A: AccountGate, C: StatusClock> AISessionStatusService<S, A
             if entry.session_id != eligible.source.session_id {
                 return Err(StatusStoreError::InvalidData.into());
             }
+            let source = eligible.source.stamp;
+            let described = if exact {
+                entry.stamp == source
+            } else {
+                entry.stamp.terminal_generation == source.terminal_generation
+                    && entry.stamp.source_revision <= source.source_revision
+            };
             if entry.account == eligible.binding.account
                 && entry.auth_revision == eligible.binding.auth_revision
                 && entry.consent_revision == eligible.consent
                 && entry.folder == eligible.source.folder
-                && entry.stamp == eligible.source.stamp
+                && described
             {
                 return Ok(StatusView::Ready(Box::new(entry)));
             }
+            if pending {
+                return Ok(StatusView::Pending);
+            }
             return Ok(StatusView::Stale);
+        }
+        if pending {
+            return Ok(StatusView::Pending);
         }
         Ok(StatusView::Missing)
     }

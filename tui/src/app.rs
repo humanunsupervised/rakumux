@@ -31,6 +31,7 @@ pub mod config;
 mod connection;
 mod detail;
 mod feature_flags;
+pub mod feed;
 pub mod folders;
 pub mod grid;
 pub mod grouping;
@@ -154,6 +155,9 @@ pub enum Hit {
     /// The pin left of a hovered session row's name (that list row):
     /// pins or unpins its session.
     PinToggle(usize),
+    /// The ↻ at the end of a hovered session row's AI description (that list
+    /// row): makes a new summary of its session.
+    SummaryRefresh(usize),
     /// Visible Grid card in filtered session order (last is New session).
     GridCell(usize),
     /// Previous/next Grid page.
@@ -163,7 +167,10 @@ pub enum Hit {
     FolderSelector,
     /// A tab on the list's top row: activates it, or opens its modal when
     /// it's the active one.
-    ListTab(grouping::Grouping),
+    ListTab(grouping::ListTab),
+    /// A reply in the feed (its index, newest first): selects it, or opens
+    /// it when it's selected already (at once on a phone).
+    FeedEntry(usize),
     /// The open Folders modal (clicks inside it don't close it).
     FolderMenu,
     /// A row of the Folders modal.
@@ -267,6 +274,18 @@ pub struct App {
     descriptions_at: Option<Instant>,
     descriptions_busy: bool,
     descriptions_generation: u64,
+    /// Sessions whose new AI summary is being made, as the service said.
+    summaries_refreshing: HashSet<SessionId>,
+    /// Sessions a summary was asked for whose request hasn't been answered.
+    summary_asks: HashSet<SessionId>,
+    /// The agent feed (`app/feed`), shown by the list's Feed tab.
+    pub feed: feed::FeedStore,
+    /// The Feed tab is the active one (where Master detail can show it).
+    feed_tab: bool,
+    /// A tab was chosen this run: the feed isn't put in front any more.
+    tab_chosen: bool,
+    /// The account's Feed switch was seen on this run.
+    feed_switch_seen: bool,
     pub connection: Connection,
     /// The daemon was reachable once; losing it triggers reconnects.
     was_connected: bool,
@@ -375,6 +394,12 @@ impl App {
             descriptions_at: None,
             descriptions_busy: false,
             descriptions_generation: 0,
+            summaries_refreshing: HashSet::new(),
+            summary_asks: HashSet::new(),
+            feed: feed::FeedStore::new(rakumux_sensagent::feed::machine_name()),
+            feed_tab: false,
+            tab_chosen: false,
+            feed_switch_seen: false,
             connection: Connection::Connecting,
             was_connected: false,
             checked_daemon_features: false,
@@ -836,6 +861,7 @@ impl App {
             }
         }
         self.account_timers(now);
+        self.feed_timers(now);
         changed
     }
 
@@ -931,6 +957,8 @@ impl App {
             AppEvent::Descriptions { generation, result } => {
                 self.on_descriptions(generation, result)
             }
+            AppEvent::Summarized { session, result } => self.on_summarized(session, result),
+            AppEvent::Feed { generation, result } => self.on_feed(generation, result),
             AppEvent::JobFailed(message) => {
                 self.set_status(format!("Background task failed: {message}"))
             }

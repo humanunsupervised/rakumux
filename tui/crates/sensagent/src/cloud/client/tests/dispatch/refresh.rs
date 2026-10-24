@@ -4,11 +4,12 @@
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
+use session_core::api::TurnContent;
 use session_core::api::{EventEnvelope, SessionEvent};
 use session_core::client::SessionApi;
-use session_core::model::{Reported, SessionView};
+use session_core::model::{AgentTurn, Reported, SessionView};
 
-use super::source::{event, tracked_view};
+use super::source::{event, tracked_view as plain_view};
 use super::*;
 use crate::cloud::RemoteErrorCode;
 use crate::refresh::{
@@ -124,9 +125,31 @@ pub(super) fn ready(status: &AIStatus) -> bool {
     matches!(&status.view, StatusView::Ready(entry) if entry.text.as_str() == STATUS)
 }
 
+/// An agent chat at its fifth message: due for its one automatic summary.
+pub(super) fn tracked_view(number: u8) -> SessionView {
+    let mut view = plain_view(number);
+    view.agent_turn = Some(AgentTurn {
+        id: 1,
+        messages: 5,
+        conversation_id: Some(format!("synthetic-conversation-{number}")),
+    });
+    view
+}
+
+/// The turn the fake daemon reads for every session.
+fn turn(messages: u32) -> TurnContent {
+    TurnContent {
+        id: 1,
+        prompt: Some("Add a regression test for quoted commas".into()),
+        messages: (1..=messages).map(|n| format!("Step {n}")).collect(),
+        total: messages,
+    }
+}
+
 fn api(views: &[SessionView]) -> FakeSessionApi {
     let api = FakeSessionApi::user(views[0].clone(), OUTPUT);
     api.set_listed(views.to_vec());
+    api.set_turn(turn(5));
     api
 }
 
@@ -167,6 +190,7 @@ fn refreshing_waits_for_the_daemon_list_and_confirmed_consent() {
             rate_limited: false,
             unauthorized: false,
             summaries: None,
+            feed: None,
         }
     );
 }
@@ -232,32 +256,27 @@ fn a_switch_read_for_an_earlier_sign_in_is_not_applied() {
 }
 
 #[test]
-fn busy_terminal_keeps_its_text_until_one_refresh_per_interval() {
+fn output_and_time_never_refresh_and_asking_does() {
     let api = api(&[tracked_view(2)]);
     let mut harness = Harness::enabled(ReplyMode::Success);
     harness.resync(&api, vec![tracked_view(2)], 0);
     assert_eq!(harness.round(&api, 0), 1);
-    let first = harness.refresher.source_stamp(&session(2)).unwrap();
-    for now in 1..=60 {
+    for now in [1, 61, 600, 3600] {
         harness.event(event(2, SessionEvent::Activity), now);
         assert_eq!(harness.round(&api, now), 0, "{now}");
         assert!(ready(&harness.status(2)), "{now}");
     }
-    harness.event(event(2, SessionEvent::Activity), 61);
-    assert_eq!(harness.round(&api, 61), 1);
-    assert!(harness.refresher.source_stamp(&session(2)).unwrap() > first);
-    assert!(ready(&harness.status(2)));
+    assert_eq!(harness.calls(), 1);
+    harness.refresher.request(&session(2));
+    assert!(harness.status(2).refreshing);
+    assert_eq!(harness.round(&api, 3601), 1);
+    let status = harness.status(2);
+    assert!(ready(&status) && !status.refreshing);
     assert_eq!(harness.calls(), 2);
-
-    // Output that stops is refreshed once quiet, within the interval rule.
-    harness.event(event(2, SessionEvent::Activity), 100);
-    assert_eq!(harness.round(&api, 120), 0);
-    assert_eq!(harness.round(&api, 121), 1);
-    assert_eq!(harness.calls(), 3);
 }
 
 #[test]
-fn lifecycle_changes_hide_text_at_once_and_refresh_after_the_interval() {
+fn lifecycle_changes_keep_the_text_until_a_summary_is_asked_for() {
     let api = api(&[tracked_view(2)]);
     let mut harness = Harness::enabled(ReplyMode::Success);
     harness.resync(&api, vec![tracked_view(2)], 0);
@@ -272,11 +291,55 @@ fn lifecycle_changes_hide_text_at_once_and_refresh_after_the_interval() {
         ),
         10,
     );
-    assert_eq!(harness.status(2).view, StatusView::Stale);
-    assert_eq!(harness.round(&api, 59), 0);
-    assert_eq!(harness.round(&api, 60), 1);
+    assert!(ready(&harness.status(2)));
+    assert_eq!(harness.round(&api, 600), 0);
+    harness.refresher.request(&session(2));
+    assert_eq!(harness.round(&api, 600), 1);
     assert!(ready(&harness.status(2)));
     assert_eq!(sent_lifecycles(&harness), ["working", "blocked"]);
+}
+
+#[test]
+fn an_agent_turn_is_summarised_from_its_prompt_and_messages_not_the_screen() {
+    let api = api(&[tracked_view(2)]);
+    let mut harness = Harness::enabled(ReplyMode::Success);
+    harness.resync(&api, vec![tracked_view(2)], 0);
+    assert_eq!(harness.round(&api, 0), 1);
+    assert!(ready(&harness.status(2)));
+    assert!(
+        api.reads().is_empty(),
+        "the screen isn't read for an agent's turn"
+    );
+    let request = harness.requests.lock().unwrap()[0].body.clone();
+    let value: Value = serde_json::from_slice(&request).unwrap();
+    let output = value["context"]["recent_output"].as_str().unwrap();
+    assert!(
+        output.contains("Add a regression test for quoted commas"),
+        "{output}"
+    );
+    assert!(output.contains("Step 5"), "{output}");
+}
+
+#[test]
+fn a_chat_finished_before_its_fifth_output_is_summarised_then() {
+    let mut early = tracked_view(2);
+    early.agent_turn = Some(AgentTurn {
+        id: 1,
+        messages: 2,
+        conversation_id: Some("synthetic-short-chat".into()),
+    });
+    let api = api(&[early.clone()]);
+    api.set_turn(turn(2));
+    let mut harness = Harness::enabled(ReplyMode::Success);
+    harness.resync(&api, vec![early.clone()], 0);
+    assert_eq!(harness.round(&api, 0), 0);
+    let mut done = early;
+    done.lifecycle = Lifecycle::Done;
+    api.set_listed(vec![done.clone()]);
+    harness.event(event(2, SessionEvent::Updated { session: done }), 1);
+    assert_eq!(harness.round(&api, 1), 1);
+    assert!(ready(&harness.status(2)));
+    assert_eq!(sent_lifecycles(&harness), ["done"]);
 }
 
 fn sent_lifecycles(harness: &Harness) -> Vec<String> {
@@ -329,7 +392,7 @@ fn two_jobs_and_the_start_budget_bound_a_backfill() {
 }
 
 #[test]
-fn rejected_input_is_not_captured_again_until_the_session_changes() {
+fn rejected_input_is_not_tried_again_until_asked() {
     let mut view = tracked_view(2);
     view.reported = Some(Reported {
         state: None,
@@ -344,11 +407,8 @@ fn rejected_input_is_not_captured_again_until_the_session_changes() {
     assert_eq!(harness.calls(), 0);
     assert_eq!(harness.status(2).failure, Some(RefreshFailure::Rejected));
     assert_eq!(harness.round(&api, 600), 0);
-
-    // New output allows another attempt; the report still can't be sent.
     harness.event(event(2, SessionEvent::Activity), 600);
-    assert_eq!(harness.round(&api, 605), 1);
-    assert_eq!(harness.calls(), 0);
+    assert_eq!(harness.round(&api, 605), 0);
 
     let reported = Reported {
         state: None,
@@ -360,6 +420,8 @@ fn rejected_input_is_not_captured_again_until_the_session_changes() {
     fixed.reported = Some(reported.clone());
     api.set_listed(vec![fixed]);
     harness.event(event(2, SessionEvent::Reported { reported }), 700);
+    assert_eq!(harness.round(&api, 700), 0);
+    harness.refresher.request(&session(2));
     assert_eq!(harness.round(&api, 700), 1);
     assert_eq!(harness.calls(), 1);
     let status = harness.status(2);
@@ -479,11 +541,13 @@ fn a_session_changed_during_capture_is_corrected_from_the_daemon() {
         AIStatus {
             view: StatusView::Missing,
             failure: None,
+            refreshing: false,
         }
     );
 
-    assert_eq!(harness.round(&api, 59), 0);
-    assert_eq!(harness.round(&api, 60), 1);
+    // Tried again shortly, with the corrected view.
+    assert_eq!(harness.round(&api, 4), 0);
+    assert_eq!(harness.round(&api, 5), 1);
     assert!(ready(&harness.status(2)));
     assert_eq!(sent_lifecycles(&harness), ["blocked"]);
 }
@@ -533,7 +597,7 @@ fn a_correction_older_than_newer_events_is_not_applied() {
 }
 
 #[test]
-fn reports_only_folders_ignore_output_until_the_report_changes() {
+fn reports_only_folders_send_reports_and_never_output() {
     let api = api(&[tracked_view(2)]);
     let mut harness = Harness::reports_only();
     harness.resync(&api, vec![tracked_view(2)], 0);
@@ -544,7 +608,6 @@ fn reports_only_folders_ignore_output_until_the_report_changes() {
         assert!(ready(&harness.status(2)));
     }
     assert_eq!(harness.calls(), 1);
-    assert!(api.reads().is_empty());
 
     let reported = Reported {
         state: None,
@@ -556,8 +619,14 @@ fn reports_only_folders_ignore_output_until_the_report_changes() {
     view.reported = Some(reported.clone());
     api.set_listed(vec![view]);
     harness.event(event(2, SessionEvent::Reported { reported }), 300);
+    assert_eq!(harness.round(&api, 300), 0);
+    harness.refresher.request(&session(2));
     assert_eq!(harness.round(&api, 300), 1);
     assert_eq!(harness.calls(), 2);
+    assert!(
+        api.reads().is_empty(),
+        "reports only: the screen is never read"
+    );
 }
 
 #[test]
@@ -731,6 +800,7 @@ fn the_runner_follows_the_daemon_and_refreshes_in_the_background() {
     assert_eq!(background.requests.lock().unwrap().len(), 1);
     assert!(background.connected());
 
+    // A lifecycle change keeps the text; asking makes a new summary.
     background.api.set_listed(vec![blocked(2)]);
     events[0]
         .send(Ok(event(
@@ -740,7 +810,10 @@ fn the_runner_follows_the_daemon_and_refreshes_in_the_background() {
             },
         )))
         .unwrap();
-    eventually(|| background.status(2).view == StatusView::Stale);
+    assert!(ready(&background.status(2)));
+    background.client.summarize(session(2)).unwrap();
+    eventually(|| background.requests.lock().unwrap().len() == 2);
+    eventually(|| ready(&background.status(2)) && !background.status(2).refreshing);
 
     let client = background.client.clone();
     let revision = client.consent().unwrap().revision;

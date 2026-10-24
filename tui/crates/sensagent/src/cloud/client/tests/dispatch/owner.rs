@@ -8,8 +8,8 @@ use std::sync::mpsc::Sender;
 use serde::Serialize;
 use session_core::paths::Layout;
 
+use super::refresh::tracked_view;
 use super::refresh::{eventually, Background, Event};
-use super::source::tracked_view;
 use super::*;
 use crate::owner::protocol::{
     read_message, write_message, FolderChoice, Hello, LineState, OwnerRequest, OwnerResponse,

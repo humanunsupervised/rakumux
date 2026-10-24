@@ -200,7 +200,7 @@ mod tests {
         assert!(wide.contains("Press n to start one in repo"), "{wide}");
         // The tabs head the list, Status active: where it starts.
         assert!(
-            wide.contains("\n   ◔ Status ▾  ▤ Folders    ◇ App"),
+            wide.contains("\n   ≡ Feed  ◔ Status ▾  ▤ Folders    ◇ App"),
             "{wide}"
         );
         assert!(wide.contains("RAKUMUX"), "{wide}");
@@ -900,7 +900,7 @@ mod tests {
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, width);
         assert!(
-            list[1].starts_with("   ◔ Status    ▤ Folders    ◇ App ▾"),
+            list[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders    ◇ App ▾"),
             "{wide}"
         );
         let at = |list: &[String], needle: &str| {
@@ -933,7 +933,7 @@ mod tests {
         h.app.show_tab(Grouping::Status);
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, width);
-        assert!(list[1].starts_with("   ◔ Status ▾"), "{wide}");
+        assert!(list[1].starts_with("   ≡ Feed  ◔ Status ▾"), "{wide}");
         let headers: Vec<usize> = [
             " ◐ waiting for you ─",
             " ● unread ─",
@@ -969,8 +969,10 @@ mod tests {
                     usize::from(crate::layout::sidebar_width(width))
                 };
                 let list = list_column(&screen, list_width);
-                // Every tab, the active one with its label and ▾.
-                for mark in ["▤ Folders", "◇ App", "◔ Status"] {
+                // Every tab, the active one with its label and ▾; on a phone
+                // the Feed is its mark alone, so the others keep their names.
+                let feed = if width < 80 { "≡ " } else { "≡ Feed" };
+                for mark in [feed, "▤ Folders", "◇ App", "◔ Status"] {
                     assert!(list[1].contains(mark), "{width}x{height}: {screen}");
                 }
                 let active = format!("{} ▾", h.app.tab_label(grouping));
@@ -990,7 +992,8 @@ mod tests {
             }
         }
         // A long filter name and a text filter on a phone: the other tabs
-        // keep their marks, the text filter shows at the right end.
+        // keep their marks, the active one's label is cut, the text filter
+        // shows at the right end.
         let mut h = harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Sidebar);
         h.app.show_sections(
             Grouping::Status,
@@ -1000,7 +1003,7 @@ mod tests {
         let screen = render(&mut h.app, 40, 30);
         let tabs = screen.lines().nth(1).unwrap();
         assert!(
-            tabs.starts_with("   ◔ waiting for response ▾ ▤ ◇"),
+            tabs.starts_with("   ≡ ◔ waiting for respo… ▾ ▤ ◇"),
             "{tabs:?}"
         );
         assert!(tabs.ends_with("/front "), "{tabs:?}");
@@ -1139,12 +1142,15 @@ mod tests {
         // The tabs: a padded band above the sessions, the active tab
         // underlined on its last row.
         assert!(list[0].is_empty(), "{wide}");
-        // `◔ Status` and its arrow's room, then two columns.
-        let under = format!("   {}{}", " ".repeat(12), "▁".repeat(11));
+        // `≡ Feed` and two columns, `◔ Status` with its arrow's room and two.
+        let under = format!("   {}{}", " ".repeat(20), "▁".repeat(11));
         assert_eq!(list[2], under, "{wide}");
-        // The Status tab, then a folder icon and Folders, with ▾: it opens
-        // the Folders modal. Then the App tab.
-        assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
+        // The Feed and Status tabs, then a folder icon and Folders, with ▾:
+        // it opens the Folders modal. Then the App tab.
+        assert!(
+            list[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders ▾"),
+            "{wide}"
+        );
         assert!(list[1].ends_with("▤ Folders ▾  ◇ App"), "{wide}");
         // Pinned first, with its mark; subtext is program, then git.
         let docs = list.iter().position(|l| l.contains("docs")).unwrap();
@@ -1238,7 +1244,8 @@ mod tests {
         let wide = render(&mut h.app, 160, 48);
         assert!(wide.contains("No sessions in empty yet"), "{wide}");
         assert!(wide.contains("Press n to start one in empty"), "{wide}");
-        assert!(wide.contains("   ▤ empty  ⎇ trunk"), "{wide}");
+        // The gaps narrow to keep its branch.
+        assert!(wide.contains("  ▤ empty  ⎇ trunk ▾"), "{wide}");
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("no sessions yet"), "{narrow}");
         // On the folder filter: what it shows, and how to change it.
@@ -1283,7 +1290,10 @@ mod tests {
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, crate::layout::sidebar_width(160).into());
-        assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
+        assert!(
+            list[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders ▾"),
+            "{wide}"
+        );
         let at = |needle: &str| {
             list.iter()
                 .position(|l| l.contains(needle))
@@ -1353,7 +1363,10 @@ mod tests {
         h.press(KeyCode::Char('P')).await;
         let wide = render(&mut h.app, 160, 48);
         let lines: Vec<&str> = wide.lines().collect();
-        assert!(lines[1].starts_with("   ◔ Status    ▤ Folders"), "{wide}");
+        assert!(
+            lines[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders"),
+            "{wide}"
+        );
         assert!(lines[1].contains("▴"), "{wide}");
         assert!(wide.contains("┌ Folders ─"), "{wide}");
         assert!(
@@ -1911,5 +1924,209 @@ mod tests {
                 assert_eq!(has(Rakumux), session, "{width} {session}");
             }
         }
+    }
+
+    /// Started with an account whose Feed switch is `on`, the feed's next
+    /// answer `page` (when given), after the first read.
+    fn feed_harness(
+        account: crate::app::testing::FakeAccount,
+        page: Option<rakumux_sensagent::feed::FeedPage>,
+    ) -> Harness {
+        let fake = FakeApi::new(vec![view("A", "api", 20), view("B", "docs", 10)]);
+        let dir = tempfile::tempdir().unwrap();
+        let account = std::sync::Arc::new(account);
+        let mut options = options(&fake, scope(), &dir);
+        options.account = account.clone();
+        let mut h = start(options, fake, dir);
+        if let Some(page) = page {
+            account.queue_feed(page);
+        }
+        h.app.switch_tab(-1);
+        h.app
+            .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        h.app.process_pending();
+        h
+    }
+
+    fn reply(
+        id: &str,
+        session: &str,
+        name: &str,
+        machine: &str,
+        minutes_ago: i64,
+        text: &str,
+    ) -> rakumux_sensagent::feed::FeedEntry {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        rakumux_sensagent::feed::FeedEntry {
+            id: id.into(),
+            seq: Some(1),
+            machine: machine.into(),
+            session_id: session.into(),
+            session_name: name.into(),
+            folder: Some("repo".into()),
+            agent: "claude-code".into(),
+            conversation_id: None,
+            text: text.into(),
+            truncated: false,
+            finished_at: now - minutes_ago * 60_000,
+        }
+    }
+
+    fn feed_page(
+        status: rakumux_sensagent::feed::FeedStatus,
+        entries: Vec<rakumux_sensagent::feed::FeedEntry>,
+    ) -> rakumux_sensagent::feed::FeedPage {
+        rakumux_sensagent::feed::FeedPage {
+            status,
+            generation: 1,
+            revision: 1,
+            entries,
+            more: false,
+        }
+    }
+
+    #[test]
+    fn the_feed_tab_comes_first_and_shows_finished_replies() {
+        use rakumux_sensagent::feed::FeedStatus;
+        let machine = rakumux_sensagent::feed::machine_name();
+        let mut pending = reply(
+            "R2",
+            "A",
+            "api",
+            &machine,
+            0,
+            "Done: the parser handles quoted commas now, and the regression test covers \
+             the case from the bug report.\n\nRun cargo test to check.",
+        );
+        pending.seq = None;
+        let elsewhere = reply(
+            "R1",
+            "Z",
+            "nightly-build",
+            "lab-box",
+            5,
+            "The build is green again \u{1b}[31mafter the cache fix.",
+        );
+        let mut h = feed_harness(
+            crate::app::testing::FakeAccount::with_feed(),
+            Some(feed_page(FeedStatus::Ready, vec![pending, elsewhere])),
+        );
+        let wide = render(&mut h.app, 160, 48);
+        let width = usize::from(crate::layout::sidebar_width(160));
+        let list = list_column(&wide, width);
+        assert!(
+            list[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders"),
+            "{wide}"
+        );
+        assert_eq!(list[2], "   ▁▁▁▁▁▁", "{wide}");
+        // The newest first: its session, folder and agent, and `sending`
+        // while it isn't uploaded; another machine's says where it's from.
+        assert!(list[4].contains("api · repo · claude"), "{wide}");
+        assert!(list[4].ends_with("sending · now"), "{wide}");
+        assert!(list[5].contains("Done: the parser handles"), "{wide}");
+        assert!(
+            list[8].contains("nightly-build · repo · claude · on lab"),
+            "{wide}"
+        );
+        assert!(list[8].ends_with("5m"), "{wide}");
+        assert!(!wide.contains('\u{1b}'), "{wide}");
+        // The detail reads the selected reply whole; it runs here.
+        assert!(wide.contains("Enter goes into its session"), "{wide}");
+        assert!(wide.contains("Run cargo test to check."), "{wide}");
+        assert!(wide.contains("session: ● api"), "{wide}");
+        let narrow = render(&mut h.app, 80, 24);
+        assert!(
+            narrow.lines().nth(1).unwrap().contains("≡ Feed"),
+            "{narrow}"
+        );
+        assert!(narrow.contains("api · repo · claude"), "{narrow}");
+        assert!(narrow.contains("Run cargo test to check."), "{narrow}");
+    }
+
+    #[test]
+    fn the_feed_says_what_it_is_waiting_for() {
+        use crate::app::testing::FakeAccount;
+        use rakumux_sensagent::feed::FeedStatus;
+        let mut h = feed_harness(FakeAccount::default(), None);
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("Sign in to see your feed:"), "{screen}");
+        assert!(screen.contains(", Settings → Account"), "{screen}");
+        let mut h = feed_harness(FakeAccount::signed_in(), None);
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("The feed is off."), "{screen}");
+        assert!(
+            screen.contains("Turn it on at rakumux.com/features"),
+            "{screen}"
+        );
+        let mut h = feed_harness(FakeAccount::with_feed(), None);
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("No replies yet"), "{screen}");
+        let loading = feed_page(FeedStatus::Loading, Vec::new());
+        let mut h = feed_harness(FakeAccount::with_feed(), Some(loading));
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("Loading the feed…"), "{screen}");
+        let kept = feed_page(
+            FeedStatus::Unavailable,
+            vec![reply("R", "A", "api", "lab", 1, "Kept from before.")],
+        );
+        let mut h = feed_harness(FakeAccount::with_feed(), Some(kept));
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("can't reach rakumux.com"), "{screen}");
+        assert!(screen.contains("Kept from before."), "{screen}");
+    }
+
+    #[tokio::test]
+    async fn arrows_switch_between_the_feed_and_the_session_tabs() {
+        let mut h = feed_harness(crate::app::testing::FakeAccount::with_feed(), None);
+        let first = |h: &mut Harness| {
+            render(&mut h.app, 160, 48)
+                .lines()
+                .nth(1)
+                .unwrap()
+                .to_string()
+        };
+        assert!(first(&mut h).contains("≡ Feed"), "{}", first(&mut h));
+        h.press(KeyCode::Right).await;
+        let tabs = first(&mut h);
+        assert!(tabs.contains("◔ Status ▾"), "{tabs}");
+        assert!(render(&mut h.app, 160, 48).contains("+ New session"));
+        h.press(KeyCode::Left).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(!screen.contains("+ New session"), "{screen}");
+        assert!(screen.contains("No replies yet"), "{screen}");
+    }
+
+    #[tokio::test]
+    async fn on_a_phone_the_feed_fills_the_screen_and_a_reply_is_read_full_screen() {
+        use rakumux_sensagent::feed::FeedStatus;
+        let elsewhere = reply(
+            "R1",
+            "Z",
+            "nightly-build",
+            "lab-box",
+            5,
+            "The build is green again after the cache fix.",
+        );
+        let mut h = feed_harness(
+            crate::app::testing::FakeAccount::with_feed(),
+            Some(feed_page(FeedStatus::Ready, vec![elsewhere])),
+        );
+        h.app.resize(45, 40);
+        let phone = render(&mut h.app, 45, 40);
+        assert!(phone.lines().nth(1).unwrap().contains("≡ Feed"), "{phone}");
+        assert!(phone.contains("nightly-build"), "{phone}");
+        h.press(KeyCode::Enter).await;
+        let reading = render(&mut h.app, 45, 40);
+        assert!(reading.contains("Esc back"), "{reading}");
+        assert!(reading.contains("finished 5m ago"), "{reading}");
+        assert!(
+            reading.contains("The build is green again after the"),
+            "{reading}"
+        );
+        h.press(KeyCode::Esc).await;
+        assert!(!render(&mut h.app, 45, 40).contains("Esc back"));
     }
 }

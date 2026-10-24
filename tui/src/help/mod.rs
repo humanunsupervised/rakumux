@@ -196,7 +196,7 @@ pub enum KeyAction {
     NumberedSession,
     NextSession,
     PreviousSession,
-    /// `→`: the list's next tab (Status, Folders, App).
+    /// `→`: the list's next tab (Feed, Status, Folders, App).
     NextTab,
     /// `←`: the previous tab.
     PreviousTab,
@@ -215,6 +215,8 @@ pub enum KeyAction {
     FilterFolders,
     Rename,
     Pin,
+    /// `s`: a new AI summary of the selected session.
+    Summarize,
     /// `J`: one place down in the list (dragging does the same).
     MoveDown,
     /// `K`: one place up.
@@ -247,7 +249,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 40] = [
+    pub const ALL: [KeyAction; 41] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -270,6 +272,7 @@ impl KeyAction {
         KeyAction::FilterFolders,
         KeyAction::Rename,
         KeyAction::Pin,
+        KeyAction::Summarize,
         KeyAction::MoveDown,
         KeyAction::MoveUp,
         KeyAction::Close,
@@ -315,6 +318,7 @@ impl KeyAction {
             | KeyAction::FilterFolders
             | KeyAction::Rename
             | KeyAction::Pin
+            | KeyAction::Summarize
             | KeyAction::MoveDown
             | KeyAction::MoveUp
             | KeyAction::Close
@@ -346,7 +350,7 @@ impl KeyAction {
             KeyAction::NumberedSession => "Go into session 1 to 9",
             KeyAction::NextSession => "Next session",
             KeyAction::PreviousSession => "Previous session",
-            KeyAction::NextTab => "Next tab (Status, Folders, App)",
+            KeyAction::NextTab => "Next tab (Feed, Status, Folders, App)",
             KeyAction::PreviousTab => "Previous tab",
             KeyAction::Top => "Top of the list",
             KeyAction::Bottom => "Bottom of the list",
@@ -360,6 +364,7 @@ impl KeyAction {
             KeyAction::FilterFolders => "Filter by folder",
             KeyAction::Rename => "Rename session",
             KeyAction::Pin => "Pin or unpin session",
+            KeyAction::Summarize => "Summarise the session (AI)",
             KeyAction::MoveDown => "Move session down",
             KeyAction::MoveUp => "Move session up",
             KeyAction::Close => "Close session (end its program)",
@@ -415,6 +420,7 @@ impl KeyAction {
             KeyAction::FilterFolders => plain(&["P"]),
             KeyAction::Rename => plain(&["r"]),
             KeyAction::Pin => plain(&["p"]),
+            KeyAction::Summarize => plain(&["s"]),
             KeyAction::MoveDown => plain(&["J"]),
             KeyAction::MoveUp => plain(&["K"]),
             KeyAction::Close => plain(&["x"]),
@@ -474,7 +480,7 @@ impl KeyAction {
                 None => "Option/Alt+↑/↓ are turned off in your settings; ↑/↓ and j/k move.".into(),
             },
             KeyAction::Top => {
-                "The tabs (Status, Folders, App) are the first row; ←/→ switch them there.".into()
+                "The tabs (Feed, Status, Folders, App) are the first row; ←/→ switch them.".into()
             }
             KeyAction::NextFolder | KeyAction::PreviousFolder => {
                 "With several folders shown: the first session under the next or previous \
@@ -495,6 +501,13 @@ impl KeyAction {
             }
             KeyAction::Delete => {
                 "Press d or dd; both ask before deleting. Confirm with y or Enter.".into()
+            }
+            KeyAction::Summarize => {
+                "Each agent chat gets one AI summary by itself, at its fifth output or when it \
+                 finishes. s (or the ↻ over a description) makes a new one: the agent's latest \
+                 request and what it has done since, or the screen for other programs. Needs \
+                 your Rakumux account with AI session summaries on."
+                    .into()
             }
             KeyAction::Restart => {
                 "Asks before reloading this UI through its launcher to pick up the latest build. \
@@ -1404,7 +1417,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("The screen");
     match ctx.layout {
         SessionLayout::Sidebar => doc.bullet(format!(
-            "Session list, on the left: the tabs on top (Status, {} Folders, App), then the \
+            "Session list, on the left: the tabs on top (Feed, Status, {} Folders, App), then the \
              sessions in the order you keep them (a new one goes at the bottom), each with a \
              status mark, a bold title, and its app name in muted blue before the git branch; \
              the selected title is white, the others a softer foreground colour. With \
@@ -1479,7 +1492,10 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         ),
         row(
             "←, →",
-            "Switch between the tabs, Status, Folders and App (h, l on the tabs too)",
+            "Switch between the tabs, Feed, Status, Folders and App (h, l on the tabs too). \
+             The Feed lists what agents said when they finished a turn, on every machine of \
+             your account (turn it on at rakumux.com/features); Enter on a reply made here \
+             goes into its session",
         ),
         row(
             "gg, G, Home, End",
@@ -1532,9 +1548,10 @@ fn mouse(doc: &mut Doc) {
     doc.heading("Mouse");
     doc.bullet("Click a session in the list to show it; click the session to work in it.");
     doc.bullet(
-        "Click a tab at the top of the list (Status, Folders, App) to group the list by \
-         it; click the active one (▾) to open its modal; click a row there to show it alone, \
-         All to show everything, or outside it to close it.",
+        "Click a tab at the top of the list (Feed, Status, Folders, App): the Feed shows \
+         finished replies (click one to read it, again to open its session), the others \
+         group the list by it; click the active one (▾) to open its modal; click a row there \
+         to show it alone, All to show everything, or outside it to close it.",
     );
     doc.bullet(
         "Drag a session up or down the list (or a tab left or right) to move it; a blue bar \
@@ -3382,7 +3399,7 @@ mod tests {
             ("Rakumux mode", "C-a"),
             ("Back to the session you came from", "Esc, C-a"),
             ("Go into the selected session", "Enter, i, l"),
-            ("Next tab (Status, Folders, App)", "→"),
+            ("Next tab (Feed, Status, Folders, App)", "→"),
             ("Previous tab", "←"),
             ("Last session", "Tab"),
             ("Go into session 1 to 9", "1-9"),

@@ -61,6 +61,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_TURN,
     session_core::api::CAPABILITY_TERMINAL_PANE,
     session_core::api::CAPABILITY_ACTIVITY,
+    session_core::api::CAPABILITY_REPLIES,
     "attach",
     "subscribe",
     "list",
@@ -120,6 +121,8 @@ const KNOWN_OPS: &[&str] = &[
     "daemon_status",
     "daemon_shutdown",
     "daemon_restart",
+    "reply_capture",
+    "reply_list",
 ];
 
 /// `kind` tags of `api::Auth`.
@@ -1724,6 +1727,8 @@ mod tests {
             Request::DaemonStatus,
             Request::DaemonShutdown,
             Request::DaemonRestart { binary: None },
+            Request::ReplyCapture { enabled: true },
+            Request::ReplyList { after: None },
         ];
         assert_eq!(requests.len(), KNOWN_OPS.len());
         // A new variant breaks this match: list it above and in KNOWN_OPS.
@@ -1758,7 +1763,9 @@ mod tests {
                 | Request::Subscribe(_)
                 | Request::DaemonStatus
                 | Request::DaemonShutdown
-                | Request::DaemonRestart { .. } => {}
+                | Request::DaemonRestart { .. }
+                | Request::ReplyCapture { .. }
+                | Request::ReplyList { .. } => {}
             }
         }
         // Every `Auth` kind is known too.

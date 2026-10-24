@@ -1,8 +1,9 @@
 //! Keys in Rakumux mode: the session list (Sidebar) or tab bar (Tabs)
 //! has the keys, and the session is previewed. Arrows and Vim keys both
-//! move (on the list's top row ←/→ switch its tabs); Enter (or `i`) goes
-//! into a session; Esc cancels what's pending, then goes back to the
-//! session Rakumux mode was entered from.
+//! move (←/→ switch the list's tabs); Enter (or `i`) goes into a session;
+//! Esc cancels what's pending, then goes back to the session Rakumux mode
+//! was entered from. While the Feed tab shows, the moves go through the
+//! replies and Enter opens one (`App::feed_key`).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -20,6 +21,10 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
     // The second key of `gg`; anything else drops the first.
     if let Some(first) = app.pending_key.take() {
         match (first, key.code) {
+            ('g', KeyCode::Char('g')) if !ctrl && !alt && app.feed_shown() => {
+                app.feed_to_top();
+                return AppResult::Continue;
+            }
             ('g', KeyCode::Char('g')) if !ctrl && !alt => {
                 app.move_selection(-(app.list.row_count() as isize));
                 return AppResult::Continue;
@@ -34,7 +39,14 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         return AppResult::Continue;
     }
     if let Some(delta) = app.cycle_direction(&key) {
-        app.cycle_session(delta);
+        if app.feed_shown() {
+            app.move_feed_selection(delta as isize);
+        } else {
+            app.cycle_session(delta);
+        }
+        return AppResult::Continue;
+    }
+    if app.feed_shown() && app.feed_key(key) {
         return AppResult::Continue;
     }
     match key.code {
@@ -93,6 +105,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('T') => app.toggle_terminal_panel(),
         KeyCode::Char('v') => app.set_layout(app.next_layout()),
         KeyCode::Char('p') => app.toggle_pin(),
+        KeyCode::Char('s') => app.summarize_selected(),
         KeyCode::Char('J') => app.move_selected_session(1),
         KeyCode::Char('K') => app.move_selected_session(-1),
         KeyCode::Char('P') => app.open_folder_picker(),

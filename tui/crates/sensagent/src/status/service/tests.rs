@@ -485,12 +485,26 @@ fn an_old_cache_does_not_allow_duplicate_pending_work_for_a_new_source() {
     service.complete(&old, old.request_id(), text()).unwrap();
     source.stamp.source_revision += 1;
     service.observe(source.clone()).unwrap();
-    assert_eq!(service.view(&source.session_id).unwrap(), StatusView::Stale);
+    // The old text stays shown through a revision of the same terminal, but
+    // doesn't answer the new source: a new job may be made, once.
+    assert!(matches!(
+        service.view(&source.session_id).unwrap(),
+        StatusView::Ready(_)
+    ));
     let _new = ticket(&mut service, &source);
+    assert!(matches!(
+        service.view(&source.session_id).unwrap(),
+        StatusView::Ready(_)
+    ));
     assert!(matches!(
         service.prepare(&source.session_id).unwrap(),
         Preparation::Skipped(StatusView::Pending)
     ));
+    // A new terminal process hides it.
+    source.stamp.terminal_generation += 1;
+    source.stamp.source_revision = 1;
+    service.observe(source.clone()).unwrap();
+    assert_eq!(service.view(&source.session_id).unwrap(), StatusView::Stale);
 }
 
 #[test]

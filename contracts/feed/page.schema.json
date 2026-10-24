@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:page",
+  "title": "GET /api/v1/feed success",
+  "description": "Entries from every machine of the account. With `after`: those with a greater seq, in increasing seq. Otherwise (`before`, or neither for the newest): those with a smaller seq, in decreasing seq. `more` says whether further entries exist in that direction. `latest_seq` is the account's greatest seq, 0 for an empty feed.",
+  "x-maxBodyBytes": 2097152,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "entries", "latest_seq", "more"],
+  "properties": {
+    "version": { "const": 1 },
+    "entries": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/entry" }
+    },
+    "latest_seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "more": { "type": "boolean" }
+  }
+}

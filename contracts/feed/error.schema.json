@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:error",
+  "title": "Agent feed error",
+  "description": "Static public diagnostics only. Never echo reply text, credentials, database errors or validation details.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["error"],
+  "properties": {
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["invalid_request", "unauthenticated", "forbidden", "rate_limited", "unavailable"]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "maxUtf8Bytes": 96
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      },
+      "dependentSchemas": {
+        "retry_after_seconds": {
+          "properties": {
+            "code": { "enum": ["rate_limited", "unavailable"] }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "code": { "const": "invalid_request" },
+            "message": { "const": "Invalid feed request." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "unauthenticated" },
+            "message": { "const": "Sign in to use the feed." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "forbidden" },
+            "message": { "const": "The feed is off for this account." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "rate_limited" },
+            "message": { "const": "Too many feed requests." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "unavailable" },
+            "message": { "const": "The feed is temporarily unavailable." }
+          }
+        }
+      ]
+    }
+  }
+}
