@@ -1648,6 +1648,28 @@ mod tests {
                         total: 2,
                     },
                 },
+                Request::SessionTranscript { id, after, .. } => Response::Transcript {
+                    transcript: crate::api::TranscriptPage {
+                        agent: "codex".into(),
+                        conversation_id: format!("chat-of-{id}"),
+                        messages: vec![crate::api::TranscriptMessage {
+                            id: "m1".into(),
+                            position: 0,
+                            role: crate::api::TranscriptRole::User,
+                            at: None,
+                            parts: vec![crate::api::TranscriptPart::Text {
+                                text: "go".into(),
+                                truncated: false,
+                            }],
+                        }],
+                        cursor: crate::api::TranscriptCursor {
+                            conversation: format!("chat-of-{id}"),
+                            offset: after.map_or(0, |cursor| cursor.offset) + 10,
+                            key: None,
+                        },
+                        more: false,
+                    },
+                },
                 Request::SessionRead(read) => Response::Read(ReadResult {
                     text: format!("screen of {}", read.id),
                     rows: 24,
@@ -2022,6 +2044,11 @@ mod tests {
             (turn.id, turn.prompt.as_deref(), turn.total),
             (7, Some("prompt of S1"), 2)
         );
+        let chat = client.transcript(&s1, None, Some(4096)).unwrap();
+        assert_eq!(chat.conversation_id, "chat-of-S1");
+        assert_eq!(chat.messages.len(), 1);
+        let more = client.transcript(&s1, Some(&chat.cursor), None).unwrap();
+        assert_eq!(more.cursor.offset, 20);
         assert_eq!(turn.messages, ["reading", "done"]);
         let wait = WaitRequest {
             id: s1.clone(),
@@ -2070,6 +2097,16 @@ mod tests {
                 Request::SessionReport(report),
                 Request::SessionRead(read),
                 Request::SessionTurn { id: s1.clone() },
+                Request::SessionTranscript {
+                    id: s1.clone(),
+                    after: None,
+                    max_bytes: Some(4096)
+                },
+                Request::SessionTranscript {
+                    id: s1.clone(),
+                    after: Some(chat.cursor.clone()),
+                    max_bytes: None
+                },
                 Request::SessionWait(wait),
                 Request::SessionSend(send),
                 Request::SessionSubmit {

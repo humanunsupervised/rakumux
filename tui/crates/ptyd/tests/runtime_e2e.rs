@@ -398,6 +398,23 @@ fn serve_runs_sessions_with_the_real_control_layer() {
     stream.input(b"echo ATTACHED_$((2*2))\r");
     stream.wait_for_screen("ATTACHED_4");
 
+    // The real server takes every op the control layer serves: a shell has no
+    // agent conversation to read, which is an answer, not an unknown op.
+    match client.request(&Request::SessionTranscript {
+        id: session.id.clone(),
+        after: None,
+        max_bytes: None,
+    }) {
+        Response::Error { error } => {
+            assert_eq!(
+                error.code,
+                session_core::api::ErrorCode::NotFound,
+                "{error:?}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
+
     match client.request(&Request::DaemonStatus) {
         Response::Status(status) => {
             assert_eq!(status.sessions, 1);

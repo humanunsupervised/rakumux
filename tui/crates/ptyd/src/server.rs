@@ -111,6 +111,7 @@ const KNOWN_OPS: &[&str] = &[
     "session_submit",
     "session_touch",
     "session_turn",
+    "session_transcript",
     "session_pin",
     "session_bind",
     "project_list",
