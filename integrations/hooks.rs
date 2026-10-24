@@ -314,11 +314,11 @@ mod tests {
             stop(
                 json!([{"id":"a1", "type":"subagent", "status":"running", "agent_type":"Explore"}])
             ),
-            Some(phase(ActivityPhase::Working))
+            Some(phase(ActivityPhase::WaitingForAgents))
         );
         assert_eq!(
             stop(json!([{"id":"w1", "type":"workflow", "status":"running"}])),
-            Some(phase(ActivityPhase::Working))
+            Some(phase(ActivityPhase::WaitingForAgents))
         );
         for unrelated in [
             json!([]),

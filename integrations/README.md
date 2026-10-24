@@ -75,7 +75,9 @@ snapshots with that identifier refresh activity without making an opened reply u
 Integrations without reply identifiers use phase transitions; duplicate `done` updates do
 not make a seen reply unread until another phase starts a new turn.
 
-Phases: `working`, `waiting_for_response`, `running_tool`, `needs_input`, `idle`, `done`.
+Phases: `working`, `waiting_for_response`, `running_tool`, `waiting_for_agents` (the agent's
+turn paused until its background agents finish: working, with its screen waiting for input),
+`needs_input`, `idle`, `done`.
 The daemon validates versions/events, bounds identifiers and active subagents (64), and
 timestamps receipt. `SessionView.activity` carries phase/count to all clients through existing
 `updated`/`lifecycle` events. Ordinary self-report text is untouched. Activity is ephemeral,
@@ -89,10 +91,13 @@ phase. Their tool and permission hooks are that subagent's heartbeat (`subagent`
 a long foreground or background subagent stays counted, and its parent's activity fresh,
 while the parent itself is silent; a stopped subagent is never counted again. While
 hook-reported subagents run, activity stays fresh for 10 minutes without updates (one of
-their tool calls can take minutes); snapshots keep the 120-second limit. A busy state
-from command-hook deltas (not snapshots) that the same agent's screen has shown idle since
-after the latest hook, for 5 seconds, is dropped: that turn ended without a hook (Claude
-Code's Esc fires no Stop). Waiting-for-input and finished phases are never second-guessed.
+their tool calls can take minutes), and so does `waiting_for_agents`; snapshots keep the
+120-second limit. The agent's own busy state (`working`, `waiting_for_response`,
+`running_tool`) from command-hook deltas (not snapshots) that the same agent's screen has shown
+idle since after the latest hook, for 5 seconds, is dropped with its subagents: that turn
+ended without a hook (Claude Code's Esc fires no Stop). Waiting-for-input, waiting-for-agents
+and finished phases, and subagents still running after their parent's turn, are never
+second-guessed: the parent's screen waits for input while they work.
 Compaction (`SessionStart` with `source: compact`, including idle compaction) neither starts
 nor ends a turn.
 

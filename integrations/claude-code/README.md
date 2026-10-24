@@ -12,7 +12,8 @@ The command is `"${RAKUMUX_BIN:-rakumux}" session hook --agent claude`. It reads
 on stdin. Prompt submission reports **working**, not a confirmed network request. Tool hooks
 report **running tool**, approval/question/MCP-elicitation hooks **needs input**, and Stop
 **done**. A Stop whose `background_tasks` lists running subagents or workflows ("Waiting for
-N background agents to finish") stays **working** until they wake the conversation again.
+N background agents to finish") reports **waiting for agents**, which is working until they
+wake the conversation again, however idle its screen looks meanwhile.
 `StopFailure` (an API error ended the turn) and the `idle_prompt` notification (a minute after
 a finished or Esc-interrupted turn) report **idle**, keeping an unread reply unread; a
 compaction `SessionStart` changes nothing. Subagent start/stop uses actual `agent_id` values;

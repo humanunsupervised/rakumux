@@ -6,11 +6,13 @@
 //!   touched (seen). A report of `done` has the same effect.
 //! - `Unknown` (agent running, state unrecognisable) neither starts nor
 //!   cancels a turn.
-//! - Fresh hook activity wins over detection, except a busy state from
-//!   command hooks whose agent's screen, recognised as working after the latest
-//!   hook, has then looked idle for [`SCREEN_IDLE_MS`]: that turn ended without
-//!   a hook (an interrupted Claude Code turn fires no Stop), so the activity is
-//!   dropped.
+//! - Fresh hook activity wins over detection, except the agent's own busy
+//!   state from command hooks whose agent's screen, recognised as working after
+//!   the latest hook, has then looked idle for [`SCREEN_IDLE_MS`]: that turn
+//!   ended without a hook (an interrupted Claude Code turn fires no Stop), so
+//!   the activity is dropped. An agent waiting for its background agents, and
+//!   subagents still running after their parent's turn, look idle on its screen
+//!   by design and are never second-guessed.
 
 use super::activity::ActivityTracker;
 use crate::detect::Detection;
@@ -161,18 +163,22 @@ impl LifecycleTracker {
         self.recompute(now_ms) || stale
     }
 
-    /// A busy state from command hooks (working, running a tool, or with active
-    /// subagents) whose agent's screen was recognised as working after the latest
-    /// hook (so its markers work for this version) and has since looked idle for
-    /// [`SCREEN_IDLE_MS`]. Waiting-for-input and finished phases, and live-cache
-    /// snapshots, are never second-guessed; nor is a screen never seen busy.
+    /// The agent's own busy state from command hooks (working or running a tool,
+    /// its subagents' included) whose agent's screen was recognised as working
+    /// after the latest hook (so its markers work for this version) and has since
+    /// looked idle for [`SCREEN_IDLE_MS`]. Waiting-for-input, waiting-for-agents
+    /// and finished phases, subagents running past their parent's turn, and
+    /// live-cache snapshots are never second-guessed; nor is a screen never seen
+    /// busy.
     fn hooks_contradicted(&self, now_ms: i64) -> bool {
+        use session_core::activity::ActivityPhase;
         let Some(activity) = &self.activity else {
             return false;
         };
-        let view = activity.view();
-        let busy = view.phase != session_core::activity::ActivityPhase::NeedsInput
-            && (view.active_subagents > 0 || view.phase.lifecycle() == Lifecycle::Working);
+        let busy = matches!(
+            activity.view().phase,
+            ActivityPhase::Working | ActivityPhase::WaitingForResponse | ActivityPhase::RunningTool
+        );
         busy && activity.from_deltas()
             && self.detected == Lifecycle::Idle
             && self.agent.as_deref() == Some(activity.agent.as_str())
@@ -527,8 +533,8 @@ mod tests {
         let mut t = LifecycleTracker::default();
         t.on_activity(&phase(ActivityPhase::RunningTool), 0);
         t.on_activity(&child(true), 1);
-        // Claude's Stop while a background agent runs is reported as working.
-        t.on_activity(&phase(ActivityPhase::Working), 2);
+        // Claude's Stop while a background agent runs: waiting for it.
+        t.on_activity(&phase(ActivityPhase::WaitingForAgents), 2);
         // The child's own tool hooks are its heartbeat, beyond the parent's freshness.
         for at in [FRESH_MS / 2, FRESH_MS, FRESH_MS * 3 / 2] {
             t.on_activity(&child(true), at);
@@ -547,6 +553,84 @@ mod tests {
         assert_eq!(t.current(), Lifecycle::Done);
         // idle_prompt about a minute later: the unread reply stays unread.
         t.on_activity(&phase(ActivityPhase::Idle), FRESH_MS * 2 + 60_000);
+        assert_eq!(t.current(), Lifecycle::Done);
+    }
+
+    #[test]
+    fn waiting_for_background_agents_stays_working_while_the_screen_waits_for_input() {
+        use super::super::activity::FRESH_MS;
+        use session_core::activity::{ActivityEvent, ActivityPhase};
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Working), 0);
+        t.on_activity(&phase(ActivityPhase::RunningTool), 500);
+        // Stop with a background agent in flight, the spinner still drawn just after.
+        t.on_activity(&phase(ActivityPhase::WaitingForAgents), 1_000);
+        t.on_detection(detection(Lifecycle::Working), 1_100);
+        t.on_detection(detection(Lifecycle::Idle), 1_200);
+        // The idle screen doesn't end it, nor do minutes without a hook (the
+        // agent is in one long tool call).
+        for at in [
+            1_200 + SCREEN_IDLE_MS + 1,
+            1_000 + FRESH_MS + 1,
+            1_000 + 5 * 60_000,
+        ] {
+            t.tick(at);
+            assert_eq!(t.current(), Lifecycle::Working, "{at}");
+        }
+        // Its tool hooks count it; when it's done the parent wakes and finishes.
+        let child = |running| {
+            hook(ActivityEvent::Subagent {
+                id: "child".into(),
+                running,
+            })
+        };
+        t.on_activity(&child(true), 400_000);
+        assert_eq!(t.activity().unwrap().active_subagents, 1);
+        t.on_activity(&child(false), 410_000);
+        assert_eq!(t.current(), Lifecycle::Working);
+        t.on_activity(&phase(ActivityPhase::Done), 420_000);
+        assert_eq!(t.current(), Lifecycle::Done);
+    }
+
+    #[test]
+    fn subagents_running_after_their_parents_turn_are_not_second_guessed() {
+        use session_core::activity::{ActivityEvent, ActivityPhase};
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Working), 0);
+        t.on_activity(&phase(ActivityPhase::Done), 1_000);
+        t.on_activity(
+            &hook(ActivityEvent::Subagent {
+                id: "teammate".into(),
+                running: true,
+            }),
+            1_100,
+        );
+        t.on_detection(detection(Lifecycle::Working), 1_200);
+        t.on_detection(detection(Lifecycle::Idle), 1_300);
+        t.tick(1_300 + SCREEN_IDLE_MS + 1);
+        assert_eq!(t.current(), Lifecycle::Working);
+        assert_eq!(t.activity().unwrap().active_subagents, 1);
+    }
+
+    #[test]
+    fn an_interrupted_turn_with_a_foreground_subagent_still_ends() {
+        use session_core::activity::{ActivityEvent, ActivityPhase};
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Working), 0);
+        // The agent runs its Agent tool; the subagent works under it.
+        t.on_activity(&phase(ActivityPhase::RunningTool), 1_000);
+        t.on_activity(
+            &hook(ActivityEvent::Subagent {
+                id: "child".into(),
+                running: true,
+            }),
+            1_100,
+        );
+        t.on_detection(detection(Lifecycle::Working), 1_200);
+        // Esc: no Stop, no SubagentStop; the screen goes idle.
+        t.on_detection(detection(Lifecycle::Idle), 1_300);
+        t.tick(1_300 + SCREEN_IDLE_MS + 1);
+        assert!(t.activity().is_none());
         assert_eq!(t.current(), Lifecycle::Done);
     }
 }

@@ -8,9 +8,10 @@ use std::collections::HashSet;
 
 /// Hooks without a heartbeat eventually yield to screen/process detection.
 pub(super) const FRESH_MS: i64 = 120_000;
-/// While hook-reported subagents run, their own hooks are the only heartbeat, and
-/// one tool call of theirs can take minutes. A turn whose end was missed is still
-/// ended by the screen check in `lifecycle`.
+/// While hook-reported subagents run, or the agent waits for its background agents,
+/// their own hooks are the only heartbeat, and one tool call of theirs can take
+/// minutes. A turn whose end was missed is still ended by the screen check in
+/// `lifecycle`.
 pub(super) const FRESH_WITH_SUBAGENTS_MS: i64 = 600_000;
 const MAX_SUBAGENTS: usize = 64;
 
@@ -142,7 +143,8 @@ impl ActivityTracker {
     }
 
     pub fn fresh(&self, now: i64) -> bool {
-        let ttl = if self.delta && !self.subagents.is_empty() {
+        let waiting = !self.subagents.is_empty() || self.phase == ActivityPhase::WaitingForAgents;
+        let ttl = if self.delta && waiting {
             FRESH_WITH_SUBAGENTS_MS
         } else {
             FRESH_MS

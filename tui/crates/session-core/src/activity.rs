@@ -12,6 +12,10 @@ pub enum ActivityPhase {
     Working,
     WaitingForResponse,
     RunningTool,
+    /// The agent's own turn is over but paused until its background agents
+    /// (subagents, workflows) finish and wake it: still working, though its
+    /// screen waits for input.
+    WaitingForAgents,
     NeedsInput,
     Idle,
     Done,
@@ -24,7 +28,10 @@ impl ActivityPhase {
     pub fn lifecycle(self) -> crate::model::Lifecycle {
         use crate::model::Lifecycle;
         match self {
-            Self::Working | Self::WaitingForResponse | Self::RunningTool => Lifecycle::Working,
+            Self::Working
+            | Self::WaitingForResponse
+            | Self::RunningTool
+            | Self::WaitingForAgents => Lifecycle::Working,
             Self::NeedsInput => Lifecycle::Blocked,
             Self::Idle | Self::Done => Lifecycle::Idle,
             Self::Unknown => Lifecycle::Unknown,

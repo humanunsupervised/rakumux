@@ -28,8 +28,9 @@ pub(super) fn normalize(input: &Value) -> Result<Option<ActivityUpdate>, String>
         // with no typing: nothing is waiting for an answer, and an unread reply stays unread.
         "Notification" if input["notification_type"] == "idle_prompt" => phase(ActivityPhase::Idle),
         // The turn paused until background subagents wake it again ("Waiting for N
-        // background agents to finish"): still working, not a finished reply.
-        "Stop" if waits_for_background_agents(input) => phase(ActivityPhase::Working),
+        // background agents to finish"): still working, not a finished reply, while
+        // the screen may wait for input.
+        "Stop" if waits_for_background_agents(input) => phase(ActivityPhase::WaitingForAgents),
         "Stop" => phase(ActivityPhase::Done),
         // An API error ended the turn: no reply completed and no hook follows.
         "StopFailure" => phase(ActivityPhase::Idle),
