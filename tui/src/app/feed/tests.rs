@@ -268,6 +268,34 @@ fn turn(messages: Vec<TranscriptMessage>, next: Option<u64>) -> FeedTurn {
     }
 }
 
+/// The cells of the row that shows `needle`, left to right, that have the
+/// prompt bar's background (the storm `surface` or, selected, `selection`).
+fn bar_cells(h: &mut Harness, needle: &str) -> Vec<String> {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 48)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let buffer = terminal.backend().buffer().clone();
+    let p = crate::theme::palette();
+    for y in 0..buffer.area.height {
+        let row: String = (0..buffer.area.width)
+            .map(|x| buffer.get(x, y).symbol().to_string())
+            .collect();
+        if let Some(at) = row.find(needle) {
+            let column = row[..at].chars().count() as u16;
+            if column > 48 {
+                continue;
+            }
+            return (0..48)
+                .filter(|x| {
+                    let bg = buffer.get(*x, y).bg;
+                    bg == p.surface || bg == p.selection
+                })
+                .map(|x| buffer.get(x, y).symbol().to_string())
+                .collect();
+        }
+    }
+    panic!("{needle:?} not on screen");
+}
+
 fn screen(h: &mut Harness) -> String {
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 48)).unwrap();
     terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
@@ -354,7 +382,7 @@ async fn a_shown_reply_brings_its_whole_turn_in_order() {
         text.find(needle)
             .unwrap_or_else(|| panic!("{needle:?} not in\n{text}"))
     };
-    assert!(at("› Fix the flaky test") < at("It depends on map order."));
+    assert!(at(" Fix the flaky test") < at("It depends on map order."));
     assert!(at("It depends on map order.") < at("● Bash Run the tests"));
     assert!(at("● Bash Run the tests") < at("⎿ line 1"));
     assert!(at("line 6") < at("… 3 more lines"));
@@ -663,9 +691,16 @@ async fn cards_show_the_prompt_then_the_answer_or_that_it_is_coming() {
             .unwrap_or_else(|| panic!("{needle:?} not in\n{text}"))
     };
     // Newest first: the waiting prompt, then the finished turn.
-    assert!(at("› Now the docs") < at("waiting for the answer…"));
-    assert!(at("waiting for the answer…") < at("› Fix the flaky parser test"));
-    assert!(at("› Fix the flaky parser test") < at("Reply A"));
+    assert!(at("│  Now the docs") < at("waiting for the answer…"));
+    assert!(at("waiting for the answer…") < at("│  Fix the flaky parser test"));
+    assert!(at("│  Fix the flaky parser test") < at("Reply A"));
+    assert!(
+        !text.contains("›"),
+        "prompts sit on a bar, not behind a chevron"
+    );
+    // The prompt's bar runs from the card's border to its border.
+    let bar = bar_cells(&mut h, "Fix the flaky parser test");
+    assert!(bar.len() >= 40, "{bar:?}");
     assert!(text.contains(" ago · working"), "{text}");
     // The waiting prompt's detail says its answer comes there.
     assert!(text.contains("Waiting for the answer…"), "{text}");

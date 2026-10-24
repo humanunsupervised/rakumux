@@ -32,11 +32,12 @@ use crate::theme;
 
 /// Columns left of the content, as in the session list.
 const INDENT: usize = 3;
-/// Rows per card: its top border (the header), three lines (the prompt's
-/// first, then the answer's start) and its bottom border.
+/// Rows per card without a prompt: its top border (the header), three lines
+/// of the answer and its bottom border. A prompt's bar adds its padding
+/// ([`card_rows`]).
 const CELL_ROWS: u16 = 5;
-/// Lines inside a card.
-const PREVIEW_LINES: usize = 3;
+/// A prompt bar's columns before and after its text.
+const BAR_INSET: usize = 2;
 /// Lines of a tool's output shown in a turn.
 const RESULT_LINES: usize = 6;
 
@@ -131,22 +132,34 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
     area.y += 1;
     area.height = area.height.saturating_sub(1);
     let selected = app.feed.selected_index().unwrap_or(0);
-    let heights = vec![CELL_ROWS; cards.len()];
+    let heights: Vec<u16> = cards.iter().map(card_rows).collect();
     let first = first_visible_row(&heights, selected, area.height);
     let now = now_secs();
     let mut y = area.y;
     for (index, card) in cards.iter().enumerate().skip(first) {
-        if y + CELL_ROWS > area.bottom() {
+        let rows = heights[index];
+        if y + rows > area.bottom() {
             break;
         }
         let cell = Rect {
             y,
-            height: CELL_ROWS,
+            height: rows,
             ..area
         };
         draw_card(f, app, *card, cell, index == selected, now);
         hits.push((cell, Hit::FeedEntry(index)));
-        y += CELL_ROWS;
+        y += rows;
+    }
+}
+
+/// A card's rows: its borders and three lines, and its prompt's bar's
+/// padding above and below (two lines of a waiting prompt, one of an
+/// answered one's, then the answer's start).
+fn card_rows(card: &Card) -> u16 {
+    match card {
+        Card::Open(_) => CELL_ROWS + 2,
+        Card::Entry(entry) if entry.prompt.is_some() => CELL_ROWS + 2,
+        Card::Entry(_) => CELL_ROWS,
     }
 }
 
@@ -189,12 +202,35 @@ fn draw_card(f: &mut Frame, app: &App, card_of: Card, cell: Rect, chosen: bool, 
     };
     let width = inner.width as usize;
     let text_style = Style::default().fg(if chosen { p.text_primary } else { p.text_muted });
+    // The prompt on a bar from border to border, the answer under it.
+    let bar_rows = match card_of.prompt() {
+        Some(prompt) => {
+            let rows = if card_of.entry().is_some() { 1 } else { 2 };
+            let bar = Rect {
+                x: card.x + 1,
+                width: card.width.saturating_sub(2),
+                ..inner
+            };
+            let lines = prompt_bar(&prompt.text, bar.width as usize, Some(rows), chosen);
+            let shown = lines.len().min(inner.height as usize) as u16;
+            f.render_widget(
+                Paragraph::new(lines),
+                Rect {
+                    height: shown,
+                    ..bar
+                },
+            );
+            shown
+        }
+        None => 0,
+    };
+    let inner = Rect {
+        y: inner.y + bar_rows,
+        height: inner.height.saturating_sub(bar_rows),
+        ..inner
+    };
     let mut lines = Vec::new();
-    let prompt_lines = if card_of.entry().is_some() { 1 } else { 2 };
-    if let Some(prompt) = card_of.prompt() {
-        lines.extend(prompt_preview(&prompt.text, width, prompt_lines, chosen));
-    }
-    let room = PREVIEW_LINES.saturating_sub(lines.len());
+    let room = inner.height as usize;
     match card_of {
         Card::Entry(entry) => lines.extend(preview(&entry.text, width, room, text_style)),
         Card::Open(_) => lines.push(Line::from(Span::styled(
@@ -207,36 +243,56 @@ fn draw_card(f: &mut Frame, app: &App, card_of: Card, cell: Rect, chosen: bool, 
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// A prompt's first `rows` lines in a card, behind `›`.
-fn prompt_preview(text: &str, width: usize, rows: usize, chosen: bool) -> Vec<Line<'static>> {
+/// A user's words on a bar across `width` columns (Tokyo Night's storm
+/// background; the selection's on a selected card): [`BAR_INSET`] columns in
+/// from each side, with half a row of the bar above and below (`▄`, `▀`), so
+/// it's padded without touching the lines around it. Wrapped, or run
+/// together as one paragraph and cut to `rows` with `…` when given (a
+/// card's).
+fn prompt_bar(text: &str, width: usize, rows: Option<usize>, chosen: bool) -> Vec<Line<'static>> {
     let p = theme::palette();
-    let style = Style::default()
-        .fg(if chosen {
-            p.text_bright
-        } else {
-            p.text_primary
-        })
-        .add_modifier(Modifier::BOLD);
-    let flat: String = plain(text).split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut rows_of = wrap(&flat, width.saturating_sub(2));
-    let more = rows_of.len() > rows;
-    rows_of.truncate(rows);
-    if more {
-        if let Some(last) = rows_of.last_mut() {
-            *last = truncate(&format!("{last} …"), width.saturating_sub(2));
+    let colour = if chosen { p.selection } else { p.surface };
+    let bar = Style::default().bg(colour);
+    let style = bar.fg(if chosen || rows.is_none() {
+        p.text_bright
+    } else {
+        p.text_primary
+    });
+    let room = width.saturating_sub(2 * BAR_INSET).max(1);
+    let text = plain(text);
+    let mut lines = match rows {
+        Some(_) => wrap(&text.split_whitespace().collect::<Vec<_>>().join(" "), room),
+        None => wrap(&text, room),
+    };
+    if let Some(rows) = rows {
+        let more = lines.len() > rows;
+        lines.truncate(rows);
+        if more {
+            if let Some(last) = lines.last_mut() {
+                *last = truncate(&format!("{last} …"), room);
+            }
         }
     }
-    rows_of
-        .into_iter()
-        .enumerate()
-        .map(|(index, row)| {
-            let mark = if index == 0 { "› " } else { "  " };
-            Line::from(vec![
-                Span::styled(mark, Style::default().fg(p.accent_primary)),
-                Span::styled(row, style),
-            ])
-        })
-        .collect()
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    let edge = |half: &str| {
+        Line::from(Span::styled(
+            half.repeat(width),
+            Style::default().fg(colour),
+        ))
+    };
+    let mut bar_lines = vec![edge("▄")];
+    bar_lines.extend(lines.into_iter().map(|line| {
+        let pad = width.saturating_sub(BAR_INSET + str_width(&line));
+        Line::from(vec![
+            Span::styled(" ".repeat(BAR_INSET), bar),
+            Span::styled(line, style),
+            Span::styled(" ".repeat(pad), bar),
+        ])
+    }));
+    bar_lines.push(edge("▀"));
+    bar_lines
 }
 
 /// The start of a reply as a card shows it: its Markdown drawn, blank lines
@@ -491,7 +547,7 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rec
     let reply = || {
         let mut lines = Vec::new();
         if let Some(prompt) = &entry.prompt {
-            lines.extend(prompt_lines(&prompt.text, width));
+            lines.extend(prompt_bar(&prompt.text, width, None, false));
             lines.push(Line::default());
         }
         lines.extend(markdown::render(
@@ -531,27 +587,6 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rec
     let scroll = app.feed.scroll.min(body.len().saturating_sub(room));
     lines.extend(body.into_iter().skip(scroll).take(room));
     f.render_widget(Paragraph::new(lines), inner);
-}
-
-/// A prompt whole, wrapped behind `›`, as a turn shows the user's words.
-fn prompt_lines(text: &str, width: usize) -> Vec<Line<'static>> {
-    let p = theme::palette();
-    wrap(&plain(text), width.saturating_sub(2))
-        .into_iter()
-        .enumerate()
-        .map(|(index, line)| {
-            let mark = if index == 0 { "› " } else { "  " };
-            Line::from(vec![
-                Span::styled(mark, Style::default().fg(p.accent_primary)),
-                Span::styled(
-                    line,
-                    Style::default()
-                        .fg(p.text_bright)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ])
-        })
-        .collect()
 }
 
 /// A prompt still waiting for its answer, in the detail: its session and
@@ -607,7 +642,7 @@ fn draw_open(f: &mut Frame, app: &App, open: &rakumux_sensagent::feed::OpenTurn,
         ]));
     }
     lines.push(Line::default());
-    lines.extend(prompt_lines(&open.prompt.text, width));
+    lines.extend(prompt_bar(&open.prompt.text, width, None, false));
     lines.push(Line::default());
     lines.push(Line::from(Span::styled(
         format!("{} Waiting for the answer…", get_spinner_char()),
@@ -678,18 +713,12 @@ fn thread_lines(app: &App, entry: &FeedEntry, width: usize) -> Vec<Line<'static>
                     Span::styled("↩ ", mark),
                     Span::styled(truncate(&about, width.saturating_sub(2)), muted),
                 ]));
-                let mut rows = wrap(&plain(&reply.text), width.saturating_sub(2));
-                let more = rows.len() > THREAD_REPLY_LINES;
-                rows.truncate(THREAD_REPLY_LINES);
-                if more {
-                    if let Some(last) = rows.last_mut() {
-                        *last = truncate(&format!("{last} …"), width.saturating_sub(2));
-                    }
-                }
-                lines.extend(
-                    rows.into_iter()
-                        .map(|row| Line::from(vec![Span::raw("  "), Span::styled(row, text)])),
-                );
+                lines.extend(prompt_bar(
+                    &reply.text,
+                    width,
+                    Some(THREAD_REPLY_LINES),
+                    false,
+                ));
             }
         }
     }
@@ -735,9 +764,10 @@ enum Kind {
     Tool,
 }
 
-/// A turn's messages as lines of `width` columns: the user's prompts marked
-/// `›`, reasoning quiet and italic, each tool call `●` with what it works on
-/// and the start of its output under it, the agent's text as written.
+/// A turn's messages as lines of `width` columns: the user's prompts on a
+/// bar across them ([`prompt_bar`]), reasoning quiet and italic, each tool
+/// call `●` with what it works on and the start of its output under it, the
+/// agent's text with its Markdown drawn.
 pub fn turn_lines(messages: &[TranscriptMessage], width: usize) -> Vec<Line<'static>> {
     let p = theme::palette();
     let text_style = Style::default().fg(p.text_primary);
@@ -758,22 +788,12 @@ pub fn turn_lines(messages: &[TranscriptMessage], width: usize) -> Vec<Line<'sta
                     if message.role == TranscriptRole::User =>
                 {
                     gap(&mut lines, Kind::Prompt);
-                    let prompt = wrap(&plain(text), width.saturating_sub(2));
-                    for (index, line) in prompt.into_iter().enumerate() {
-                        let mark = if index == 0 { "› " } else { "  " };
-                        lines.push(Line::from(vec![
-                            Span::styled(mark, Style::default().fg(p.accent_primary)),
-                            Span::styled(
-                                line,
-                                Style::default()
-                                    .fg(p.text_bright)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                        ]));
-                    }
-                    if *truncated {
-                        lines.push(Line::from(Span::styled("  …", muted)));
-                    }
+                    let text = if *truncated {
+                        format!("{} …", text.trim_end())
+                    } else {
+                        text.clone()
+                    };
+                    lines.extend(prompt_bar(&text, width, None, false));
                 }
                 TranscriptPart::Text { text, truncated } => {
                     gap(&mut lines, Kind::Text);
