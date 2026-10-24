@@ -1,11 +1,16 @@
 //! The feed's wire messages (`contracts/feed/`): upload bodies built here,
 //! pages and acceptances read back within the contract's bounds.
 
+use std::collections::VecDeque;
+use std::sync::LazyLock;
 use std::time::Duration;
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
+use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
 use super::cache::FeedEntry;
+use super::chats::{ChatName, UploadMessage};
 use crate::cloud::FeedHttpReply;
 
 /// Entries per upload (contract).
@@ -16,6 +21,12 @@ pub(crate) const UPLOAD_BUDGET: usize = 768 * 1024;
 pub(crate) const PAGE_LIMIT: u32 = 100;
 /// The longest reply text, in UTF-8 bytes (contract).
 pub(crate) const MAX_TEXT_BYTES: usize = 32 * 1024;
+/// Messages per chat upload (contract).
+pub(crate) const MAX_UPLOAD_MESSAGES: usize = 100;
+/// Chat upload bodies stay under this, well within the contract's 4 MiB.
+pub(crate) const CHAT_BUDGET: usize = 2 * 1024 * 1024;
+/// Messages per turn read (contract).
+pub(crate) const MAX_TURN_MESSAGES: usize = 200;
 
 /// Why a feed request failed. Static: never reply text, URLs or tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +50,10 @@ pub(crate) enum FeedRequest {
     Upload { ids: Vec<String>, body: Vec<u8> },
     /// Read a page: the newest (`after` absent) or the entries after a seq.
     Read { after: Option<u64> },
+    /// Upload a chat's messages, as `body`.
+    Messages { body: Vec<u8> },
+    /// Read the turn an entry finished, past `after` when given.
+    Turn { entry: String, after: Option<u64> },
 }
 
 impl FeedRequest {
@@ -47,6 +62,14 @@ impl FeedRequest {
         match after {
             Some(after) => format!("after={after}&limit={PAGE_LIMIT}"),
             None => format!("limit={PAGE_LIMIT}"),
+        }
+    }
+
+    /// `GET /api/v1/feed/turn`'s query.
+    pub fn turn_query(entry: &str, after: Option<u64>) -> String {
+        match after {
+            Some(after) => format!("entry={entry}&after={after}"),
+            None => format!("entry={entry}"),
         }
     }
 }
@@ -68,6 +91,8 @@ struct UploadEntry<'a> {
     text: &'a str,
     truncated: bool,
     finished_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    position: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -91,6 +116,7 @@ fn upload_entry(entry: &FeedEntry) -> UploadEntry<'_> {
         text: &entry.text,
         truncated: entry.truncated,
         finished_at: entry.finished_at,
+        position: entry.position,
     }
 }
 
@@ -119,6 +145,195 @@ pub(crate) fn upload(machine: &str, entries: &[&FeedEntry]) -> Option<FeedReques
         ids: chosen.iter().map(|entry| entry.id.clone()).collect(),
         body,
     })
+}
+
+#[derive(Serialize)]
+struct ChatUpload<'a> {
+    version: u8,
+    machine: &'a str,
+    chat: UploadChat<'a>,
+    messages: Vec<&'a UploadMessage>,
+}
+
+#[derive(Serialize)]
+struct UploadChat<'a> {
+    agent: &'a str,
+    conversation_id: &'a str,
+    session: UploadSession<'a>,
+}
+
+/// An upload of the first of a chat's `messages` that fit one request, and
+/// how many that is (at least one).
+pub(crate) fn chat_upload(
+    machine: &str,
+    chat: &ChatName,
+    messages: &VecDeque<UploadMessage>,
+) -> Option<(FeedRequest, usize)> {
+    let mut chosen = Vec::new();
+    let mut size = 512 + machine.len() + chat.session_name.len();
+    for message in messages.iter().take(MAX_UPLOAD_MESSAGES) {
+        let one = serde_json::to_vec(message).ok()?.len() + 1;
+        if !chosen.is_empty() && size + one > CHAT_BUDGET {
+            break;
+        }
+        size += one;
+        chosen.push(message);
+    }
+    if chosen.is_empty() {
+        return None;
+    }
+    let count = chosen.len();
+    let body = serde_json::to_vec(&ChatUpload {
+        version: 1,
+        machine,
+        chat: UploadChat {
+            agent: &chat.agent,
+            conversation_id: &chat.conversation_id,
+            session: UploadSession {
+                id: &chat.session_id,
+                name: &chat.session_name,
+                folder: chat.folder.as_deref(),
+            },
+        },
+        messages: chosen,
+    })
+    .ok()?;
+    Some((FeedRequest::Messages { body }, count))
+}
+
+#[derive(Deserialize)]
+struct Stored {
+    version: u8,
+    accepted: u32,
+}
+
+/// That a chat upload was stored.
+pub(crate) fn stored(reply: &FeedHttpReply) -> Result<u32, FeedFailure> {
+    if reply.status != 200 {
+        return Err(failure(reply));
+    }
+    let stored: Stored = serde_json::from_slice(&reply.body).map_err(|_| FeedFailure::Invalid)?;
+    if stored.version != 1 {
+        return Err(FeedFailure::Invalid);
+    }
+    Ok(stored.accepted)
+}
+
+#[derive(Deserialize)]
+struct Turn {
+    version: u8,
+    messages: Vec<TranscriptMessage>,
+    more: bool,
+}
+
+/// A turn as read: its messages in order, and whether it goes on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnRead {
+    pub messages: Vec<TranscriptMessage>,
+    pub more: bool,
+}
+
+/// A turn's messages, stripped of anything a terminal would act on; parts of
+/// kinds this version doesn't know are left out.
+pub(crate) fn turn(reply: &FeedHttpReply) -> Result<TurnRead, FeedFailure> {
+    if reply.status != 200 {
+        return Err(failure(reply));
+    }
+    let turn: Turn = serde_json::from_slice(&reply.body).map_err(|_| FeedFailure::Invalid)?;
+    if turn.version != 1 || turn.messages.len() > MAX_TURN_MESSAGES {
+        return Err(FeedFailure::Invalid);
+    }
+    let messages = turn
+        .messages
+        .into_iter()
+        .filter(|message| message.role != TranscriptRole::Unknown)
+        .map(|message| TranscriptMessage {
+            id: line(&message.id),
+            parts: message
+                .parts
+                .into_iter()
+                .filter_map(|part| match part {
+                    TranscriptPart::Text { text, truncated } => Some(TranscriptPart::Text {
+                        text: plain(&text),
+                        truncated,
+                    }),
+                    TranscriptPart::Reasoning { text, truncated } => {
+                        Some(TranscriptPart::Reasoning {
+                            text: plain(&text),
+                            truncated,
+                        })
+                    }
+                    TranscriptPart::ToolCall {
+                        call_id,
+                        name,
+                        input,
+                        truncated,
+                    } => Some(TranscriptPart::ToolCall {
+                        call_id: call_id.map(|id| line(&id)),
+                        name: line(&name),
+                        input: plain(&input),
+                        truncated,
+                    }),
+                    TranscriptPart::ToolResult {
+                        call_id,
+                        output,
+                        error,
+                        truncated,
+                    } => Some(TranscriptPart::ToolResult {
+                        call_id: call_id.map(|id| line(&id)),
+                        output: plain(&output),
+                        error,
+                        truncated,
+                    }),
+                    TranscriptPart::Unknown => None,
+                })
+                .collect(),
+            ..message
+        })
+        .collect();
+    Ok(TurnRead {
+        messages,
+        more: turn.more,
+    })
+}
+
+/// The contract's conversation id: 1–128 of letters, digits, `.`, `_`, `:`, `-`.
+pub(crate) fn conversation_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
+}
+
+/// The contract's message id: as a conversation id.
+pub(crate) fn message_id(id: &str) -> bool {
+    conversation_id(id)
+}
+
+/// The contract's tool call id: as a conversation id, `|` too.
+pub(crate) fn call_id(id: &str) -> bool {
+    conversation_id(&id.replace('|', ":"))
+}
+
+static LABEL_HIDDEN: LazyLock<Option<Regex>> = LazyLock::new(|| {
+    Regex::new(r"[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]").ok()
+});
+static LABEL_VISIBLE: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"[\p{L}\p{N}\p{P}\p{S}]").ok());
+
+/// `text` as the contract's one visible line of at most `characters`: what a
+/// terminal would act on removed; `None` when nothing visible is left.
+pub(crate) fn label(text: &str, characters: usize) -> Option<String> {
+    let hidden = LABEL_HIDDEN.as_ref()?;
+    let label: String = hidden
+        .replace_all(text, "")
+        .trim()
+        .chars()
+        .take(characters)
+        .collect();
+    LABEL_VISIBLE.as_ref()?.is_match(&label).then_some(label)
 }
 
 #[derive(Deserialize)]
@@ -246,6 +461,7 @@ pub(crate) fn page(reply: &FeedHttpReply) -> Result<PageRead, FeedFailure> {
                 text: plain(&entry.text),
                 truncated: entry.truncated,
                 finished_at: entry.finished_at,
+                position: None,
             })
         })
         .collect();
@@ -335,7 +551,91 @@ mod tests {
             text: text.into(),
             truncated: false,
             finished_at: 1_761_220_000_000,
+            position: None,
         }
+    }
+
+    #[test]
+    fn a_turn_reads_back_plain_and_parts_of_unknown_kinds_are_left_out() {
+        let body = r#"{"version":1,"entry":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","more":true,"messages":[
+            {"id":"u1","position":0,"role":"user","at":1761220000000,"parts":[{"type":"text","text":"Fix it\u202e"}]},
+            {"id":"a1","position":9,"role":"assistant","parts":[
+                {"type":"tool_call","call_id":"c1","name":"Bash","input":"{}"},
+                {"type":"image","url":"x"}]},
+            {"id":"t1","position":12,"role":"tool","parts":[{"type":"tool_result","output":"\u001b[31mno","error":true}]}
+        ]}"#;
+        let read = turn(&reply(200, body)).unwrap();
+        assert!(read.more);
+        assert_eq!(read.messages.len(), 3);
+        assert_eq!(
+            read.messages[0].parts,
+            [TranscriptPart::Text {
+                text: "Fix it".into(),
+                truncated: false
+            }]
+        );
+        assert_eq!(read.messages[1].parts.len(), 1);
+        assert_eq!(
+            read.messages[2].parts,
+            [TranscriptPart::ToolResult {
+                call_id: None,
+                output: "[31mno".into(),
+                error: true,
+                truncated: false
+            }]
+        );
+        assert_eq!(
+            turn(&reply(
+                403,
+                r#"{"error":{"code":"forbidden","message":"x"}}"#
+            )),
+            Err(FeedFailure::Off)
+        );
+        assert_eq!(
+            turn(&reply(200, r#"{"version":2,"messages":[],"more":false}"#)),
+            Err(FeedFailure::Invalid)
+        );
+        assert_eq!(stored(&reply(200, r#"{"version":1,"accepted":3}"#)), Ok(3));
+    }
+
+    #[test]
+    fn a_chat_upload_names_its_chat_and_takes_what_fits() {
+        let chat = ChatName {
+            agent: "codex".into(),
+            conversation_id: "019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b".into(),
+            session_id: "01K89ZQ4D2F6H8J0K2M4N6P8R0".into(),
+            session_name: "fix-tests".into(),
+            folder: None,
+        };
+        let message = |position: u64, text: &str| UploadMessage {
+            id: position.to_string(),
+            position,
+            role: TranscriptRole::Tool,
+            at: None,
+            parts: vec![TranscriptPart::ToolResult {
+                call_id: Some("call_1".into()),
+                output: text.into(),
+                error: false,
+                truncated: false,
+            }],
+        };
+        let big = "z".repeat(600 * 1024);
+        let messages: VecDeque<_> = (0..5).map(|n| message(n, &big)).collect();
+        let (FeedRequest::Messages { body }, count) =
+            chat_upload("studio", &chat, &messages).unwrap()
+        else {
+            panic!("expected a chat upload");
+        };
+        assert_eq!(count, 3, "2 MiB a request");
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["chat"]["conversation_id"], chat.conversation_id);
+        assert!(json["chat"]["session"].get("folder").is_none());
+        assert!(json["messages"][0].get("at").is_none());
+        assert_eq!(json["messages"][0]["parts"][0]["type"], "tool_result");
+        assert!(json["messages"][0]["parts"][0].get("error").is_none());
+        assert_eq!(label(" Bash\u{200b} ", 128).as_deref(), Some("Bash"));
+        assert_eq!(label("\u{7}", 128), None);
+        assert!(call_id("call_9|fc_1") && !call_id("a b"));
     }
 
     #[test]

@@ -2,9 +2,11 @@
 //! first, each a cell like a session's (a blank row, then its session,
 //! folder, agent and machine with its age at the right, then the start of
 //! the reply), or what the feed is waiting for (a sign-in, the switch, the
-//! first read). The selected reply is drawn whole by [`draw_feed_reply`]:
-//! in the detail beside the list, or in the list's place on a phone. Text
-//! is stripped of anything a terminal would act on before it's drawn.
+//! first read). The selected reply is drawn by [`draw_feed_reply`], in the
+//! detail beside the list or in the list's place on a phone: its whole turn
+//! in order once it's read (the prompt, the agent's reasoning, its tool
+//! calls with the start of their output, its text), else the reply alone.
+//! Text is stripped of anything a terminal would act on before it's drawn.
 
 use rakumux_sensagent::feed::{FeedEntry, FeedStatus};
 use ratatui::{
@@ -14,11 +16,12 @@ use ratatui::{
     widgets::{Block, Paragraph},
     Frame,
 };
+use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
 use super::format::{now_secs, relative_time, truncate};
 use super::session_list::first_visible_row;
 use super::utils::get_spinner_char;
-use crate::app::feed::{agent_name, plain};
+use crate::app::feed::{agent_name, plain, TurnState};
 use crate::app::types::AccountStatus;
 use crate::app::{App, Hit};
 use crate::layout::str_width;
@@ -30,6 +33,8 @@ const INDENT: usize = 3;
 const CELL_ROWS: u16 = 4;
 /// Lines of a reply shown in the list.
 const PREVIEW_LINES: usize = 2;
+/// Lines of a tool's output shown in a turn.
+const RESULT_LINES: usize = 6;
 
 /// Where the feed is up to, as shown: the service's word, else signed out
 /// (known before it answers) or loading.
@@ -276,16 +281,207 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect) {
     }
     lines.push(Line::default());
     let head = lines.len();
-    let text = wrap(&plain(&entry.text), width);
+    let reply = || {
+        wrap(&plain(&entry.text), width)
+            .into_iter()
+            .map(|line| Line::from(Span::styled(line, Style::default().fg(p.text_primary))))
+            .collect::<Vec<_>>()
+    };
+    let body = match app.feed.turn(&entry.id) {
+        Some(TurnState::Ready { messages, next }) if !messages.is_empty() => {
+            let mut body = turn_lines(messages, width);
+            if next.is_some() {
+                body.push(Line::from(Span::styled(
+                    format!("{} more of the turn…", get_spinner_char()),
+                    muted,
+                )));
+            }
+            body
+        }
+        Some(TurnState::Loading) => {
+            let mut body = vec![
+                Line::from(Span::styled(
+                    format!("{} Loading the whole turn…", get_spinner_char()),
+                    muted,
+                )),
+                Line::default(),
+            ];
+            body.extend(reply());
+            body
+        }
+        _ => reply(),
+    };
     let room = (inner.height as usize).saturating_sub(head);
-    let scroll = app.feed.scroll.min(text.len().saturating_sub(room));
-    lines.extend(
-        text.into_iter()
-            .skip(scroll)
-            .take(room)
-            .map(|line| Line::from(Span::styled(line, Style::default().fg(p.text_primary)))),
-    );
+    let scroll = app.feed.scroll.min(body.len().saturating_sub(room));
+    lines.extend(body.into_iter().skip(scroll).take(room));
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// What a line of a turn shows, to put a blank line between kinds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Prompt,
+    Text,
+    Reasoning,
+    Tool,
+}
+
+/// A turn's messages as lines of `width` columns: the user's prompts marked
+/// `›`, reasoning quiet and italic, each tool call `●` with what it works on
+/// and the start of its output under it, the agent's text as written.
+pub fn turn_lines(messages: &[TranscriptMessage], width: usize) -> Vec<Line<'static>> {
+    let p = theme::palette();
+    let text_style = Style::default().fg(p.text_primary);
+    let muted = Style::default().fg(p.text_muted);
+    let quiet = muted.add_modifier(Modifier::ITALIC);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut last: Option<Kind> = None;
+    let mut gap = |lines: &mut Vec<Line<'static>>, kind: Kind| {
+        if last.is_some_and(|last| last != kind || kind == Kind::Prompt) {
+            lines.push(Line::default());
+        }
+        last = Some(kind);
+    };
+    for message in messages {
+        for part in &message.parts {
+            match part {
+                TranscriptPart::Text { text, truncated }
+                    if message.role == TranscriptRole::User =>
+                {
+                    gap(&mut lines, Kind::Prompt);
+                    let prompt = wrap(&plain(text), width.saturating_sub(2));
+                    for (index, line) in prompt.into_iter().enumerate() {
+                        let mark = if index == 0 { "› " } else { "  " };
+                        lines.push(Line::from(vec![
+                            Span::styled(mark, Style::default().fg(p.accent_primary)),
+                            Span::styled(
+                                line,
+                                Style::default()
+                                    .fg(p.text_bright)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]));
+                    }
+                    if *truncated {
+                        lines.push(Line::from(Span::styled("  …", muted)));
+                    }
+                }
+                TranscriptPart::Text { text, truncated } => {
+                    gap(&mut lines, Kind::Text);
+                    lines.extend(
+                        wrap(&plain(text), width)
+                            .into_iter()
+                            .map(|line| Line::from(Span::styled(line, text_style))),
+                    );
+                    if *truncated {
+                        lines.push(Line::from(Span::styled("…", muted)));
+                    }
+                }
+                TranscriptPart::Reasoning { text, .. } => {
+                    gap(&mut lines, Kind::Reasoning);
+                    lines.extend(
+                        wrap(&plain(text), width)
+                            .into_iter()
+                            .map(|line| Line::from(Span::styled(line, quiet))),
+                    );
+                }
+                TranscriptPart::ToolCall { name, input, .. } => {
+                    gap(&mut lines, Kind::Tool);
+                    let name = truncate(&plain(name), width.saturating_sub(2));
+                    let room = width.saturating_sub(2 + str_width(&name) + 1);
+                    let subject = truncate(&tool_subject(input), room);
+                    lines.push(Line::from(vec![
+                        Span::styled("● ", Style::default().fg(p.accent_green)),
+                        Span::styled(name, text_style.add_modifier(Modifier::BOLD)),
+                        Span::styled(format!(" {subject}"), muted),
+                    ]));
+                }
+                TranscriptPart::ToolResult {
+                    output,
+                    error,
+                    truncated,
+                    ..
+                } => {
+                    gap(&mut lines, Kind::Tool);
+                    let style = if *error {
+                        Style::default().fg(p.accent_pink)
+                    } else {
+                        muted
+                    };
+                    let output = plain(output);
+                    let shown: Vec<&str> = output
+                        .lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .collect();
+                    if shown.is_empty() {
+                        let none = if *error {
+                            "  ⎿ failed"
+                        } else {
+                            "  ⎿ (no output)"
+                        };
+                        lines.push(Line::from(Span::styled(none, style)));
+                        continue;
+                    }
+                    for (index, line) in shown.iter().take(RESULT_LINES).enumerate() {
+                        let mark = if index == 0 { "  ⎿ " } else { "    " };
+                        lines.push(Line::from(Span::styled(
+                            truncate(&format!("{mark}{}", line.trim_end()), width),
+                            style,
+                        )));
+                    }
+                    let hidden = shown.len().saturating_sub(RESULT_LINES);
+                    if hidden > 0 || *truncated {
+                        let more = match hidden {
+                            0 => "    …".to_owned(),
+                            1 => "    … 1 more line".to_owned(),
+                            n => format!("    … {n} more lines"),
+                        };
+                        lines.push(Line::from(Span::styled(more, muted)));
+                    }
+                }
+                TranscriptPart::Unknown => {}
+            }
+        }
+    }
+    lines
+}
+
+/// What a tool call works on, in a few words: the field of its input that
+/// says (a description, a command, a path, a pattern…), else the input's
+/// first line.
+fn tool_subject(input: &str) -> String {
+    const FIELDS: [&str; 10] = [
+        "description",
+        "command",
+        "cmd",
+        "file_path",
+        "filePath",
+        "path",
+        "pattern",
+        "url",
+        "query",
+        "prompt",
+    ];
+    let value: Option<serde_json::Value> = serde_json::from_str(input).ok();
+    let field = value.as_ref().and_then(|value| {
+        FIELDS.iter().find_map(|key| match value.get(key)? {
+            serde_json::Value::String(text) => Some(text.clone()),
+            serde_json::Value::Array(parts) => Some(
+                parts
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            _ => None,
+        })
+    });
+    let text = plain(&field.unwrap_or_else(|| input.to_owned()));
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn indented(spans: Vec<Span<'static>>) -> Line<'static> {

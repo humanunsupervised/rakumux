@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use rakumux_sensagent::feed::{FeedPage, FeedStatus};
+use rakumux_sensagent::feed::{FeedPage, FeedStatus, FeedTurn};
 use rakumux_sensagent::owner::protocol::{OwnerState, SignInReason, SignInView, StatusLine};
 use rakumux_sensagent::owner::{OwnerClient, OwnerError, OwnerLayout};
 use rakumux_sensagent::service::{self, ServiceConfig, ServiceError};
@@ -83,6 +83,10 @@ pub trait AccountAccess: Send + Sync {
     /// rakumux.com/features. The service applies it at once and saves it
     /// next; [`Account::features_unsaved`] says when that failed.
     fn set_features(&self, summaries: Option<bool>, feed: Option<bool>) -> Result<(), String>;
+    /// The whole turn feed entry `entry` finished, past `after` when given:
+    /// the prompt, the agent's text, reasoning and tool calls, and the tools'
+    /// output, in order, as rakumux.com keeps it.
+    fn feed_turn(&self, entry: &str, after: Option<u64>) -> Result<FeedTurn, String>;
 }
 
 /// The feed of a home whose service isn't running: signed out.
@@ -212,6 +216,11 @@ impl AccountAccess for LocalAccount {
             client.set_features(summaries, feed)
         })?
         .ok_or_else(|| "the account service isn't running".into())
+    }
+
+    fn feed_turn(&self, entry: &str, after: Option<u64>) -> Result<FeedTurn, String> {
+        self.with(false, |client| client.feed_turn(entry, after))?
+            .ok_or_else(|| "the account service isn't running".into())
     }
 }
 

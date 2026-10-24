@@ -107,6 +107,7 @@ mod tests {
             text: text.into(),
             truncated: false,
             finished_at: at,
+            position: None,
         }
     }
 

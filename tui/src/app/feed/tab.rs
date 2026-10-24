@@ -1,13 +1,14 @@
 //! The Feed tab: the first of the list's tabs. While it's active in Master
 //! detail, the list shows the feed (`components/feed.rs`) and, in Rakumux
-//! mode, the detail shows the selected reply in full instead of a session.
-//! The service is asked for changes every 2 s, only while the feed is on
-//! screen; Enter on a reply made here goes into its session.
+//! mode, the detail shows the selected reply's whole turn instead of a
+//! session (read from the service once it's shown, then kept). The service
+//! is asked for changes every 2 s, only while the feed is on screen; Enter
+//! on a reply made here goes into its session.
 
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use rakumux_sensagent::feed::FeedPage;
+use rakumux_sensagent::feed::{FeedPage, FeedTurn};
 use session_core::ids::SessionId;
 
 use crate::app::grouping::{Grouping, ListTab};
@@ -85,14 +86,66 @@ impl App {
         }
     }
 
-    /// The tick's feed work: ask for changes when due, while it's shown.
+    /// The tick's feed work: ask for changes when due, while it's shown, and
+    /// for the selected reply's turn while it's read.
     pub(in crate::app) fn feed_timers(&mut self, now: Instant) {
-        if !self.feed_shown() || self.feed.busy {
+        if !self.feed_shown() {
+            return;
+        }
+        self.follow_turn();
+        if self.feed.busy {
             return;
         }
         if self.feed.due.is_none_or(|due| now >= due) {
             self.read_feed(now);
         }
+    }
+
+    /// Ask for the selected reply's turn while it's read (in the detail, or
+    /// full screen on a phone), unless one is being asked for.
+    fn follow_turn(&mut self) {
+        if (self.feed_in_detail() || self.feed.reading) && !self.feed.turn_busy {
+            self.read_turn();
+        }
+    }
+
+    /// Ask for the selected reply's turn, or the rest of it.
+    fn read_turn(&mut self) {
+        let Some((entry, after)) = self.feed.turn_due() else {
+            return;
+        };
+        self.feed.turn_asked(&entry);
+        self.feed.turn_busy = true;
+        let generation = self.feed.request_generation;
+        let access = self.account_access.clone();
+        self.exec.job(move || {
+            let result = access.feed_turn(&entry, after);
+            AppEvent::FeedTurn {
+                generation,
+                entry,
+                appended: after.is_some(),
+                result,
+            }
+        });
+    }
+
+    pub(in crate::app) fn on_feed_turn(
+        &mut self,
+        generation: u64,
+        entry: String,
+        appended: bool,
+        result: Result<FeedTurn, String>,
+    ) {
+        if generation != self.feed.request_generation {
+            return;
+        }
+        self.feed.turn_busy = false;
+        let turn = result.unwrap_or_else(|_| {
+            FeedTurn::failed(rakumux_sensagent::feed::FeedFailure::Unavailable(None))
+        });
+        self.feed.apply_turn(&entry, turn, appended);
+        // The rest of it at once, or the turn selected meanwhile.
+        self.follow_turn();
     }
 
     fn read_feed(&mut self, now: Instant) {
@@ -117,6 +170,7 @@ impl App {
         if self.feed.apply(page) && self.feed_shown() {
             self.read_feed(Instant::now());
         }
+        self.follow_turn();
     }
 
     /// Rakumux mode keys while the feed is shown; `false` leaves the key to
@@ -159,6 +213,7 @@ impl App {
     pub fn move_feed_selection(&mut self, delta: isize) {
         self.feed.reading = false;
         self.feed.move_selection(delta);
+        self.follow_turn();
     }
 
     /// A click on the reply at `index`: select it; on a phone, or when it
@@ -172,6 +227,7 @@ impl App {
         if again || self.phone() {
             self.open_feed_entry();
         }
+        self.follow_turn();
     }
 
     /// Enter on a reply: into its session when it runs here (from the
@@ -190,6 +246,7 @@ impl App {
         }
         if self.phone() {
             self.feed.reading = true;
+            self.follow_turn();
             return;
         }
         let place = if entry.machine == self.feed.machine() {

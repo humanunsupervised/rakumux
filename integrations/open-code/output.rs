@@ -130,6 +130,110 @@ fn turn_v1(connection: &rusqlite::Connection, conversation: &str) -> Option<RawT
     Some((since.max(0).unsigned_abs(), prompt, messages))
 }
 
+/// The current turn's reply in `conversation`: the last text the agent wrote
+/// since the user's newest prompt, with its key and transcript position.
+pub(super) fn reply(database: &Path, conversation: &str) -> Option<(String, String, u64)> {
+    let connection = crate::resume::open_read_only(database)?;
+    reply_v2(&connection, conversation).or_else(|| reply_v1(&connection, conversation))
+}
+
+/// OpenCode 2: the last text block of the newest reply after the newest
+/// prompt that has one.
+fn reply_v2(
+    connection: &rusqlite::Connection,
+    conversation: &str,
+) -> Option<(String, String, u64)> {
+    let after: i64 = connection
+        .query_row(
+            "SELECT COALESCE(MAX(seq), -1) FROM session_message \
+             WHERE session_id = ?1 AND type = 'user'",
+            [conversation],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT id, seq, data FROM session_message WHERE session_id = ?1 \
+             AND type = 'assistant' AND seq > ?2 ORDER BY seq DESC LIMIT {RECENT_REPLIES}"
+        ))
+        .ok()?;
+    let rows = statement
+        .query_map(rusqlite::params![conversation, after], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .ok()?;
+    let found = rows.filter_map(Result::ok).find_map(|(id, seq, data)| {
+        let data: Value = serde_json::from_str(&data).ok()?;
+        let (index, text) = data
+            .get("content")?
+            .as_array()?
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, block)| {
+                (block.get("type")?.as_str()? == "text")
+                    .then(|| written(block.get("text")?.as_str()?))?
+                    .map(|text| (index, text))
+            })?;
+        let position = u64::try_from(seq).ok()?.checked_mul(1024)? + index as u64;
+        Some((format!("{id}:{index}"), text, position))
+    });
+    found
+}
+
+/// OpenCode 1.x: the assistant's last text piece since the newest prompt.
+fn reply_v1(
+    connection: &rusqlite::Connection,
+    conversation: &str,
+) -> Option<(String, String, u64)> {
+    let since: i64 = connection
+        .query_row(
+            "SELECT COALESCE(MAX(time_created), 0) FROM message \
+             WHERE session_id = ?1 AND json_extract(data, '$.role') = 'user'",
+            [conversation],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT part.id, part.data, message.time_created, \
+               (SELECT COUNT(*) FROM part AS earlier \
+                WHERE earlier.message_id = part.message_id AND earlier.id < part.id) \
+             FROM part JOIN message ON message.id = part.message_id \
+             WHERE part.session_id = ?1 AND message.time_created >= ?2 \
+               AND json_extract(message.data, '$.role') = 'assistant' \
+             ORDER BY message.time_created DESC, part.id DESC LIMIT {RECENT_PARTS}"
+        ))
+        .ok()?;
+    let rows = statement
+        .query_map(rusqlite::params![conversation, since], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })
+        .ok()?;
+    let found = rows
+        .filter_map(Result::ok)
+        .find_map(|(id, part, created, ordinal)| {
+            let part: Value = serde_json::from_str(&part).ok()?;
+            if part.get("type")?.as_str()? != "text" {
+                return None;
+            }
+            let text = written(part.get("text")?.as_str()?)?;
+            let position = u64::try_from(created).ok()?.checked_mul(1024)?
+                + u64::try_from(ordinal).ok()?.min(1023);
+            Some((id, text, position))
+        });
+    found
+}
+
 /// The latest line of `conversation`, whichever of the two layouts holds
 /// it (the newer one, when both do).
 pub(super) fn latest(database: &Path, conversation: &str) -> Option<String> {
@@ -437,5 +541,14 @@ mod tests {
         let (_, prompt, messages) = turn(&database, "ses_b").unwrap();
         assert_eq!(prompt.as_deref(), Some("my prompt"));
         assert_eq!(messages, ["Fixed it."]);
+        // The reply: OpenCode 2's last text since the prompt, at its block.
+        assert_eq!(
+            super::reply(&database, "ses_a"),
+            Some(("m5:0".into(), "Working on it".into(), 5 * 1024))
+        );
+        assert_eq!(
+            super::reply(&database, "ses_b"),
+            Some(("p1".into(), "Fixed it.".into(), 0))
+        );
     }
 }

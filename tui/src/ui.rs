@@ -1972,6 +1972,7 @@ mod tests {
             text: text.into(),
             truncated: false,
             finished_at: now - minutes_ago * 60_000,
+            position: None,
         }
     }
 

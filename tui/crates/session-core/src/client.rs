@@ -123,6 +123,17 @@ pub trait SessionApi: Send + Sync {
         let _ = id;
         Err(unsupported("reading an agent's turn"))
     }
+    /// A live session's agent conversation after `after` (user callers;
+    /// capability `session.transcript`).
+    fn transcript(
+        &self,
+        id: &SessionId,
+        after: Option<&crate::api::TranscriptCursor>,
+        max_bytes: Option<u32>,
+    ) -> Result<crate::api::TranscriptPage> {
+        let _ = (id, after, max_bytes);
+        Err(unsupported("reading an agent's conversation"))
+    }
     /// The optional features the daemon announced in its hello; `None` when
     /// the implementation can't tell (adapters, fakes).
     fn daemon_capabilities(&self) -> Option<Vec<String>> {
@@ -406,6 +417,23 @@ impl SessionApi for Client {
     fn turn(&self, id: &SessionId) -> Result<crate::api::TurnContent> {
         match self.request(&Request::SessionTurn { id: id.clone() })? {
             Response::Turn { turn } => Ok(turn),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn transcript(
+        &self,
+        id: &SessionId,
+        after: Option<&crate::api::TranscriptCursor>,
+        max_bytes: Option<u32>,
+    ) -> Result<crate::api::TranscriptPage> {
+        let request = Request::SessionTranscript {
+            id: id.clone(),
+            after: after.cloned(),
+            max_bytes,
+        };
+        match self.request(&request)? {
+            Response::Transcript { transcript } => Ok(transcript),
             other => Err(unexpected(&other)),
         }
     }
@@ -999,6 +1027,7 @@ fn is_idempotent(request: &Request) -> bool {
             | Request::SessionGet { .. }
             | Request::SessionRead(_)
             | Request::SessionTurn { .. }
+            | Request::SessionTranscript { .. }
             | Request::SessionTouch { .. }
             | Request::DaemonStatus
     )

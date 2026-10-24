@@ -1,8 +1,9 @@
 # Agent feed wire contract, version 1
 
 Canonical JSON Schema draft 2020-12 for the feed routes of rakumux.com: what agents said when
-they finished a turn, uploaded by each machine's Rakumux status service and read back by every
-machine of the same account. This directory contains contracts and development-only
+they finished a turn, and the whole chats those turns belong to (the user's prompts, the agents'
+text, reasoning and tool calls, and the tools' output), uploaded by each machine's Rakumux status
+service and read back by every machine of the same account. This directory contains contracts and development-only
 conformance tests, not an HTTP server, database or local runtime.
 
 ## Routes and messages
@@ -12,9 +13,12 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/entries` | [upload](upload.schema.json) | [accepted](accepted.schema.json) |
 | `GET /api/v1/feed?after=SEQ&limit=N` | query only | [page](page.schema.json), increasing seq |
 | `GET /api/v1/feed?before=SEQ&limit=N`, `GET /api/v1/feed?limit=N` | query only | [page](page.schema.json), decreasing seq |
+| `POST /api/v1/feed/messages` | [chat-upload](chat-upload.schema.json) | [chat-accepted](chat-accepted.schema.json) |
+| `GET /api/v1/feed/turn?entry=ID[&after=POSITION]` | query only | [turn](turn.schema.json), increasing position |
 
 - **Upload:** `{version:1, machine, entries}` with 1–50 entries. Each entry is
-  `{id, session:{id, name, folder?}, agent, conversation_id?, text, truncated, finished_at}`.
+  `{id, session:{id, name, folder?}, agent, conversation_id?, text, truncated, finished_at,
+  position?}`; `position` is the turn's last message's in its chat (below).
   `id` is the ULID the local daemon gave the reply; the cloud keeps the first upload of an
   id and answers a repeat with the same `seq`, so retries never duplicate. `folder` is a
   folder's last path component, never a path. `text` is at most **32768 UTF-8 bytes**;
@@ -26,6 +30,22 @@ conformance tests, not an HTTP server, database or local runtime.
   (default 50); the cloud may return fewer to keep the response small, with `more` true.
   `after` and `before` together are invalid. Each entry adds `seq`, `machine` and
   `received_at` to what was uploaded.
+- **Chats:** a chat is one agent conversation on one machine: `(machine, agent,
+  conversation_id)` for the account. `POST /api/v1/feed/messages` uploads 1–100 of its messages,
+  `{version:1, machine, chat:{agent, conversation_id, session}, messages}`; each message is
+  `{id, position, role, at?, parts}` with 1–64 parts, and uploading an id again replaces that
+  message and its parts (OpenCode rewrites its messages as they stream). `role` is `user` (what
+  the user typed), `assistant` (the agent's text, reasoning and tool calls) or `tool` (tools'
+  output). A part is `text` or `reasoning` `{text}`, `tool_call` `{call_id?, name, input}` or
+  `tool_result` `{call_id?, output, error?}`, each with `truncated?`; texts are at most **65536
+  UTF-8 bytes**, plain text (tab, LF, CR), and a tool's input or output may be empty. Messages sort
+  by `position`, then `id`: Claude Code's and Codex's are byte offsets into their logs, OpenCode's
+  its own order times 1024 plus a block's index. The session is the one that last showed the chat.
+- **Turn:** `GET /api/v1/feed/turn?entry=ID` gives the messages of the turn a feed entry finished:
+  from the chat's last `user` message at or before the entry's `position` up to that position,
+  increasing; `more` says it continues, and `after=POSITION` asks for the rest. An entry without
+  `position` (an older machine) ends at its chat's last message at or before `finished_at`. No
+  messages when the chat wasn't uploaded. At most 200 messages per answer.
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
   message per code: `invalid_request` (400, or 413 for an oversized body), `unauthenticated`
   (401), `forbidden` (403: the account's Feed switch is off), `rate_limited` (429) and
@@ -38,7 +58,7 @@ requests are refused. The user is the verified token's subject, never a body fie
 ## Validation boundaries
 
 1. Bound the raw body before parsing: the upload's `x-maxBodyBytes` (1 MiB) on the server,
-   the page's (2 MiB) on the client. Reject malformed UTF-8 or JSON, a byte-order mark and
+   the page's (2 MiB) on the client, 4 MiB for a chat upload and a turn. Reject malformed UTF-8 or JSON, a byte-order mark and
    duplicate member names.
 2. Implement `maxUtf8Bytes` as an assertion on the decoded string's UTF-8 length.
    `maxLength` counts code points, not bytes.
@@ -46,10 +66,10 @@ requests are refused. The user is the verified token's subject, never a body fie
 
 ## What is not in it
 
-No prompts, tool calls, tool output, terminal output, transcripts, full paths, account ids
-or credentials. Schemas reject such fields, not secrets inside reply text: the status
-service sends replies only while the account's Feed switch is on, only from consented,
-non-private sessions, and applies its best-effort redaction first.
+No terminal output, full paths (beyond what the chat's own text holds), account ids or
+credentials. Schemas reject such fields, not secrets inside the text: the status service sends
+replies and chats only while the account's Feed switch is on, never a private session's, and
+masks keys, credential assignments and tokens in every text first (best effort).
 
 ## Conformance tests
 

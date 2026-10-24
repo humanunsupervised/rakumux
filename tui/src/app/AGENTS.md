@@ -69,8 +69,12 @@ new-session flow, and code boundaries.
   at once while `more`), the first time the Feed switch is seen on bringing the Feed to the front
   unless a tab was chosen, and its keys (`feed_key`) and Enter (`open_feed_entry`: a reply whose
   session is listed here goes into it under Status; one from another machine says where it
-  runs; on phones it's read full screen). `components/feed.rs` draws a `FeedStore` into any
-  area. The Feed shows in Master detail only; Grid and Tabs keep sessions.
+  runs; on phones it's read full screen). The reply being read brings its whole turn
+  (`AccountAccess::feed_turn`, off the UI thread, the rest asked for at once while `next`;
+  `FeedStore` keeps the last 20 turns, `TurnState`), drawn in order by
+  `components::feed::turn_lines` (`›` prompts, quiet reasoning, `●` tool calls with the first
+  lines of their output). `components/feed.rs` draws a `FeedStore` into any area. The Feed
+  shows in Master detail only; Grid and Tabs keep sessions.
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
   folders / App / Status; Feed says Feed), `filter_label` (the Tabs layout's selector, Grid's header),
   `switch_tab`/`show_tab`, `open_tab_picker` (Folders: the Folders modal) and the App and

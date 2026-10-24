@@ -6,7 +6,7 @@ use crate::auth::{
 };
 use crate::cloud::{Cancellation, CloudAIClient, CloudAIError, FeedHttp};
 
-use super::wire::{self, FeedFailure, FeedRequest, PageRead};
+use super::wire::{self, FeedFailure, FeedRequest, PageRead, TurnRead};
 
 /// One feed request, run off the owner thread. It borrows the bearer only for
 /// the one request, like a features read.
@@ -25,6 +25,10 @@ pub(crate) enum FeedResult {
     Accepted(Vec<(String, u64)>),
     /// A page read.
     Page(PageRead),
+    /// A chat's messages were stored.
+    Stored,
+    /// A turn read.
+    Turn(TurnRead),
 }
 
 /// A finished feed request, tagged with the account revision it was made for.
@@ -39,11 +43,14 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
         let cancel = Cancellation::new();
         let query = match &self.request {
             FeedRequest::Read { after } => FeedRequest::query(*after),
-            FeedRequest::Upload { .. } => String::new(),
+            FeedRequest::Turn { entry, after } => FeedRequest::turn_query(entry, *after),
+            FeedRequest::Upload { .. } | FeedRequest::Messages { .. } => String::new(),
         };
         let http = match &self.request {
             FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
             FeedRequest::Read { .. } => FeedHttp::Page(&query),
+            FeedRequest::Messages { body } => FeedHttp::Messages(body),
+            FeedRequest::Turn { .. } => FeedHttp::Turn(&query),
         };
         let outcome = self
             .account
@@ -53,6 +60,10 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                 Some(Ok(reply)) => match &self.request {
                     FeedRequest::Upload { .. } => wire::accepted(&reply).map(FeedResult::Accepted),
                     FeedRequest::Read { .. } => wire::page(&reply).map(FeedResult::Page),
+                    FeedRequest::Messages { .. } => {
+                        wire::stored(&reply).map(|_| FeedResult::Stored)
+                    }
+                    FeedRequest::Turn { .. } => wire::turn(&reply).map(FeedResult::Turn),
                 },
                 Some(Err(error)) => Err(transport(error)),
                 // The sign-in changed meanwhile; the owner fences this completion.

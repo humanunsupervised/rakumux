@@ -2,7 +2,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossterm::event::KeyCode;
-use rakumux_sensagent::feed::{FeedEntry, FeedPage, FeedStatus};
+use rakumux_sensagent::feed::{FeedEntry, FeedPage, FeedStatus, FeedTurn, FeedTurnStatus};
+use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
 use super::{FeedStore, MAX_ENTRIES};
 use crate::app::grouping::{Grouping, ListTab};
@@ -23,6 +24,7 @@ pub fn entry(id: &str, session: &str, finished_at: i64, seq: Option<u64>) -> Fee
         text: format!("Reply {id}"),
         truncated: false,
         finished_at,
+        position: None,
     }
 }
 
@@ -237,4 +239,134 @@ async fn signing_out_empties_the_feed() {
     h.app.sign_out();
     h.app.process_pending();
     assert!(h.app.feed.entries().is_empty());
+}
+
+fn said(position: u64, role: TranscriptRole, parts: Vec<TranscriptPart>) -> TranscriptMessage {
+    TranscriptMessage {
+        id: position.to_string(),
+        position,
+        role,
+        at: None,
+        parts,
+    }
+}
+
+fn turn(messages: Vec<TranscriptMessage>, next: Option<u64>) -> FeedTurn {
+    FeedTurn {
+        status: FeedTurnStatus::Ready,
+        messages,
+        next,
+    }
+}
+
+fn screen(h: &mut Harness) -> String {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 48)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let buffer = terminal.backend().buffer().clone();
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer.get(x, y).symbol().to_string())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[tokio::test]
+async fn a_shown_reply_brings_its_whole_turn_in_order() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    let mut remote = entry("R", "elsewhere", 2_000, Some(2));
+    remote.machine = "lab".into();
+    account.queue_feed(page(1, 1, vec![remote], false));
+    account.turns.lock().unwrap().extend([
+        turn(
+            vec![
+                said(
+                    0,
+                    TranscriptRole::User,
+                    vec![TranscriptPart::Text {
+                        text: "Fix the flaky test".into(),
+                        truncated: false,
+                    }],
+                ),
+                said(
+                    5,
+                    TranscriptRole::Assistant,
+                    vec![
+                        TranscriptPart::Reasoning {
+                            text: "It depends on map order.".into(),
+                            truncated: false,
+                        },
+                        TranscriptPart::ToolCall {
+                            call_id: Some("c1".into()),
+                            name: "Bash".into(),
+                            input: r#"{"command":"cargo test","description":"Run the tests"}"#
+                                .into(),
+                            truncated: false,
+                        },
+                    ],
+                ),
+            ],
+            Some(5),
+        ),
+        turn(
+            vec![
+                said(
+                    9,
+                    TranscriptRole::Tool,
+                    vec![TranscriptPart::ToolResult {
+                        call_id: Some("c1".into()),
+                        output: (1..=9).map(|n| format!("line {n}\n")).collect(),
+                        error: false,
+                        truncated: false,
+                    }],
+                ),
+                said(
+                    12,
+                    TranscriptRole::Assistant,
+                    vec![TranscriptPart::Text {
+                        text: "Fixed: the test sorts the keys.".into(),
+                        truncated: false,
+                    }],
+                ),
+            ],
+            None,
+        ),
+    ]);
+    tick(&mut h, Duration::from_secs(3));
+    // Asked for once it's shown, then the rest at once.
+    assert_eq!(
+        *account.turn_asks.lock().unwrap(),
+        [("R".to_owned(), None), ("R".to_owned(), Some(5))]
+    );
+    let text = screen(&mut h);
+    let at = |needle: &str| {
+        text.find(needle)
+            .unwrap_or_else(|| panic!("{needle:?} not in\n{text}"))
+    };
+    assert!(at("› Fix the flaky test") < at("It depends on map order."));
+    assert!(at("It depends on map order.") < at("● Bash Run the tests"));
+    assert!(at("● Bash Run the tests") < at("⎿ line 1"));
+    assert!(at("line 6") < at("… 3 more lines"));
+    assert!(!text.contains("line 7"));
+    assert!(at("… 3 more lines") < at("Fixed: the test sorts the keys."));
+    // Kept: nothing asked again on the next ticks.
+    tick(&mut h, Duration::from_secs(6));
+    assert_eq!(account.turn_asks.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_turn_that_cant_be_read_shows_the_reply_alone() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    account.queue_feed(page(1, 1, vec![entry("A", "S", 1_000, Some(1))], false));
+    account
+        .turns
+        .lock()
+        .unwrap()
+        .push_back(FeedTurn::failed(rakumux_sensagent::feed::FeedFailure::Off));
+    tick(&mut h, Duration::from_secs(3));
+    let text = screen(&mut h);
+    assert!(text.contains("Reply A"), "{text}");
+    assert!(!text.contains("Loading the whole turn"), "{text}");
 }

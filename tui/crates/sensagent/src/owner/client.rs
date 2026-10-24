@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use session_core::ids::SessionId;
 
-use crate::feed::FeedPage;
+use crate::feed::{FeedPage, FeedTurn};
 
 use super::layout::{current_uid, peer_uid};
 use super::protocol::{
@@ -197,6 +197,17 @@ impl OwnerClient {
             feed,
         })? {
             OwnerResponse::Done => Ok(()),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// The whole turn feed entry `entry` finished, past `after` when given.
+    pub fn feed_turn(&self, entry: &str, after: Option<u64>) -> Result<FeedTurn, OwnerError> {
+        match self.request(&OwnerRequest::FeedTurn {
+            entry: entry.to_owned(),
+            after,
+        })? {
+            OwnerResponse::FeedTurn { turn } => Ok(turn),
             _ => Err(OwnerError::Protocol),
         }
     }

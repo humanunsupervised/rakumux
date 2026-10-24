@@ -46,6 +46,11 @@ impl SessionMeta {
     }
 }
 
+/// `view`'s folder name, as the feed shows it.
+pub(super) fn folder_of(view: &SessionView) -> Option<String> {
+    folder_name(&view.scope)
+}
+
 fn folder_name(scope: &ScopeRoot) -> Option<String> {
     let name = scope.path().file_name()?.to_str()?;
     let name: String = name.chars().filter(|c| !c.is_control()).take(128).collect();
@@ -186,10 +191,11 @@ impl FeedSync {
             session_name: meta.name.clone(),
             folder: meta.folder.clone(),
             agent: reply.agent,
-            conversation_id: reply.conversation_id.filter(|id| conversation_id(id)),
+            conversation_id: reply.conversation_id.filter(|id| wire::conversation_id(id)),
             text,
             truncated: reply.truncated || cut,
             finished_at: reply.finished_at,
+            position: reply.position,
         });
     }
 
@@ -244,6 +250,8 @@ impl FeedSync {
                     now + self.read_interval(now)
                 };
             }
+            // Chats' requests, not the feed's.
+            Ok(FeedResult::Stored | FeedResult::Turn(_)) => {}
             Err(failure) => self.fail(failure, now),
         }
     }
@@ -312,16 +320,6 @@ fn bounded(mut text: String) -> (String, bool) {
     (text, true)
 }
 
-/// The contract's conversation id: 1–128 of letters, digits, `.`, `_`, `:`, `-`.
-fn conversation_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 128
-        && id.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
-}
-
 /// This machine's name for the feed: its host name, or "this machine".
 pub fn machine_name() -> String {
     let mut buffer = [0u8; 256];
@@ -369,6 +367,7 @@ mod tests {
             text: text.into(),
             truncated: false,
             finished_at: 1_761_220_000_000,
+            position: None,
         }
     }
 

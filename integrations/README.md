@@ -148,7 +148,30 @@ status service turns it on for an account whose Feed switch is on), when the ses
 `Done` after it was seen working, from a read of the log made after that; a key already
 captured is never captured again. See the protocol section of `AGENTS.md` (`reply_capture`,
 `reply_list`, `replies` subscriptions). The hook adapters still forward metadata only.
-OpenCode has no reply yet.
+For OpenCode, the reply is the last text block the agent wrote since the newest prompt. Each
+reply also says where its turn ends in the conversation (`position`, as below).
+
+## Whole conversations
+
+`transcript.rs` reads a followed conversation whole, on demand (`session_transcript`), with
+the mappings beside each agent's output parser (`<agent>/transcript.rs`): what the user typed
+(the agents' own insertions taken out, as for the prompt line), the agent's text and visible
+reasoning, its tool calls with their input, and the tools' output (the `tool` role), in order.
+
+- **Claude Code:** one message per entry of the main conversation's transcript, at its byte
+  offset, with its `uuid`. Subagents' entries, meta entries, compaction summaries and
+  interruption notices are left out; redacted thinking says nothing.
+- **Codex:** one message per rollout line, at its byte offset. The user's messages come from
+  `user_message` events; replies, reasoning summaries (encrypted reasoning is left out), tool
+  calls and their output from response items. A shell call's output is its `output`, failed
+  when its exit code isn't 0.
+- **OpenCode:** the conversation's rows changed since a watermark: each OpenCode 2 prompt, and
+  each block of a reply (`seq × 1024 + block`; a tool block holds its call and, once it ran, its
+  result), or each 1.x piece (`time_created × 1024 + its place`). Bookkeeping pieces (steps,
+  snapshots, patches) and text OpenCode added are left out.
+
+A log line longer than 8 MiB is passed over. Text is cut at 64 KiB per part and otherwise left
+as written: the status service cleans it before it leaves the machine.
 
 Native input is capped at 1 MiB and never
 logged. Outside a Rakumux session hooks do nothing and never spawn a daemon. Errors emit a

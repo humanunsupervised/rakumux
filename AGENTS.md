@@ -165,7 +165,16 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    every 10 s while a TUI shows it (an owner `feed` request in the last 30 s), else every 2
    minutes. Cache (the newest 500) and upload queue are memory only; the TUI asks the owner for
    the entries changed since its revision (`OwnerRequest::Feed`). Signing out or turning the
-   switch off empties both.
+   switch off empties both. **Whole chats** (`feed/chats.rs`, `ChatSync`): under the same
+   switch, each live, non-private session's agent conversation is read from the daemon
+   (`session_transcript`) after where it was last uploaded, at most every 5 s while it changes,
+   its texts cleaned (escape sequences and controls removed, keys, credential assignments and
+   tokens masked) and uploaded as messages (`POST /api/v1/feed/messages`, ≤ 100 and ~2 MiB a
+   request); where each session's chat is up to is kept in `sensagent/status/chats.json`
+   (0600), so a restart carries on. Entries carry their turn's last `position`. The TUI reads an
+   entry's whole turn with `OwnerRequest::FeedTurn {entry, after?}` (`GET /api/v1/feed/turn`),
+   each part cut to what a detail pane shows and the answer within one owner message (`next`
+   continues).
 
 ## File structure
 
@@ -377,7 +386,21 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   finished_at}`. Replies are kept in daemon memory only (the last 200, 2 MiB of text, an
   hour), listed by `reply_list {after?}` and delivered as `reply` events only to
   subscriptions with `replies: true`. The audit log records turning capture on or off, never
-  reply text; session callers, delegated callers and `rakumux-api` never see replies.
+  reply text; session callers, delegated callers and `rakumux-api` never see replies. OpenCode
+  replies are its turn's last text block. A reply's optional `position` is its turn's last
+  message's in the conversation (below).
+- Agent conversations (user only, capability `session.transcript`;
+  `integrations/transcript.rs`): `session_transcript {id, after?, max_bytes?}` reads a live
+  session's agent conversation on demand, nothing kept in memory, from the log or database the
+  daemon already follows: `TranscriptPage {agent, conversation_id, messages, cursor, more}`.
+  A message is `{id, position, role (user | assistant | tool), at?, parts}`; parts are
+  `text`, `reasoning`, `tool_call {call_id?, name, input}` and `tool_result {call_id?, output,
+  error?}`, each cut at 64 KiB (`truncated`). Claude Code and Codex: one message per log line at
+  its byte offset (the cursor is the next offset; prompts without the agents' insertions,
+  subagents' and meta entries left out). OpenCode: rows changed since a `(time_updated, id)`
+  watermark, OpenCode 2 one message per reply block (`seq × 1024 + block`), 1.x one per piece.
+  About 512 KiB of log is read per request (at most 2 MiB); `more` says ask again. A cursor of
+  another conversation reads the current one from its start.
 - **Compatibility**: new fields optional; enums carry an `Unknown` fallback; an op never changes
   meaning (add a new op); bump `PROTOCOL_VERSION` only for incompatible changes.
 
@@ -597,7 +620,8 @@ startup authorization. Success reloads only the UI through the new launcher, str
 fallback. Legacy npm/Homebrew installs use their package manager. On a protocol mismatch the TUI
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
-`session.working_directory`, `session.agent_output`, `session.user_prompt`, `session.turn`, read with
+`session.working_directory`, `session.agent_output`, `session.user_prompt`, `session.turn`,
+`session.replies`, `session.transcript`, read with
 `SessionApi::daemon_capabilities`) it says what's missing
 and offers a restart: in place when the daemon has `daemon.restart` (sessions keep running;
 `y`/Enter), otherwise by stopping it (`y` only, since running sessions end).
@@ -628,6 +652,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Reply** (agent reply): what an agent said when it finished a turn, captured by the daemon
   only while the status service has reply capture on, for the **feed**: the replies of the
   account's machines, kept on rakumux.com for 30 days while the account's Feed switch is on.
+- **Chat** (transcript): an agent conversation's messages in order (prompts, text,
+  reasoning, tool calls, tools' output), uploaded under the same switch; the Feed detail shows
+  a reply's whole turn from it.
 - **Daemon** (`rakumux-ptyd`): the single per-user server owning every session.
 - **Client**: anything connected to the daemon (TUI, CLI call, agent, `rakumux-api`).
 - **External API**: `rakumux-api`, HTTP on 127.0.0.1 over the daemon; found through `api.json`.

@@ -228,6 +228,21 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after: Option<ReplyId>,
     },
+    /// User only (capability `session.transcript`): the messages of a live
+    /// session's agent conversation (Claude Code, Codex, OpenCode) after
+    /// `after` (from its start without one, or when it names another
+    /// conversation), oldest first, read from the agent's own log or
+    /// database: prompts, the agent's text, reasoning and tool calls, and
+    /// the tools' output. At most about `max_bytes` (default
+    /// [`TRANSCRIPT_BYTES`], at most [`MAX_TRANSCRIPT_BYTES`]) of the log is
+    /// read at once. Answered with `Transcript`.
+    SessionTranscript {
+        id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<TranscriptCursor>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_bytes: Option<u32>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -501,6 +516,10 @@ pub struct AgentReply {
     pub truncated: bool,
     /// When the turn finished (Unix milliseconds).
     pub finished_at: i64,
+    /// The [`TranscriptMessage::position`] of the turn's last message in its
+    /// conversation, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<u64>,
 }
 
 /// The longest reply text kept, in UTF-8 bytes.
@@ -514,6 +533,120 @@ pub const CAPABILITY_USER_PROMPT: &str = "session.user_prompt";
 
 /// `session_turn` and `SessionView::agent_turn`: a running agent's current turn.
 pub const CAPABILITY_TURN: &str = "session.turn";
+
+/// `session_transcript`: a running agent's whole conversation.
+pub const CAPABILITY_TRANSCRIPT: &str = "session.transcript";
+
+/// How much of an agent's log `session_transcript` reads by default, in bytes.
+pub const TRANSCRIPT_BYTES: u32 = 512 * 1024;
+/// The most it reads at once.
+pub const MAX_TRANSCRIPT_BYTES: u32 = 2 * 1024 * 1024;
+/// The longest text of a [`TranscriptPart`], in UTF-8 bytes: longer text is
+/// cut and the part says `truncated`.
+pub const MAX_PART_BYTES: usize = 64 * 1024;
+/// The most parts a [`TranscriptMessage`] has; further ones are left out.
+pub const MAX_PARTS: usize = 64;
+
+/// Where a `session_transcript` read stopped; pass it back to read on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TranscriptCursor {
+    /// The conversation read: a cursor of another one reads the current one
+    /// from its start.
+    pub conversation: String,
+    /// How far: a byte offset into the agent's log, or the last
+    /// `time_updated` OpenCode gave.
+    pub offset: u64,
+    /// OpenCode: the id of the last row read at `offset`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+/// The answer to `session_transcript`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TranscriptPage {
+    /// `claude-code`, `codex` or `opencode`.
+    pub agent: String,
+    /// The agent's own conversation id.
+    pub conversation_id: String,
+    /// In the order read: by position for logs; OpenCode sends a message
+    /// again when it changes.
+    #[serde(default)]
+    pub messages: Vec<TranscriptMessage>,
+    /// Where to read on from.
+    pub cursor: TranscriptCursor,
+    /// More was there to read: ask again at once.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub more: bool,
+}
+
+/// One message of an agent's conversation: one entry of its log, or one
+/// block of an OpenCode reply. Terminal-like untrusted text, cut at
+/// [`MAX_PART_BYTES`] per part, not otherwise cleaned.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TranscriptMessage {
+    /// Unique in the conversation: the agent's own id, or the position.
+    pub id: String,
+    /// Where it goes: messages sort by it. A byte offset into Claude Code's
+    /// and Codex's logs; OpenCode's own order times 1024, plus the block.
+    pub position: u64,
+    pub role: TranscriptRole,
+    /// When the agent wrote it (Unix milliseconds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+    pub parts: Vec<TranscriptPart>,
+}
+
+/// Who a [`TranscriptMessage`] is from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptRole {
+    /// What the user typed.
+    User,
+    /// The agent's text, reasoning and tool calls.
+    Assistant,
+    /// Tools' output.
+    Tool,
+    #[serde(other)]
+    Unknown,
+}
+
+/// A piece of a [`TranscriptMessage`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TranscriptPart {
+    Text {
+        text: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        truncated: bool,
+    },
+    /// The agent's visible reasoning.
+    Reasoning {
+        text: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        truncated: bool,
+    },
+    /// A tool call; `input` as the agent gave it (usually JSON).
+    ToolCall {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
+        name: String,
+        input: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        truncated: bool,
+    },
+    /// A tool's output.
+    ToolResult {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
+        output: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        error: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        truncated: bool,
+    },
+    #[serde(other)]
+    Unknown,
+}
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -544,6 +677,10 @@ pub enum Response {
     /// The answer to `session_turn`.
     Turn {
         turn: TurnContent,
+    },
+    /// The answer to `session_transcript`.
+    Transcript {
+        transcript: TranscriptPage,
     },
     Wait(WaitResult),
     Killed {

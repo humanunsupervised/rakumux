@@ -11,6 +11,7 @@ use ptyd::detect::{DetectInput, Detection};
 use ptyd::host::ProcessInfo;
 use session_core::api::{
     AgentReply, ErrorCode, EventEnvelope, Request, Response, SessionEvent, SubscribeRequest,
+    TranscriptPart, TranscriptRole,
 };
 use session_core::ids::SessionId;
 use session_core::model::Lifecycle;
@@ -145,6 +146,8 @@ fn a_finished_turns_reply_reaches_only_subscriptions_that_ask() {
     assert_eq!(got[0].agent, "codex");
     assert_eq!(got[0].conversation_id.as_deref(), Some(THREAD));
     assert_eq!(got[0].text, "Done: the tests pass.");
+    // Where the turn ends in the chat: its `task_complete` line.
+    assert!(got[0].position.is_some_and(|position| position > 0));
     assert!(replies_in(&plain, Duration::from_millis(300)).is_empty());
 
     // Listed for a late reader, then nothing after it.
@@ -246,4 +249,107 @@ fn a_turns_chat_is_named_for_its_one_automatic_summary() {
             .map(|turn| turn.conversation_id)
     });
     assert_eq!(conversation.as_deref(), Some(THREAD));
+}
+
+#[test]
+fn a_running_agents_whole_chat_is_read_on_from_a_cursor() {
+    let _log = one_log_at_a_time();
+    let h = Harness::with_detector(codex_detector);
+    let (id, mut file) = codex_session(&h);
+    h.host.show(&id, "thinking [working]");
+    settle(&h, &id, Lifecycle::Working);
+    event(
+        &mut file,
+        serde_json::json!({"type": "user_message", "message": "Fix the parser"}),
+    );
+    let item = |file: &mut File, payload: serde_json::Value| {
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type": "response_item", "payload": payload})
+        )
+        .unwrap();
+    };
+    item(
+        &mut file,
+        serde_json::json!({"type": "function_call", "name": "exec_command", "call_id": "call_1",
+            "arguments": "{\"cmd\":\"cargo test\"}"}),
+    );
+    item(
+        &mut file,
+        serde_json::json!({"type": "function_call_output", "call_id": "call_1", "output": "ok"}),
+    );
+    item(
+        &mut file,
+        serde_json::json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "Fixed."}]}),
+    );
+    let read = |after| {
+        h.handle(
+            &h.user,
+            Request::SessionTranscript {
+                id: id.clone(),
+                after,
+                max_bytes: None,
+            },
+        )
+    };
+    // Once the daemon follows the agent, its chat is there to read.
+    let mut frame = 0;
+    let page = eventually("the chat to be readable", || {
+        frame += 1;
+        h.host.show(&id, &format!("still [working] {frame}"));
+        match read(None) {
+            Response::Transcript { transcript } => Some(transcript),
+            _ => None,
+        }
+    });
+    assert_eq!(page.agent, "codex");
+    assert_eq!(page.conversation_id, THREAD);
+    let roles: Vec<_> = page.messages.iter().map(|message| message.role).collect();
+    assert_eq!(
+        roles,
+        [
+            TranscriptRole::User,
+            TranscriptRole::Assistant,
+            TranscriptRole::Tool,
+            TranscriptRole::Assistant
+        ]
+    );
+    assert!(page
+        .messages
+        .windows(2)
+        .all(|pair| pair[0].position < pair[1].position));
+    assert_eq!(
+        page.messages[3].parts,
+        [TranscriptPart::Text {
+            text: "Fixed.".into(),
+            truncated: false
+        }]
+    );
+    match read(Some(page.cursor.clone())) {
+        Response::Transcript { transcript } => assert!(transcript.messages.is_empty()),
+        other => panic!("expected a transcript, got {other:?}"),
+    }
+    // Sessions can't read chats; a session without an agent has none.
+    let agent = h.session_caller(&id);
+    let request = Request::SessionTranscript {
+        id: id.clone(),
+        after: None,
+        max_bytes: None,
+    };
+    match h.handle(&agent, request) {
+        Response::Error { error } => assert_eq!(error.code, ErrorCode::PermissionDenied),
+        other => panic!("expected a denial, got {other:?}"),
+    }
+    let shell = h.create(Some("shell"));
+    let request = Request::SessionTranscript {
+        id: shell.id,
+        after: None,
+        max_bytes: None,
+    };
+    match h.handle(&h.user, request) {
+        Response::Error { error } => assert_eq!(error.code, ErrorCode::NotFound),
+        other => panic!("expected no chat, got {other:?}"),
+    }
 }

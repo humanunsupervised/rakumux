@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:turn",
+  "title": "GET /api/v1/feed/turn success",
+  "description": "The whole turn a feed entry finished, in order: from the user's message that started it (the chat's last `user` message at or before the entry's position) to the entry's position, or with `after` the messages past that position. `more` says the turn continues past the last one returned (ask again with its position as `after`). No messages when the machine didn't upload the chat.",
+  "x-maxBodyBytes": 4194304,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "entry",
+    "messages",
+    "more"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "entry": {
+      "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid"
+    },
+    "messages": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "urn:rakumux:feed:v1:common#/$defs/message"
+      }
+    },
+    "more": {
+      "type": "boolean"
+    }
+  }
+}

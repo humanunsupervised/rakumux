@@ -59,6 +59,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_AGENT_OUTPUT,
     session_core::api::CAPABILITY_USER_PROMPT,
     session_core::api::CAPABILITY_TURN,
+    session_core::api::CAPABILITY_TRANSCRIPT,
     session_core::api::CAPABILITY_TERMINAL_PANE,
     session_core::api::CAPABILITY_ACTIVITY,
     session_core::api::CAPABILITY_REPLIES,
@@ -1687,6 +1688,11 @@ mod tests {
             },
             Request::SessionTouch { id: id.clone() },
             Request::SessionTurn { id: id.clone() },
+            Request::SessionTranscript {
+                id: id.clone(),
+                after: None,
+                max_bytes: None,
+            },
             Request::SessionPin {
                 id: id.clone(),
                 pinned: true,
@@ -1751,6 +1757,7 @@ mod tests {
                 | Request::SessionSubmit { .. }
                 | Request::SessionTouch { .. }
                 | Request::SessionTurn { .. }
+                | Request::SessionTranscript { .. }
                 | Request::SessionPin { .. }
                 | Request::SessionBind { .. }
                 | Request::ProjectList

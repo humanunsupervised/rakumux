@@ -35,6 +35,10 @@ pub struct FeedEntry {
     pub truncated: bool,
     /// When the turn finished (Unix milliseconds).
     pub finished_at: i64,
+    /// Where the turn ends in its chat; only this machine's know (uploaded,
+    /// never read back).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<u64>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -259,6 +263,7 @@ mod tests {
             text: format!("reply {id}"),
             truncated: false,
             finished_at: at,
+            position: None,
         }
     }
 

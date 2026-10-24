@@ -162,6 +162,8 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     /// them next.
     turn_settings: Option<Box<dyn Fn() -> TurnSettings + Send>>,
     settings_due: Duration,
+    /// Where the feed remembers how far each chat was uploaded.
+    chat_cursors: Option<std::path::PathBuf>,
 }
 
 impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> {
@@ -186,7 +188,20 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             last_note: None,
             turn_settings: None,
             settings_due: Duration::ZERO,
+            chat_cursors: None,
         }
+    }
+
+    /// Remember how far each chat was uploaded in `path`, so a restarted
+    /// service carries on (memory only without it).
+    pub fn with_chat_cursors(mut self, path: std::path::PathBuf) -> Self {
+        self.chat_cursors = Some(path);
+        self
+    }
+
+    /// Where chat cursors are kept, if anywhere.
+    pub(crate) fn chat_cursors(&self) -> Option<std::path::PathBuf> {
+        self.chat_cursors.clone()
     }
 
     /// Read the turn settings from `read` now and every [`SETTINGS_INTERVAL`].

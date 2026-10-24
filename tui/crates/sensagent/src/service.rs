@@ -163,7 +163,9 @@ pub fn serve(
         .map_err(|_| ServiceError::Setup)?;
 
     let api: Arc<dyn SessionApi> = Arc::new(connect_daemon(home, version)?);
-    let mut refresher = StatusRefresher::new(service).following_account_switch();
+    let mut refresher = StatusRefresher::new(service)
+        .following_account_switch()
+        .with_chat_cursors(layout.status_dir().join("chats.json"));
     if let Some(TurnSettingsSource(read)) = config.turn_settings {
         refresher = refresher.with_turn_settings(move || read());
     }

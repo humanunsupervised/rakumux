@@ -6,7 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
-use session_core::api::{AgentReply, CallerInfo, EventEnvelope, SessionEvent, SubscribeRequest};
+use session_core::api::{
+    AgentReply, CallerInfo, ErrorCode, EventEnvelope, SessionEvent, SubscribeRequest,
+    TranscriptCursor, TranscriptPage,
+};
 use session_core::client::SessionApi;
 use session_core::ids::{ReplyId, SessionId};
 use session_core::model::SessionView;
@@ -20,7 +23,10 @@ use super::StatusRefresher;
 use crate::auth::{AccountSession, AccountWebsite, CredentialStore, WallClock};
 use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
-use crate::feed::{FeedCompletion, FeedJob, FeedPage, FeedSync};
+use crate::feed::{
+    ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedRequest, FeedResult,
+    FeedSync, TurnRead,
+};
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
 /// How often the owner rechecks jobs and plans refreshes.
@@ -71,6 +77,7 @@ enum Command {
     Feed(Option<u64>, Option<u64>, Sender<FeedPage>),
     Summarize(SessionId, Sender<()>),
     SetFeatures(FeatureChange, Reply<()>),
+    FeedTurn(String, Option<u64>, Sender<Result<TurnRead, FeedFailure>>),
 }
 
 enum Message {
@@ -81,6 +88,10 @@ enum Message {
     Completed(Completed),
     FeaturesRead(FeaturesCompletion),
     FeedDone(FeedCompletion),
+    /// A chat read from the daemon, or why it couldn't be.
+    Transcript(SessionId, Result<TranscriptPage, ErrorCode>),
+    /// A chat upload finished.
+    ChatDone(FeedCompletion),
     /// The daemon was told to capture replies or not (or refused: an older one).
     CaptureSet(bool),
     /// Replies the daemon kept, for catching up.
@@ -96,6 +107,12 @@ enum Work<A, C> {
     Dispatch(Dispatch<A, C>),
     Features(FeaturesJob<A, C>),
     Feed(FeedJob<A, C>),
+    /// Read a session's chat after a cursor.
+    Transcript(SessionId, Option<TranscriptCursor>),
+    /// Upload a chat's messages.
+    ChatUpload(FeedJob<A, C>),
+    /// Read a turn for a TUI, answered straight to it.
+    Turn(FeedJob<A, C>, Sender<Result<TurnRead, FeedFailure>>),
     /// Turn the daemon's reply capture on or off.
     ReplyCapture(bool),
     /// Read the replies the daemon kept after this one (all of them for `None`).
@@ -307,6 +324,18 @@ impl RefreshClient {
         Ok(answer.recv().map_err(|_| RefreshError::Stopped)??)
     }
 
+    /// The turn feed entry `entry` finished, from rakumux.com, past `after`
+    /// when given.
+    pub fn feed_turn(
+        &self,
+        entry: String,
+        after: Option<u64>,
+    ) -> Result<Result<TurnRead, FeedFailure>, RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::FeedTurn(entry, after, reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
     /// The feed entries that changed after `after` for a TUI of `generation`.
     /// Asking says a TUI shows the feed, so it is read more often.
     pub fn feed(
@@ -371,7 +400,9 @@ fn own<S, A, C>(
         state: SignInState::Idle,
     };
     let mut renewal = Renewal::default();
-    let mut feed = FeedSync::new(crate::feed::machine_name());
+    let machine = crate::feed::machine_name();
+    let mut feed = FeedSync::new(machine.clone());
+    let mut chats = ChatSync::new(machine, refresher.chat_cursors());
     loop {
         let now = origin.elapsed();
         if now >= next_tick {
@@ -384,6 +415,7 @@ fn own<S, A, C>(
                 let _ = work.send(Work::Features(job));
             }
             follow_feed(&refresher, &mut feed, work, now);
+            follow_chats(&refresher, &mut chats, work, now);
             next_tick = now.saturating_add(TICK);
         }
         let message = match inbox.recv_timeout(next_tick.saturating_sub(origin.elapsed())) {
@@ -397,18 +429,34 @@ fn own<S, A, C>(
             Message::Resync(views) => {
                 let _ = refresher.resync(&views, now);
                 let after = feed.connected(&views);
+                chats.connected(&views);
                 let _ = work.send(Work::Replies(after));
             }
             Message::Event(event) => {
                 match &event.event {
                     SessionEvent::Reply { reply } => feed.reply(reply.clone()),
                     SessionEvent::Created { session } | SessionEvent::Updated { session } => {
-                        feed.observe(session)
+                        feed.observe(session);
+                        chats.observe(session);
                     }
-                    SessionEvent::Removed => feed.forget(&event.session_id),
+                    SessionEvent::Removed => {
+                        feed.forget(&event.session_id);
+                        chats.forget(&event.session_id);
+                    }
                     _ => {}
                 }
                 let _ = refresher.apply_event(&event, now);
+                follow_chats(&refresher, &mut chats, work, now);
+            }
+            Message::Transcript(session, result) => {
+                chats.read_done(session, result, now);
+                follow_chats(&refresher, &mut chats, work, now);
+            }
+            Message::ChatDone(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.map(|_| ());
+                chats.upload_done(current, outcome, now);
+                follow_chats(&refresher, &mut chats, work, now);
             }
             Message::FeedDone(completion) => {
                 let current = refresher.is_current(completion.revision);
@@ -460,6 +508,16 @@ fn own<S, A, C>(
             Message::Command(Command::Feed(after, generation, reply)) => {
                 let _ = reply.send(feed.page(after, generation, now));
                 follow_feed(&refresher, &mut feed, work, now);
+            }
+            Message::Command(Command::FeedTurn(entry, after, reply)) => {
+                match refresher.feed_job(FeedRequest::Turn { entry, after }) {
+                    Some(job) => {
+                        let _ = work.send(Work::Turn(job, reply));
+                    }
+                    None => {
+                        let _ = reply.send(Err(FeedFailure::Unauthorized));
+                    }
+                }
             }
             Message::Command(command) => control(
                 &mut refresher,
@@ -546,7 +604,7 @@ fn control<S, A, C>(
             let _ = reply.send(());
         }
         // Answered by the owner loop, which holds the feed.
-        Command::Feed(..) => {}
+        Command::Feed(..) | Command::FeedTurn(..) => {}
         Command::Summarize(session, reply) => {
             refresher.request(&session);
             let _ = reply.send(());
@@ -593,6 +651,34 @@ fn follow_feed<S, A, C>(
             }
             None => feed.not_started(now),
         }
+    }
+}
+
+/// Start the next chat read or upload, when one is due: only while signed in
+/// with the account's Feed switch on.
+fn follow_chats<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    chats: &mut ChatSync,
+    work: &Sender<Work<A, C>>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled = refresher.account().is_some() && refresher.feed_switch() == Some(true);
+    chats.set_enabled(enabled, now);
+    match chats.next_work(now) {
+        Some(ChatWork::Read { session, after }) => {
+            let _ = work.send(Work::Transcript(session, after));
+        }
+        Some(ChatWork::Upload(request)) => match refresher.feed_job(request) {
+            Some(job) => {
+                let _ = work.send(Work::ChatUpload(job));
+            }
+            None => chats.upload_done(false, Err(FeedFailure::Unauthorized), now),
+        },
+        None => {}
     }
 }
 
@@ -661,6 +747,35 @@ where
                 Ok(completion) => Message::FeedDone(completion),
                 Err(_) => continue,
             },
+            Ok(Work::Transcript(session, after)) => {
+                let result = api
+                    .transcript(&session, after.as_ref(), Some(crate::feed::READ_BYTES))
+                    .map_err(|error| error.code);
+                Message::Transcript(session, result)
+            }
+            Ok(Work::ChatUpload(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::ChatDone(completion),
+                    // Its chat is tried again rather than waiting forever.
+                    Err(_) => Message::ChatDone(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
+            }
+            Ok(Work::Turn(job, reply)) => {
+                let outcome = match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => match completion.outcome {
+                        Ok(FeedResult::Turn(turn)) => Ok(turn),
+                        Ok(_) => Err(FeedFailure::Invalid),
+                        Err(failure) => Err(failure),
+                    },
+                    Err(_) => Err(FeedFailure::Unavailable(None)),
+                };
+                let _ = reply.send(outcome);
+                continue;
+            }
             Ok(Work::ReplyCapture(enabled)) => {
                 // An older daemon refuses; it isn't asked again until it reconnects.
                 let _ = api.set_reply_capture(enabled);

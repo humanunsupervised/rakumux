@@ -376,7 +376,7 @@ mod tests {
             )),
             reply_step(&json!({"type": "attachment"})),
         ] {
-            reply = super::super::next_reply(reply, step);
+            reply = super::super::next_reply(reply, step, 0);
         }
         let reply = reply.unwrap();
         assert_eq!(reply.key, "e");
@@ -392,11 +392,13 @@ mod tests {
         let reply = super::super::next_reply(
             None,
             reply_step(&entry("a", json!([{"type": "text", "text": "Answer"}]))),
+            0,
         );
         assert!(reply.is_some());
         let reply = super::super::next_reply(
             reply,
             reply_step(&json!({"type": "user", "message": {"content": "next"}})),
+            0,
         );
         assert_eq!(reply, None);
     }

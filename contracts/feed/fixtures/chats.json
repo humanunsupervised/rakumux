@@ -1,0 +1,120 @@
+{
+  "chatUpload": {
+    "valid": [
+      {
+        "note": "a Claude Code turn: the prompt, reasoning, a tool call, its output and the reply",
+        "value": {
+          "version": 1,
+          "machine": "studio",
+          "chat": {
+            "agent": "claude-code",
+            "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+            "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" }
+          },
+          "messages": [
+            {
+              "id": "6c0d7a52-9b1e-4f3a-8d2c-1e5f7a9b3c4d",
+              "position": 0,
+              "role": "user",
+              "at": 1761220000000,
+              "parts": [{ "type": "text", "text": "Fix the flaky parser test" }]
+            },
+            {
+              "id": "7d1e8b63-0c2f-4a4b-9e3d-2f6a8b0c4d5e",
+              "position": 812,
+              "role": "assistant",
+              "at": 1761220001000,
+              "parts": [
+                { "type": "reasoning", "text": "The test depends on map order." },
+                { "type": "tool_call", "call_id": "toolu_01ABC", "name": "Bash", "input": "{\"command\":\"cargo test -p tui parser\"}" }
+              ]
+            },
+            {
+              "id": "8e2f9c74-1d3a-4b5c-8f4e-3a7b9c1d5e6f",
+              "position": 1650,
+              "role": "tool",
+              "parts": [{ "type": "tool_result", "call_id": "toolu_01ABC", "output": "test result: FAILED. 1 failed\n\tat parser.rs:42", "error": true }]
+            },
+            {
+              "id": "9f3a0d85-2e4b-4c6d-9a5f-4b8c0d2e6f7a",
+              "position": 2400,
+              "role": "assistant",
+              "parts": [{ "type": "text", "text": "Fixed: the test sorts the keys now.", "truncated": false }]
+            }
+          ]
+        }
+      },
+      {
+        "note": "an OpenCode reply block with an empty tool output, cut short",
+        "value": {
+          "version": 1,
+          "machine": "build-box",
+          "chat": {
+            "agent": "opencode",
+            "conversation_id": "ses_3c2b1a0f9e8d7c6b5a4",
+            "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R1", "name": "opencode 2" }
+          },
+          "messages": [
+            {
+              "id": "msg_3c2b1a0f9e8d:3",
+              "position": 7171,
+              "role": "assistant",
+              "parts": [
+                { "type": "tool_call", "call_id": "call_9|fc_1", "name": "write", "input": "", "truncated": true },
+                { "type": "tool_result", "call_id": "call_9|fc_1", "output": "" }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      { "note": "no messages", "patch": { "messages": [] } },
+      { "note": "unknown version", "patch": { "version": 2 } },
+      { "note": "a user id in the body", "patch": { "user_id": "user_1" } },
+      { "note": "a full path as the folder", "session": { "folder": "/home/person/rakumux" } },
+      { "note": "an unknown agent", "chat": { "agent": "cursor" } },
+      { "note": "no conversation", "chat": { "conversation_id": null } },
+      { "note": "a role that isn't one", "message": { "role": "system" } },
+      { "note": "a negative position", "message": { "position": -1 } },
+      { "note": "no parts", "message": { "parts": [] } },
+      { "note": "an id with a slash", "message": { "id": "a/b" } },
+      { "note": "an unknown part type", "message": { "parts": [{ "type": "image", "text": "x" }] } },
+      { "note": "empty text", "message": { "parts": [{ "type": "text", "text": "" }] } },
+      { "note": "a tool call without a name", "message": { "parts": [{ "type": "tool_call", "input": "{}" }] } },
+      { "note": "a result with text instead of output", "message": { "parts": [{ "type": "tool_result", "text": "ok" }] } },
+      { "note": "an extra field on a part", "message": { "parts": [{ "type": "text", "text": "hi", "html": "<b>hi</b>" }] } },
+      { "note": "an escape sequence in tool output", "message": { "parts": [{ "type": "tool_result", "output": "\u001b[31mred" }] } },
+      { "note": "a bidi override in text", "message": { "parts": [{ "type": "text", "text": "abc\u202edef" }] } }
+    ],
+    "bounds": [
+      { "note": "64 KiB of ASCII text fits", "text": "a", "count": 65536, "valid": true },
+      { "note": "a byte more doesn't", "text": "a", "count": 65537, "valid": false },
+      { "note": "16384 four-byte characters fit", "text": "😀", "count": 16384, "valid": true },
+      { "note": "one more doesn't", "text": "😀", "count": 16385, "valid": false }
+    ]
+  },
+  "chatAccepted": {
+    "valid": [{ "version": 1, "accepted": 4 }],
+    "invalid": [{ "version": 1, "accepted": 0 }, { "version": 1 }, { "version": 1, "accepted": 4, "seq": 9 }]
+  },
+  "turn": {
+    "valid": [
+      { "version": 1, "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "messages": [], "more": false },
+      {
+        "version": 1,
+        "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+        "messages": [
+          { "id": "6c0d7a52-9b1e-4f3a-8d2c-1e5f7a9b3c4d", "position": 0, "role": "user", "at": 1761220000000, "parts": [{ "type": "text", "text": "Fix the flaky parser test" }] },
+          { "id": "9f3a0d85-2e4b-4c6d-9a5f-4b8c0d2e6f7a", "position": 2400, "role": "assistant", "parts": [{ "type": "text", "text": "Fixed." }] }
+        ],
+        "more": true
+      }
+    ],
+    "invalid": [
+      { "version": 1, "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "messages": [] },
+      { "version": 1, "entry": "not-a-ulid", "messages": [], "more": false },
+      { "version": 1, "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "messages": [{ "id": "x", "position": 1, "role": "user", "parts": [] }], "more": false }
+    ]
+  }
+}

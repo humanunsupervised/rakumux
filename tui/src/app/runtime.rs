@@ -156,6 +156,13 @@ pub enum AppEvent {
     },
     /// A switch of the account was changed (Settings → Available on sign-in).
     FeaturesSet(Result<(), String>),
+    /// A feed entry's turn, from its start or after what was held.
+    FeedTurn {
+        generation: u64,
+        entry: String,
+        appended: bool,
+        result: Result<rakumux_sensagent::feed::FeedTurn, String>,
+    },
     /// The feed entries that changed since this window last asked.
     Feed {
         generation: u64,

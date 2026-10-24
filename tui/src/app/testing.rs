@@ -438,6 +438,7 @@ impl SessionApi for FakeApi {
                 session_core::api::CAPABILITY_USER_PROMPT,
                 session_core::api::CAPABILITY_TURN,
                 session_core::api::CAPABILITY_REPLIES,
+                session_core::api::CAPABILITY_TRANSCRIPT,
             ]);
         }
         if state.restarts_in_place {
@@ -817,6 +818,9 @@ pub struct FakeAccount {
     pub refreshing: Mutex<std::collections::HashSet<SessionId>>,
     /// Sessions a summary was asked for, in order.
     pub summarized: Mutex<Vec<SessionId>>,
+    /// What `feed_turn` answers in turn, then an empty turn; and what it was asked.
+    pub turns: Mutex<std::collections::VecDeque<rakumux_sensagent::feed::FeedTurn>>,
+    pub turn_asks: Mutex<Vec<(String, Option<u64>)>>,
     pub calls: Mutex<Vec<&'static str>>,
 }
 
@@ -949,6 +953,28 @@ impl crate::account::AccountAccess for FakeAccount {
         self.summarized.lock().unwrap().push(session.clone());
         self.refreshing.lock().unwrap().insert(session.clone());
         Ok(())
+    }
+
+    fn feed_turn(
+        &self,
+        entry: &str,
+        after: Option<u64>,
+    ) -> std::result::Result<rakumux_sensagent::feed::FeedTurn, String> {
+        self.call("feed_turn");
+        self.turn_asks
+            .lock()
+            .unwrap()
+            .push((entry.to_owned(), after));
+        Ok(self
+            .turns
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(rakumux_sensagent::feed::FeedTurn {
+                status: rakumux_sensagent::feed::FeedTurnStatus::Ready,
+                messages: Vec::new(),
+                next: None,
+            }))
     }
 
     fn set_features(

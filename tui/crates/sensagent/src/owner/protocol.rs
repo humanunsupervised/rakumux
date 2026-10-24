@@ -14,7 +14,7 @@ use session_core::ids::SessionId;
 use session_core::model::ScopeRoot;
 
 use crate::dispatch::DispatchError;
-use crate::feed::FeedPage;
+use crate::feed::{FeedPage, FeedTurn};
 use crate::refresh::{AIStatus, RefreshError, RefreshFailure, SignInFailure, SignInState};
 use crate::status::{
     ConsentPolicy, ConsentSnapshot, FolderConsent, StatusError, StatusStoreError, StatusView,
@@ -105,6 +105,15 @@ pub enum OwnerRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         feed: Option<bool>,
     },
+    /// The whole turn feed entry `entry` (its ULID) finished, read from
+    /// rakumux.com: the prompt, the agent's text, reasoning and tool calls,
+    /// and the tools' output, in order, past `after` when given. Answered
+    /// with `FeedTurn`.
+    FeedTurn {
+        entry: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<u64>,
+    },
 }
 
 /// The owner's answers.
@@ -132,6 +141,9 @@ pub enum OwnerResponse {
     },
     Feed {
         feed: FeedPage,
+    },
+    FeedTurn {
+        turn: FeedTurn,
     },
     Done,
     Error {

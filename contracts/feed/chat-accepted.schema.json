@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:chat-accepted",
+  "title": "POST /api/v1/feed/messages success",
+  "description": "How many of the uploaded messages were stored (all of them).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "accepted"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "accepted": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  }
+}

@@ -22,6 +22,7 @@ const SECRET_MASK: u8 = 1;
 const PATH_MASK: u8 = 2;
 
 struct Patterns {
+    escapes: Regex,
     prohibited: Regex,
     meaningful: Regex,
     private_key: Regex,
@@ -33,6 +34,11 @@ struct Patterns {
 
 static PATTERNS: LazyLock<Result<Patterns, regex::Error>> = LazyLock::new(|| {
     Ok(Patterns {
+        // Terminal escape sequences: CSI (colours, cursor), OSC (titles, links)
+        // and string commands, and two-character escapes.
+        escapes: Regex::new(
+            r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|[ -/]*[0-~])",
+        )?,
         // Rust strings have no surrogate scalars. TAB/LF/CR remain valid context.
         prohibited: Regex::new(
             r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\p{Cf}\p{Default_Ignorable_Code_Point}]",
@@ -213,6 +219,23 @@ pub(crate) fn feed_text(input: &str) -> Option<String> {
     let rendered = render_masks(&clean, &mask);
     let text = rendered.trim();
     patterns.meaningful.is_match(text).then(|| text.to_owned())
+}
+
+/// Text of an agent's chat as the feed uploads it: without terminal escape
+/// sequences or controls (but tab, line feed and carriage return), with private
+/// keys, credential assignments and tokens masked. Paths stay, and it may be
+/// empty (a tool with no output).
+pub(crate) fn chat_text(input: &str) -> Option<String> {
+    let patterns = PATTERNS.as_ref().ok()?;
+    let plain = patterns.escapes.replace_all(input, "");
+    let clean = patterns.prohibited.replace_all(&plain, "");
+    let mut mask = vec![0u8; clean.len()];
+    for pattern in [&patterns.private_key, &patterns.assignment, &patterns.token] {
+        for found in pattern.find_iter(&clean) {
+            mark(&mut mask, found.start(), found.end(), SECRET_MASK);
+        }
+    }
+    Some(render_masks(&clean, &mask))
 }
 
 fn redact(input: &str, secrets: &[&SecretValue], patterns: &Patterns) -> String {

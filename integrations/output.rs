@@ -13,9 +13,10 @@
 //!   Rakumux plugin bound to the session, else the folder's newest one.
 //!
 //! For the agent feed, the follower also keeps the current turn's reply
-//! whole ([`Reply`], Claude Code and Codex): what the agent said after its
-//! last tool call, or the turn's last message. The control layer captures it
-//! when the turn finishes, and only while reply capture is on.
+//! whole ([`Reply`]): what the agent said after its last tool call, or the
+//! turn's last message. The control layer captures it when the turn
+//! finishes, and only while reply capture is on. The whole conversation is
+//! read on demand ([`transcript`]).
 
 use crate::host::ProcessInfo;
 use serde_json::Value;
@@ -31,6 +32,8 @@ mod claude;
 mod codex;
 #[path = "open-code/output.rs"]
 mod opencode;
+#[path = "transcript.rs"]
+pub mod transcript;
 
 /// The most of a log read at once: a log that grew more is read from its tail.
 const MAX_READ: u64 = 256 * 1024;
@@ -86,6 +89,8 @@ pub struct Reply {
     pub text: String,
     /// The reply was longer than `text`.
     pub truncated: bool,
+    /// The [`transcript`] position of the reply's last message.
+    pub position: Option<u64>,
 }
 
 /// How one log entry changes the reply being built.
@@ -103,7 +108,7 @@ enum Step {
 
 /// An agent whose log is an append-only file of JSON lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LogAgent {
+pub enum LogAgent {
     Claude,
     Codex,
 }
@@ -128,6 +133,8 @@ enum Source {
     OpenCode {
         database: PathBuf,
         cwd: Option<PathBuf>,
+        /// The one the last read found.
+        conversation: Option<String>,
     },
 }
 
@@ -164,6 +171,7 @@ impl Follower {
             "opencode" | "opencode2" => Source::OpenCode {
                 database: crate::resume::opencode_database()?,
                 cwd: crate::procinfo::cwd_of(process.pid),
+                conversation: None,
             },
             _ => return None,
         };
@@ -193,29 +201,47 @@ impl Follower {
         }
     }
 
-    /// The conversation the log belongs to: Claude Code's, or Codex's
-    /// thread from its `rollout-<time>-<thread>.jsonl`.
+    /// The conversation followed: Claude Code's, Codex's thread from its
+    /// `rollout-<time>-<thread>.jsonl`, or the OpenCode session last read.
     pub fn conversation(&self) -> Option<String> {
-        let Source::Log {
-            agent,
-            conversation,
-            path,
-            ..
-        } = &self.source
-        else {
-            return None;
-        };
-        let id = match agent {
-            LogAgent::Claude => conversation.clone()?,
-            LogAgent::Codex => {
+        let id = match &self.source {
+            Source::Log {
+                agent: LogAgent::Claude,
+                conversation,
+                ..
+            } => conversation.clone()?,
+            Source::Log {
+                agent: LogAgent::Codex,
+                path,
+                ..
+            } => {
                 let stem = path.file_stem()?.to_str()?;
                 stem.get(stem.len().checked_sub(36)?..)?.to_owned()
             }
+            Source::OpenCode { conversation, .. } => conversation.clone()?,
         };
         let valid = !id.is_empty()
             && id.len() <= 128
-            && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
         valid.then_some(id)
+    }
+
+    /// Where the whole conversation is read from, once it's known.
+    pub fn transcript_source(&self) -> Option<transcript::TranscriptSource> {
+        let conversation = self.conversation()?;
+        Some(match &self.source {
+            Source::Log { agent, path, .. } => transcript::TranscriptSource::Log {
+                agent: *agent,
+                conversation,
+                path: path.clone(),
+            },
+            Source::OpenCode { database, .. } => transcript::TranscriptSource::OpenCode {
+                database: database.clone(),
+                conversation,
+            },
+        })
     }
 
     /// The current turn's reply, once the log has shown one.
@@ -266,12 +292,12 @@ impl Follower {
                 let Some(lines) = read(path, offset, partial) else {
                     return false;
                 };
-                let entries: Vec<Value> = lines
+                let entries: Vec<(u64, Value)> = lines
                     .iter()
-                    .filter_map(|line| serde_json::from_slice(line).ok())
+                    .filter_map(|(at, line)| Some((*at, serde_json::from_slice(line).ok()?)))
                     .collect();
                 // In order: a prompt starts a turn, the agent's messages join it.
-                for entry in &entries {
+                for (position, entry) in &entries {
                     let (typed, messages) = match agent {
                         LogAgent::Claude => (claude::typed(entry), claude::messages(entry)),
                         LogAgent::Codex => (codex::typed(entry), codex::messages(entry)),
@@ -286,24 +312,39 @@ impl Follower {
                         LogAgent::Claude => claude::reply_step(entry),
                         LogAgent::Codex => codex::reply_step(entry),
                     };
-                    self.reply = next_reply(self.reply.take(), step);
+                    self.reply = next_reply(self.reply.take(), step, *position);
                 }
-                let newest =
-                    |line: fn(&Value) -> Option<String>| entries.iter().rev().find_map(line);
+                let newest = |line: fn(&Value) -> Option<String>| {
+                    entries.iter().rev().find_map(|(_, entry)| line(entry))
+                };
                 match agent {
                     LogAgent::Claude => (newest(claude::line), newest(claude::prompt)),
                     LogAgent::Codex => (newest(codex::line), newest(codex::prompt)),
                 }
             }
-            Source::OpenCode { database, cwd } => {
+            Source::OpenCode {
+                database,
+                cwd,
+                conversation: followed,
+            } => {
                 let conversation = match bound {
                     Some(bound) => Some(bound.to_string()),
                     None => cwd
                         .as_deref()
                         .and_then(crate::resume::opencode_recent_session),
                 };
-                match conversation.filter(|id| crate::resume::is_conversation_id(id)) {
+                let conversation = conversation.filter(|id| crate::resume::is_conversation_id(id));
+                if *followed != conversation {
+                    *followed = conversation.clone();
+                    self.reply = None;
+                }
+                match conversation {
                     Some(id) => {
+                        self.reply =
+                            opencode::reply(database, &id).map(|(key, text, position)| Reply {
+                                position: Some(position),
+                                ..bounded(key, text)
+                            });
                         if let Some((turn_id, prompt, messages)) = opencode::turn(database, &id) {
                             if turn_id != self.turn.id {
                                 self.turn = Turn {
@@ -367,9 +408,10 @@ fn switch_conversation(
     true
 }
 
-/// The complete lines `path` gained since `offset` (moved past them); the
-/// start of an unfinished one waits in `partial`.
-fn read(path: &Path, offset: &mut u64, partial: &mut Vec<u8>) -> Option<Vec<Vec<u8>>> {
+/// The complete lines `path` gained since `offset` (moved past them), each
+/// with where it starts in the file; the start of an unfinished one waits in
+/// `partial`.
+fn read(path: &Path, offset: &mut u64, partial: &mut Vec<u8>) -> Option<Vec<(u64, Vec<u8>)>> {
     let mut file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
     if len < *offset {
@@ -385,19 +427,20 @@ fn read(path: &Path, offset: &mut u64, partial: &mut Vec<u8>) -> Option<Vec<Vec<
     file.seek(SeekFrom::Start(start)).ok()?;
     let mut bytes = Vec::new();
     file.take(len - start).read_to_end(&mut bytes).ok()?;
-    *offset = start + bytes.len() as u64;
-    let mut data = if skipped {
+    let (mut data, base) = if skipped {
         partial.clear();
         // Mid-line: from the next one.
         match bytes.iter().position(|b| *b == b'\n') {
-            Some(at) => bytes.split_off(at + 1),
-            None => Vec::new(),
+            Some(at) => (bytes.split_off(at + 1), start + at as u64 + 1),
+            None => (Vec::new(), start),
         }
     } else {
+        let base = (*offset).saturating_sub(partial.len() as u64);
         let mut data = std::mem::take(partial);
         data.extend_from_slice(&bytes);
-        data
+        (data, base)
     };
+    *offset = start + bytes.len() as u64;
     let complete = data
         .iter()
         .rposition(|b| *b == b'\n')
@@ -406,28 +449,35 @@ fn read(path: &Path, offset: &mut u64, partial: &mut Vec<u8>) -> Option<Vec<Vec<
     if (rest.len() as u64) <= MAX_READ {
         *partial = rest;
     }
-    Some(
-        data.split(|b| *b == b'\n')
-            .filter(|line| !line.is_empty())
-            .map(<[u8]>::to_vec)
-            .collect(),
-    )
+    let mut lines = Vec::new();
+    let mut at = base;
+    for line in data.split(|b| *b == b'\n') {
+        if !line.is_empty() {
+            lines.push((at, line.to_vec()));
+        }
+        at += line.len() as u64 + 1;
+    }
+    Some(lines)
 }
 
-/// The reply after one more log entry.
-fn next_reply(reply: Option<Reply>, step: Step) -> Option<Reply> {
+/// The reply after one more log entry, the one at `position`.
+fn next_reply(reply: Option<Reply>, step: Step, position: u64) -> Option<Reply> {
+    let at = |reply: Reply| Reply {
+        position: Some(position),
+        ..reply
+    };
     match step {
         Step::Keep => reply,
         Step::Reset => None,
         Step::Text { key, text } => {
             let text = match reply {
                 Some(reply) if !reply.truncated => format!("{}\n\n{text}", reply.text),
-                Some(reply) => return Some(Reply { key, ..reply }),
+                Some(reply) => return Some(at(Reply { key, ..reply })),
                 None => text,
             };
-            Some(bounded(key, text))
+            Some(at(bounded(key, text)))
         }
-        Step::Complete { key, text } => Some(bounded(key, text)),
+        Step::Complete { key, text } => Some(at(bounded(key, text))),
     }
 }
 
@@ -445,6 +495,7 @@ fn bounded(key: String, mut text: String) -> Reply {
         key,
         text,
         truncated,
+        position: None,
     }
 }
 

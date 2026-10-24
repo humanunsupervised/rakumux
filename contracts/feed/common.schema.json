@@ -89,7 +89,137 @@
           "description": "The reply was longer and `text` is its start.",
           "type": "boolean"
         },
-        "finished_at": { "$ref": "#/$defs/timestampMs" }
+        "finished_at": { "$ref": "#/$defs/timestampMs" },
+        "position": {
+          "description": "The position of the turn's last message in its chat (`chat-upload`), so the cloud can find the turn. Absent from older machines: the turn then ends at its chat's last message at or before `finished_at`.",
+          "$ref": "#/$defs/position"
+        }
+      }
+    },
+    "position": {
+      "description": "Where a message is in its conversation; messages sort by it. A byte offset into the agent's log for Claude Code and Codex; for OpenCode, its own order times 1024 plus the block's index.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "messageId": {
+      "description": "A message's id within its conversation: the agent's own (Claude Code's entry uuid, OpenCode's ids) or its position.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "callId": {
+      "description": "The agent's id for a tool call, which its result names too.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:|-]*$"
+    },
+    "toolName": {
+      "type": "string",
+      "$ref": "#/$defs/label",
+      "maxLength": 128,
+      "maxUtf8Bytes": 512
+    },
+    "partText": {
+      "description": "A message part's text as plain text, at most 64 KiB (longer text is cut and the part says `truncated`). Tab, LF and CR are allowed; other terminal controls, format controls, default-ignorables and lone surrogates are not.",
+      "type": "string",
+      "minLength": 1,
+      "maxUtf8Bytes": 65536,
+      "not": {
+        "pattern": "[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\\p{Cf}\\p{Cs}\\p{Default_Ignorable_Code_Point}]"
+      }
+    },
+    "partOutput": {
+      "description": "A tool call's input or a tool's output: `partText`, but it may be empty.",
+      "type": "string",
+      "maxUtf8Bytes": 65536,
+      "not": {
+        "pattern": "[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\\p{Cf}\\p{Cs}\\p{Default_Ignorable_Code_Point}]"
+      }
+    },
+    "truncated": {
+      "description": "The text was longer and this is its start.",
+      "type": "boolean"
+    },
+    "part": {
+      "description": "One piece of a message, by `type`: what was written (`text`), the agent's visible reasoning (`reasoning`), a tool call and its input (`tool_call`; `input` is usually JSON) or a tool's output (`tool_result`).",
+      "type": "object",
+      "required": ["type"],
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "$ref": "#/$defs/partText" },
+            "truncated": { "$ref": "#/$defs/truncated" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "reasoning" },
+            "text": { "$ref": "#/$defs/partText" },
+            "truncated": { "$ref": "#/$defs/truncated" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["type", "name", "input"],
+          "properties": {
+            "type": { "const": "tool_call" },
+            "call_id": { "$ref": "#/$defs/callId" },
+            "name": { "$ref": "#/$defs/toolName" },
+            "input": { "$ref": "#/$defs/partOutput" },
+            "truncated": { "$ref": "#/$defs/truncated" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["type", "output"],
+          "properties": {
+            "type": { "const": "tool_result" },
+            "call_id": { "$ref": "#/$defs/callId" },
+            "output": { "$ref": "#/$defs/partOutput" },
+            "error": { "description": "The tool failed.", "type": "boolean" },
+            "truncated": { "$ref": "#/$defs/truncated" }
+          }
+        }
+      ]
+    },
+    "message": {
+      "description": "One message of a chat: one entry of the agent's conversation. `user` is what the user typed, `assistant` the agent's text, reasoning and tool calls, `tool` tools' output. Uploading an id again replaces the message (OpenCode changes its messages as they stream).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "position", "role", "parts"],
+      "properties": {
+        "id": { "$ref": "#/$defs/messageId" },
+        "position": { "$ref": "#/$defs/position" },
+        "role": { "type": "string", "enum": ["user", "assistant", "tool"] },
+        "at": {
+          "description": "When the agent wrote it, on the machine's clock.",
+          "$ref": "#/$defs/timestampMs"
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/part" }
+        }
+      }
+    },
+    "chat": {
+      "description": "An agent's conversation on one machine, with the Rakumux session that last showed it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "conversation_id", "session"],
+      "properties": {
+        "agent": { "$ref": "#/$defs/agent" },
+        "conversation_id": { "$ref": "#/$defs/conversationId" },
+        "session": { "$ref": "#/$defs/session" }
       }
     },
     "entry": {

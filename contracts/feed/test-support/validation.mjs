@@ -5,7 +5,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 /** Canonical schema documents, loaded locally without resolving network references. */
 export const schemas = Object.freeze(
   Object.fromEntries(
-    ["common", "upload", "accepted", "page", "error"].map((name) => [
+    ["common", "upload", "accepted", "page", "error", "chat-upload", "chat-accepted", "turn"].map((name) => [
       name,
       JSON.parse(readFileSync(new URL(`../${name}.schema.json`, import.meta.url), "utf8")),
     ]),
@@ -47,4 +47,7 @@ export const validators = Object.freeze({
   accepted: ajv.compile(schemas.accepted),
   page: ajv.compile(schemas.page),
   error: ajv.compile(schemas.error),
+  chatUpload: ajv.compile(schemas["chat-upload"]),
+  chatAccepted: ajv.compile(schemas["chat-accepted"]),
+  turn: ajv.compile(schemas.turn),
 });

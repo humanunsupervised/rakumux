@@ -2646,7 +2646,8 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
                 "each agent's latest output",
                 "your last message in each session",
                 "AI summaries of each agent's turn",
-                "the agent feed"
+                "the agent feed",
+                "whole chats in the agent feed"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -3165,7 +3166,8 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "each agent's latest output",
                 "your last message in each session",
                 "AI summaries of each agent's turn",
-                "the agent feed"
+                "the agent feed",
+                "whole chats in the agent feed"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),

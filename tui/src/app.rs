@@ -983,6 +983,12 @@ impl App {
             }
             AppEvent::Summarized { session, result } => self.on_summarized(session, result),
             AppEvent::FeaturesSet(result) => self.on_features_set(result),
+            AppEvent::FeedTurn {
+                generation,
+                entry,
+                appended,
+                result,
+            } => self.on_feed_turn(generation, entry, appended, result),
             AppEvent::Feed { generation, result } => self.on_feed(generation, result),
             AppEvent::JobFailed(message) => {
                 self.set_status(format!("Background task failed: {message}"))
@@ -1323,7 +1329,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 10] = [
+const DAEMON_FEATURES: [(&str, &str); 11] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1352,6 +1358,10 @@ const DAEMON_FEATURES: [(&str, &str); 10] = [
         "AI summaries of each agent's turn",
     ),
     (session_core::api::CAPABILITY_REPLIES, "the agent feed"),
+    (
+        session_core::api::CAPABILITY_TRANSCRIPT,
+        "whole chats in the agent feed",
+    ),
 ];
 
 /// The daemon restarts in place, keeping the sessions (`daemon.restart`).

@@ -188,6 +188,7 @@ mod tests {
             text: "done".into(),
             truncated: false,
             finished_at: 1,
+            position: None,
         };
         bus.publish(envelope("/s", "A", SessionEvent::Reply { reply }));
         bus.publish(envelope("/s", "A", SessionEvent::Activity));

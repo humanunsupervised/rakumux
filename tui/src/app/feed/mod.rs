@@ -2,21 +2,42 @@
 //! this machine and the account's others, as the account service
 //! (`crate::account::AccountAccess::feed`) hands it out. Entries are kept
 //! newest first, with the selection, the scroll of the reply being read
-//! and where the service's pages are up to. Nothing here draws or knows
-//! where it's shown: the list's Feed tab hosts it today (`tab.rs`), and
-//! `components/feed.rs` draws it into any area.
+//! and where the service's pages are up to, and the whole turns of the
+//! entries read lately (`AccountAccess::feed_turn`). Nothing here draws or
+//! knows where it's shown: the list's Feed tab hosts it today (`tab.rs`),
+//! and `components/feed.rs` draws it into any area.
 
 mod tab;
 #[cfg(test)]
 mod tests;
 
 use std::cmp::Reverse;
+use std::collections::VecDeque;
 use std::time::Instant;
 
-use rakumux_sensagent::feed::{FeedEntry, FeedPage, FeedStatus};
+use rakumux_sensagent::feed::{FeedEntry, FeedPage, FeedStatus, FeedTurn, FeedTurnStatus};
+use session_core::api::TranscriptMessage;
 
 /// Entries kept, newest first (the service keeps as many).
 pub const MAX_ENTRIES: usize = 500;
+/// Whole turns kept, the most recently read.
+const MAX_TURNS: usize = 20;
+/// The most messages of one turn held (its start).
+const MAX_TURN_MESSAGES: usize = 2000;
+
+/// An entry's whole turn, as far as it was read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnState {
+    /// Asked for, nothing back yet.
+    Loading,
+    /// Its messages so far, in order; `next` while more are to come.
+    Ready {
+        messages: Vec<TranscriptMessage>,
+        next: Option<u64>,
+    },
+    /// It couldn't be read; the reply alone is shown.
+    Unavailable,
+}
 
 /// The feed as this window has it.
 #[derive(Debug, Clone)]
@@ -42,6 +63,10 @@ pub struct FeedStore {
     pub(super) due: Option<Instant>,
     /// Answers for an older request generation are dropped.
     pub(super) request_generation: u64,
+    /// Entries' turns, the most recently read last.
+    turns: VecDeque<(String, TurnState)>,
+    /// A turn is being read.
+    pub(super) turn_busy: bool,
 }
 
 impl FeedStore {
@@ -58,7 +83,68 @@ impl FeedStore {
             busy: false,
             due: None,
             request_generation: 0,
+            turns: VecDeque::new(),
+            turn_busy: false,
         }
+    }
+
+    /// Entry `id`'s turn, if it was asked for.
+    pub fn turn(&self, id: &str) -> Option<&TurnState> {
+        self.turns
+            .iter()
+            .find(|(held, _)| held == id)
+            .map(|(_, turn)| turn)
+    }
+
+    /// What to read of the selected entry's turn next: from its start when
+    /// it wasn't asked for, else after `next` while more are to come.
+    pub(super) fn turn_due(&self) -> Option<(String, Option<u64>)> {
+        let entry = self.selected()?;
+        match self.turn(&entry.id) {
+            None => Some((entry.id.clone(), None)),
+            Some(TurnState::Ready {
+                messages,
+                next: Some(next),
+            }) if messages.len() < MAX_TURN_MESSAGES => Some((entry.id.clone(), Some(*next))),
+            Some(_) => None,
+        }
+    }
+
+    /// Entry `id`'s turn is being read (from its start).
+    pub(super) fn turn_asked(&mut self, id: &str) {
+        if self.turn(id).is_none() {
+            self.turns.push_back((id.to_owned(), TurnState::Loading));
+            while self.turns.len() > MAX_TURNS {
+                self.turns.pop_front();
+            }
+        }
+    }
+
+    /// Take in a read of entry `id`'s turn: from its start, or after what's
+    /// held (`appended`).
+    pub(super) fn apply_turn(&mut self, id: &str, turn: FeedTurn, appended: bool) {
+        let Some(at) = self.turns.iter().position(|(held, _)| held == id) else {
+            return;
+        };
+        let state = match (turn.status, &mut self.turns[at].1) {
+            (FeedTurnStatus::Ready, TurnState::Ready { messages, next }) if appended => {
+                messages.extend(turn.messages);
+                messages.truncate(MAX_TURN_MESSAGES);
+                *next = turn.next;
+                return;
+            }
+            (FeedTurnStatus::Ready, _) => TurnState::Ready {
+                messages: turn.messages,
+                next: turn.next,
+            },
+            // A continuation that failed keeps what was read.
+            (_, TurnState::Ready { next, .. }) if appended => {
+                *next = None;
+                return;
+            }
+            _ => TurnState::Unavailable,
+        };
+        self.turns[at].1 = state;
     }
 
     /// This machine's name in entries.

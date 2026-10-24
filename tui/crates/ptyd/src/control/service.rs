@@ -452,6 +452,11 @@ impl Inner {
             Request::SessionSubmit { id, text } => self.submit(caller, &id, &text),
             Request::SessionTouch { id } => self.touch(caller, &id),
             Request::SessionTurn { id } => self.turn(caller, &id),
+            Request::SessionTranscript {
+                id,
+                after,
+                max_bytes,
+            } => self.transcript(caller, &id, after.as_ref(), max_bytes),
             Request::SessionPin { id, pinned } => self.pin(caller, &id, pinned),
             Request::SessionBind {
                 agent,
@@ -1518,6 +1523,41 @@ impl Inner {
                 total: turn.total,
             },
         })
+    }
+
+    /// `session_transcript`: the live agent's conversation after `after`, for
+    /// user callers. Reads files of other programs, so it reads without the
+    /// state lock.
+    fn transcript(
+        &self,
+        caller: &Caller,
+        id: &SessionId,
+        after: Option<&session_core::api::TranscriptCursor>,
+        max_bytes: Option<u32>,
+    ) -> Result<Response, ApiError> {
+        let source = {
+            let state = self.lock();
+            let record = self.target(&state, caller, Op::Transcript, id)?;
+            let live = state.live.get(&record.id).ok_or_else(|| {
+                ApiError::new(ErrorCode::SessionNotLive, "the session isn't running")
+            })?;
+            live.output
+                .as_ref()
+                .and_then(|follower| follower.transcript_source())
+        };
+        let source = source.ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::NotFound,
+                "no agent conversation is known in this session",
+            )
+        })?;
+        let transcript = source.read(after, max_bytes).ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::Internal,
+                "the agent's conversation couldn't be read",
+            )
+        })?;
+        Ok(Response::Transcript { transcript })
     }
 
     fn touch(&self, caller: &Caller, id: &SessionId) -> Result<Response, ApiError> {
@@ -2603,6 +2643,7 @@ impl Inner {
             text: reply.text,
             truncated: reply.truncated,
             finished_at: due.since,
+            position: reply.position,
         };
         let scope = live.scope.clone();
         replies.push(reply.clone(), now);
