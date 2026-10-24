@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use rakumux_sensagent::feed::{
     FeedEntry, FeedPage, FeedReply, FeedStatus, FeedTurn, FeedTurnStatus, ReplyStatus, ReplyWrite,
     ReplyWriteStatus,
@@ -31,6 +31,7 @@ pub fn entry(id: &str, session: &str, finished_at: i64, seq: Option<u64>) -> Fee
         position: None,
         reply_to: None,
         thread: None,
+        prompt: None,
     }
 }
 
@@ -42,6 +43,7 @@ pub fn page(generation: u64, revision: u64, entries: Vec<FeedEntry>, more: bool)
         entries,
         replies: Vec::new(),
         more,
+        open: None,
     }
 }
 
@@ -481,9 +483,52 @@ async fn r_writes_back_to_a_reply_which_then_shows_in_its_thread() {
 }
 
 #[tokio::test]
+async fn only_a_sessions_newest_message_can_be_answered() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    let mut newer = conversing("B");
+    newer.finished_at = 5_000;
+    newer.seq = Some(2);
+    account.queue_feed(page(1, 1, vec![conversing("A"), newer], false));
+    tick(&mut h, Duration::from_secs(3));
+    // The newest, B, has the button; A, older in the same session, doesn't.
+    assert!(screen(&mut h).contains("↩ Reply  r"));
+    h.press(KeyCode::Down).await;
+    assert!(!screen(&mut h).contains("↩ Reply"));
+    h.press(KeyCode::Char('r')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h
+        .app
+        .status()
+        .unwrap_or_default()
+        .contains("newest message"));
+    // A click on the button opens the box, as `r` does.
+    h.press(KeyCode::Up).await;
+    let _ = screen(&mut h);
+    let button = h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == crate::app::Hit::FeedReply)
+        .map(|(rect, _)| *rect)
+        .expect("a Reply button");
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        h.app.handle_mouse(MouseEvent {
+            kind,
+            column: button.x,
+            row: button.y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    assert!(matches!(h.app.mode, AppMode::FeedReply(_)));
+}
+
+#[tokio::test]
 async fn a_reply_that_isnt_stored_keeps_its_box_open_and_says_why() {
     let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
-    let unknown = entry("U", "S", 2_000, Some(2));
+    let unknown = entry("U", "T", 2_000, Some(2));
     account.queue_feed(page(1, 1, vec![conversing("A"), unknown], false));
     tick(&mut h, Duration::from_secs(3));
     // The newest has no known chat: nothing to write back to.
@@ -515,4 +560,113 @@ async fn a_reply_that_isnt_stored_keeps_its_box_open_and_says_why() {
     assert_eq!(dialog.input.value(), "Try again");
     h.press(KeyCode::Esc).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
+}
+
+#[tokio::test]
+async fn replies_show_their_markdown_drawn_not_its_markers() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    let mut done = conversing("A");
+    done.text = "## Fixed\n\nThe **parser** passes now:\n\n- `cargo test`\n- the e2e run".into();
+    account.queue_feed(page(1, 1, vec![done], false));
+    account
+        .turns
+        .lock()
+        .unwrap()
+        .push_back(FeedTurn::failed(rakumux_sensagent::feed::FeedFailure::Off));
+    tick(&mut h, Duration::from_secs(3));
+    let text = screen(&mut h);
+    assert!(text.contains("• cargo test"), "{text}");
+    assert!(text.contains("The parser passes now:"), "{text}");
+    assert!(!text.contains("**"), "{text}");
+    assert!(!text.contains("## Fixed"), "{text}");
+}
+
+fn asked(id: &str, session: &str, at: i64, text: &str) -> rakumux_sensagent::feed::FeedPrompt {
+    let _ = session;
+    rakumux_sensagent::feed::FeedPrompt {
+        id: id.into(),
+        text: text.into(),
+        truncated: false,
+        at: Some(at),
+    }
+}
+
+fn open_turn(
+    prompt: &str,
+    session: &str,
+    at: i64,
+    text: &str,
+) -> rakumux_sensagent::feed::OpenTurn {
+    rakumux_sensagent::feed::OpenTurn {
+        machine: "studio".into(),
+        session_id: session.into(),
+        session_name: format!("session {session}"),
+        folder: Some("repo".into()),
+        branch: Some("main".into()),
+        agent: "claude-code".into(),
+        conversation_id: "c".into(),
+        prompt: asked(prompt, session, at, text),
+    }
+}
+
+#[test]
+fn a_prompt_is_a_card_until_its_answer_takes_it_over() {
+    let mut store = FeedStore::new("studio".into());
+    let mut first = page(1, 1, vec![conversing("A")], false);
+    first.open = Some(vec![open_turn("p2", "S", 2_000, "Now add a test")]);
+    store.apply(first);
+    let keys =
+        |store: &FeedStore| -> Vec<String> { store.cards().iter().map(super::Card::key).collect() };
+    // The waiting prompt is newest: it leads, and is selected.
+    assert_eq!(keys(&store), ["open:p2", "A"]);
+    assert_eq!(store.selected_card().unwrap().key(), "open:p2");
+    assert!(store.selected().is_none(), "no entry yet");
+
+    // Its answer arrives with the same prompt: one card, still selected.
+    let mut answer = conversing("B");
+    answer.finished_at = 3_000;
+    answer.seq = Some(2);
+    answer.prompt = Some(asked("p2", "S", 2_000, "Now add a test"));
+    let mut second = page(1, 2, vec![answer], false);
+    second.open = Some(Vec::new());
+    store.apply(second);
+    assert_eq!(keys(&store), ["B", "A"]);
+    assert_eq!(store.selected().unwrap().id, "B");
+}
+
+#[test]
+fn this_machines_answer_not_yet_uploaded_borrows_its_prompt() {
+    let mut store = FeedStore::new("studio".into());
+    let mut pending = conversing("L");
+    pending.seq = None;
+    pending.finished_at = 5_000;
+    let mut read = page(1, 1, vec![pending], false);
+    read.open = Some(vec![open_turn("p1", "S", 4_000, "Fix the parser")]);
+    store.apply(read);
+    let cards = store.cards();
+    assert_eq!(cards.len(), 1, "the prompt's card is the answer's");
+    assert_eq!(cards[0].prompt().unwrap().text, "Fix the parser");
+}
+
+#[tokio::test]
+async fn cards_show_the_prompt_then_the_answer_or_that_it_is_coming() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    let mut done = conversing("A");
+    done.prompt = Some(asked("p1", "S", 500, "Fix the flaky parser test"));
+    let mut read = page(1, 1, vec![done], false);
+    read.open = Some(vec![open_turn("p2", "T", 2_000, "Now the docs")]);
+    account.queue_feed(read);
+    tick(&mut h, Duration::from_secs(3));
+    let text = screen(&mut h);
+    let at = |needle: &str| {
+        text.find(needle)
+            .unwrap_or_else(|| panic!("{needle:?} not in\n{text}"))
+    };
+    // Newest first: the waiting prompt, then the finished turn.
+    assert!(at("› Now the docs") < at("waiting for the answer…"));
+    assert!(at("waiting for the answer…") < at("› Fix the flaky parser test"));
+    assert!(at("› Fix the flaky parser test") < at("Reply A"));
+    assert!(text.contains(" ago · working"), "{text}");
+    // The waiting prompt's detail says its answer comes there.
+    assert!(text.contains("Waiting for the answer…"), "{text}");
 }

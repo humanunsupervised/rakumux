@@ -9,7 +9,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
-use super::cache::{FeedEntry, FeedReply, ReplyFailure, ReplyStatus};
+use super::cache::{FeedEntry, FeedPrompt, FeedReply, OpenTurn, ReplyFailure, ReplyStatus};
 use super::chats::{ChatName, UploadMessage};
 use crate::cloud::FeedHttpReply;
 
@@ -31,6 +31,8 @@ pub(crate) const MAX_TURN_MESSAGES: usize = 200;
 pub(crate) const REPLIES_LIMIT: u32 = 100;
 /// The longest reply text, in UTF-8 bytes (contract).
 pub(crate) const MAX_PROMPT_BYTES: usize = 8 * 1024;
+/// The most of a turn's prompt a page carries (`turnPrompt`), in UTF-8 bytes.
+const MAX_PROMPT_TEXT: usize = 4096;
 
 /// Why a feed request failed. Static: never reply text, URLs or tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -558,6 +560,68 @@ struct Page {
     entries: Vec<PageEntry>,
     latest_seq: u64,
     more: bool,
+    #[serde(default)]
+    open: Option<Vec<WireOpen>>,
+}
+
+#[derive(Deserialize)]
+struct WirePrompt {
+    id: String,
+    text: String,
+    #[serde(default)]
+    truncated: bool,
+    #[serde(default)]
+    at: Option<i64>,
+}
+
+impl WirePrompt {
+    /// Within the contract's bounds, stripped of what a terminal would act on.
+    fn checked(self) -> Option<FeedPrompt> {
+        let fits = conversation_id(&self.id) && self.text.len() <= MAX_PROMPT_TEXT;
+        fits.then(|| FeedPrompt {
+            id: self.id,
+            text: plain(&self.text),
+            truncated: self.truncated,
+            at: self.at,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct WireOpen {
+    machine: String,
+    session: PageSession,
+    agent: String,
+    conversation_id: String,
+    prompt: WirePrompt,
+}
+
+impl WireOpen {
+    fn checked(self) -> Option<OpenTurn> {
+        let fits = within(&self.machine, 256)
+            && within(&self.session.id, 64)
+            && within(&self.session.name, 256)
+            && self
+                .session
+                .folder
+                .as_deref()
+                .is_none_or(|f| within(f, 512))
+            && within(&self.agent, 32)
+            && conversation_id(&self.conversation_id);
+        if !fits {
+            return None;
+        }
+        Some(OpenTurn {
+            machine: line(&self.machine),
+            session_id: self.session.id,
+            session_name: line(&self.session.name),
+            folder: self.session.folder.map(|folder| line(&folder)),
+            branch: self.session.branch.map(|branch| line(&branch)),
+            agent: line(&self.agent),
+            conversation_id: self.conversation_id,
+            prompt: self.prompt.checked()?,
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -576,6 +640,8 @@ struct PageEntry {
     reply_to: Option<String>,
     #[serde(default)]
     thread: Option<String>,
+    #[serde(default)]
+    prompt: Option<WirePrompt>,
 }
 
 #[derive(Deserialize)]
@@ -609,6 +675,8 @@ pub(crate) struct PageRead {
     pub entries: Vec<FeedEntry>,
     pub latest_seq: u64,
     pub more: bool,
+    /// The account's open turns, when rakumux.com sent them.
+    pub open: Option<Vec<OpenTurn>>,
 }
 
 /// The seq of each uploaded id.
@@ -675,13 +743,21 @@ pub(crate) fn page(reply: &FeedHttpReply) -> Result<PageRead, FeedFailure> {
                 position: None,
                 reply_to: entry.reply_to.filter(|id| crate::feed::is_entry_id(id)),
                 thread: entry.thread.filter(|id| crate::feed::is_entry_id(id)),
+                prompt: entry.prompt.and_then(WirePrompt::checked),
             })
         })
         .collect();
+    let open = page.open.map(|open| {
+        open.into_iter()
+            .take(50)
+            .filter_map(WireOpen::checked)
+            .collect()
+    });
     Ok(PageRead {
         entries,
         latest_seq: page.latest_seq,
         more: page.more,
+        open,
     })
 }
 
@@ -768,6 +844,7 @@ mod tests {
             position: None,
             reply_to: None,
             thread: None,
+            prompt: None,
         }
     }
 
@@ -1055,5 +1132,36 @@ mod tests {
             super::reply(&reply(200, r#"{"version":2,"reply":{}}"#)).unwrap_err(),
             FeedFailure::Invalid
         );
+    }
+
+    #[test]
+    fn pages_bring_entries_prompts_and_the_open_turns() {
+        let body = r#"{"version":1,"latest_seq":3,"more":false,"entries":[
+            {"seq":3,"id":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","machine":"studio",
+             "session":{"id":"01K89ZQ4D2F6H8J0K2M4N6P8R0","name":"fix-tests","branch":"main"},
+             "agent":"claude-code","conversation_id":"c1","text":"Fixed.","truncated":false,
+             "finished_at":1761220000000,"received_at":1761220000400,
+             "prompt":{"id":"m1","text":"Fix it\u202e","truncated":false,"at":1761219990000}}],
+            "open":[
+             {"machine":"studio","session":{"id":"01K89ZQ4D2F6H8J0K2M4N6P8R0","name":"fix-tests"},
+              "agent":"claude-code","conversation_id":"c1",
+              "prompt":{"id":"m2","text":"Now the docs","truncated":false,"at":1761220060000}},
+             {"machine":"studio","session":{"id":"01K89ZQ4D2F6H8J0K2M4N6P8R0","name":"fix-tests"},
+              "agent":"claude-code","conversation_id":"c1",
+              "prompt":{"id":"bad id","text":"x","truncated":false}}]}"#;
+        let read = page(&reply(200, body)).unwrap();
+        let prompt = read.entries[0].prompt.as_ref().unwrap();
+        assert_eq!((prompt.id.as_str(), prompt.text.as_str()), ("m1", "Fix it"));
+        assert_eq!(read.entries[0].branch.as_deref(), Some("main"));
+        let open = read.open.unwrap();
+        assert_eq!(open.len(), 1, "an open turn off the contract is left out");
+        assert_eq!(open[0].prompt.id, "m2");
+        // An older rakumux.com says nothing about open turns.
+        let older = page(&reply(
+            200,
+            r#"{"version":1,"entries":[],"latest_seq":0,"more":false}"#,
+        ))
+        .unwrap();
+        assert_eq!(older.open, None);
     }
 }

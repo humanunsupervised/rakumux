@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:rakumux:feed:v1:page",
   "title": "GET /api/v1/feed success",
-  "description": "Entries from every machine of the account. With `after`: those with a greater seq, in increasing seq. Otherwise (`before`, or neither for the newest): those with a smaller seq, in decreasing seq. `more` says whether further entries exist in that direction. `latest_seq` is the account's greatest seq, 0 for an empty feed.",
+  "description": "Entries from every machine of the account, and its prompts still waiting for answers (`open`). With `after`: those with a greater seq, in increasing seq. Otherwise (`before`, or neither for the newest): those with a smaller seq, in decreasing seq. `more` says whether further entries exist in that direction. `latest_seq` is the account's greatest seq, 0 for an empty feed.",
   "x-maxBodyBytes": 2097152,
   "type": "object",
   "additionalProperties": false,
@@ -19,6 +19,12 @@
       "minimum": 0,
       "maximum": 9007199254740991
     },
-    "more": { "type": "boolean" }
+    "more": { "type": "boolean" },
+    "open": {
+      "description": "The account's prompts still waiting for their answers, newest first: the whole list on every read, not only what changed after `after`. A prompt drops out when the entry that answers it arrives (that entry's `prompt` has the same `id`).",
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/openTurn" }
+    }
   }
 }

@@ -17,7 +17,9 @@ mod sync;
 mod turn;
 mod wire;
 
-pub use cache::{FeedEntry, FeedPage, FeedReply, FeedStatus, ReplyFailure, ReplyStatus};
+pub use cache::{
+    FeedEntry, FeedPage, FeedPrompt, FeedReply, FeedStatus, OpenTurn, ReplyFailure, ReplyStatus,
+};
 pub(crate) use chats::{ChatSync, ChatWork, READ_BYTES};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};

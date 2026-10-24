@@ -90,7 +90,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let Some(tabs) = screen.tabs {
         tab_hits = draw_session_tabs(f, app, tabs, &mut hits);
     }
-    let main_cursor = draw_session_detail(f, app, &screen);
+    let main_cursor = draw_session_detail(f, app, &screen, &mut hits);
     let panel_cursor = draw_terminal_panel(f, app, &mut hits);
     let cursor = if app.focus == Focus::Terminal {
         panel_cursor
@@ -1999,6 +1999,7 @@ mod tests {
             position: None,
             reply_to: None,
             thread: None,
+            prompt: None,
         }
     }
 
@@ -2013,6 +2014,7 @@ mod tests {
             entries,
             replies: Vec::new(),
             more: false,
+            open: None,
         }
     }
 
@@ -2057,12 +2059,12 @@ mod tests {
         assert!(list[4].contains(" now · "), "{wide}");
         assert!(list[4].ends_with(" sending ╮"), "{wide}");
         assert!(list[5].starts_with(" │ Done: the parser handles"), "{wide}");
-        assert!(list[7].starts_with(" ╰─"), "{wide}");
+        assert!(list[8].starts_with(" ╰─"), "{wide}");
         assert!(
-            list[8].starts_with(" ╭ nightly-build  claude · repo ─"),
+            list[9].starts_with(" ╭ nightly-build  claude · repo ─"),
             "{wide}"
         );
-        assert!(list[8].ends_with(" 5m · ● done ╮"), "{wide}");
+        assert!(list[9].ends_with(" 5m · ● done ╮"), "{wide}");
         // The border's corners line up with its sides.
         let right = |row: &str| row.chars().count();
         assert_eq!(

@@ -234,10 +234,14 @@ impl App {
     /// Status tab, where it's shown); on a phone, a reply from elsewhere
     /// fills the screen to be read; otherwise say where it's from.
     pub fn open_feed_entry(&mut self) {
-        let Some(entry) = self.feed.selected().cloned() else {
+        let Some((session, machine)) = self.feed.selected_card().map(|card| {
+            (
+                SessionId::from_string(card.session_id().to_owned()),
+                card.machine().to_owned(),
+            )
+        }) else {
             return;
         };
-        let session = SessionId::from_string(entry.session_id.clone());
         if self.list.get(&session).is_some() {
             self.close_feed_tab();
             self.list.set_grouping(Grouping::Status);
@@ -249,10 +253,10 @@ impl App {
             self.follow_turn();
             return;
         }
-        let place = if entry.machine == self.feed.machine() {
+        let place = if machine == self.feed.machine() {
             "It came from a session that's gone.".to_owned()
         } else {
-            format!("It came from {}; its session runs there.", entry.machine)
+            format!("It came from {machine}; its session runs there.")
         };
         self.set_status(place);
     }
@@ -260,9 +264,9 @@ impl App {
     /// The feed entry's session when it runs here: what the footer names
     /// while the feed is shown.
     pub fn feed_session(&self) -> Option<&session_core::model::SessionView> {
-        let entry = self.feed.selected()?;
+        let card = self.feed.selected_card()?;
         self.list
-            .get(&SessionId::from_string(entry.session_id.clone()))
+            .get(&SessionId::from_string(card.session_id().to_owned()))
     }
 
     /// Rows of the area the selected reply is read in, for paging.

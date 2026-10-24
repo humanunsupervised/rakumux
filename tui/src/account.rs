@@ -101,6 +101,7 @@ pub fn signed_out_feed() -> FeedPage {
         entries: Vec::new(),
         replies: Vec::new(),
         more: false,
+        open: None,
     }
 }
 

@@ -35,6 +35,8 @@ chrono = { version = "0.4" }
 base64 = "0.21"
 libc = "0.2"
 qrcodegen = "1.8"
+# Agents' Markdown in the feed's detail; the parser only, no HTML.
+pulldown-cmark = { version = "=0.13.4", default-features = false }
 flate2 = "1.0"
 tar = "0.4"
 sha2 = "0.10"

@@ -171,6 +171,8 @@ pub enum Hit {
     /// A reply in the feed (its index, newest first): selects it, or opens
     /// it when it's selected already (at once on a phone).
     FeedEntry(usize),
+    /// The feed detail's Reply button: writes back to the selected reply.
+    FeedReply,
     /// The open Folders modal (clicks inside it don't close it).
     FolderMenu,
     /// A row of the Folders modal.

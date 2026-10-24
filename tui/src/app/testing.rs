@@ -1035,6 +1035,7 @@ impl crate::account::AccountAccess for FakeAccount {
             entries: Vec::new(),
             replies: Vec::new(),
             more: false,
+            open: None,
         })
     }
 }

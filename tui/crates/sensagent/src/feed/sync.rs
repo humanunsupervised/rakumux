@@ -222,6 +222,7 @@ impl FeedSync {
             position: reply.position,
             reply_to,
             thread: None,
+            prompt: None,
         });
     }
 
@@ -270,6 +271,9 @@ impl FeedSync {
                 self.read = true;
                 let more = page.more;
                 self.cache.merge(page.entries, page.latest_seq);
+                if let Some(open) = page.open {
+                    self.cache.set_open(open);
+                }
                 self.next_read = if more {
                     now
                 } else {
@@ -414,6 +418,7 @@ mod tests {
             entries,
             latest_seq: latest,
             more,
+            open: None,
         }))
     }
 

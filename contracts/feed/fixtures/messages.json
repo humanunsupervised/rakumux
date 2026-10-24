@@ -94,14 +94,26 @@
             "text": "The tests pass now.",
             "truncated": false,
             "finished_at": 1761220000000,
-            "received_at": 1761220000400
+            "received_at": 1761220000400,
+            "prompt": { "id": "6e1b0c3a-8f6d-4a52-9d1e-2f7c4b9a0e11", "text": "Fix the flaky parser test", "truncated": false, "at": 1761219940000 }
           }
         ],
         "latest_seq": 42,
-        "more": false
+        "more": false,
+        "open": [
+          {
+            "machine": "studio",
+            "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux", "branch": "main" },
+            "agent": "claude-code",
+            "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+            "prompt": { "id": "9a7c2e10-1b3d-4f5a-8c6e-0d2b4f6a8c1e", "text": "Now add a regression test", "truncated": false, "at": 1761220060000 }
+          }
+        ]
       }
     ],
     "invalid": [
+      { "version": 1, "entries": [], "latest_seq": 0, "more": false, "open": [{ "machine": "studio", "agent": "codex", "conversation_id": "c1", "prompt": { "id": "m1", "text": "hi", "truncated": false } }] },
+      { "version": 1, "entries": [], "latest_seq": 0, "more": false, "open": [{ "machine": "studio", "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "s" }, "agent": "codex", "conversation_id": "c1", "prompt": { "id": "m1", "text": "hi" } }] },
       { "version": 1, "entries": [], "latest_seq": -1, "more": false },
       { "version": 1, "entries": [], "latest_seq": 0 },
       { "version": 1, "entries": [{ "seq": 1 }], "latest_seq": 1, "more": false }

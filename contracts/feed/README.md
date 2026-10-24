@@ -69,7 +69,10 @@ conformance tests, not an HTTP server, database or local runtime.
   `unavailable` (503). Retry delays are 1–86400 seconds, only for the last two. A turn, reply
   upload or reply status naming an entry or reply the account doesn't have is
   `invalid_request` with 404; a reply to an entry without a conversation id is
-  `invalid_request` (400).
+  `invalid_request` (400), and one to an entry that isn't the newest of its session (its
+  machine's and session's latest by `finished_at`, then `seq`) is `invalid_request` with 409:
+  only a session's newest message can be answered. A repeated upload of a stored reply still
+  answers with the stored reply.
 
 Every object rejects additional properties. Authorization is the terminal's Clerk OAuth
 access token in the `Authorization` header, never the body; browser cookies and `Origin`

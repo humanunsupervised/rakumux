@@ -296,7 +296,36 @@
         "thread": {
           "description": "With `reply_to`: the entry that started the thread (the one first replied to).",
           "$ref": "#/$defs/ulid"
+        },
+        "prompt": {
+          "description": "What the user asked that started the entry's turn, from its uploaded chat; absent when the chat wasn't uploaded.",
+          "$ref": "#/$defs/turnPrompt"
         }
+      }
+    },
+    "turnPrompt": {
+      "description": "The user's message that started a turn, its text cut to 4096 UTF-8 bytes for the feed (`truncated` says so). `id` is the message's id in its chat; an open turn and the entry that finishes it name the same one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "truncated"],
+      "properties": {
+        "id": { "$ref": "#/$defs/messageId" },
+        "text": { "type": "string", "$ref": "#/$defs/partText", "maxUtf8Bytes": 4096 },
+        "truncated": { "type": "boolean" },
+        "at": { "$ref": "#/$defs/timestampMs" }
+      }
+    },
+    "openTurn": {
+      "description": "A prompt still waiting for its answer: a chat's newest user message with no entry finishing at or after it, sent in the last 6 hours.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["machine", "session", "agent", "conversation_id", "prompt"],
+      "properties": {
+        "machine": { "$ref": "#/$defs/machine" },
+        "session": { "$ref": "#/$defs/session" },
+        "agent": { "$ref": "#/$defs/agent" },
+        "conversation_id": { "$ref": "#/$defs/conversationId" },
+        "prompt": { "$ref": "#/$defs/turnPrompt" }
       }
     }
   }

@@ -1301,6 +1301,10 @@ impl App {
                     self.click_feed_entry(index);
                     return;
                 }
+                Some(Hit::FeedReply) => {
+                    self.open_feed_reply();
+                    return;
+                }
                 Some(Hit::ModeBadge) => {
                     // Like the Rakumux key in session mode, Esc in
                     // Rakumux mode.

@@ -162,8 +162,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    reconnecting or starting late), leaves out private sessions, masks keys, credential
    assignments and tokens, and uploads them with the session's name, folder name and git
    branch (`POST /api/v1/feed/entries`, batches of up to 50,
-   idempotent on the reply id). It reads the account's feed back (`GET /api/v1/feed?after=SEQ`)
-   every 10 s while a TUI shows it (an owner `feed` request in the last 30 s), else every 2
+   idempotent on the reply id). It reads the account's feed back (`GET /api/v1/feed?after=SEQ`;
+   entries carry their turn's `prompt`, and every page the account's prompts still waiting for
+   answers, `open`, kept whole and passed to TUIs when they change) every 10 s while a TUI shows it (an owner `feed` request in the last 30 s), else every 2
    minutes. Cache (the newest 500) and upload queue are memory only; the TUI asks the owner for
    the entries changed since its revision (`OwnerRequest::Feed`). Signing out or turning the
    switch off empties both. **Whole chats** (`feed/chats.rs`, `ChatSync`): under the same
@@ -758,15 +759,19 @@ its tabs, `≡ Feed    ◔ Status ▾  ▤ Folders    ◇ App` (Status is active
 filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`, `◔ 2 statuses ▾`); short rows narrow the gaps, then show
 the inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's
 filter at the left (`◔ Status ▾`); only Master detail shows the four tabs. With Feed active,
-the list shows the replies of the account's machines, newest first, each a card
-(`components/feed.rs`): on its top border the session's name, then quieter its agent and
-branch (the folder when no branch is known), and at the right its age and status (`done`,
-`sending`, or the newest reply written back to it: `reply waiting`, `reply typed in`,
-`answered`, `reply not sent`; only the mark when short of room), its first lines inside, the
-selected card's border in the accent; and the detail
-the selected reply whole (`Ctrl-d`/`Ctrl-u`, PgUp/PgDn scroll it), then its thread when
-someone wrote back; Enter goes into its session when it runs here, and `r` writes back to it
-(an entry answering a reply is marked `↳`). The footer,
+the list shows the account's machines' turns, newest first, each a card
+(`components/feed.rs`, `app::feed::Card`): on its top border the session's name, then quieter
+its agent and branch (the folder when no branch is known), and at the right its age and status
+(`done`, `sending`, `working`, or the newest reply written back to it: `reply waiting`, `reply
+typed in`, `answered`, `reply not sent`; only the mark when short of room); inside, the
+prompt's first line (`›`), then the start of the answer, its Markdown drawn
+(`components/markdown.rs`, pulldown-cmark); the selected card's border in the accent. A prompt
+still waiting for its answer (rakumux.com's `open` turns, from the uploaded chats) is a card of
+its own, `working`, until the entry that answers it takes the card over; and the detail
+the selected reply whole (`Ctrl-d`/`Ctrl-u`, PgUp/PgDn scroll it), its Markdown drawn, then its
+thread when someone wrote back; Enter goes into its session when it runs here, and `r` (or a
+click on its `↩ Reply` button) writes back to it, on a session's newest entry only, as
+rakumux.com requires (an entry answering a reply is marked `↳`). The footer,
 always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
 while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
 SESSION/TERMINAL), then messages and the daemon connection while it isn't up (`⠋ connecting`,

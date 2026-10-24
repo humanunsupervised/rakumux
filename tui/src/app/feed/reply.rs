@@ -20,8 +20,12 @@ impl App {
             self.set_status("Sign in to reply: Settings → Account.");
             return;
         }
-        let Some(entry) = self.feed.selected() else {
+        let Some(card) = self.feed.selected_card() else {
             self.set_status("Select a reply to answer.");
+            return;
+        };
+        let Some(entry) = card.entry() else {
+            self.set_status("Its answer hasn't come yet: reply to it once it has.");
             return;
         };
         if entry.seq.is_none() {
@@ -30,6 +34,10 @@ impl App {
         }
         if entry.conversation_id.is_none() {
             self.set_status("Its agent's chat isn't known, so it can't be answered.");
+            return;
+        }
+        if !self.feed.can_reply(entry) {
+            self.set_status("Only a session's newest message can be answered: reply to that one.");
             return;
         }
         let answering = super::plain(&entry.text)

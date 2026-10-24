@@ -19,7 +19,8 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use rakumux_sensagent::feed::{
-    FeedEntry, FeedPage, FeedReply, FeedStatus, FeedTurn, FeedTurnStatus, ReplyStatus,
+    FeedEntry, FeedPage, FeedPrompt, FeedReply, FeedStatus, FeedTurn, FeedTurnStatus, OpenTurn,
+    ReplyStatus,
 };
 use session_core::api::TranscriptMessage;
 
@@ -54,10 +55,102 @@ pub enum TurnState {
     Unavailable,
 }
 
+/// One card of the feed: a finished turn (its prompt, when known, and its
+/// answer), or a prompt still waiting for its answer. A prompt's card
+/// becomes its answer's when that arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Card<'a> {
+    Entry(&'a FeedEntry),
+    Open(&'a OpenTurn),
+}
+
+impl<'a> Card<'a> {
+    /// What the selection holds: an entry's id, or an open prompt's.
+    pub fn key(&self) -> String {
+        match self {
+            Card::Entry(entry) => entry.id.clone(),
+            Card::Open(open) => format!("open:{}", open.prompt.id),
+        }
+    }
+
+    /// When it last changed: its turn finished, or its prompt was sent (an
+    /// open one of unknown time counts as now).
+    pub fn at(&self) -> i64 {
+        match self {
+            Card::Entry(entry) => entry.finished_at,
+            Card::Open(open) => open.prompt.at.unwrap_or(i64::MAX),
+        }
+    }
+
+    pub fn entry(&self) -> Option<&'a FeedEntry> {
+        match self {
+            Card::Entry(entry) => Some(entry),
+            Card::Open(_) => None,
+        }
+    }
+
+    pub fn prompt(&self) -> Option<&'a FeedPrompt> {
+        match self {
+            Card::Entry(entry) => entry.prompt.as_ref(),
+            Card::Open(open) => Some(&open.prompt),
+        }
+    }
+
+    pub fn machine(&self) -> &'a str {
+        match self {
+            Card::Entry(entry) => &entry.machine,
+            Card::Open(open) => &open.machine,
+        }
+    }
+
+    pub fn session_id(&self) -> &'a str {
+        match self {
+            Card::Entry(entry) => &entry.session_id,
+            Card::Open(open) => &open.session_id,
+        }
+    }
+
+    pub fn session_name(&self) -> &'a str {
+        match self {
+            Card::Entry(entry) => &entry.session_name,
+            Card::Open(open) => &open.session_name,
+        }
+    }
+
+    pub fn agent(&self) -> &'a str {
+        match self {
+            Card::Entry(entry) => &entry.agent,
+            Card::Open(open) => &open.agent,
+        }
+    }
+
+    /// The branch its agent worked on, else its folder.
+    pub fn place(&self) -> Option<&'a str> {
+        match self {
+            Card::Entry(entry) => entry.branch.as_deref().or(entry.folder.as_deref()),
+            Card::Open(open) => open.branch.as_deref().or(open.folder.as_deref()),
+        }
+    }
+}
+
+/// Whether `entry` answers `open`: it names the same prompt, or it finished
+/// in the same chat after the prompt was sent.
+fn answers(entry: &FeedEntry, open: &OpenTurn) -> bool {
+    if let Some(prompt) = &entry.prompt {
+        return prompt.id == open.prompt.id;
+    }
+    entry.machine == open.machine
+        && entry.session_id == open.session_id
+        && entry.conversation_id.as_deref() == Some(open.conversation_id.as_str())
+        && open.prompt.at.is_some_and(|at| entry.finished_at >= at)
+}
+
 /// Where a feed entry is up to, as its card says at the right of its top
 /// border (rakumux.com's Feed says the same words).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryStatus {
+    /// A prompt whose answer hasn't come yet.
+    Working,
     /// This machine's, not uploaded yet.
     Sending,
     /// The agent finished its turn and nobody wrote back.
@@ -75,6 +168,7 @@ pub enum EntryStatus {
 impl EntryStatus {
     pub fn label(self) -> &'static str {
         match self {
+            EntryStatus::Working => "working",
             EntryStatus::Sending => "sending",
             EntryStatus::Done => "done",
             EntryStatus::ReplyWaiting => "reply waiting",
@@ -91,6 +185,8 @@ pub struct FeedStore {
     /// This machine's name, as the service names it in entries it uploads.
     machine: String,
     entries: Vec<FeedEntry>,
+    /// Prompts still waiting for their answers, as the service last said.
+    open: Vec<OpenTurn>,
     /// Replies written back to entries, by when they were written.
     replies: Vec<FeedReply>,
     /// `None` until the service first answered.
@@ -98,7 +194,7 @@ pub struct FeedStore {
     /// The service's generation and revision these entries are at.
     generation: Option<u64>,
     revision: Option<u64>,
-    /// The selected entry's id; `None` selects the newest.
+    /// The selected card's key ([`Card::key`]); `None` selects the newest.
     selected: Option<String>,
     /// Rows of the selected reply scrolled past (the detail).
     pub scroll: usize,
@@ -122,6 +218,7 @@ impl FeedStore {
         Self {
             machine,
             entries: Vec::new(),
+            open: Vec::new(),
             replies: Vec::new(),
             status: None,
             generation: None,
@@ -149,6 +246,7 @@ impl FeedStore {
     /// it wasn't asked for, else after `next` while more are to come.
     pub(super) fn turn_due(&self) -> Option<(String, Option<u64>)> {
         let entry = self.selected()?;
+        entry.seq?;
         match self.turn(&entry.id) {
             None => Some((entry.id.clone(), None)),
             Some(TurnState::Ready {
@@ -207,8 +305,24 @@ impl FeedStore {
     }
 
     /// Newest first.
+    #[cfg(test)]
     pub fn entries(&self) -> &[FeedEntry] {
         &self.entries
+    }
+
+    /// The cards, newest first: every entry, and each prompt still waiting
+    /// for an answer that no entry has given yet.
+    pub fn cards(&self) -> Vec<Card<'_>> {
+        let mut cards: Vec<Card> = self.entries.iter().map(Card::Entry).collect();
+        cards.extend(
+            self.open
+                .iter()
+                .filter(|open| !self.entries.iter().any(|entry| answers(entry, open)))
+                .map(Card::Open),
+        );
+        // Entries are newest first already; open prompts go where their time puts them.
+        cards.sort_by_key(|card| Reverse(card.at()));
+        cards
     }
 
     /// What to ask the service next: changes after this revision, of this
@@ -223,8 +337,12 @@ impl FeedStore {
         let selected = self.selected_index();
         if self.generation != Some(page.generation) {
             self.entries.clear();
+            self.open.clear();
             self.replies.clear();
             self.scroll = 0;
+        }
+        if let Some(open) = page.open {
+            self.open = open;
         }
         for reply in page.replies {
             self.take_reply(reply);
@@ -242,12 +360,36 @@ impl FeedStore {
         self.entries
             .sort_by_key(|entry| Reverse((entry.finished_at, entry.seq.unwrap_or(u64::MAX))));
         self.entries.truncate(MAX_ENTRIES);
-        // An entry that went away leaves the selection where it was.
+        // This machine's entry not uploaded yet says which prompt it answers.
+        for entry in &mut self.entries {
+            if entry.prompt.is_none() {
+                if let Some(open) = self.open.iter().find(|open| answers(entry, open)) {
+                    entry.prompt = Some(open.prompt.clone());
+                }
+            }
+        }
+        // A prompt that was answered stays selected as its answer's card.
+        if let Some(prompt) = self
+            .selected
+            .as_deref()
+            .and_then(|key| key.strip_prefix("open:"))
+        {
+            let gone = !self.open.iter().any(|open| open.prompt.id == prompt);
+            let answer = self
+                .entries
+                .iter()
+                .find(|entry| entry.prompt.as_ref().is_some_and(|p| p.id == prompt));
+            if let (true, Some(answer)) = (gone, answer) {
+                self.selected = Some(answer.id.clone());
+            }
+        }
+        // A card that went away leaves the selection where it was.
         if self.selected_index().is_none() && self.selected.is_some() {
+            let cards = self.cards();
             self.selected = selected
-                .map(|index| index.min(self.entries.len().saturating_sub(1)))
-                .and_then(|index| self.entries.get(index))
-                .map(|entry| entry.id.clone());
+                .map(|index| index.min(cards.len().saturating_sub(1)))
+                .and_then(|index| cards.get(index))
+                .map(Card::key);
         }
         page.more
     }
@@ -265,6 +407,20 @@ impl FeedStore {
             let over = self.replies.len() - MAX_REPLIES;
             self.replies.drain(..over);
         }
+    }
+
+    /// Whether `entry` can be written back to: uploaded, with a known chat,
+    /// and the newest entry of its session (its machine's and session's
+    /// latest by when it finished, then its seq), as rakumux.com requires.
+    pub fn can_reply(&self, entry: &FeedEntry) -> bool {
+        let key = |held: &FeedEntry| (held.finished_at, held.seq.unwrap_or(u64::MAX));
+        entry.seq.is_some()
+            && entry.conversation_id.is_some()
+            && !self.entries.iter().any(|held| {
+                held.machine == entry.machine
+                    && held.session_id == entry.session_id
+                    && key(held) > key(entry)
+            })
     }
 
     /// Where `entry` is up to: sending, done, or what became of the newest
@@ -315,32 +471,39 @@ impl FeedStore {
         items.into_iter().map(|(_, item)| item).collect()
     }
 
-    /// The selected entry's position; `None` when there are none.
+    /// The selected card's position; `None` when there are none.
     pub fn selected_index(&self) -> Option<usize> {
-        if self.entries.is_empty() {
+        let cards = self.cards();
+        if cards.is_empty() {
             return None;
         }
         match &self.selected {
             None => Some(0),
-            Some(id) => self.entries.iter().position(|entry| &entry.id == id),
+            Some(key) => cards.iter().position(|card| &card.key() == key),
         }
     }
 
-    pub fn selected(&self) -> Option<&FeedEntry> {
-        self.selected_index()
-            .and_then(|index| self.entries.get(index))
+    pub fn selected_card(&self) -> Option<Card<'_>> {
+        let index = self.selected_index()?;
+        self.cards().into_iter().nth(index)
     }
 
-    /// Select the entry at `index` (clamped); its reply is read from the top.
+    /// The selected card's entry; `None` for a prompt still waiting.
+    pub fn selected(&self) -> Option<&FeedEntry> {
+        self.selected_card().and_then(|card| card.entry())
+    }
+
+    /// Select the card at `index` (clamped); it's read from the top.
     pub fn select(&mut self, index: usize) {
-        let Some(last) = self.entries.len().checked_sub(1) else {
+        let cards = self.cards();
+        let Some(last) = cards.len().checked_sub(1) else {
             return;
         };
-        let id = self.entries[index.min(last)].id.clone();
-        if self.selected.as_ref() != Some(&id) {
+        let key = cards[index.min(last)].key();
+        if self.selected.as_ref() != Some(&key) {
             self.scroll = 0;
         }
-        self.selected = Some(id);
+        self.selected = Some(key);
     }
 
     /// Move the selection `delta` entries, stopping at either end.

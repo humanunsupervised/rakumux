@@ -12,6 +12,10 @@ pub(crate) const MAX_REPLIES: usize = 500;
 /// Reply text per page to a TUI: within the owner protocol's message bound,
 /// even with every character escaped.
 pub(crate) const PAGE_TEXT_BUDGET: usize = 96 * 1024;
+/// Open turns kept and how much of each prompt: within a page's room beside
+/// [`PAGE_TEXT_BUDGET`] (20 KiB at most).
+pub(crate) const MAX_OPEN: usize = 20;
+pub(crate) const OPEN_PROMPT_BYTES: usize = 1024;
 
 /// What an agent said when it finished a turn, on one of the account's machines.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +55,40 @@ pub struct FeedEntry {
     /// With `reply_to`: the entry that started the thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
+    /// What the user asked that started the turn, once rakumux.com has its
+    /// chat (never for this machine's not yet uploaded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<FeedPrompt>,
+}
+
+/// The user's message that started a turn (`contracts/feed/` `turnPrompt`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FeedPrompt {
+    /// Its id in its chat: an open turn and the entry that answers it share it.
+    pub id: String,
+    pub text: String,
+    /// The prompt was longer; `text` is its start.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
+    /// When it was sent (Unix milliseconds), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+}
+
+/// A prompt still waiting for its answer, on one of the account's machines
+/// (`contracts/feed/` `openTurn`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenTurn {
+    pub machine: String,
+    pub session_id: String,
+    pub session_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub agent: String,
+    pub conversation_id: String,
+    pub prompt: FeedPrompt,
 }
 
 /// What the user wrote back to a feed entry, for the entry's machine to type
@@ -157,6 +195,10 @@ pub struct FeedPage {
     /// More changes than fit one page: ask again now.
     #[serde(default)]
     pub more: bool,
+    /// The account's prompts still waiting for answers, newest first, whole,
+    /// when they changed since the TUI's revision; absent: as they were.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open: Option<Vec<OpenTurn>>,
 }
 
 struct Cached {
@@ -174,6 +216,9 @@ struct CachedReply {
 pub(crate) struct FeedCache {
     entries: Vec<Cached>,
     replies: Vec<CachedReply>,
+    /// The open turns as last read, and the revision they changed at.
+    open: Vec<OpenTurn>,
+    open_revision: u64,
     revision: u64,
     generation: u64,
     latest_seq: u64,
@@ -182,13 +227,41 @@ pub(crate) struct FeedCache {
 impl FeedCache {
     /// Forget every entry (sign-out, the switch turned off).
     pub fn clear(&mut self) {
-        if self.entries.is_empty() && self.replies.is_empty() && self.latest_seq == 0 {
+        if self.entries.is_empty()
+            && self.replies.is_empty()
+            && self.open.is_empty()
+            && self.latest_seq == 0
+        {
             return;
         }
         self.entries.clear();
         self.replies.clear();
+        self.open.clear();
+        self.open_revision = 0;
         self.latest_seq = 0;
         self.generation += 1;
+    }
+
+    /// The open turns as rakumux.com lists them now: TUIs get them whole
+    /// when they changed, each prompt cut to [`OPEN_PROMPT_BYTES`], at most
+    /// [`MAX_OPEN`].
+    pub fn set_open(&mut self, mut open: Vec<OpenTurn>) {
+        open.truncate(MAX_OPEN);
+        for turn in &mut open {
+            if turn.prompt.text.len() > OPEN_PROMPT_BYTES {
+                let mut cut = OPEN_PROMPT_BYTES;
+                while !turn.prompt.text.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                turn.prompt.text.truncate(cut);
+                turn.prompt.truncated = true;
+            }
+        }
+        if open != self.open {
+            self.revision += 1;
+            self.open_revision = self.revision;
+            self.open = open;
+        }
     }
 
     /// Replies read back, or this machine's just written: a changed one
@@ -332,7 +405,9 @@ impl FeedCache {
         let mut more = false;
         for (at, change) in changed {
             text += match &change {
-                Changed::Entry(entry) => entry.text.len(),
+                Changed::Entry(entry) => {
+                    entry.text.len() + entry.prompt.as_ref().map_or(0, |prompt| prompt.text.len())
+                }
                 Changed::Reply(reply) => reply.text.len(),
             };
             if !(entries.is_empty() && replies.is_empty()) && text > PAGE_TEXT_BUDGET {
@@ -355,6 +430,7 @@ impl FeedCache {
             entries,
             replies,
             more,
+            open: (self.open_revision > after).then(|| self.open.clone()),
         }
     }
 
@@ -416,6 +492,7 @@ mod tests {
             position: None,
             reply_to: None,
             thread: None,
+            prompt: None,
         }
     }
 
@@ -567,5 +644,44 @@ mod tests {
         );
         assert!(cleared.replies.is_empty());
         assert_ne!(cleared.generation, next.generation);
+    }
+
+    #[test]
+    fn open_turns_reach_a_tui_whole_when_they_change() {
+        let open = |id: &str, text: &str| OpenTurn {
+            machine: "studio".into(),
+            session_id: "S".into(),
+            session_name: "tests".into(),
+            folder: None,
+            branch: None,
+            agent: "codex".into(),
+            conversation_id: "c".into(),
+            prompt: FeedPrompt {
+                id: id.into(),
+                text: text.into(),
+                truncated: false,
+                at: Some(1),
+            },
+        };
+        let mut cache = FeedCache::default();
+        cache.set_open(vec![open("m1", &"é".repeat(OPEN_PROMPT_BYTES))]);
+        let first = cache.page(FeedStatus::Ready, None, None);
+        let sent = first.open.unwrap();
+        assert!(sent[0].prompt.text.len() <= OPEN_PROMPT_BYTES && sent[0].prompt.truncated);
+        // Unchanged: nothing more; changed (or emptied): the whole list.
+        cache.set_open(sent.clone());
+        let same = cache.page(
+            FeedStatus::Ready,
+            Some(first.revision),
+            Some(first.generation),
+        );
+        assert_eq!(same.open, None);
+        cache.set_open(Vec::new());
+        let emptied = cache.page(
+            FeedStatus::Ready,
+            Some(first.revision),
+            Some(first.generation),
+        );
+        assert_eq!(emptied.open, Some(Vec::new()));
     }
 }

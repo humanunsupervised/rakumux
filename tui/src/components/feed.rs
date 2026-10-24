@@ -21,9 +21,10 @@ use ratatui::{
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
 use super::format::{now_secs, relative_time, truncate};
+use super::markdown;
 use super::session_list::first_visible_row;
 use super::utils::get_spinner_char;
-use crate::app::feed::{agent_name, plain, EntryStatus, ThreadItem, TurnState};
+use crate::app::feed::{agent_name, plain, Card, EntryStatus, ThreadItem, TurnState};
 use crate::app::types::AccountStatus;
 use crate::app::{App, Hit};
 use crate::layout::str_width;
@@ -31,11 +32,11 @@ use crate::theme;
 
 /// Columns left of the content, as in the session list.
 const INDENT: usize = 3;
-/// Rows per reply's card: its top border (the header), two lines of its
-/// text and its bottom border.
-const CELL_ROWS: u16 = 4;
-/// Lines of a reply shown in the list.
-const PREVIEW_LINES: usize = 2;
+/// Rows per card: its top border (the header), three lines (the prompt's
+/// first, then the answer's start) and its bottom border.
+const CELL_ROWS: u16 = 5;
+/// Lines inside a card.
+const PREVIEW_LINES: usize = 3;
 /// Lines of a tool's output shown in a turn.
 const RESULT_LINES: usize = 6;
 
@@ -56,7 +57,7 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
         return;
     }
     if app.feed.reading {
-        draw_feed_reply(f, app, area);
+        draw_feed_reply(f, app, area, hits);
         return;
     }
     let p = theme::palette();
@@ -95,7 +96,7 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
             f.render_widget(message(lines), area);
             return;
         }
-        FeedStatus::Loading if app.feed.entries().is_empty() => {
+        FeedStatus::Loading if app.feed.cards().is_empty() => {
             let line = indented(vec![Span::styled(
                 format!("{} Loading the feed…", get_spinner_char()),
                 muted,
@@ -112,8 +113,8 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
         }
         FeedStatus::Loading | FeedStatus::Ready => {}
     }
-    let entries = app.feed.entries();
-    if entries.is_empty() {
+    let cards = app.feed.cards();
+    if cards.is_empty() {
         if status(app) == FeedStatus::Ready {
             let lines = vec![
                 indented(vec![Span::styled("No replies yet", strong)]),
@@ -130,11 +131,11 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
     area.y += 1;
     area.height = area.height.saturating_sub(1);
     let selected = app.feed.selected_index().unwrap_or(0);
-    let heights = vec![CELL_ROWS; entries.len()];
+    let heights = vec![CELL_ROWS; cards.len()];
     let first = first_visible_row(&heights, selected, area.height);
     let now = now_secs();
     let mut y = area.y;
-    for (index, entry) in entries.iter().enumerate().skip(first) {
+    for (index, card) in cards.iter().enumerate().skip(first) {
         if y + CELL_ROWS > area.bottom() {
             break;
         }
@@ -143,17 +144,18 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
             height: CELL_ROWS,
             ..area
         };
-        draw_card(f, app, entry, cell, index == selected, now);
+        draw_card(f, app, *card, cell, index == selected, now);
         hits.push((cell, Hit::FeedEntry(index)));
         y += CELL_ROWS;
     }
 }
 
-/// One reply's card in `cell`, a column in from each side: the top border
-/// names its session (then, quieter, its agent and branch) on the left and
-/// says its age and status on the right; the start of the reply inside.
-/// The selected card's border is the accent's.
-fn draw_card(f: &mut Frame, app: &App, entry: &FeedEntry, cell: Rect, chosen: bool, now: i64) {
+/// One card in `cell`, a column in from each side: the top border names its
+/// session (then, quieter, its agent and branch) on the left and says its
+/// age and status on the right; inside, the prompt's first line, then the
+/// start of the answer (or that it's coming). The selected card's border is
+/// the accent's.
+fn draw_card(f: &mut Frame, app: &App, card_of: Card, cell: Rect, chosen: bool, now: i64) {
     let p = theme::palette();
     let card = Rect {
         x: cell.x + 1,
@@ -176,7 +178,7 @@ fn draw_card(f: &mut Frame, app: &App, entry: &FeedEntry, cell: Rect, chosen: bo
         },
     );
     f.render_widget(
-        Paragraph::new(card_top(app, entry, card.width as usize, chosen, now)),
+        Paragraph::new(card_top(app, card_of, card.width as usize, chosen, now)),
         Rect { height: 1, ..card },
     );
     let inner = Rect {
@@ -187,25 +189,87 @@ fn draw_card(f: &mut Frame, app: &App, entry: &FeedEntry, cell: Rect, chosen: bo
     };
     let width = inner.width as usize;
     let text_style = Style::default().fg(if chosen { p.text_primary } else { p.text_muted });
-    let mut preview = wrap(&plain(&entry.text), width);
-    let more = preview.len() > PREVIEW_LINES;
-    preview.truncate(PREVIEW_LINES);
+    let mut lines = Vec::new();
+    let prompt_lines = if card_of.entry().is_some() { 1 } else { 2 };
+    if let Some(prompt) = card_of.prompt() {
+        lines.extend(prompt_preview(&prompt.text, width, prompt_lines, chosen));
+    }
+    let room = PREVIEW_LINES.saturating_sub(lines.len());
+    match card_of {
+        Card::Entry(entry) => lines.extend(preview(&entry.text, width, room, text_style)),
+        Card::Open(_) => lines.push(Line::from(Span::styled(
+            "waiting for the answer…",
+            Style::default()
+                .fg(p.text_muted)
+                .add_modifier(Modifier::ITALIC),
+        ))),
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// A prompt's first `rows` lines in a card, behind `›`.
+fn prompt_preview(text: &str, width: usize, rows: usize, chosen: bool) -> Vec<Line<'static>> {
+    let p = theme::palette();
+    let style = Style::default()
+        .fg(if chosen {
+            p.text_bright
+        } else {
+            p.text_primary
+        })
+        .add_modifier(Modifier::BOLD);
+    let flat: String = plain(text).split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut rows_of = wrap(&flat, width.saturating_sub(2));
+    let more = rows_of.len() > rows;
+    rows_of.truncate(rows);
     if more {
-        if let Some(last) = preview.last_mut() {
-            *last = truncate(&format!("{last} …"), width);
+        if let Some(last) = rows_of.last_mut() {
+            *last = truncate(&format!("{last} …"), width.saturating_sub(2));
         }
     }
-    let lines: Vec<Line> = preview
+    rows_of
         .into_iter()
-        .map(|line| Line::from(Span::styled(line, text_style)))
+        .enumerate()
+        .map(|(index, row)| {
+            let mark = if index == 0 { "› " } else { "  " };
+            Line::from(vec![
+                Span::styled(mark, Style::default().fg(p.accent_primary)),
+                Span::styled(row, style),
+            ])
+        })
+        .collect()
+}
+
+/// The start of a reply as a card shows it: its Markdown drawn, blank lines
+/// left out, `rows` of it, `…` when there's more.
+fn preview(text: &str, width: usize, rows: usize, style: Style) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = markdown::render(text, width, style)
+        .into_iter()
+        .filter(|line| line.width() > 0)
         .collect();
-    f.render_widget(Paragraph::new(lines), inner);
+    let more = lines.len() > rows;
+    lines.truncate(rows);
+    if more {
+        if let Some(last) = lines.last_mut() {
+            let room = width.saturating_sub(2);
+            while last.width() > room && !last.spans.is_empty() {
+                let span = last.spans.pop().unwrap_or_default();
+                let keep = room.saturating_sub(last.width());
+                if keep > 0 {
+                    last.spans
+                        .push(Span::styled(truncate(&span.content, keep), span.style));
+                    break;
+                }
+            }
+            last.spans.push(Span::styled(" …", style));
+        }
+    }
+    lines
 }
 
 /// A card's top border, `width` columns: `╭ session  agent · branch ─── age ·
 /// ● status ╮`. Short of room, the status keeps only its mark, then the
 /// agent and branch give way, then the session's name.
-fn card_top(app: &App, entry: &FeedEntry, width: usize, chosen: bool, now: i64) -> Line<'static> {
+fn card_top(app: &App, card: Card, width: usize, chosen: bool, now: i64) -> Line<'static> {
     let p = theme::palette();
     let border = Style::default().fg(if chosen { p.accent_primary } else { p.border });
     let muted = Style::default().fg(p.text_muted);
@@ -216,11 +280,18 @@ fn card_top(app: &App, entry: &FeedEntry, width: usize, chosen: bool, now: i64) 
             p.text_primary
         })
         .add_modifier(Modifier::BOLD);
-    let status = app.feed.status_of(entry);
+    let status = match card {
+        Card::Entry(entry) => app.feed.status_of(entry),
+        Card::Open(_) => EntryStatus::Working,
+    };
     let (mark, mark_style) = status_mark(status);
-    let age = relative_time(now, entry.finished_at / 1000);
-    let name = plain(&entry.session_name);
-    let mut meta = card_meta(entry);
+    let at = match card {
+        Card::Open(open) => open.prompt.at.unwrap_or(now * 1000),
+        Card::Entry(entry) => entry.finished_at,
+    };
+    let age = relative_time(now, at / 1000);
+    let name = plain(card.session_name());
+    let mut meta = card_meta(card);
     // The status's word goes first when the left part wouldn't fit whole.
     let left_width = str_width(&name) + 2 + str_width(&meta);
     let whole = str_width(&age) + str_width(status.label()) + 7;
@@ -272,9 +343,9 @@ fn card_top(app: &App, entry: &FeedEntry, width: usize, chosen: bool, now: i64) 
 
 /// What a card names after its session: the agent, then the branch it
 /// worked on (its folder when that isn't known).
-fn card_meta(entry: &FeedEntry) -> String {
-    let mut parts = vec![plain(agent_name(&entry.agent))];
-    if let Some(place) = entry.branch.as_ref().or(entry.folder.as_ref()) {
+fn card_meta(card: Card) -> String {
+    let mut parts = vec![plain(agent_name(card.agent()))];
+    if let Some(place) = card.place() {
         parts.push(plain(place));
     }
     parts.join(" · ")
@@ -285,6 +356,7 @@ fn card_meta(entry: &FeedEntry) -> String {
 fn status_mark(status: EntryStatus) -> (String, Style) {
     let p = theme::palette();
     let (mark, colour) = match status {
+        EntryStatus::Working => (get_spinner_char().to_string(), p.accent_primary),
         EntryStatus::Sending => (get_spinner_char().to_string(), p.text_muted),
         EntryStatus::Done => ("●".into(), p.accent_green),
         EntryStatus::ReplyWaiting => ("◐".into(), p.accent_gold),
@@ -312,7 +384,7 @@ fn origin(app: &App, entry: &FeedEntry) -> String {
 /// The selected reply whole in `area`: its session and where it's from,
 /// when it finished, then its text, scrolled by the feed's scroll (stopped
 /// at its end).
-pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     let p = theme::palette();
     f.render_widget(
         Block::default().style(Style::default().bg(p.background)),
@@ -325,14 +397,19 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect) {
     let key = Style::default()
         .fg(p.accent_primary)
         .add_modifier(Modifier::BOLD);
-    let Some(entry) = app.feed.selected() else {
-        return;
-    };
     let inner = Rect {
         x: area.x + 2,
         width: area.width.saturating_sub(4),
         y: area.y + 1,
         height: area.height.saturating_sub(1),
+    };
+    let entry = match app.feed.selected_card() {
+        Some(Card::Entry(entry)) => entry,
+        Some(Card::Open(open)) => {
+            draw_open(f, app, open, inner);
+            return;
+        }
+        None => return,
     };
     let width = inner.width as usize;
     let age = relative_time(now_secs(), entry.finished_at / 1000);
@@ -358,11 +435,22 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect) {
     } else {
         Vec::new()
     };
-    if entry.conversation_id.is_some() && entry.seq.is_some() {
+    // A button for a click or a tap, `r` from the keyboard.
+    let mut reply_at = None;
+    if app.feed.can_reply(entry) {
         if !action.is_empty() {
             action.push(Span::styled(" · ", muted));
         }
-        action.extend([Span::styled("r", key), Span::styled(" replies", muted)]);
+        let before: usize = action.iter().map(|span| str_width(&span.content)).sum();
+        let button = " ↩ Reply  r ";
+        reply_at = Some((before, str_width(button)));
+        action.push(Span::styled(
+            button,
+            Style::default()
+                .fg(p.background)
+                .bg(p.accent_primary)
+                .add_modifier(Modifier::BOLD),
+        ));
     }
     let mut lines = vec![
         Line::from(vec![
@@ -383,15 +471,35 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(truncate(&about.join(" · "), width), muted)),
     ];
     if !action.is_empty() {
+        if let Some((x, width)) = reply_at {
+            let x = inner.x.saturating_add(x as u16);
+            let rect = Rect {
+                x,
+                y: inner.y + lines.len() as u16,
+                width: (width as u16).min(inner.right().saturating_sub(x)),
+                height: 1,
+            };
+            if rect.width > 0 && rect.y < inner.bottom() {
+                hits.push((rect, Hit::FeedReply));
+            }
+        }
         lines.push(Line::from(action));
     }
     lines.push(Line::default());
     let head = lines.len();
+    // The prompt (when known) and the answer, while the whole turn isn't read.
     let reply = || {
-        wrap(&plain(&entry.text), width)
-            .into_iter()
-            .map(|line| Line::from(Span::styled(line, Style::default().fg(p.text_primary))))
-            .collect::<Vec<_>>()
+        let mut lines = Vec::new();
+        if let Some(prompt) = &entry.prompt {
+            lines.extend(prompt_lines(&prompt.text, width));
+            lines.push(Line::default());
+        }
+        lines.extend(markdown::render(
+            &entry.text,
+            width,
+            Style::default().fg(p.text_primary),
+        ));
+        lines
     };
     let body = match app.feed.turn(&entry.id) {
         Some(TurnState::Ready { messages, next }) if !messages.is_empty() => {
@@ -422,6 +530,92 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect) {
     let room = (inner.height as usize).saturating_sub(head);
     let scroll = app.feed.scroll.min(body.len().saturating_sub(room));
     lines.extend(body.into_iter().skip(scroll).take(room));
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// A prompt whole, wrapped behind `›`, as a turn shows the user's words.
+fn prompt_lines(text: &str, width: usize) -> Vec<Line<'static>> {
+    let p = theme::palette();
+    wrap(&plain(text), width.saturating_sub(2))
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
+            let mark = if index == 0 { "› " } else { "  " };
+            Line::from(vec![
+                Span::styled(mark, Style::default().fg(p.accent_primary)),
+                Span::styled(
+                    line,
+                    Style::default()
+                        .fg(p.text_bright)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])
+        })
+        .collect()
+}
+
+/// A prompt still waiting for its answer, in the detail: its session and
+/// where it's from, when it was sent, the prompt, and that the answer comes
+/// here.
+fn draw_open(f: &mut Frame, app: &App, open: &rakumux_sensagent::feed::OpenTurn, inner: Rect) {
+    let p = theme::palette();
+    let muted = Style::default().fg(p.text_muted);
+    let key = Style::default()
+        .fg(p.accent_primary)
+        .add_modifier(Modifier::BOLD);
+    let width = inner.width as usize;
+    let mut place = vec![plain(agent_name(&open.agent))];
+    if let Some(where_) = open.branch.as_ref().or(open.folder.as_ref()) {
+        place.push(plain(where_));
+    }
+    if open.machine != app.feed.machine() {
+        place.push(format!("on {}", plain(&open.machine)));
+    }
+    let name = plain(&open.session_name);
+    let sent = match open.prompt.at {
+        Some(at) => match relative_time(now_secs(), at / 1000).as_str() {
+            "now" => "asked just now".to_owned(),
+            age => format!("asked {age} ago"),
+        },
+        None => "asked".to_owned(),
+    };
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                truncate(&name, width),
+                Style::default()
+                    .fg(p.text_bright)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                truncate(
+                    &format!(" · {}", place.join(" · ")),
+                    width.saturating_sub(str_width(&name)),
+                ),
+                muted,
+            ),
+        ]),
+        Line::from(Span::styled(
+            truncate(&format!("{sent} · working"), width),
+            muted,
+        )),
+    ];
+    if app.feed_session().is_some() {
+        lines.push(Line::from(vec![
+            Span::styled("Enter", key),
+            Span::styled(" goes into its session", muted),
+        ]));
+    }
+    lines.push(Line::default());
+    lines.extend(prompt_lines(&open.prompt.text, width));
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        format!("{} Waiting for the answer…", get_spinner_char()),
+        muted,
+    )));
+    let room = inner.height as usize;
+    let scroll = app.feed.scroll.min(lines.len().saturating_sub(room));
+    let lines: Vec<Line> = lines.into_iter().skip(scroll).take(room).collect();
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -583,22 +777,14 @@ pub fn turn_lines(messages: &[TranscriptMessage], width: usize) -> Vec<Line<'sta
                 }
                 TranscriptPart::Text { text, truncated } => {
                     gap(&mut lines, Kind::Text);
-                    lines.extend(
-                        wrap(&plain(text), width)
-                            .into_iter()
-                            .map(|line| Line::from(Span::styled(line, text_style))),
-                    );
+                    lines.extend(markdown::render(text, width, text_style));
                     if *truncated {
                         lines.push(Line::from(Span::styled("…", muted)));
                     }
                 }
                 TranscriptPart::Reasoning { text, .. } => {
                     gap(&mut lines, Kind::Reasoning);
-                    lines.extend(
-                        wrap(&plain(text), width)
-                            .into_iter()
-                            .map(|line| Line::from(Span::styled(line, quiet))),
-                    );
+                    lines.extend(markdown::render(text, width, quiet));
                 }
                 TranscriptPart::ToolCall { name, input, .. } => {
                     gap(&mut lines, Kind::Tool);
