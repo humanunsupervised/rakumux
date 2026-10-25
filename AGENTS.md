@@ -204,10 +204,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    entry's thread under its turn.
    **Session list** (`feed/sessions.rs`, `SessionSync`): under the same switch the service
    uploads the machine's whole list of sessions (`POST /api/v1/feed/sessions`, at most 200, never
-   private or dead ones): what the TUI's Status and Folders tabs group by (name, folder name,
-   branch, agent, `status`, `lifecycle`, activity `phase`, the conversation shown, `pinned`,
-   `last_active_at`), when it changes (at most every 3 s) and every 60 s meanwhile, so
-   rakumux.com's Status and Folder pages list the account's sessions, show a session's
+   private or dead ones): what the TUI's Status, Folders and App tabs group by (name, folder
+   name, branch, agent, or without a named one the `program` the App tab files it under (its
+   `AppKey`, never a shell), `status`, `lifecycle`, activity `phase`, the conversation shown,
+   `pinned`, `last_active_at`), when it changes (at most every 3 s) and every 60 s meanwhile, so
+   rakumux.com's Status, Folders and App pages list the account's sessions, show a session's
    conversation from the uploaded chats, and tell a machine that's away.
 
 ## File structure

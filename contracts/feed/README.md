@@ -77,8 +77,10 @@ conformance tests, not an HTTP server, database or local runtime.
 - **Sessions:** a machine's whole list of sessions now (`sessions-upload`, `{version:1,
   machine, sessions, at}`, at most 200; `sessionState` in common), replacing what was stored for
   it: a session left out is gone. Sent when the list changes and every minute meanwhile, so a
-  machine that stops sending is known to be away. Each session says what the TUI's Status and
-  Folders tabs group by: its name, folder name and branch, agent, `status` (`live` or
+  machine that stops sending is known to be away. Each session says what the TUI's Status,
+  Folders and App tabs group by: its name, folder name and branch, agent (or, without one of
+  the three, the `program` the App tab files it under: an agent Rakumux doesn't name, its
+  foreground program while it runs, else the one it started with; never a shell), `status` (`live` or
   `exited`; dead sessions aren't listed), `lifecycle`, the agent's `phase` when it reports one,
   the `conversation_id` it shows, `pinned` and `last_active_at`. Private sessions are never
   listed. The answer says how many are stored (`sessions-stored`). Kept while the account's

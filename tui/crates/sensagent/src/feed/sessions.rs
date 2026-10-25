@@ -38,6 +38,9 @@ pub(crate) struct SessionState {
     branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     agent: Option<&'static str>,
+    /// Without one of those agents, what the TUI's App tab files it under.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    program: Option<String>,
     status: &'static str,
     lifecycle: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -90,6 +93,11 @@ impl SessionState {
                 "opencode" | "opencode2" => Some("opencode"),
                 _ => None,
             });
+        let program = if agent.is_none() {
+            program_of(view)
+        } else {
+            None
+        };
         let name: String = view
             .name
             .chars()
@@ -105,6 +113,7 @@ impl SessionState {
             folder: super::sync::folder_of(view),
             branch: super::sync::branch_of(view),
             agent,
+            program,
             status,
             lifecycle,
             phase,
@@ -121,6 +130,44 @@ impl SessionState {
                 .max(1_577_836_800_000),
         })
     }
+}
+
+/// Shells, which the App tab files as `shell` (the TUI's `grouping::is_shell`).
+const SHELLS: &[&str] = &[
+    "sh", "bash", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh", "nu", "xonsh", "elvish",
+];
+
+/// The app the TUI's App tab files `view` under (its `grouping::AppKey`), when it isn't `shell`:
+/// the agent the session names, else its foreground program while it runs, else the program it
+/// started with; never a shell. Lowercase, a name only, within the contract's 64 characters.
+fn program_of(view: &SessionView) -> Option<String> {
+    let usable = |program: &str| {
+        let program = program.trim();
+        (!program.is_empty() && !SHELLS.contains(&program)).then(|| program.to_owned())
+    };
+    let agent = view.agent.as_ref().and_then(|agent| usable(&agent.kind));
+    let foreground = view
+        .terminal
+        .as_ref()
+        .filter(|_| view.status == SessionStatus::Live)
+        .and_then(|terminal| terminal.foreground_process.as_deref())
+        .and_then(usable);
+    let launched = view
+        .launch
+        .argv
+        .as_ref()
+        .and_then(|argv| argv.first())
+        .map(|program| program.rsplit('/').next().unwrap_or(program))
+        .and_then(usable);
+    let program: String = agent
+        .or(foreground)
+        .or(launched)?
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_control() && *c != '/')
+        .take(64)
+        .collect();
+    (!program.trim().is_empty()).then_some(program)
 }
 
 /// The session list's state on the owner thread.

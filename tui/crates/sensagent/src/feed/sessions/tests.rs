@@ -159,3 +159,46 @@ fn rakumux_com_says_how_many_it_holds() {
         Err(FeedFailure::Off)
     );
 }
+
+#[test]
+fn sessions_without_a_named_agent_say_the_program_the_app_tab_files_them_under() {
+    let running = |id: &str, program: &str| {
+        let mut view = view(id);
+        if let Some(terminal) = view.terminal.as_mut() {
+            terminal.foreground_process = Some(program.into());
+        }
+        view
+    };
+    let node = running("01K89ZQ4D2F6H8J0K2M4N6P8R0", "node");
+    let shell = running("01K89ZQ4D2F6H8J0K2M4N6P8R1", "zsh");
+    let mut launched = running("01K89ZQ4D2F6H8J0K2M4N6P8R2", "node");
+    launched.status = SessionStatus::Exited;
+    launched.launch.argv = Some(vec!["/usr/local/bin/HTOP".into(), "-d".into(), "10".into()]);
+    let mut other_agent = running("01K89ZQ4D2F6H8J0K2M4N6P8R3", "node");
+    other_agent.agent = Some(AgentInfo {
+        kind: "pi".into(),
+        agent_session_id: None,
+        agent_session_path: None,
+    });
+    let named = agent(running("01K89ZQ4D2F6H8J0K2M4N6P8R4", "node"));
+    let mut sessions = on(&[node, shell, launched, other_agent, named]);
+    let upload = body(sessions.next_request(NOW, WALL));
+    let program = |id: &str| {
+        upload["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["id"] == id)
+            .unwrap()
+            .get("program")
+            .cloned()
+    };
+    // Its foreground program while it runs; a shell is no program.
+    assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R0"), Some("node".into()));
+    assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R1"), None);
+    // Ended: the program it started with, its name only, in lowercase.
+    assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R2"), Some("htop".into()));
+    // An agent the contract doesn't name is its program; a named one is the agent.
+    assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R3"), Some("pi".into()));
+    assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R4"), None);
+}

@@ -26,6 +26,16 @@
             "lifecycle": "none",
             "pinned": false,
             "last_active_at": 1761210000000
+          },
+          {
+            "id": "01K89ZQ4D2F6H8J0K2M4N6P8R2",
+            "name": "dev-server",
+            "folder": "rakumux",
+            "program": "node",
+            "status": "live",
+            "lifecycle": "none",
+            "pinned": false,
+            "last_active_at": 1761215000000
           }
         ]
       },
@@ -36,6 +46,8 @@
       { "note": "an unknown lifecycle", "session": { "lifecycle": "sleeping" } },
       { "note": "an unknown phase", "session": { "phase": "thinking" } },
       { "note": "a folder path", "session": { "folder": "/home/me/rakumux" } },
+      { "note": "a program path", "session": { "program": "/usr/bin/node" } },
+      { "note": "an empty program", "session": { "program": "" } },
       { "note": "a cwd", "session": { "cwd": "/home/me/rakumux" } },
       { "note": "no pinned", "session": { "pinned": null } },
       { "note": "a name with a newline", "session": { "name": "fix\ntests" } },
