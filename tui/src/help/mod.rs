@@ -1873,10 +1873,10 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     doc.text(
         "`p` pins the selected session, or unpins it. With the mouse, the session under the \
          pointer shows ☆ left of its name (★ when pinned): a click pins or unpins it. Pinned \
-         sessions come first in their folder (tabs show ★ after their name), in both layouts, \
-         in the order you give them. \
-         Unpinned, a session goes back to its place among the others. Every Rakumux window \
-         sees the same pins.",
+         sessions sit in their own section at the top of the list, under ★ pinned, above every \
+         folder, app and status, under every tab (tabs show ★ after their name), in the order \
+         you give them there. Unpinned, a session goes back to its place among the others. \
+         Every Rakumux window sees the same pins.",
     );
 
     doc.heading("Git branch");
@@ -2113,7 +2113,7 @@ fn agents_and_cli(doc: &mut Doc) {
     );
     doc.command(
         "rakumux pin <name|id>, rakumux unpin <name|id>",
-        "Pin a session first in its folder, or unpin it.",
+        "Pin a session into the pinned section at the top of the list, or unpin it.",
     );
     doc.command(
         "rakumux folders [--json], rakumux folders add|rm <dir>",

@@ -925,18 +925,16 @@ mod tests {
                 .position(|l| l.contains(needle))
                 .unwrap_or_else(|| panic!("{needle} missing: {wide}"))
         };
-        // Agents by name, then other programs, then the shell; each header
-        // ends in live/total.
-        let headers: Vec<usize> = [
-            " claude ─",
-            " codex ─",
-            " opencode ─",
-            " cargo ─",
-            " shell ─",
-        ]
-        .iter()
-        .map(|header| at(&list, header))
-        .collect();
+        // The pinned section first: docs, the one shell, takes its header
+        // with it. Then agents by name, then other programs; each header ends
+        // in live/total.
+        assert!(at(&list, "★ pinned") < at(&list, " docs "), "{wide}");
+        assert!(at(&list, " docs ") < at(&list, " claude ─"), "{wide}");
+        assert!(!wide.contains(" shell ─"), "{wide}");
+        let headers: Vec<usize> = [" claude ─", " codex ─", " opencode ─", " cargo ─"]
+            .iter()
+            .map(|header| at(&list, header))
+            .collect();
         assert!(headers.windows(2).all(|w| w[0] < w[1]), "{wide}");
         assert!(list[headers[0]].ends_with("─ 3/3 live"), "{wide}");
         assert!(list[headers[1]].ends_with("─ 1/2 live"), "{wide}");
@@ -945,7 +943,6 @@ mod tests {
         assert!(at(&list, "release-notes") < at(&list, "api-refactor"));
         assert!(at(&list, "api-refactor") < at(&list, "styles"));
         assert!(headers[1] < at(&list, "storybook") && at(&list, "storybook") < headers[2]);
-        assert!(at(&list, " docs ") > headers[4], "{wide}");
 
         h.app.show_tab(Grouping::Status);
         let wide = render(&mut h.app, 160, 48);
@@ -1189,9 +1186,11 @@ mod tests {
         assert!(list.iter().any(|l| l.ends_with(" live")), "{wide}");
         // No header above the list: the folder filter says what's shown.
         assert!(wide.lines().last().unwrap().starts_with(" RAKUMUX "));
+        // Narrow, the list keeps the selection in view: the pinned section
+        // is above it.
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("▤ Folders"), "{narrow}");
-        assert!(narrow.contains(" docs "), "{narrow}");
+        assert!(narrow.contains("api-refactor"), "{narrow}");
     }
 
     #[test]
@@ -1321,10 +1320,11 @@ mod tests {
         assert!(repo < api && api < web, "{wide}");
         assert!(list[repo].ends_with("2/2 live"), "{wide}");
         assert!(list[web].ends_with("1/2 live"), "{wide}");
-        // Inside a group: pinned first, then oldest first. Pins show only
-        // under the pointer.
-        assert!(at(" docs ") < at("api-refactor"), "{wide}");
-        assert!(!wide.contains('★'), "{wide}");
+        // Pinned sessions above every folder, under their own header; the
+        // rows' pins show only under the pointer. Then oldest first.
+        let pinned = at("★ pinned");
+        assert!(pinned < at(" docs ") && at(" docs ") < repo, "{wide}");
+        assert_eq!(wide.matches('★').count(), 1, "{wide}");
         assert!(
             web < at("storybook") && at("storybook") < at("frontend"),
             "{wide}"

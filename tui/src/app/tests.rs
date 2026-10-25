@@ -2395,10 +2395,12 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
     shift(&mut h, 'J').await;
     assert_eq!(visible_ids(&h), ["A", "C", "B"]);
     assert_eq!(h.selected().as_deref(), Some("C"));
-    // Pinned sessions stay above the others.
+    // Pinned sessions stay above the others, in the pinned section: C is
+    // past the folder's header under it.
     h.press(KeyCode::Char('k')).await;
     h.press(KeyCode::Char('p')).await;
     assert_eq!(visible_ids(&h), ["A", "C", "B"]);
+    h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     shift(&mut h, 'K').await;
     assert_eq!(visible_ids(&h), ["A", "C", "B"]);
@@ -4618,7 +4620,8 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     screen_rows(&mut h, 160, 48);
     assert_eq!(target(&h, Hit::PinToggle(row)), None);
 
-    // The pin is in the column of done's `★ pinned` header's star.
+    // A pinned session is in the pinned section, under its own `★ pinned`
+    // header above ready's; the others' pins still show under the pointer.
     let now = crate::components::format::now_secs();
     let done = |id: &str, pinned: bool| {
         let mut session = view(id, &id.to_lowercase(), now - 30);
@@ -4631,7 +4634,7 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     let rows = h.app.list.rows();
     let header = rows
         .iter()
-        .position(|row| matches!(row, ListRow::ReadPeriodHeader(_)))
+        .position(|row| matches!(row, ListRow::PinnedHeader))
         .unwrap();
     let row = rows
         .iter()
@@ -4642,12 +4645,9 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     let screen = screen_rows(&mut h, 160, 48);
     let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
     let header_line = target(&h, Hit::ListRow(header)).unwrap().1;
-    let column = |line: &str, mark: char| line.chars().position(|c| c == mark);
-    assert!(screen[usize::from(header_line)].contains("★ pinned"));
-    assert_eq!(
-        column(&screen[usize::from(pin.1)], '☆'),
-        column(&screen[usize::from(header_line)], '★')
-    );
+    assert!(screen[usize::from(header_line)].starts_with(" ★ pinned ─"));
+    assert!(header < row, "above the other sessions");
+    assert!(screen[usize::from(pin.1)].contains('☆'));
 }
 
 #[tokio::test]

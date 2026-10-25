@@ -214,6 +214,7 @@ impl App {
                 | Selection::WorktreeHeader(..)
                 | Selection::SectionHeader(_)
                 | Selection::ReadPeriodHeader(_)
+                | Selection::PinnedHeader
         ) {
             let first = self.list.visible().first().map(|s| s.id.clone());
             self.list.select(

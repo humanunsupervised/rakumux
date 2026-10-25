@@ -73,7 +73,7 @@ pub enum Command {
         #[arg(value_name = "NAME|ID", required = true, num_args = 1..=2)]
         args: Vec<String>,
     },
-    /// Pin a session: it's listed first in its folder
+    /// Pin a session: it's listed in the pinned section, at the top of the list
     Pin {
         /// Session name or id
         target: String,

@@ -91,13 +91,16 @@ new-session flow, and code boundaries.
   (`Selection::FolderHeader`; the launch folder first, then by name, then path; with no filter
   the folders that have sessions, with one the filter's, empty ones included) or under App and
   Status per app or status (`Selection::SectionHeader`, same rules; Enter opens that tab's
-  modal), and ends with "+ New session". The order never changes by itself: pinned sessions lead
-  their folder, both parts follow the user's order (`sessions.session_order`), and sessions
-  without a place go last, oldest first; inside an app or status, folder by folder. Under App
+  modal), and ends with "+ New session". Pinned sessions come first, in the pinned section
+  (`ListRow::PinnedHeader`, `Selection::PinnedHeader`; the list counts as grouped whenever one
+  is shown) under every tab, in its own order (`section_order["pinned"]`, `PINNED_ORDER`), the
+  active tab's filter applied; the groups below leave them out. The order never changes by
+  itself: sessions follow the user's order (`sessions.session_order`), and sessions without a
+  place go last, oldest first; inside an app or status, folder by folder. Under App
   and Status the selected session is kept shown when it stops matching the filter (`kept`), so
   a status change never takes away the session being worked in; filter and tab changes
-  (`refilter`) don't keep it. `move_session` moves one within its folder, its pinned or unpinned
-  part and its app or status (`J`/`K`, and the drag in `sessions.rs`: `App::drag`,
+  (`refilter`) don't keep it. `move_session` moves one within the pinned section, or its
+  folder and its app or status (`J`/`K`, and the drag in `sessions.rs`: `App::drag`,
   `SessionDrag`); `group_target` is `{`/`}` over any headers. A folder filter only sets
   `current_folder` while the Folders tab is active.
 - `screen.rs`: screen geometry for a size, layout, focus, zoom and the dragged pane sizes

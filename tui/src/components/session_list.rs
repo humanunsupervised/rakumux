@@ -42,7 +42,8 @@ fn row_height(row: &ListRow) -> u16 {
         | ListRow::FolderHeader(_)
         | ListRow::WorktreeHeader(..)
         | ListRow::SectionHeader(_)
-        | ListRow::ReadPeriodHeader(_) => 2,
+        | ListRow::ReadPeriodHeader(_)
+        | ListRow::PinnedHeader => 2,
         ListRow::Session(_) => 3,
     }
 }
@@ -326,6 +327,35 @@ pub fn section_header_line(
     Line::from(vec![
         Span::raw(" "),
         Span::styled(mark, mark_style),
+        Span::styled(
+            name,
+            Style::default().fg(name_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled("─".repeat(rule), Style::default().fg(rule_color)),
+        Span::raw(" "),
+        Span::styled(count, Style::default().fg(p.text_muted)),
+    ])
+}
+
+/// The pinned section's header, drawn like an app's or a status's: the
+/// gold pin, `pinned`, a rule, then how many it shows, in `width` columns.
+pub fn pinned_header_line(app: &App, width: usize, selected: bool) -> Line<'static> {
+    let p = theme::palette();
+    let count = sessions_label(app.list.pinned_count());
+    let mark = format!("{PIN_MARK} ");
+    // " ★ pinned ─── count": three spaces, and at least two rule columns.
+    let fixed = 3 + str_width(&mark) + str_width(&count);
+    let name = truncate("pinned", width.saturating_sub(fixed + 2));
+    let rule = width.saturating_sub(fixed + str_width(&name));
+    let (name_color, rule_color) = if selected {
+        (p.text_bright, p.accent_primary)
+    } else {
+        (p.accent_purple, p.border_dim)
+    };
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(mark, Style::default().fg(p.accent_gold)),
         Span::styled(
             name,
             Style::default().fg(name_color).add_modifier(Modifier::BOLD),
@@ -839,6 +869,15 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 lines.push(read_period_header_line(
                     app,
                     *period,
+                    (inner.width as usize).saturating_sub(1),
+                    is_selected,
+                ));
+                lines
+            }
+            ListRow::PinnedHeader => {
+                let mut lines = vec![Line::default(); height as usize - 1];
+                lines.push(pinned_header_line(
+                    app,
                     (inner.width as usize).saturating_sub(1),
                     is_selected,
                 ));
