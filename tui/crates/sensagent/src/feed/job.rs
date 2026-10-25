@@ -32,6 +32,8 @@ pub(crate) enum FeedResult {
     Turn(TurnRead),
     /// A reply as stored (after an upload or a status change).
     Reply(FeedReply),
+    /// A session message as stored (after a status change).
+    Message(wire::SessionMessage),
     /// The account's changed replies.
     Replies(RepliesRead),
     /// This machine's session list was stored: how many sessions it holds.
@@ -81,7 +83,10 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                     }
                     FeedRequest::Turn { .. } => wire::turn(&reply).map(FeedResult::Turn),
                     FeedRequest::ReplyUpload { .. } | FeedRequest::ReplyStatus { .. } => {
-                        wire::reply(&reply).map(FeedResult::Reply)
+                        wire::reply(&reply).map(|received| match received {
+                            wire::Received::Reply(reply) => FeedResult::Reply(reply),
+                            wire::Received::Message(message) => FeedResult::Message(message),
+                        })
                     }
                     FeedRequest::Replies { .. } => wire::replies(&reply).map(FeedResult::Replies),
                     FeedRequest::Sessions { .. } => {

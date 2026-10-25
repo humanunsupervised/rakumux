@@ -248,22 +248,23 @@
       "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused"]
     },
     "reply": {
-      "description": "What the user wrote back to a feed entry, for its machine to type into the entry's session, and where it is up to. The agent's next reply there names it as `reply_to`.",
+      "description": "What the user wrote back to a feed entry, for its machine to type into the entry's session, and where it is up to; or, without `entry` and `thread`, a session message: what the user wrote to a session itself, which has no answer to reply to yet. The agent's next reply there names it as `reply_to`.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["seq", "id", "entry", "thread", "machine", "session", "agent", "conversation_id", "text", "status", "created_at", "status_at"],
+      "required": ["seq", "id", "machine", "session", "agent", "text", "status", "created_at", "status_at"],
+      "dependentRequired": { "entry": ["thread", "conversation_id"], "thread": ["entry"] },
       "properties": {
         "seq": {
           "description": "The account's order of reply changes: a reply takes a new seq whenever its status changes.",
           "$ref": "#/$defs/seq"
         },
         "id": { "$ref": "#/$defs/ulid" },
-        "entry": { "description": "The entry replied to.", "$ref": "#/$defs/ulid" },
-        "thread": { "description": "The entry that started the thread.", "$ref": "#/$defs/ulid" },
-        "machine": { "description": "The entry's machine, which delivers it.", "$ref": "#/$defs/machine" },
+        "entry": { "description": "The entry replied to; absent on a session message.", "$ref": "#/$defs/ulid" },
+        "thread": { "description": "The entry that started the thread; absent on a session message.", "$ref": "#/$defs/ulid" },
+        "machine": { "description": "The session's machine, which delivers it.", "$ref": "#/$defs/machine" },
         "session": { "$ref": "#/$defs/session" },
         "agent": { "$ref": "#/$defs/agent" },
-        "conversation_id": { "$ref": "#/$defs/conversationId" },
+        "conversation_id": { "description": "The chat a reply answers; on a session message, the chat the session showed when it was written, when it said.", "$ref": "#/$defs/conversationId" },
         "text": { "$ref": "#/$defs/promptText" },
         "from": { "description": "The machine it was written on; absent when written on rakumux.com.", "$ref": "#/$defs/machine" },
         "status": { "$ref": "#/$defs/replyStatus" },

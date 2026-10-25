@@ -42,6 +42,27 @@ test("an entry names the reply it answers and its thread; uploads only the reply
   assert.equal(validators.page(page), true);
 });
 
+test("a session message has no entry or thread, and a reply to an entry has both", () => {
+  const reply = structuredClone(fixtures.reply.valid[0].reply);
+  const message = structuredClone(reply);
+  delete message.entry;
+  delete message.thread;
+  delete message.response;
+  assert.equal(validators.reply({ version: 1, reply: message }), true, "a session message");
+  delete message.conversation_id;
+  assert.equal(validators.reply({ version: 1, reply: message }), true, "the session said no chat");
+  assert.equal(validators.replies({ version: 1, replies: [message], latest_seq: message.seq, more: false }), true);
+  const halfThread = structuredClone(reply);
+  delete halfThread.thread;
+  assert.equal(validators.reply({ version: 1, reply: halfThread }), false, "an entry without its thread");
+  const halfEntry = structuredClone(reply);
+  delete halfEntry.entry;
+  assert.equal(validators.reply({ version: 1, reply: halfEntry }), false, "a thread without its entry");
+  const noChat = structuredClone(reply);
+  delete noChat.conversation_id;
+  assert.equal(validators.reply({ version: 1, reply: noChat }), false, "a reply to an entry names its chat");
+});
+
 test("reply body caps are annotated for the transport", () => {
   assert.equal(schemas["reply-upload"]["x-maxBodyBytes"], 65536);
   assert.equal(schemas.replies["x-maxBodyBytes"], 2097152);

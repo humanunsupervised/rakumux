@@ -80,10 +80,11 @@ impl FeedRequest {
     }
 
     /// `GET /api/v1/feed/replies`' query, naming the asking machine so the
-    /// answer's `poll_ms` knows whether a reply waits for it.
+    /// answer's `poll_ms` knows whether a reply waits for it, and asking for
+    /// session messages too (replies to a session itself, without an entry).
     pub fn replies_query(after: u64, machine: &str) -> String {
         format!(
-            "after={after}&limit={REPLIES_LIMIT}&machine={}",
+            "after={after}&limit={REPLIES_LIMIT}&machine={}&session_messages=1",
             percent_encoded(machine)
         )
     }
@@ -488,12 +489,16 @@ pub(crate) fn reply_status(
 struct WireReply {
     seq: u64,
     id: String,
-    entry: String,
-    thread: String,
+    /// Absent on a session message, with `thread`.
+    #[serde(default)]
+    entry: Option<String>,
+    #[serde(default)]
+    thread: Option<String>,
     machine: String,
     session: PageSession,
     agent: String,
-    conversation_id: String,
+    #[serde(default)]
+    conversation_id: Option<String>,
     text: String,
     #[serde(default)]
     from: Option<String>,
@@ -506,10 +511,33 @@ struct WireReply {
     status_at: i64,
 }
 
+/// A session message: what the user wrote on rakumux.com to a session that
+/// had no answer to reply to (`contracts/feed/` `reply` without `entry`). It
+/// is typed into the session like a reply, but never shown in TUIs' threads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SessionMessage {
+    pub seq: u64,
+    pub id: String,
+    pub machine: String,
+    pub session_id: String,
+    /// The chat the session showed when it was written, when it said.
+    pub conversation_id: Option<String>,
+    pub text: String,
+    pub from: Option<String>,
+    pub status: ReplyStatus,
+}
+
+/// A reply as read: one to an entry, or a session message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Received {
+    Reply(FeedReply),
+    Message(SessionMessage),
+}
+
 impl WireReply {
     /// Within the contract's bounds, stripped of anything a terminal would act on.
-    fn checked(self) -> Option<FeedReply> {
-        let ids = [&self.id, &self.entry, &self.thread, &self.session.id];
+    fn checked(self) -> Option<Received> {
+        let ids = [&self.id, &self.session.id];
         let fits = self.seq > 0
             && ids.iter().all(|id| crate::feed::is_entry_id(id))
             && within(&self.machine, 256)
@@ -520,32 +548,53 @@ impl WireReply {
                 .as_deref()
                 .is_none_or(|f| within(f, 512))
             && within(&self.agent, 32)
-            && conversation_id(&self.conversation_id)
+            && self.conversation_id.as_deref().is_none_or(conversation_id)
             && within(&self.text, MAX_PROMPT_BYTES)
             && self.from.as_deref().is_none_or(|f| within(f, 256))
             && self
                 .response
                 .as_deref()
                 .is_none_or(crate::feed::is_entry_id);
-        fits.then(|| FeedReply {
-            seq: self.seq,
-            id: self.id,
-            entry: self.entry,
-            thread: self.thread,
-            machine: line(&self.machine),
-            session_id: self.session.id,
-            session_name: line(&self.session.name),
-            folder: self.session.folder.map(|folder| line(&folder)),
-            agent: line(&self.agent),
-            conversation_id: self.conversation_id,
-            text: plain(&self.text),
-            from: self.from.map(|from| line(&from)),
-            status: self.status,
-            failure: self.failure,
-            response: self.response,
-            created_at: self.created_at,
-            status_at: self.status_at,
-        })
+        if !fits {
+            return None;
+        }
+        match (self.entry, self.thread, self.conversation_id) {
+            (Some(entry), Some(thread), Some(conversation_id))
+                if crate::feed::is_entry_id(&entry) && crate::feed::is_entry_id(&thread) =>
+            {
+                Some(Received::Reply(FeedReply {
+                    seq: self.seq,
+                    id: self.id,
+                    entry,
+                    thread,
+                    machine: line(&self.machine),
+                    session_id: self.session.id,
+                    session_name: line(&self.session.name),
+                    folder: self.session.folder.map(|folder| line(&folder)),
+                    agent: line(&self.agent),
+                    conversation_id,
+                    text: plain(&self.text),
+                    from: self.from.map(|from| line(&from)),
+                    status: self.status,
+                    failure: self.failure,
+                    response: self.response,
+                    created_at: self.created_at,
+                    status_at: self.status_at,
+                }))
+            }
+            (None, None, conversation_id) => Some(Received::Message(SessionMessage {
+                seq: self.seq,
+                id: self.id,
+                machine: line(&self.machine),
+                session_id: self.session.id,
+                conversation_id,
+                text: plain(&self.text),
+                from: self.from.map(|from| line(&from)),
+                status: self.status,
+            })),
+            // Half a reply: outside the contract.
+            _ => None,
+        }
     }
 }
 
@@ -555,8 +604,9 @@ struct ReplyAnswer {
     reply: WireReply,
 }
 
-/// The stored reply a reply upload or status change answers with.
-pub(crate) fn reply(reply: &FeedHttpReply) -> Result<FeedReply, FeedFailure> {
+/// The stored reply (or session message) a reply upload or status change
+/// answers with.
+pub(crate) fn reply(reply: &FeedHttpReply) -> Result<Received, FeedFailure> {
     if reply.status != 200 {
         return Err(failure(reply));
     }
@@ -578,12 +628,13 @@ struct WireReplies {
     poll_ms: Option<u64>,
 }
 
-/// Replies as read: those that fit the contract, the account's newest seq,
-/// whether more follow, and when rakumux.com says to read again (kept within
-/// 1–60 s), when it does.
+/// Replies as read: those that fit the contract (replies to entries, and
+/// session messages apart), the account's newest seq, whether more follow,
+/// and when rakumux.com says to read again (kept within 1–60 s), when it does.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct RepliesRead {
     pub replies: Vec<FeedReply>,
+    pub messages: Vec<SessionMessage>,
     pub latest_seq: u64,
     pub more: bool,
     pub poll: Option<Duration>,
@@ -599,12 +650,17 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
     if page.version != 1 || page.replies.len() > 200 {
         return Err(FeedFailure::Invalid);
     }
+    let mut replies = Vec::new();
+    let mut messages = Vec::new();
+    for received in page.replies.into_iter().filter_map(WireReply::checked) {
+        match received {
+            Received::Reply(reply) => replies.push(reply),
+            Received::Message(message) => messages.push(message),
+        }
+    }
     Ok(RepliesRead {
-        replies: page
-            .replies
-            .into_iter()
-            .filter_map(WireReply::checked)
-            .collect(),
+        replies,
+        messages,
         latest_seq: page.latest_seq,
         more: page.more,
         poll: page
@@ -1164,7 +1220,9 @@ mod tests {
     #[test]
     fn replies_read_back_cleaned_and_those_off_contract_are_left_out() {
         let answer = format!(r#"{{"version":1,"reply":{REPLY}}}"#);
-        let stored = super::reply(&reply(200, &answer)).unwrap();
+        let Received::Reply(stored) = super::reply(&reply(200, &answer)).unwrap() else {
+            panic!("a reply to an entry");
+        };
         assert_eq!(stored.seq, 3);
         assert_eq!(stored.status, ReplyStatus::Delivered);
         assert_eq!(stored.text, "Now run the tests [2J too.");
@@ -1237,10 +1295,37 @@ mod tests {
     }
 
     #[test]
+    fn session_messages_are_read_apart_and_half_replies_left_out() {
+        let message = REPLY
+            .replace(r#""entry":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","#, "")
+            .replace(r#""thread":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","#, "")
+            .replace(r#","response":"01K8A1Z9Y8X7W6V5T4S3R2Q1P0""#, "")
+            .replace(r#""seq":3"#, r#""seq":4"#);
+        assert!(
+            !message.contains("entry") && !message.contains("thread"),
+            "{message}"
+        );
+        let half = REPLY
+            .replace(r#""thread":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","#, "")
+            .replace(r#""seq":3"#, r#""seq":5"#);
+        let page = format!(
+            r#"{{"version":1,"replies":[{REPLY},{message},{half}],"latest_seq":5,"more":false}}"#
+        );
+        let read = replies(&reply(200, &page)).unwrap();
+        assert_eq!(read.replies.iter().map(|r| r.seq).collect::<Vec<_>>(), [3]);
+        assert_eq!(read.messages.len(), 1);
+        let message = &read.messages[0];
+        assert_eq!(message.seq, 4);
+        assert_eq!(message.session_id, "01K89ZQ4D2F6H8J0K2M4N6P8R0");
+        assert_eq!(message.text, "Now run the tests [2J too.");
+        assert_eq!(read.latest_seq, 5);
+    }
+
+    #[test]
     fn replies_name_the_machine_and_say_when_to_read_again_within_bounds() {
         assert_eq!(
             FeedRequest::replies_query(7, "Studio Mac é"),
-            "after=7&limit=100&machine=Studio%20Mac%20%C3%A9"
+            "after=7&limit=100&machine=Studio%20Mac%20%C3%A9&session_messages=1"
         );
         let paced = |poll: &str| {
             replies(&reply(

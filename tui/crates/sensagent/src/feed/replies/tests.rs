@@ -46,6 +46,7 @@ fn read(replies: Vec<FeedReply>) -> Result<FeedResult, FeedFailure> {
     let latest_seq = replies.iter().map(|reply| reply.seq).max().unwrap_or(0);
     Ok(FeedResult::Replies(RepliesRead {
         replies,
+        messages: vec![],
         latest_seq,
         more: false,
         poll: None,
@@ -286,6 +287,7 @@ fn reads_follow_the_cursor_and_back_off_after_failures() {
         true,
         Ok(FeedResult::Replies(RepliesRead {
             replies: vec![],
+            messages: vec![],
             latest_seq: 12,
             more: true,
             poll: None,
@@ -319,6 +321,7 @@ fn reads_come_as_soon_as_rakumux_com_says() {
     let paced = |poll: Option<Duration>| {
         Ok(FeedResult::Replies(RepliesRead {
             replies: vec![],
+            messages: vec![],
             latest_seq: 0,
             more: false,
             poll,
@@ -343,4 +346,110 @@ fn reads_come_as_soon_as_rakumux_com_says() {
         None
     );
     assert_eq!(read_after(replies.next_work(later + READ_EVERY)), 0);
+}
+
+fn message(id: &str, seq: u64, conversation: Option<&str>) -> SessionMessage {
+    SessionMessage {
+        seq,
+        id: id.into(),
+        machine: "studio".into(),
+        session_id: "S".into(),
+        conversation_id: conversation.map(Into::into),
+        text: "Start on the parser.".into(),
+        from: None,
+        status: ReplyStatus::Pending,
+    }
+}
+
+fn read_messages(messages: Vec<SessionMessage>) -> Result<FeedResult, FeedFailure> {
+    let latest_seq = messages
+        .iter()
+        .map(|message| message.seq)
+        .max()
+        .unwrap_or(0);
+    Ok(FeedResult::Replies(RepliesRead {
+        replies: vec![],
+        messages,
+        latest_seq,
+        more: false,
+        poll: None,
+    }))
+}
+
+#[test]
+fn a_session_message_waits_for_an_agent_then_goes_into_whatever_chat_it_shows() {
+    let remote: AcceptRemote = Arc::new(|| true);
+    // A shell: nothing is typed into it.
+    let mut replies = on(Some(remote), &[view("S", Lifecycle::None, None)]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    let shown = replies.request_done(
+        true,
+        read_messages(vec![message("01K8A2", 6, Some(CHAT))]),
+        NOW,
+    );
+    assert!(shown.is_empty(), "session messages never reach TUIs");
+    assert_eq!(replies.next_work(NOW), None);
+    // Its agent works: still waiting.
+    replies.observe(&view("S", Lifecycle::Working, Some("another")));
+    assert_eq!(replies.next_work(NOW), None);
+    // It waits for input, in another chat than the one written to: typed.
+    replies.observe(&view("S", Lifecycle::Idle, Some("another")));
+    assert_eq!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Submit {
+            reply: "01K8A2".into(),
+            session: SessionId::from_string("S"),
+            text: "Start on the parser.".into(),
+        })
+    );
+    replies.submitted("01K8A2".into(), Ok(()), 2_000);
+    let body = report_of(replies.next_work(NOW));
+    assert_eq!(body["id"], "01K8A2");
+    assert_eq!(body["status"], "delivered");
+    let mut delivered = message("01K8A2", 7, Some(CHAT));
+    delivered.status = ReplyStatus::Delivered;
+    assert!(replies
+        .request_done(true, Ok(FeedResult::Message(delivered)), NOW)
+        .is_empty());
+    // Answered in the chat the session showed when it was typed.
+    assert_eq!(replies.answered(&answer(Some(CHAT), 3_000)), None);
+    assert_eq!(
+        replies.answered(&answer(Some("another"), 3_000)),
+        Some("01K8A2".into())
+    );
+}
+
+#[test]
+fn a_session_message_follows_the_same_rules_for_where_it_may_go() {
+    // Written on rakumux.com: not typed here unless this machine takes those.
+    let mut replies = on(None, &[view("S", Lifecycle::Idle, None)]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read_messages(vec![message("01K8A3", 8, None)]), NOW);
+    let body = report_of(replies.next_work(NOW));
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["failure"], "not_accepted");
+
+    // A session that ended, or a private one, can't take it.
+    let remote: AcceptRemote = Arc::new(|| true);
+    let mut private = view("S", Lifecycle::Idle, None);
+    private.private = true;
+    let mut replies = on(Some(remote), &[private]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read_messages(vec![message("01K8A4", 9, None)]), NOW);
+    assert_eq!(report_of(replies.next_work(NOW))["failure"], "private");
+
+    // With no chat to name, the agent's next reply answers it, whichever chat.
+    let remote: AcceptRemote = Arc::new(|| true);
+    let mut replies = on(Some(remote), &[view("S", Lifecycle::Done, None)]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read_messages(vec![message("01K8A5", 10, None)]), NOW);
+    assert!(matches!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Submit { .. })
+    ));
+    replies.submitted("01K8A5".into(), Ok(()), 2_000);
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), 3_000)),
+        Some("01K8A5".into())
+    );
 }

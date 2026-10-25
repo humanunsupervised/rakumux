@@ -194,7 +194,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `private`, `not_accepted`, `refused`; `POST /api/v1/feed/replies/status`). A reply written
    on rakumux.com or another machine is typed only when this machine's
    `sessions.remote_replies` is on (Settings → Replies from rakumux.com, local, off by default,
-   read every 10 s); one written in this machine's TUI always is. The agent's next reply in that
+   read every 10 s); one written in this machine's TUI always is. A **session message** (written
+   on rakumux.com to a session with no answer to reply to: a reply without `entry` or `thread`,
+   read with `session_messages=1` so older machines never get one) is typed once an agent runs
+   there and waits, whatever chat it shows, never into a session without an agent; it never
+   reaches TUIs, and the agent's next reply answers it. The agent's next reply in that
    session and conversation is uploaded with `reply_to`, and the cloud links it (`response`,
    `thread`). Pages to TUIs carry the replies (`FeedPage.replies`), and the Feed detail shows an
    entry's thread under its turn.

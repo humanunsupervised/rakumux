@@ -6,7 +6,10 @@
 //! says so. It delivers only to the entry's own session, while it runs, isn't
 //! private, still shows the entry's conversation and its agent waits for
 //! input; a busy or blocked agent is waited for (the cloud expires a reply
-//! after an hour). A reply written on rakumux.com or another machine is
+//! after an hour). A session message (written on rakumux.com to a session
+//! with no answer to reply to) is typed once an agent runs there and waits,
+//! whatever chat it shows; never into a session without an agent, which is
+//! waited for. Session messages never reach TUIs. A reply written on rakumux.com or another machine is
 //! typed only when this machine's user turned that on in Settings; one
 //! written in this machine's TUI always is. The agent's next reply in that
 //! session is uploaded as the reply's answer (`reply_to`). Driven by the owner
@@ -24,7 +27,7 @@ use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
 use super::cache::{FeedReply, ReplyFailure, ReplyStatus};
 use super::job::FeedResult;
-use super::wire::{self, FeedFailure, FeedRequest, RepliesRead};
+use super::wire::{self, FeedFailure, FeedRequest, RepliesRead, SessionMessage};
 
 /// How often the account's replies are read while the feed is on, unless
 /// rakumux.com's answer says otherwise (`poll_ms`: every second while a reply
@@ -126,10 +129,50 @@ impl Seen {
     }
 }
 
-/// A delivered reply waiting for the agent's answer.
+/// Where a pending reply goes.
+#[derive(Clone, Debug)]
+enum Target {
+    /// A reply to an entry: into the session while it shows that chat.
+    Chat(String),
+    /// A session message: into the session's agent, whatever chat it shows.
+    Session,
+}
+
+/// A reply (or session message) pending for this machine.
+#[derive(Clone, Debug)]
+struct Pending {
+    session_id: String,
+    target: Target,
+    text: String,
+    /// The machine it was written on; `None` on rakumux.com.
+    from: Option<String>,
+}
+
+impl Pending {
+    fn reply(reply: &FeedReply) -> Self {
+        Self {
+            session_id: reply.session_id.clone(),
+            target: Target::Chat(reply.conversation_id.clone()),
+            text: reply.text.clone(),
+            from: reply.from.clone(),
+        }
+    }
+
+    fn message(message: &SessionMessage) -> Self {
+        Self {
+            session_id: message.session_id.clone(),
+            target: Target::Session,
+            text: message.text.clone(),
+            from: message.from.clone(),
+        }
+    }
+}
+
+/// A delivered reply waiting for the agent's answer, in `conversation` (any
+/// of the session's chats when it's `None`).
 struct Awaiting {
     reply: String,
-    conversation: String,
+    conversation: Option<String>,
     since_ms: i64,
 }
 
@@ -148,8 +191,8 @@ pub(crate) struct ReplySync {
     next_read: Duration,
     retry_at: Duration,
     retry: Duration,
-    /// This machine's pending replies, by id, as last read.
-    pending: HashMap<String, FeedReply>,
+    /// This machine's pending replies and session messages, by id, as last read.
+    pending: HashMap<String, Pending>,
     /// Typed (or refused) here, to tell rakumux.com: the id and why it failed.
     reports: VecDeque<(String, Option<ReplyFailure>)>,
     /// Being typed now.
@@ -272,25 +315,29 @@ impl ReplySync {
             let reply = &self.pending[id];
             let elsewhere = reply.from.as_deref() != Some(self.machine.as_str());
             let session = SessionId::from_string(reply.session_id.clone());
+            let waits = |seen: &Seen| matches!(seen.lifecycle, Lifecycle::Idle | Lifecycle::Done);
             let outcome = match self.sessions.get(&session) {
                 _ if elsewhere && !remote => Err(ReplyFailure::NotAccepted),
                 None => Err(ReplyFailure::SessionGone),
                 Some(seen) if !seen.live => Err(ReplyFailure::SessionGone),
                 Some(seen) if seen.private => Err(ReplyFailure::Private),
-                // No agent there any more: not that chat.
-                Some(seen) if seen.lifecycle == Lifecycle::None => {
-                    Err(ReplyFailure::ConversationChanged)
-                }
-                Some(seen) => match &seen.conversation {
-                    Some(conversation) if *conversation != reply.conversation_id => {
+                Some(seen) => match &reply.target {
+                    // No agent there any more: not that chat.
+                    Target::Chat(_) if seen.lifecycle == Lifecycle::None => {
                         Err(ReplyFailure::ConversationChanged)
                     }
-                    // Its agent waits for input: type it.
-                    Some(_) if matches!(seen.lifecycle, Lifecycle::Idle | Lifecycle::Done) => {
-                        Ok(true)
-                    }
-                    // Busy, blocked on a question, or its chat not known yet: wait.
-                    _ => Ok(false),
+                    Target::Chat(wanted) => match &seen.conversation {
+                        Some(conversation) if conversation != wanted => {
+                            Err(ReplyFailure::ConversationChanged)
+                        }
+                        // Its agent waits for input: type it.
+                        Some(_) if waits(seen) => Ok(true),
+                        // Busy, blocked on a question, or its chat not known yet: wait.
+                        _ => Ok(false),
+                    },
+                    // Typed only to an agent that waits for input; a session
+                    // without one (a shell) is waited for, never typed into.
+                    Target::Session => Ok(waits(seen)),
                 },
             };
             match outcome {
@@ -347,6 +394,15 @@ impl ReplySync {
         match result {
             Ok(()) => {
                 let session = SessionId::from_string(pending.session_id.clone());
+                // A reply is answered in its chat; a session message in the
+                // chat the session shows now, or any when it doesn't say.
+                let conversation = match &pending.target {
+                    Target::Chat(conversation) => Some(conversation.clone()),
+                    Target::Session => self
+                        .sessions
+                        .get(&session)
+                        .and_then(|seen| seen.conversation.clone()),
+                };
                 // Its agent has input now: nothing else is typed there until
                 // the session says it waits again.
                 if let Some(seen) = self.sessions.get_mut(&session) {
@@ -356,7 +412,7 @@ impl ReplySync {
                     session,
                     Awaiting {
                         reply: reply.clone(),
-                        conversation: pending.conversation_id.clone(),
+                        conversation,
                         since_ms: now_ms,
                     },
                 );
@@ -383,7 +439,10 @@ impl ReplySync {
     /// reply was typed into its session, in that conversation.
     pub fn answered(&mut self, answer: &AgentReply) -> Option<String> {
         let awaiting = self.awaiting.get(&answer.session_id)?;
-        let same_chat = answer.conversation_id.as_deref() == Some(awaiting.conversation.as_str());
+        let same_chat = awaiting
+            .conversation
+            .as_deref()
+            .is_none_or(|conversation| answer.conversation_id.as_deref() == Some(conversation));
         if !same_chat || answer.finished_at < awaiting.since_ms {
             return None;
         }
@@ -404,8 +463,14 @@ impl ReplySync {
             (Some(Out::Read), Ok(FeedResult::Replies(read))) => {
                 self.read_done(current, Ok(read), now)
             }
-            (Some(Out::Report), Ok(FeedResult::Reply(reply))) => {
-                self.reported(current, Ok(reply), now).into_iter().collect()
+            (Some(Out::Report), Ok(FeedResult::Reply(reply))) => self
+                .reported(current, Ok(Some(reply)), now)
+                .into_iter()
+                .collect(),
+            // A session message's status: nothing for TUIs.
+            (Some(Out::Report), Ok(FeedResult::Message(_))) => {
+                self.reported(current, Ok(None), now);
+                Vec::new()
             }
             (Some(Out::Read), Err(failure)) => self.read_done(current, Err(failure), now),
             (Some(Out::Report), Err(failure)) => {
@@ -440,6 +505,10 @@ impl ReplySync {
                     self.cursor = self.cursor.max(reply.seq);
                     self.take(reply);
                 }
+                for message in &read.messages {
+                    self.cursor = self.cursor.max(message.seq);
+                    self.take_message(message);
+                }
                 self.cursor = self.cursor.max(read.latest_seq);
                 self.next_read = if read.more {
                     now
@@ -458,19 +527,39 @@ impl ReplySync {
     /// Hold `reply` for delivery when it's pending here, else drop it from
     /// what's pending.
     fn take(&mut self, reply: &FeedReply) {
-        let mine = reply.machine == self.machine;
-        if mine && reply.status == ReplyStatus::Pending && !self.handled.contains(&reply.id) {
-            self.pending.insert(reply.id.clone(), reply.clone());
+        self.hold(&reply.id, &reply.machine, reply.status, || {
+            Pending::reply(reply)
+        });
+    }
+
+    /// The same for a session message.
+    fn take_message(&mut self, message: &SessionMessage) {
+        self.hold(&message.id, &message.machine, message.status, || {
+            Pending::message(message)
+        });
+    }
+
+    fn hold(
+        &mut self,
+        id: &str,
+        machine: &str,
+        status: ReplyStatus,
+        pending: impl FnOnce() -> Pending,
+    ) {
+        let mine = machine == self.machine;
+        if mine && status == ReplyStatus::Pending && !self.handled.contains(id) {
+            self.pending.insert(id.to_owned(), pending());
         } else {
-            self.pending.remove(&reply.id);
+            self.pending.remove(id);
         }
     }
 
-    /// A status report finished. Returns the stored reply, for TUIs.
+    /// A status report finished. Returns the stored reply, for TUIs (none for
+    /// a session message).
     fn reported(
         &mut self,
         current: bool,
-        outcome: Result<FeedReply, FeedFailure>,
+        outcome: Result<Option<FeedReply>, FeedFailure>,
         now: Duration,
     ) -> Option<FeedReply> {
         self.out = None;
@@ -481,7 +570,7 @@ impl ReplySync {
             Ok(reply) => {
                 self.retry = RETRY_MIN;
                 self.reports.pop_front();
-                Some(reply)
+                reply
             }
             // A report the cloud refuses is dropped, not retried forever.
             Err(FeedFailure::Invalid) => {

@@ -16,7 +16,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/messages` | [chat-upload](chat-upload.schema.json) | [chat-accepted](chat-accepted.schema.json) |
 | `GET /api/v1/feed/turn?entry=ID[&after=POSITION]` | query only | [turn](turn.schema.json), increasing position |
 | `POST /api/v1/feed/replies` | [reply-upload](reply-upload.schema.json) | [reply](reply.schema.json) |
-| `GET /api/v1/feed/replies?after=SEQ&limit=N&machine=NAME` | query only | [replies](replies.schema.json), increasing seq |
+| `GET /api/v1/feed/replies?after=SEQ&limit=N&machine=NAME&session_messages=1` | query only | [replies](replies.schema.json), increasing seq |
 | `POST /api/v1/feed/replies/status` | [reply-status](reply-status.schema.json) | [reply](reply.schema.json) |
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
 
@@ -66,6 +66,14 @@ conformance tests, not an HTTP server, database or local runtime.
   agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as
   the reply's `response`; page entries carry `reply_to` and `thread`. Machines take replies
   written elsewhere only when the user turned that on there (`not_accepted` otherwise).
+- **Session messages:** on rakumux.com the user can also write to a session that has no
+  answer to reply to yet (a new chat, or one whose newest answer is in another chat). It is
+  stored as a reply without `entry` and `thread`, with the chat the session showed when it
+  said one (`conversation_id`), and reaches only machines that read with
+  `session_messages=1`, so an older machine never gets a reply it can't parse. The machine
+  types it into the session once an agent runs there and waits for input, whatever chat it
+  shows (never into a session without an agent: it waits for one), and reports it like a
+  reply; the agent's next finished reply answers it (`reply_to`) and starts its own thread.
 - **Sessions:** a machine's whole list of sessions now (`sessions-upload`, `{version:1,
   machine, sessions, at}`, at most 200; `sessionState` in common), replacing what was stored for
   it: a session left out is gone. Sent when the list changes and every minute meanwhile, so a

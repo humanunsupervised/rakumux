@@ -289,6 +289,7 @@ impl FeedSync {
                 FeedResult::Stored
                 | FeedResult::Turn(_)
                 | FeedResult::Reply(_)
+                | FeedResult::Message(_)
                 | FeedResult::Replies(_)
                 | FeedResult::SessionsStored(_),
             ) => {}
