@@ -150,9 +150,10 @@ export default function Home() {
               <p className="kicker">Two modes, one key</p>
               <h2>Your tools keep their keys.</h2>
               <p className="section-lede">
-                Inside a session, every key goes to the program. Press <kbd>Ctrl</kbd> <kbd>\</kbd> and your keys drive
-                Rakumux instead, with the Vim-style moves your fingers already know. The badge in the bottom-left
-                corner always tells you which mode you&apos;re in.
+                Your coding agent has shortcuts of its own, and Rakumux never intercepts or overrides them: inside a
+                session, every key goes to the program. Press <kbd>Ctrl</kbd> <kbd>\</kbd>, the one key Rakumux keeps
+                for itself, and your keys drive Rakumux instead, with the Vim-style moves your fingers already know.
+                The badge in the bottom-left corner always tells you which mode you&apos;re in.
               </p>
               <ul className="checks">
                 <li>No prefix-key gymnastics: one key out, Enter or Esc back in.</li>
