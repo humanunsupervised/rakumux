@@ -7,32 +7,32 @@ const REASONS = [
   {
     tag: "claude · codex · opencode",
     title: "Bring your own subscription",
-    body: "Claude Code, Codex and OpenCode run as themselves, on the Claude, ChatGPT or other plans you already pay for. Every feature each agent has keeps working, because it's the agent itself. Rakumux adds no model costs.",
+    body: "Your Claude Code, Codex and OpenCode plans, with every native feature. No extra model costs.",
   },
   {
     tag: "≡ Feed",
     title: "Never let an agent sit idle",
-    body: "The moment an agent finishes a turn or stops for you, it's in your Agent feed, from every machine. Answer from any browser and Rakumux types it in as soon as the agent is ready, so every one keeps working.",
+    body: "Every finished turn lands in your feed. Answer from any browser and it's typed straight in.",
   },
   {
     tag: "◔ Status",
     title: "Find the right session fast",
-    body: "Group sessions by status, folder or app, pin the ones that matter above the rest, and see each one's branch as it changes. The agent waiting for you is at the top, not lost in a tab you forgot about.",
+    body: "Group by status, folder or app. Pin what matters. The agent waiting on you is always on top.",
   },
   {
     tag: "ssh",
-    title: "Terminal-first, built for remote",
-    body: "Agentic coding is moving to remote machines, and Rakumux lives in the terminal. Run it on a dev box over SSH, close your laptop, and your agents keep working until you come back from anywhere.",
+    title: "Built for remote",
+    body: "Lives in your terminal. Run it over SSH, close your laptop, and your agents keep going.",
   },
   {
     tag: "rakumux.com",
-    title: "On the web, no VPN needed",
-    body: "The web app works on your desktop and your phone with nothing to set up: no Tailscale, no open ports. Prefer a direct connection? Tailscale works too. An iPhone app is coming soon.",
+    title: "Web and phone, no VPN",
+    body: "Check in from your desktop or phone with nothing to set up. Tailscale optional. iPhone app soon.",
   },
   {
     tag: "rakumux-mcp",
-    title: "Management with real power",
-    body: "Restart Rakumux without stopping a single agent, bring sessions back after a reboot with their conversations resumed, let agents start agents through MCP, and script everything from the CLI, JSON or a local API.",
+    title: "Serious management tools",
+    body: "Restart without stopping an agent. Sessions survive reboots. Agents launch agents over MCP.",
   },
 ];
 
@@ -112,9 +112,8 @@ export default function Home() {
               <span className="accent">One terminal.</span>
             </h1>
             <p className="lede">
-              Run Claude Code, Codex and OpenCode on the subscriptions you already have, side by side in one terminal,
-              on your laptop or a remote box. Rakumux shows which agent needs you and lets you answer from any browser,
-              so none of them sits idle. Built in Rust, driven from the keyboard.
+              Run Claude Code, Codex and OpenCode side by side, on your own subscriptions. See which one needs you.
+              Answer it from anywhere.
             </p>
             <div className="hero-actions">
               <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
@@ -122,7 +121,7 @@ export default function Home() {
                 How it installs →
               </a>
             </div>
-            <p className="hero-meta">macOS + Linux x64 binaries · your own agent subscriptions · no tmux or VPN needed</p>
+            <p className="hero-meta">Free and open source · macOS + Linux · no tmux or VPN needed</p>
           </div>
           <div className="container container-wide hero-demo">
             <TuiDemo />
@@ -134,8 +133,7 @@ export default function Home() {
             <p className="kicker">Why Rakumux</p>
             <h2>A multiplexer for your agents.</h2>
             <p className="section-lede">
-              Rakumux doesn&apos;t replace your agents or resell their models. It runs them as they are, keeps every one of
-              them working, and puts them in reach wherever you are: in your terminal, on the web and on your phone.
+              Your agents, exactly as they are. Always working, always in reach.
             </p>
             <div className="grid">
               {REASONS.map((r) => (
@@ -155,17 +153,14 @@ export default function Home() {
               <p className="kicker">Agent feed</p>
               <h2>Keep every agent at 100%.</h2>
               <p className="section-lede">
-                Your Agent feed is a running feed of your agents&apos; latest turns, from every machine, newest first.
-                See what each one did, and write back from rakumux.com on your desktop or your phone: Rakumux types your
-                answer in the moment the agent is ready. Your machine reaches out to rakumux.com and nothing reaches in,
-                so there&apos;s no VPN or Tailscale to set up.
+                Every turn from every agent on every machine, in one feed. Reply from your desktop or phone, and
+                Rakumux types it in the moment the agent is ready. No VPN, no open ports.
               </p>
               <ul className="checks">
-                <li>Each turn pairs your prompt with the agent&apos;s answer, its Markdown drawn.</li>
-                <li>Status, Folders and App list every session on every machine, live.</li>
-                <li>Write to any session, even one that hasn&apos;t answered yet.</li>
-                <li>Prefer a direct connection to your machine? Tailscale works too.</li>
-                <li>Off until you turn it on, and private sessions are never sent. iPhone app coming soon.</li>
+                <li>Every session on every machine, live.</li>
+                <li>Message any session, even a brand-new one.</li>
+                <li>Tailscale optional. iPhone app coming soon.</li>
+                <li>Off until you turn it on. Private sessions never leave your machine.</li>
               </ul>
             </div>
             <div className="feedmock" aria-label="The Agent feed on rakumux.com">
@@ -227,25 +222,21 @@ export default function Home() {
               <p className="kicker">Two modes, one key</p>
               <h2>Your agent&apos;s native keys.</h2>
               <p className="section-lede">
-                Your coding agent has shortcuts of its own, and Rakumux never intercepts or overrides them: inside a
-                session, every key goes to the program. Press <kbd>Ctrl</kbd> <kbd>\</kbd>, the one key Rakumux keeps
-                for itself, and your keys drive Rakumux instead, with the Vim-style moves your fingers already know.
-                The badge in the bottom-left corner always tells you which mode you&apos;re in.
+                Every key goes to your agent. Press <kbd>Ctrl</kbd> <kbd>\</kbd> to drive Rakumux, <kbd>Enter</kbd> to
+                jump back.
               </p>
               <ul className="checks">
-                <li>No prefix-key gymnastics: one key out, Enter or Esc back in.</li>
+                <li>One key out, one key back. No prefix gymnastics.</li>
                 <li>
-                  <kbd>Option</kbd> <kbd>↑</kbd> <kbd>↓</kbd> cycle sessions, even from inside one if you turn it on.
+                  <kbd>Option</kbd> <kbd>↑</kbd> <kbd>↓</kbd> to cycle sessions, even from inside one.
                 </li>
-                <li>Settings lists every action with its keys and runs the one you pick.</li>
               </ul>
             </div>
             <div className="modes" aria-label="The two modes">
               <div className="mode">
                 <span className="badge badge-session">SESSION</span>
                 <p>
-                  <b>Work in the session.</b> Every key goes to Claude Code, Neovim, your shell. Rakumux stays out of
-                  the way and blends into the background.
+                  <b>Work in the session.</b> Every key goes to your agent.
                 </p>
               </div>
               <div className="mode-switch" aria-hidden="true">
@@ -259,8 +250,8 @@ export default function Home() {
               <div className="mode mode-hot">
                 <span className="badge badge-rakumux">RAKUMUX</span>
                 <p>
-                  <b>Drive Rakumux.</b> <kbd>j</kbd>/<kbd>k</kbd> to look around while sessions preview live,{" "}
-                  <kbd>n</kbd> for a new one, <kbd>Esc</kbd> to go back where you were.
+                  <b>Drive Rakumux.</b> <kbd>j</kbd>/<kbd>k</kbd> to look around, <kbd>n</kbd> for new, <kbd>Esc</kbd> to
+                  go back.
                 </p>
               </div>
             </div>
@@ -273,14 +264,12 @@ export default function Home() {
               <p className="kicker">Built for agents</p>
               <h2>Know when each agent needs you.</h2>
               <p className="section-lede">
-                Claude Code, Codex and OpenCode run inside Rakumux natively, exactly as they do in your terminal: their
-                own screens, their own keys, nothing wrapped. Rakumux follows each one as it works, so you see which agent
-                is working, which is waiting for you and which just finished, and answer the one that needs you first.
+                Working, waiting for you, or done: Rakumux tracks every agent, so you answer the right one first.
               </p>
               <ul className="checks">
-                <li>Works with Claude Code, Codex and OpenCode as they are, on your own subscriptions, and runs any other program too.</li>
-                <li>Agents can start their own sessions through the MCP server, in their own folder, a few at a time.</li>
-                <li>The local API listens on 127.0.0.1 only and needs a token.</li>
+                <li>Claude Code, Codex and OpenCode as they are, plus any other program.</li>
+                <li>Agents start their own sessions over MCP.</li>
+                <li>A local, token-protected API for your scripts.</li>
               </ul>
             </div>
             <div className="terminal" aria-label="Terminal example">
@@ -321,8 +310,7 @@ export default function Home() {
             <p className="kicker">Key bindings</p>
             <h2>Use your coding agent natively.</h2>
             <p className="section-lede">
-              Inside a session your agent gets every key, so its shortcuts work exactly as they always have. Rakumux&apos;s
-              own keys work only in Rakumux mode, and they fit on one card. Forget one? <kbd>?</kbd> opens Help.
+              Your agent keeps every shortcut. Rakumux&apos;s own keys fit on one card. <kbd>?</kbd> opens Help.
             </p>
             <dl className="keygrid">
               {KEYS.map((k) => (
@@ -343,14 +331,13 @@ export default function Home() {
               <p className="kicker">Install</p>
               <h2>Up and running in a minute.</h2>
               <p className="section-lede">
-                One package with everything in it: the app, its background server, the MCP server and the local API.
-                Prebuilt binaries for macOS Intel, Apple Silicon and Linux x64 need nothing but bash.
+                One command. Everything included. macOS and Linux, nothing but bash.
               </p>
               <div className="install">
                 <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
                 <p className="install-note">
-                  Downloads the latest release for your machine from GitHub, checks it against the release&apos;s
-                  checksums and installs to <code>/usr/local</code> (asking for sudo if needed). For another prefix:
+                  Downloads the latest release from GitHub, verifies its checksum and installs to{" "}
+                  <code>/usr/local</code>. Another prefix:{" "}
                   <code>curl -fsSL https://rakumux.com/install.sh | PREFIX=&quot;$HOME/.local&quot; bash</code>. Read the
                   <a href="/install.sh">script</a> first if you like.
                 </p>
@@ -362,7 +349,7 @@ export default function Home() {
                 <li>
                   <span className="step-n">1</span>
                   <div>
-                    <p>In a repository or any folder, open Rakumux.</p>
+                    <p>Open Rakumux.</p>
                     <CopyCommand command="rakumux" />
                   </div>
                 </li>
@@ -370,8 +357,8 @@ export default function Home() {
                   <span className="step-n">2</span>
                   <div>
                     <p>
-                      Press <kbd>n</kbd> for a new session and start an agent in its shell: <code>claude</code>,{" "}
-                      <code>codex</code> or <code>opencode</code>.
+                      Press <kbd>n</kbd> and start an agent: <code>claude</code>, <code>codex</code> or{" "}
+                      <code>opencode</code>.
                     </p>
                   </div>
                 </li>
@@ -379,8 +366,8 @@ export default function Home() {
                   <span className="step-n">3</span>
                   <div>
                     <p>
-                      Press <kbd>Ctrl</kbd> <kbd>\</kbd> to step out, <kbd>j</kbd> <kbd>k</kbd> to look around,{" "}
-                      <kbd>Enter</kbd> to jump back in.
+                      <kbd>Ctrl</kbd> <kbd>\</kbd> to step out, <kbd>j</kbd> <kbd>k</kbd> to look around,{" "}
+                      <kbd>Enter</kbd> to jump back.
                     </p>
                   </div>
                 </li>
