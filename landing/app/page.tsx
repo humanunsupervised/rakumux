@@ -74,7 +74,7 @@ export default function Home() {
         <div className="container nav-inner">
           <a href="#top" className="brand" aria-label="Rakumux home">
             <img src="/icon.svg" alt="" width={28} height={28} className="brand-icon" />
-            <span className="brand-name">rakumux</span>
+            <span className="brand-name">Rakumux</span>
           </a>
           <nav className="nav-links" aria-label="Sections">
             <a href="#why">Why</a>
