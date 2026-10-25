@@ -131,10 +131,10 @@ export default function Home() {
         <section id="why" className="section">
           <div className="container">
             <p className="kicker">Why Rakumux</p>
-            <h2>A harness within a harness.</h2>
+            <h2>A multiplexer for your agents.</h2>
             <p className="section-lede">
-              Claude Code, Codex and OpenCode are each a harness around a model. Rakumux is the harness around them: it
-              keeps them running, organises them, tells you which one needs you, and follows you to the web.
+              Claude Code, Codex and OpenCode each want a terminal of their own. Rakumux runs them all in one: it keeps
+              them running, organises them, tells you which one needs you, and follows you to the web.
             </p>
             <div className="grid">
               {REASONS.map((r) => (
