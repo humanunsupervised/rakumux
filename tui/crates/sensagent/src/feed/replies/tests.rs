@@ -48,6 +48,7 @@ fn read(replies: Vec<FeedReply>) -> Result<FeedResult, FeedFailure> {
         replies,
         latest_seq,
         more: false,
+        poll: None,
     }))
 }
 
@@ -60,7 +61,10 @@ fn on(accept_remote: Option<AcceptRemote>, views: &[SessionView]) -> ReplySync {
 
 fn read_after(work: Option<ReplyWork>) -> u64 {
     match work {
-        Some(ReplyWork::Request(FeedRequest::Replies { after })) => after,
+        Some(ReplyWork::Request(FeedRequest::Replies { after, machine })) => {
+            assert_eq!(machine, "studio", "the read names this machine");
+            after
+        }
         other => panic!("expected a read, got {other:?}"),
     }
 }
@@ -284,6 +288,7 @@ fn reads_follow_the_cursor_and_back_off_after_failures() {
             replies: vec![],
             latest_seq: 12,
             more: true,
+            poll: None,
         })),
         NOW,
     );
@@ -307,4 +312,35 @@ fn reads_follow_the_cursor_and_back_off_after_failures() {
     assert_eq!(replies.next_work(NOW), None);
     replies.set_enabled(true, NOW);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
+}
+
+#[test]
+fn reads_come_as_soon_as_rakumux_com_says() {
+    let paced = |poll: Option<Duration>| {
+        Ok(FeedResult::Replies(RepliesRead {
+            replies: vec![],
+            latest_seq: 0,
+            more: false,
+            poll,
+        }))
+    };
+    let mut replies = on(None, &[]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    // A reply waits for this machine, or the website is open: every second.
+    replies.request_done(true, paced(Some(Duration::from_secs(1))), NOW);
+    assert_eq!(replies.next_work(NOW + Duration::from_millis(999)), None);
+    let soon = NOW + Duration::from_secs(1);
+    assert_eq!(read_after(replies.next_work(soon)), 0);
+    // Nothing going on: less often.
+    replies.request_done(true, paced(Some(Duration::from_secs(15))), soon);
+    assert_eq!(replies.next_work(soon + Duration::from_secs(14)), None);
+    let later = soon + Duration::from_secs(15);
+    assert_eq!(read_after(replies.next_work(later)), 0);
+    // Without a hint, its own pace.
+    replies.request_done(true, paced(None), later);
+    assert_eq!(
+        replies.next_work(later + READ_EVERY - Duration::from_millis(1)),
+        None
+    );
+    assert_eq!(read_after(replies.next_work(later + READ_EVERY)), 0);
 }

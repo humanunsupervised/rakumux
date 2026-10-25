@@ -51,7 +51,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
         let query = match &self.request {
             FeedRequest::Read { after } => FeedRequest::query(*after),
             FeedRequest::Turn { entry, after } => FeedRequest::turn_query(entry, *after),
-            FeedRequest::Replies { after } => FeedRequest::replies_query(*after),
+            FeedRequest::Replies { after, machine } => FeedRequest::replies_query(*after, machine),
             FeedRequest::Upload { .. }
             | FeedRequest::Messages { .. }
             | FeedRequest::ReplyUpload { .. }

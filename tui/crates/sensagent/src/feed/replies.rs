@@ -26,7 +26,9 @@ use super::cache::{FeedReply, ReplyFailure, ReplyStatus};
 use super::job::FeedResult;
 use super::wire::{self, FeedFailure, FeedRequest, RepliesRead};
 
-/// How often the account's replies are read while the feed is on.
+/// How often the account's replies are read while the feed is on, unless
+/// rakumux.com's answer says otherwise (`poll_ms`: every second while a reply
+/// waits for this machine or the website is open, less often otherwise).
 const READ_EVERY: Duration = Duration::from_secs(5);
 /// The first and longest waits after a failed request.
 const RETRY_MIN: Duration = Duration::from_secs(5);
@@ -250,6 +252,7 @@ impl ReplySync {
             self.out = Some(Out::Read);
             return Some(ReplyWork::Request(FeedRequest::Replies {
                 after: self.cursor,
+                machine: self.machine.clone(),
             }));
         }
         None
@@ -438,7 +441,11 @@ impl ReplySync {
                     self.take(reply);
                 }
                 self.cursor = self.cursor.max(read.latest_seq);
-                self.next_read = if read.more { now } else { now + READ_EVERY };
+                self.next_read = if read.more {
+                    now
+                } else {
+                    now + read.poll.unwrap_or(READ_EVERY)
+                };
                 read.replies
             }
             Err(failure) => {

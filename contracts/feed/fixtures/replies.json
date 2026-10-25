@@ -76,10 +76,12 @@
   },
   "replies": {
     "valid": [
-      { "version": 1, "replies": [], "latest_seq": 0, "more": false }
+      { "version": 1, "replies": [], "latest_seq": 0, "more": false },
+      { "version": 1, "replies": [], "latest_seq": 0, "more": false, "poll_ms": 1000 }
     ],
     "invalid": [
       { "version": 1, "replies": [], "more": false },
+      { "version": 1, "replies": [], "latest_seq": 0, "more": false, "poll_ms": 500 },
       { "version": 1, "replies": [{ "seq": 1 }], "latest_seq": 1, "more": false }
     ]
   }

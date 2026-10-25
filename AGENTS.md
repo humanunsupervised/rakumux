@@ -181,7 +181,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    writes back to any entry with a conversation id, on rakumux.com or in a TUI (`r` in the
    Feed: `OwnerRequest::FeedReply {entry, text}` → `POST /api/v1/feed/replies`, ≤ 8 KiB, no
    controls). Under the same switch the service reads the account's replies as they change
-   (`GET /api/v1/feed/replies?after=SEQ`, every 5 s) and types each pending one addressed to
+   (`GET /api/v1/feed/replies?after=SEQ&machine=NAME`, as soon as the answer's `poll_ms` says:
+   every second while a reply waits for this machine or the user has the website open, every
+   15 s otherwise, within 1–60 s; every 5 s from a rakumux.com that doesn't say) and types each
+   pending one addressed to
    this machine into the entry's session with `session_submit` (a bracketed paste, then
    Enter; the same for Claude Code, Codex and OpenCode, which have no API for a running
    interactive session), only while it's live, not private, shows the entry's conversation

@@ -16,7 +16,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/messages` | [chat-upload](chat-upload.schema.json) | [chat-accepted](chat-accepted.schema.json) |
 | `GET /api/v1/feed/turn?entry=ID[&after=POSITION]` | query only | [turn](turn.schema.json), increasing position |
 | `POST /api/v1/feed/replies` | [reply-upload](reply-upload.schema.json) | [reply](reply.schema.json) |
-| `GET /api/v1/feed/replies?after=SEQ&limit=N` | query only | [replies](replies.schema.json), increasing seq |
+| `GET /api/v1/feed/replies?after=SEQ&limit=N&machine=NAME` | query only | [replies](replies.schema.json), increasing seq |
 | `POST /api/v1/feed/replies/status` | [reply-status](reply-status.schema.json) | [reply](reply.schema.json) |
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
 
@@ -57,8 +57,10 @@ conformance tests, not an HTTP server, database or local runtime.
   **8192 UTF-8 bytes**). The cloud stores it `pending` for the entry's machine, session, agent
   and conversation, with its `thread`: the entry that started it (an entry that answers a reply
   belongs to that reply's thread). The machine reads the account's replies after a seq
-  (`replies`; a reply takes a new seq whenever it changes, and pending ones older than an hour
-  are `expired` first), types each pending one into its session when the session still shows
+  (`replies`, naming itself with `machine`; a reply takes a new seq whenever it changes, and
+  pending ones older than an hour are `expired` first) as often as the answer's `poll_ms` says
+  (1000 while a reply waits for that machine or the user has the website open, 15000
+  otherwise; within 1–60 s; a machine keeps its own pace when it's absent), types each pending one into its session when the session still shows
   that conversation and the agent waits for input, and reports `delivered` or `failed` with a
   `failure` code (`reply-status`; only the reply's own machine, only a pending reply). The
   agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as

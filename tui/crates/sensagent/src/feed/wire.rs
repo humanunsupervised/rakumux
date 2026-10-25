@@ -62,8 +62,8 @@ pub(crate) enum FeedRequest {
     Turn { entry: String, after: Option<u64> },
     /// Store a reply written here, as `body`.
     ReplyUpload { body: Vec<u8> },
-    /// Read the account's replies changed after a seq.
-    Replies { after: u64 },
+    /// Read the account's replies changed after a seq, as `machine`.
+    Replies { after: u64, machine: String },
     /// Say whether a reply was typed into its session, as `body`.
     ReplyStatus { body: Vec<u8> },
     /// Upload this machine's whole session list, as `body`.
@@ -79,9 +79,13 @@ impl FeedRequest {
         }
     }
 
-    /// `GET /api/v1/feed/replies`' query.
-    pub fn replies_query(after: u64) -> String {
-        format!("after={after}&limit={REPLIES_LIMIT}")
+    /// `GET /api/v1/feed/replies`' query, naming the asking machine so the
+    /// answer's `poll_ms` knows whether a reply waits for it.
+    pub fn replies_query(after: u64, machine: &str) -> String {
+        format!(
+            "after={after}&limit={REPLIES_LIMIT}&machine={}",
+            percent_encoded(machine)
+        )
     }
 
     /// `GET /api/v1/feed/turn`'s query.
@@ -91,6 +95,20 @@ impl FeedRequest {
             None => format!("entry={entry}"),
         }
     }
+}
+
+/// `text` for a URL's query: unreserved characters as they are, every other
+/// byte as `%XX`.
+fn percent_encoded(text: &str) -> String {
+    let mut encoded = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 #[derive(Serialize)]
@@ -556,15 +574,19 @@ struct WireReplies {
     replies: Vec<WireReply>,
     latest_seq: u64,
     more: bool,
+    #[serde(default)]
+    poll_ms: Option<u64>,
 }
 
-/// Replies as read: those that fit the contract, the account's newest seq and
-/// whether more follow.
+/// Replies as read: those that fit the contract, the account's newest seq,
+/// whether more follow, and when rakumux.com says to read again (kept within
+/// 1–60 s), when it does.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct RepliesRead {
     pub replies: Vec<FeedReply>,
     pub latest_seq: u64,
     pub more: bool,
+    pub poll: Option<Duration>,
 }
 
 /// A page of the account's changed replies.
@@ -585,6 +607,9 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
             .collect(),
         latest_seq: page.latest_seq,
         more: page.more,
+        poll: page
+            .poll_ms
+            .map(|ms| Duration::from_millis(ms.clamp(1_000, 60_000))),
     })
 }
 
@@ -1209,5 +1234,29 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(older.open, None);
+    }
+
+    #[test]
+    fn replies_name_the_machine_and_say_when_to_read_again_within_bounds() {
+        assert_eq!(
+            FeedRequest::replies_query(7, "Studio Mac é"),
+            "after=7&limit=100&machine=Studio%20Mac%20%C3%A9"
+        );
+        let paced = |poll: &str| {
+            replies(&reply(
+                200,
+                &format!(r#"{{"version":1,"replies":[],"latest_seq":0,"more":false{poll}}}"#),
+            ))
+            .unwrap()
+            .poll
+        };
+        assert_eq!(paced(r#","poll_ms":1000"#), Some(Duration::from_secs(1)));
+        assert_eq!(paced(r#","poll_ms":15000"#), Some(Duration::from_secs(15)));
+        assert_eq!(paced(r#","poll_ms":10"#), Some(Duration::from_secs(1)));
+        assert_eq!(
+            paced(r#","poll_ms":3600000"#),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(paced(""), None);
     }
 }
