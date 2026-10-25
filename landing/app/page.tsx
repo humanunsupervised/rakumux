@@ -152,7 +152,7 @@ export default function Home() {
           <div className="container split">
             <div>
               <p className="kicker">Two modes, one key</p>
-              <h2>Your tools keep their keys.</h2>
+              <h2>Your agent&apos;s native keys.</h2>
               <p className="section-lede">
                 Your coding agent has shortcuts of its own, and Rakumux never intercepts or overrides them: inside a
                 session, every key goes to the program. Press <kbd>Ctrl</kbd> <kbd>\</kbd>, the one key Rakumux keeps
