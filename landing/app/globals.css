@@ -1136,6 +1136,152 @@ h3 {
   }
 }
 
+/* ------------------------------------------------------------ feed cards (as rakumux.com draws them) */
+
+/* An agent's turn. */
+.feed-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  margin-top: 0.75em;
+  padding: 18px 14px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+.feed-card-top {
+  position: absolute;
+  top: 0;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  transform: translateY(-50%);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.feed-card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  letter-spacing: 0;
+}
+/* The agent and branch give way first; the name keeps up to most of the room. */
+.feed-card-name { flex: 0 0 auto; max-width: 65%; overflow: hidden; text-overflow: ellipsis; color: var(--bright); font-weight: 700; }
+.feed-card-sub { flex: 1 1 0; min-width: 0; margin-left: 1ch; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.feed-card-meta { flex: none; display: flex; align-items: baseline; gap: 1ch; margin: 0; padding: 0 6px; background: var(--bg); color: var(--text-dim); }
+.feed-card-status { color: var(--text-dim); }
+.feed-card-mark { font-size: 0.85em; }
+.feed-card-status[data-status="done"] .feed-card-mark { color: var(--green); }
+.feed-card-status[data-status="sending"] .feed-card-mark { color: var(--yellow); }
+.feed-card-status[data-status="sent"] .feed-card-mark { color: var(--cyan); }
+.feed-card-status[data-status="answered"] .feed-card-mark { color: var(--purple); }
+.feed-card-status[data-status="reply-not-sent"] .feed-card-mark { color: var(--red); }
+/* Working: the agent hasn't answered yet; the mark breathes, quietly. */
+.feed-card-status[data-status="working"] .feed-card-mark { color: var(--orange); animation: feed-working 1.6s ease-in-out infinite; }
+@keyframes feed-working {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.feed-waiting { margin: 0; color: var(--muted); font-style: italic; }
+/* A turn's steps (reasoning, tool calls and output), closed behind their count. */
+.feed-steps { min-width: 0; }
+.feed-steps > summary {
+  width: fit-content;
+  min-height: 32px;
+  display: list-item;
+  align-content: center;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.feed-steps > summary:hover { color: var(--bright); }
+.feed-steps > .feed-items { margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--line); }
+.feed-card .feed-prompt { max-width: min(92%, 640px); }
+
+.feed-items { display: grid; gap: 12px; min-width: 0; }
+.feed-body { display: grid; gap: 10px; min-width: 0; }
+.feed-body p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.feed-prompt {
+  justify-self: end;
+  max-width: min(85%, 640px);
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 158, 100, 0.3);
+  border-radius: 16px 16px 4px 16px;
+  background: var(--orange-soft);
+  color: var(--bright);
+}
+.feed-text { display: grid; gap: 6px; min-width: 0; color: var(--text); }
+.feed-reply-sent { display: grid; justify-items: end; gap: 4px; min-width: 0; }
+.feed-reply-status { max-width: min(85%, 640px); margin: 0; color: var(--text-dim); font-size: 0.85em; text-align: right; overflow-wrap: anywhere; }
+.feed-reply-status[data-tone="waiting"] { color: var(--yellow); }
+.feed-reply-status[data-tone="failed"] { color: var(--red); }
+/* Phones: the card's header moves inside the box, its own two lines over a rule: the session and
+   its time and status, then the agent and branch, which wrap rather than vanish. */
+@media (max-width: 560px) {
+  .feed-card { margin-top: 0; padding: 10px 12px 12px; }
+  .feed-card-top {
+    position: static;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    transform: none;
+    white-space: normal;
+  }
+  .feed-card-title { display: grid; flex: 1 1 auto; padding: 0; overflow: visible; background: none; }
+  .feed-card-name { max-width: 100%; white-space: nowrap; }
+  .feed-card-sub { margin: 0; overflow: visible; overflow-wrap: anywhere; white-space: normal; }
+  .feed-card-meta { flex-direction: column; align-items: flex-end; gap: 0; padding: 0; background: none; text-align: right; }
+}
+
+/* ------------------------------------------------------------ agent feed mock-up */
+
+/* The landing page's picture of rakumux.com's Feed: its own cards (.feed-card), on a panel. */
+.feedmock {
+  display: grid;
+  gap: 22px;
+  padding: 26px 18px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.7);
+  font-size: 0.92rem;
+}
+.feedmock .feed-card-title,
+.feedmock .feed-card-meta { background: var(--surface); }
+.feedmock .feed-text p { margin: 0; }
+.feedmock .feed-text code { color: var(--orange); font-family: var(--mono); font-size: 0.92em; }
+.feedmock-reply {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 8px 8px 12px;
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+.feedmock-send {
+  flex: none;
+  padding: 5px 14px;
+  color: var(--surface);
+  background: var(--orange);
+  border-radius: 6px;
+  font-weight: 600;
+}
+
 /* ------------------------------------------------------------ sections */
 
 .section {

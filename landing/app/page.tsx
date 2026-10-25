@@ -5,34 +5,34 @@ const RELEASES = "https://github.com/humanunsupervised/rakumux/releases";
 
 const REASONS = [
   {
-    tag: "◔ Status",
-    title: "See what needs you",
-    body: "Every session sorted by what it's doing: waiting for you, unread, working, running, ready. The agent asking a question is at the top, not buried in a tab you forgot about.",
-  },
-  {
-    tag: "▤ Folders",
-    title: "Organise sessions your way",
-    body: "Group sessions by folder, app or status, pin the ones that matter above the rest and drag them into the order you want. Each folder shows its worktrees, and every session its git branch as it changes.",
-  },
-  {
-    tag: "rakumux-ptyd",
-    title: "Sessions outlive the window",
-    body: "A background server owns every session. Quit Rakumux, close the terminal or drop your SSH connection and your agents keep working. After a crash or a reboot they come back by themselves, each resuming its conversation.",
+    tag: "claude · codex · opencode",
+    title: "Bring your own subscription",
+    body: "Claude Code, Codex and OpenCode run as themselves, on the Claude, ChatGPT or other plans you already pay for. Every feature each agent has keeps working, because it's the agent itself. Rakumux adds no model costs.",
   },
   {
     tag: "≡ Feed",
-    title: "TUI first, on the web too",
-    body: "Rakumux lives in your terminal. Turn on the Agent feed and rakumux.com shows every machine's sessions, their chats and their replies in any browser, on your desktop or your phone, and you can write back from there. An iPhone app is coming.",
+    title: "Never let an agent sit idle",
+    body: "The moment an agent finishes a turn or stops for you, it's in your Agent feed, from every machine. Answer from any browser and Rakumux types it in as soon as the agent is ready, so every one keeps working.",
+  },
+  {
+    tag: "◔ Status",
+    title: "Find the right session fast",
+    body: "Group sessions by status, folder or app, pin the ones that matter above the rest, and see each one's branch as it changes. The agent waiting for you is at the top, not lost in a tab you forgot about.",
+  },
+  {
+    tag: "ssh",
+    title: "Terminal-first, built for remote",
+    body: "Agentic coding is moving to remote machines, and Rakumux lives in the terminal. Run it on a dev box over SSH, close your laptop, and your agents keep working until you come back from anywhere.",
+  },
+  {
+    tag: "rakumux.com",
+    title: "On the web, no VPN needed",
+    body: "The web app works on your desktop and your phone with nothing to set up: no Tailscale, no open ports. Prefer a direct connection? Tailscale works too. An iPhone app is coming soon.",
   },
   {
     tag: "rakumux-mcp",
-    title: "Agents can run agents",
-    body: "An MCP server lets an agent list folders, start sessions in its own folder, read another session's screen and rename sessions, a few at a time. Fan out a refactor, then check on it.",
-  },
-  {
-    tag: "rakumux ls",
-    title: "Scriptable all the way down",
-    body: "Everything on screen is a command too: new, ls, attach, rename, pin, kill. JSON output for scripts, and a token-protected local HTTP API on 127.0.0.1.",
+    title: "Management with real power",
+    body: "Restart Rakumux without stopping a single agent, bring sessions back after a reboot with their conversations resumed, let agents start agents through MCP, and script everything from the CLI, JSON or a local API.",
   },
 ];
 
@@ -78,6 +78,7 @@ export default function Home() {
           </a>
           <nav className="nav-links" aria-label="Sections">
             <a href="#why">Why</a>
+            <a href="#agent-feed">Agent Feed</a>
             <a href="#modes">Modes</a>
             <a href="#agents">Agents</a>
             <a href="#keys">Key Bindings</a>
@@ -111,9 +112,9 @@ export default function Home() {
               <span className="accent">One terminal.</span>
             </h1>
             <p className="lede">
-              Rakumux keeps Claude Code, Codex, OpenCode, your dev server and your shells running in the background,
-              grouped by status, folder or app, so you see at a glance what&apos;s running and which agent needs you.
-              Built in Rust, driven from the keyboard.
+              Run Claude Code, Codex and OpenCode on the subscriptions you already have, side by side in one terminal,
+              on your laptop or a remote box. Rakumux shows which agent needs you and lets you answer from any browser,
+              so none of them sits idle. Built in Rust, driven from the keyboard.
             </p>
             <div className="hero-actions">
               <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
@@ -121,7 +122,7 @@ export default function Home() {
                 How it installs →
               </a>
             </div>
-            <p className="hero-meta">macOS + Linux x64 binaries · no tmux, git or other tools needed</p>
+            <p className="hero-meta">macOS + Linux x64 binaries · your own agent subscriptions · no tmux or VPN needed</p>
           </div>
           <div className="container container-wide hero-demo">
             <TuiDemo />
@@ -133,8 +134,8 @@ export default function Home() {
             <p className="kicker">Why Rakumux</p>
             <h2>A multiplexer for your agents.</h2>
             <p className="section-lede">
-              Claude Code, Codex and OpenCode each want a terminal of their own. Rakumux runs them all in one: it keeps
-              them running, organises them, tells you which one needs you, and follows you to the web.
+              Rakumux doesn&apos;t replace your agents or resell their models. It runs them as they are, keeps every one of
+              them working, and puts them in reach wherever you are: in your terminal, on the web and on your phone.
             </p>
             <div className="grid">
               {REASONS.map((r) => (
@@ -148,7 +149,79 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="modes" className="section section-alt">
+        <section id="agent-feed" className="section section-alt">
+          <div className="container split">
+            <div>
+              <p className="kicker">Agent feed</p>
+              <h2>Keep every agent at 100%.</h2>
+              <p className="section-lede">
+                Your Agent feed is a running feed of your agents&apos; latest turns, from every machine, newest first.
+                See what each one did, and write back from rakumux.com on your desktop or your phone: Rakumux types your
+                answer in the moment the agent is ready. Your machine reaches out to rakumux.com and nothing reaches in,
+                so there&apos;s no VPN or Tailscale to set up.
+              </p>
+              <ul className="checks">
+                <li>Each turn pairs your prompt with the agent&apos;s answer, its Markdown drawn.</li>
+                <li>Status, Folders and App list every session on every machine, live.</li>
+                <li>Write to any session, even one that hasn&apos;t answered yet.</li>
+                <li>Prefer a direct connection to your machine? Tailscale works too.</li>
+                <li>Off until you turn it on, and private sessions are never sent. iPhone app coming soon.</li>
+              </ul>
+            </div>
+            <div className="feedmock" aria-label="The Agent feed on rakumux.com">
+              <article className="feed-card">
+                <header className="feed-card-top">
+                  <h3 className="feed-card-title">
+                    <span className="feed-card-name">auth-refactor</span> <span className="feed-card-sub">Claude Code · feat/auth</span>
+                  </h3>
+                  <p className="feed-card-meta">
+                    <span>2m</span>
+                    <span className="feed-card-status" data-status="done"><span className="feed-card-mark" aria-hidden="true">●</span> done</span>
+                  </p>
+                </header>
+                <div className="feed-items">
+                  <div className="feed-prompt">Move the session checks into middleware and add tests</div>
+                  <div className="feed-text">
+                    <p>
+                      Moved the checks into a <code>requireSession()</code> middleware and added 23 tests. All of them
+                      pass.
+                    </p>
+                  </div>
+                  <div className="feedmock-reply" aria-hidden="true">
+                    <span>Write back to Claude Code…</span>
+                    <span className="feedmock-send">Send</span>
+                  </div>
+                </div>
+              </article>
+              <article className="feed-card">
+                <header className="feed-card-top">
+                  <h3 className="feed-card-title">
+                    <span className="feed-card-name">flaky-tests</span> <span className="feed-card-sub">Codex · fix/flaky</span>
+                  </h3>
+                  <p className="feed-card-meta">
+                    <span>9m</span>
+                    <span className="feed-card-status" data-status="sent"><span className="feed-card-mark" aria-hidden="true">●</span> sent</span>
+                  </p>
+                </header>
+                <div className="feed-items">
+                  <div className="feed-prompt">Why do the queue tests fail on CI?</div>
+                  <div className="feed-text">
+                    <p>
+                      All three share a timer race in <code>queue.spec.ts</code>. Swapping <code>flush()</code> for{" "}
+                      <code>vi.runAllTimersAsync()</code> fixes it.
+                    </p>
+                  </div>
+                  <div className="feed-reply-sent">
+                    <div className="feed-prompt">Apply it and rerun the suite.</div>
+                    <p className="feed-reply-status" data-tone="delivered">from your phone · Sent</p>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="modes" className="section">
           <div className="container split">
             <div>
               <p className="kicker">Two modes, one key</p>
@@ -194,7 +267,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="agents" className="section">
+        <section id="agents" className="section section-alt">
           <div className="container split split-reverse">
             <div>
               <p className="kicker">Built for agents</p>
@@ -205,7 +278,7 @@ export default function Home() {
                 is working, which is waiting for you and which just finished, and answer the one that needs you first.
               </p>
               <ul className="checks">
-                <li>Works with Claude Code, Codex and OpenCode as they are, and runs any other program too.</li>
+                <li>Works with Claude Code, Codex and OpenCode as they are, on your own subscriptions, and runs any other program too.</li>
                 <li>Agents can start their own sessions through the MCP server, in their own folder, a few at a time.</li>
                 <li>The local API listens on 127.0.0.1 only and needs a token.</li>
               </ul>
@@ -243,7 +316,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="keys" className="section section-alt">
+        <section id="keys" className="section">
           <div className="container">
             <p className="kicker">Key bindings</p>
             <h2>Use your coding agent natively.</h2>
@@ -264,7 +337,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="install" className="section">
+        <section id="install" className="section section-alt">
           <div className="container split">
             <div>
               <p className="kicker">Install</p>
@@ -297,7 +370,8 @@ export default function Home() {
                   <span className="step-n">2</span>
                   <div>
                     <p>
-                      Press <kbd>n</kbd>, give it a name (or don&apos;t), and run a command or an agent in its shell.
+                      Press <kbd>n</kbd> for a new session and start an agent in its shell: <code>claude</code>,{" "}
+                      <code>codex</code> or <code>opencode</code>.
                     </p>
                   </div>
                 </li>
