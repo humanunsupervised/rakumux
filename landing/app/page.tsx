@@ -5,29 +5,29 @@ const RELEASES = "https://github.com/humanunsupervised/rakumux/releases";
 
 const REASONS = [
   {
+    tag: "◔ Status",
+    title: "See what needs you",
+    body: "Every session sorted by what it's doing: waiting for you, unread, working, running, ready. The agent asking a question is at the top, not buried in a tab you forgot about.",
+  },
+  {
+    tag: "▤ Folders",
+    title: "Organise sessions your way",
+    body: "Group sessions by folder, app or status, pin the ones that matter above the rest and drag them into the order you want. Each folder shows its worktrees, and every session its git branch as it changes.",
+  },
+  {
     tag: "rakumux-ptyd",
     title: "Sessions outlive the window",
-    body: "A background server owns every session. Quit Rakumux, close the terminal or drop your SSH connection and your agents keep working. After a reboot, Enter brings a session back, resuming the agent's conversation when it knows how.",
+    body: "A background server owns every session. Quit Rakumux, close the terminal or drop your SSH connection and your agents keep working. After a crash or a reboot they come back by themselves, each resuming its conversation.",
   },
   {
-    tag: "j / k",
-    title: "See every agent at once",
-    body: "Move through the list and each session plays live beside it. Which agent is working, which is waiting for you, which is done: it's on the screen, not buried in a tab you forgot about.",
-  },
-  {
-    tag: "Ctrl-\\",
-    title: "One key, no collisions",
-    body: "Claude Code, Codex, OpenCode, Neovim and your shell keep every key but one. Ctrl-\\ is the key nothing else wants, so Rakumux never fights your tools for a shortcut.",
+    tag: "≡ Feed",
+    title: "TUI first, on the web too",
+    body: "Rakumux lives in your terminal. Turn on the Agent feed and rakumux.com shows every machine's sessions, their chats and their replies in any browser, on your desktop or your phone, and you can write back from there. An iPhone app is coming.",
   },
   {
     tag: "rakumux-mcp",
-    title: "Agents can drive it too",
-    body: "An MCP server lets agents list folders, start sessions in their own folder, read another session's screen and rename sessions. Fan out a refactor, then check on it.",
-  },
-  {
-    tag: "⎇ feat/auth",
-    title: "Every folder, every worktree",
-    body: "Each session lives in a folder: a repository, a worktree or anything else. See every folder's sessions at once or filter to a few, order and pin the ones that matter, and see each session's git branch as it changes.",
+    title: "Agents can run agents",
+    body: "An MCP server lets an agent list folders, start sessions in its own folder, read another session's screen and rename sessions, a few at a time. Fan out a refactor, then check on it.",
   },
   {
     tag: "rakumux ls",
@@ -73,17 +73,20 @@ export default function Home() {
       <header className="nav">
         <div className="container nav-inner">
           <a href="#top" className="brand" aria-label="Rakumux home">
-            <span className="badge badge-rakumux">RAKUMUX</span>
+            <img src="/icon.svg" alt="" width={28} height={28} className="brand-icon" />
+            <span className="brand-name">rakumux</span>
           </a>
           <nav className="nav-links" aria-label="Sections">
             <a href="#why">Why</a>
             <a href="#modes">Modes</a>
             <a href="#agents">Agents</a>
-            <a href="#keys">Keys</a>
+            <a href="#keys">Key Bindings</a>
             <a
               href="https://github.com/humanunsupervised/rakumux"
               className="nav-github"
-              aria-label="Rakumux on GitHub"
+              aria-label="Rakumux on GitHub (opens in a new tab)"
+              target="_blank"
+              rel="noopener noreferrer"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
                 <path d="M12 .297C5.37.297 0 5.67 0 12.297c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.729.083-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.418-1.305.762-1.605-2.665-.305-5.467-1.334-5.467-5.93 0-1.31.469-2.38 1.236-3.22-.124-.303-.536-1.524.117-3.176 0 0 1.008-.322 3.301 1.23a11.52 11.52 0 0 1 3.003-.404c1.02.005 2.045.138 3.003.404 2.291-1.552 3.297-1.23 3.297-1.23.655 1.652.243 2.873.12 3.176.77.84 1.235 1.91 1.235 3.22 0 4.61-2.807 5.622-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .322.216.694.825.576C20.565 22.092 24 17.597 24 12.297c0-6.627-5.373-12-12-12" />
@@ -100,7 +103,7 @@ export default function Home() {
         <section className="hero">
           <div className="container">
             <p className="eyebrow">
-              <span className="pulse" aria-hidden="true" /> A terminal session manager for coding agents
+              <span className="pulse" aria-hidden="true" /> A terminal multiplexer for coding agents
             </p>
             <h1>
               Every coding agent.
@@ -109,7 +112,8 @@ export default function Home() {
             </h1>
             <p className="lede">
               Rakumux keeps Claude Code, Codex, OpenCode, your dev server and your shells running in the background,
-              and puts them side by side, live, one key apart. Built in Rust, driven from the keyboard.
+              grouped by status, folder or app, so you see at a glance what&apos;s running and which agent needs you.
+              Built in Rust, driven from the keyboard.
             </p>
             <div className="hero-actions">
               <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
@@ -127,10 +131,10 @@ export default function Home() {
         <section id="why" className="section">
           <div className="container">
             <p className="kicker">Why Rakumux</p>
-            <h2>Stop losing agents in terminal tabs.</h2>
+            <h2>A harness within a harness.</h2>
             <p className="section-lede">
-              Running three agents, a dev server and a test watcher means a dozen tabs, and the one waiting for your
-              answer is never the one you&apos;re looking at. Rakumux gives them one home.
+              Claude Code, Codex and OpenCode are each a harness around a model. Rakumux is the harness around them: it
+              keeps them running, organises them, tells you which one needs you, and follows you to the web.
             </p>
             <div className="grid">
               {REASONS.map((r) => (
@@ -194,15 +198,15 @@ export default function Home() {
           <div className="container split split-reverse">
             <div>
               <p className="kicker">Built for agents</p>
-              <h2>Let your agents start their own sessions.</h2>
+              <h2>Know when each agent needs you.</h2>
               <p className="section-lede">
-                Rakumux recognises common coding agents and shows whether each one is working, waiting for you or
-                done. Its MCP server goes further: an agent running inside Rakumux can start sessions in its own
-                folder, read another session&apos;s screen and report back.
+                Claude Code, Codex and OpenCode run inside Rakumux natively, exactly as they do in your terminal: their
+                own screens, their own keys, nothing wrapped. Rakumux follows each one as it works, so you see which agent
+                is working, which is waiting for you and which just finished, and answer the one that needs you first.
               </p>
               <ul className="checks">
-                <li>Works with Claude Code, Codex, OpenCode and any MCP client.</li>
-                <li>Agents start sessions only in their own folder, a few at a time.</li>
+                <li>Works with Claude Code, Codex and OpenCode as they are, and runs any other program too.</li>
+                <li>Agents can start their own sessions through the MCP server, in their own folder, a few at a time.</li>
                 <li>The local API listens on 127.0.0.1 only and needs a token.</li>
               </ul>
             </div>
@@ -241,11 +245,11 @@ export default function Home() {
 
         <section id="keys" className="section section-alt">
           <div className="container">
-            <p className="kicker">Keyboard first</p>
-            <h2>The whole thing fits on one card.</h2>
+            <p className="kicker">Key bindings</p>
+            <h2>Use your coding agent natively.</h2>
             <p className="section-lede">
-              These are Rakumux mode&apos;s keys. Forget one? <kbd>?</kbd> opens Help, and a one-minute tour shows on
-              first launch.
+              Inside a session your agent gets every key, so its shortcuts work exactly as they always have. Rakumux&apos;s
+              own keys work only in Rakumux mode, and they fit on one card. Forget one? <kbd>?</kbd> opens Help.
             </p>
             <dl className="keygrid">
               {KEYS.map((k) => (
@@ -326,7 +330,7 @@ export default function Home() {
           <span className="badge badge-session">RAKUMUX</span>
           <span className="t-muted">© {new Date().getFullYear()} Human Unsupervised</span>
           <span className="tui-spacer" />
-          <a href="https://github.com/humanunsupervised/rakumux">Source · Apache-2.0</a>
+          <a href="https://github.com/humanunsupervised/rakumux" target="_blank" rel="noopener noreferrer">Source · Apache-2.0</a>
           <a href={RELEASES}>Releases</a>
           <a href="#install">Install</a>
         </div>
