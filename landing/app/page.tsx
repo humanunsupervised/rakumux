@@ -221,7 +221,7 @@ export default function Home() {
                     </p>
                   </div>
                   <div className="feedmock-reply" aria-hidden="true">
-                    <span>Write back to Claude Code…</span>
+                    <span>Message your agent…</span>
                     <span className="feedmock-send">Send</span>
                   </div>
                 </div>
