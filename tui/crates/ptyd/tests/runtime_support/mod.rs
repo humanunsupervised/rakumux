@@ -305,7 +305,7 @@ impl Control for FakeControl {
                 },
                 Err(error) => Response::Error { error },
             },
-            Request::SessionSubmit { id, text } => match self.lookup(&id) {
+            Request::SessionSubmit { id, text, .. } => match self.lookup(&id) {
                 Ok(tid) => match self.host.submit(tid, &text) {
                     Ok(()) => Response::Ok,
                     Err(e) => host_failure(e),
@@ -492,6 +492,7 @@ impl TestClient {
         let response = self.request(&Request::SessionSubmit {
             id: id.clone(),
             text: text.into(),
+            quiet_ms: None,
         });
         assert_eq!(response, Response::Ok, "submit {text:?}");
     }

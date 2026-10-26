@@ -671,6 +671,32 @@ fn a_stalled_observer_is_resynced_without_blocking_output() {
 }
 
 #[test]
+fn a_quiet_submit_waits_while_the_controller_is_typing() {
+    let home = TestHome::new();
+    let host = home.host();
+    let info = host.spawn(home.bash_spec(80, 24, b"")).unwrap();
+    let quiet = Duration::from_secs(30);
+
+    // Nobody has typed: it's written.
+    host.submit_when_quiet(info.id, "true", quiet).unwrap();
+
+    // The controller just typed: refused, nothing written.
+    let controller = host.attach(info.id, Role::Controller, 80, 24).unwrap();
+    controller.control.input(b"ec").unwrap();
+    assert!(matches!(
+        host.submit_when_quiet(info.id, "echo nope", quiet),
+        Err(HostError::Typing)
+    ));
+    // A plain submit doesn't wait, and a shorter window has passed.
+    std::thread::sleep(Duration::from_millis(50));
+    host.submit_when_quiet(info.id, "true", Duration::from_millis(10))
+        .unwrap();
+    host.submit(info.id, "true").unwrap();
+    drop(controller);
+    host.shutdown();
+}
+
+#[test]
 fn observers_fit_the_terminal_unless_the_controller_is_typing() {
     let home = TestHome::new();
     let host = home.host();

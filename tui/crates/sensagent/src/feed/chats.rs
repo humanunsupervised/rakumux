@@ -3,9 +3,10 @@
 //! daemon (`session_transcript`) after where it was last uploaded, cleaned
 //! (terminal controls removed, keys, credential assignments and tokens
 //! masked) and uploaded to rakumux.com (`POST /api/v1/feed/messages`), one
-//! request at a time. Where each session's chat is up to is kept in the
-//! status directory, so a restarted service carries on rather than starting
-//! over. Driven by the owner thread with its own clock.
+//! request at a time; a changing chat is read at most every 5 s, every second
+//! while rakumux.com is open. Where each session's chat is up to is kept in
+//! the status directory, so a restarted service carries on rather than
+//! starting over. Driven by the owner thread with its own clock.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -23,8 +24,10 @@ use super::wire::{self, FeedFailure, FeedRequest};
 
 /// How much of a chat's log is read at once.
 pub(crate) const READ_BYTES: u32 = 512 * 1024;
-/// A changing chat is read again at most this often.
+/// A changing chat is read again at most this often…
 const READ_EVERY: Duration = Duration::from_secs(5);
+/// …or this often while rakumux.com is open (`ReplySync::watched`), so its pages follow along.
+const READ_EVERY_WATCHED: Duration = Duration::from_secs(1);
 /// After a read failed, before that session is read again.
 const READ_RETRY: Duration = Duration::from_secs(30);
 /// The first and longest waits after a failed upload.
@@ -103,6 +106,8 @@ pub(crate) struct ChatSync {
     supported: bool,
     sessions: HashMap<SessionId, Followed>,
     cursors: Cursors,
+    /// rakumux.com is open: chats are read every [`READ_EVERY_WATCHED`].
+    watched: bool,
     busy: bool,
     pending: Option<Pending>,
     retry_at: Duration,
@@ -119,6 +124,7 @@ impl ChatSync {
             supported: true,
             sessions: HashMap::new(),
             cursors: Cursors::load(cursors),
+            watched: false,
             busy: false,
             pending: None,
             retry_at: Duration::ZERO,
@@ -141,6 +147,17 @@ impl ChatSync {
                 session.due = true;
             }
         }
+    }
+
+    /// Whether rakumux.com is open: then chats are read every second, a
+    /// session waiting out the slower pace no longer than that.
+    pub fn set_watched(&mut self, watched: bool, now: Duration) {
+        if watched && !self.watched {
+            for session in self.sessions.values_mut() {
+                session.next = session.next.min(now + READ_EVERY_WATCHED);
+            }
+        }
+        self.watched = watched;
     }
 
     /// The daemon (re)connected: these are its sessions, each read again.
@@ -212,7 +229,12 @@ impl ChatSync {
             .map(|(id, _)| id.clone())?;
         if let Some(followed) = self.sessions.get_mut(&session) {
             followed.due = false;
-            followed.next = now + READ_EVERY;
+            followed.next = now
+                + if self.watched {
+                    READ_EVERY_WATCHED
+                } else {
+                    READ_EVERY
+                };
         }
         self.busy = true;
         Some(ChatWork::Read {

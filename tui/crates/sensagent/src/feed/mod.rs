@@ -26,7 +26,7 @@ pub(crate) use chats::{ChatSync, ChatWork, READ_BYTES};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
 pub use replies::{AcceptRemote, ReplyWrite, ReplyWriteStatus};
-pub(crate) use replies::{ReplySync, ReplyWork};
+pub(crate) use replies::{ReplySync, ReplyWork, TYPING_QUIET};
 pub(crate) use sessions::SessionSync;
 pub use sync::machine_name;
 pub(crate) use sync::FeedSync;

@@ -53,6 +53,13 @@ pub trait SessionApi: Send + Sync {
     fn wait(&self, request: WaitRequest) -> Result<WaitResult>;
     fn send(&self, request: SendRequest) -> Result<()>;
     fn submit(&self, id: &SessionId, text: &str) -> Result<()>;
+    /// [`submit`](Self::submit), refused with `session_in_use` while someone
+    /// typed in the session within `quiet` (capability `session.submit.quiet`;
+    /// a daemon without it submits anyway).
+    fn submit_when_quiet(&self, id: &SessionId, text: &str, quiet: Duration) -> Result<()> {
+        let _ = quiet;
+        self.submit(id, text)
+    }
     fn touch(&self, id: &SessionId) -> Result<()>;
     fn status(&self) -> Result<DaemonStatusInfo>;
     fn shutdown(&self) -> Result<()>;
@@ -529,6 +536,15 @@ impl SessionApi for Client {
         self.expect_ok(&Request::SessionSubmit {
             id: id.clone(),
             text: text.to_owned(),
+            quiet_ms: None,
+        })
+    }
+
+    fn submit_when_quiet(&self, id: &SessionId, text: &str, quiet: Duration) -> Result<()> {
+        self.expect_ok(&Request::SessionSubmit {
+            id: id.clone(),
+            text: text.to_owned(),
+            quiet_ms: Some(u64::try_from(quiet.as_millis()).unwrap_or(u64::MAX)),
         })
     }
 
@@ -2111,7 +2127,8 @@ mod tests {
                 Request::SessionSend(send),
                 Request::SessionSubmit {
                     id: s1.clone(),
-                    text: "echo hi".into()
+                    text: "echo hi".into(),
+                    quiet_ms: None,
                 },
                 Request::SessionTouch { id: s1.clone() },
                 Request::DaemonStatus,

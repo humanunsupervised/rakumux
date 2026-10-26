@@ -84,6 +84,7 @@ fn host_error(error: HostError) -> ApiError {
     let code = match error {
         HostError::NotFound | HostError::NotRunning => ErrorCode::NotFound,
         HostError::NotController => ErrorCode::PermissionDenied,
+        HostError::Typing => ErrorCode::SessionInUse,
         HostError::InvalidKey(_) => ErrorCode::InvalidArgument,
         HostError::Spawn(_) | HostError::Io(_) => ErrorCode::Internal,
     };

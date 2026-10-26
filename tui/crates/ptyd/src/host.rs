@@ -180,6 +180,8 @@ pub enum HostError {
     NotRunning,
     /// Input from an observer, or a second controller conflict.
     NotController,
+    /// Someone typed in the terminal too recently (`submit_when_quiet`).
+    Typing,
     InvalidKey(String),
     Spawn(String),
     Io(String),
@@ -191,6 +193,7 @@ impl std::fmt::Display for HostError {
             HostError::NotFound => write!(f, "terminal not found"),
             HostError::NotRunning => write!(f, "terminal is not running"),
             HostError::NotController => write!(f, "only the controller can do that"),
+            HostError::Typing => write!(f, "someone is typing in this terminal"),
             HostError::InvalidKey(k) => write!(f, "unknown key {k:?}"),
             HostError::Spawn(m) => write!(f, "spawn failed: {m}"),
             HostError::Io(m) => write!(f, "I/O error: {m}"),
@@ -284,6 +287,17 @@ pub trait TerminalHost: Send + Sync + 'static {
     fn write(&self, id: TerminalId, bytes: &[u8]) -> Result<(), HostError>;
     /// Bracketed-paste-aware text followed by Enter, written atomically.
     fn submit(&self, id: TerminalId, text: &str) -> Result<(), HostError>;
+    /// [`submit`](Self::submit), unless its controller sent input within
+    /// `quiet`: then [`HostError::Typing`] and nothing is written.
+    fn submit_when_quiet(
+        &self,
+        id: TerminalId,
+        text: &str,
+        quiet: std::time::Duration,
+    ) -> Result<(), HostError> {
+        let _ = quiet;
+        self.submit(id, text)
+    }
     /// Named keys (`enter`, `esc`, `tab`, `backspace`, `up`/`down`/`left`/
     /// `right`, `home`, `end`, `pageup`, `pagedown`, `ctrl+<c>`, `alt+<c>`)
     /// then optional literal text. All keys are validated before any byte is

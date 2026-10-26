@@ -654,3 +654,38 @@ fn revive_replaces_an_agent_launch_command_with_its_resume_command() {
     );
     let _ = &mut h;
 }
+
+#[test]
+fn a_quiet_submit_waits_while_someone_types_without_filling_the_audit_log() {
+    let h = Harness::new();
+    let session = h.create(Some("agent"));
+    let terminal = h.host.terminal_of(&session.id);
+    h.host.set_typing(&session.id, true);
+    let audited = h.audit().len();
+    let quiet = |text: &str| Request::SessionSubmit {
+        id: session.id.clone(),
+        text: text.into(),
+        quiet_ms: Some(10_000),
+    };
+    match h.handle(&h.user, quiet("from the web")) {
+        Response::Error { error } => assert_eq!(error.code, ErrorCode::SessionInUse),
+        other => panic!("expected session_in_use, got {other:?}"),
+    }
+    assert!(h.host.terminal(terminal).submits.is_empty());
+    assert_eq!(
+        h.audit().len(),
+        audited,
+        "each try while someone types isn't audited"
+    );
+
+    // A plain submit doesn't wait; once they pause, the quiet one goes in too.
+    let plain = Request::SessionSubmit {
+        id: session.id.clone(),
+        text: "now".into(),
+        quiet_ms: None,
+    };
+    assert_eq!(h.handle(&h.user, plain), Response::Ok);
+    h.host.set_typing(&session.id, false);
+    assert_eq!(h.handle(&h.user, quiet("from the web")), Response::Ok);
+    assert_eq!(h.host.terminal(terminal).submits, ["now", "from the web"]);
+}

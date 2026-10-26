@@ -193,6 +193,26 @@ fn a_session_being_typed_into_takes_nothing_else_meanwhile() {
 }
 
 #[test]
+fn a_session_someone_is_typing_in_is_tried_again_once_they_pause() {
+    let mut replies = on(None, &[view("S", Lifecycle::Idle, Some(CHAT))]);
+    let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    assert!(matches!(work, Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"));
+    // The daemon refused: someone typed there. It stays pending, unreported…
+    replies.typing("01K8A1".into(), NOW);
+    let meanwhile = replies.next_work(NOW + TYPING_HOLD / 2);
+    assert!(!matches!(meanwhile, Some(ReplyWork::Submit { .. })));
+    assert!(!matches!(
+        meanwhile,
+        Some(ReplyWork::Request(FeedRequest::ReplyStatus { .. }))
+    ));
+    // …and is typed in once the hold is over.
+    assert!(matches!(
+        replies.next_work(NOW + TYPING_HOLD),
+        Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"
+    ));
+}
+
+#[test]
 fn replies_written_elsewhere_need_this_machines_setting() {
     let views = [view("S", Lifecycle::Done, Some(CHAT))];
     for from in [None, Some("laptop")] {
@@ -352,11 +372,13 @@ fn reads_come_as_soon_as_rakumux_com_says() {
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     // A reply waits for this machine, or the website is open: every second.
     replies.request_done(true, paced(Some(Duration::from_secs(1))), NOW);
+    assert!(replies.watched(), "chats then upload as they grow");
     assert_eq!(replies.next_work(NOW + Duration::from_millis(999)), None);
     let soon = NOW + Duration::from_secs(1);
     assert_eq!(read_after(replies.next_work(soon)), 0);
     // Nothing going on: less often.
     replies.request_done(true, paced(Some(Duration::from_secs(15))), soon);
+    assert!(!replies.watched());
     assert_eq!(replies.next_work(soon + Duration::from_secs(14)), None);
     let later = soon + Duration::from_secs(15);
     assert_eq!(read_after(replies.next_work(later)), 0);

@@ -98,6 +98,25 @@ fn a_live_chat_is_read_uploaded_then_read_on_from_where_it_was() {
 }
 
 #[test]
+fn while_rakumux_com_is_open_a_changing_chat_is_read_every_second() {
+    let mut chats = on(None);
+    let (session, _) = read_of(chats.next_work(NOW));
+    chats.read_done(session, Ok(page(vec![], 120, false)), NOW);
+    // At the usual pace it waits out READ_EVERY; once the site is open, a second at most.
+    chats.observe(&view("S", false));
+    assert_eq!(chats.next_work(NOW + READ_EVERY_WATCHED), None);
+    chats.set_watched(true, NOW);
+    let (session, _) = read_of(chats.next_work(NOW + READ_EVERY_WATCHED));
+    chats.read_done(
+        session,
+        Ok(page(vec![], 120, false)),
+        NOW + READ_EVERY_WATCHED,
+    );
+    chats.observe(&view("S", false));
+    read_of(chats.next_work(NOW + 2 * READ_EVERY_WATCHED));
+}
+
+#[test]
 fn nothing_is_read_while_the_feed_is_off_and_a_turned_off_feed_drops_what_wasnt_sent() {
     let mut chats = ChatSync::new("studio".into(), None);
     chats.connected(&[view("S", false)]);

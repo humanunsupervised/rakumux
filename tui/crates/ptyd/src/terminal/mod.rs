@@ -718,6 +718,23 @@ impl TerminalHost for Host {
         shared.send_input(bytes)
     }
 
+    fn submit_when_quiet(
+        &self,
+        id: TerminalId,
+        text: &str,
+        quiet: Duration,
+    ) -> Result<(), HostError> {
+        let shared = self.inner.get(id)?;
+        let typing = shared
+            .lock()
+            .controller_input_at
+            .is_some_and(|at| at.elapsed() < quiet);
+        if typing {
+            return Err(HostError::Typing);
+        }
+        self.submit(id, text)
+    }
+
     fn send_keys(
         &self,
         id: TerminalId,

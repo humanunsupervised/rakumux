@@ -34,6 +34,8 @@ pub struct FakeTerminal {
     pub keys: Vec<(Vec<String>, Option<String>)>,
     pub terminated: bool,
     pub forgotten: bool,
+    /// Someone is typing in it: a quiet submit is refused.
+    pub typing: bool,
 }
 
 #[derive(Default)]
@@ -130,6 +132,17 @@ impl FakeHost {
 
     pub fn fail_next_spawn(&self, message: &str) {
         self.state.lock().unwrap().fail_next_spawn = Some(message.to_string());
+    }
+
+    pub fn set_typing(&self, session: &SessionId, typing: bool) {
+        let id = self.terminal_of(session);
+        self.state
+            .lock()
+            .unwrap()
+            .terminals
+            .get_mut(&id)
+            .unwrap()
+            .typing = typing;
     }
 
     pub fn set_size(&self, session: &SessionId, cols: u16, rows: u16) {
@@ -229,6 +242,7 @@ impl TerminalHost for FakeHost {
                 keys: Vec::new(),
                 terminated: false,
                 forgotten: false,
+                typing: false,
             },
         );
         Ok(info)
@@ -282,6 +296,25 @@ impl TerminalHost for FakeHost {
 
     fn submit(&self, id: TerminalId, text: &str) -> Result<(), HostError> {
         self.with_running(id, |t| t.submits.push(text.to_string()))
+    }
+
+    fn submit_when_quiet(
+        &self,
+        id: TerminalId,
+        text: &str,
+        _quiet: Duration,
+    ) -> Result<(), HostError> {
+        if self
+            .state
+            .lock()
+            .unwrap()
+            .terminals
+            .get(&id)
+            .is_some_and(|t| t.typing)
+        {
+            return Err(HostError::Typing);
+        }
+        self.submit(id, text)
     }
 
     fn send_keys(

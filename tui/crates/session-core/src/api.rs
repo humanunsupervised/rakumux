@@ -145,6 +145,12 @@ pub enum Request {
     SessionSubmit {
         id: SessionId,
         text: String,
+        /// Refuse with `session_in_use` while someone typed in the session
+        /// (its controller sent input) within this many milliseconds, so the
+        /// text isn't added to what they're writing (capability
+        /// `session.submit.quiet`). A daemon without it submits anyway.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quiet_ms: Option<u64>,
     },
     /// Mark a session as just used (list ordering, `done` → `idle`).
     SessionTouch {
@@ -536,6 +542,9 @@ pub const CAPABILITY_TURN: &str = "session.turn";
 
 /// `session_transcript`: a running agent's whole conversation.
 pub const CAPABILITY_TRANSCRIPT: &str = "session.transcript";
+
+/// `session_submit`'s `quiet_ms`: refused while someone typed in the session.
+pub const CAPABILITY_SUBMIT_QUIET: &str = "session.submit.quiet";
 
 /// How much of an agent's log `session_transcript` reads by default, in bytes.
 pub const TRANSCRIPT_BYTES: u32 = 512 * 1024;

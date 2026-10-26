@@ -169,7 +169,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    the entries changed since its revision (`OwnerRequest::Feed`). Signing out or turning the
    switch off empties both. **Whole chats** (`feed/chats.rs`, `ChatSync`): under the same
    switch, each live, non-private session's agent conversation is read from the daemon
-   (`session_transcript`) after where it was last uploaded, at most every 5 s while it changes,
+   (`session_transcript`) after where it was last uploaded, at most every 5 s while it changes
+   (every second while rakumux.com is open: the replies read asks for 1 s, `ReplySync::watched`),
    its texts cleaned (escape sequences and controls removed, keys, credential assignments and
    tokens masked) and uploaded as messages (`POST /api/v1/feed/messages`, ≤ 100 and ~2 MiB a
    request); where each session's chat is up to is kept in `sensagent/status/chats.json`
@@ -189,7 +190,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    Enter; the same for Claude Code, Codex and OpenCode, which have no API for a running
    interactive session), only while it's live, not private, shows the entry's conversation
    (`agent_turn.conversation_id`) and its agent waits (`idle`/`done`; `working`, `blocked` or an
-   unknown chat waits, the cloud expires a reply after an hour), one at a time per session.
+   unknown chat waits, the cloud expires a reply after an hour), one at a time per session,
+   and not while someone typed in that session in the last 10 s (`session_submit`'s `quiet_ms`,
+   so it isn't added to what they're writing; tried again 2 s later).
    It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
    `private`, `not_accepted`, `refused`; `POST /api/v1/feed/replies/status`). A reply written
    on rakumux.com or another machine is typed only when this machine's
@@ -375,7 +378,10 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `projects`, `session.pin`, `session.git`, `auth.delegated`, `sessions.all` and `daemon.restart`
   advertise the additions. `session_turn {id}` (user only, capability `session.turn`) returns a
   live agent's current turn: `TurnContent {id, prompt?, messages, total}`, the newest 100
-  messages, each one line of at most 600 characters, for AI summaries.
+  messages, each one line of at most 600 characters, for AI summaries. `session_submit {id, text,
+  quiet_ms?}` (paste, then Enter): with `quiet_ms` (capability `session.submit.quiet`) it's
+  refused with `session_in_use`, unaudited, while the session's controller typed within that
+  time; a daemon without it submits anyway.
 - `session_import {source}` (user only, capability `session.import`) restores an archive directory
   containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.
   The daemon preserves ids and metadata, refuses existing ids or names, stages files privately,

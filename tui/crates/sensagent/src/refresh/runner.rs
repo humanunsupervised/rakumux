@@ -449,7 +449,7 @@ fn own<S, A, C>(
                 let _ = work.send(Work::Features(job));
             }
             follow_feed(&refresher, &mut feed, work, now);
-            follow_chats(&refresher, &mut chats, work, now);
+            follow_chats(&refresher, &mut chats, replies.watched(), work, now);
             follow_replies(&refresher, &mut replies, work, now);
             follow_sessions(&refresher, &mut sessions, work, now);
             next_tick = now.saturating_add(TICK);
@@ -491,7 +491,7 @@ fn own<S, A, C>(
                     _ => {}
                 }
                 let _ = refresher.apply_event(&event, now);
-                follow_chats(&refresher, &mut chats, work, now);
+                follow_chats(&refresher, &mut chats, replies.watched(), work, now);
                 follow_replies(&refresher, &mut replies, work, now);
                 follow_sessions(&refresher, &mut sessions, work, now);
             }
@@ -509,7 +509,11 @@ fn own<S, A, C>(
                 follow_replies(&refresher, &mut replies, work, now);
             }
             Message::ReplySubmitted(reply, result) => {
-                replies.submitted(reply, result, wall_ms());
+                match result {
+                    // Someone is typing in that session: wait for them to pause.
+                    Err(ErrorCode::SessionInUse) => replies.typing(reply, now),
+                    result => replies.submitted(reply, result, wall_ms()),
+                }
                 follow_replies(&refresher, &mut replies, work, now);
             }
             Message::ReplyWritten(outcome, answer) => {
@@ -522,13 +526,13 @@ fn own<S, A, C>(
             }
             Message::Transcript(session, result) => {
                 chats.read_done(session, result, now);
-                follow_chats(&refresher, &mut chats, work, now);
+                follow_chats(&refresher, &mut chats, replies.watched(), work, now);
             }
             Message::ChatDone(completion) => {
                 let current = refresher.is_current(completion.revision);
                 let outcome = completion.outcome.map(|_| ());
                 chats.upload_done(current, outcome, now);
-                follow_chats(&refresher, &mut chats, work, now);
+                follow_chats(&refresher, &mut chats, replies.watched(), work, now);
             }
             Message::FeedDone(completion) => {
                 let current = refresher.is_current(completion.revision);
@@ -749,6 +753,7 @@ fn follow_feed<S, A, C>(
 fn follow_chats<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
     chats: &mut ChatSync,
+    watched: bool,
     work: &Sender<Work<A, C>>,
     now: Duration,
 ) where
@@ -758,6 +763,7 @@ fn follow_chats<S, A, C>(
 {
     let enabled = refresher.account().is_some() && refresher.feed_switch() == Some(true);
     chats.set_enabled(enabled, now);
+    chats.set_watched(watched, now);
     match chats.next_work(now) {
         Some(ChatWork::Read { session, after }) => {
             let _ = work.send(Work::Transcript(session, after));
@@ -947,7 +953,9 @@ where
                 }
             }
             Ok(Work::Submit(reply, session, text)) => {
-                let result = api.submit(&session, &text).map_err(|error| error.code);
+                let result = api
+                    .submit_when_quiet(&session, &text, crate::feed::TYPING_QUIET)
+                    .map_err(|error| error.code);
                 Message::ReplySubmitted(reply, result)
             }
             Ok(Work::WriteReply(job, answer)) => {

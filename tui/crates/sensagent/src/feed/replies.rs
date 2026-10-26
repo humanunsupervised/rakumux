@@ -33,6 +33,8 @@ use super::wire::{self, FeedFailure, FeedRequest, RepliesRead, SessionMessage};
 /// rakumux.com's answer says otherwise (`poll_ms`: every second while a reply
 /// waits for this machine or the website is open, less often otherwise).
 const READ_EVERY: Duration = Duration::from_secs(5);
+/// rakumux.com asks this often while someone has it open (or a reply waits here).
+const WATCHED_POLL: Duration = Duration::from_secs(1);
 /// The first and longest waits after a failed request.
 const RETRY_MIN: Duration = Duration::from_secs(5);
 const RETRY_MAX: Duration = Duration::from_secs(300);
@@ -40,6 +42,11 @@ const RETRY_MAX: Duration = Duration::from_secs(300);
 const SETTING_EVERY: Duration = Duration::from_secs(10);
 /// Replies remembered as handled here, so a stale pending one isn't typed twice.
 const MAX_HANDLED: usize = 1_000;
+/// Nothing is typed into a session someone typed in this recently, so a reply
+/// isn't added to what they're writing (`session_submit`'s `quiet_ms`).
+pub(crate) const TYPING_QUIET: Duration = Duration::from_secs(10);
+/// After the daemon refused because someone was typing, try that session again this much later.
+pub(crate) const TYPING_HOLD: Duration = Duration::from_secs(2);
 
 /// Whether this machine takes replies written on rakumux.com or other machines.
 pub type AcceptRemote = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -189,6 +196,8 @@ pub(crate) struct ReplySync {
     /// The read or report out, if one is.
     out: Option<Out>,
     next_read: Duration,
+    /// How often rakumux.com asked to be read, at the last read.
+    poll: Option<Duration>,
     retry_at: Duration,
     retry: Duration,
     /// This machine's pending replies and session messages, by id, as last read.
@@ -200,6 +209,8 @@ pub(crate) struct ReplySync {
     handled: HashSet<String>,
     handled_order: VecDeque<String>,
     awaiting: HashMap<SessionId, Awaiting>,
+    /// Sessions someone was typing in, by session id: nothing is typed there until then.
+    held: HashMap<String, Duration>,
 }
 
 impl ReplySync {
@@ -216,6 +227,7 @@ impl ReplySync {
             cursor: 0,
             out: None,
             next_read: Duration::ZERO,
+            poll: None,
             retry_at: Duration::ZERO,
             retry: RETRY_MIN,
             pending: HashMap::new(),
@@ -224,6 +236,7 @@ impl ReplySync {
             handled: HashSet::new(),
             handled_order: VecDeque::new(),
             awaiting: HashMap::new(),
+            held: HashMap::new(),
         }
     }
 
@@ -235,12 +248,19 @@ impl ReplySync {
         }
         self.enabled = enabled;
         self.cursor = 0;
+        self.poll = None;
         self.pending.clear();
         self.reports.clear();
         self.awaiting.clear();
         self.retry = RETRY_MIN;
         self.retry_at = now;
         self.next_read = now;
+    }
+
+    /// rakumux.com asks for this machine's replies every second: someone has
+    /// it open (or a reply waits here), so chats are worth uploading as they grow.
+    pub fn watched(&self) -> bool {
+        self.enabled && self.poll.is_some_and(|poll| poll <= WATCHED_POLL)
     }
 
     /// The daemon (re)connected: these are its sessions.
@@ -258,6 +278,7 @@ impl ReplySync {
     pub fn forget(&mut self, session: &SessionId) {
         self.sessions.remove(session);
         self.awaiting.remove(session);
+        self.held.remove(session.as_str());
     }
 
     /// A reply written in this machine's TUI was stored: typed here at once
@@ -304,8 +325,10 @@ impl ReplySync {
     /// The first pending reply that can be decided now: typed, or failed.
     fn deliver(&mut self, now: Duration) -> Option<ReplyWork> {
         let remote = self.accepts_remote(now);
-        // A session being typed into takes nothing else until it says it waits again.
-        let typing: HashSet<&str> = self
+        self.held.retain(|_, until| *until > now);
+        // A session being typed into takes nothing else until it says it waits again,
+        // and one someone is typing in nothing until they pause.
+        let being_typed: HashSet<&str> = self
             .submitting
             .iter()
             .filter_map(|id| self.pending.get(id))
@@ -317,7 +340,8 @@ impl ReplySync {
             .filter(|(id, reply)| {
                 !self.submitting.contains(*id)
                     && !self.handled.contains(*id)
-                    && !typing.contains(reply.session_id.as_str())
+                    && !being_typed.contains(reply.session_id.as_str())
+                    && !self.held.contains_key(&reply.session_id)
             })
             .map(|(id, _)| id)
             .collect();
@@ -434,6 +458,16 @@ impl ReplySync {
         }
     }
 
+    /// The daemon refused it because someone was typing in its session: it
+    /// stays pending, and that session is tried again after [`TYPING_HOLD`].
+    pub fn typing(&mut self, reply: String, now: Duration) {
+        self.submitting.remove(&reply);
+        if let Some(pending) = self.pending.get(&reply) {
+            self.held
+                .insert(pending.session_id.clone(), now + TYPING_HOLD);
+        }
+    }
+
     fn handle(&mut self, id: &str, failure: Option<ReplyFailure>) {
         self.pending.remove(id);
         self.reports.push_back((id.to_owned(), failure));
@@ -522,6 +556,7 @@ impl ReplySync {
                     self.take_message(message);
                 }
                 self.cursor = self.cursor.max(read.latest_seq);
+                self.poll = read.poll;
                 self.next_read = if read.more {
                     now
                 } else {

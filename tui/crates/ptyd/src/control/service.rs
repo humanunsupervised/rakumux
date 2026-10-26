@@ -449,7 +449,9 @@ impl Inner {
             Request::SessionRead(request) => self.read(caller, request),
             Request::SessionWait(request) => self.wait(caller, request),
             Request::SessionSend(request) => self.send(caller, request),
-            Request::SessionSubmit { id, text } => self.submit(caller, &id, &text),
+            Request::SessionSubmit { id, text, quiet_ms } => {
+                self.submit(caller, &id, &text, quiet_ms.map(Duration::from_millis))
+            }
             Request::SessionTouch { id } => self.touch(caller, &id),
             Request::SessionTurn { id } => self.turn(caller, &id),
             Request::SessionTranscript {
@@ -1486,13 +1488,28 @@ impl Inner {
         result.map(|()| Response::Ok)
     }
 
-    fn submit(&self, caller: &Caller, id: &SessionId, text: &str) -> Result<Response, ApiError> {
+    /// `session_submit`; with `quiet`, refused while someone typed in the
+    /// session that recently (not audited: the caller tries again).
+    fn submit(
+        &self,
+        caller: &Caller,
+        id: &SessionId,
+        text: &str,
+        quiet: Option<Duration>,
+    ) -> Result<Response, ApiError> {
         let state = self.lock();
         let record = self.target(&state, caller, Op::Submit, id)?;
-        let result = self
-            .running_terminal(&state, id)
+        let terminal = self.running_terminal(&state, id);
+        let written = terminal.map(|terminal| match quiet {
+            Some(quiet) => self.host.submit_when_quiet(terminal, text, quiet),
+            None => self.host.submit(terminal, text),
+        });
+        if let Some(Err(HostError::Typing)) = written {
+            return Err(host_error(HostError::Typing));
+        }
+        let result = written
             .ok_or_else(|| not_live(id))
-            .and_then(|terminal| self.host.submit(terminal, text).map_err(host_error));
+            .and_then(|written| written.map_err(host_error));
         self.audit_outcome(
             &state,
             caller,
@@ -3120,7 +3137,9 @@ fn host_error(error: HostError) -> ApiError {
         HostError::NotFound | HostError::NotRunning => {
             ApiError::new(ErrorCode::SessionNotLive, error.to_string())
         }
-        HostError::NotController => ApiError::new(ErrorCode::SessionInUse, error.to_string()),
+        HostError::NotController | HostError::Typing => {
+            ApiError::new(ErrorCode::SessionInUse, error.to_string())
+        }
         HostError::InvalidKey(_) => invalid(error.to_string()),
         HostError::Spawn(message) => invalid(format!("could not start the session: {message}")),
         HostError::Io(_) => ApiError::new(ErrorCode::Internal, error.to_string()),
