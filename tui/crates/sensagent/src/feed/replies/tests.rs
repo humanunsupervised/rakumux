@@ -172,6 +172,27 @@ fn one_reply_at_a_time_goes_into_a_session() {
 }
 
 #[test]
+fn a_session_being_typed_into_takes_nothing_else_meanwhile() {
+    let mut replies = on(None, &[view("S", Lifecycle::Idle, Some(CHAT))]);
+    let first = reply("01K8A1", 4, Some("studio"));
+    let second = reply("01K8A2", 5, Some("studio"));
+    let work = after_reading(&mut replies, vec![second, first]);
+    assert!(matches!(work, Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"));
+    // The service asks again before the daemon has answered the first.
+    assert!(!matches!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Submit { .. })
+    ));
+    replies.submitted("01K8A1".into(), Ok(()), 2_000);
+    report_of(replies.next_work(NOW));
+    replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
+    assert!(matches!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A2"
+    ));
+}
+
+#[test]
 fn replies_written_elsewhere_need_this_machines_setting() {
     let views = [view("S", Lifecycle::Done, Some(CHAT))];
     for from in [None, Some("laptop")] {

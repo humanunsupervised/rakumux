@@ -304,10 +304,22 @@ impl ReplySync {
     /// The first pending reply that can be decided now: typed, or failed.
     fn deliver(&mut self, now: Duration) -> Option<ReplyWork> {
         let remote = self.accepts_remote(now);
+        // A session being typed into takes nothing else until it says it waits again.
+        let typing: HashSet<&str> = self
+            .submitting
+            .iter()
+            .filter_map(|id| self.pending.get(id))
+            .map(|reply| reply.session_id.as_str())
+            .collect();
         let mut ids: Vec<&String> = self
             .pending
-            .keys()
-            .filter(|id| !self.submitting.contains(*id) && !self.handled.contains(*id))
+            .iter()
+            .filter(|(id, reply)| {
+                !self.submitting.contains(*id)
+                    && !self.handled.contains(*id)
+                    && !typing.contains(reply.session_id.as_str())
+            })
+            .map(|(id, _)| id)
             .collect();
         ids.sort();
         let mut decided = None;
