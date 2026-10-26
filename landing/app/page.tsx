@@ -125,6 +125,7 @@ export default function Home() {
             >
               <GitHubMark /> GitHub
             </a>
+            <a href="https://rakumux.com/docs">Docs</a>
             <a href="https://rakumux.com/pricing">Pricing</a>
             <a href="#install" className="nav-cta">
               Install
