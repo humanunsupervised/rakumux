@@ -1,129 +1,286 @@
 # Rakumux
 
-**Terminal sessions for coding agents, in one fast terminal UI.**
+**A terminal multiplexer for coding agents.**
 
-[rakumux.com](https://rakumux.com) · [Source](https://github.com/humanunsupervised/rakumux) · [Releases](https://github.com/humanunsupervised/rakumux/releases)
+[rakumux.com](https://rakumux.com) · [Releases](https://github.com/humanunsupervised/rakumux/releases) · [Pricing](https://rakumux.com/pricing)
 
 楽 (*raku*) means easy, and read *gaku* it means music: tmux, made easy.
 
-![Rakumux session list and live terminal](assets/rakumux-screenshot.png)
+![Rakumux: the session list and a live Claude Code session](assets/rakumux-screenshot.png)
 
-Run Claude Code, Codex, OpenCode, Pi, dev servers, and shells side by side. A small background
-daemon owns your terminals, so sessions keep running when you close the UI or lose an SSH
-connection.
+Run Claude Code, Codex and OpenCode side by side, on your own subscriptions, along with any other
+program. Rakumux shows which agent is working, which needs you and which has finished. Your
+sessions keep running when you close the window, lose SSH or reboot.
 
-- See every folder's sessions, with live previews and agent status.
-- Filter, rename, reorder, and pin sessions without managing worktrees.
-- Switch between your program and Rakumux with `Ctrl-\`.
-- Use the CLI, local HTTP API, or Model Context Protocol (MCP) server to drive sessions.
-- Pair a separate mobile client over opt-in Tailscale access.
+- **Every session in one list.** Group it by status, folder or app, with live previews. Pin,
+  reorder and filter your sessions.
+- **Your agent's native keys.** In a session every key goes to the program. A single key,
+  `Ctrl-\`, switches to Rakumux.
+- **Sessions outlive the UI.** One background server owns every terminal. After a crash or a
+  reboot, agents resume their conversation.
+- **Answer from anywhere** (optional free account). Read your agents' replies on rakumux.com in
+  any browser, including your phone's, and write back. No VPN or open port.
+- **Scriptable.** A CLI, a local HTTP API and an MCP server, so agents can drive sessions too.
 
-## Build and run
+Free and open source (Apache-2.0), for macOS and Linux. No tmux, git or VPN required.
 
-Requires a stable Rust toolchain, a C compiler, and bash on macOS or Linux. SQLite is bundled.
-Git and tmux are not runtime dependencies.
-
-```bash
-git clone https://github.com/humanunsupervised/rakumux.git
-cd rakumux
-./build.sh
-./rakumux.sh
-```
-
-The recommended binary installer is:
+## Install
 
 ```bash
 curl -fsSL https://rakumux.com/install.sh | bash
 ```
 
-The installer verifies the release checksum before running the tarball's installer. Re-run it
-to upgrade. npm and Homebrew publishing are not enabled. See the
-[installation guide](install/INSTALL.md) for binary and release-tarball instructions.
-Native binaries are available for macOS Intel, macOS Apple Silicon and Linux x64.
+The installer:
 
-**Update in the app:** press `Shift+U` in Rakumux mode, or open Settings → Update.
-Confirm to download, verify and install the new release, then restart only the UI. Running
-sessions and the daemon stay up. Binary installs need a writable installation directory;
-admin-owned installs need the installer outside the app. Source builds use `./build.sh`, then `R`.
+- picks the build for your machine (macOS Apple Silicon, macOS Intel or Linux x64);
+- checks the download against the release's SHA-256 checksums;
+- installs into `/usr/local`, asking for `sudo` if it needs to.
+
+To install into your home directory without `sudo`, run the following, then make sure
+`~/.local/bin` is on your `PATH`:
+
+```bash
+curl -fsSL https://rakumux.com/install.sh | PREFIX="$HOME/.local" bash
+```
+
+This gives you three commands:
+
+- `rakumux`: the app and the CLI;
+- `rakumux-mcp`: the MCP server for agents;
+- `rakumux-api`: the local HTTP API.
+
+The session server, `rakumux-ptyd`, is installed alongside them. Rakumux needs nothing else at
+runtime besides bash.
+
+**Update:** press `U` in Rakumux mode, or re-run the installer. Running sessions stay up.
+
+For release tarballs, uninstalling and troubleshooting, see the
+[installation guide](install/INSTALL.md).
 
 ## Quick start
 
-In the UI, press `n` or click **+ New session** to create and enter a session immediately.
-Run an agent or any command in its shell.
-Press `Ctrl-\` to return to Rakumux mode. Use `j`/`k` or the arrow keys to select a session,
-`Enter` to work in it, and `?` for Help. Quitting the UI does not stop sessions.
+```bash
+cd ~/code/my-app
+rakumux
+```
 
-**Layouts:** Settings → Layout, or `v` in Rakumux mode, cycles **Master detail**
-(the default), **Grid**, and **Tabs**. Grid shows a responsive page of up to six real live
-terminal previews. Arrows or `h`/`j`/`k`/`l` select cards; `PgUp`/`PgDn` change page. Enter or
-a tap opens a session; `Ctrl-\` returns to Grid. Folder/text filters and pinned/custom ordering
-apply to every layout. Grid previews are read-only observers: browsing never takes control,
-resizes a terminal, sends input, or marks a session as used. Cards crop/pan at the terminal's
-existing size. Only visible cards have preview streams; dead/exited cards show saved output.
-`n` or the + New session card creates and enters a generated-name session immediately.
+1. Press `n` to start a session. You're in its shell, so run `claude`, `codex`, `opencode` or
+   anything else.
+2. Press `Ctrl-\` to switch to Rakumux mode. The footer turns orange.
+3. Use `↑`/`↓` to pick a session, `Enter` to go back in, and `n` to start another.
+4. Press `q` to quit. Your sessions keep running, and `rakumux` brings them back.
 
-**Bottom terminal:** `T` in Rakumux mode, or Settings → Terminal panel, opens an
-independent shell underneath the main detail. It starts in the selected session's current
-directory (or the current folder when none is selected) and has its
-own input focus. Click a pane to focus it; `Ctrl-\` returns to Rakumux mode, then `Esc` returns
-to the shell or `T` hides it. The × button hides it too. Drag the horizontal divider to resize.
-Hiding does not stop the shell or its command; reopening reuses the same terminal.
-The pane creates no Rakumux session or session-list entry. Typing `exit` or sending end-of-file
-closes the pane and releases its terminal automatically. The pane belongs to this UI window,
-so closing or reloading the UI ends its temporary shell, not any Rakumux sessions.
-Short windows show the focused pane alone. A daemon restart in place preserves the pane;
-reconnecting starts read-only until you refocus it. Older daemons need an in-place restart
-to support standalone panes; Rakumux never falls back to creating a session for one.
+### Two modes, one key
+
+| Mode | Footer | Keys go to | Switch to it |
+|---|---|---|---|
+| Session | blue | the program, so your agent's shortcuts all work | `Enter` on a session |
+| Rakumux | orange | Rakumux | `Ctrl-\` |
+
+Rakumux claims only one key, so it never overrides your agent's shortcuts. To send `Ctrl-\`
+itself to the program, press `\` in Rakumux mode. To use another key, set
+`sessions.rakumux_key` in `~/.rakumux/config.json`.
+
+### Rakumux mode keys
+
+| Key | Action |
+|---|---|
+| `↑` `↓` or `j` `k` | Select a session |
+| `Enter` | Go into it (also restarts or revives an ended one) |
+| `Esc` | Back to the session you came from |
+| `Tab` / `1`–`9` | Last session / that session |
+| `n` | New session in the current folder |
+| `←` `→` | Switch tabs: Feed, Status, Folders, App |
+| `P` / `/` | Filter by folder / by text |
+| `p` | Pin or unpin |
+| `J` `K` | Move down or up (or drag the session) |
+| `r` | Rename |
+| `x` / `d` | Close (end its program) / delete |
+| `v` | Layout: Master detail, Grid, Tabs |
+| `T` | Terminal panel: a scratch shell under the session |
+| `z` | Full screen |
+| `?` / `,` | Help / Settings (every key, searchable) |
+| `U` | Update |
+| `q` | Quit (sessions keep running) |
+
+The mouse works too: click to select, drag to reorder, and drag the divider to resize.
+
+## How sessions work
+
+A session is a folder and a terminal. `n` starts one in the current folder, and from the CLI
+`rakumux new --cwd DIR` starts one anywhere.
+
+### The list
+
+Tabs across the top of the list group your sessions:
+
+- **Status**: waiting for you, unread, working, waiting for response, running, exited, dead, then
+  ready (read, newest first).
+- **Folders**: by folder, with each folder's git branch. Sessions in another linked worktree go
+  under it.
+- **App**: by agent or program.
+- **Feed**: your agents' replies, newest first (needs an account).
+
+Pinned sessions sit above every group.
+
+### Status
+
+Rakumux reads each agent's status from its screen. The [activity hooks](#coding-agents) make it
+exact.
+
+An ended session keeps its last screen:
+
+- **exited**: its program ended. `Enter` restarts it.
+- **dead**: its terminal is gone, for example after `rakumux daemon stop`. `Enter` revives it,
+  resuming the agent's conversation.
+
+### The server
+
+One server per user, `rakumux-ptyd`, owns every terminal. It starts when first needed and keeps
+running with no window open. Any number of windows can connect at once, from any login: SSH, mosh
+or a phone.
+
+- **Restart:** `rakumux daemon restart` swaps in a new version without stopping your programs.
+- **Recovery:** after a crash or a reboot, the sessions that were running come back by
+  themselves. Claude Code, Codex and OpenCode return in the same conversation. Other programs
+  have their command typed at the prompt.
+
+## Command line
 
 ```bash
-rakumux new --name dev          # Create and attach
-rakumux ls --all                # List sessions across folders
-rakumux attach dev              # Full-screen attach; Ctrl-\ then d detaches
-rakumux daemon status
+rakumux new --name dev                          # create a session and attach
+rakumux new --detach --name web -- npm run dev  # start a program in the background
+rakumux ls --all                                # sessions of every folder
+rakumux attach dev                              # full screen; Ctrl-\ then d detaches
+rakumux rename dev api
+rakumux pin dev
+rakumux kill dev
+rakumux rm dev
+rakumux daemon status                           # also start, stop, restart, logs
 rakumux --help
 ```
 
-From a checkout, use `./rakumux.sh` instead of `rakumux`.
+`rakumux ls` lists only the current folder's sessions; `--all` lists every folder's.
 
-## Agent integration
+For scripts and agents, `rakumux session list|get|read|wait|report` print JSON.
 
-Activity hooks for OpenCode, Claude Code and Codex provide busy spinners, needs-input
-markers, tool phases and agent-internal subagent counts. Setup is opt-in; see
-[agent integrations](integrations/README.md). Screen detection remains the fallback.
+## Coding agents
 
-With agent integrations enabled, each session's branch follows the agent's active or
-last-used worktree while that agent runs. Without an agent it follows the terminal cwd.
-This never creates/switches worktrees or changes the session's folder permissions.
+Rakumux runs any agent as it is. Two extras are optional.
+
+### Activity hooks
+
+The hooks report exactly when an agent is working, needs input or is done. They also report its
+subagents and the worktree it's working in.
+
+```bash
+rakumux session hook-config --agent claude  # merge the printed hooks into ~/.claude/settings.json
+rakumux session hook-config --agent codex   # merge into ~/.codex/hooks.json, then trust them in /hooks
+rakumux-mcp opencode-plugin --install       # OpenCode
+```
+
+For details, see the [agent integrations guide](integrations/README.md).
+
+### MCP server
+
+The MCP server lets an agent list, create, read and rename sessions in its own folder.
 
 ```bash
 claude mcp add --scope user rakumux -- rakumux-mcp
 ```
 
-See the [MCP guide](mcp/README.md) for Codex, OpenCode, tool permissions, and session identity.
-The [HTTP API guide](api/README.md) describes local automation and remote access.
+For Codex, OpenCode and session identity, see the [MCP guide](mcp/README.md).
 
-Sessions and settings live in `~/.rakumux`. Set `RAKUMUX_HOME` to use an isolated data directory.
-Optional AI naming uses your own Anthropic or OpenAI key; no account or key is needed for terminal
-sessions. Remote access is off until explicitly enabled.
+## Rakumux account (optional)
 
-## Development
+Everything above works without an account.
+
+**Sign in** with `a` in Rakumux mode, or `rakumux account login`. Then turn features on under
+**Settings → Available on sign-in**.
+
+**AI session summaries** add a short description under each agent session's name. Press `s` to
+refresh one.
+
+**Agent feed** collects your agents' replies and chats from every signed-in machine:
+
+- in Rakumux's Feed tab;
+- at [rakumux.com/feed](https://rakumux.com/feed), with your sessions by status, folder and app.
+
+**Writing back:** you can answer an agent from the web. Rakumux types your message into the
+session once the agent is waiting for you. Each machine takes replies written elsewhere only with
+**Replies from rakumux.com** turned on in its Settings.
+
+**Privacy:** your machine only ever calls out to rakumux.com. Nothing calls in. Before uploading,
+Rakumux masks text that looks like a key, a credential or a token.
+
+The free plan covers all of this. See [pricing](https://rakumux.com/pricing) and the
+[privacy policy](https://rakumux.com/privacy).
+
+## From your phone
+
+- **Browser:** open rakumux.com in your phone's browser for the feed, your sessions and writing
+  back.
+- **SSH:** the app fits phone-width terminals. Tap a session to go in. `Ctrl-\`, or a tap on the
+  `SESSION` badge, goes back to the list.
+- **iPhone app (coming soon):** it connects over [Tailscale](https://tailscale.com). Run
+  `rakumux remote on`, then `rakumux remote pair` to show its QR code.
+
+## Configuration and data
+
+- **Data:** sessions, saved output, logs and `config.json` live in `~/.rakumux`.
+- **Separate instance:** set `RAKUMUX_HOME` to another directory to run a fully separate
+  instance, with its own server and sessions.
+- **Settings** (`,`): layout, icons, session-switching keys, your account and its features.
+- **Session names:** Rakumux names sessions with AI if you provide your own Anthropic or OpenAI
+  key, through `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `config.json`.
+- **Logs:** `rakumux daemon logs` shows the server's log.
+
+## Build from source
+
+You need stable Rust, a C compiler and bash. SQLite is bundled.
+
+```bash
+git clone https://github.com/humanunsupervised/rakumux.git
+cd rakumux
+./build.sh       # release build of all four binaries
+./rakumux.sh     # run from the checkout
+```
+
+To try it without touching your real sessions:
+
+```bash
+RAKUMUX_HOME=$(mktemp -d) ./rakumux.sh
+```
+
+After rebuilding:
+
+- press `R` to reload the UI;
+- press `S` to restart the server in place. Your sessions keep running.
+
+To run the tests:
 
 ```bash
 cd tui
-cargo build --workspace --locked
 cargo test --workspace --locked
-cargo fmt --all --check
 ```
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for checks and the
-[architecture](AGENTS.md) for module boundaries. The website lives in [`landing/`](landing/README.md).
-The mobile app is maintained separately in `humanunsupervised/rakumux-mobile`; its source is not
-part of this repository or this repository's license grant.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the full checks, and [AGENTS.md](AGENTS.md) for the
+architecture.
+
+## More
+
+- [Installation guide](install/INSTALL.md): tarballs, upgrading, uninstalling, troubleshooting
+- [Agent integrations](integrations/README.md): hooks, status, worktrees
+- [MCP server](mcp/README.md): tools for coding agents
+- [HTTP API](api/README.md): local automation and remote access
+- [Security](SECURITY.md): reporting a vulnerability privately
 
 ## License
 
 Copyright 2024–2026 Antonio de Perio and Human Unsupervised Pty Ltd.
 
-Rakumux is licensed under [Apache-2.0](LICENSE). Dependencies retain their own licenses;
-binary releases include `THIRD_PARTY_NOTICES`. The license does not grant rights to Rakumux
-trademarks. See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
+Rakumux is licensed under [Apache-2.0](LICENSE). Dependencies keep their own licenses, and binary
+releases include `THIRD_PARTY_NOTICES`. The license grants no rights to Rakumux trademarks.
+
+The mobile app is maintained separately in `humanunsupervised/rakumux-mobile`. Its source is not
+part of this repository or its license grant.
