@@ -1567,6 +1567,59 @@ h3 {
   color: var(--muted);
 }
 
+.platform-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.platform-head .card-tag {
+  margin-bottom: 0;
+}
+
+.platform-status {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.platform-status::before {
+  content: "○ ";
+}
+
+.platform-status.is-available {
+  color: var(--green);
+}
+
+.platform-status.is-available::before {
+  content: "● ";
+}
+
+.platform-link {
+  display: inline-block;
+  margin-top: 18px;
+}
+
+.source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+  padding: 10px 16px;
+  font-weight: 500;
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+}
+
+.source-link:hover {
+  color: var(--bright);
+  border-color: var(--text-dim);
+}
+
 .firstrun {
   padding: clamp(20px, 5vw, 32px);
   background: var(--surface);

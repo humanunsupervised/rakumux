@@ -1,7 +1,8 @@
 import CopyCommand from "@/components/CopyCommand";
 import TuiDemo from "@/components/TuiDemo";
 
-const RELEASES = "https://github.com/humanunsupervised/rakumux/releases";
+const GITHUB = "https://github.com/humanunsupervised/rakumux";
+const RELEASES = `${GITHUB}/releases`;
 
 const REASONS = [
   {
@@ -27,12 +28,41 @@ const REASONS = [
   {
     tag: "rakumux.com",
     title: "Web and phone, no VPN",
-    body: "Check in from your desktop or phone with nothing to set up. Tailscale optional. iPhone app soon.",
+    body: "Check in from your desktop or phone with nothing to set up. Tailscale optional. iPhone and Android apps soon.",
   },
   {
     tag: "rakumux-mcp",
     title: "Serious management tools",
     body: "Restart without stopping an agent. Sessions survive reboots. Agents launch agents over MCP.",
+  },
+];
+
+const PLATFORMS: {
+  tag: string;
+  title: string;
+  body: string;
+  available: boolean;
+  link?: { href: string; label: string };
+}[] = [
+  {
+    tag: "macOS · Linux",
+    title: "Terminal app",
+    body: "The full app, free and open source. Run it on your machine or over SSH.",
+    available: true,
+    link: { href: "#install", label: "Install" },
+  },
+  {
+    tag: "rakumux.com",
+    title: "Web app",
+    body: "Your feed and sessions in any browser, desktop or mobile. Free with an account.",
+    available: true,
+    link: { href: "https://rakumux.com/feed", label: "Open the web app" },
+  },
+  {
+    tag: "iOS · Android",
+    title: "iPhone and Android",
+    body: "Native apps are on the way. Until then, the web app works on your phone.",
+    available: false,
   },
 ];
 
@@ -67,6 +97,15 @@ function Keys({ keys }: { keys: string[] }) {
   );
 }
 
+/** GitHub's mark, 20px, in the text colour. */
+function GitHubMark() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M12 .297C5.37.297 0 5.67 0 12.297c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.729.083-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.418-1.305.762-1.605-2.665-.305-5.467-1.334-5.467-5.93 0-1.31.469-2.38 1.236-3.22-.124-.303-.536-1.524.117-3.176 0 0 1.008-.322 3.301 1.23a11.52 11.52 0 0 1 3.003-.404c1.02.005 2.045.138 3.003.404 2.291-1.552 3.297-1.23 3.297-1.23.655 1.652.243 2.873.12 3.176.77.84 1.235 1.91 1.235 3.22 0 4.61-2.807 5.622-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .322.216.694.825.576C20.565 22.092 24 17.597 24 12.297c0-6.627-5.373-12-12-12" />
+    </svg>
+  );
+}
+
 export default function Home() {
   return (
     <>
@@ -78,15 +117,13 @@ export default function Home() {
           </a>
           <nav className="nav-links" aria-label="Rakumux">
             <a
-              href="https://github.com/humanunsupervised/rakumux"
+              href={GITHUB}
               className="nav-github"
               aria-label="GitHub (opens in a new tab)"
               target="_blank"
               rel="noopener noreferrer"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
-                <path d="M12 .297C5.37.297 0 5.67 0 12.297c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.729.083-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.418-1.305.762-1.605-2.665-.305-5.467-1.334-5.467-5.93 0-1.31.469-2.38 1.236-3.22-.124-.303-.536-1.524.117-3.176 0 0 1.008-.322 3.301 1.23a11.52 11.52 0 0 1 3.003-.404c1.02.005 2.045.138 3.003.404 2.291-1.552 3.297-1.23 3.297-1.23.655 1.652.243 2.873.12 3.176.77.84 1.235 1.91 1.235 3.22 0 4.61-2.807 5.622-5.479 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .322.216.694.825.576C20.565 22.092 24 17.597 24 12.297c0-6.627-5.373-12-12-12" />
-              </svg> GitHub
+              <GitHubMark /> GitHub
             </a>
             <a href="https://rakumux.com/pricing">Pricing</a>
             <a href="#install" className="nav-cta">
@@ -118,7 +155,7 @@ export default function Home() {
               </a>
             </div>
             <p className="hero-meta">
-              <a href="https://github.com/humanunsupervised/rakumux" target="_blank" rel="noopener noreferrer">
+              <a href={GITHUB} target="_blank" rel="noopener noreferrer">
                 Free and open source
               </a>{" "}
               · macOS + Linux · no tmux or VPN needed
@@ -160,7 +197,7 @@ export default function Home() {
               <ul className="checks">
                 <li>Every session on every machine, live.</li>
                 <li>Message any session, even a brand-new one.</li>
-                <li>Tailscale optional. iPhone app coming soon.</li>
+                <li>Tailscale optional. iPhone and Android apps coming soon.</li>
                 <li>Off until you turn it on. Private sessions never leave your machine.</li>
               </ul>
             </div>
@@ -326,23 +363,52 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="install" className="section section-alt">
+        <section id="platforms" className="section section-alt">
+          <div className="container">
+            <p className="kicker">Platforms</p>
+            <h2>Everywhere you work.</h2>
+            <div className="grid">
+              {PLATFORMS.map((p) => (
+                <article className="card" key={p.title}>
+                  <div className="platform-head">
+                    <code className="card-tag">{p.tag}</code>
+                    <span className={p.available ? "platform-status is-available" : "platform-status"}>
+                      {p.available ? "Available" : "Coming soon"}
+                    </span>
+                  </div>
+                  <h3>{p.title}</h3>
+                  <p>{p.body}</p>
+                  {p.link && (
+                    <a href={p.link.href} className="link-arrow platform-link">
+                      {p.link.label} →
+                    </a>
+                  )}
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="install" className="section">
           <div className="container split">
             <div>
               <p className="kicker">Install</p>
-              <h2>Up and running in a minute.</h2>
+              <h2>Free. Open source. Running in a minute.</h2>
               <p className="section-lede">
-                One command. Everything included. macOS and Linux, nothing but bash.
+                The whole app is Apache-2.0 on GitHub. No account, no card. One command on macOS or Linux.
               </p>
               <div className="install">
                 <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
                 <p className="install-note">
                   Downloads the latest release from GitHub, verifies its checksum and installs to{" "}
                   <code>/usr/local</code>. Another prefix:{" "}
-                  <code>curl -fsSL https://rakumux.com/install.sh | PREFIX=&quot;$HOME/.local&quot; bash</code>. Read the
+                  <code>curl -fsSL https://rakumux.com/install.sh | PREFIX=&quot;$HOME/.local&quot; bash</code>. Read the{" "}
                   <a href="/install.sh">script</a> first if you like.
                 </p>
               </div>
+              <a href={GITHUB} className="source-link" target="_blank" rel="noopener noreferrer">
+                <GitHubMark /> Read the source on GitHub
+              </a>
             </div>
             <div className="firstrun">
               <h3>Then, in any folder</h3>
@@ -392,7 +458,7 @@ export default function Home() {
           <span className="badge badge-session">RAKUMUX</span>
           <span className="t-muted">© {new Date().getFullYear()} Human Unsupervised</span>
           <span className="tui-spacer" />
-          <a href="https://github.com/humanunsupervised/rakumux" target="_blank" rel="noopener noreferrer">Source · Apache-2.0</a>
+          <a href={GITHUB} target="_blank" rel="noopener noreferrer">Source · Apache-2.0</a>
           <a href={RELEASES}>Releases</a>
           <a href="#install">Install</a>
         </div>

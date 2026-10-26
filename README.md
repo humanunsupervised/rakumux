@@ -222,8 +222,9 @@ The free plan covers all of this. See [pricing](https://rakumux.com/pricing) and
   back.
 - **SSH:** the app fits phone-width terminals. Tap a session to go in. `Ctrl-\`, or a tap on the
   `SESSION` badge, goes back to the list.
-- **iPhone app (coming soon):** it connects over [Tailscale](https://tailscale.com). Run
-  `rakumux remote on`, then `rakumux remote pair` to show its QR code.
+- **iPhone and Android apps (coming soon):** the iPhone app connects over
+  [Tailscale](https://tailscale.com). Run `rakumux remote on`, then `rakumux remote pair` to show
+  its QR code.
 
 ## Configuration and data
 
