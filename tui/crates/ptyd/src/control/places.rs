@@ -2,23 +2,24 @@
 //! agent's conversation shows ([`crate::agent_output::places`]), its agent's
 //! working-directory reports and its terminal's directories.
 //!
-//! A touched directory becomes a place ([`resolve`], which reads files and
-//! so runs without the state lock): the git working tree it is in (`.git`
-//! files only), or outside any repository the directory itself, folded into
-//! a listed directory above it ([`Places::apply`]). The agents' own data
-//! directories and the kernel's (`/proc`, `/sys`, `/dev`) are never places,
-//! nor are `/`, the home directory and the temporary directory themselves. Each session keeps its [`MAX_PLACES`] most
-//! recent, in memory and in the registry (`session_places`), so ended
-//! sessions keep theirs; a place's time moves on by at least
-//! [`MIN_STEP_SECS`] at a time, so an agent at work saves its list at most
-//! about once a minute.
+//! A place is a git working tree (a repository's main worktree or a linked
+//! one, found from `.git` files only): a touched directory becomes the
+//! working tree it is in ([`resolve`], which reads files and so runs without
+//! the state lock), and a directory outside any repository is no place at
+//! all, nor is one read from the registry ([`Places::new`]). Working trees
+//! in the agents' own data directories (but OpenCode's worktrees) and the
+//! kernel's (`/proc`, `/sys`, `/dev`) are never places. Each session keeps
+//! its [`MAX_PLACES`] most recent, in memory and in the registry
+//! (`session_places`), so ended sessions keep theirs; a place's time moves
+//! on by at least [`MIN_STEP_SECS`] at a time, so an agent at work saves its
+//! list at most about once a minute.
 
 use crate::agent_output::places::Touch;
 use crate::git;
 use session_core::ids::SessionId;
 use session_core::model::{GitInfo, SessionPlace, MAX_PLACES};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// The least a place's `last_at` moves on, in seconds.
 pub(super) const MIN_STEP_SECS: i64 = 60;
@@ -26,54 +27,43 @@ pub(super) const MIN_STEP_SECS: i64 = 60;
 /// Directories whose contents are never places.
 const SYSTEM_DIRS: &[&str] = &["/proc", "/sys", "/dev"];
 
-/// A touched directory resolved to the place it belongs to.
+/// A touched directory resolved to the working tree it is in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Resolved {
+    /// The working tree's top (`GitInfo::repo_root`).
     pub path: PathBuf,
-    pub git: Option<GitInfo>,
+    pub git: GitInfo,
     /// Unix seconds.
     pub at: i64,
     pub edited: bool,
 }
 
-/// What [`resolve`] leaves out (canonical): the agents' data directories,
-/// and directories that hold too much else to be a place themselves.
+/// What [`resolve`] leaves out (canonical): the agents' data directories.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Excluded {
     data_dirs: Vec<PathBuf>,
-    shared: Vec<PathBuf>,
 }
 
 impl Excluded {
-    /// This machine's: [`crate::agent_output::places::agent_data_dirs`],
-    /// and `$HOME`, `/tmp` and the temporary directory.
+    /// This machine's: [`crate::agent_output::places::agent_data_dirs`].
     pub fn of_this_machine() -> Self {
-        let home = std::env::var_os("HOME")
-            .filter(|home| !home.is_empty())
-            .map(PathBuf::from);
-        let shared = home
-            .into_iter()
-            .chain([PathBuf::from("/tmp"), std::env::temp_dir()])
-            .collect();
-        Self::new(crate::agent_output::places::agent_data_dirs(), shared)
+        Self::new(crate::agent_output::places::agent_data_dirs())
     }
 
-    pub fn new(data_dirs: Vec<PathBuf>, shared: Vec<PathBuf>) -> Self {
-        let canonical = |dirs: Vec<PathBuf>| {
-            dirs.into_iter()
-                .map(|dir| std::fs::canonicalize(&dir).unwrap_or(dir))
-                .collect()
-        };
+    pub fn new(data_dirs: Vec<PathBuf>) -> Self {
         Self {
-            data_dirs: canonical(data_dirs),
-            shared: canonical(shared),
+            data_dirs: data_dirs
+                .into_iter()
+                .map(|dir| std::fs::canonicalize(&dir).unwrap_or(dir))
+                .collect(),
         }
     }
 }
 
 /// The places `touches` belong to, one per distinct directory touched (its
 /// latest time; edited when any touch was), with `now_ms` for touches
-/// without a time. Directories that no longer exist are passed over.
+/// without a time. Directories outside any working tree, and ones that no
+/// longer exist, are passed over.
 pub(super) fn resolve(touches: Vec<Touch>, excluded: &Excluded, now_ms: i64) -> Vec<Resolved> {
     let mut dirs: HashMap<PathBuf, (i64, bool)> = HashMap::new();
     for touch in touches {
@@ -89,25 +79,15 @@ pub(super) fn resolve(touches: Vec<Touch>, excluded: &Excluded, now_ms: i64) -> 
             if !dir.is_dir() || SYSTEM_DIRS.iter().any(|system| dir.starts_with(system)) {
                 return None;
             }
-            let git = git::detect(&dir);
+            let git = git::detect(&dir)?;
             // An agent's own directory, unless it holds a working tree of
             // the user's (OpenCode keeps its worktrees there).
             let own = excluded.data_dirs.iter().find(|data| dir.starts_with(data));
-            if let Some(data) = own {
-                if !git
-                    .as_ref()
-                    .is_some_and(|git| git.repo_root.starts_with(data))
-                {
-                    return None;
-                }
+            if own.is_some_and(|data| !git.repo_root.starts_with(data)) {
+                return None;
             }
-            let path = match &git {
-                Some(git) => git.repo_root.clone(),
-                None if dir.parent().is_none() || excluded.shared.contains(&dir) => return None,
-                None => dir,
-            };
             Some(Resolved {
-                path,
+                path: git.repo_root.clone(),
                 git,
                 at: at.div_euclid(1000),
                 edited,
@@ -125,13 +105,15 @@ pub(super) struct Places {
 }
 
 impl Places {
-    /// The places the registry holds.
-    pub fn new(by_session: HashMap<SessionId, Vec<SessionPlace>>) -> Self {
-        let mut places = Self { by_session };
-        for list in places.by_session.values_mut() {
+    /// The places the registry holds, but the ones without git context:
+    /// directories outside any repository, which earlier releases kept.
+    /// They stay in the registry until the session's list is next saved.
+    pub fn new(mut by_session: HashMap<SessionId, Vec<SessionPlace>>) -> Self {
+        for list in by_session.values_mut() {
+            list.retain(|place| place.git.is_some());
             sort(list);
         }
-        places
+        Self { by_session }
     }
 
     pub fn get(&self, id: &SessionId) -> &[SessionPlace] {
@@ -143,10 +125,8 @@ impl Places {
     }
 
     /// Record that `id` worked in `resolved`. Returns its list when that
-    /// changed (to save and publish). A directory outside any repository
-    /// is folded into a listed one above it, and takes in listed ones below
-    /// it; a place's time moves on by [`MIN_STEP_SECS`] at least; its git
-    /// context is the latest touch's.
+    /// changed (to save and publish). A place's time moves on by
+    /// [`MIN_STEP_SECS`] at least; its git context is the latest touch's.
     pub fn apply(&mut self, id: &SessionId, resolved: Vec<Resolved>) -> Option<&[SessionPlace]> {
         if resolved.is_empty() {
             return None;
@@ -154,38 +134,19 @@ impl Places {
         let list = self.by_session.entry(id.clone()).or_default();
         let before = list.clone();
         for place in resolved {
-            let key = match &place.git {
-                Some(_) => place.path.clone(),
-                None => {
-                    let above = list
-                        .iter()
-                        .filter(|listed| {
-                            listed.git.is_none() && place.path.starts_with(&listed.path)
-                        })
-                        .map(|listed| listed.path.clone())
-                        .min_by_key(|path| path.components().count());
-                    match above {
-                        Some(above) => above,
-                        None => {
-                            take_in_below(list, &place.path);
-                            place.path.clone()
-                        }
-                    }
-                }
-            };
-            match list.iter_mut().find(|listed| listed.path == key) {
+            match list.iter_mut().find(|listed| listed.path == place.path) {
                 Some(listed) => {
                     if place.at >= listed.last_at.saturating_add(MIN_STEP_SECS) {
                         listed.last_at = place.at;
                     }
-                    if place.at >= listed.last_at && key == place.path {
-                        listed.git = place.git;
+                    if place.at >= listed.last_at {
+                        listed.git = Some(place.git);
                     }
                     listed.edited |= place.edited;
                 }
                 None => list.push(SessionPlace {
-                    path: key,
-                    git: place.git,
+                    path: place.path,
+                    git: Some(place.git),
                     last_at: place.at,
                     edited: place.edited,
                 }),
@@ -195,27 +156,6 @@ impl Places {
         list.truncate(MAX_PLACES);
         (*list != before).then_some(list.as_slice())
     }
-}
-
-/// Fold the listed directories outside any repository below `dir` into one
-/// entry for `dir` (their latest time; edited when any was).
-fn take_in_below(list: &mut Vec<SessionPlace>, dir: &Path) {
-    let mut taken: Option<SessionPlace> = None;
-    list.retain(|listed| {
-        let below = listed.git.is_none() && listed.path.starts_with(dir) && listed.path != dir;
-        if below {
-            let place = taken.get_or_insert_with(|| SessionPlace {
-                path: dir.to_path_buf(),
-                git: None,
-                last_at: listed.last_at,
-                edited: false,
-            });
-            place.last_at = place.last_at.max(listed.last_at);
-            place.edited |= listed.edited;
-        }
-        !below
-    });
-    list.extend(taken);
 }
 
 /// Most recent first, then by path.
@@ -228,14 +168,14 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn resolved(path: &str, git: bool, at: i64, edited: bool) -> Resolved {
+    fn resolved(path: &str, at: i64, edited: bool) -> Resolved {
         Resolved {
             path: path.into(),
-            git: git.then(|| GitInfo {
+            git: GitInfo {
                 repo_root: path.into(),
                 branch: Some("main".into()),
                 ..GitInfo::default()
-            }),
+            },
             at,
             edited,
         }
@@ -255,8 +195,8 @@ mod tests {
             .apply(
                 &id,
                 vec![
-                    resolved("/repo", true, 1000, false),
-                    resolved("/wt/x", true, 1010, true),
+                    resolved("/repo", 1000, false),
+                    resolved("/wt/x", 1010, true),
                 ],
             )
             .unwrap();
@@ -264,13 +204,11 @@ mod tests {
         assert!(list[0].edited);
         // Back within the minute: nothing to save.
         assert!(places
-            .apply(&id, vec![resolved("/repo", true, 1030, false)])
+            .apply(&id, vec![resolved("/repo", 1030, false)])
             .is_none());
         // A minute on, it moves up, with the branch it's on now.
-        let mut checked_out = resolved("/repo", true, 1070, false);
-        if let Some(git) = checked_out.git.as_mut() {
-            git.branch = Some("feature".into());
-        }
+        let mut checked_out = resolved("/repo", 1070, false);
+        checked_out.git.branch = Some("feature".into());
         let list = places.apply(&id, vec![checked_out]).unwrap();
         assert_eq!(paths(list), ["/repo 1070", "/wt/x 1010"]);
         assert_eq!(
@@ -280,11 +218,11 @@ mod tests {
         // An older touch (reading a log again) keeps the time and branch,
         // and counts its edit.
         assert!(places
-            .apply(&id, vec![resolved("/repo", true, 10, true)])
+            .apply(&id, vec![resolved("/repo", 10, true)])
             .is_some_and(|list| list[0].edited && list[0].last_at == 1070));
         // At most MAX_PLACES: the oldest go.
         let many = (0..MAX_PLACES as i64)
-            .map(|n| resolved(&format!("/r/{n}"), true, 2000 + n, false))
+            .map(|n| resolved(&format!("/r/{n}"), 2000 + n, false))
             .collect();
         let list = places.apply(&id, many).unwrap();
         assert_eq!(list.len(), MAX_PLACES);
@@ -292,76 +230,97 @@ mod tests {
     }
 
     #[test]
-    fn directories_outside_repositories_fold_into_the_one_above() {
-        let mut places = Places::default();
+    fn stored_places_outside_repositories_are_dropped() {
+        let place = |path: &str, git: bool, last_at: i64| SessionPlace {
+            path: path.into(),
+            git: git.then(|| GitInfo {
+                repo_root: path.into(),
+                branch: Some("main".into()),
+                ..GitInfo::default()
+            }),
+            last_at,
+            edited: false,
+        };
         let id = SessionId::from_string("A");
-        places.apply(
-            &id,
-            vec![
-                resolved("/dl/logo/concepts", false, 100, false),
-                resolved("/dl/logo/screens", false, 200, true),
-            ],
+        let only_folders = SessionId::from_string("B");
+        let mut places = Places::new(HashMap::from([
+            (
+                id.clone(),
+                vec![
+                    place("/home/me/repos", false, 300),
+                    place("/home/me/repos/app", true, 100),
+                    place("/home/me/Downloads", false, 50),
+                    place("/home/me/repos/wt", true, 200),
+                ],
+            ),
+            (only_folders.clone(), vec![place("/srv", false, 10)]),
+        ]));
+        assert_eq!(
+            paths(places.get(&id)),
+            ["/home/me/repos/wt 200", "/home/me/repos/app 100"]
         );
-        // A directory above both takes them in.
+        assert!(places.get(&only_folders).is_empty());
+        // The next change saves the list without them.
         let list = places
-            .apply(&id, vec![resolved("/dl/logo", false, 150, false)])
+            .apply(&id, vec![resolved("/home/me/repos/app", 400, false)])
             .unwrap();
-        assert_eq!(paths(list), ["/dl/logo 200"]);
-        assert!(list[0].edited);
-        // One below it is folded in.
-        let list = places
-            .apply(&id, vec![resolved("/dl/logo/x/y", false, 400, false)])
-            .unwrap();
-        assert_eq!(paths(list), ["/dl/logo 400"]);
-        // A repository inside is a place of its own.
-        let list = places
-            .apply(&id, vec![resolved("/dl/logo/repo", true, 500, false)])
-            .unwrap();
-        assert_eq!(paths(list), ["/dl/logo/repo 500", "/dl/logo 400"]);
+        assert_eq!(
+            paths(list),
+            ["/home/me/repos/app 400", "/home/me/repos/wt 200"]
+        );
     }
 
     #[test]
-    fn touches_resolve_to_working_trees_and_leave_out_agents_and_home() {
+    fn touches_resolve_to_working_trees_only_and_leave_out_the_agents() {
         let dir = tempfile::tempdir().unwrap();
         let root = fs::canonicalize(dir.path()).unwrap();
         let repo = root.join("repo");
         fs::create_dir_all(repo.join(".git")).unwrap();
         fs::write(repo.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
         fs::create_dir_all(repo.join("src/deep")).unwrap();
+        let detached = root.join("detached");
+        fs::create_dir_all(detached.join(".git")).unwrap();
+        fs::write(
+            detached.join(".git/HEAD"),
+            format!("{}\n", "ab12cd34".repeat(5)),
+        )
+        .unwrap();
         fs::create_dir_all(root.join("plain/sub")).unwrap();
         fs::create_dir_all(root.join("agent/memory")).unwrap();
         let worktree = root.join("agent/worktree/w1");
         fs::create_dir_all(worktree.join(".git")).unwrap();
         fs::write(worktree.join(".git/HEAD"), "ref: refs/heads/feature\n").unwrap();
-        let home = root.join("home");
-        fs::create_dir_all(&home).unwrap();
-        let excluded = Excluded::new(vec![root.join("agent")], vec![home.clone()]);
+        let excluded = Excluded::new(vec![root.join("agent")]);
         let touch = |dir: PathBuf, at: Option<i64>, edited: bool| Touch { dir, edited, at };
         let found = resolve(
             vec![
                 touch(repo.join("src/deep"), Some(5_000), false),
                 touch(repo.join("src"), Some(9_000), true),
-                touch(root.join("plain/sub"), None, false),
+                touch(detached.clone(), None, false),
+                // Outside any repository: no place, itself or above.
+                touch(root.join("plain/sub"), Some(1_000), true),
+                touch(root.join("plain"), Some(1_000), false),
+                touch(root.clone(), Some(1_000), false),
                 touch(root.join("agent/memory"), Some(1_000), true),
                 touch(worktree.clone(), Some(2_000), false),
-                touch(home.clone(), Some(1_000), false),
                 touch(root.join("gone"), Some(1_000), false),
                 touch("/proc/self".into(), Some(1_000), false),
             ],
             &excluded,
             70_000,
         );
-        let summary: Vec<(PathBuf, Option<String>, i64, bool)> = found
+        let summary: Vec<(PathBuf, Option<String>, Option<String>, i64, bool)> = found
             .into_iter()
-            .map(|r| (r.path, r.git.and_then(|g| g.branch), r.at, r.edited))
+            .map(|r| (r.path, r.git.branch, r.git.detached_at, r.at, r.edited))
             .collect();
         assert_eq!(
             summary,
             [
-                (worktree, Some("feature".into()), 2, false),
-                (repo.clone(), Some("main".into()), 5, false),
-                (repo, Some("main".into()), 9, true),
-                (root.join("plain/sub"), None, 70, false),
+                (worktree, Some("feature".into()), None, 2, false),
+                (repo.clone(), Some("main".into()), None, 5, false),
+                (repo, Some("main".into()), None, 9, true),
+                // Detached: the working tree, at its commit.
+                (detached, None, Some("ab12cd3".into()), 70, false),
             ]
         );
     }

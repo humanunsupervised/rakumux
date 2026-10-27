@@ -3,8 +3,8 @@
 //! `cd`, a search's root, a shell call's working directory) and the files it
 //! read or changed, each as a [`Touch`] of a directory (`SessionView::places`).
 //! Only paths are taken: never file contents, commands' output or prompts.
-//! The control layer turns touches into places (a git working tree, or a
-//! directory outside any repository).
+//! The control layer turns touches into places: the git working trees they
+//! are in (a touch outside any repository is no place).
 //!
 //! A conversation is read from its start, a piece at a time ([`PlaceScan`]),
 //! then on as it grows. Provider mappings live beside their hooks in

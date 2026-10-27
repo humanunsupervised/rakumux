@@ -223,17 +223,18 @@ fn sessions_without_a_named_agent_say_the_program_the_app_tab_files_them_under()
     assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R4"), None);
 }
 
-/// `view` worked in its folder, a worktree in it and a repository and a
-/// folder elsewhere (most recent first), and in `extra` more of its folder.
+/// `view` worked in its folder, a worktree in it and two repositories
+/// elsewhere, one at a detached HEAD (`branch` `None`), most recent first,
+/// and in `extra` more worktrees in its folder.
 fn worked(mut view: SessionView, extra: usize) -> SessionView {
     let place = |path: &str, branch: Option<&str>, worktree: Option<&str>, at: i64| {
         session_core::model::SessionPlace {
             path: path.into(),
-            git: branch.map(|branch| GitInfo {
+            git: Some(GitInfo {
                 repo_root: path.into(),
-                branch: Some(branch.into()),
+                branch: branch.map(String::from),
+                detached_at: branch.is_none().then(|| "1a2b3c4".into()),
                 worktree: worktree.map(String::from),
-                ..Default::default()
             }),
             last_at: at,
             edited: at % 2 == 0,
@@ -253,11 +254,12 @@ fn worked(mut view: SessionView, extra: usize) -> SessionView {
             None,
             1_761_218_001,
         ),
-        place("/home/me/Downloads/logo", None, None, 1_761_210_000),
+        place("/home/me/repos/logo", None, None, 1_761_210_000),
     ];
-    view.places.extend(
-        (0..extra).map(|n| place(&format!("/home/me/rakumux/p{n}"), None, None, 1_761_200_000)),
-    );
+    view.places.extend((0..extra).map(|n| {
+        let path = format!("/home/me/rakumux/p{n}");
+        place(&path, Some("main"), Some(&format!("p{n}")), 1_761_200_000)
+    }));
     view
 }
 

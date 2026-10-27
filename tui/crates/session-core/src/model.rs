@@ -231,9 +231,9 @@ pub struct SessionView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<GitInfo>,
     /// Where the session has worked, most recent first (capability
-    /// `session.places`): the working trees (and directories outside any
-    /// repository) its agent worked in, read files from or changed, as its
-    /// conversation shows them, and its terminal's directories. Read by the
+    /// `session.places`): the git working trees its agent worked in, read
+    /// files from or changed, as its conversation shows them, and its
+    /// terminal's directories in them. Read by the
     /// daemon on this machine; at most [`MAX_PLACES`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub places: Vec<SessionPlace>,
@@ -243,14 +243,15 @@ pub struct SessionView {
 pub const MAX_PLACES: usize = 32;
 
 /// A place a session worked in: a git working tree (a repository's main
-/// worktree or a linked one), or a directory outside any repository.
+/// worktree or a linked one). Earlier daemons also listed directories
+/// outside any repository, without `git`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionPlace {
-    /// The working tree's top (`GitInfo::repo_root`), or the directory
-    /// itself outside a repository. Canonical.
+    /// The working tree's top (`GitInfo::repo_root`). Canonical.
     pub path: PathBuf,
     /// Its git context when the session last worked there: the branch, and
-    /// the linked worktree. `None` outside a repository.
+    /// the linked worktree, or the commit of a detached HEAD. `None` only
+    /// from an older daemon, outside any repository.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<GitInfo>,
     /// Unix seconds: when the session last worked there, by the agent's own

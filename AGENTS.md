@@ -235,7 +235,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    rakumux.com's Status, Folders and App pages list the account's sessions, show a session's
    conversation from the uploaded chats, and tell a machine that's away. Each session's 8 most
    recent places go too, as names only (`PlaceState`: a path in the session's folder, `.` for
-   the folder itself, else a folder's last component; branch, worktree, `edited`, `last_at`), and
+   the folder itself, else its last component; branch, worktree, `edited`, `last_at`), and
    only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`); a
    list that would pass the contract's 256 KiB goes without them.
 
@@ -348,17 +348,19 @@ last_active_at, added_at, git}` on the wire.
 
 - **Places** (capability `session.places`; `integrations/places.rs`, `control/places.rs`):
   where the session has worked, most recent first, at most 32: `SessionPlace {path, git?,
-  last_at, edited}`. A place is a git working tree (`path` = its `repo_root`, `git` its branch
-  and linked worktree when last worked in), or outside any repository a directory, folded into a
-  listed one above it. The daemon reads them from its agent's conversation, from its start (512
+  last_at, edited}`. A place is a git working tree, a repository's main checkout or a linked
+  worktree (`path` = its `repo_root`, `git` its branch, or a detached HEAD's commit, and linked
+  worktree when last worked in); a directory outside any repository is never one, and those an
+  earlier daemon kept are dropped as the registry is read (and from it at the session's next
+  save). The daemon reads them from its agent's conversation, from its start (512
   KiB a second) and then as it grows: Claude Code's entries' `cwd` and its tools' file paths,
   search roots, `EnterWorktree` and Bash `cd`/`git -C`; Codex's turns' `cwd`, shell calls'
   `workdir` and commands, and `apply_patch`'s files; OpenCode's tools' paths and commands. Its
   agent's working-directory reports and its terminal's directories count too. `edited`: files
   there were changed. Times are the conversation's own, so reading it again changes nothing, and
-  a place's moves on a minute at a time. The agents' own data directories (`~/.claude`,
-  `~/.codex`, OpenCode's but its worktrees, Claude Code's `/tmp/claude-<uid>`), `/`, home, `/tmp`
-  and `/proc`, `/sys`, `/dev` are never places. Kept in the registry, so ended sessions keep
+  a place's moves on a minute at a time. Working trees in the agents' own data directories
+  (`~/.claude`, `~/.codex`, OpenCode's but its worktrees, Claude Code's `/tmp/claude-<uid>`) and
+  in `/proc`, `/sys`, `/dev` are never places. Kept in the registry, so ended sessions keep
   theirs; only paths are read. They stay on this machine (not in `rakumux-api`), except their
   names in the feed's session list (below).
 - **Status**: `live` (terminal running), `exited` (process ended; final screen kept; Enter
@@ -743,7 +745,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
 - **Git context**: a session's branch and linked worktree, read from `.git` files (never `git`).
-- **Place**: a working tree (or a folder outside any repository) a session has worked in, as its
+- **Place**: a git working tree (main checkout or linked worktree) a session has worked in, as its
   agent's conversation, its working-directory reports and its terminal show; listed under the
   session's row (`w`).
 - **Reply** (agent reply): what an agent said when it finished a turn, captured by the daemon

@@ -1086,6 +1086,19 @@ fn places_follow_where_a_session_works_and_outlive_its_terminal() {
         ]
     );
 
+    // A directory outside any repository is no place.
+    let plain = h.root().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    h.host.emit(HostEvent::Cwd {
+        id: h.host.terminal_of(&s.id),
+        session_id: s.id.clone(),
+        path: plain.clone(),
+    });
+    let view = eventually("an update in the plain directory", || {
+        updated(&drain(&watch), &s.id).filter(|view| view.cwd == plain)
+    });
+    assert_eq!(places(&view).len(), 2, "{:?}", view.places);
+
     // The agent reports a linked worktree it works in.
     h.host.set_foreground(
         &s.id,
@@ -1121,7 +1134,15 @@ fn places_follow_where_a_session_works_and_outlive_its_terminal() {
     ];
     assert_eq!(places(&h.get(&s.id)), expected);
 
-    // A dead session keeps them; deleting it removes them.
+    // A dead session keeps them, but a folder outside any repository that
+    // an earlier release kept; deleting it removes them.
+    h.db()
+        .execute(
+            "INSERT INTO session_places (session_id, path, git_json, last_at, edited) \
+             VALUES (?1, ?2, NULL, 4102444800, 1)",
+            [s.id.as_str(), plain.to_str().unwrap()],
+        )
+        .unwrap();
     h.restart();
     let dead = h.get(&s.id);
     assert_eq!(dead.status, SessionStatus::Dead);

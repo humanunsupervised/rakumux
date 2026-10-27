@@ -409,7 +409,7 @@
       }
     },
     "sessionPlace": {
-      "description": "A place a session has worked in, as its machine read it from the session's agent's conversation and terminal: a git working tree, or a folder outside any repository. `name` is its path in the session's folder when it's there (`inside`; `.` for the folder itself, `worktrees/fix` below it), else its last path component (`rakumux-cloud`): never an absolute path or `..`. `branch` and `worktree` (a linked worktree's name) are its git context when the session last worked there; `edited` says files there were changed; `last_at` is when the session last worked there (the machine's clock, Unix ms).",
+      "description": "A place a session has worked in, as its machine read it from the session's agent's conversation and terminal: a git working tree (earlier machines also sent folders outside any repository, without `branch`). `name` is its path in the session's folder when it's there (`inside`; `.` for the folder itself, `worktrees/fix` below it), else its last path component (`rakumux-cloud`): never an absolute path or `..`. `branch` and `worktree` (a linked worktree's name) are its git context when the session last worked there (no `branch` while its HEAD is detached); `edited` says files there were changed; `last_at` is when the session last worked there (the machine's clock, Unix ms).",
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "inside", "edited", "last_at"],
