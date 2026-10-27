@@ -60,6 +60,10 @@ const READ_EVERY: Duration = Duration::from_secs(5);
 /// rakumux.com asks this often while someone has it open, a reply waits here,
 /// or for 30 s after the account's last reply activity.
 const WATCHED_POLL: Duration = Duration::from_secs(1);
+/// While pokes come (`set_pushed`), replies are read when poked, as often as
+/// rakumux.com asks while it asks every second (someone watching), and
+/// otherwise this often, in case a poke was lost.
+const PUSHED_READ_EVERY: Duration = Duration::from_secs(60);
 /// The first and longest waits after a failed request.
 const RETRY_MIN: Duration = Duration::from_secs(5);
 const RETRY_MAX: Duration = Duration::from_secs(300);
@@ -461,6 +465,10 @@ pub(crate) struct ReplySync {
     next_read: Duration,
     /// How often rakumux.com asked to be read, at the last read.
     poll: Option<Duration>,
+    /// A realtime connection is open: rakumux.com pokes when to read.
+    pushed: bool,
+    /// Poked while a read was out: read again once it's back.
+    reread: bool,
     /// Reads' and reports' waits after failures, apart.
     read_retry: Backoff,
     report_retry: Backoff,
@@ -505,6 +513,8 @@ impl ReplySync {
             out: None,
             next_read: Duration::ZERO,
             poll: None,
+            pushed: false,
+            reread: false,
             read_retry: Backoff::new(Duration::ZERO),
             report_retry: Backoff::new(Duration::ZERO),
             pending: HashMap::new(),
@@ -530,6 +540,7 @@ impl ReplySync {
         self.enabled = enabled;
         self.cursor = 0;
         self.poll = None;
+        self.reread = false;
         self.pending.clear();
         self.awaiting.clear();
         // Nothing pending is typed in now: files saved for it go. A fetch
@@ -547,6 +558,25 @@ impl ReplySync {
     /// activity, so chats are worth uploading as they grow.
     pub fn watched(&self) -> bool {
         self.enabled && self.poll.is_some_and(|poll| poll <= WATCHED_POLL)
+    }
+
+    /// A realtime connection opened (`pushed`) or closed: while open, replies
+    /// are read when poked; closed, at rakumux.com's pace again.
+    pub fn set_pushed(&mut self, pushed: bool, now: Duration) {
+        if !pushed && self.pushed {
+            self.next_read = self.next_read.min(now + self.poll.unwrap_or(READ_EVERY));
+        }
+        self.pushed = pushed;
+    }
+
+    /// rakumux.com poked: read now, or again once the read out is back (it
+    /// may have been answered before the change).
+    pub fn poked(&mut self, now: Duration) {
+        if self.out == Some(Out::Read) {
+            self.reread = true;
+        } else {
+            self.next_read = now;
+        }
     }
 
     /// The daemon (re)connected: these are its sessions.
@@ -1091,10 +1121,13 @@ impl ReplySync {
                 // seq is on a later page, after replies not read yet.
                 self.cursor = self.cursor.max(read.read_to());
                 self.poll = read.poll;
-                self.next_read = if read.more {
+                let poll = read.poll.unwrap_or(READ_EVERY);
+                self.next_read = if read.more || std::mem::take(&mut self.reread) {
                     now
+                } else if self.pushed && poll > WATCHED_POLL {
+                    now + PUSHED_READ_EVERY
                 } else {
-                    now + read.poll.unwrap_or(READ_EVERY)
+                    now + poll
                 };
                 read.replies
             }

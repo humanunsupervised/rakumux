@@ -20,6 +20,8 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/replies/status` | [reply-status](reply-status.schema.json) | [reply](reply.schema.json) |
 | `GET /api/v1/feed/replies/attachments/{id}` | path only | the file's bytes, not JSON (below) |
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
+| `GET /api/v1/feed/realtime` | header only | [realtime](realtime.schema.json) |
+| WebSocket at the realtime `url` | bearer `token` | [poke](poke.schema.json) messages |
 
 - **Upload:** `{version:1, machine, entries}` with 1–50 entries. Each entry is
   `{id, session:{id, name, folder?, branch?}, agent, conversation_id?, text, truncated,
@@ -125,6 +127,21 @@ conformance tests, not an HTTP server, database or local runtime.
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
   fetches a reply's attachments and gives the agent their paths. The cloud keeps the latest list
   and ignores names it doesn't know.
+- **Pokes:** instead of reading its replies every few seconds, a machine can be told when to.
+  `GET /api/v1/feed/realtime` (the machine id header required, else `invalid_request`) gives a
+  WebSocket `url` and a `token` that admits that machine of the account once, before
+  `expires_at` (a few minutes); a cloud that offers no pokes answers `invalid_request` with
+  404, and the machine reads at `poll_ms` as before and asks again much later. The machine
+  connects with `Authorization: Bearer <token>` (never in the URL) and keeps the connection:
+  it may send a text `ping` (answered `pong`) to keep it alive, at most every 30 s, and takes a
+  connection silent for 90 s as gone. The server sends a `poke` when anything the account's
+  machines read about replies changes (a reply or session message written, reported, expired
+  or answered) and when the account's website comes into use; it carries nothing else. On a
+  poke the machine reads its replies at once. While connected, it reads at `poll_ms` only
+  while that is 1000 (someone is watching, or replies are busy), and otherwise once a minute in
+  case a poke was lost. The server closes with 4000 when the same machine connects again, 4001
+  when a connection is a day old (connect again, with a new token) and 1008 when it refuses;
+  the machine reconnects with a new token, backing off from 1 s to a minute.
 - **Machine id:** a machine sends its own id with every request, `X-Rakumux-Machine-Id`: a ULID
   it keeps, so two of the account's machines with one name are told apart. The first id to send
   a session list under a name holds that name. A request from another id that names it (`machine`

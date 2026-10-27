@@ -81,6 +81,8 @@ pub(crate) enum FeedRequest {
     Sessions { body: Vec<u8> },
     /// Fetch a file attached to a reply: `size` bytes, as the reply says.
     Attachment { id: String, size: u64 },
+    /// Ask where to connect to be poked, and a token for it.
+    Realtime,
 }
 
 impl FeedRequest {
@@ -855,6 +857,89 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
             .poll_ms
             .map(|ms| Duration::from_millis(ms.clamp(1_000, 60_000))),
     })
+}
+
+/// Where this machine connects to be poked (`realtime.schema.json`), and the
+/// token that admits it there once.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct RealtimeToken {
+    /// `wss://…`; `ws://` only to this machine itself (a local worker).
+    pub url: String,
+    pub token: String,
+}
+
+impl std::fmt::Debug for RealtimeToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RealtimeToken")
+            .field("url", &self.url)
+            .field("token", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireRealtime {
+    version: u8,
+    url: String,
+    token: String,
+    #[allow(dead_code)]
+    expires_at: u64,
+}
+
+/// The realtime answer, within the contract: a TLS WebSocket (or one on this
+/// machine), and a token a header can carry. A cloud without pokes answers
+/// 404, which, like any other refusal, is `Invalid` here.
+pub(crate) fn realtime(reply: &FeedHttpReply) -> Result<RealtimeToken, FeedFailure> {
+    if reply.status != 200 {
+        return Err(failure(reply));
+    }
+    let answer: WireRealtime =
+        serde_json::from_slice(&reply.body).map_err(|_| FeedFailure::Invalid)?;
+    let url_fits = answer.url.len() <= 512 && realtime_url(&answer.url);
+    let token_fits = (16..=1_024).contains(&answer.token.len())
+        && answer
+            .token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+    if answer.version != 1 || !url_fits || !token_fits {
+        return Err(FeedFailure::Invalid);
+    }
+    Ok(RealtimeToken {
+        url: answer.url,
+        token: answer.token,
+    })
+}
+
+/// `wss://host[:port][/path]`, or `ws://` to a loopback host: no credentials,
+/// query or fragment.
+pub(crate) fn realtime_url(url: &str) -> bool {
+    let (rest, local_only) = match url.strip_prefix("wss://") {
+        Some(rest) => (rest, false),
+        None => match url.strip_prefix("ws://") {
+            Some(rest) => (rest, true),
+            None => return false,
+        },
+    };
+    let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let host = match authority.rsplit_once(':') {
+        Some((host, port))
+            if !port.is_empty() && port.len() <= 5 && port.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            host
+        }
+        Some(_) => return false,
+        None => authority,
+    };
+    let host_fits = !host.is_empty()
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'));
+    let path_fits = path
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'~' | b'/' | b'-'));
+    host_fits && path_fits && (!local_only || matches!(host, "127.0.0.1" | "localhost"))
 }
 
 /// What an attachment download brought back.
@@ -1808,5 +1893,55 @@ mod tests {
             Some(Duration::from_secs(60))
         );
         assert_eq!(paced(""), None);
+    }
+
+    #[test]
+    fn a_realtime_answer_is_a_tls_websocket_and_a_header_safe_token() {
+        let token = "v1.eyJhY2N0IjoieCJ9.c2lnbmF0dXJl";
+        let answer = |url: &str, token: &str| {
+            format!(r#"{{"version":1,"url":"{url}","token":"{token}","expires_at":1761220300000}}"#)
+        };
+        let got = realtime(&reply(
+            200,
+            &answer("wss://realtime.rakumux.com/v1/connect", token),
+        ))
+        .unwrap();
+        assert_eq!(got.url, "wss://realtime.rakumux.com/v1/connect");
+        assert_eq!(got.token, token);
+        assert!(!format!("{got:?}").contains(token), "never logged");
+        // A worker on this machine, for development.
+        assert!(realtime(&reply(
+            200,
+            &answer("ws://127.0.0.1:8787/v1/connect", token)
+        ))
+        .is_ok());
+        for (url, token) in [
+            ("ws://realtime.rakumux.com/v1/connect", token),
+            ("wss://realtime.rakumux.com/v1/connect?token=x", token),
+            ("wss://user@realtime.rakumux.com/v1/connect", token),
+            ("https://realtime.rakumux.com/v1/connect", token),
+            ("wss://realtime.rakumux.com/v1/connect", "short"),
+            (
+                "wss://realtime.rakumux.com/v1/connect",
+                "v1.has a space.in-it-somewhere",
+            ),
+        ] {
+            assert_eq!(
+                realtime(&reply(200, &answer(url, token))),
+                Err(FeedFailure::Invalid),
+                "{url} {token}"
+            );
+        }
+        assert_eq!(
+            realtime(&reply(
+                200,
+                r#"{"version":1,"url":"wss://a.example/v1/connect","token":"v1.aaaaaaaaaaaaaaaa.b","expires_at":1,"user":"u"}"#
+            )),
+            Err(FeedFailure::Invalid),
+            "more than the contract says"
+        );
+        // A cloud without pokes.
+        let off = r#"{"error":{"code":"invalid_request","message":"Invalid feed request."}}"#;
+        assert_eq!(realtime(&reply(404, off)), Err(FeedFailure::Invalid));
     }
 }

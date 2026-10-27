@@ -15,6 +15,7 @@ mod cache;
 mod chats;
 mod job;
 mod machine;
+mod poke;
 mod replies;
 mod sessions;
 mod sync;
@@ -30,6 +31,7 @@ pub(crate) use chats::{write_private, ChatSync, ChatWork, READ_BYTES};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
 pub(crate) use machine::MachineIdentity;
+pub(crate) use poke::{listen, PokeEvent, PokeSync};
 pub use replies::{AcceptRemote, ReplyWrite, ReplyWriteStatus};
 pub(crate) use replies::{Fetch, Fetched, ReplySync, ReplyWork, TYPING_QUIET};
 pub(crate) use sessions::SessionSync;
@@ -47,4 +49,6 @@ pub fn is_entry_id(id: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b.is_ascii_uppercase() && !b"ILOU".contains(&b)))
 }
 pub use wire::TurnRead;
-pub(crate) use wire::{reply_upload, session_message_upload, FeedRequest, SessionMessage};
+pub(crate) use wire::{
+    reply_upload, session_message_upload, FeedRequest, RealtimeToken, SessionMessage,
+};

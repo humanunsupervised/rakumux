@@ -39,6 +39,8 @@ pub(crate) enum FeedResult {
     /// This machine's session list was stored: how many sessions it holds,
     /// and what more the cloud takes.
     SessionsStored(wire::SessionsStored),
+    /// Where to connect to be poked.
+    Realtime(wire::RealtimeToken),
     /// A file attached to a reply, or that it's gone.
     Download(Download),
 }
@@ -62,7 +64,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::ReplyUpload { .. }
             | FeedRequest::ReplyStatus { .. }
             | FeedRequest::Sessions { .. }
-            | FeedRequest::Attachment { .. } => String::new(),
+            | FeedRequest::Attachment { .. }
+            | FeedRequest::Realtime => String::new(),
         };
         let http = match &self.request {
             FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
@@ -74,6 +77,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::ReplyStatus { body } => FeedHttp::ReplyStatus(body),
             FeedRequest::Sessions { body } => FeedHttp::Sessions(body),
             FeedRequest::Attachment { id, size } => FeedHttp::Attachment { id, size: *size },
+            FeedRequest::Realtime => FeedHttp::Realtime,
         };
         let outcome = self
             .account
@@ -100,6 +104,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                     FeedRequest::Attachment { size, .. } => {
                         wire::download(reply, *size).map(FeedResult::Download)
                     }
+                    FeedRequest::Realtime => wire::realtime(&reply).map(FeedResult::Realtime),
                 },
                 Some(Err(error)) => Err(transport(error)),
                 // The sign-in changed meanwhile; the owner fences this completion.

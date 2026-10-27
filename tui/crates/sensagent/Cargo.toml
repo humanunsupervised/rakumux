@@ -15,6 +15,11 @@ rakumux-session-core = { path = "../session-core" }
 regex = "1"
 rusqlite = { version = "0.32", features = ["bundled", "limits"] }
 reqwest = { version = "0.11", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# The realtime connection (feed/poke.rs): the TLS reqwest already uses, and the WebSocket
+# framing rakumux-api already uses.
+rustls = "0.21"
+webpki-roots = "0.25"
+tungstenite = { version = "=0.24.0", default-features = false, features = ["handshake"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 thiserror = "1.0"

@@ -26,6 +26,7 @@ const FEED_TURN_PATH: &str = "/api/v1/feed/turn";
 const FEED_REPLIES_PATH: &str = "/api/v1/feed/replies";
 const FEED_REPLY_STATUS_PATH: &str = "/api/v1/feed/replies/status";
 const FEED_SESSIONS_PATH: &str = "/api/v1/feed/sessions";
+const FEED_REALTIME_PATH: &str = "/api/v1/feed/realtime";
 /// Followed by `/{id}`, a ULID.
 const FEED_ATTACHMENTS_PATH: &str = "/api/v1/feed/replies/attachments";
 /// The largest feed page read (`contracts/feed/page.schema.json`), and the
@@ -51,6 +52,7 @@ pub struct CloudAIConfig {
     feed_reply_status: Url,
     feed_sessions: Url,
     feed_attachments: Url,
+    feed_realtime: Url,
     /// This machine's own id, sent with every feed request
     /// (`X-Rakumux-Machine-Id`), so two machines with one name are told apart.
     machine_id: Option<HeaderValue>,
@@ -122,6 +124,8 @@ pub(crate) enum FeedHttp<'a> {
     Sessions(&'a [u8]),
     /// `GET /api/v1/feed/replies/attachments/{id}`: a file of `size` bytes.
     Attachment { id: &'a str, size: u64 },
+    /// `GET /api/v1/feed/realtime`: where to connect to be poked.
+    Realtime,
 }
 
 /// A feed reply as received: the feed module decodes it against its contract.
@@ -181,6 +185,7 @@ impl CloudAIConfig {
         let (feed_replies, feed_reply_status) =
             (path(FEED_REPLIES_PATH), path(FEED_REPLY_STATUS_PATH));
         let feed_sessions = path(FEED_SESSIONS_PATH);
+        let feed_realtime = path(FEED_REALTIME_PATH);
         let feed_attachments = path(FEED_ATTACHMENTS_PATH);
         endpoint.set_path(STATUS_PATH);
         endpoint.set_query(Some(STATUS_QUERY));
@@ -195,6 +200,7 @@ impl CloudAIConfig {
             feed_reply_status,
             feed_sessions,
             feed_attachments,
+            feed_realtime,
             machine_id: None,
         })
     }
@@ -426,6 +432,7 @@ impl CloudAIClient {
                 url.set_query(Some(query));
                 Request::new(Method::GET, url)
             }
+            FeedHttp::Realtime => Request::new(Method::GET, self.config.feed_realtime.clone()),
             FeedHttp::Attachment { .. } => return Err(CloudAIError::InvalidRequest),
         };
         *outgoing.timeout_mut() = Some(TOTAL_TIMEOUT);

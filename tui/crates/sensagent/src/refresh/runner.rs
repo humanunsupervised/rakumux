@@ -26,8 +26,8 @@ use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
     ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
-    FeedResult, FeedSync, Fetch, Fetched, ReplySync, ReplyWork, SessionMessage, SessionSync,
-    TurnRead, Uploads,
+    FeedResult, FeedSync, Fetch, Fetched, PokeEvent, PokeSync, RealtimeToken, ReplySync, ReplyWork,
+    SessionMessage, SessionSync, TurnRead, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -105,6 +105,10 @@ enum Message {
     ChatDone(FeedCompletion),
     /// The session list's upload finished.
     SessionsDone(FeedCompletion),
+    /// The realtime token request finished.
+    RealtimeDone(FeedCompletion),
+    /// What realtime connection `generation` did.
+    Poke(u64, PokeEvent),
     /// A replies read or a reply's status report finished.
     ReplyDone(FeedCompletion),
     /// A reply was typed into its session, or the daemon refused it.
@@ -149,6 +153,8 @@ enum Work<A, C> {
     ReplyRequest(FeedJob<A, C>),
     /// Upload this machine's session list.
     SessionsUpload(FeedJob<A, C>),
+    /// Ask where to connect to be poked.
+    Realtime(FeedJob<A, C>),
     /// Type a reply (its id) into a session while the program seen in its
     /// foreground is still there.
     Submit(String, SessionId, String, Option<String>),
@@ -489,6 +495,9 @@ fn own<S, A, C>(
     );
     let uploads = refresher.uploads().map(Uploads::new);
     let mut sessions = SessionSync::new(machine.clone(), uploads.is_some());
+    let mut pokes = PokeSync::new();
+    // The running realtime connection's stop, if one runs.
+    let mut poke_stop: Option<Arc<AtomicBool>> = None;
     let uploads = uploads.as_ref();
     let mut next_clean = Duration::ZERO;
     loop {
@@ -519,6 +528,16 @@ fn own<S, A, C>(
                 now,
             );
             follow_sessions(&refresher, &mut sessions, work, now);
+            let confirmed = sessions.confirmed();
+            follow_pokes(
+                &refresher,
+                &mut pokes,
+                &mut poke_stop,
+                &mut replies,
+                confirmed,
+                work,
+                now,
+            );
             next_tick = now.saturating_add(TICK);
         }
         let message = match inbox.recv_timeout(next_tick.saturating_sub(origin.elapsed())) {
@@ -528,7 +547,46 @@ fn own<S, A, C>(
         };
         let now = origin.elapsed();
         match message {
-            Message::Stop => return,
+            Message::Stop => {
+                if let Some(stop) = poke_stop.take() {
+                    stop.store(true, Ordering::SeqCst);
+                }
+                return;
+            }
+            Message::RealtimeDone(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::Realtime(token) => Ok(token),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                if let Some((token, generation)) = pokes.token_done(current, outcome, now) {
+                    poke_stop = Some(start_listening(token, generation, messages));
+                }
+            }
+            Message::Poke(generation, event) => {
+                if pokes.current(generation) {
+                    match event {
+                        PokeEvent::Connected => {
+                            pokes.connected();
+                            replies.set_pushed(true, now);
+                        }
+                        PokeEvent::Poked => replies.poked(now),
+                        PokeEvent::Closed => {
+                            pokes.closed(now);
+                            poke_stop = None;
+                            replies.set_pushed(false, now);
+                        }
+                    }
+                    follow_replies(
+                        &refresher,
+                        &mut replies,
+                        sessions.confirmed(),
+                        uploads,
+                        work,
+                        now,
+                    );
+                }
+            }
             Message::Resync(views) => {
                 let _ = refresher.resync(&views, now);
                 let after = feed.connected(&views);
@@ -955,6 +1013,61 @@ fn follow_feed<S, A, C>(
     }
 }
 
+/// Ask for a realtime token when one is due: only while signed in with the
+/// account's Feed switch on and this machine's name confirmed. Turned off,
+/// the running connection stops and replies are read at rakumux.com's pace.
+#[allow(clippy::too_many_arguments)]
+fn follow_pokes<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    pokes: &mut PokeSync,
+    poke_stop: &mut Option<Arc<AtomicBool>>,
+    replies: &mut ReplySync,
+    confirmed: bool,
+    work: &Sender<Work<A, C>>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled =
+        refresher.account().is_some() && refresher.feed_switch() == Some(true) && confirmed;
+    if pokes.set_enabled(enabled, now) {
+        if let Some(stop) = poke_stop.take() {
+            stop.store(true, Ordering::SeqCst);
+        }
+        replies.set_pushed(false, now);
+    }
+    if pokes.next_request(now) {
+        match refresher.feed_job(FeedRequest::Realtime) {
+            Some(job) => {
+                let _ = work.send(Work::Realtime(job));
+            }
+            None => pokes.not_started(now),
+        }
+    }
+}
+
+/// Hold the realtime connection `token` opens on a thread of its own (it
+/// blocks for hours), telling the owner what it does; returns its stop.
+fn start_listening(
+    token: RealtimeToken,
+    generation: u64,
+    messages: &Sender<Message>,
+) -> Arc<AtomicBool> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let (stopped, events) = (stop.clone(), messages.clone());
+    let started = spawn("rakumux-status-poke", move || {
+        crate::feed::listen(&token, &stopped, |event| {
+            events.send(Message::Poke(generation, event)).is_ok()
+        });
+    });
+    if started.is_err() {
+        let _ = messages.send(Message::Poke(generation, PokeEvent::Closed));
+    }
+    stop
+}
+
 /// Whether rakumux.com refused a request because another machine of the
 /// account holds this one's name.
 fn machine_taken<T>(outcome: &Result<T, FeedFailure>) -> bool {
@@ -1197,6 +1310,16 @@ where
                 match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
                     Ok(completion) => Message::SessionsDone(completion),
                     Err(_) => Message::SessionsDone(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
+            }
+            Ok(Work::Realtime(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::RealtimeDone(completion),
+                    Err(_) => Message::RealtimeDone(FeedCompletion {
                         revision,
                         outcome: Err(FeedFailure::Unavailable(None)),
                     }),

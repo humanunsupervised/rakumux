@@ -1,0 +1,24 @@
+{
+  "realtime": {
+    "valid": [
+      { "version": 1, "url": "wss://realtime.rakumux.com/v1/connect", "token": "v1.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl", "expires_at": 1761220300000 },
+      { "version": 1, "url": "wss://rakumux-realtime.example.workers.dev:443/v1/connect", "token": "v1.payload-that-is-long.signature_x", "expires_at": 1761220300000 }
+    ],
+    "invalid": [
+      { "note": "not TLS", "value": { "version": 1, "url": "ws://realtime.rakumux.com/v1/connect", "token": "v1.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl", "expires_at": 1761220300000 } },
+      { "note": "a token in the URL", "value": { "version": 1, "url": "wss://realtime.rakumux.com/v1/connect?token=x", "token": "v1.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl", "expires_at": 1761220300000 } },
+      { "note": "credentials in the URL", "value": { "version": 1, "url": "wss://user:pass@realtime.rakumux.com/v1/connect", "token": "v1.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl", "expires_at": 1761220300000 } },
+      { "note": "a token a header can't carry", "value": { "version": 1, "url": "wss://realtime.rakumux.com/v1/connect", "token": "v1.eyJzdWIiOiJ1c2VyIn0 c2lnbmF0dXJl", "expires_at": 1761220300000 } },
+      { "note": "no expiry", "value": { "version": 1, "url": "wss://realtime.rakumux.com/v1/connect", "token": "v1.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl" } },
+      { "note": "more than asked", "value": { "version": 1, "url": "wss://realtime.rakumux.com/v1/connect", "token": "v1.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl", "expires_at": 1761220300000, "user": "user_123" } }
+    ]
+  },
+  "poke": {
+    "valid": [{ "version": 1, "type": "poke" }],
+    "invalid": [
+      { "note": "content", "value": { "version": 1, "type": "poke", "text": "Now run the tests." } },
+      { "note": "another version", "value": { "version": 2, "type": "poke" } },
+      { "note": "another type", "value": { "version": 1, "type": "reply" } }
+    ]
+  }
+}

@@ -201,7 +201,13 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    website open, and for
    30 s after the account's last reply activity (a reply or session message written anywhere, or
    one reported delivered or failed), then 2, 4 and 8 s as the quiet time doubles, up to 15 s
-   after 4 minutes; within 1–60 s; every 5 s from a rakumux.com that doesn't say) and types each
+   after 4 minutes; within 1–60 s; every 5 s from a rakumux.com that doesn't say; while its
+   realtime connection is open, when poked, and otherwise once a minute unless that pace is 1 s:
+   **pokes**, `feed/poke.rs`: `GET /api/v1/feed/realtime` gives a `wss://` URL and a token for
+   this machine, a thread of its own (`rakumux-status-poke`) holds the WebSocket (rustls,
+   tungstenite; the token as its bearer, a `ping` every 30 s, gone when silent 90 s, made again
+   after 12 h or when closed, backing off 1 s to a minute; a cloud answering 404 offers none and
+   is asked again in half an hour), and a `poke` makes `ReplySync` read at once) and types each
    pending one addressed to
    this machine into the entry's session with `session_submit` (a bracketed paste, then
    Enter; the same for Claude Code, Codex and OpenCode, which have no API for a running

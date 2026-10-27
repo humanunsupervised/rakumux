@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:poke",
+  "title": "A poke over the realtime WebSocket",
+  "description": "Something this machine reads (its replies) changed, or the account's website came into use: read replies now. It says nothing else; the read is the truth.",
+  "x-maxBodyBytes": 256,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "type"],
+  "properties": {
+    "version": { "const": 1 },
+    "type": { "const": "poke" }
+  }
+}

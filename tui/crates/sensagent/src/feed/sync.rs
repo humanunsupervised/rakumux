@@ -293,7 +293,8 @@ impl FeedSync {
                 | FeedResult::Message(_)
                 | FeedResult::Replies(_)
                 | FeedResult::SessionsStored(_)
-                | FeedResult::Download(_),
+                | FeedResult::Download(_)
+                | FeedResult::Realtime(_),
             ) => {}
             Err(failure) => self.fail(failure, now),
         }

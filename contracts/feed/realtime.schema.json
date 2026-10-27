@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:realtime",
+  "title": "GET /api/v1/feed/realtime success",
+  "description": "Where this machine connects to be poked when the account's replies change, and the token that admits it there: once, before `expires_at`, as this account and the machine id it asked with.",
+  "x-maxBodyBytes": 4096,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "url", "token", "expires_at"],
+  "properties": {
+    "version": { "const": 1 },
+    "url": {
+      "description": "The WebSocket to connect to: TLS, no credentials, query or fragment.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^wss://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$"
+    },
+    "token": {
+      "description": "Opaque to the machine; sent as the connection's bearer token.",
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 1024,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "expires_at": { "$ref": "urn:rakumux:feed:v1:common#/$defs/timestampMs" }
+  }
+}

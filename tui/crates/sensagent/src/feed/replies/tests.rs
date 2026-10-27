@@ -1438,3 +1438,71 @@ fn a_reply_whose_turn_ended_without_an_answer_never_takes_a_later_one() {
     replies.next_work(ended + ANSWER_WAIT);
     assert!(replies.awaiting.is_empty());
 }
+
+/// A read answered with `poll` (rakumux.com's `poll_ms`), at `at`.
+fn read_with_poll(replies: &mut ReplySync, poll: Duration, at: Duration) {
+    read_after(replies.next_work(at));
+    let mut page = read(vec![]);
+    if let Ok(FeedResult::Replies(read)) = &mut page {
+        read.poll = Some(poll);
+    }
+    replies.request_done(true, page, at);
+}
+
+#[test]
+fn while_pokes_come_replies_are_read_when_poked_and_once_a_minute_in_case() {
+    let mut replies = on(None, &[]);
+    replies.set_pushed(true, NOW);
+    read_with_poll(&mut replies, Duration::from_secs(15), NOW);
+    // Nothing until a minute is up…
+    assert_eq!(replies.next_work(NOW + Duration::from_secs(59)), None);
+    // …unless poked.
+    replies.poked(NOW + Duration::from_secs(2));
+    read_with_poll(
+        &mut replies,
+        Duration::from_secs(15),
+        NOW + Duration::from_secs(2),
+    );
+    assert_eq!(replies.next_work(NOW + Duration::from_secs(61)), None);
+    assert_eq!(
+        read_after(replies.next_work(NOW + Duration::from_secs(62))),
+        0
+    );
+}
+
+#[test]
+fn someone_watching_keeps_reads_at_rakumux_coms_pace_while_pushed() {
+    let mut replies = on(None, &[]);
+    replies.set_pushed(true, NOW);
+    read_with_poll(&mut replies, WATCHED_POLL, NOW);
+    assert!(replies.watched());
+    assert_eq!(read_after(replies.next_work(NOW + WATCHED_POLL)), 0);
+}
+
+#[test]
+fn a_poke_during_a_read_reads_again_once_it_is_back() {
+    let mut replies = on(None, &[]);
+    replies.set_pushed(true, NOW);
+    read_after(replies.next_work(NOW));
+    // The change may have come after the read was answered.
+    replies.poked(NOW);
+    let mut page = read(vec![]);
+    if let Ok(FeedResult::Replies(read)) = &mut page {
+        read.poll = Some(Duration::from_secs(15));
+    }
+    replies.request_done(true, page, NOW);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+}
+
+#[test]
+fn a_closed_connection_brings_back_rakumux_coms_pace() {
+    let mut replies = on(None, &[]);
+    replies.set_pushed(true, NOW);
+    read_with_poll(&mut replies, Duration::from_secs(15), NOW);
+    replies.set_pushed(false, NOW + Duration::from_secs(1));
+    assert_eq!(replies.next_work(NOW + Duration::from_secs(15)), None);
+    assert_eq!(
+        read_after(replies.next_work(NOW + Duration::from_secs(16))),
+        0
+    );
+}
