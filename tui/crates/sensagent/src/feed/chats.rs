@@ -4,9 +4,9 @@
 //! (terminal controls removed, keys, credential assignments and tokens
 //! masked) and uploaded to rakumux.com (`POST /api/v1/feed/messages`), one
 //! request at a time; a changing chat is read at most every 5 s, every second
-//! while rakumux.com is open. Where each session's chat is up to is kept in
-//! the status directory, so a restarted service carries on rather than
-//! starting over. Driven by the owner thread with its own clock.
+//! while replies are (`ReplySync::watched`). Where each session's chat is up
+//! to is kept in the status directory, so a restarted service carries on
+//! rather than starting over. Driven by the owner thread with its own clock.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -26,7 +26,8 @@ use super::wire::{self, FeedFailure, FeedRequest};
 pub(crate) const READ_BYTES: u32 = 512 * 1024;
 /// A changing chat is read again at most this often…
 const READ_EVERY: Duration = Duration::from_secs(5);
-/// …or this often while rakumux.com is open (`ReplySync::watched`), so its pages follow along.
+/// …or this often while replies are read every second (`ReplySync::watched`), so
+/// rakumux.com's pages follow along.
 const READ_EVERY_WATCHED: Duration = Duration::from_secs(1);
 /// After a read failed, before that session is read again.
 const READ_RETRY: Duration = Duration::from_secs(30);
@@ -106,7 +107,8 @@ pub(crate) struct ChatSync {
     supported: bool,
     sessions: HashMap<SessionId, Followed>,
     cursors: Cursors,
-    /// rakumux.com is open: chats are read every [`READ_EVERY_WATCHED`].
+    /// Replies are read every second (`ReplySync::watched`): chats are read
+    /// every [`READ_EVERY_WATCHED`].
     watched: bool,
     busy: bool,
     pending: Option<Pending>,
@@ -149,8 +151,8 @@ impl ChatSync {
         }
     }
 
-    /// Whether rakumux.com is open: then chats are read every second, a
-    /// session waiting out the slower pace no longer than that.
+    /// Whether replies are read every second (`ReplySync::watched`): then
+    /// chats are too, a session waiting out the slower pace no longer than that.
     pub fn set_watched(&mut self, watched: bool, now: Duration) {
         if watched && !self.watched {
             for session in self.sessions.values_mut() {

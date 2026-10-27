@@ -44,9 +44,12 @@ use super::wire::{self, FeedFailure, FeedRequest, RepliesRead, SessionMessage};
 
 /// How often the account's replies are read while the feed is on, unless
 /// rakumux.com's answer says otherwise (`poll_ms`: every second while a reply
-/// waits for this machine or the website is open, less often otherwise).
+/// waits for this machine or the website is open, and for 30 s after the
+/// account's last reply activity, then 2, 4 and 8 s as the quiet time
+/// doubles, up to 15 s after 4 minutes).
 const READ_EVERY: Duration = Duration::from_secs(5);
-/// rakumux.com asks this often while someone has it open (or a reply waits here).
+/// rakumux.com asks this often while someone has it open, a reply waits here,
+/// or for 30 s after the account's last reply activity.
 const WATCHED_POLL: Duration = Duration::from_secs(1);
 /// The first and longest waits after a failed request.
 const RETRY_MIN: Duration = Duration::from_secs(5);
@@ -490,7 +493,8 @@ impl ReplySync {
     }
 
     /// rakumux.com asks for this machine's replies every second: someone has
-    /// it open (or a reply waits here), so chats are worth uploading as they grow.
+    /// it open, a reply waits here, or it's the half minute after reply
+    /// activity, so chats are worth uploading as they grow.
     pub fn watched(&self) -> bool {
         self.enabled && self.poll.is_some_and(|poll| poll <= WATCHED_POLL)
     }
