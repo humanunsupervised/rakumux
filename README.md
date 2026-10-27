@@ -6,7 +6,7 @@
 
 楽 (*raku*) means easy, and read *gaku* it means music: tmux, made easy.
 
-![Rakumux: the session list and a live Claude Code session](assets/rakumux-screenshot.png)
+![Rakumux: the session list with where each session works, a live Claude Code session and the Feed](assets/rakumux-screenshot.png)
 
 Run Claude Code, Codex and OpenCode side by side, on your own subscriptions, along with any other
 program. Rakumux shows which agent is working, which needs you and which has finished. Your
