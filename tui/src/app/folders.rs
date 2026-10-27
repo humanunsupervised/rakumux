@@ -331,8 +331,7 @@ impl App {
     /// sessions; an older daemon is asked for a folder it isn't watching
     /// yet.
     pub fn show_folders(&mut self, folders: Vec<ScopeRoot>) {
-        self.tab_chosen = true;
-        self.close_feed_tab();
+        self.close_feed_view();
         let current = self.list.folder_filter();
         let unchanged = self.list.grouping() == Grouping::Folder
             && folders.len() == current.len()

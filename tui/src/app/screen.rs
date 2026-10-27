@@ -39,6 +39,9 @@ pub struct Screen {
     /// The list is above the detail (a narrow Sidebar screen in Rakumux
     /// mode).
     pub stacked: bool,
+    /// The hidden list's rail at the left edge (Sidebar side by side): a
+    /// click shows the list again.
+    pub rail: Option<Rect>,
     /// Session tab bar (Tabs).
     pub tabs: Option<Rect>,
     /// Detail pane: the session's terminal.
@@ -93,6 +96,7 @@ pub fn compute(
     screen.list = areas.list;
     screen.divider = areas.divider;
     screen.stacked = areas.stacked;
+    screen.rail = areas.rail;
     screen.tabs = areas.tabs;
     // A zero-width detail means a short narrow Sidebar shows the list
     // alone.
@@ -185,6 +189,7 @@ mod tests {
             screen.grid,
             screen.list,
             screen.divider,
+            screen.rail,
             screen.tabs,
             screen.terminal,
             screen.terminal_panel_divider,
@@ -387,6 +392,34 @@ mod tests {
     }
 
     #[test]
+    fn a_hidden_list_gives_the_session_its_columns_in_both_modes() {
+        let hidden = PaneSizes {
+            list_hidden: true,
+            ..PaneSizes::default()
+        };
+        for focus in [Focus::List, Focus::Session] {
+            let screen = compute(area(160, 48), SessionLayout::Sidebar, focus, false, hidden);
+            assert_tiled(&screen, &format!("{focus:?}"));
+            assert_eq!(screen.rail, Some(Rect::new(0, 0, layout::RAIL_COLS, 47)));
+            assert_eq!((screen.list, screen.divider), (None, None));
+            let width = 160 - layout::RAIL_COLS;
+            assert_eq!(
+                screen.terminal,
+                Some(Rect::new(layout::RAIL_COLS, 0, width, 47))
+            );
+        }
+        let shown = terminal_size(
+            area(160, 48),
+            SessionLayout::Sidebar,
+            false,
+            PaneSizes::default(),
+        );
+        let wider = terminal_size(area(160, 48), SessionLayout::Sidebar, false, hidden);
+        assert_eq!(wider, (160 - layout::RAIL_COLS, 47));
+        assert!(wider.0 > shown.0);
+    }
+
+    #[test]
     fn a_short_narrow_screen_shows_the_list_alone() {
         // 90×14 (a short narrow window): 13 rows above the
         // footer is too few for both.
@@ -408,6 +441,7 @@ mod tests {
         let sizes = |percent| PaneSizes {
             list_cols: None,
             list_percent: Some(percent),
+            list_hidden: false,
         };
         let screen = compute(
             area(90, 40),

@@ -173,6 +173,8 @@ fn program_of(view: &SessionView) -> Option<String> {
 /// The session list's state on the owner thread.
 pub(crate) struct SessionSync {
     machine: String,
+    /// What else this machine handles, said with every upload.
+    capabilities: Vec<&'static str>,
     enabled: bool,
     sessions: BTreeMap<SessionId, SessionState>,
     /// What rakumux.com was last sent; `None` until it was, since the switch
@@ -187,9 +189,17 @@ pub(crate) struct SessionSync {
 }
 
 impl SessionSync {
-    pub fn new(machine: String) -> Self {
+    /// The list for `machine`; `reply_attachments` says it saves replies'
+    /// files for their agents (`capabilities`), so rakumux.com sends it those.
+    pub fn new(machine: String, reply_attachments: bool) -> Self {
+        let capabilities = if reply_attachments {
+            vec![wire::REPLY_ATTACHMENTS]
+        } else {
+            Vec::new()
+        };
         Self {
             machine,
+            capabilities,
             enabled: false,
             sessions: BTreeMap::new(),
             sent: None,
@@ -258,7 +268,7 @@ impl SessionSync {
         if !due {
             return None;
         }
-        let request = wire::sessions_upload(&self.machine, &list, wall_ms)?;
+        let request = wire::sessions_upload(&self.machine, &list, wall_ms, &self.capabilities)?;
         self.sending = Some(list);
         Some(request)
     }

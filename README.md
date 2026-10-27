@@ -90,7 +90,8 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `Esc` | Back to the session you came from |
 | `Tab` / `1`–`9` | Last session / that session |
 | `n` | New session in the current folder |
-| `←` `→` | Switch tabs: Feed, Status, Folders, App |
+| `←` `→` | Switch tabs: Status, Folders, App |
+| `f` | Feed, or back to the sessions |
 | `P` / `/` | Filter by folder / by text |
 | `p` | Pin or unpin |
 | `J` `K` | Move down or up (or drag the session) |
@@ -119,9 +120,12 @@ Tabs across the top of the list group your sessions:
 - **Folders**: by folder, with each folder's git branch. Sessions in another linked worktree go
   under it.
 - **App**: by agent or program.
-- **Feed**: your agents' replies, newest first (needs an account).
 
 Pinned sessions sit above every group.
+
+`f` (or the footer's **≡ Feed** button) swaps the list for the **Feed**: your agents' replies,
+newest first (needs an account). The button counts the replies that came in since you last
+looked. `f` or `Esc` brings the sessions back.
 
 ### Status
 
@@ -203,7 +207,7 @@ refresh one.
 
 **Agent feed** collects your agents' replies and chats from every signed-in machine:
 
-- in Rakumux's Feed tab;
+- in Rakumux's Feed (`f`);
 - at [rakumux.com/feed](https://rakumux.com/feed), with your sessions by status, folder and app.
 
 **Writing back:** you can answer an agent from the web. Rakumux types your message into the

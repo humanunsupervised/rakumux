@@ -1006,3 +1006,78 @@ fn feed_uploads_are_one_sized_post_and_reads_one_get() {
         Some(CloudAIError::HttpStatus(302))
     );
 }
+
+#[test]
+fn an_attached_file_is_one_get_read_as_bytes_up_to_its_size() {
+    const FILE: &str = "01K8A1C0FFEE0000000000000A";
+    let file = |status: u16, body: Vec<u8>, coding: Option<&'static str>| {
+        let mut headers = HeaderMap::from_iter([(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/octet-stream"),
+        )]);
+        if let Some(coding) = coding {
+            headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(coding));
+        }
+        HttpReply {
+            status,
+            headers,
+            body: Box::new(Cursor::new(body)),
+        }
+    };
+    let fetch = |client: &CloudAIClient, id: &str, size: u64| {
+        client.feed(
+            &token(),
+            FeedHttp::Attachment { id, size },
+            &Cancellation::new(),
+        )
+    };
+    // The largest file there is fits whole, as raw bytes.
+    let largest = vec![9u8; MAX_FEED_BODY_BYTES];
+    let (client, recorded) = client_with(Ok(file(200, largest.clone(), None)), None);
+    let fetched = fetch(&client, FILE, MAX_FEED_BODY_BYTES as u64).unwrap();
+    assert_eq!((fetched.status, fetched.body), (200, largest));
+    {
+        let recorded = recorded.lock().unwrap();
+        let outgoing = &recorded[0].request;
+        assert_eq!(outgoing.method(), Method::GET);
+        assert_eq!(
+            outgoing.url().as_str(),
+            format!("https://reviewed.example:8443/api/v1/feed/replies/attachments/{FILE}")
+        );
+        assert_eq!(
+            outgoing.headers()[header::AUTHORIZATION],
+            format!("Bearer {SECRET}")
+        );
+        assert_eq!(outgoing.headers()[header::ACCEPT_ENCODING], "identity");
+        assert_eq!(outgoing.timeout(), Some(&DOWNLOAD_TIMEOUT));
+        assert!(recorded[0].body.is_empty());
+    }
+    // A longer body is read one byte past its size, for the feed to see.
+    let (client, _) = client_with(Ok(file(200, vec![9; 64], None)), None);
+    assert_eq!(fetch(&client, FILE, 10).unwrap().body.len(), 11);
+    // An error comes back for the feed to decode against its contract.
+    let (client, _) = client_with(
+        Ok(reply(
+            404,
+            r#"{"error":{"code":"invalid_request","message":"Not found."}}"#,
+        )),
+        None,
+    );
+    assert_eq!(fetch(&client, FILE, 10).unwrap().status, 404);
+    // A content coding is refused; so is an id that isn't one, before sending.
+    let (client, _) = client_with(Ok(file(200, vec![9; 10], Some("gzip"))), None);
+    assert_eq!(
+        fetch(&client, FILE, 10).err(),
+        Some(CloudAIError::InvalidResponse)
+    );
+    let (client, recorded) = client_with(Ok(file(200, Vec::new(), None)), None);
+    assert_eq!(
+        fetch(&client, "../../features", 10).err(),
+        Some(CloudAIError::InvalidRequest)
+    );
+    assert_eq!(
+        fetch(&client, FILE, MAX_FEED_BODY_BYTES as u64 + 1).err(),
+        Some(CloudAIError::InvalidRequest)
+    );
+    assert!(recorded.lock().unwrap().is_empty());
+}

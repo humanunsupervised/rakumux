@@ -29,6 +29,16 @@ test("a machine lists at most 200 sessions", () => {
   assert.equal(validators.sessionsUpload(many(201)), false);
 });
 
+test("a machine says what it handles beyond the first version", () => {
+  const base = fixtures.upload.valid[0];
+  for (const capabilities of fixtures.capabilities.valid) {
+    assert.equal(validators.sessionsUpload({ ...base, capabilities }), true, JSON.stringify(capabilities));
+  }
+  const many = (count) => Array.from({ length: count }, (_, index) => `capability_${index}`);
+  assert.equal(validators.sessionsUpload({ ...base, capabilities: many(16) }), true);
+  assert.equal(validators.sessionsUpload({ ...base, capabilities: many(17) }), false);
+});
+
 test("stored answers validate", () => {
   for (const value of fixtures.stored.valid) assert.equal(validators.sessionsStored(value), true, JSON.stringify(value));
   for (const value of fixtures.stored.invalid) assert.equal(validators.sessionsStored(value), false, JSON.stringify(value));

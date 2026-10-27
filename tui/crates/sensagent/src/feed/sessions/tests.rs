@@ -34,7 +34,7 @@ fn agent(mut view: SessionView) -> SessionView {
 }
 
 fn on(views: &[SessionView]) -> SessionSync {
-    let mut sessions = SessionSync::new("studio".into());
+    let mut sessions = SessionSync::new("studio".into(), true);
     sessions.set_enabled(true, NOW);
     sessions.connected(views);
     sessions
@@ -201,4 +201,19 @@ fn sessions_without_a_named_agent_say_the_program_the_app_tab_files_them_under()
     // An agent the contract doesn't name is its program; a named one is the agent.
     assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R3"), Some("pi".into()));
     assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R4"), None);
+}
+
+#[test]
+fn the_list_says_this_machine_takes_replies_with_files_when_it_saves_them() {
+    let mut sessions = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0")]);
+    let upload = body(sessions.next_request(NOW, WALL));
+    assert_eq!(
+        upload["capabilities"],
+        serde_json::json!(["reply_attachments"])
+    );
+
+    let mut sessions = SessionSync::new("studio".into(), false);
+    sessions.set_enabled(true, NOW);
+    let upload = body(sessions.next_request(NOW, WALL));
+    assert!(upload.get("capabilities").is_none(), "{upload}");
 }

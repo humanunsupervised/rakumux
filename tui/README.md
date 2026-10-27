@@ -124,7 +124,8 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   which switches to **Rakumux mode**. There, `↑/↓`, `j/k` or `Option`/`Alt`+`↑/↓` select (the
   session shows live, in full colour; on the folder filter, a folder header or + New
   session the last session stays in view), `gg`/`G` top/bottom, `Ctrl-d`/`Ctrl-u` half a page,
-  `{`/`}` previous/next folder, `←`/`→` switch the list's tabs (Status, Folders, App); `Enter` or
+  `{`/`}` previous/next folder, `←`/`→` switch the list's tabs (Status, Folders, App), `f` the
+  Feed (what agents said, in the list's place) and back; `Enter` or
   `i` goes in (reviving a dead session, restarting an
   exited one; on a folder header, a new session there), `Esc` (once it has
   cancelled a pending key or the filter) or `Ctrl-\` goes back to the session you came from (or,
@@ -133,7 +134,8 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   the session down/up, `x` close, `d`/`dd` delete, `z` full screen, `P` folders, `/` filter, `\`
   sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `R` restart the UI, `S` restart the server, `q` quit. The footer is a
   full-width bar that shows the mode, in zoom too, with `session: <name>` in its centre:
-  orange in Rakumux mode (with the `? Help` and `, Settings` buttons on the right), muted blue in
+  orange in Rakumux mode (with the `f ≡ Feed`, `? Help` and `, Settings` buttons on the right;
+  `RAKUMUX FEED` while the Feed shows), muted blue in
   session mode (with a `Ctrl-\ Rakumux` button). Help and Settings list the keys, and
   Settings runs any of them.
 - **Folders**: a session belongs to the folder it was started in (a repo, a worktree, any

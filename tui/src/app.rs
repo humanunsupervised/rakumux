@@ -70,7 +70,7 @@ pub use feature_flags::FeatureFlags;
 pub use folders::Folders;
 pub use keys::{CycleKeys, KeyBinding};
 pub use runtime::{AppEvent, ExecMode};
-pub use session_list::{ListRow, Selection, SessionList};
+pub use session_list::{ListRow, Selection, SessionList, ShownAs};
 pub use text_input::TextInput;
 
 use runtime::{CancelFlag, Exec};
@@ -167,9 +167,10 @@ pub enum Hit {
     FolderSelector,
     /// A tab on the list's top row: activates it, or opens its modal when
     /// it's the active one.
-    ListTab(grouping::ListTab),
+    ListTab(grouping::Grouping),
     /// A reply in the feed (its index, newest first): selects it, or opens
-    /// it when it's selected already (at once on a phone).
+    /// it when it's selected already (at once on a phone, and from session
+    /// mode).
     FeedEntry(usize),
     /// The feed detail's Reply button: writes back to the selected reply.
     FeedReply,
@@ -184,6 +185,11 @@ pub enum Hit {
     /// The footer's mode badge: `SESSION` switches to Rakumux mode,
     /// `RAKUMUX` goes back to the session you came from.
     ModeBadge,
+    /// The list pane's last row (Master detail, beside the session): hides
+    /// the list.
+    HideList,
+    /// What's left of a hidden list at the left edge: shows it again.
+    ShowList,
     /// A key hint on the right of the footer.
     FooterKey(FooterKey),
 }
@@ -201,6 +207,9 @@ pub enum FooterKey {
     SignIn,
     /// `✓ Signed in` (Rakumux mode, signed in): the account dialog.
     Account,
+    /// `f ≡ Feed` (Rakumux mode; `f Sessions` while the feed is shown):
+    /// the Feed view, or back to the sessions.
+    Feed,
 }
 
 /// Everything `App::new` needs; tests swap the connector, executor and
@@ -282,14 +291,10 @@ pub struct App {
     summaries_refreshing: HashSet<SessionId>,
     /// Sessions a summary was asked for whose request hasn't been answered.
     summary_asks: HashSet<SessionId>,
-    /// The agent feed (`app/feed`), shown by the list's Feed tab.
+    /// The agent feed (`app/feed`), shown by the Feed view.
     pub feed: feed::FeedStore,
-    /// The Feed tab is the active one (where Master detail can show it).
-    feed_tab: bool,
-    /// A tab was chosen this run: the feed isn't put in front any more.
-    tab_chosen: bool,
-    /// The account's Feed switch was seen on this run.
-    feed_switch_seen: bool,
+    /// Rakumux mode shows the Feed view instead of the sessions (`f`).
+    feed_view: bool,
     /// A switch was changed from Settings; the next account check says if
     /// saving it failed.
     features_saving: bool,
@@ -324,6 +329,10 @@ pub struct App {
     pub zoomed: bool,
     /// The list/detail divider: hovered or being dragged.
     pub divider: DividerState,
+    /// Master detail's list is hidden beside the session (`b`, the list's
+    /// Hide list button; the rail left of it brings it back). This window
+    /// only, never saved.
+    list_hidden: bool,
     /// A session being dragged to another place in the list.
     pub drag: Option<SessionDrag>,
     /// The list row under the mouse pointer (terminals that report
@@ -336,6 +345,9 @@ pub struct App {
     pub hits: Vec<(Rect, Hit)>,
     /// Session tab click targets from the last draw (`layout::tab_at`).
     pub tab_hits: Vec<(usize, Rect)>,
+    /// The first tab the tab bar showed last time it didn't fit: it keeps
+    /// that window while the selected tab is in it.
+    pub tab_first: usize,
     /// Detail generation whose attach should take focus when it completes.
     pending_focus: Option<u64>,
     /// Prevent duplicate creates and misrouted input before the new session attaches.
@@ -404,9 +416,7 @@ impl App {
             summaries_refreshing: HashSet::new(),
             summary_asks: HashSet::new(),
             feed: feed::FeedStore::new(rakumux_sensagent::feed::machine_name()),
-            feed_tab: false,
-            tab_chosen: false,
-            feed_switch_seen: false,
+            feed_view: false,
             features_saving: false,
             connection: Connection::Connecting,
             was_connected: false,
@@ -427,12 +437,14 @@ impl App {
             window_focused: true,
             zoomed: false,
             divider: DividerState::default(),
+            list_hidden: false,
             drag: None,
             hovered_row: None,
             mode: AppMode::Normal,
             area: Rect::new(0, 0, 80, 24),
             hits: Vec::new(),
             tab_hits: Vec::new(),
+            tab_first: 0,
             pending_focus: None,
             creating_session: false,
             status: None,
@@ -590,22 +602,71 @@ impl App {
         crate::layout::is_phone(self.area.width)
     }
 
-    /// The list sizes set by dragging the dividers.
+    /// The list sizes set by dragging the dividers, and whether the list
+    /// is hidden.
     fn pane_sizes(&self) -> crate::layout::PaneSizes {
         crate::layout::PaneSizes {
             list_cols: self.settings.sessions.sidebar_width,
             list_percent: self.settings.sessions.stacked_list_percent,
+            list_hidden: self.list_hidden,
         }
+    }
+
+    /// Master detail's list is hidden (it shows wherever it wouldn't be
+    /// beside the session: stacked, on a phone).
+    #[cfg(test)]
+    pub fn list_hidden(&self) -> bool {
+        self.list_hidden
+    }
+
+    /// The list is beside the session, where it can be hidden: Master
+    /// detail on a window wide enough for both.
+    pub fn list_beside_session(&self) -> bool {
+        let screen = self.screen();
+        screen.rail.is_some() || (screen.divider.is_some() && !screen.stacked)
+    }
+
+    /// `b`, the list's Hide list button and the rail: hide Master detail's
+    /// list so the session gets its columns, or show it again. The session
+    /// on screen takes the new pane size, as a dragged divider gives it.
+    pub fn toggle_list(&mut self) {
+        if !self.list_hidden && !self.list_beside_session() {
+            self.set_status("The list hides in Master detail, beside the session.");
+            return;
+        }
+        self.list_hidden = !self.list_hidden;
+        self.divider = DividerState::default();
+        self.hovered_row = None;
+        self.sync_terminal_size();
     }
 
     pub fn screen(&self) -> screen::Screen {
         self.screen_for(self.focus)
     }
 
+    /// How the sessions on screen are laid out: as tabs while a tab bar
+    /// shows them (Tabs; a session under tabs on a phone or from Grid, zoomed
+    /// in or not), else as the list or Grid's cards. Stepping through them
+    /// (cycle keys, `1`-`9`, `J`/`K`) follows that order.
+    pub fn shown_as(&self) -> ShownAs {
+        let unzoomed = screen::compute(
+            self.area,
+            self.shown_layout(self.focus),
+            self.focus,
+            false,
+            self.pane_sizes(),
+        );
+        if unzoomed.tabs.is_some() {
+            ShownAs::Tabs
+        } else {
+            ShownAs::List
+        }
+    }
+
     pub(super) fn screen_for(&self, focus: Focus) -> screen::Screen {
         let screen = screen::compute(
             self.area,
-            self.session_layout(),
+            self.shown_layout(focus),
             focus,
             self.zoomed,
             self.pane_sizes(),
@@ -805,7 +866,7 @@ impl App {
                 };
                 let note = match feature {
                     AccountFeature::AiSummaries => "A short AI summary of each agent chat under the session's name, made once the agent has written 5 messages or finished, then when you ask (the ↻ on a hovered summary, or `s`). Your prompt and the agent's messages since are sent to rakumux.com to write it; private sessions never are. Without one the line shows your last message. Saved to your account, as on rakumux.com/features.",
-                    AccountFeature::AgentFeed => "The Feed tab: what your agents said when they finished a turn, from every machine signed in to your account, newest first. Each finished reply and its chat are sent to rakumux.com, keys and tokens masked, private sessions never, and kept for 30 days; so is the list of this machine's sessions (names, folder names, branches, agents and what they're doing), for rakumux.com's Status and Folder pages. Saved to your account, as on rakumux.com/features.",
+                    AccountFeature::AgentFeed => "The Feed (f): what your agents said when they finished a turn, from every machine signed in to your account, newest first. Each finished reply and its chat are sent to rakumux.com, keys and tokens masked, private sessions never, and kept for 30 days; so is the list of this machine's sessions (names, folder names, branches, agents and what they're doing), for rakumux.com's Status and Folder pages. Saved to your account, as on rakumux.com/features.",
                 };
                 return SettingRow {
                     section: item.section(),

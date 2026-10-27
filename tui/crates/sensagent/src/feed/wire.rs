@@ -9,7 +9,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
-use super::cache::{FeedEntry, FeedPrompt, FeedReply, OpenTurn, ReplyFailure, ReplyStatus};
+use super::cache::{
+    FeedEntry, FeedPrompt, FeedReply, OpenTurn, ReplyAttachment, ReplyFailure, ReplyStatus,
+};
 use super::chats::{ChatName, UploadMessage};
 use crate::cloud::FeedHttpReply;
 
@@ -33,6 +35,12 @@ pub(crate) const REPLIES_LIMIT: u32 = 100;
 pub(crate) const MAX_PROMPT_BYTES: usize = 8 * 1024;
 /// The most of a turn's prompt a page carries (`turnPrompt`), in UTF-8 bytes.
 const MAX_PROMPT_TEXT: usize = 4096;
+/// Files attached to one reply, and the largest (contract).
+pub(crate) const MAX_ATTACHMENTS: usize = 5;
+pub(crate) const MAX_ATTACHMENT_BYTES: u64 = 4 * 1024 * 1024;
+/// What this machine handles beyond the contract's first version, said with
+/// its session list when it can save replies' files (`capabilities`).
+pub(crate) const REPLY_ATTACHMENTS: &str = "reply_attachments";
 
 /// Why a feed request failed. Static: never reply text, URLs or tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +76,8 @@ pub(crate) enum FeedRequest {
     ReplyStatus { body: Vec<u8> },
     /// Upload this machine's whole session list, as `body`.
     Sessions { body: Vec<u8> },
+    /// Fetch a file attached to a reply: `size` bytes, as the reply says.
+    Attachment { id: String, size: u64 },
 }
 
 impl FeedRequest {
@@ -271,20 +281,25 @@ struct SessionsUpload<'a> {
     machine: &'a str,
     sessions: &'a [super::sessions::SessionState],
     at: i64,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    capabilities: &'a [&'a str],
 }
 
-/// This machine's session list as `sessions-upload`; `None` only when it
+/// This machine's session list as `sessions-upload`, with what else it
+/// handles (`capabilities`, left out when nothing); `None` only when it
 /// can't be encoded.
 pub(crate) fn sessions_upload(
     machine: &str,
     sessions: &[super::sessions::SessionState],
     at: i64,
+    capabilities: &[&str],
 ) -> Option<FeedRequest> {
     let body = serde_json::to_vec(&SessionsUpload {
         version: 1,
         machine,
         sessions,
         at: at.max(1_577_836_800_000),
+        capabilities,
     })
     .ok()?;
     Some(FeedRequest::Sessions { body })
@@ -407,6 +422,39 @@ pub(crate) fn call_id(id: &str) -> bool {
     conversation_id(&id.replace('|', ":"))
 }
 
+/// The contract's attached file name (`fileName`): one visible line of at
+/// most 128 characters and 255 UTF-8 bytes (what Linux and macOS take), never
+/// a path (`/`, `\`), `.` or `..`.
+pub(crate) fn file_name(name: &str) -> bool {
+    let (Some(hidden), Some(visible)) = (LABEL_HIDDEN.as_ref(), LABEL_VISIBLE.as_ref()) else {
+        return false;
+    };
+    !name.is_empty()
+        && name.len() <= 255
+        && name.chars().count() <= 128
+        && !name.contains(['/', '\\'])
+        && name != "."
+        && name != ".."
+        && !hidden.is_match(name)
+        && visible.is_match(name)
+}
+
+/// The contract's media type: lowercase `type/subtype` without parameters.
+fn media_type(text: &str) -> bool {
+    let token = |part: &str| {
+        part.bytes()
+            .next()
+            .is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit())
+            && part.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"!#$&^_.+-".contains(&byte)
+            })
+    };
+    text.len() <= 128
+        && text
+            .split_once('/')
+            .is_some_and(|(kind, subtype)| token(kind) && token(subtype))
+}
+
 static LABEL_HIDDEN: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r"[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]").ok()
 });
@@ -500,6 +548,10 @@ struct WireReply {
     #[serde(default)]
     conversation_id: Option<String>,
     text: String,
+    /// Read as any JSON, so attachments off the contract leave out this row
+    /// only (see [`attachments`]), never the page.
+    #[serde(default)]
+    attachments: Option<serde_json::Value>,
     #[serde(default)]
     from: Option<String>,
     status: ReplyStatus,
@@ -509,6 +561,42 @@ struct WireReply {
     response: Option<String>,
     created_at: i64,
     status_at: i64,
+}
+
+#[derive(Deserialize)]
+struct WireAttachment {
+    id: String,
+    name: String,
+    media_type: String,
+    size: u64,
+}
+
+/// A reply's attached files, each within the contract's bounds; `None` when
+/// they aren't, and the reply is then left out like any row off the contract:
+/// its text is never typed without its files.
+fn attachments(value: Option<serde_json::Value>) -> Option<Vec<ReplyAttachment>> {
+    let Some(value) = value else {
+        return Some(Vec::new());
+    };
+    let files: Vec<WireAttachment> = serde_json::from_value(value).ok()?;
+    if files.len() > MAX_ATTACHMENTS {
+        return None;
+    }
+    files
+        .into_iter()
+        .map(|file| {
+            let fits = crate::feed::is_entry_id(&file.id)
+                && file_name(&file.name)
+                && media_type(&file.media_type)
+                && (1..=MAX_ATTACHMENT_BYTES).contains(&file.size);
+            fits.then_some(ReplyAttachment {
+                id: file.id,
+                name: file.name,
+                media_type: file.media_type,
+                size: file.size,
+            })
+        })
+        .collect()
 }
 
 /// A session message: what the user wrote on rakumux.com to a session that
@@ -523,6 +611,8 @@ pub(crate) struct SessionMessage {
     /// The chat the session showed when it was written, when it said.
     pub conversation_id: Option<String>,
     pub text: String,
+    /// Files the user attached, typed in as their paths after the text.
+    pub attachments: Vec<ReplyAttachment>,
     pub from: Option<String>,
     pub status: ReplyStatus,
 }
@@ -536,7 +626,8 @@ pub(crate) enum Received {
 
 impl WireReply {
     /// Within the contract's bounds, stripped of anything a terminal would act on.
-    fn checked(self) -> Option<Received> {
+    fn checked(mut self) -> Option<Received> {
+        let attachments = attachments(self.attachments.take())?;
         let ids = [&self.id, &self.session.id];
         let fits = self.seq > 0
             && ids.iter().all(|id| crate::feed::is_entry_id(id))
@@ -574,6 +665,7 @@ impl WireReply {
                     agent: line(&self.agent),
                     conversation_id,
                     text: plain(&self.text),
+                    attachments,
                     from: self.from.map(|from| line(&from)),
                     status: self.status,
                     failure: self.failure,
@@ -589,6 +681,7 @@ impl WireReply {
                 session_id: self.session.id,
                 conversation_id,
                 text: plain(&self.text),
+                attachments,
                 from: self.from.map(|from| line(&from)),
                 status: self.status,
             })),
@@ -629,15 +722,38 @@ struct WireReplies {
 }
 
 /// Replies as read: those that fit the contract (replies to entries, and
-/// session messages apart), the account's newest seq, whether more follow,
-/// and when rakumux.com says to read again (kept within 1–60 s), when it does.
+/// session messages apart), the page's and the account's greatest seq,
+/// whether more follow, and when rakumux.com says to read again (kept within
+/// 1–60 s), when it does.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct RepliesRead {
     pub replies: Vec<FeedReply>,
     pub messages: Vec<SessionMessage>,
+    /// The greatest seq of the page's rows, those left out as off the
+    /// contract too, so a page of rows that don't fit can't stall reads.
+    pub page_seq: u64,
     pub latest_seq: u64,
     pub more: bool,
     pub poll: Option<Duration>,
+}
+
+impl RepliesRead {
+    /// Where the next read continues: see [`read_to`].
+    pub fn read_to(&self) -> u64 {
+        read_to(self.page_seq, self.latest_seq, self.more)
+    }
+}
+
+/// Where reads continue after a page: past every row on it and, once no more
+/// wait, past the account's greatest seq. While more wait, rows between the
+/// page's greatest seq and the account's are still to be read (a page holds
+/// at most its limit), so the account's isn't taken then.
+fn read_to(page_seq: u64, latest_seq: u64, more: bool) -> u64 {
+    if more {
+        page_seq
+    } else {
+        page_seq.max(latest_seq)
+    }
 }
 
 /// A page of the account's changed replies.
@@ -650,6 +766,12 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
     if page.version != 1 || page.replies.len() > 200 {
         return Err(FeedFailure::Invalid);
     }
+    let page_seq = page
+        .replies
+        .iter()
+        .map(|reply| reply.seq)
+        .max()
+        .unwrap_or(0);
     let mut replies = Vec::new();
     let mut messages = Vec::new();
     for received in page.replies.into_iter().filter_map(WireReply::checked) {
@@ -661,12 +783,44 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
     Ok(RepliesRead {
         replies,
         messages,
+        page_seq,
         latest_seq: page.latest_seq,
         more: page.more,
         poll: page
             .poll_ms
             .map(|ms| Duration::from_millis(ms.clamp(1_000, 60_000))),
     })
+}
+
+/// What an attachment download brought back.
+#[derive(PartialEq, Eq)]
+pub(crate) enum Download {
+    /// The file, exactly the size its reply said.
+    File(Vec<u8>),
+    /// Gone for good: rakumux.com doesn't have it (404: the reply isn't
+    /// pending any more, or its file was deleted), or it isn't the size its
+    /// reply said.
+    Unavailable,
+}
+
+impl std::fmt::Debug for Download {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::File(bytes) => write!(formatter, "File({} bytes)", bytes.len()),
+            Self::Unavailable => formatter.write_str("Unavailable"),
+        }
+    }
+}
+
+/// An attachment download's answer, its body taken as bytes and never
+/// parsed: the file when it is exactly `size` bytes. Errors other than 404
+/// are those of every feed route.
+pub(crate) fn download(reply: FeedHttpReply, size: u64) -> Result<Download, FeedFailure> {
+    match reply.status {
+        200 if u64::try_from(reply.body.len()).ok() == Some(size) => Ok(Download::File(reply.body)),
+        200 | 404 => Ok(Download::Unavailable),
+        _ => Err(failure(&reply)),
+    }
 }
 
 #[derive(Deserialize)]
@@ -796,14 +950,25 @@ struct ErrorDetail {
 /// The longest wait a failure can ask for (the contract's: a day).
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(86_400);
 
-/// A page as read: its entries, the account's newest seq and whether more follow.
+/// A page as read: its entries, the page's and the account's greatest seq
+/// and whether more follow.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct PageRead {
     pub entries: Vec<FeedEntry>,
+    /// The greatest seq of the page's rows, those left out as off the
+    /// contract too, so a page of rows that don't fit can't stall reads.
+    pub page_seq: u64,
     pub latest_seq: u64,
     pub more: bool,
     /// The account's open turns, when rakumux.com sent them.
     pub open: Option<Vec<OpenTurn>>,
+}
+
+impl PageRead {
+    /// Where the next read continues: see [`read_to`].
+    pub fn read_to(&self) -> u64 {
+        read_to(self.page_seq, self.latest_seq, self.more)
+    }
 }
 
 /// The seq of each uploaded id.
@@ -834,6 +999,12 @@ pub(crate) fn page(reply: &FeedHttpReply) -> Result<PageRead, FeedFailure> {
     if page.version != 1 || page.entries.len() > 200 {
         return Err(FeedFailure::Invalid);
     }
+    let page_seq = page
+        .entries
+        .iter()
+        .map(|entry| entry.seq)
+        .max()
+        .unwrap_or(0);
     let entries = page
         .entries
         .into_iter()
@@ -882,6 +1053,7 @@ pub(crate) fn page(reply: &FeedHttpReply) -> Result<PageRead, FeedFailure> {
     });
     Ok(PageRead {
         entries,
+        page_seq,
         latest_seq: page.latest_seq,
         more: page.more,
         open,
@@ -1319,6 +1491,194 @@ mod tests {
         assert_eq!(message.session_id, "01K89ZQ4D2F6H8J0K2M4N6P8R0");
         assert_eq!(message.text, "Now run the tests [2J too.");
         assert_eq!(read.latest_seq, 5);
+    }
+
+    #[test]
+    fn reads_go_past_rows_left_out_but_not_past_pages_still_to_read() {
+        // Only rows off the contract: none kept, but the page was read.
+        let off = REPLY
+            .replace(r#""seq":3"#, r#""seq":42"#)
+            .replace("01K8A1B2C3D4E5F6G7H8J9K0MN", "not an id");
+        let body = |more: bool| {
+            format!(r#"{{"version":1,"replies":[{off}],"latest_seq":300,"more":{more}}}"#)
+        };
+        let read = replies(&reply(200, &body(true))).unwrap();
+        assert!(read.replies.is_empty() && read.messages.is_empty());
+        assert_eq!((read.page_seq, read.latest_seq), (42, 300));
+        // More wait: after this page; the account's newest is on a later one.
+        assert_eq!(read.read_to(), 42);
+        assert_eq!(replies(&reply(200, &body(false))).unwrap().read_to(), 300);
+
+        // The feed's pages the same.
+        let body = |more: bool| {
+            format!(
+                r#"{{"version":1,"latest_seq":300,"more":{more},"entries":[
+                {{"seq":8,"id":"{long}","machine":"studio",
+                 "session":{{"id":"01K89ZQ4D2F6H8J0K2M4N6P8R0","name":"fix-tests"}},
+                 "agent":"claude-code","text":"Fixed.","truncated":false,
+                 "finished_at":1761220000000}}]}}"#,
+                long = "x".repeat(65)
+            )
+        };
+        let read = page(&reply(200, &body(true))).unwrap();
+        assert!(read.entries.is_empty());
+        assert_eq!((read.page_seq, read.read_to()), (8, 8));
+        assert_eq!(page(&reply(200, &body(false))).unwrap().read_to(), 300);
+    }
+
+    const FILE: &str = r#"{"id":"01K8A1C0FFEE0000000000000A","name":"screen shot.png",
+        "media_type":"image/png","size":4194304}"#;
+
+    /// `REPLY` with `attachments` (`None`: none), as seq `seq`.
+    fn attached(seq: u64, attachments: Option<&str>) -> String {
+        let with = attachments.map_or(String::new(), |files| format!(r#","attachments":{files}"#));
+        REPLY
+            .replace(r#""seq":3"#, &format!(r#""seq":{seq}"#))
+            .replace(
+                r#""status":"delivered""#,
+                &format!(r#""status":"pending"{with}"#),
+            )
+    }
+
+    #[test]
+    fn replies_bring_their_files_and_rows_with_files_off_the_contract_are_left_out() {
+        let two = format!(
+            r#"[{FILE},{}]"#,
+            FILE.replace("0A", "0B")
+                .replace("screen shot.png", "notes.txt")
+        );
+        let message = attached(4, Some(&format!("[{FILE}]")))
+            .replace(r#""entry":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","#, "")
+            .replace(r#""thread":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","#, "");
+        let six = format!("[{}]", vec![FILE; 6].join(","));
+        let malformed = [
+            r#""files""#.to_owned(),
+            r#"[{"id":"01K8A1C0FFEE0000000000000A","name":"a.txt","media_type":"text/plain"}]"#
+                .into(),
+            six,
+            FILE.replace("screen shot.png", "../shot.png"),
+            FILE.replace("screen shot.png", "shot\\u0007.png"),
+            FILE.replace("screen shot.png", ".."),
+            FILE.replace("4194304", "4194305"),
+            FILE.replace("4194304", "0"),
+            FILE.replace("4194304", "-1"),
+            FILE.replace("01K8A1C0FFEE0000000000000A", "file-1"),
+            FILE.replace("image/png", "Image/PNG"),
+            FILE.replace("image/png", "image/png; charset=x"),
+        ];
+        let mut rows = vec![attached(2, None), attached(3, Some(&two)), message];
+        for (n, files) in malformed.iter().enumerate() {
+            let files = if files.starts_with('[') || files.starts_with('"') {
+                files.clone()
+            } else {
+                format!("[{files}]")
+            };
+            rows.push(attached(10 + n as u64, Some(&files)));
+        }
+        let page = format!(
+            r#"{{"version":1,"replies":[{}],"latest_seq":30,"more":false}}"#,
+            rows.join(",")
+        );
+        let read = replies(&reply(200, &page)).unwrap();
+        assert_eq!(read.page_seq, 21, "rows left out are read past");
+        assert_eq!(
+            read.replies.iter().map(|r| r.seq).collect::<Vec<_>>(),
+            [2, 3]
+        );
+        assert!(read.replies[0].attachments.is_empty(), "absent: none");
+        let files = &read.replies[1].attachments;
+        assert_eq!(files.len(), 2);
+        assert_eq!(
+            files[0],
+            ReplyAttachment {
+                id: "01K8A1C0FFEE0000000000000A".into(),
+                name: "screen shot.png".into(),
+                media_type: "image/png".into(),
+                size: 4_194_304,
+            }
+        );
+        assert_eq!(files[1].name, "notes.txt");
+        assert_eq!(read.messages.len(), 1);
+        assert_eq!(read.messages[0].attachments.len(), 1);
+    }
+
+    #[test]
+    fn a_download_is_its_files_bytes_exactly_or_unavailable() {
+        let bytes = |status: u16, body: Vec<u8>| FeedHttpReply {
+            status,
+            retry_after: None,
+            body,
+        };
+        let whole = vec![7u8; 4_194_304];
+        assert_eq!(
+            download(bytes(200, whole.clone()), 4_194_304),
+            Ok(Download::File(whole))
+        );
+        assert_eq!(
+            download(bytes(200, vec![7; 9]), 10),
+            Ok(Download::Unavailable),
+            "short"
+        );
+        assert_eq!(
+            download(bytes(200, vec![7; 11]), 10),
+            Ok(Download::Unavailable),
+            "long"
+        );
+        let gone = br#"{"error":{"code":"invalid_request","message":"x"}}"#.to_vec();
+        assert_eq!(
+            download(bytes(404, gone.clone()), 10),
+            Ok(Download::Unavailable)
+        );
+        assert_eq!(download(bytes(400, gone), 10), Err(FeedFailure::Invalid));
+        assert_eq!(
+            download(
+                bytes(
+                    503,
+                    br#"{"error":{"code":"unavailable","message":"x"}}"#.to_vec()
+                ),
+                10
+            ),
+            Err(FeedFailure::Unavailable(None))
+        );
+        assert_eq!(
+            download(bytes(502, b"<html>".to_vec()), 10),
+            Err(FeedFailure::Unavailable(None))
+        );
+        assert_eq!(
+            download(
+                bytes(
+                    429,
+                    br#"{"error":{"code":"rate_limited","message":"x"}}"#.to_vec()
+                ),
+                10
+            ),
+            Err(FeedFailure::RateLimited(None))
+        );
+        assert_eq!(
+            download(
+                bytes(
+                    401,
+                    br#"{"error":{"code":"unauthenticated","message":"x"}}"#.to_vec()
+                ),
+                10
+            ),
+            Err(FeedFailure::Unauthorized)
+        );
+    }
+
+    #[test]
+    fn the_session_list_says_what_else_the_machine_handles() {
+        let body = |capabilities: &[&str]| match sessions_upload("studio", &[], 1, capabilities) {
+            Some(FeedRequest::Sessions { body }) => {
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+            }
+            other => panic!("expected a session list, got {other:?}"),
+        };
+        assert_eq!(
+            body(&[REPLY_ATTACHMENTS])["capabilities"],
+            serde_json::json!(["reply_attachments"])
+        );
+        assert!(body(&[]).get("capabilities").is_none());
     }
 
     #[test]

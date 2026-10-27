@@ -16,6 +16,7 @@ use super::OwnerError;
 ///   sensagent/                 0700, the owner's alone
 ///     status/                  consent and cached status (status.sqlite3, status.lock)
 ///     credentials/             sign-in credentials (unencrypted private files)
+///   uploads/<reply id>/        0700: files attached to feed replies (0600), kept 7 days
 ///   run/                       shared with rakumux-ptyd, 0700
 ///     sensagent.json           registration: pid, socket, token (0600)
 ///     sensagent.lock           flock held by the running owner
@@ -62,6 +63,12 @@ impl OwnerLayout {
     /// The dedicated credential directory.
     pub fn credentials_dir(&self) -> PathBuf {
         self.root().join("credentials")
+    }
+
+    /// `$RAKUMUX_HOME/uploads`: files attached to feed replies, a directory
+    /// per reply, for the agents they're typed to (made when first needed).
+    pub fn uploads_dir(&self) -> PathBuf {
+        self.home.join("uploads")
     }
 
     pub fn registration_file(&self) -> PathBuf {

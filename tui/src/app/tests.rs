@@ -780,6 +780,140 @@ async fn dragging_the_divider_resizes_the_list_and_saves_the_width() {
 }
 
 #[tokio::test]
+async fn b_hides_the_list_beside_the_session_which_takes_its_columns() {
+    let mut h = harness(vec![aged("A", "a", 1, 30), aged("B", "b", 2, 20)]);
+    let (index, _) = h.last_attach();
+    h.fake.outgoing(index);
+    let beside = h.app.terminal_size();
+    let list = h.app.screen().list.unwrap().width;
+    h.press(KeyCode::Char('b')).await;
+    assert!(h.app.list_hidden());
+    let screen = h.app.screen();
+    assert_eq!((screen.list, screen.divider), (None, None));
+    assert!(screen.rail.is_some());
+    // The session gets the list's columns, less the rail's, and the one on
+    // screen takes them (observed here, so a Fit).
+    let (cols, rows) = h.app.terminal_size();
+    assert_eq!(
+        (cols, rows),
+        (beside.0 + list + 1 - crate::layout::RAIL_COLS, beside.1)
+    );
+    assert_eq!(
+        h.fake.outgoing(index),
+        vec![AttachOutgoing::Command(StreamCommand::Fit { cols, rows })]
+    );
+    // The keys still move through the sessions, and the detail follows at
+    // the new size; going in takes control at it.
+    h.press(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    let (b_index, request) = h.last_attach();
+    assert_eq!((request.id.as_str(), request.cols), ("B", cols));
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(h.app.list_hidden(), "kept in session mode");
+    h.fake.outgoing(b_index);
+    // From a session the rail brings the list back, and the controller
+    // resizes the terminal to the narrower pane; the mode stays.
+    draw(&mut h);
+    let rail = h.app.screen().rail.unwrap();
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        rail.x,
+        rail.bottom() - 1,
+    ));
+    assert!(!h.app.list_hidden());
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.app.terminal_size(), beside);
+    assert_eq!(
+        h.fake.outgoing(b_index),
+        vec![AttachOutgoing::Command(StreamCommand::Resize {
+            cols: beside.0,
+            rows: beside.1
+        })]
+    );
+    // The list's own button hides it again; the divider still drags once
+    // it's back.
+    draw(&mut h);
+    let (button, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::HideList)
+        .unwrap();
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        button.x + 4,
+        button.y,
+    ));
+    assert!(h.app.list_hidden());
+    h.rakumux().await;
+    h.press(KeyCode::Char('b')).await;
+    let divider = h.app.screen().divider.unwrap();
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        divider.x,
+        divider.y + 3,
+    ));
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        70,
+        divider.y + 3,
+    ));
+    assert_eq!(h.app.screen().list.unwrap().width, 70);
+    // Nothing of it is saved: hidden is this window's.
+    h.press(KeyCode::Char('b')).await;
+    let saved = std::fs::read_to_string(h.home.path().join("config.json")).unwrap_or_default();
+    assert!(!saved.contains("hidden"), "{saved}");
+}
+
+#[tokio::test]
+async fn the_list_hides_only_beside_the_session() {
+    for (layout, width, height) in [
+        (SessionLayout::Sidebar, 90, 40),
+        (SessionLayout::Sidebar, 45, 40),
+        (SessionLayout::Tabs, 160, 48),
+        (SessionLayout::Grid, 160, 48),
+    ] {
+        let mut h = harness(vec![view("A", "a", 10)]);
+        h.app.set_layout(layout);
+        h.app.resize(width, height);
+        let screen = h.app.screen();
+        h.press(KeyCode::Char('b')).await;
+        assert!(!h.app.list_hidden(), "{layout:?} {width}x{height}");
+        assert_eq!(h.app.screen(), screen, "{layout:?} {width}x{height}");
+        assert!(h.app.status().unwrap().contains("Master detail"));
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+        assert!(
+            !h.app.hits.iter().any(|(_, hit)| *hit == Hit::HideList),
+            "{layout:?} {width}x{height}"
+        );
+    }
+    // Hidden on a wide window, the list shows as usual when the window
+    // narrows (stacked, a phone), and hides again when it widens.
+    let mut h = harness(vec![view("A", "a", 10)]);
+    h.press(KeyCode::Char('b')).await;
+    for width in [90, 45] {
+        h.app.resize(width, 40);
+        assert!(h.app.screen().list.is_some(), "{width}");
+        assert!(h.app.screen().rail.is_none(), "{width}");
+    }
+    h.app.resize(160, 48);
+    assert!(h.app.screen().rail.is_some());
+}
+
+#[tokio::test]
+async fn hiding_the_list_runs_from_settings_and_keeps_the_mode() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    super::handlers::settings::run_action(&mut h.app, KeyAction::HideList);
+    assert!(h.app.list_hidden());
+    assert_eq!(h.app.focus, Focus::Session);
+}
+
+#[tokio::test]
 async fn dragging_the_stacked_divider_resizes_the_list_and_saves_its_height() {
     let mut h = harness(vec![view("A", "a", 10)]);
     // A narrow window: the list above the session.
@@ -1848,6 +1982,31 @@ async fn installation_cannot_be_cancelled_or_started_twice_by_more_keys() {
 }
 
 #[tokio::test]
+async fn settings_shows_the_feed_and_the_sessions_from_either_focus() {
+    for focus_session in [false, true] {
+        let mut h = harness(vec![view("A", "a", 20)]);
+        if focus_session {
+            h.press(KeyCode::Enter).await;
+        }
+        let run_feed = |h: &mut Harness| {
+            h.app.mode = settings_on_actions(h.app.focus == Focus::Session);
+            let AppMode::Modal { state, .. } = &mut h.app.mode else {
+                unreachable!();
+            };
+            state.select_action(KeyAction::Feed);
+        };
+        run_feed(&mut h);
+        h.press(KeyCode::Enter).await;
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        assert_eq!(h.app.focus, Focus::List);
+        assert!(h.app.feed_shown());
+        run_feed(&mut h);
+        h.press(KeyCode::Enter).await;
+        assert!(!h.app.feed_view());
+    }
+}
+
+#[tokio::test]
 async fn settings_can_restart_only_the_ui_from_either_focus() {
     for focus_session in [false, true] {
         let mut h = harness(vec![view("A", "a", 20)]);
@@ -2333,6 +2492,179 @@ async fn a_drag_stays_in_its_folder_group() {
     let (r2, a1) = (list_row(&h, "R2"), list_row(&h, "A1"));
     drag(&mut h, (x, a1.y + 1), &[(x, r2.y + 1), (x, 0)]);
     assert_eq!(visible_ids(&h), ["R2", "R1", "A1", "W1"]);
+}
+
+/// Started in the Tabs layout under Status, where every start opens.
+fn tabs_harness(sessions: Vec<session_core::model::SessionView>) -> Harness {
+    let fake = FakeApi::new(sessions);
+    let dir = tempfile::tempdir().unwrap();
+    let mut options = options(&fake, scope(), &dir);
+    options.settings.sessions.layout = SessionLayout::Tabs;
+    start(options, fake, dir)
+}
+
+/// A session created at `created` in `lifecycle`, last read at `read`.
+fn agent_at(
+    id: &str,
+    name: &str,
+    lifecycle: Lifecycle,
+    created: i64,
+    read: i64,
+) -> session_core::model::SessionView {
+    let mut session = aged(id, name, created, read);
+    session.lifecycle = lifecycle;
+    session
+}
+
+/// What the daemon says after this window went into `id`: read now, an
+/// unread reply among it.
+fn read_now(h: &mut Harness, session_id: &str, at: i64) {
+    let mut session = h.app.list.get(&id(session_id)).unwrap().clone();
+    session.last_active_at = at;
+    if session.lifecycle == Lifecycle::Done {
+        session.lifecycle = Lifecycle::Idle;
+    }
+    h.event(session_id, SessionEvent::Updated { session });
+}
+
+fn tab_ids(h: &Harness) -> Vec<String> {
+    h.app
+        .list
+        .tab_order()
+        .iter()
+        .map(|s| s.id.to_string())
+        .collect()
+}
+
+/// The names on the tab bar, left to right, from a draw.
+fn tab_names(h: &mut Harness, names: &[&str]) -> Vec<String> {
+    let buffer = draw(h);
+    let bar: String = (0..buffer.area.width)
+        .map(|x| buffer.get(x, 0).symbol().to_string())
+        .collect();
+    let mut found: Vec<(usize, String)> = names
+        .iter()
+        .filter_map(|name| {
+            bar.find(&format!(" {name} "))
+                .map(|at| (at, name.to_string()))
+        })
+        .collect();
+    found.sort();
+    found.into_iter().map(|(_, name)| name).collect()
+}
+
+#[tokio::test]
+async fn cycling_the_tabs_reaches_every_one_while_reading_them_moves_none() {
+    // Under Status (where every start opens) the list goes unread, working,
+    // then ready by when each was last read. Going into a tab reads it
+    // (touch), which moved it to the top of ready, so the tabs were rebuilt
+    // in another order at every step: cycling went alpha, bravo, alpha,
+    // bravo… and never reached charlie or delta.
+    let mut h = tabs_harness(vec![
+        agent_at("A", "alpha", Lifecycle::Idle, 1, 30),
+        agent_at("B", "bravo", Lifecycle::Idle, 2, 20),
+        agent_at("C", "charlie", Lifecycle::Idle, 3, 10),
+        agent_at("D", "delta", Lifecycle::Done, 4, 40),
+        agent_at("E", "echo", Lifecycle::Working, 5, 50),
+    ]);
+    assert_eq!(
+        h.app.list.grouping(),
+        crate::app::grouping::Grouping::Status
+    );
+    assert_eq!(visible_ids(&h), ["D", "E", "A", "B", "C"]);
+    assert_eq!(h.selected().as_deref(), Some("E"));
+    // The tabs: the Folders tab's order (created first, first), whatever
+    // each is doing.
+    let names = ["alpha", "bravo", "charlie", "delta", "echo"];
+    assert_eq!(tab_ids(&h), ["A", "B", "C", "D", "E"]);
+    assert_eq!(tab_names(&mut h, &names), names);
+    let mut visited = Vec::new();
+    for at in 100..105 {
+        h.alt(KeyCode::Down).await;
+        let id = h.selected().unwrap();
+        h.press(KeyCode::Enter).await;
+        assert_eq!(h.app.focus, Focus::Session, "{id}");
+        read_now(&mut h, &id, at);
+        visited.push(id);
+        h.rakumux().await;
+        assert_eq!(tab_ids(&h), ["A", "B", "C", "D", "E"], "after {visited:?}");
+        assert_eq!(tab_names(&mut h, &names), names);
+    }
+    assert_eq!(visited, ["A", "B", "C", "D", "E"]);
+    // The list itself still lists ready by when each was last read.
+    assert_eq!(visible_ids(&h), ["E", "D", "C", "B", "A"]);
+    // The numbers on the tabs are what 1-9 go into.
+    h.press(KeyCode::Char('3')).await;
+    assert_eq!(h.selected().as_deref(), Some("C"));
+    assert_eq!(h.app.focus, Focus::Session);
+}
+
+#[tokio::test]
+async fn tabs_move_and_number_in_their_own_order_under_status() {
+    let mut h = tabs_harness(vec![
+        agent_at("A", "alpha", Lifecycle::Idle, 1, 30),
+        agent_at("B", "bravo", Lifecycle::Working, 2, 20),
+        agent_at("C", "charlie", Lifecycle::Done, 3, 10),
+    ]);
+    assert_eq!(visible_ids(&h), ["C", "B", "A"]);
+    assert_eq!(tab_ids(&h), ["A", "B", "C"]);
+    // ↓/↑ step along the tabs, not the list's statuses.
+    h.app.list.select(Selection::Session(id("A")));
+    h.press(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    // K moves the tab one place left, even though ready can't be
+    // reordered in the list; the order is the folder's, saved.
+    h.app.list.select(Selection::Session(id("C")));
+    shift(&mut h, 'K').await;
+    assert_eq!(tab_ids(&h), ["A", "C", "B"]);
+    assert_eq!(
+        saved_order(&h),
+        serde_json::json!({"/repo": ["A", "C", "B"]})
+    );
+    // A click on the second tab is the second tab's session.
+    draw(&mut h);
+    let second = h
+        .app
+        .tab_hits
+        .iter()
+        .find(|(i, _)| *i == 1)
+        .map(|(_, area)| *area)
+        .unwrap();
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        second.x + 1,
+        second.y,
+    ));
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        second.x + 1,
+        second.y,
+    ));
+    h.app.process_pending();
+    assert_eq!(h.selected().as_deref(), Some("C"));
+}
+
+#[tokio::test]
+async fn a_phones_session_tabs_cycle_in_their_order() {
+    let mut h = harness(vec![
+        agent_at("A", "alpha", Lifecycle::Idle, 1, 30),
+        agent_at("B", "bravo", Lifecycle::Idle, 2, 20),
+        agent_at("C", "charlie", Lifecycle::Idle, 3, 10),
+    ]);
+    h.app.resize(45, 40);
+    h.app.settings.sessions.cycle_keys_in_session = true;
+    // The list (Rakumux mode) is Status's; a session's tab row isn't.
+    assert_eq!(h.app.shown_as(), ShownAs::List);
+    h.app.list.select(Selection::Session(id("A")));
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.shown_as(), ShownAs::Tabs);
+    let mut visited = vec![h.selected().unwrap()];
+    for at in 100..103 {
+        read_now(&mut h, visited.last().unwrap(), at);
+        h.alt(KeyCode::Down).await;
+        visited.push(h.selected().unwrap());
+    }
+    assert_eq!(visited, ["A", "B", "C", "A"]);
 }
 
 #[tokio::test]
@@ -3273,7 +3605,7 @@ async fn new_sessions_go_in_the_current_folder() {
     let new_id = h.app.list.selected_id().cloned().unwrap();
     assert_eq!(h.app.list.get(&new_id).unwrap().scope, web);
     assert_eq!(h.app.list.folder_filter(), [api, web]);
-    assert!(h.app.list.visible_position(&new_id).is_some());
+    assert!(h.app.list.position(ShownAs::List, &new_id).is_some());
 }
 
 #[tokio::test]
@@ -3531,8 +3863,8 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     assert_eq!(h.app.list.grouping(), Grouping::Folder);
     h.press(KeyCode::Home).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
-    // → and l go along the tabs (Feed, Status, Folders, App) and stop at
-    // the last; the top row stays selected; ← and h come back.
+    // → and l go along the tabs (Status, Folders, App) and stop at the
+    // last; the top row stays selected; ← and h come back.
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
@@ -3542,13 +3874,10 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     h.press(KeyCode::Left).await;
     h.press(KeyCode::Char('h')).await;
     assert_eq!(h.app.list.grouping(), Grouping::Status);
-    // The Feed comes first; there they stop.
+    // Status comes first; there they stop (the feed is no tab).
     h.press(KeyCode::Left).await;
-    assert_eq!(h.app.list_tab(), grouping::ListTab::Feed);
-    h.press(KeyCode::Left).await;
-    assert_eq!(h.app.list_tab(), grouping::ListTab::Feed);
-    h.press(KeyCode::Right).await;
-    assert_eq!(h.app.list_tab(), Grouping::Status.into());
+    assert_eq!(h.app.list.grouping(), Grouping::Status);
+    assert!(!h.app.feed_shown());
     h.press(KeyCode::Right).await;
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
@@ -3706,13 +4035,13 @@ async fn clicks_switch_tabs_open_the_active_ones_modal_and_pick_its_rows() {
     // From a session, a click on another tab: Rakumux mode, that tab.
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
-    click(&mut h, Hit::ListTab(Grouping::App.into()));
+    click(&mut h, Hit::ListTab(Grouping::App));
     assert_eq!(h.app.focus, Focus::List);
     assert_eq!(h.app.list.grouping(), Grouping::App);
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
     assert!(matches!(h.app.mode, AppMode::Normal));
     // On the active tab: its modal; a row picks it (All, claude, codex).
-    click(&mut h, Hit::ListTab(Grouping::App.into()));
+    click(&mut h, Hit::ListTab(Grouping::App));
     assert_eq!(section_picker(&h).grouping, Grouping::App);
     click(&mut h, Hit::SectionRow(2));
     assert!(matches!(h.app.mode, AppMode::Normal));
@@ -3721,8 +4050,8 @@ async fn clicks_switch_tabs_open_the_active_ones_modal_and_pick_its_rows() {
         [app_section("codex")]
     );
     // Another modal, closed by a click outside it: nothing changes.
-    click(&mut h, Hit::ListTab(Grouping::Status.into()));
-    click(&mut h, Hit::ListTab(Grouping::Status.into()));
+    click(&mut h, Hit::ListTab(Grouping::Status));
+    click(&mut h, Hit::ListTab(Grouping::Status));
     assert_eq!(section_picker(&h).grouping, Grouping::Status);
     h.app
         .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 1, 46));
@@ -3733,9 +4062,9 @@ async fn clicks_switch_tabs_open_the_active_ones_modal_and_pick_its_rows() {
     assert_eq!(section_picker(&h).grouping, Grouping::Status);
     h.press(KeyCode::Esc).await;
     // All folders' tab, clicked twice: the Folders modal, as before.
-    click(&mut h, Hit::ListTab(Grouping::Folder.into()));
+    click(&mut h, Hit::ListTab(Grouping::Folder));
     assert_eq!(h.app.list.grouping(), Grouping::Folder);
-    click(&mut h, Hit::ListTab(Grouping::Folder.into()));
+    click(&mut h, Hit::ListTab(Grouping::Folder));
     assert!(matches!(h.app.mode, AppMode::Folders(_)));
 }
 

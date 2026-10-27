@@ -18,6 +18,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/replies` | [reply-upload](reply-upload.schema.json) | [reply](reply.schema.json) |
 | `GET /api/v1/feed/replies?after=SEQ&limit=N&machine=NAME&session_messages=1` | query only | [replies](replies.schema.json), increasing seq |
 | `POST /api/v1/feed/replies/status` | [reply-status](reply-status.schema.json) | [reply](reply.schema.json) |
+| `GET /api/v1/feed/replies/attachments/{id}` | path only | the file's bytes, not JSON (below) |
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
 
 - **Upload:** `{version:1, machine, entries}` with 1–50 entries. Each entry is
@@ -66,6 +67,7 @@ conformance tests, not an HTTP server, database or local runtime.
   agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as
   the reply's `response`; page entries carry `reply_to` and `thread`. Machines take replies
   written elsewhere only when the user turned that on there (`not_accepted` otherwise).
+  Readers take a `failure` they don't know as a failure without a reason.
 - **Session messages:** on rakumux.com the user can also write to a session that has no
   answer to reply to yet (a new chat, or one whose newest answer is in another chat). It is
   stored as a reply without `entry` and `thread`, with the chat the session showed when it
@@ -74,6 +76,28 @@ conformance tests, not an HTTP server, database or local runtime.
   types it into the session once an agent runs there and waits for input, whatever chat it
   shows (never into a session without an agent: it waits for one), and reports it like a
   reply; the agent's next finished reply answers it (`reply_to`) and starts its own thread.
+- **Attachments:** on rakumux.com the user can attach up to 5 files of at most **4 MiB**
+  (4194304 bytes) each to a reply or session message, which still has its `text`. The reply
+  lists them as `attachments`, `{id, name, media_type, size}` each (`attachment` in common):
+  `name` is one visible line of at most 128 characters and 255 UTF-8 bytes, never a path, `.`
+  or `..`, and two files may share it; `media_type` is lowercase `type/subtype` without
+  parameters, informational only.
+  The cloud keeps each file only while its reply is pending, and sends a reply with attachments
+  only to a reader whose machine advertises `reply_attachments` in its session list (below),
+  so an older machine never gets one it would type without its files. The reply's machine
+  fetches every file before typing anything, saves it under a directory of its own for that
+  reply, and types the text followed by each file's absolute path; when a file can't be fetched
+  or its length isn't `size`, it types nothing and reports `failed` with
+  `attachment_unavailable`. `attachments` stays on the reply after its files are gone, so
+  threads can still name them.
+- **Attachment download:** `GET /api/v1/feed/replies/attachments/{id}`, authorized like the
+  other routes, answers 200 with the file as raw bytes: `Content-Type:
+  application/octet-stream`, `Content-Length` equal to the attachment's `size`,
+  `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and `Cache-Control:
+  no-store`. A machine names the file from the reply's `name`, never from the response's
+  headers, and doesn't trust `media_type`. An id the account doesn't have, of a reply that is
+  no longer pending, or whose file was deleted is `invalid_request` with 404; other errors are
+  as for every route ([error](error.schema.json)).
 - **Sessions:** a machine's whole list of sessions now (`sessions-upload`, `{version:1,
   machine, sessions, at}`, at most 200; `sessionState` in common), replacing what was stored for
   it: a session left out is gone. Sent when the list changes and every minute meanwhile, so a
@@ -84,7 +108,10 @@ conformance tests, not an HTTP server, database or local runtime.
   `exited`; dead sessions aren't listed), `lifecycle`, the agent's `phase` when it reports one,
   the `conversation_id` it shows, `pinned` and `last_active_at`. Private sessions are never
   listed. The answer says how many are stored (`sessions-stored`). Kept while the account's
-  Feed switch is on.
+  Feed switch is on. The upload also says what the machine handles beyond the first version of
+  this contract (`capabilities`, at most 16 unique names matching `^[a-z][a-z0-9_.]{0,31}$`;
+  absent from older machines): `reply_attachments`, it fetches a reply's attachments and gives
+  the agent their paths. The cloud keeps the latest list and ignores names it doesn't know.
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
   message per code: `invalid_request` (400, or 413 for an oversized body), `unauthenticated`
   (401), `forbidden` (403: the account's Feed switch is off), `rate_limited` (429) and
@@ -94,7 +121,8 @@ conformance tests, not an HTTP server, database or local runtime.
   `invalid_request` (400), and one to an entry that isn't the newest of its session (its
   machine's and session's latest by `finished_at`, then `seq`) is `invalid_request` with 409:
   only a session's newest message can be answered. A repeated upload of a stored reply still
-  answers with the stored reply.
+  answers with the stored reply. An attachment download whose file is gone is `invalid_request`
+  with 404 (above).
 
 Every object rejects additional properties. Authorization is the terminal's Clerk OAuth
 access token in the `Authorization` header, never the body; browser cookies and `Origin`
@@ -104,7 +132,8 @@ requests are refused. The user is the verified token's subject, never a body fie
 
 1. Bound the raw body before parsing: the upload's `x-maxBodyBytes` (1 MiB) on the server,
    the page's (2 MiB) on the client, 4 MiB for a chat upload and a turn. Reject malformed UTF-8 or JSON, a byte-order mark and
-   duplicate member names.
+   duplicate member names. Read an attachment download as bytes, never parsed: at most the
+   attachment's `size` (4 MiB at most), and any other length is unavailable.
 2. Implement `maxUtf8Bytes` as an assertion on the decoded string's UTF-8 length.
    `maxLength` counts code points, not bytes.
 3. Apply the schemas without coercion, defaults or removing extra fields.
@@ -112,9 +141,11 @@ requests are refused. The user is the verified token's subject, never a body fie
 ## What is not in it
 
 No terminal output, full paths (beyond what the chat's own text holds), account ids or
-credentials. Schemas reject such fields, not secrets inside the text: the status service sends
-replies and chats only while the account's Feed switch is on, never a private session's, and
-masks keys, credential assignments and tokens in every text first (best effort).
+credentials. Files attached to replies travel only through the attachment download, never in a
+JSON body, and only from rakumux.com to the reply's machine. Schemas reject such fields, not
+secrets inside the text: the status service sends replies and chats only while the account's
+Feed switch is on, never a private session's, and masks keys, credential assignments and tokens
+in every text first (best effort).
 
 ## Conformance tests
 

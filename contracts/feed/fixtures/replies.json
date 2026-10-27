@@ -14,13 +14,18 @@
       { "note": "no machine", "patch": { "from": null } },
       { "note": "an escape sequence", "patch": { "text": "run \u001b[2Jthis" } },
       { "note": "a user id in the body", "patch": { "user_id": "user_1" } },
-      { "note": "not a ULID", "patch": { "entry": "entry-1" } }
+      { "note": "not a ULID", "patch": { "entry": "entry-1" } },
+      {
+        "note": "files from a machine",
+        "patch": { "attachments": [{ "id": "01K8A2C3D4E5F6G7H8J9K0MNPQ", "name": "notes.txt", "media_type": "text/plain", "size": 12 }] }
+      }
     ]
   },
   "replyStatus": {
     "valid": [
       { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "delivered" },
-      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed", "failure": "conversation_changed" }
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed", "failure": "conversation_changed" },
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed", "failure": "attachment_unavailable" }
     ],
     "invalid": [
       { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed" },
@@ -67,6 +72,48 @@
           "created_at": 1761220200000,
           "status_at": 1761220201000
         }
+      },
+      {
+        "version": 1,
+        "reply": {
+          "seq": 5,
+          "id": "01K8A1B2C3D4E5F6G7H8J9K0MQ",
+          "entry": "01K8A1Z9Y8X7W6V5T4S3R2Q1P0",
+          "thread": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+          "machine": "studio",
+          "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" },
+          "agent": "claude-code",
+          "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+          "text": "The page looks like this now, and here is the log.",
+          "attachments": [
+            { "id": "01K8A2C3D4E5F6G7H8J9K0MNPQ", "name": "Screenshot 2026-10-26 at 10.04.12.png", "media_type": "image/png", "size": 482113 },
+            { "id": "01K8A2C3D4E5F6G7H8J9K0MNPR", "name": "failing-test.log", "media_type": "text/plain", "size": 18342 }
+          ],
+          "status": "pending",
+          "created_at": 1761220300000,
+          "status_at": 1761220300000
+        }
+      },
+      {
+        "version": 1,
+        "reply": {
+          "seq": 6,
+          "id": "01K8A1B2C3D4E5F6G7H8J9K0MR",
+          "entry": "01K8A1Z9Y8X7W6V5T4S3R2Q1P0",
+          "thread": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+          "machine": "studio",
+          "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests" },
+          "agent": "claude-code",
+          "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+          "text": "Use this design.",
+          "attachments": [
+            { "id": "01K8A2C3D4E5F6G7H8J9K0MNPS", "name": "diagram.svg", "media_type": "image/svg+xml", "size": 9000 }
+          ],
+          "status": "failed",
+          "failure": "attachment_unavailable",
+          "created_at": 1761220400000,
+          "status_at": 1761220401000
+        }
       }
     ],
     "invalid": [
@@ -77,12 +124,82 @@
   "replies": {
     "valid": [
       { "version": 1, "replies": [], "latest_seq": 0, "more": false },
-      { "version": 1, "replies": [], "latest_seq": 0, "more": false, "poll_ms": 1000 }
+      { "version": 1, "replies": [], "latest_seq": 0, "more": false, "poll_ms": 1000 },
+      {
+        "version": 1,
+        "replies": [
+          {
+            "seq": 7,
+            "id": "01K8A1B2C3D4E5F6G7H8J9K0MS",
+            "machine": "studio",
+            "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R2", "name": "dev-server", "folder": "rakumux" },
+            "agent": "codex",
+            "text": "Start from this spec.",
+            "attachments": [
+              { "id": "01K8A2C3D4E5F6G7H8J9K0MNPT", "name": "設計メモ.md", "media_type": "text/markdown", "size": 2048 }
+            ],
+            "status": "pending",
+            "created_at": 1761220500000,
+            "status_at": 1761220500000
+          }
+        ],
+        "latest_seq": 7,
+        "more": false,
+        "poll_ms": 1000
+      }
     ],
     "invalid": [
       { "version": 1, "replies": [], "more": false },
       { "version": 1, "replies": [], "latest_seq": 0, "more": false, "poll_ms": 500 },
       { "version": 1, "replies": [{ "seq": 1 }], "latest_seq": 1, "more": false }
+    ]
+  },
+  "attachments": {
+    "valid": [
+      { "id": "01K8A2C3D4E5F6G7H8J9K0MNPQ", "name": "Screenshot 2026-10-26 at 10.04.12.png", "media_type": "image/png", "size": 482113 },
+      { "id": "01K8A2C3D4E5F6G7H8J9K0MNPR", "name": "a", "media_type": "text/plain", "size": 1 },
+      { "id": "01K8A2C3D4E5F6G7H8J9K0MNPS", "name": ".env.example", "media_type": "application/octet-stream", "size": 4194304 },
+      { "id": "01K8A2C3D4E5F6G7H8J9K0MNPT", "name": "設計メモ.md", "media_type": "text/markdown", "size": 2048 },
+      { "id": "01K8A2C3D4E5F6G7H8J9K0MNPV", "name": "..notes", "media_type": "text/x-shellscript", "size": 64 },
+      {
+        "id": "01K8A2C3D4E5F6G7H8J9K0MNPW",
+        "name": "report (final) 😀.docx",
+        "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "size": 70211
+      }
+    ],
+    "invalid": [
+      { "note": "a parent path", "patch": { "name": "../x" } },
+      { "note": "a folder and a file", "patch": { "name": "a/b" } },
+      { "note": "an absolute path", "patch": { "name": "/etc/passwd" } },
+      { "note": "a Windows path", "patch": { "name": "a\\b" } },
+      { "note": "an empty name", "patch": { "name": "" } },
+      { "note": "the folder itself", "patch": { "name": "." } },
+      { "note": "the parent folder", "patch": { "name": ".." } },
+      { "note": "only spaces", "patch": { "name": "   " } },
+      { "note": "a NUL", "patch": { "name": "a\u0000b.txt" } },
+      { "note": "a newline", "patch": { "name": "notes\n.txt" } },
+      { "note": "a tab", "patch": { "name": "notes\t.txt" } },
+      { "note": "an escape sequence", "patch": { "name": "\u001b[31mred.txt" } },
+      { "note": "a right-to-left override", "patch": { "name": "invoice\u202etxt.exe" } },
+      { "note": "a zero-width space", "patch": { "name": "a\u200bb.txt" } },
+      { "note": "no name", "patch": { "name": null } },
+      { "note": "a capital media type", "patch": { "media_type": "Image/PNG" } },
+      { "note": "a media type without a subtype", "patch": { "media_type": "image" } },
+      { "note": "an empty subtype", "patch": { "media_type": "text/" } },
+      { "note": "an empty type", "patch": { "media_type": "/plain" } },
+      { "note": "media type parameters", "patch": { "media_type": "text/plain; charset=utf-8" } },
+      { "note": "a wildcard media type", "patch": { "media_type": "*/*" } },
+      { "note": "no media type", "patch": { "media_type": null } },
+      { "note": "an empty file", "patch": { "size": 0 } },
+      { "note": "over 4 MiB", "patch": { "size": 4194305 } },
+      { "note": "a fractional size", "patch": { "size": 1.5 } },
+      { "note": "a size as text", "patch": { "size": "12" } },
+      { "note": "no size", "patch": { "size": null } },
+      { "note": "not a ULID", "patch": { "id": "file-1" } },
+      { "note": "a path on the machine", "patch": { "path": "/home/me/.rakumux/uploads/x.png" } },
+      { "note": "a download URL", "patch": { "url": "https://rakumux.com/files/x.png" } },
+      { "note": "the file inline", "patch": { "content": "aGVsbG8=" } }
     ]
   }
 }

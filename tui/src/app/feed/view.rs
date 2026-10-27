@@ -1,10 +1,19 @@
-//! The Feed tab: the first of the list's tabs. While it's active in Master
-//! detail, the list shows the feed (`components/feed.rs`) and, in Rakumux
-//! mode, the detail shows the selected reply's whole turn instead of a
-//! session (read from the service once it's shown, then kept). The service
-//! is asked for changes every 2 s, only while the feed is on screen; Enter
-//! on a reply made here goes into its session, and `r` writes back to it
-//! (`reply.rs`).
+//! The Feed view: Rakumux mode's other view besides the sessions (`f`, the
+//! footer's Feed button, or Settings). The list's place shows the feed
+//! (`components/feed.rs`) and, in Rakumux mode, the detail shows the
+//! selected reply's whole turn instead of a session (read from the service
+//! once it's shown, then kept). It's laid out as Master detail whatever the
+//! layout: Grid and Tabs give way to it in Rakumux mode and come back in a
+//! session and when it's left. It stays until it's left (`f`, Esc, the
+//! footer, a grouping chosen) or a reply's session is opened (Enter), so
+//! Rakumux mode comes back to it from a session; in Master detail it stays
+//! beside the session too.
+//!
+//! The service is asked for changes every 2 s while the feed is on screen,
+//! and every 10 s otherwise while the account's Feed switch is on (without
+//! counting as showing it), so the footer's button can count the entries
+//! that arrived since it was last on screen. Enter on a reply made here
+//! goes into its session, and `r` writes back to it (`reply.rs`).
 
 use std::time::{Duration, Instant};
 
@@ -12,7 +21,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rakumux_sensagent::feed::{FeedPage, FeedTurn};
 use session_core::ids::SessionId;
 
-use crate::app::grouping::{Grouping, ListTab};
 use crate::app::runtime::AppEvent;
 use crate::app::types::{AccountStatus, Focus};
 use crate::app::App;
@@ -20,22 +28,36 @@ use crate::layout::SessionLayout;
 
 /// How often the feed is asked for changes while it's shown.
 const FEED_EVERY: Duration = Duration::from_secs(2);
+/// How often otherwise, while the account's Feed switch is on: to count
+/// what's new.
+pub(in crate::app) const FEED_HIDDEN_EVERY: Duration = Duration::from_secs(10);
 
 impl App {
-    /// The active tab of the list's top row, as shown: the Feed only where
-    /// it can show (Master detail); Grid and Tabs show the grouped one.
-    pub fn list_tab(&self) -> ListTab {
-        if self.feed_shown() {
-            ListTab::Feed
-        } else {
-            ListTab::Grouped(self.list.grouping())
-        }
+    /// The feed is on screen: the Feed view in Rakumux mode, and beside a
+    /// session in Master detail (Grid and Tabs show the session alone).
+    pub fn feed_shown(&self) -> bool {
+        self.feed_shown_for(self.focus)
     }
 
-    /// The Feed tab is active where it can show: Master detail (Grid and
-    /// Tabs show sessions, and their selector the grouped tab).
-    pub fn feed_shown(&self) -> bool {
-        self.feed_tab && self.session_layout() == SessionLayout::Sidebar
+    fn feed_shown_for(&self, focus: Focus) -> bool {
+        self.feed_view && (focus == Focus::List || self.session_layout() == SessionLayout::Sidebar)
+    }
+
+    /// The Feed view was chosen: Rakumux mode shows it rather than the
+    /// sessions.
+    #[cfg(test)]
+    pub fn feed_view(&self) -> bool {
+        self.feed_view
+    }
+
+    /// The layout the screen takes with `focus`: Master detail while the
+    /// feed shows there, else the one in use.
+    pub(in crate::app) fn shown_layout(&self, focus: Focus) -> SessionLayout {
+        if self.feed_shown_for(focus) {
+            SessionLayout::Sidebar
+        } else {
+            self.session_layout()
+        }
     }
 
     /// The feed is on screen and the detail shows the selected reply rather
@@ -44,56 +66,93 @@ impl App {
         self.feed_shown() && self.focus == Focus::List
     }
 
-    /// Make `tab` active (the user's choice, so the Feed is never put in
-    /// front of them afterwards).
-    pub fn show_list_tab(&mut self, tab: ListTab) {
-        self.tab_chosen = true;
-        match tab {
-            ListTab::Feed => self.open_feed_tab(),
-            ListTab::Grouped(grouping) => self.show_tab(grouping),
+    /// `f`, the footer's Feed button or Settings: the Feed view, or back to
+    /// the sessions.
+    pub fn toggle_feed_view(&mut self) {
+        if self.feed_view {
+            self.close_feed_view();
+        } else {
+            self.open_feed_view();
         }
     }
 
-    fn open_feed_tab(&mut self) {
-        if self.feed_tab {
+    /// Show the Feed view: what was held is on screen now, and changes since
+    /// are asked for at once.
+    pub fn open_feed_view(&mut self) {
+        if self.feed_view {
             return;
         }
-        self.feed_tab = true;
+        self.feed_view = true;
         self.feed.reading = false;
-        // Changes since this window last looked, at once.
+        self.feed.mark_seen();
         self.feed.due = Some(Instant::now());
+        // Grid's previews stop while the feed covers them.
+        self.sync_grid();
         self.feed_timers(Instant::now());
     }
 
-    /// Leave the Feed tab for the grouped one (a grouped tab was chosen).
-    pub(in crate::app) fn close_feed_tab(&mut self) {
-        self.feed_tab = false;
+    /// Back to the sessions, as the layout shows them.
+    pub fn close_feed_view(&mut self) {
+        if self.feed_view {
+            self.leave_feed_view();
+            self.sync_grid();
+        }
+    }
+
+    /// Leave the Feed view (a session is being opened, or a grouping
+    /// chosen, which bring the sessions back themselves).
+    pub(in crate::app) fn leave_feed_view(&mut self) {
+        if self.feed_view {
+            self.feed.mark_seen();
+        }
+        self.feed_view = false;
         self.feed.reading = false;
     }
 
-    /// The account was checked: the first time its Feed switch is on, the
-    /// feed comes to the front unless a tab was chosen already.
-    pub(in crate::app) fn on_feed_switch(&mut self) {
-        let on =
-            matches!(&self.account, AccountStatus::SignedIn(account) if account.feed == Some(true));
-        if on && !self.feed_switch_seen {
-            self.feed_switch_seen = true;
-            if !self.tab_chosen {
-                self.open_feed_tab();
-            }
+    /// Esc while the feed shows (the mode badge too): a reply read full
+    /// screen goes back to the replies, else back to the sessions.
+    pub fn feed_back(&mut self) {
+        if self.feed.reading {
+            self.feed.reading = false;
+        } else {
+            self.close_feed_view();
         }
+    }
+
+    /// The account was checked or its Feed switch changed: signed out, the
+    /// feed is forgotten (but what was seen). With the switch on, the next
+    /// tick starts keeping it, to count what's new.
+    pub(in crate::app) fn on_feed_switch(&mut self) {
         if matches!(self.account, AccountStatus::SignedOut) {
             self.feed.clear();
         }
     }
 
-    /// The tick's feed work: ask for changes when due, while it's shown, and
-    /// for the selected reply's turn while it's read.
+    /// Signed in with the account's Feed switch on.
+    fn feed_switch_on(&self) -> bool {
+        matches!(&self.account, AccountStatus::SignedIn(account) if account.feed == Some(true))
+    }
+
+    /// Entries that arrived since the feed was last on screen (none while
+    /// it is, or while the switch is off and it isn't kept): what the
+    /// footer's Feed button counts.
+    pub fn feed_unseen(&self) -> usize {
+        if self.feed_shown() || !self.feed_switch_on() {
+            0
+        } else {
+            self.feed.unseen()
+        }
+    }
+
+    /// The tick's feed work: ask for changes when due (while it's shown, or
+    /// while the switch is on, to count what's new), and for the selected
+    /// reply's turn while it's read.
     pub(in crate::app) fn feed_timers(&mut self, now: Instant) {
-        if !self.feed_shown() {
+        if self.feed_shown() {
+            self.follow_turn();
+        } else if !self.feed_switch_on() {
             return;
         }
-        self.follow_turn();
         if self.feed.busy {
             return;
         }
@@ -149,15 +208,19 @@ impl App {
         self.follow_turn();
     }
 
+    /// Ask for the changes since what's held; the service reads the cloud
+    /// more often only while the feed is on screen.
     fn read_feed(&mut self, now: Instant) {
-        self.feed.due = Some(now + FEED_EVERY);
+        let shown = self.feed_shown();
+        let every = if shown { FEED_EVERY } else { FEED_HIDDEN_EVERY };
+        self.feed.due = Some(now + every);
         self.feed.busy = true;
         let generation = self.feed.request_generation;
         let (after, held) = self.feed.cursor();
         let access = self.account_access.clone();
         self.exec.job(move || AppEvent::Feed {
             generation,
-            result: access.feed(after, held),
+            result: access.feed(after, held, shown),
         });
     }
 
@@ -168,15 +231,21 @@ impl App {
         self.feed.busy = false;
         // A failure (the service restarting) keeps what's shown.
         let Ok(page) = result else { return };
-        if self.feed.apply(page) && self.feed_shown() {
+        let more = self.feed.apply(page);
+        if self.feed_shown() {
+            // On screen: none of it is new.
+            self.feed.mark_seen();
+        }
+        if more {
             self.read_feed(Instant::now());
         }
         self.follow_turn();
     }
 
     /// Rakumux mode keys while the feed is shown; `false` leaves the key to
-    /// the list's handler. Keys that act on the list's selected session do
-    /// nothing here: no session is selected on screen.
+    /// the list's handler (`f` back to the sessions among them). Keys that
+    /// act on the list's selected session do nothing here: no session is
+    /// selected on screen.
     pub fn feed_key(&mut self, key: KeyEvent) -> bool {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let page = self.feed_page_rows();
@@ -193,11 +262,11 @@ impl App {
             KeyCode::Home => self.move_feed_selection(isize::MIN / 2),
             KeyCode::End | KeyCode::Char('G') => self.move_feed_selection(isize::MAX / 2),
             KeyCode::Char('g') => self.pending_key = Some('g'),
-            KeyCode::Char('h') => self.switch_tab(-1),
-            KeyCode::Char('l') => self.switch_tab(1),
-            KeyCode::Enter | KeyCode::Char('i') => self.open_feed_entry(),
+            KeyCode::Enter | KeyCode::Char('i' | 'l') => self.open_feed_entry(),
             KeyCode::Char('r') => self.open_feed_reply(),
-            KeyCode::Esc if self.feed.reading => self.feed.reading = false,
+            KeyCode::Esc => self.feed_back(),
+            // The feed has no tabs to switch.
+            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') => {}
             KeyCode::Char('p' | 's' | 'J' | 'K' | 'd' | 'x' | 'z' | 'c' | '/' | '{' | '}') => {}
             _ => return false,
         }
@@ -216,22 +285,26 @@ impl App {
         self.follow_turn();
     }
 
-    /// A click on the reply at `index`: select it; on a phone, or when it
-    /// was selected already, open it.
+    /// A click on the reply at `index`: in Rakumux mode select it, and open
+    /// it (as Enter does) when it was selected already or on a phone; from
+    /// session mode (the feed beside the session) open it at once, so the
+    /// click goes into its session rather than leaving the user in Rakumux
+    /// mode with the reply where their session was.
     pub fn click_feed_entry(&mut self, index: usize) {
-        if self.focus != Focus::List {
+        let from_session = self.focus != Focus::List;
+        if from_session {
             self.enter_rakumux_mode();
         }
         let again = self.feed.selected_index() == Some(index);
         self.feed.select(index);
-        if again || self.phone() {
+        if again || from_session || self.phone() {
             self.open_feed_entry();
         }
         self.follow_turn();
     }
 
-    /// Enter on a reply: into its session when it runs here (from the
-    /// Status tab, where it's shown); on a phone, a reply from elsewhere
+    /// Enter on a reply: into its session when it runs here (the sessions
+    /// come back as they were grouped); on a phone, a reply from elsewhere
     /// fills the screen to be read; otherwise say where it's from.
     pub fn open_feed_entry(&mut self) {
         let Some((session, machine)) = self.feed.selected_card().map(|card| {
@@ -243,8 +316,7 @@ impl App {
             return;
         };
         if self.list.get(&session).is_some() {
-            self.close_feed_tab();
-            self.list.set_grouping(Grouping::Status);
+            self.leave_feed_view();
             self.go_into(session);
             return;
         }

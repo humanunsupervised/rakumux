@@ -70,10 +70,16 @@ pub trait AccountAccess: Send + Sync {
     /// order; empty when the service isn't running.
     fn descriptions(&self, sessions: &[SessionId]) -> Result<Vec<StatusLine>, String>;
     /// The feed entries that changed after `after` for a client holding
-    /// `generation`. Asking says the feed is shown (the service reads it
-    /// from rakumux.com more often). Starts the service only when this home
-    /// has a saved account; signed out without one.
-    fn feed(&self, after: Option<u64>, generation: Option<u64>) -> Result<FeedPage, String>;
+    /// `generation`. Asking while `shown` says the feed is on screen (the
+    /// service reads it from rakumux.com more often); otherwise this window
+    /// only keeps it, to count what's new. Starts the service only when this
+    /// home has a saved account; signed out without one.
+    fn feed(
+        &self,
+        after: Option<u64>,
+        generation: Option<u64>,
+        shown: bool,
+    ) -> Result<FeedPage, String>;
     /// Make a new AI summary of `session` now (the refresh icon or `s`). Starts
     /// the service only when this home has a saved account; signed out without
     /// one, it does nothing.
@@ -203,10 +209,15 @@ impl AccountAccess for LocalAccount {
             .unwrap_or_default())
     }
 
-    fn feed(&self, after: Option<u64>, generation: Option<u64>) -> Result<FeedPage, String> {
+    fn feed(
+        &self,
+        after: Option<u64>,
+        generation: Option<u64>,
+        shown: bool,
+    ) -> Result<FeedPage, String> {
         Ok(self
             .with(self.has_saved_account(), |client| {
-                client.feed(after, generation)
+                client.feed(after, generation, !shown)
             })?
             .unwrap_or_else(signed_out_feed))
     }
@@ -370,6 +381,6 @@ mod tests {
             Ok(vec![])
         );
         assert_eq!(account.sign_in_status(), Ok(SignInView::Idle));
-        assert_eq!(account.feed(None, None), Ok(signed_out_feed()));
+        assert_eq!(account.feed(None, None, true), Ok(signed_out_feed()));
     }
 }

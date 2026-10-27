@@ -24,7 +24,7 @@ use crate::components::{
     section_picker::draw_section_picker,
     session_detail::draw_session_detail,
     session_grid::draw_session_grid,
-    session_list::draw_session_list,
+    session_list::{draw_list_rail, draw_session_list},
     session_tabs::draw_session_tabs,
     terminal_panel::draw_terminal_panel,
 };
@@ -87,8 +87,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let Some(divider) = screen.divider {
         draw_divider(f, app, divider, screen.stacked);
     }
+    if let Some(rail) = screen.rail {
+        draw_list_rail(f, rail, &mut hits);
+    }
     if let Some(tabs) = screen.tabs {
-        tab_hits = draw_session_tabs(f, app, tabs, &mut hits);
+        let (targets, first) = draw_session_tabs(f, app, tabs, &mut hits);
+        tab_hits = targets;
+        app.tab_first = first;
     }
     let main_cursor = draw_session_detail(f, app, &screen, &mut hits);
     let panel_cursor = draw_terminal_panel(f, app, &mut hits);
@@ -202,7 +207,7 @@ mod tests {
         assert!(wide.contains("Press n to start one in repo"), "{wide}");
         // The tabs head the list, Status active: where it starts.
         assert!(
-            wide.contains("\n   ≡ Feed  ◔ Status ▾  ▤ Folders    ◇ App"),
+            wide.contains("\n   ◔ Status ▾  ▤ Folders    ◇ App"),
             "{wide}"
         );
         assert!(wide.contains("RAKUMUX"), "{wide}");
@@ -664,6 +669,145 @@ mod tests {
         assert!(screen.contains("No sessions yet"), "{screen}");
     }
 
+    #[test]
+    fn the_list_has_a_hide_button_and_leaves_a_rail_when_hidden() {
+        let mut h = harness(vec![view("A", "api", 20), view("B", "docs", 10)]);
+        let screen = render(&mut h.app, 160, 48);
+        let rows: Vec<&str> = screen.lines().collect();
+        let list = h.app.screen().list.unwrap();
+        // The list pane's last row, just above the footer.
+        assert!(rows[46].starts_with("   « Hide list "), "{:?}", rows[46]);
+        let button = h
+            .app
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == Hit::HideList)
+            .map(|(area, _)| *area);
+        assert_eq!(button, Some(Rect::new(0, 46, list.width, 1)));
+        let beside = h.app.screen().terminal.unwrap();
+
+        tap(&mut h, Hit::HideList);
+        let screen = render(&mut h.app, 160, 48);
+        let rows: Vec<&str> = screen.lines().collect();
+        assert!(!screen.contains("Hide list"), "{screen}");
+        assert!(!screen.contains("◔ Status"), "{screen}");
+        // A column of the list pane with `»` where the button was, the
+        // divider's line, then the session from the third column.
+        assert!(rows[46].starts_with("»│"), "{:?}", rows[46]);
+        assert!(
+            rows[0].starts_with(" │hello from the fake"),
+            "{:?}",
+            rows[0]
+        );
+        let rail = h
+            .app
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == Hit::ShowList)
+            .map(|(area, _)| *area);
+        assert_eq!(rail, Some(Rect::new(0, 0, crate::layout::RAIL_COLS, 47)));
+        let hidden = h.app.screen().terminal.unwrap();
+        assert_eq!(hidden.x, crate::layout::RAIL_COLS);
+        assert_eq!(
+            hidden.width,
+            beside.width + list.width + 1 - crate::layout::RAIL_COLS
+        );
+
+        // A click anywhere on the rail shows the list again.
+        tap_at(&mut h, 1, 20);
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("« Hide list"), "{screen}");
+        assert!(screen.contains("◔ Status"), "{screen}");
+        assert_eq!(h.app.screen().terminal, Some(beside));
+    }
+
+    #[test]
+    fn the_feed_view_hides_with_the_list() {
+        let mut h = harness(vec![view("A", "api", 20)]);
+        h.app.toggle_feed_view();
+        let screen = render(&mut h.app, 160, 48);
+        assert!(
+            screen
+                .lines()
+                .nth(46)
+                .unwrap()
+                .starts_with("   « Hide list"),
+            "{screen}"
+        );
+        tap(&mut h, Hit::HideList);
+        let screen = render(&mut h.app, 160, 48);
+        assert!(!screen.contains("≡ Feed "), "{screen}");
+        assert!(
+            screen.lines().nth(46).unwrap().starts_with("»│"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn tabs_that_dont_fit_say_how_many_are_hidden_and_hold_still() {
+        let sessions: Vec<SessionView> = (1..=9)
+            .map(|i| aged(&format!("S{i}"), &format!("session-{i}"), i, i))
+            .collect();
+        let mut h = with_layout(sessions, SessionLayout::Tabs);
+        let bar = |h: &mut Harness| {
+            render(&mut h.app, 80, 24)
+                .lines()
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        let names = |bar: &str| -> Vec<usize> {
+            (1..=9)
+                .filter(|i| bar.contains(&format!(" session-{i} ")))
+                .collect()
+        };
+        let hidden = |bar: &str, marker: char| -> usize {
+            let at = bar.find(marker).map(|at| {
+                if marker == '‹' {
+                    &bar[at + marker.len_utf8()..]
+                } else {
+                    &bar[..at]
+                }
+            });
+            at.map(|text| {
+                let digits: String = if marker == '‹' {
+                    text.chars().take_while(char::is_ascii_digit).collect()
+                } else {
+                    let rev: String = text
+                        .chars()
+                        .rev()
+                        .take_while(char::is_ascii_digit)
+                        .collect();
+                    rev.chars().rev().collect()
+                };
+                digits.parse().unwrap()
+            })
+            .unwrap_or(0)
+        };
+        // The most recent session, the last tab, is selected: the ones
+        // before it that don't fit are counted on the left.
+        assert_eq!(h.selected().as_deref(), Some("S9"));
+        let last = bar(&mut h);
+        let shown = names(&last);
+        assert!(shown.contains(&9), "{last:?}");
+        assert_eq!(hidden(&last, '‹') + shown.len(), 9, "{last:?}");
+        assert!(!last.contains('›'), "{last:?}");
+        // The first: the rest are counted on the right.
+        h.app.list.select(crate::app::Selection::Session(
+            session_core::ids::SessionId::from_string("S1"),
+        ));
+        let first = bar(&mut h);
+        let shown = names(&first);
+        assert_eq!(shown[0], 1, "{first:?}");
+        assert_eq!(shown.len() + hidden(&first, '›'), 9, "{first:?}");
+        assert!(!first.contains('‹'), "{first:?}");
+        // Moving to a tab in view moves none of them.
+        h.app.list.select(crate::app::Selection::Session(
+            session_core::ids::SessionId::from_string("S2"),
+        ));
+        assert_eq!(names(&bar(&mut h)), shown);
+    }
+
     #[tokio::test]
     async fn clicking_a_tab_selects_it() {
         let mut h = with_layout(
@@ -917,7 +1061,7 @@ mod tests {
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, width);
         assert!(
-            list[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders    ◇ App ▾"),
+            list[1].starts_with("   ◔ Status    ▤ Folders    ◇ App ▾"),
             "{wide}"
         );
         let at = |list: &[String], needle: &str| {
@@ -947,7 +1091,7 @@ mod tests {
         h.app.show_tab(Grouping::Status);
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, width);
-        assert!(list[1].starts_with("   ≡ Feed  ◔ Status ▾"), "{wide}");
+        assert!(list[1].starts_with("   ◔ Status ▾"), "{wide}");
         let headers: Vec<usize> = [
             " ◐ waiting for you ─",
             " ● unread ─",
@@ -983,10 +1127,8 @@ mod tests {
                     usize::from(crate::layout::sidebar_width(width))
                 };
                 let list = list_column(&screen, list_width);
-                // Every tab, the active one with its label and ▾; on a phone
-                // the Feed is its mark alone, so the others keep their names.
-                let feed = if width < 80 { "≡ " } else { "≡ Feed" };
-                for mark in [feed, "▤ Folders", "◇ App", "◔ Status"] {
+                // Every tab, the active one with its label and ▾.
+                for mark in ["▤ Folders", "◇ App", "◔ Status"] {
                     assert!(list[1].contains(mark), "{width}x{height}: {screen}");
                 }
                 let active = format!("{} ▾", h.app.tab_label(grouping));
@@ -1017,10 +1159,45 @@ mod tests {
         let screen = render(&mut h.app, 40, 30);
         let tabs = screen.lines().nth(1).unwrap();
         assert!(
-            tabs.starts_with("   ≡ ◔ waiting for respo… ▾ ▤ ◇"),
+            tabs.starts_with("   ◔ waiting for response ▾ ▤ ◇"),
             "{tabs:?}"
         );
         assert!(tabs.ends_with("/front "), "{tabs:?}");
+    }
+
+    #[test]
+    fn three_tabs_keep_their_names_in_a_33_column_list() {
+        use crate::app::grouping::Grouping;
+        let mut h = harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Sidebar);
+        h.app.settings.sessions.sidebar_width = Some(33);
+        let mut rows = Vec::new();
+        for grouping in Grouping::ALL {
+            h.app.show_tab(grouping);
+            let screen = render(&mut h.app, 160, 48);
+            assert_eq!(h.app.screen().list.map(|list| list.width), Some(33));
+            let list = list_column(&screen, 33);
+            // Every tab by name, too short for the arrow: none keeps room
+            // for it, so the tabs sit where they sat.
+            for name in ["◔ Status", "▤ Folders", "◇ App"] {
+                assert!(list[1].contains(name), "{grouping:?}: {screen}");
+            }
+            assert!(!list[1].contains('▾'), "{grouping:?}: {screen}");
+            rows.push(list[1].clone());
+        }
+        assert!(rows.iter().all(|row| row == &rows[0]), "{rows:?}");
+        assert_eq!(rows[0], "   ◔ Status  ▤ Folders  ◇ App");
+        // The active one is still underlined.
+        h.app.show_tab(Grouping::Folder);
+        let screen = render(&mut h.app, 160, 48);
+        let under = list_column(&screen, 33)[2].clone();
+        assert_eq!(under, format!("   {}{}", " ".repeat(10), "▁".repeat(9)));
+        // A wider list keeps the arrow.
+        h.app.settings.sessions.sidebar_width = Some(36);
+        let screen = render(&mut h.app, 160, 48);
+        assert!(
+            list_column(&screen, 36)[1].contains("▤ Folders ▾"),
+            "{screen}"
+        );
     }
 
     #[tokio::test]
@@ -1156,15 +1333,12 @@ mod tests {
         // The tabs: a padded band above the sessions, the active tab
         // underlined on its last row.
         assert!(list[0].is_empty(), "{wide}");
-        // `≡ Feed` and two columns, `◔ Status` with its arrow's room and two.
-        let under = format!("   {}{}", " ".repeat(20), "▁".repeat(11));
+        // `◔ Status` with its arrow's room and two columns.
+        let under = format!("   {}{}", " ".repeat(12), "▁".repeat(11));
         assert_eq!(list[2], under, "{wide}");
-        // The Feed and Status tabs, then a folder icon and Folders, with ▾:
-        // it opens the Folders modal. Then the App tab.
-        assert!(
-            list[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders ▾"),
-            "{wide}"
-        );
+        // The Status tab, then a folder icon and Folders, with ▾: it opens
+        // the Folders modal. Then the App tab.
+        assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
         assert!(list[1].ends_with("▤ Folders ▾  ◇ App"), "{wide}");
         // Pinned first, with its mark; subtext is program, then git.
         let docs = list.iter().position(|l| l.contains("docs")).unwrap();
@@ -1306,10 +1480,7 @@ mod tests {
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, crate::layout::sidebar_width(160).into());
-        assert!(
-            list[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders ▾"),
-            "{wide}"
-        );
+        assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
         let at = |needle: &str| {
             list.iter()
                 .position(|l| l.contains(needle))
@@ -1380,10 +1551,7 @@ mod tests {
         h.press(KeyCode::Char('P')).await;
         let wide = render(&mut h.app, 160, 48);
         let lines: Vec<&str> = wide.lines().collect();
-        assert!(
-            lines[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders"),
-            "{wide}"
-        );
+        assert!(lines[1].starts_with("   ◔ Status    ▤ Folders"), "{wide}");
         assert!(lines[1].contains("▴"), "{wide}");
         assert!(wide.contains("┌ Folders ─"), "{wide}");
         assert!(
@@ -1935,15 +2103,19 @@ mod tests {
                         Hit::FooterKey(crate::app::FooterKey::Help) => " ? Help ",
                         Hit::FooterKey(crate::app::FooterKey::Settings) => " , Settings ",
                         Hit::FooterKey(crate::app::FooterKey::Account) => " a ✓ Signed in ",
+                        Hit::FooterKey(crate::app::FooterKey::Feed) => " f ≡ Feed ",
                         other => panic!("{other:?}"),
                     };
                     assert_eq!(shown, wanted);
                 }
-                // Rakumux mode has Help and Settings, a session the way out.
+                // Rakumux mode has the Feed, Help and Settings, a session the
+                // way out.
                 let has = |key| targets.iter().any(|(_, hit)| *hit == Hit::FooterKey(key));
-                use crate::app::FooterKey::{Help, Rakumux, Settings};
+                use crate::app::FooterKey::{Feed, Help, Rakumux, Settings};
+                assert_eq!(has(Feed), !session, "{width} {session}");
                 assert_eq!(has(Help), !session, "{width} {session}");
-                assert_eq!(has(Settings), !session, "{width} {session}");
+                // A 40-column phone has room for the Feed and Help.
+                assert_eq!(has(Settings), !session && width > 40, "{width} {session}");
                 assert_eq!(has(Rakumux), session, "{width} {session}");
             }
         }
@@ -1964,7 +2136,7 @@ mod tests {
         if let Some(page) = page {
             account.queue_feed(page);
         }
-        h.app.switch_tab(-1);
+        h.app.open_feed_view();
         h.app
             .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(3));
         h.app.process_pending();
@@ -2019,7 +2191,7 @@ mod tests {
     }
 
     #[test]
-    fn the_feed_tab_comes_first_and_shows_finished_replies() {
+    fn the_feed_view_shows_finished_replies_under_its_band() {
         use rakumux_sensagent::feed::FeedStatus;
         let machine = rakumux_sensagent::feed::machine_name();
         let mut pending = reply(
@@ -2047,11 +2219,13 @@ mod tests {
         let wide = render(&mut h.app, 160, 48);
         let width = usize::from(crate::layout::sidebar_width(160));
         let list = list_column(&wide, width);
-        assert!(
-            list[1].starts_with("   ≡ Feed  ◔ Status    ▤ Folders"),
-            "{wide}"
-        );
+        // The band says it's the feed; the sessions' tabs are gone.
+        assert_eq!(list[1].trim_end(), "   ≡ Feed", "{wide}");
         assert_eq!(list[2], "   ▁▁▁▁▁▁", "{wide}");
+        // So does the footer, whose button goes back to the sessions.
+        let footer = wide.lines().last().unwrap();
+        assert!(footer.starts_with(" RAKUMUX  FEED  "), "{footer:?}");
+        assert!(footer.contains(" f Sessions "), "{footer:?}");
         // The newest first, each a card: its session, agent and folder (no
         // branch known) on the top border, then its age and `sending` while
         // it isn't uploaded, `done` once it is.
@@ -2105,6 +2279,7 @@ mod tests {
             agent: "claude-code".into(),
             conversation_id: "c".into(),
             text: "Now the docs.".into(),
+            attachments: Vec::new(),
             from: None,
             status: ReplyStatus::Delivered,
             failure: None,
@@ -2162,7 +2337,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn arrows_switch_between_the_feed_and_the_session_tabs() {
+    async fn f_switches_between_the_feed_and_the_sessions() {
         let mut h = feed_harness(crate::app::testing::FakeAccount::with_feed(), None);
         let first = |h: &mut Harness| {
             render(&mut h.app, 160, 48)
@@ -2172,14 +2347,88 @@ mod tests {
                 .to_string()
         };
         assert!(first(&mut h).contains("≡ Feed"), "{}", first(&mut h));
-        h.press(KeyCode::Right).await;
+        assert!(!first(&mut h).contains("◔ Status"), "{}", first(&mut h));
+        h.press(KeyCode::Char('f')).await;
         let tabs = first(&mut h);
         assert!(tabs.contains("◔ Status ▾"), "{tabs}");
+        assert!(!tabs.contains("≡"), "{tabs}");
         assert!(render(&mut h.app, 160, 48).contains("+ New session"));
-        h.press(KeyCode::Left).await;
+        h.press(KeyCode::Char('f')).await;
         let screen = render(&mut h.app, 160, 48);
         assert!(!screen.contains("+ New session"), "{screen}");
         assert!(screen.contains("No replies yet"), "{screen}");
+    }
+
+    #[tokio::test]
+    async fn the_footers_feed_button_toggles_the_feed_and_counts_what_came_meanwhile() {
+        use crate::app::FooterKey;
+        use rakumux_sensagent::feed::FeedStatus;
+        let fake = FakeApi::new(vec![view("A", "api", 20), view("B", "docs", 10)]);
+        let dir = tempfile::tempdir().unwrap();
+        let account = std::sync::Arc::new(crate::app::testing::FakeAccount::with_feed());
+        let mut options = options(&fake, scope(), &dir);
+        options.account = account.clone();
+        let mut h = start(options, fake, dir);
+        // Two replies finish while the sessions show; and one from before
+        // this window started, which isn't new.
+        let new = |id: &str| {
+            let mut entry = reply(id, "A", "api", "lab-box", 0, "Done.");
+            entry.finished_at += 1_000;
+            entry
+        };
+        let (first, second) = (new("R1"), new("R2"));
+        let old = reply("R0", "A", "api", "lab-box", 60, "Old.");
+        account.queue_feed(feed_page(FeedStatus::Ready, vec![first, second, old]));
+        h.app
+            .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(1));
+        h.app.process_pending();
+        let footer = |h: &mut Harness| {
+            render(&mut h.app, 160, 48)
+                .lines()
+                .last()
+                .unwrap()
+                .to_string()
+        };
+        let shown = footer(&mut h);
+        assert!(shown.starts_with(" RAKUMUX  "), "{shown:?}");
+        assert!(!shown.contains("FEED"), "{shown:?}");
+        assert!(shown.contains(" f ≡ Feed ●2   ? Help "), "{shown:?}");
+        // A tap: the feed, which the bar names; its button goes back.
+        tap(&mut h, Hit::FooterKey(FooterKey::Feed));
+        assert!(h.app.feed_shown());
+        let shown = footer(&mut h);
+        assert!(shown.starts_with(" RAKUMUX  FEED  "), "{shown:?}");
+        assert!(shown.contains(" f Sessions   ? Help "), "{shown:?}");
+        // The FEED chip keeps the buttons' darker shade.
+        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
+        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+        let p = crate::theme::palette();
+        let chip = terminal.backend().buffer().get(10, 47).bg;
+        assert_ne!(chip, p.accent_orange);
+        assert_eq!(
+            Some(chip),
+            p.faded(p.accent_orange, 0.2).or(Some(p.background))
+        );
+        // The badge (and its chip) does what Esc does: back to the
+        // sessions, with nothing new any more.
+        tap(&mut h, Hit::ModeBadge);
+        assert!(!h.app.feed_view());
+        assert_eq!(h.app.focus, Focus::List);
+        let shown = footer(&mut h);
+        assert!(shown.contains(" f ≡ Feed   ? Help "), "{shown:?}");
+        // The button, twice: there and back.
+        tap(&mut h, Hit::FooterKey(FooterKey::Feed));
+        assert!(h.app.feed_shown());
+        render(&mut h.app, 160, 48);
+        tap(&mut h, Hit::FooterKey(FooterKey::Feed));
+        assert!(!h.app.feed_view());
+        // On a phone it fits beside the badge and Help.
+        h.app.resize(40, 20);
+        h.press(KeyCode::Char('f')).await;
+        let phone = render(&mut h.app, 40, 20);
+        let shown = phone.lines().last().unwrap();
+        assert!(shown.starts_with(" RAKUMUX  FEED "), "{shown:?}");
+        assert!(shown.ends_with(" f Sessions   ? Help  "), "{shown:?}");
     }
 
     #[tokio::test]

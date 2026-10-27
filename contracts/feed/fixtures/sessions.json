@@ -52,7 +52,23 @@
       { "note": "no pinned", "session": { "pinned": null } },
       { "note": "a name with a newline", "session": { "name": "fix\ntests" } },
       { "note": "no machine", "patch": { "machine": null } },
-      { "note": "a user id", "patch": { "user_id": "user_1" } }
+      { "note": "a user id", "patch": { "user_id": "user_1" } },
+      { "note": "a capability twice", "patch": { "capabilities": ["reply_attachments", "reply_attachments"] } },
+      { "note": "a capital in a capability", "patch": { "capabilities": ["Reply_attachments"] } },
+      { "note": "a capability starting with a digit", "patch": { "capabilities": ["2fa"] } },
+      { "note": "a hyphen in a capability", "patch": { "capabilities": ["reply-attachments"] } },
+      { "note": "an empty capability", "patch": { "capabilities": [""] } },
+      { "note": "a capability of 33 characters", "patch": { "capabilities": ["reply_attachments_and_more_things"] } },
+      { "note": "a capability that isn't a string", "patch": { "capabilities": [1] } },
+      { "note": "capabilities as one string", "patch": { "capabilities": "reply_attachments" } }
+    ]
+  },
+  "capabilities": {
+    "valid": [
+      ["reply_attachments"],
+      [],
+      ["reply_attachments", "later.feature_2", "a"],
+      ["reply_attachments_and_more_thing"]
     ]
   },
   "stored": {

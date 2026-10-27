@@ -111,6 +111,10 @@ pub struct FeedReply {
     pub agent: String,
     pub conversation_id: String,
     pub text: String,
+    /// Files the user attached on rakumux.com, in the order attached: typed
+    /// in as their paths after the text, once fetched to this machine.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<ReplyAttachment>,
     /// The machine it was written on; `None` when written on rakumux.com.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
@@ -123,6 +127,21 @@ pub struct FeedReply {
     /// Unix milliseconds.
     pub created_at: i64,
     pub status_at: i64,
+}
+
+/// A file the user attached to a reply on rakumux.com (`contracts/feed/`
+/// `attachment`), fetched from `GET /api/v1/feed/replies/attachments/{id}`
+/// while the reply is pending.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplyAttachment {
+    /// A ULID.
+    pub id: String,
+    /// The file's name as the user's browser gave it: never a path.
+    pub name: String,
+    /// What the browser said it is; informational only.
+    pub media_type: String,
+    /// Its length in bytes, 1 to 4 MiB.
+    pub size: u64,
 }
 
 /// Where a reply is up to.
@@ -152,6 +171,8 @@ pub enum ReplyFailure {
     NotAccepted,
     /// The session refused the text.
     Refused,
+    /// A file attached to it couldn't be fetched, or wasn't what the reply said.
+    AttachmentUnavailable,
     #[serde(other)]
     Unknown,
 }
@@ -307,7 +328,8 @@ impl FeedCache {
         }
     }
 
-    /// The account's newest seq read so far: reads continue after it.
+    /// Where reads continue: the greatest seq read so far (the account's
+    /// once a read said no more wait).
     pub fn latest_seq(&self) -> u64 {
         self.latest_seq
     }
@@ -336,8 +358,9 @@ impl FeedCache {
         }
     }
 
-    /// Entries read from the account's feed.
-    pub fn merge(&mut self, entries: Vec<FeedEntry>, latest_seq: u64) {
+    /// Entries read from the account's feed; reads continue after `read_to`
+    /// (`PageRead::read_to`: past the page, not past entries still to read).
+    pub fn merge(&mut self, entries: Vec<FeedEntry>, read_to: u64) {
         for entry in entries {
             self.latest_seq = self.latest_seq.max(entry.seq.unwrap_or(0));
             match self.position(&entry.id) {
@@ -352,7 +375,7 @@ impl FeedCache {
                 None => self.push(entry),
             }
         }
-        self.latest_seq = self.latest_seq.max(latest_seq);
+        self.latest_seq = self.latest_seq.max(read_to);
         self.evict();
     }
 
@@ -408,7 +431,14 @@ impl FeedCache {
                 Changed::Entry(entry) => {
                     entry.text.len() + entry.prompt.as_ref().map_or(0, |prompt| prompt.text.len())
                 }
-                Changed::Reply(reply) => reply.text.len(),
+                Changed::Reply(reply) => {
+                    reply.text.len()
+                        + reply
+                            .attachments
+                            .iter()
+                            .map(|file| file.name.len() + file.media_type.len())
+                            .sum::<usize>()
+                }
             };
             if !(entries.is_empty() && replies.is_empty()) && text > PAGE_TEXT_BUDGET {
                 more = true;
@@ -472,7 +502,7 @@ impl FeedCache {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     pub(crate) fn entry(id: &str, seq: Option<u64>, at: i64) -> FeedEntry {
@@ -601,6 +631,7 @@ mod tests {
             agent: "codex".into(),
             conversation_id: "c".into(),
             text: "And the docs.".into(),
+            attachments: Vec::new(),
             from: None,
             status,
             failure: None,

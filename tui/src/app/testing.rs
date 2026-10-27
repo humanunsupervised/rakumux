@@ -805,7 +805,8 @@ impl crate::remote_access::PhoneAccess for FakePhone {
 /// ones are `pending`), `refreshing` while in `refreshing`, which `summarize`
 /// adds the session to (and records it in `summarized`); the feed answers with `feed_pages` in turn, then an
 /// empty page at the asked revision (signed out, off or ready, as the
-/// account is). Every call is recorded, and each feed question in `feed_asks`.
+/// account is). Every call is recorded, and each feed question in `feed_asks`
+/// (with whether the feed was shown in `feed_shown`).
 #[derive(Default)]
 pub struct FakeAccount {
     pub account: Mutex<Option<crate::account::Account>>,
@@ -814,6 +815,7 @@ pub struct FakeAccount {
     pub descriptions: Mutex<HashMap<SessionId, String>>,
     pub feed_pages: Mutex<std::collections::VecDeque<rakumux_sensagent::feed::FeedPage>>,
     pub feed_asks: Mutex<Vec<(Option<u64>, Option<u64>)>>,
+    pub feed_shown: Mutex<Vec<bool>>,
     /// Sessions whose description is being made (`refreshing`).
     pub refreshing: Mutex<std::collections::HashSet<SessionId>>,
     /// Sessions a summary was asked for, in order.
@@ -856,6 +858,11 @@ impl FakeAccount {
 
     pub fn feed_asks(&self) -> Vec<(Option<u64>, Option<u64>)> {
         self.feed_asks.lock().unwrap().clone()
+    }
+
+    /// Whether each feed question was asked with the feed on screen.
+    pub fn feed_shown(&self) -> Vec<bool> {
+        self.feed_shown.lock().unwrap().clone()
     }
 
     pub fn signed_in() -> Self {
@@ -1016,10 +1023,12 @@ impl crate::account::AccountAccess for FakeAccount {
         &self,
         after: Option<u64>,
         generation: Option<u64>,
+        shown: bool,
     ) -> std::result::Result<rakumux_sensagent::feed::FeedPage, String> {
         use rakumux_sensagent::feed::{FeedPage, FeedStatus};
         self.call("feed");
         self.feed_asks.lock().unwrap().push((after, generation));
+        self.feed_shown.lock().unwrap().push(shown);
         if let Some(page) = self.feed_pages.lock().unwrap().pop_front() {
             return Ok(page);
         }

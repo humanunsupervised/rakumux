@@ -9,7 +9,7 @@ use rakumux_sensagent::feed::{
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
 use super::{FeedStore, ThreadItem, MAX_ENTRIES};
-use crate::app::grouping::{Grouping, ListTab};
+use crate::app::grouping::Grouping;
 use crate::app::testing::{options, scope, start, view, FakeAccount, FakeApi, Harness};
 use crate::app::types::{AppMode, Focus};
 use crate::layout::SessionLayout;
@@ -137,67 +137,142 @@ fn tick(h: &mut Harness, after: Duration) {
     h.app.process_pending();
 }
 
+/// The Feed view, opened with `f`.
+async fn show_feed(h: &mut Harness) {
+    h.press(KeyCode::Char('f')).await;
+    assert!(h.app.feed_shown(), "the feed shows");
+}
+
+/// Entries that finished after this window started (so they can be new).
+fn fresh(id: &str, session: &str, seq: u64) -> FeedEntry {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    entry(id, session, now + seq as i64, Some(seq))
+}
+
 #[tokio::test]
-async fn the_feed_comes_to_the_front_when_its_switch_is_first_seen_on() {
-    let (h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
-    assert_eq!(h.app.list_tab(), ListTab::Feed);
-    // Asked at once, with nothing held yet.
+async fn the_start_shows_the_sessions_even_with_the_feed_switch_on() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    assert!(!h.app.feed_view());
+    assert_eq!(h.app.list.grouping(), Grouping::Status);
+    // The feed is kept in the background, to count what's new: asked
+    // without counting as shown.
+    tick(&mut h, Duration::from_millis(10));
     assert_eq!(account.feed_asks(), [(None, None)]);
+    assert_eq!(account.feed_shown(), [false]);
+    assert!(!h.app.feed_view());
     assert_eq!(h.app.feed.status(), Some(FeedStatus::Ready));
 
-    // Off: the start stays under Status and nothing is asked.
-    let (h, account) = feed_harness(FakeAccount::signed_in(), SessionLayout::Sidebar);
-    assert_eq!(h.app.list_tab(), ListTab::Grouped(Grouping::Status));
-    assert!(account.feed_asks().is_empty());
-}
-
-#[tokio::test]
-async fn a_chosen_tab_is_kept_when_the_switch_turns_on_later() {
+    // Off: nothing is asked while it's hidden.
     let (mut h, account) = feed_harness(FakeAccount::signed_in(), SessionLayout::Sidebar);
-    h.press(KeyCode::Right).await;
-    assert_eq!(h.app.list_tab(), ListTab::Grouped(Grouping::Folder));
-    *account.account.lock().unwrap() = FakeAccount::with_feed().account.lock().unwrap().clone();
     tick(&mut h, Duration::from_secs(120));
-    assert_eq!(h.app.list_tab(), ListTab::Grouped(Grouping::Folder));
-    assert!(account.feed_asks().is_empty(), "not asked while hidden");
+    assert!(account.feed_asks().is_empty());
+    assert!(!h.app.feed_view());
 }
 
 #[tokio::test]
-async fn the_feed_is_asked_every_two_seconds_only_while_shown_and_again_while_more() {
+async fn f_shows_the_feed_and_f_or_esc_brings_the_sessions_back() {
+    let (mut h, _) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    h.press(KeyCode::Right).await;
+    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    show_feed(&mut h).await;
+    assert!(h.app.feed_in_detail());
+    // No tabs to switch here: ←/→ and `h` do nothing.
+    for code in [KeyCode::Left, KeyCode::Right, KeyCode::Char('h')] {
+        h.press(code).await;
+        assert!(h.app.feed_shown(), "{code:?}");
+    }
+    h.press(KeyCode::Char('f')).await;
+    assert!(!h.app.feed_view());
+    assert_eq!(h.app.list.grouping(), Grouping::Folder, "as it was");
+    show_feed(&mut h).await;
+    // Esc cancels a pending key first, then goes back to the sessions.
+    h.press(KeyCode::Char('g')).await;
+    h.press(KeyCode::Esc).await;
+    assert!(h.app.feed_shown());
+    h.press(KeyCode::Esc).await;
+    assert!(!h.app.feed_view());
+    assert_eq!(h.app.focus, Focus::List);
+    // Picking a grouping (P, a tab's modal) shows the sessions too.
+    show_feed(&mut h).await;
+    h.app.show_tab(Grouping::App);
+    assert!(!h.app.feed_view());
+}
+
+#[tokio::test]
+async fn the_feed_is_asked_every_two_seconds_while_shown_and_every_ten_while_kept() {
     let (mut h, account) = feed_harness(FakeAccount::signed_in(), SessionLayout::Sidebar);
     account.queue_feed(page(7, 1, vec![entry("A", "S", 1, Some(1))], true));
     account.queue_feed(page(7, 2, vec![entry("B", "S", 2, Some(2))], false));
-    h.press(KeyCode::Left).await;
-    assert_eq!(h.app.list_tab(), ListTab::Feed);
+    show_feed(&mut h).await;
     // The first page said more: asked again at once from where it ended.
     assert_eq!(account.feed_asks(), [(None, None), (Some(1), Some(7))]);
+    assert_eq!(account.feed_shown(), [true, true]);
     assert_eq!(ids(&h.app.feed), ["B", "A"]);
     tick(&mut h, Duration::from_millis(500));
     assert_eq!(account.feed_asks().len(), 2, "not before 2 s");
     tick(&mut h, Duration::from_secs(3));
     assert_eq!(account.feed_asks().last(), Some(&(Some(2), Some(7))));
-    // Hidden: no more questions.
-    h.press(KeyCode::Right).await;
+    // Hidden with the switch off: no more questions.
+    h.press(KeyCode::Char('f')).await;
     let asked = account.feed_asks().len();
-    tick(&mut h, Duration::from_secs(10));
+    tick(&mut h, Duration::from_secs(30));
     assert_eq!(account.feed_asks().len(), asked);
+    // With it on: every 10 s, not counting as shown.
+    *account.account.lock().unwrap() = FakeAccount::with_feed().account.lock().unwrap().clone();
+    h.app.check_account();
+    h.app.process_pending();
+    tick(&mut h, Duration::from_secs(30));
+    assert_eq!(account.feed_asks().len(), asked + 1);
+    assert_eq!(account.feed_shown().last(), Some(&false));
+    tick(&mut h, Duration::from_secs(35));
+    assert_eq!(account.feed_asks().len(), asked + 1, "not before 10 s");
+    tick(&mut h, Duration::from_secs(41));
+    assert_eq!(account.feed_asks().len(), asked + 2);
 }
 
 #[tokio::test]
-async fn arrows_reach_the_feed_only_where_it_can_show() {
-    // Grid shows sessions: the tabs stop at Status (Tabs' selector too).
-    let (mut h, _) = feed_harness(FakeAccount::signed_in(), SessionLayout::Grid);
-    h.app.switch_tab(-1);
-    assert_eq!(h.app.list_tab(), ListTab::Grouped(Grouping::Status));
-    let (mut h, _) = feed_harness(FakeAccount::signed_in(), SessionLayout::Sidebar);
-    h.press(KeyCode::Left).await;
-    assert_eq!(h.app.list_tab(), ListTab::Feed);
-    // `h`/`l` go along the tabs too: the feed has no top row to select.
-    h.press(KeyCode::Char('l')).await;
-    assert_eq!(h.app.list_tab(), ListTab::Grouped(Grouping::Status));
-    h.press(KeyCode::Left).await;
-    h.press(KeyCode::Char('h')).await;
-    assert_eq!(h.app.list_tab(), ListTab::Feed);
+async fn replies_that_came_while_the_feed_was_hidden_are_counted_until_it_shows() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    // What finished before this window started isn't new.
+    account.queue_feed(page(1, 1, vec![entry("old", "S", 1_000, Some(1))], false));
+    tick(&mut h, Duration::from_millis(10));
+    assert_eq!(ids(&h.app.feed), ["old"]);
+    assert_eq!(h.app.feed_unseen(), 0);
+    // Two arrive while the sessions show.
+    account.queue_feed(page(
+        1,
+        3,
+        vec![fresh("N1", "S", 2), fresh("N2", "S", 3)],
+        false,
+    ));
+    tick(&mut h, Duration::from_secs(11));
+    assert_eq!(h.app.feed_unseen(), 2);
+    // Shown: none is new, and they stay seen once it's hidden again.
+    show_feed(&mut h).await;
+    assert_eq!(h.app.feed_unseen(), 0);
+    h.press(KeyCode::Char('f')).await;
+    assert_eq!(h.app.feed_unseen(), 0);
+    // One more, then the account signs out and in: what was seen stays seen.
+    account.queue_feed(page(1, 4, vec![fresh("N3", "S", 4)], false));
+    tick(&mut h, Duration::from_secs(30));
+    assert_eq!(h.app.feed_unseen(), 1);
+    h.app.feed.clear();
+    account.queue_feed(page(
+        2,
+        1,
+        vec![
+            fresh("N1", "S", 2),
+            fresh("N2", "S", 3),
+            fresh("N3", "S", 4),
+        ],
+        false,
+    ));
+    tick(&mut h, Duration::from_secs(60));
+    assert_eq!(ids(&h.app.feed).len(), 3);
+    assert_eq!(h.app.feed_unseen(), 1);
 }
 
 #[tokio::test]
@@ -211,38 +286,209 @@ async fn enter_on_a_reply_goes_into_its_session_here_or_says_where_it_is() {
         vec![entry("L", "B", 1_000, Some(1)), remote],
         false,
     ));
-    tick(&mut h, Duration::from_secs(3));
+    // The sessions were last grouped by app.
+    h.app.show_tab(Grouping::App);
+    show_feed(&mut h).await;
     assert_eq!(ids(&h.app.feed), ["R", "L"]);
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::List);
-    assert_eq!(h.app.list_tab(), ListTab::Feed);
+    assert!(h.app.feed_shown());
     let status = h.app.status().unwrap_or_default().to_owned();
     assert!(status.contains("lab"), "{status}");
     h.press(KeyCode::Down).await;
     h.press(KeyCode::Enter).await;
-    assert_eq!(h.app.list_tab(), ListTab::Grouped(Grouping::Status));
+    assert!(!h.app.feed_view());
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.app.list.grouping(), Grouping::App, "as they were");
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    // Back in Rakumux mode: the sessions.
+    h.rakumux().await;
+    assert!(!h.app.feed_shown());
+}
+
+#[tokio::test]
+async fn grid_and_tabs_give_way_to_the_feed_in_rakumux_mode_and_come_back() {
+    for layout in [SessionLayout::Grid, SessionLayout::Tabs] {
+        let (mut h, account) = feed_harness(FakeAccount::with_feed(), layout);
+        account.queue_feed(page(1, 1, vec![entry("L", "B", 1_000, Some(1))], false));
+        assert!(h.app.screen().list.is_none(), "{layout:?}: no list");
+        show_feed(&mut h).await;
+        // Laid out as Master detail: the feed in the list's place, the
+        // reply beside it; the layout chosen is kept.
+        let screen = h.app.screen();
+        assert!(screen.list.is_some() && screen.grid.is_none(), "{layout:?}");
+        assert!(screen.tabs.is_none(), "{layout:?}");
+        assert!(h.app.feed_in_detail(), "{layout:?}");
+        assert!(!h.app.browsing_grid(), "{layout:?}");
+        assert_eq!(h.app.session_layout(), layout);
+        // Arrows go through the replies, not the cards or tabs.
+        h.press(KeyCode::Down).await;
+        assert!(h.app.feed_shown(), "{layout:?}");
+        // f brings the layout back.
+        h.press(KeyCode::Char('f')).await;
+        assert!(h.app.screen().list.is_none(), "{layout:?}");
+        assert_eq!(h.app.browsing_grid(), layout == SessionLayout::Grid);
+        // Into a session from a reply: the session in the layout chosen.
+        show_feed(&mut h).await;
+        h.press(KeyCode::Enter).await;
+        assert_eq!(h.app.focus, Focus::Session, "{layout:?}");
+        assert!(!h.app.feed_view());
+        assert_eq!(h.selected().as_deref(), Some("B"));
+        assert!(h.app.screen().list.is_none(), "{layout:?}");
+    }
+}
+
+#[tokio::test]
+async fn in_grid_or_tabs_a_session_shows_alone_and_rakumux_mode_comes_back_to_the_feed() {
+    let (mut h, _) = feed_harness(FakeAccount::with_feed(), SessionLayout::Tabs);
+    show_feed(&mut h).await;
+    // The Rakumux key: into the session, under its tabs (no feed).
+    h.rakumux().await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(!h.app.feed_shown());
+    assert!(h.app.screen().tabs.is_some());
+    // Back in Rakumux mode: the feed again.
+    h.rakumux().await;
+    assert_eq!(h.app.focus, Focus::List);
+    assert!(h.app.feed_shown());
+    // `v` shows the sessions in the next layout.
+    h.press(KeyCode::Char('v')).await;
+    assert!(!h.app.feed_view());
+    assert_eq!(h.app.session_layout(), SessionLayout::Sidebar);
+}
+
+/// Click the feed's card `index` where it was last drawn.
+fn click_card(h: &mut Harness, index: usize) {
+    let _ = screen(h);
+    let card = h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == crate::app::Hit::FeedEntry(index))
+        .map(|(rect, _)| *rect)
+        .unwrap_or_else(|| panic!("card {index} on screen"));
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        h.app.handle_mouse(MouseEvent {
+            kind,
+            column: card.x + 2,
+            row: card.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    h.app.process_pending();
+}
+
+/// A reply made here in session B (newest, so selected first) and one
+/// from the machine `lab`.
+fn here_and_elsewhere(account: &FakeAccount) {
+    let mut remote = entry("R", "elsewhere", 1_000, Some(1));
+    remote.machine = "lab".into();
+    account.queue_feed(page(
+        1,
+        2,
+        vec![entry("L", "B", 2_000, Some(2)), remote],
+        false,
+    ));
+}
+
+#[tokio::test]
+async fn a_click_on_a_reply_from_a_session_opens_it_as_enter_does() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+    here_and_elsewhere(&account);
+    show_feed(&mut h).await;
+    tick(&mut h, Duration::from_secs(3));
+    assert_eq!(ids(&h.app.feed), ["L", "R"]);
+    // Into session A (the Rakumux key), the feed beside it.
+    h.rakumux().await;
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(h.app.feed_shown());
+
+    // A card from elsewhere, not selected: Rakumux mode, saying where it's
+    // from, the reply shown.
+    click_card(&mut h, 1);
+    assert_eq!(h.app.focus, Focus::List);
+    assert!(h.app.feed_shown());
+    assert_eq!(h.app.feed.selected_index(), Some(1));
+    let status = h.app.status().unwrap_or_default().to_owned();
+    assert!(status.contains("lab"), "{status}");
+
+    // Back into A; a click on the reply made here goes into its session.
+    h.rakumux().await;
+    assert_eq!(h.app.focus, Focus::Session);
+    click_card(&mut h, 0);
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(!h.app.feed_view());
+    assert_eq!(h.app.list.grouping(), Grouping::Status);
     assert_eq!(h.selected().as_deref(), Some("B"));
 }
 
 #[tokio::test]
-async fn on_a_phone_a_reply_from_elsewhere_fills_the_screen_until_esc() {
+async fn a_click_in_rakumux_mode_selects_a_reply_and_a_second_goes_in() {
     let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
-    h.app.resize(45, 40);
-    let mut remote = entry("R", "elsewhere", 2_000, Some(2));
-    remote.machine = "lab".into();
-    account.queue_feed(page(1, 1, vec![remote], false));
+    here_and_elsewhere(&account);
+    show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
-    h.press(KeyCode::Enter).await;
-    assert!(h.app.feed.reading);
-    h.press(KeyCode::Esc).await;
-    assert!(!h.app.feed.reading);
+    h.press(KeyCode::Down).await;
+    assert_eq!(h.app.feed.selected_index(), Some(1));
+    click_card(&mut h, 0);
     assert_eq!(h.app.focus, Focus::List);
+    assert!(h.app.feed_shown());
+    assert_eq!(h.app.feed.selected_index(), Some(0));
+    click_card(&mut h, 0);
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(!h.app.feed_view());
+    assert_eq!(h.selected().as_deref(), Some("B"));
+}
+
+#[tokio::test]
+async fn on_a_phone_the_feed_is_the_list_alone_and_a_reply_from_elsewhere_fills_it_until_esc() {
+    for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
+        let (mut h, account) = feed_harness(FakeAccount::with_feed(), layout);
+        h.app.resize(45, 40);
+        let mut remote = entry("R", "elsewhere", 2_000, Some(2));
+        remote.machine = "lab".into();
+        account.queue_feed(page(
+            1,
+            1,
+            vec![remote, entry("L", "B", 1_000, Some(1))],
+            false,
+        ));
+        show_feed(&mut h).await;
+        tick(&mut h, Duration::from_secs(3));
+        // The feed fills the screen, as the session list does.
+        let screen = h.app.screen();
+        assert!(screen.list.is_some(), "{layout:?}");
+        assert!(
+            screen.detail.is_none() && screen.tabs.is_none(),
+            "{layout:?}"
+        );
+        h.press(KeyCode::Enter).await;
+        assert!(h.app.feed.reading);
+        // Esc: back to the replies, then to the sessions.
+        h.press(KeyCode::Esc).await;
+        assert!(!h.app.feed.reading);
+        assert!(h.app.feed_shown());
+        assert_eq!(h.app.focus, Focus::List);
+        h.press(KeyCode::Esc).await;
+        assert!(!h.app.feed_view());
+        // A reply made here goes into its session, full screen.
+        show_feed(&mut h).await;
+        h.press(KeyCode::Down).await;
+        h.press(KeyCode::Enter).await;
+        assert_eq!(h.app.focus, Focus::Session, "{layout:?}");
+        assert_eq!(h.selected().as_deref(), Some("B"));
+        assert!(h.app.screen().list.is_none(), "{layout:?}");
+    }
 }
 
 #[tokio::test]
 async fn signing_out_empties_the_feed() {
     let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
     account.queue_feed(page(1, 1, vec![entry("A", "S", 1, Some(1))], false));
+    show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
     assert_eq!(h.app.feed.entries().len(), 1);
     h.app.sign_out();
@@ -371,6 +617,7 @@ async fn a_shown_reply_brings_its_whole_turn_in_order() {
             None,
         ),
     ]);
+    show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
     // Asked for once it's shown, then the rest at once.
     assert_eq!(
@@ -402,6 +649,7 @@ async fn a_turn_that_cant_be_read_shows_the_reply_alone() {
         .lock()
         .unwrap()
         .push_back(FeedTurn::failed(rakumux_sensagent::feed::FeedFailure::Off));
+    show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
     let text = screen(&mut h);
     assert!(text.contains("Reply A"), "{text}");
@@ -421,6 +669,7 @@ fn written(id: &str, entry: &str, thread: &str, created_at: i64, status: ReplySt
         agent: "claude-code".into(),
         conversation_id: "c".into(),
         text: format!("Reply back {id}"),
+        attachments: Vec::new(),
         from: Some(rakumux_sensagent::feed::machine_name()),
         status,
         failure: None,
@@ -483,6 +732,7 @@ fn conversing(id: &str) -> FeedEntry {
 async fn r_writes_back_to_a_reply_which_then_shows_in_its_thread() {
     let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
     account.queue_feed(page(1, 1, vec![conversing("A")], false));
+    show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
     account.reply_answers.lock().unwrap().push_back(ReplyWrite {
         status: ReplyWriteStatus::Sent,
@@ -517,6 +767,7 @@ async fn only_a_sessions_newest_message_can_be_answered() {
     newer.finished_at = 5_000;
     newer.seq = Some(2);
     account.queue_feed(page(1, 1, vec![conversing("A"), newer], false));
+    show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
     // The newest, B, has the button; A, older in the same session, doesn't.
     assert!(screen(&mut h).contains("↩ Reply  r"));
@@ -558,6 +809,7 @@ async fn a_reply_that_isnt_stored_keeps_its_box_open_and_says_why() {
     let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
     let unknown = entry("U", "T", 2_000, Some(2));
     account.queue_feed(page(1, 1, vec![conversing("A"), unknown], false));
+    show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
     // The newest has no known chat: nothing to write back to.
     h.press(KeyCode::Char('r')).await;
@@ -601,6 +853,7 @@ async fn replies_show_their_markdown_drawn_not_its_markers() {
         .lock()
         .unwrap()
         .push_back(FeedTurn::failed(rakumux_sensagent::feed::FeedFailure::Off));
+    show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
     let text = screen(&mut h);
     assert!(text.contains("• cargo test"), "{text}");
@@ -684,6 +937,7 @@ async fn cards_show_the_prompt_then_the_answer_or_that_it_is_coming() {
     let mut read = page(1, 1, vec![done], false);
     read.open = Some(vec![open_turn("p2", "T", 2_000, "Now the docs")]);
     account.queue_feed(read);
+    show_feed(&mut h).await;
     tick(&mut h, Duration::from_secs(3));
     let text = screen(&mut h);
     let at = |needle: &str| {

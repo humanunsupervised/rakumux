@@ -158,7 +158,7 @@ impl Drop for PendingSlot {
 impl App {
     /// Grid browsing never has a hidden detail terminal claiming its size.
     pub fn browsing_grid(&self) -> bool {
-        self.session_layout() == SessionLayout::Grid && self.focus == Focus::List
+        self.shown_layout(self.focus) == SessionLayout::Grid && self.focus == Focus::List
     }
 
     pub fn grid_page(&self) -> GridPage {

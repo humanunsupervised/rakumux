@@ -1,6 +1,9 @@
 //! Session tab bar (Tabs layout): the active list tab's filter at the left
 //! end (the folder filter under All folders), then the tabs drawn by
-//! `layout::render_tabs`.
+//! `layout::render_tabs_from`: the sessions that filter shows, in the
+//! Folders tab's order whatever the active tab (`SessionList::tab_order`),
+//! so tabs keep their places as statuses change. A phone's session-mode tab
+//! row (and Grid's) is the same bar without the filter.
 
 use ratatui::{
     layout::Rect,
@@ -20,9 +23,9 @@ use crate::theme;
 /// Columns the folder filter may take from the tab bar.
 const SELECTOR_MAX: u16 = 28;
 
-/// Tab items for the visible sessions, in list order.
+/// Tab items for the visible sessions, in the tabs' order.
 pub fn tab_items(app: &App) -> (Vec<TabItem>, usize) {
-    let visible = app.list.visible();
+    let visible = app.list.tab_order();
     let selected = app
         .list
         .selected_id()
@@ -53,13 +56,14 @@ pub fn tab_items(app: &App) -> (Vec<TabItem>, usize) {
 }
 
 /// Draws the folder filter and the tab bar; records the filter's click target
-/// in `hits` and returns the tabs' targets for `layout::tab_at`.
+/// in `hits` and returns the tabs' targets for `layout::tab_at`, and the
+/// first tab shown (kept as `App::tab_first` for the next draw).
 pub fn draw_session_tabs(
     f: &mut Frame,
     app: &App,
     area: Rect,
     hits: &mut Vec<(Rect, Hit)>,
-) -> Vec<(usize, Rect)> {
+) -> (Vec<(usize, Rect)>, usize) {
     let p = theme::palette();
     f.render_widget(
         Block::default().style(Style::default().bg(p.background)),
@@ -69,7 +73,7 @@ pub fn draw_session_tabs(
     // A phone shows the tabs in session mode only; the folder filter is the
     // list's first row.
     if layout::is_phone(app.area.width) {
-        return layout::render_tabs(area, f.buffer_mut(), &items, selected);
+        return layout::render_tabs_from(area, f.buffer_mut(), &items, selected, app.tab_first);
     }
     let focused = app.focus == Focus::List && matches!(app.mode, AppMode::Normal);
     let selector = draw_selector(
@@ -95,7 +99,7 @@ pub fn draw_session_tabs(
             )),
             tabs,
         );
-        return Vec::new();
+        return (Vec::new(), 0);
     }
-    layout::render_tabs(tabs, f.buffer_mut(), &items, selected)
+    layout::render_tabs_from(tabs, f.buffer_mut(), &items, selected, app.tab_first)
 }

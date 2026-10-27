@@ -85,12 +85,16 @@ pub enum OwnerRequest {
     Shutdown,
     /// The feed entries that changed after `after` for a client holding
     /// `generation` (all of them for another generation or none). Asking
-    /// counts as showing the feed, so it's read from the cloud more often.
+    /// counts as showing the feed, so it's read from the cloud more often,
+    /// unless `background`: a client that keeps the feed without showing it
+    /// (to count what's new) leaves the cloud's reads at their idle pace.
     Feed {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         generation: Option<u64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        background: bool,
     },
     /// Make a new AI summary of `session` now: its agent's latest prompt and
     /// outputs since, or its screen for other programs. Answered with `Done`;

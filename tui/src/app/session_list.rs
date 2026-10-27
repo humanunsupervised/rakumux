@@ -20,7 +20,10 @@
 //! app or status for one section above every other, under its own header
 //! (`ListRow::PinnedHeader`), in an order of their own (under
 //! [`PINNED_ORDER`], set the same ways) that every tab shares; there the
-//! active tab's filter still applies. Every layout uses the active tab's order. Selection is tracked by session id (or header) so it
+//! active tab's filter still applies. The list and Grid use the active
+//! tab's order; a row of tabs ([`ShownAs::Tabs`]) shows the same sessions
+//! in the Folders tab's order whatever the active tab, so a tab keeps its
+//! place (and number) as statuses change and sessions are read. Selection is tracked by session id (or header) so it
 //! survives moves and updates made by other clients; under App or Status
 //! the selected session stays shown when it stops matching the filter
 //! (its status changed), until something else is selected.
@@ -68,6 +71,18 @@ pub enum Selection {
     PinnedHeader,
     NewSession,
     Session(SessionId),
+}
+
+/// How the sessions are laid out on screen, which decides their order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShownAs {
+    /// The list (and Grid's cards): the active tab's order, under its
+    /// headers ([`SessionList::visible`]).
+    List,
+    /// A row of tabs (the Tabs layout, a session under tabs on a phone or
+    /// from Grid): the same sessions in the Folders tab's order
+    /// ([`SessionList::tab_order`]).
+    Tabs,
 }
 
 /// One row of the list, top to bottom.
@@ -425,9 +440,39 @@ impl SessionList {
             .collect()
     }
 
-    /// Where `id` is among the visible sessions.
-    pub fn visible_position(&self, id: &SessionId) -> Option<usize> {
-        self.visible().iter().position(|s| &s.id == id)
+    /// The sessions shown, in the order `shown` lays them out.
+    pub fn shown(&self, shown: ShownAs) -> Vec<&SessionView> {
+        match shown {
+            ShownAs::List => self.visible(),
+            ShownAs::Tabs => self.tab_order(),
+        }
+    }
+
+    /// Where `id` is among the sessions shown as `shown`.
+    pub fn position(&self, shown: ShownAs, id: &SessionId) -> Option<usize> {
+        self.shown(shown).iter().position(|s| &s.id == id)
+    }
+
+    /// The sessions [`SessionList::visible`] shows (the active tab's filter,
+    /// the one kept shown, the text filter), as a row of tabs orders them:
+    /// the pinned section's order first, then folder by folder (the launch
+    /// folder first, then by name, then path), each in its folder's order.
+    /// That's the Folders tab's order under every tab: what a session is
+    /// doing never moves its tab, nor does reading it, so stepping through
+    /// the tabs reaches every one.
+    pub fn tab_order(&self) -> Vec<&SessionView> {
+        let shown: HashSet<&SessionId> = self.visible().into_iter().map(|s| &s.id).collect();
+        let pinned = self.in_pinned_order();
+        let others = self
+            .all_folders
+            .iter()
+            .flat_map(|folder| self.in_folder_order(folder))
+            .filter(|s| !s.pinned);
+        pinned
+            .into_iter()
+            .chain(others)
+            .filter(|s| shown.contains(&s.id))
+            .collect()
     }
 
     /// The visible position a drag over list row `row` aims at: a
@@ -448,17 +493,35 @@ impl SessionList {
     /// except ready's, listed by when each was last read. A `to` outside
     /// that part means its first or last place. Returns whether it moved.
     pub fn move_session(&mut self, id: &SessionId, to: usize) -> bool {
-        let visible = self.visible();
+        self.move_shown(ShownAs::List, id, to)
+    }
+
+    /// Move session `id` to place `to` among the tabs ([`Self::tab_order`]),
+    /// where a dragged tab drops it or `J`/`K` take it in a row of tabs: as
+    /// under the Folders tab, it stays among the pinned sessions or in its
+    /// folder (and worktree). Returns whether it moved.
+    pub fn move_tab(&mut self, id: &SessionId, to: usize) -> bool {
+        self.move_shown(ShownAs::Tabs, id, to)
+    }
+
+    /// [`Self::move_session`] among the sessions in `shown`'s order.
+    fn move_shown(&mut self, shown: ShownAs, id: &SessionId, to: usize) -> bool {
+        let visible = self.shown(shown);
         let Some(from) = visible.iter().position(|s| &s.id == id) else {
             return false;
         };
         let moving = visible[from];
-        if self.pins_first() && moving.pinned {
+        // Tabs are in the Folders tab's order, with its parts.
+        let (grouping, pins_first) = match shown {
+            ShownAs::List => (self.grouping, self.pins_first()),
+            ShownAs::Tabs => (Grouping::Folder, true),
+        };
+        if pins_first && moving.pinned {
             let shown: Vec<(SessionId, bool)> =
                 visible.iter().map(|s| (s.id.clone(), s.pinned)).collect();
             return self.move_pinned(&shown, from, to);
         }
-        let section = Section::of(self.grouping, moving);
+        let section = Section::of(grouping, moving);
         if section.as_ref().is_some_and(Section::by_last_read) {
             return false;
         }
@@ -466,7 +529,7 @@ impl SessionList {
             (section.is_some()
                 || (s.scope == moving.scope && linked_worktree(s) == linked_worktree(moving)))
                 && s.pinned == moving.pinned
-                && Section::of(self.grouping, s) == section
+                && Section::of(grouping, s) == section
         };
         // A part is contiguous in the list.
         let first = visible.iter().position(in_part).unwrap_or(from);
@@ -2563,6 +2626,88 @@ mod tests {
         assert_eq!(
             row_names(&list),
             ["^", "## waiting for you", "## exited", "r1", "+"]
+        );
+    }
+
+    #[test]
+    fn tabs_show_what_the_active_tab_shows_in_the_folders_order() {
+        let tabs = |list: &SessionList| -> Vec<String> {
+            list.tab_order().iter().map(|s| s.name.clone()).collect()
+        };
+        let mut list = agents();
+        // Under Folders the tabs are the list.
+        assert_eq!(tabs(&list), names(&list));
+        assert_eq!(tabs(&list), ["r1", "r2", "r3", "r4", "w1", "w2"]);
+        // Under Status and App the list goes by status or app; the tabs
+        // keep the folders' order, so what a session does never moves one.
+        for grouping in [Grouping::Status, Grouping::App] {
+            list.set_grouping(grouping);
+            assert_ne!(names(&list), tabs(&list), "{grouping:?}");
+            assert_eq!(tabs(&list), ["r1", "r2", "r3", "r4", "w1", "w2"]);
+        }
+        list.set_grouping(Grouping::Status);
+        list.apply(&envelope(
+            "R4",
+            SessionEvent::Lifecycle {
+                lifecycle: Lifecycle::Idle,
+            },
+        ));
+        assert_eq!(tabs(&list), ["r1", "r2", "r3", "r4", "w1", "w2"]);
+        // A pinned session leads, as the pinned section does in the list.
+        let mut pinned = list.get(&SessionId::from_string("W1")).unwrap().clone();
+        pinned.pinned = true;
+        list.upsert(pinned);
+        assert_eq!(tabs(&list), ["w1", "r1", "r2", "r3", "r4", "w2"]);
+        // The active tab's filter decides which: what wants you, and the
+        // selected session kept shown after it was answered, until another
+        // is selected (as in the list).
+        list.set_section_filter(
+            Grouping::Status,
+            vec![Section::Status(StatusGroup::WaitingForYou)],
+        );
+        assert_eq!(tabs(&list), ["r3"]);
+        list.select(Selection::Session(SessionId::from_string("R3")));
+        list.apply(&envelope(
+            "R3",
+            SessionEvent::Lifecycle {
+                lifecycle: Lifecycle::Idle,
+            },
+        ));
+        assert_eq!(tabs(&list), ["r3"]);
+        list.apply(&envelope(
+            "R1",
+            SessionEvent::Lifecycle {
+                lifecycle: Lifecycle::Blocked,
+            },
+        ));
+        assert_eq!(tabs(&list), ["r1", "r3"]);
+        list.select(Selection::Session(SessionId::from_string("R1")));
+        assert_eq!(tabs(&list), ["r1"]);
+    }
+
+    #[test]
+    fn a_tab_moves_within_its_folder_or_the_pinned_ones_whatever_the_tab() {
+        let mut list = agents();
+        list.set_grouping(Grouping::Status);
+        let tabs = |list: &SessionList| -> Vec<String> {
+            list.tab_order().iter().map(|s| s.id.to_string()).collect()
+        };
+        let id = SessionId::from_string;
+        // Ready can't be reordered in the list, but its tab moves.
+        assert!(list.listed_by_last_read(&id("W1")));
+        assert!(list.move_tab(&id("W1"), 5));
+        assert_eq!(tabs(&list), ["R1", "R2", "R3", "R4", "W2", "W1"]);
+        // Not into another folder: past its first place it stays.
+        assert!(!list.move_tab(&id("W2"), 0));
+        assert!(list.move_tab(&id("W2"), 5));
+        assert!(list.move_tab(&id("R4"), 0));
+        assert_eq!(tabs(&list), ["R4", "R1", "R2", "R3", "W1", "W2"]);
+        // It's the folder's order, the list's under Folders too.
+        list.set_grouping(Grouping::Folder);
+        assert_eq!(ids(&list), ["R4", "R1", "R2", "R3", "W1", "W2"]);
+        assert_eq!(
+            list.session_order()[std::path::Path::new("/repo")],
+            ["R4", "R1", "R2", "R3"].map(SessionId::from_string)
         );
     }
 

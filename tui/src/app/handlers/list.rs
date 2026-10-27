@@ -2,8 +2,10 @@
 //! has the keys, and the session is previewed. Arrows and Vim keys both
 //! move (←/→ switch the list's tabs); Enter (or `i`) goes into a session;
 //! Esc cancels what's pending, then goes back to the session Rakumux mode
-//! was entered from. While the Feed tab shows, the moves go through the
-//! replies and Enter opens one (`App::feed_key`).
+//! was entered from. `f` switches to the Feed view and back; while it
+//! shows, the moves go through the replies, Enter opens one and Esc goes
+//! back to the sessions (`App::feed_key`). `b` hides Master detail's list
+//! beside the session, and shows it again.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -103,7 +105,13 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char(digit @ '1'..='9') => app.go_into_nth(digit as usize - '0' as usize),
         KeyCode::Char('n') => app.open_new_session(),
         KeyCode::Char('T') => app.toggle_terminal_panel(),
-        KeyCode::Char('v') => app.set_layout(app.next_layout()),
+        KeyCode::Char('b') => app.toggle_list(),
+        KeyCode::Char('f') => app.toggle_feed_view(),
+        // The layout is the sessions': choosing one shows them.
+        KeyCode::Char('v') => {
+            app.close_feed_view();
+            app.set_layout(app.next_layout());
+        }
         KeyCode::Char('p') => app.toggle_pin(),
         KeyCode::Char('s') => app.summarize_selected(),
         KeyCode::Char('J') => app.move_selected_session(1),

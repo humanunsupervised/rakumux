@@ -1,9 +1,10 @@
 //! What the session list is grouped and filtered by: the tabs on its top
-//! row. All folders (a section per folder, the folder filter of
-//! `folders.rs`), App (a section per agent or program) and Status (a
-//! section per state, as the user reads it). One tab is active at a time:
-//! it decides the section headers and the only filter that applies. Each
-//! tab keeps its own filter while another one is active; none is saved.
+//! row. Status (a section per state, as the user reads it), All folders (a
+//! section per folder, the folder filter of `folders.rs`) and App (a
+//! section per agent or program). One tab is active at a time: it decides
+//! the section headers and the only filter that applies. Each tab keeps its
+//! own filter while another one is active; none is saved. (The feed isn't
+//! one of them: it's a view of its own, `app/feed`.)
 //!
 //! Everything here is derived from a `SessionView` alone; nothing draws.
 
@@ -27,9 +28,15 @@ pub enum Grouping {
 }
 
 impl Grouping {
-    /// The grouped tabs, left to right (after the Feed): what wants the
-    /// user first.
+    /// The tabs, left to right: what wants the user first.
     pub const ALL: [Grouping; 3] = [Grouping::Status, Grouping::Folder, Grouping::App];
+
+    /// The tab `delta` places along, stopping at either end.
+    pub fn step(self, delta: isize) -> Grouping {
+        let last = Self::ALL.len() as isize - 1;
+        let index = Self::ALL.iter().position(|g| *g == self).unwrap_or(0) as isize;
+        Self::ALL[(index + delta).clamp(0, last) as usize]
+    }
 
     /// What the tab says while it filters nothing.
     pub fn name(self) -> &'static str {
@@ -47,45 +54,6 @@ impl Grouping {
             Grouping::App => "apps",
             Grouping::Status => "statuses",
         }
-    }
-}
-
-/// A tab of the list's top row: the feed of what agents said when they
-/// finished a turn (`app/feed`), or the sessions grouped one way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ListTab {
-    Feed,
-    Grouped(Grouping),
-}
-
-impl ListTab {
-    /// The tabs, left to right: the feed, then the groupings.
-    pub const ALL: [ListTab; 4] = [
-        ListTab::Feed,
-        ListTab::Grouped(Grouping::ALL[0]),
-        ListTab::Grouped(Grouping::ALL[1]),
-        ListTab::Grouped(Grouping::ALL[2]),
-    ];
-
-    /// The tab `delta` places along, stopping at either end.
-    pub fn step(self, delta: isize) -> ListTab {
-        let last = Self::ALL.len() as isize - 1;
-        let index = Self::ALL.iter().position(|t| *t == self).unwrap_or(0) as isize;
-        Self::ALL[(index + delta).clamp(0, last) as usize]
-    }
-
-    /// What the tab says while it filters nothing.
-    pub fn name(self) -> &'static str {
-        match self {
-            ListTab::Feed => "Feed",
-            ListTab::Grouped(grouping) => grouping.name(),
-        }
-    }
-}
-
-impl From<Grouping> for ListTab {
-    fn from(grouping: Grouping) -> Self {
-        ListTab::Grouped(grouping)
     }
 }
 
@@ -417,19 +385,17 @@ mod tests {
     }
 
     #[test]
-    fn tabs_step_without_wrapping_from_the_feed() {
-        // Status is the grouping the list starts with.
+    fn tabs_step_without_wrapping() {
+        // Status is the grouping the list starts with, and the first tab.
         assert_eq!(Grouping::default(), Grouping::Status);
-        let names: Vec<&str> = ListTab::ALL.iter().map(|t| t.name()).collect();
-        assert_eq!(names, ["Feed", "Status", "Folders", "App"]);
-        let tab = ListTab::from;
-        assert_eq!(ListTab::Feed.step(-1), ListTab::Feed);
-        assert_eq!(ListTab::Feed.step(1), tab(Grouping::Status));
-        assert_eq!(tab(Grouping::Status).step(1), tab(Grouping::Folder));
-        assert_eq!(tab(Grouping::Folder).step(1), tab(Grouping::App));
-        assert_eq!(tab(Grouping::App).step(1), tab(Grouping::App));
-        assert_eq!(tab(Grouping::App).step(-1), tab(Grouping::Folder));
-        assert_eq!(tab(Grouping::Status).step(-1), ListTab::Feed);
+        let names: Vec<&str> = Grouping::ALL.iter().map(|g| g.name()).collect();
+        assert_eq!(names, ["Status", "Folders", "App"]);
+        assert_eq!(Grouping::Status.step(-1), Grouping::Status);
+        assert_eq!(Grouping::Status.step(1), Grouping::Folder);
+        assert_eq!(Grouping::Folder.step(1), Grouping::App);
+        assert_eq!(Grouping::App.step(1), Grouping::App);
+        assert_eq!(Grouping::App.step(-1), Grouping::Folder);
+        assert_eq!(Grouping::Folder.step(-1), Grouping::Status);
     }
 
     #[test]

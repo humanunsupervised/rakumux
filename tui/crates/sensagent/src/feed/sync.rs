@@ -274,7 +274,8 @@ impl FeedSync {
                 self.succeeded();
                 self.read = true;
                 let more = page.more;
-                self.cache.merge(page.entries, page.latest_seq);
+                let read_to = page.read_to();
+                self.cache.merge(page.entries, read_to);
                 if let Some(open) = page.open {
                     self.cache.set_open(open);
                 }
@@ -291,19 +292,29 @@ impl FeedSync {
                 | FeedResult::Reply(_)
                 | FeedResult::Message(_)
                 | FeedResult::Replies(_)
-                | FeedResult::SessionsStored(_),
+                | FeedResult::SessionsStored(_)
+                | FeedResult::Download(_),
             ) => {}
             Err(failure) => self.fail(failure, now),
         }
     }
 
-    /// The entries changed since a TUI's revision. Asking means a TUI shows the
-    /// feed: reads come every [`WATCHED_READ`], the first one now.
-    pub fn page(&mut self, after: Option<u64>, generation: Option<u64>, now: Duration) -> FeedPage {
-        let was_watched = self.watched(now);
-        self.watched_until = Some(now + WATCH_WINDOW);
-        if !was_watched && self.read {
-            self.next_read = self.next_read.min(now);
+    /// The entries changed since a TUI's revision. Asking while `shown` means
+    /// a TUI shows the feed: reads come every [`WATCHED_READ`], the first one
+    /// now. A TUI that only keeps it (to count what's new) changes nothing.
+    pub fn page(
+        &mut self,
+        after: Option<u64>,
+        generation: Option<u64>,
+        shown: bool,
+        now: Duration,
+    ) -> FeedPage {
+        if shown {
+            let was_watched = self.watched(now);
+            self.watched_until = Some(now + WATCH_WINDOW);
+            if !was_watched && self.read {
+                self.next_read = self.next_read.min(now);
+            }
         }
         self.cache.page(self.status(), after, generation)
     }
@@ -420,8 +431,20 @@ mod tests {
     }
 
     fn page(entries: Vec<FeedEntry>, latest: u64, more: bool) -> Result<FeedResult, FeedFailure> {
+        let page_seq = entries.iter().filter_map(|entry| entry.seq).max();
+        rows(entries, page_seq.unwrap_or(0), latest, more)
+    }
+
+    /// A page of a read: `entries` kept, its rows up to `page_seq`.
+    fn rows(
+        entries: Vec<FeedEntry>,
+        page_seq: u64,
+        latest: u64,
+        more: bool,
+    ) -> Result<FeedResult, FeedFailure> {
         Ok(FeedResult::Page(PageRead {
             entries,
+            page_seq,
             latest_seq: latest,
             more,
             open: None,
@@ -528,8 +551,11 @@ mod tests {
             None,
             "idle: every 2 minutes"
         );
-        // A TUI asking brings the next read forward and keeps it at 10 s.
-        feed.page(None, None, NOW + Duration::from_secs(1));
+        // A TUI that only keeps the feed changes nothing.
+        feed.page(None, None, false, NOW + Duration::from_secs(1));
+        assert_eq!(feed.next_request(NOW + Duration::from_secs(1)), None);
+        // A TUI showing it brings the next read forward and keeps it at 10 s.
+        feed.page(None, None, true, NOW + Duration::from_secs(1));
         let at = NOW + Duration::from_secs(1);
         assert_eq!(
             feed.next_request(at),
@@ -541,6 +567,38 @@ mod tests {
             None
         );
         assert!(feed.next_request(at + WATCHED_READ).is_some());
+    }
+
+    #[test]
+    fn reads_go_on_page_by_page_past_rows_left_out() {
+        let mut feed = on();
+        assert!(feed.next_request(NOW).is_some());
+        feed.completed(true, page(Vec::new(), 12, false), NOW);
+        let later = NOW + Duration::from_secs(600);
+        assert_eq!(
+            feed.next_request(later),
+            Some(FeedRequest::Read { after: Some(12) })
+        );
+        // More than a page arrived meanwhile: after this page, not after the
+        // account's newest, so the entries between aren't skipped.
+        let entries = vec![crate::feed::cache::tests::entry("E1", Some(13), 1)];
+        feed.completed(true, page(entries, 300, true), later);
+        assert_eq!(
+            feed.next_request(later),
+            Some(FeedRequest::Read { after: Some(13) })
+        );
+        // A page whose rows were all left out still moves reads on.
+        feed.completed(true, rows(Vec::new(), 113, 300, true), later);
+        assert_eq!(
+            feed.next_request(later),
+            Some(FeedRequest::Read { after: Some(113) })
+        );
+        feed.completed(true, rows(Vec::new(), 213, 300, false), later);
+        assert_eq!(feed.next_request(later), None);
+        assert_eq!(
+            feed.next_request(later + RETRY_MAX),
+            Some(FeedRequest::Read { after: Some(300) })
+        );
     }
 
     #[test]
@@ -559,10 +617,10 @@ mod tests {
         );
         assert!(feed.next_request(NOW + Duration::from_secs(64)).is_none());
         // An answer for an older sign-in changes nothing.
-        let before = feed.page(None, None, NOW).entries.len();
+        let before = feed.page(None, None, true, NOW).entries.len();
         feed.set_account(true, Some(false), NOW);
         assert_eq!(feed.status(), FeedStatus::Off);
-        let page = feed.page(None, None, NOW);
+        let page = feed.page(None, None, true, NOW);
         assert!(before == 1 && page.entries.is_empty());
         feed.set_account(false, None, NOW);
         assert_eq!(feed.status(), FeedStatus::SignedOut);

@@ -5,18 +5,18 @@
 //! and where the service's pages are up to, and the whole turns of the
 //! entries read lately (`AccountAccess::feed_turn`), and the replies written
 //! back to entries (`AccountAccess::feed_reply`, `r`), which with the entries
-//! that answer them make threads. Nothing here draws or
-//! knows where it's shown: the list's Feed tab hosts it today (`tab.rs`),
-//! and `components/feed.rs` draws it into any area.
+//! that answer them make threads, and which entries were on screen, to count
+//! the new ones. Nothing here draws or knows where it's shown: the Feed view
+//! hosts it (`view.rs`), and `components/feed.rs` draws it into any area.
 
 mod reply;
-mod tab;
 #[cfg(test)]
 mod tests;
+mod view;
 
 use std::cmp::Reverse;
-use std::collections::VecDeque;
-use std::time::Instant;
+use std::collections::{HashSet, VecDeque};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rakumux_sensagent::feed::{
     FeedEntry, FeedPage, FeedPrompt, FeedReply, FeedStatus, FeedTurn, FeedTurnStatus, OpenTurn,
@@ -211,10 +211,18 @@ pub struct FeedStore {
     turns: VecDeque<(String, TurnState)>,
     /// A turn is being read.
     pub(super) turn_busy: bool,
+    /// Entries that were in the feed while it was on screen, by id.
+    seen: HashSet<String>,
+    /// Entries that finished before this (Unix milliseconds: when this
+    /// window started) are never new.
+    pub(super) since: i64,
 }
 
 impl FeedStore {
     pub fn new(machine: String) -> Self {
+        let since = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |now| i64::try_from(now.as_millis()).unwrap_or(i64::MAX));
         Self {
             machine,
             entries: Vec::new(),
@@ -231,7 +239,29 @@ impl FeedStore {
             request_generation: 0,
             turns: VecDeque::new(),
             turn_busy: false,
+            seen: HashSet::new(),
+            since,
         }
+    }
+
+    /// Everything held was on screen: none of it is new any more.
+    pub fn mark_seen(&mut self) {
+        // Ids of entries no longer held go once the set outgrows them.
+        if self.seen.len() > 2 * MAX_ENTRIES {
+            let held: HashSet<&str> = self.entries.iter().map(|e| e.id.as_str()).collect();
+            self.seen.retain(|id| held.contains(id.as_str()));
+        }
+        self.seen
+            .extend(self.entries.iter().map(|entry| entry.id.clone()));
+    }
+
+    /// Entries that arrived since the feed was last on screen: finished in
+    /// this window's run and never shown.
+    pub fn unseen(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| entry.finished_at > self.since && !self.seen.contains(&entry.id))
+            .count()
     }
 
     /// Entry `id`'s turn, if it was asked for.
@@ -518,10 +548,13 @@ impl FeedStore {
         self.scroll = (self.scroll as isize + delta).max(0) as usize;
     }
 
-    /// Forget everything (the account signed out elsewhere).
+    /// Forget everything (the account signed out elsewhere) but what was
+    /// seen, so signing in again brings back nothing as new.
     pub fn clear(&mut self) {
         *self = Self {
             request_generation: self.request_generation + 1,
+            seen: std::mem::take(&mut self.seen),
+            since: self.since,
             ..Self::new(std::mem::take(&mut self.machine))
         };
     }

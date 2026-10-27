@@ -33,6 +33,7 @@ fn reply(id: &str, seq: u64, from: Option<&str>) -> FeedReply {
         agent: "claude-code".into(),
         conversation_id: CHAT.into(),
         text: "Now add a test.".into(),
+        attachments: Vec::new(),
         from: from.map(Into::into),
         status: ReplyStatus::Pending,
         failure: None,
@@ -44,11 +45,23 @@ fn reply(id: &str, seq: u64, from: Option<&str>) -> FeedReply {
 
 fn read(replies: Vec<FeedReply>) -> Result<FeedResult, FeedFailure> {
     let latest_seq = replies.iter().map(|reply| reply.seq).max().unwrap_or(0);
+    page_of(replies, latest_seq, latest_seq, false)
+}
+
+/// A page of a read: `replies` kept, its rows up to `page_seq`, the account's
+/// newest seq `latest_seq`.
+fn page_of(
+    replies: Vec<FeedReply>,
+    page_seq: u64,
+    latest_seq: u64,
+    more: bool,
+) -> Result<FeedResult, FeedFailure> {
     Ok(FeedResult::Replies(RepliesRead {
         replies,
         messages: vec![],
+        page_seq,
         latest_seq,
-        more: false,
+        more,
         poll: None,
     }))
 }
@@ -324,20 +337,12 @@ fn reads_follow_the_cursor_and_back_off_after_failures() {
     let mut replies = on(None, &[]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     assert_eq!(replies.next_work(NOW), None);
-    replies.request_done(
-        true,
-        Ok(FeedResult::Replies(RepliesRead {
-            replies: vec![],
-            messages: vec![],
-            latest_seq: 12,
-            more: true,
-            poll: None,
-        })),
-        NOW,
-    );
-    // More waits: at once.
-    assert_eq!(read_after(replies.next_work(NOW)), 12);
-    replies.request_done(true, read(vec![]), NOW);
+    replies.request_done(true, page_of(vec![], 7, 12, true), NOW);
+    // More waits: at once, after this page (not the account's newest seq,
+    // which is on a later one).
+    assert_eq!(read_after(replies.next_work(NOW)), 7);
+    // The last page: after the account's newest.
+    replies.request_done(true, page_of(vec![], 0, 12, false), NOW);
     assert_eq!(replies.next_work(NOW), None);
     assert_eq!(read_after(replies.next_work(NOW + READ_EVERY)), 12);
     replies.request_done(true, Err(FeedFailure::Unavailable(None)), NOW + READ_EVERY);
@@ -358,11 +363,84 @@ fn reads_follow_the_cursor_and_back_off_after_failures() {
 }
 
 #[test]
+fn reports_and_reads_wait_out_their_own_failures() {
+    let hour = Duration::from_secs(3_600);
+    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, Err(FeedFailure::RateLimited(Some(hour))), NOW);
+    assert_eq!(replies.next_work(NOW + READ_EVERY), None);
+
+    // Reads wait an hour; a reply typed in meanwhile is reported at once.
+    let later = NOW + Duration::from_secs(60);
+    replies.written(&reply("01K8A1", 4, Some("studio")));
+    assert!(matches!(
+        replies.next_work(later),
+        Some(ReplyWork::Submit { .. })
+    ));
+    replies.submitted("01K8A1".into(), Ok(()), 2_000);
+    assert_eq!(report_of(replies.next_work(later))["status"], "delivered");
+    assert_eq!(replies.next_work(later), None, "one request at a time");
+    let mut delivered = reply("01K8A1", 5, Some("studio"));
+    delivered.status = ReplyStatus::Delivered;
+    replies.request_done(true, Ok(FeedResult::Reply(delivered)), later);
+    assert_eq!(replies.next_work(NOW + hour - Duration::from_secs(1)), None);
+    let read_at = NOW + hour;
+    assert_eq!(read_after(replies.next_work(read_at)), 0);
+    replies.request_done(true, read(vec![]), read_at);
+
+    // Reports rate-limited in turn don't hold back reads.
+    replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
+    replies.written(&reply("01K8A2", 6, Some("studio")));
+    assert!(matches!(
+        replies.next_work(read_at),
+        Some(ReplyWork::Submit { .. })
+    ));
+    replies.submitted("01K8A2".into(), Ok(()), 3_000);
+    report_of(replies.next_work(read_at));
+    replies.request_done(true, Err(FeedFailure::RateLimited(Some(hour))), read_at);
+    assert_eq!(
+        read_after(replies.next_work(read_at + READ_EVERY)),
+        0,
+        "reads go on"
+    );
+    replies.request_done(true, read(vec![]), read_at + READ_EVERY);
+    // The report goes again once its hour is over, before the read due then.
+    assert_eq!(report_of(replies.next_work(read_at + hour))["id"], "01K8A2");
+}
+
+#[test]
+fn a_pending_reply_on_a_later_page_is_typed_in() {
+    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    // The first page: replies delivered long ago. The account's newest, the
+    // pending one, is on a later page.
+    let mut old = reply("01K8A0", 100, Some("studio"));
+    old.status = ReplyStatus::Delivered;
+    replies.request_done(true, page_of(vec![old], 100, 250, true), NOW);
+    assert_eq!(read_after(replies.next_work(NOW)), 100);
+    let pending = reply("01K8A1", 250, Some("studio"));
+    replies.request_done(true, page_of(vec![pending], 250, 250, false), NOW);
+    assert!(matches!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"
+    ));
+}
+
+#[test]
+fn a_page_whose_rows_were_all_left_out_still_moves_reads_on() {
+    let mut replies = on(None, &[]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, page_of(vec![], 100, 300, true), NOW);
+    assert_eq!(read_after(replies.next_work(NOW)), 100);
+}
+
+#[test]
 fn reads_come_as_soon_as_rakumux_com_says() {
     let paced = |poll: Option<Duration>| {
         Ok(FeedResult::Replies(RepliesRead {
             replies: vec![],
             messages: vec![],
+            page_seq: 0,
             latest_seq: 0,
             more: false,
             poll,
@@ -399,6 +477,7 @@ fn message(id: &str, seq: u64, conversation: Option<&str>) -> SessionMessage {
         session_id: "S".into(),
         conversation_id: conversation.map(Into::into),
         text: "Start on the parser.".into(),
+        attachments: Vec::new(),
         from: None,
         status: ReplyStatus::Pending,
     }
@@ -413,6 +492,7 @@ fn read_messages(messages: Vec<SessionMessage>) -> Result<FeedResult, FeedFailur
     Ok(FeedResult::Replies(RepliesRead {
         replies: vec![],
         messages,
+        page_seq: latest_seq,
         latest_seq,
         more: false,
         poll: None,
@@ -495,4 +575,332 @@ fn a_session_message_follows_the_same_rules_for_where_it_may_go() {
         replies.answered(&answer(Some(CHAT), 3_000)),
         Some("01K8A5".into())
     );
+}
+
+// Files attached to replies.
+
+use super::super::uploads::{saved, Uploads};
+use crate::cloud::FeedHttpReply;
+
+/// A reply with files: its id a ULID, as saving them needs.
+const ATTACHED: &str = "01K8A1B2C3D4E5F6G7H8J9K0MN";
+
+fn file(last: char, name: &str, size: u64) -> ReplyAttachment {
+    ReplyAttachment {
+        id: format!("01K8A1C0FFEE000000000000F{last}"),
+        name: name.into(),
+        media_type: "application/octet-stream".into(),
+        size,
+    }
+}
+
+fn with_files(id: &str, files: Vec<ReplyAttachment>) -> FeedReply {
+    let mut reply = reply(id, 4, Some("studio"));
+    reply.attachments = files;
+    reply
+}
+
+fn uploads() -> (tempfile::TempDir, Uploads) {
+    let home = tempfile::tempdir().unwrap();
+    let uploads = Uploads::new(home.path().join("uploads"));
+    (home, uploads)
+}
+
+fn fetch_of(work: Option<ReplyWork>) -> Fetch {
+    match work {
+        Some(ReplyWork::Fetch(fetch)) => fetch,
+        other => panic!("expected a fetch, got {other:?}"),
+    }
+}
+
+fn typed_text(work: Option<ReplyWork>) -> String {
+    match work {
+        Some(ReplyWork::Submit { text, .. }) => text,
+        other => panic!("expected typing, got {other:?}"),
+    }
+}
+
+/// rakumux.com answers `fetch`'s download with `status` and `body`, and the
+/// worker saves what came, as the runner's does.
+fn served(fetch: &Fetch, uploads: &Uploads, status: u16, body: &[u8]) -> Fetched {
+    let answer = FeedHttpReply {
+        status,
+        retry_after: None,
+        body: body.to_vec(),
+    };
+    let outcome = wire::download(answer, fetch.attachment.size).map(FeedResult::Download);
+    saved(outcome, fetch, uploads)
+}
+
+const GONE: &[u8] = br#"{"error":{"code":"invalid_request","message":"Not found."}}"#;
+const DOWN: &[u8] = br#"{"error":{"code":"unavailable","message":"Try later."}}"#;
+
+#[test]
+fn a_replys_files_are_fetched_then_its_text_typed_with_their_paths() {
+    let (home, uploads) = uploads();
+    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let files = vec![file('A', "shot.png", 4), file('B', "Shot.PNG", 3)];
+    let first = fetch_of(after_reading(
+        &mut replies,
+        vec![with_files(ATTACHED, files)],
+    ));
+    assert!(first.first && first.taken.is_empty());
+    assert_eq!(
+        first.request(),
+        FeedRequest::Attachment {
+            id: "01K8A1C0FFEE000000000000FA".into(),
+            size: 4
+        }
+    );
+    // One file at a time, and nothing typed meanwhile.
+    assert_eq!(replies.next_work(NOW), None);
+    let fetched = served(&first, &uploads, 200, b"\x89PNG");
+    replies.fetched(true, ATTACHED.into(), fetched, NOW);
+    let second = fetch_of(replies.next_work(NOW));
+    assert!(!second.first);
+    assert_eq!(second.taken, ["shot.png"]);
+    let fetched = served(&second, &uploads, 200, b"GIF");
+    replies.fetched(true, ATTACHED.into(), fetched, NOW);
+
+    let dir = home.path().join("uploads").join(ATTACHED);
+    assert_eq!(
+        typed_text(replies.next_work(NOW)),
+        format!(
+            "Now add a test.\n\n{}\n{}",
+            dir.join("shot.png").display(),
+            dir.join("Shot (2).PNG").display()
+        )
+    );
+    assert_eq!(std::fs::read(dir.join("Shot (2).PNG")).unwrap(), b"GIF");
+    replies.submitted(ATTACHED.into(), Ok(()), 2_000);
+    assert_eq!(report_of(replies.next_work(NOW))["status"], "delivered");
+    // Typed in: its files stay for the agent.
+    assert_eq!(replies.next_work(NOW), None);
+    assert!(dir.join("shot.png").exists());
+}
+
+#[test]
+fn files_are_fetched_only_once_the_reply_could_go_in_and_never_twice() {
+    let (_home, uploads) = uploads();
+    // A busy agent: nothing is fetched for a reply that may wait an hour.
+    let mut replies = on(None, &[view("S", Lifecycle::Working, Some(CHAT))]);
+    let pending = with_files(ATTACHED, vec![file('A', "log.txt", 2)]);
+    assert_eq!(after_reading(&mut replies, vec![pending]), None);
+    replies.observe(&view("S", Lifecycle::Idle, Some(CHAT)));
+    let fetch = fetch_of(replies.next_work(NOW));
+    replies.fetched(
+        true,
+        ATTACHED.into(),
+        served(&fetch, &uploads, 200, b"ok"),
+        NOW,
+    );
+
+    // Busy again before it went in: it waits with its files.
+    replies.observe(&view("S", Lifecycle::Working, Some(CHAT)));
+    assert_eq!(replies.next_work(NOW), None);
+    replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
+    assert!(typed_text(replies.next_work(NOW)).ends_with("/log.txt"));
+    // Someone was typing there: tried again later, without fetching again.
+    replies.typing(ATTACHED.into(), NOW);
+    assert_eq!(replies.next_work(NOW + TYPING_HOLD / 2), None);
+    assert!(typed_text(replies.next_work(NOW + TYPING_HOLD)).ends_with("/log.txt"));
+}
+
+#[test]
+fn a_file_thats_gone_or_not_its_size_fails_the_reply_and_types_nothing() {
+    for (status, body) in [
+        (404, GONE),
+        (200, &b"short"[..]),
+        (200, &b"too long!!"[..]),
+        (400, GONE),
+    ] {
+        let (home, uploads) = uploads();
+        let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+        let files = vec![file('A', "a.txt", 1), file('B', "b.txt", 8)];
+        let first = fetch_of(after_reading(
+            &mut replies,
+            vec![with_files(ATTACHED, files)],
+        ));
+        replies.fetched(
+            true,
+            ATTACHED.into(),
+            served(&first, &uploads, 200, b"a"),
+            NOW,
+        );
+        let second = fetch_of(replies.next_work(NOW));
+        let fetched = served(&second, &uploads, status, body);
+        let expected = if status == 400 {
+            Fetched::Failed(FeedFailure::Invalid)
+        } else {
+            Fetched::Unavailable
+        };
+        assert_eq!(fetched, expected);
+        replies.fetched(true, ATTACHED.into(), fetched, NOW);
+        // What was saved of it goes, and rakumux.com hears why.
+        assert_eq!(
+            replies.next_work(NOW),
+            Some(ReplyWork::Discard(ATTACHED.into()))
+        );
+        uploads.discard(ATTACHED);
+        assert!(!home.path().join("uploads").join(ATTACHED).exists());
+        let body = report_of(replies.next_work(NOW));
+        assert_eq!(body["status"], "failed", "{status}");
+        assert_eq!(body["failure"], "attachment_unavailable");
+        assert_eq!(replies.next_work(NOW), None);
+    }
+}
+
+#[test]
+fn a_download_that_fails_for_now_is_tried_again_and_nothing_goes_in_meanwhile() {
+    let (_home, uploads) = uploads();
+    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let files = vec![file('A', "a.txt", 1), file('B', "b.txt", 1)];
+    let first = fetch_of(after_reading(
+        &mut replies,
+        vec![with_files(ATTACHED, files)],
+    ));
+    let fetched = served(&first, &uploads, 503, DOWN);
+    assert_eq!(fetched, Fetched::Failed(FeedFailure::Unavailable(None)));
+    replies.fetched(true, ATTACHED.into(), fetched, NOW);
+    // Pending still: neither typed nor reported, until the wait is over.
+    assert_eq!(replies.next_work(NOW), None);
+    let retry = NOW + RETRY_MIN;
+    assert_eq!(replies.next_work(retry - Duration::from_secs(1)), None);
+    let again = fetch_of(replies.next_work(retry));
+    assert_eq!(again, first, "the same file, its directory afresh");
+    replies.fetched(
+        true,
+        ATTACHED.into(),
+        served(&again, &uploads, 200, b"a"),
+        retry,
+    );
+
+    // The second fails in turn: only it is fetched again, the first kept.
+    let second = fetch_of(replies.next_work(retry));
+    let limited = br#"{"error":{"code":"rate_limited","message":"x","retry_after_seconds":60}}"#;
+    let fetched = served(&second, &uploads, 429, limited);
+    replies.fetched(true, ATTACHED.into(), fetched, retry);
+    // Reads go on meanwhile.
+    let minute = retry + Duration::from_secs(60);
+    let before = minute - Duration::from_secs(1);
+    read_after(replies.next_work(before));
+    replies.request_done(true, read(vec![]), before);
+    assert_eq!(replies.next_work(before), None);
+    let second = fetch_of(replies.next_work(minute));
+    assert!(!second.first && second.taken == ["a.txt"]);
+    replies.fetched(
+        true,
+        ATTACHED.into(),
+        served(&second, &uploads, 200, b"b"),
+        minute,
+    );
+    let text = typed_text(replies.next_work(minute));
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 4, "{text}");
+    assert!(lines[2].ends_with("/a.txt") && lines[3].ends_with("/b.txt"));
+}
+
+#[test]
+fn a_replys_files_go_when_it_wont_be_typed_in() {
+    let saved_reply = |views: &[SessionView]| {
+        let (home, uploads) = uploads();
+        let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+        let files = vec![file('A', "a.txt", 1)];
+        let fetch = fetch_of(after_reading(
+            &mut replies,
+            vec![with_files(ATTACHED, files)],
+        ));
+        replies.fetched(
+            true,
+            ATTACHED.into(),
+            served(&fetch, &uploads, 200, b"a"),
+            NOW,
+        );
+        replies.connected(views);
+        (home, replies)
+    };
+    // Its session ended before it went in: rakumux.com hears why, and its
+    // files go.
+    let (_home, mut replies) = saved_reply(&[]);
+    assert_eq!(report_of(replies.next_work(NOW))["failure"], "session_gone");
+    assert_eq!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Discard(ATTACHED.into()))
+    );
+
+    // The daemon refused the text.
+    let (_home, mut replies) = saved_reply(&[view("S", Lifecycle::Done, Some(CHAT))]);
+    typed_text(replies.next_work(NOW));
+    replies.submitted(ATTACHED.into(), Err(ErrorCode::SessionNotLive), 2_000);
+    assert_eq!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Discard(ATTACHED.into()))
+    );
+    assert_eq!(report_of(replies.next_work(NOW))["failure"], "refused");
+
+    // It expired while its agent was busy.
+    let (_home, mut replies) = saved_reply(&[view("S", Lifecycle::Working, Some(CHAT))]);
+    assert_eq!(read_after(replies.next_work(NOW + READ_EVERY)), 4);
+    let mut expired = with_files(ATTACHED, vec![file('A', "a.txt", 1)]);
+    expired.seq = 5;
+    expired.status = ReplyStatus::Expired;
+    replies.request_done(true, read(vec![expired]), NOW + READ_EVERY);
+    assert_eq!(
+        replies.next_work(NOW + READ_EVERY),
+        Some(ReplyWork::Discard(ATTACHED.into()))
+    );
+
+    // The feed was turned off.
+    let (_home, mut replies) = saved_reply(&[view("S", Lifecycle::Working, Some(CHAT))]);
+    replies.set_enabled(false, NOW);
+    assert_eq!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Discard(ATTACHED.into()))
+    );
+    assert_eq!(replies.next_work(NOW), None);
+}
+
+#[test]
+fn later_replies_to_a_session_wait_behind_one_fetching_its_files() {
+    let (_home, uploads) = uploads();
+    let mut other = view("T", Lifecycle::Idle, Some(CHAT));
+    other.name = "other".into();
+    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT)), other]);
+    let later = reply("01K8A1B2C3D4E5F6G7H8J9K0MP", 5, Some("studio"));
+    let mut elsewhere = reply("01K8A1B2C3D4E5F6G7H8J9K0MQ", 6, Some("studio"));
+    elsewhere.session_id = "T".into();
+    let first = fetch_of(after_reading(
+        &mut replies,
+        vec![
+            with_files(ATTACHED, vec![file('A', "a.txt", 1)]),
+            later,
+            elsewhere,
+        ],
+    ));
+    // Another session's reply goes in meanwhile; this one's later reply waits.
+    assert!(matches!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1B2C3D4E5F6G7H8J9K0MQ"
+    ));
+    assert_eq!(replies.next_work(NOW), None);
+    // Still behind it while its download waits to be tried again.
+    replies.fetched(
+        true,
+        ATTACHED.into(),
+        served(&first, &uploads, 503, DOWN),
+        NOW,
+    );
+    assert_eq!(replies.next_work(NOW), None);
+    let retry = NOW + RETRY_MIN;
+    let first = fetch_of(replies.next_work(retry));
+    replies.fetched(
+        true,
+        ATTACHED.into(),
+        served(&first, &uploads, 200, b"a"),
+        retry,
+    );
+    assert!(matches!(
+        replies.next_work(retry),
+        Some(ReplyWork::Submit { reply, .. }) if reply == ATTACHED
+    ));
 }

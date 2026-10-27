@@ -7,7 +7,7 @@ use crate::auth::{
 use crate::cloud::{Cancellation, CloudAIClient, CloudAIError, FeedHttp};
 
 use super::cache::FeedReply;
-use super::wire::{self, FeedFailure, FeedRequest, PageRead, RepliesRead, TurnRead};
+use super::wire::{self, Download, FeedFailure, FeedRequest, PageRead, RepliesRead, TurnRead};
 
 /// One feed request, run off the owner thread. It borrows the bearer only for
 /// the one request, like a features read.
@@ -38,6 +38,8 @@ pub(crate) enum FeedResult {
     Replies(RepliesRead),
     /// This machine's session list was stored: how many sessions it holds.
     SessionsStored(u32),
+    /// A file attached to a reply, or that it's gone.
+    Download(Download),
 }
 
 /// A finished feed request, tagged with the account revision it was made for.
@@ -58,7 +60,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::Messages { .. }
             | FeedRequest::ReplyUpload { .. }
             | FeedRequest::ReplyStatus { .. }
-            | FeedRequest::Sessions { .. } => String::new(),
+            | FeedRequest::Sessions { .. }
+            | FeedRequest::Attachment { .. } => String::new(),
         };
         let http = match &self.request {
             FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
@@ -69,6 +72,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::Replies { .. } => FeedHttp::Replies(&query),
             FeedRequest::ReplyStatus { body } => FeedHttp::ReplyStatus(body),
             FeedRequest::Sessions { body } => FeedHttp::Sessions(body),
+            FeedRequest::Attachment { id, size } => FeedHttp::Attachment { id, size: *size },
         };
         let outcome = self
             .account
@@ -91,6 +95,9 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                     FeedRequest::Replies { .. } => wire::replies(&reply).map(FeedResult::Replies),
                     FeedRequest::Sessions { .. } => {
                         wire::sessions_stored(&reply).map(FeedResult::SessionsStored)
+                    }
+                    FeedRequest::Attachment { size, .. } => {
+                        wire::download(reply, *size).map(FeedResult::Download)
                     }
                 },
                 Some(Err(error)) => Err(transport(error)),

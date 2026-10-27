@@ -224,6 +224,38 @@ fn newer_answers_degrade_to_unknown() {
 }
 
 #[test]
+fn a_feed_read_says_background_only_when_the_feed_isnt_shown() {
+    let shown = OwnerRequest::Feed {
+        after: Some(4),
+        generation: Some(1),
+        background: false,
+    };
+    assert_eq!(
+        serde_json::to_value(&shown).unwrap(),
+        serde_json::json!({"op": "feed", "after": 4, "generation": 1})
+    );
+    let kept = OwnerRequest::Feed {
+        after: None,
+        generation: None,
+        background: true,
+    };
+    assert_eq!(
+        serde_json::to_value(&kept).unwrap(),
+        serde_json::json!({"op": "feed", "background": true})
+    );
+    // An older client's read shows the feed.
+    let older: OwnerRequest = serde_json::from_str(r#"{"op":"feed","after":4}"#).unwrap();
+    assert_eq!(
+        older,
+        OwnerRequest::Feed {
+            after: Some(4),
+            generation: None,
+            background: false,
+        }
+    );
+}
+
+#[test]
 fn a_feed_reply_is_asked_and_answered_by_name() {
     let request = OwnerRequest::FeedReply {
         entry: "01K8A0RZ0V3X5Q2N9T7W4Y6M8B".into(),

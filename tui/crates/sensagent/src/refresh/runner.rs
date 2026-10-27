@@ -20,12 +20,12 @@ use super::renewal::{self, Renewal, RenewalEvent};
 use super::schedule::MAX_RUNNING;
 use super::sign_in::{self, SignInEvent, SignInFailure, SignInState};
 use super::StatusRefresher;
-use crate::auth::{AccountSession, AccountWebsite, CredentialStore, WallClock};
+use crate::auth::{AccountSession, AccountWebsite, CredentialRevision, CredentialStore, WallClock};
 use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
     ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
-    FeedResult, FeedSync, ReplySync, ReplyWork, SessionSync, TurnRead,
+    FeedResult, FeedSync, Fetch, Fetched, ReplySync, ReplyWork, SessionSync, TurnRead, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -74,7 +74,8 @@ enum Command {
     SignInStatus(Sender<SignInState>),
     SignInCancel(Sender<()>),
     Renew(Sender<()>),
-    Feed(Option<u64>, Option<u64>, Sender<FeedPage>),
+    /// After, generation, and whether a TUI shows the feed.
+    Feed(Option<u64>, Option<u64>, bool, Sender<FeedPage>),
     Summarize(SessionId, Sender<()>),
     SetFeatures(FeatureChange, Reply<()>),
     FeedTurn(String, Option<u64>, Sender<Result<TurnRead, FeedFailure>>),
@@ -99,6 +100,9 @@ enum Message {
     ReplyDone(FeedCompletion),
     /// A reply was typed into its session, or the daemon refused it.
     ReplySubmitted(String, Result<(), ErrorCode>),
+    /// One of a reply's files was fetched and saved (or wasn't), for the
+    /// account of that revision.
+    Fetched(CredentialRevision, String, Fetched),
     /// A reply written in a TUI was stored (or not), for the TUI waiting on it.
     ReplyWritten(
         Result<FeedReply, FeedFailure>,
@@ -131,6 +135,12 @@ enum Work<A, C> {
     SessionsUpload(FeedJob<A, C>),
     /// Type a reply into its session.
     Submit(String, SessionId, String),
+    /// Fetch one of a reply's files and save it.
+    Fetch(FeedJob<A, C>, Fetch, Uploads),
+    /// Remove a reply's saved files.
+    Discard(Uploads, String),
+    /// Remove replies' files kept long enough.
+    CleanUploads(Uploads),
     /// Store a reply written in a TUI, then answer it.
     WriteReply(FeedJob<A, C>, Sender<Result<FeedReply, FeedFailure>>),
     /// Turn the daemon's reply capture on or off.
@@ -369,14 +379,15 @@ impl RefreshClient {
     }
 
     /// The feed entries that changed after `after` for a TUI of `generation`.
-    /// Asking says a TUI shows the feed, so it is read more often.
+    /// Asking while `shown` says a TUI shows the feed, so it is read more often.
     pub fn feed(
         &self,
         after: Option<u64>,
         generation: Option<u64>,
+        shown: bool,
     ) -> Result<FeedPage, RefreshError> {
         let (reply, answer) = mpsc::channel();
-        self.send(Command::Feed(after, generation, reply))?;
+        self.send(Command::Feed(after, generation, shown, reply))?;
         answer.recv().map_err(|_| RefreshError::Stopped)
     }
 
@@ -436,11 +447,20 @@ fn own<S, A, C>(
     let mut feed = FeedSync::new(machine.clone());
     let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
     let mut replies = ReplySync::new(machine.clone(), refresher.accept_remote());
-    let mut sessions = SessionSync::new(machine.clone());
+    let uploads = refresher.uploads().map(Uploads::new);
+    let mut sessions = SessionSync::new(machine.clone(), uploads.is_some());
+    let uploads = uploads.as_ref();
+    let mut next_clean = Duration::ZERO;
     loop {
         let now = origin.elapsed();
         if now >= next_tick {
             renew(&refresher, &mut renewal, messages);
+            if now >= next_clean {
+                if let Some(uploads) = uploads {
+                    let _ = work.send(Work::CleanUploads(uploads.clone()));
+                }
+                next_clean = now.saturating_add(crate::feed::CLEAN_EVERY);
+            }
             for capture in refresher.tick(now) {
                 // Workers outlive the owner, so the queue only closes with it.
                 let _ = work.send(Work::Capture(capture));
@@ -450,7 +470,7 @@ fn own<S, A, C>(
             }
             follow_feed(&refresher, &mut feed, work, now);
             follow_chats(&refresher, &mut chats, replies.watched(), work, now);
-            follow_replies(&refresher, &mut replies, work, now);
+            follow_replies(&refresher, &mut replies, uploads, work, now);
             follow_sessions(&refresher, &mut sessions, work, now);
             next_tick = now.saturating_add(TICK);
         }
@@ -492,7 +512,7 @@ fn own<S, A, C>(
                 }
                 let _ = refresher.apply_event(&event, now);
                 follow_chats(&refresher, &mut chats, replies.watched(), work, now);
-                follow_replies(&refresher, &mut replies, work, now);
+                follow_replies(&refresher, &mut replies, uploads, work, now);
                 follow_sessions(&refresher, &mut sessions, work, now);
             }
             Message::SessionsDone(completion) => {
@@ -506,7 +526,12 @@ fn own<S, A, C>(
             Message::ReplyDone(completion) => {
                 let current = refresher.is_current(completion.revision);
                 feed.merge_replies(replies.request_done(current, completion.outcome, now));
-                follow_replies(&refresher, &mut replies, work, now);
+                follow_replies(&refresher, &mut replies, uploads, work, now);
+            }
+            Message::Fetched(revision, reply, fetched) => {
+                let current = refresher.is_current(revision);
+                replies.fetched(current, reply, fetched, now);
+                follow_replies(&refresher, &mut replies, uploads, work, now);
             }
             Message::ReplySubmitted(reply, result) => {
                 match result {
@@ -514,7 +539,7 @@ fn own<S, A, C>(
                     Err(ErrorCode::SessionInUse) => replies.typing(reply, now),
                     result => replies.submitted(reply, result, wall_ms()),
                 }
-                follow_replies(&refresher, &mut replies, work, now);
+                follow_replies(&refresher, &mut replies, uploads, work, now);
             }
             Message::ReplyWritten(outcome, answer) => {
                 if let Ok(reply) = &outcome {
@@ -522,7 +547,7 @@ fn own<S, A, C>(
                     feed.merge_replies(vec![reply.clone()]);
                 }
                 let _ = answer.send(outcome);
-                follow_replies(&refresher, &mut replies, work, now);
+                follow_replies(&refresher, &mut replies, uploads, work, now);
             }
             Message::Transcript(session, result) => {
                 chats.read_done(session, result, now);
@@ -582,8 +607,8 @@ fn own<S, A, C>(
                 };
                 renewal.finished(succeeded, SystemTime::now());
             }
-            Message::Command(Command::Feed(after, generation, reply)) => {
-                let _ = reply.send(feed.page(after, generation, now));
+            Message::Command(Command::Feed(after, generation, shown, reply)) => {
+                let _ = reply.send(feed.page(after, generation, shown, now));
                 follow_feed(&refresher, &mut feed, work, now);
             }
             Message::Command(Command::FeedReply(entry, text, answer)) => {
@@ -778,11 +803,13 @@ fn follow_chats<S, A, C>(
     }
 }
 
-/// Start what replies need next: reports, typing pending ones into their
-/// sessions, reads. Only while signed in with the account's Feed switch on.
+/// Start what replies need next: reports, fetching files and typing pending
+/// ones into their sessions, reads. Only while signed in with the account's
+/// Feed switch on, but for removing files no longer needed.
 fn follow_replies<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
     replies: &mut ReplySync,
+    uploads: Option<&Uploads>,
     work: &Sender<Work<A, C>>,
     now: Duration,
 ) where
@@ -810,6 +837,28 @@ fn follow_replies<S, A, C>(
                 text,
             }) => {
                 let _ = work.send(Work::Submit(reply, session, text));
+            }
+            Some(ReplyWork::Fetch(fetch)) => {
+                // Nowhere to save files: a reply never goes in without them.
+                let Some(uploads) = uploads else {
+                    replies.fetched(true, fetch.reply, Fetched::Unsaved, now);
+                    continue;
+                };
+                match refresher.feed_job(fetch.request()) {
+                    Some(job) => {
+                        let _ = work.send(Work::Fetch(job, fetch, uploads.clone()));
+                    }
+                    None => {
+                        let failed = Fetched::Failed(FeedFailure::Unauthorized);
+                        replies.fetched(true, fetch.reply, failed, now);
+                        return;
+                    }
+                }
+            }
+            Some(ReplyWork::Discard(reply)) => {
+                if let Some(uploads) = uploads {
+                    let _ = work.send(Work::Discard(uploads.clone(), reply));
+                }
             }
             None => return,
         }
@@ -957,6 +1006,23 @@ where
                     .submit_when_quiet(&session, &text, crate::feed::TYPING_QUIET)
                     .map_err(|error| error.code);
                 Message::ReplySubmitted(reply, result)
+            }
+            Ok(Work::Fetch(job, fetch, uploads)) => {
+                let revision = job.revision;
+                let fetched = panic::catch_unwind(AssertUnwindSafe(|| {
+                    crate::feed::fetch(job, &fetch, &uploads)
+                }))
+                // Tried again rather than waiting forever.
+                .unwrap_or(Fetched::Failed(FeedFailure::Unavailable(None)));
+                Message::Fetched(revision, fetch.reply, fetched)
+            }
+            Ok(Work::Discard(uploads, reply)) => {
+                uploads.discard(&reply);
+                continue;
+            }
+            Ok(Work::CleanUploads(uploads)) => {
+                uploads.clean(SystemTime::now());
+                continue;
             }
             Ok(Work::WriteReply(job, answer)) => {
                 let outcome = match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {

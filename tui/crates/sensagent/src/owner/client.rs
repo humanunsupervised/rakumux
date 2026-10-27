@@ -224,13 +224,20 @@ impl OwnerClient {
     }
 
     /// The feed entries that changed after `after` for a client holding
-    /// `generation`; ask again at once while `more`.
+    /// `generation`; ask again at once while `more`. `background`: the
+    /// client keeps the feed without showing it, so the service doesn't read
+    /// it from the cloud more often for it.
     pub fn feed(
         &self,
         after: Option<u64>,
         generation: Option<u64>,
+        background: bool,
     ) -> Result<FeedPage, OwnerError> {
-        match self.request(&OwnerRequest::Feed { after, generation })? {
+        match self.request(&OwnerRequest::Feed {
+            after,
+            generation,
+            background,
+        })? {
             OwnerResponse::Feed { feed } => Ok(feed),
             _ => Err(OwnerError::Protocol),
         }

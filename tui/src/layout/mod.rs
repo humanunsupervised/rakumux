@@ -3,7 +3,9 @@
 //!
 //! - **Master detail** (`Sidebar`, default): the session list in a column on the left, a
 //!   one-column divider, the selected session's detail on the right. The
-//!   divider can be dragged; the chosen list width is a setting. Below
+//!   divider can be dragged; the chosen list width is a setting. The list
+//!   can be hidden ([`PaneSizes::list_hidden`]): a [`RAIL_COLS`]-wide rail
+//!   at the left edge brings it back, and the detail takes the rest. Below
 //!   [`SINGLE_PANE_BELOW`] columns (phones, split windows) the panes are
 //!   stacked instead: in Rakumux mode ([`PaneFocus::List`]) the list
 //!   sits on top, a one-row divider below it, and the detail fills the
@@ -68,13 +70,15 @@ const SIDEBAR_COLS: u16 = 48;
 pub const LIST_MIN_COLS: u16 = 20;
 /// Narrowest detail a dragged divider leaves.
 pub const DETAIL_MIN_COLS: u16 = 40;
+/// Columns a hidden Sidebar list leaves at the left edge: a sliver of the
+/// list pane (its `»` shows it again) and the divider's line.
+pub const RAIL_COLS: u16 = 2;
 
 /// Longest session name drawn on a tab before it's cut with `…`.
 pub const TAB_NAME_MAX: usize = 24;
-/// Blank columns between two tabs.
+/// Blank columns between two tabs, and between a tab and an overflow
+/// marker (`‹3`, `5›`).
 const TAB_GAP: u16 = 1;
-/// Columns taken by an overflow marker (`‹ ` or ` ›`).
-const MARKER_COLS: u16 = 2;
 const ELLIPSIS: &str = "…";
 
 /// How sessions are arranged on screen.
@@ -170,6 +174,10 @@ pub struct LayoutAreas {
     /// The list is above the detail (a narrow Sidebar screen in Rakumux
     /// mode), so the divider is a row, dragged up and down.
     pub stacked: bool,
+    /// What's left of a hidden list at the left edge (Sidebar side by side,
+    /// [`PaneSizes::list_hidden`]): a click there shows the list again. No
+    /// list or divider then.
+    pub rail: Option<Rect>,
     /// One-row tab bar (Tabs only).
     pub tabs: Option<Rect>,
     /// Selected session's detail. Zero width when hidden (a narrow Sidebar
@@ -178,8 +186,8 @@ pub struct LayoutAreas {
     pub detail: Rect,
 }
 
-/// The pane sizes the user chose by dragging a divider; `None` sizes that
-/// pane to the screen.
+/// The pane sizes the user chose by dragging a divider (`None` sizes that
+/// pane to the screen), or by hiding the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PaneSizes {
     /// Sidebar list width, side by side (see [`list_width`]).
@@ -187,6 +195,10 @@ pub struct PaneSizes {
     /// Sidebar list height, stacked: a share of the height in percent (see
     /// [`list_rows`]).
     pub list_percent: Option<u16>,
+    /// The Sidebar list is hidden while it would be beside the detail: a
+    /// rail [`RAIL_COLS`] wide is left of the detail. A stacked or phone
+    /// screen shows the list as usual.
+    pub list_hidden: bool,
 }
 
 /// A phone-width screen ([`PHONE_BELOW`]): the list or a session, never
@@ -279,6 +291,7 @@ pub fn split_with(
         list: None,
         divider: None,
         stacked: false,
+        rail: None,
         tabs: None,
         detail,
     };
@@ -336,6 +349,7 @@ pub fn split_with(
                         ..area
                     }),
                     stacked: true,
+                    rail: None,
                     tabs: None,
                     detail: Rect {
                         y: area.y + rows + 1,
@@ -350,6 +364,17 @@ pub fn split_with(
             },
             PaneFocus::Detail | PaneFocus::Zoomed => only(area),
         },
+        SessionLayout::Sidebar if sizes.list_hidden => {
+            let width = RAIL_COLS.min(area.width);
+            LayoutAreas {
+                rail: Some(Rect { width, ..area }),
+                ..only(Rect {
+                    x: area.x + width,
+                    width: area.width - width,
+                    ..area
+                })
+            }
+        }
         SessionLayout::Sidebar => {
             let width = list_width(area.width, sizes.list_cols);
             LayoutAreas {
@@ -420,25 +445,41 @@ pub const PIN_MARK: &str = "★";
 ///
 /// Tabs are numbered `1`–`9` (later ones are unnumbered). When they don't
 /// all fit, the bar scrolls so the tab at `selected` is always visible and
-/// shows `‹` / `›` where tabs are hidden. Those markers are click targets
-/// too, for the nearest hidden tab on that side. The row's existing
-/// background is kept, so the bar can sit inside a styled block.
+/// says how many tabs are hidden on each side (`‹3`, `5›`). Those markers
+/// are click targets too, for the nearest hidden tab on that side. The
+/// row's existing background is kept, so the bar can sit inside a styled
+/// block.
 pub fn render_tabs(
     area: Rect,
     buf: &mut Buffer,
     items: &[TabItem],
     selected: usize,
 ) -> Vec<(usize, Rect)> {
+    render_tabs_from(area, buf, items, selected, 0).0
+}
+
+/// [`render_tabs`] for a bar that last showed the tabs from `first` (when
+/// they didn't fit): it keeps that window while the selected tab is in it,
+/// and otherwise scrolls only as far as the selected tab needs, so moving
+/// through the tabs doesn't shift the ones in view. Returns the click
+/// targets and the first tab shown, for the next draw.
+pub fn render_tabs_from(
+    area: Rect,
+    buf: &mut Buffer,
+    items: &[TabItem],
+    selected: usize,
+    first: usize,
+) -> (Vec<(usize, Rect)>, usize) {
     let area = area.intersection(*buf.area());
     if area.width == 0 || area.height == 0 {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
     let row = Rect { height: 1, ..area };
     for x in row.left()..row.right() {
         buf.get_mut(x, row.y).set_symbol(" ");
     }
     if items.is_empty() {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
 
     let selected = selected.min(items.len() - 1);
@@ -448,7 +489,7 @@ pub fn render_tabs(
         .map(|(index, item)| TabLabel::new(item, index, TAB_NAME_MAX))
         .collect();
     let widths: Vec<u16> = labels.iter().map(TabLabel::width).collect();
-    let (start, end) = visible_window(&widths, selected, row.width);
+    let (start, end) = visible_window(&widths, selected, row.width, first);
 
     // A lone tab that's still too wide gets a shorter name.
     let room = row
@@ -468,14 +509,18 @@ pub fn render_tabs(
     let mut x = row.x;
 
     if start > 0 {
-        buf.set_stringn(x, row.y, "‹", 1, marker_style);
-        hits.push((start - 1, Rect { width: 1, ..row }));
-        x += MARKER_COLS;
+        let marker = format!("‹{start}");
+        let width = str_width(&marker) as u16;
+        buf.set_stringn(x, row.y, &marker, usize::from(width), marker_style);
+        hits.push((start - 1, Rect { width, ..row }));
+        x += width + TAB_GAP;
     }
-    let tabs_right = if end < items.len() {
-        row.right().saturating_sub(MARKER_COLS)
-    } else {
-        row.right()
+    let right_marker = (end < items.len()).then(|| format!("{}›", items.len() - end));
+    let tabs_right = match &right_marker {
+        Some(marker) => row
+            .right()
+            .saturating_sub(str_width(marker) as u16 + TAB_GAP),
+        None => row.right(),
     };
     for (index, label) in labels.iter().enumerate().take(end).skip(start) {
         if x >= tabs_right {
@@ -492,19 +537,20 @@ pub fn render_tabs(
         ));
         x = x.saturating_add(drawn + TAB_GAP);
     }
-    if end < items.len() {
-        let marker_x = row.right() - 1;
-        buf.set_stringn(marker_x, row.y, "›", 1, marker_style);
+    if let Some(marker) = right_marker {
+        let width = (str_width(&marker) as u16).min(row.width);
+        let marker_x = row.right() - width;
+        buf.set_stringn(marker_x, row.y, &marker, usize::from(width), marker_style);
         hits.push((
             end,
             Rect {
                 x: marker_x,
-                width: 1,
+                width,
                 ..row
             },
         ));
     }
-    hits
+    (hits, start)
 }
 
 /// The item under a mouse position, from the targets [`render_tabs`]
@@ -615,20 +661,27 @@ impl TabLabel {
 }
 
 /// Which tabs `[start, end)` to show so `selected` is visible within
-/// `avail` columns, packing from the left.
-fn visible_window(widths: &[u16], selected: usize, avail: u16) -> (usize, usize) {
+/// `avail` columns: from `first` (the window shown before) while that still
+/// shows `selected`; else from `selected` when it's left of it, or from as
+/// far left as still shows `selected` when it's right of it. Then as many
+/// tabs as fit after it, and when the last one is shown, as many before it
+/// as the room left takes.
+fn visible_window(widths: &[u16], selected: usize, avail: u16, first: usize) -> (usize, usize) {
     let len = widths.len();
     let fits = |start: usize, end: usize| needed_width(widths, start, end) <= u32::from(avail);
     if fits(0, len) {
         return (0, len);
     }
-    let mut start = 0;
+    let mut start = first.min(selected);
     while start < selected && !fits(start, selected + 1) {
         start += 1;
     }
     let mut end = selected + 1;
     while end < len && fits(start, end + 1) {
         end += 1;
+    }
+    while end == len && start > 0 && fits(start - 1, end) {
+        start -= 1;
     }
     (start, end)
 }
@@ -640,10 +693,17 @@ fn needed_width(widths: &[u16], start: usize, end: usize) -> u32 {
     tabs + gaps + u32::from(markers_width(start, end, widths.len()))
 }
 
+/// Columns the overflow markers take, with their gaps: `‹3 ` when `start`
+/// tabs are hidden on the left, ` 5›` when `len - end` are on the right.
 fn markers_width(start: usize, end: usize, len: usize) -> u16 {
-    let left = if start > 0 { MARKER_COLS } else { 0 };
-    let right = if end < len { MARKER_COLS } else { 0 };
-    left + right
+    let marker = |hidden: usize| {
+        if hidden == 0 {
+            0
+        } else {
+            str_width(&hidden.to_string()) as u16 + 1 + TAB_GAP
+        }
+    };
+    marker(start) + marker(len.saturating_sub(end))
 }
 
 /// Display width of `text` in terminal columns.
@@ -792,6 +852,7 @@ mod tests {
                 list_cols: Some(width),
                 // A stacked height changes nothing side by side.
                 list_percent: Some(70),
+                list_hidden: false,
             };
             split_with(area, SessionLayout::Sidebar, PaneFocus::List, sizes)
         };
@@ -801,6 +862,38 @@ mod tests {
         assert_eq!(at(5).list.unwrap().width, LIST_MIN_COLS);
         assert_eq!(at(150).detail.width, DETAIL_MIN_COLS);
         assert_eq!(list_width(160, None), sidebar_width(160));
+    }
+
+    #[test]
+    fn a_hidden_list_leaves_a_rail_and_gives_the_detail_the_rest() {
+        let hidden = PaneSizes {
+            list_cols: Some(70),
+            list_hidden: true,
+            ..PaneSizes::default()
+        };
+        let area = rect(3, 1, 160, 46);
+        for focus in [PaneFocus::List, PaneFocus::Detail] {
+            let areas = split_with(area, SessionLayout::Sidebar, focus, hidden);
+            assert_eq!(areas.rail, Some(rect(3, 1, RAIL_COLS, 46)));
+            assert_eq!((areas.list, areas.divider), (None, None));
+            assert_eq!(areas.detail, rect(3 + RAIL_COLS, 1, 160 - RAIL_COLS, 46));
+            // Zoom has no rail either.
+            let zoomed = split_with(area, SessionLayout::Sidebar, PaneFocus::Zoomed, hidden);
+            assert_eq!((zoomed.rail, zoomed.detail), (None, area));
+        }
+        // Only beside the detail: stacked, on a phone, in Grid and Tabs the
+        // list (or the layout's own panes) shows as usual.
+        for (width, height) in [(90, 39), (45, 39)] {
+            let area = rect(0, 0, width, height);
+            let shown = split(area, SessionLayout::Sidebar, PaneFocus::List);
+            let kept = split_with(area, SessionLayout::Sidebar, PaneFocus::List, hidden);
+            assert_eq!(kept.rail, None);
+            assert_eq!(kept.list, shown.list);
+        }
+        for layout in [SessionLayout::Grid, SessionLayout::Tabs] {
+            let kept = split_with(area, layout, PaneFocus::List, hidden);
+            assert_eq!(kept, split(area, layout, PaneFocus::List));
+        }
     }
 
     #[test]
@@ -932,6 +1025,7 @@ mod tests {
         let sizes = PaneSizes {
             list_cols: Some(70),
             list_percent: Some(64),
+            list_hidden: false,
         };
         let split = split_with(area, SessionLayout::Sidebar, PaneFocus::List, sizes);
         assert_eq!(split.list, Some(rect(0, 0, 90, 25)));
@@ -1152,42 +1246,91 @@ mod tests {
     }
 
     #[test]
-    fn overflow_scrolls_to_keep_the_selected_tab_visible() {
+    fn overflow_scrolls_to_keep_the_selected_tab_visible_and_counts_the_hidden_ones() {
         let names: Vec<String> = (1..=8).map(|i| format!("session-{i}")).collect();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         // Each tab is " n ● session-n " = 15 columns.
         let area = rect(0, 0, 50, 1);
 
-        // First tab selected: no left marker, right marker present.
+        // First tab selected: no left marker; the right one says five
+        // tabs are hidden there.
         let mut buf = Buffer::empty(area);
         let hits = render_tabs(area, &mut buf, &tabs(&refs, 0), 0);
         let text = row_text(&buf, 0);
         assert!(text.starts_with(" 1 ● session-1"), "{text:?}");
         assert!(!text.contains('‹'), "{text:?}");
-        assert_eq!(text.chars().last(), Some('›'));
+        assert!(text.ends_with(" 5›"), "{text:?}");
         let visible: Vec<usize> = hits.iter().map(|(i, _)| *i).collect();
-        assert_eq!(visible, vec![0, 1, 2, 3]); // three tabs + the › target for tab 3
+        assert_eq!(visible, vec![0, 1, 2, 3]); // three tabs + the 5› target for tab 3
+        assert_eq!(hits[3].1, rect(48, 0, 2, 1));
 
-        // Last tab selected: left marker, no right marker, tab 8 drawn.
+        // Last tab selected: five hidden on the left, none on the right.
         let mut buf = Buffer::empty(area);
         let hits = render_tabs(area, &mut buf, &tabs(&refs, 7), 7);
         let text = row_text(&buf, 0);
-        assert!(text.starts_with('‹'), "{text:?}");
+        assert!(text.starts_with("‹5 "), "{text:?}");
         assert!(!text.contains('›'), "{text:?}");
         assert!(text.contains("8 ● session-8"), "{text:?}");
-        let (first_index, first_rect) = hits[0];
-        assert_eq!(first_rect, rect(0, 0, 1, 1));
-        assert!(first_index < 7);
+        assert_eq!(hits[0], (4, rect(0, 0, 2, 1)));
         assert!(hits.iter().any(|(i, r)| *i == 7 && r.right() <= 50));
 
-        // Middle tab selected: both markers, selected visible.
+        // Middle tab selected: both markers, with their counts.
         let mut buf = Buffer::empty(area);
         let hits = render_tabs(area, &mut buf, &tabs(&refs, 4), 4);
         let text = row_text(&buf, 0);
-        assert!(text.starts_with('‹'), "{text:?}");
-        assert!(text.ends_with('›'), "{text:?}");
+        assert!(text.starts_with("‹3 "), "{text:?}");
+        assert!(text.trim_end().ends_with(" 3›"), "{text:?}");
         assert!(text.contains("5 ● session-5"), "{text:?}");
         assert!(hits.iter().any(|(i, r)| *i == 4 && r.width == 15));
+        // Every tab is a tab shown or counted by a marker.
+        let shown = hits.iter().filter(|(_, r)| r.width == 15).count();
+        assert_eq!(3 + shown + 3, refs.len());
+    }
+
+    #[test]
+    fn the_tabs_in_view_stay_while_the_selection_moves_among_them() {
+        let names: Vec<String> = (1..=8).map(|i| format!("session-{i}")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let area = rect(0, 0, 50, 1);
+        let shown = |selected: usize, first: usize| {
+            let mut buf = Buffer::empty(area);
+            let (hits, first) =
+                render_tabs_from(area, &mut buf, &tabs(&refs, selected), selected, first);
+            let tabs: Vec<usize> = hits
+                .iter()
+                .filter(|(_, r)| r.width == 15)
+                .map(|(i, _)| *i)
+                .collect();
+            (tabs, first)
+        };
+        // Right along: the window holds until the selected tab is past it,
+        // then scrolls just far enough to show it.
+        let mut first = 0;
+        let mut windows = Vec::new();
+        for selected in 0..8 {
+            let (tabs, next) = shown(selected, first);
+            assert!(tabs.contains(&selected), "{selected}: {tabs:?}");
+            windows.push(tabs);
+            first = next;
+        }
+        assert_eq!(windows[0], [0, 1, 2]);
+        assert_eq!(windows[2], [0, 1, 2], "still in view: nothing moves");
+        assert_eq!(windows[3], [2, 3]);
+        assert_eq!(windows[7], [5, 6, 7]);
+        // Back left: the tabs in view stay until the selected one is left of
+        // them, which then comes first.
+        let (tabs, first) = shown(6, first);
+        assert_eq!((tabs, first), (vec![5, 6, 7], 5));
+        let (tabs, first) = shown(5, first);
+        assert_eq!((tabs, first), (vec![5, 6, 7], 5));
+        let (tabs, _) = shown(4, first);
+        assert_eq!(tabs, [4, 5]);
+        // A window from before that no longer has the selected tab, or
+        // points past the tabs (some closed), still shows it.
+        assert!(shown(0, 6).0.contains(&0));
+        assert!(shown(7, 40).0.contains(&7));
+        // Room to spare once the last tab shows: more on the left.
+        assert_eq!(shown(7, 7).0, [5, 6, 7]);
     }
 
     #[test]
@@ -1227,7 +1370,7 @@ mod tests {
         let items = tabs(&["first", "a-really-long-session-name"], 1);
         let hits = render_tabs(area, &mut buf, &items, 1);
         let text = row_text(&buf, 0);
-        assert!(text.starts_with('‹'), "{text:?}");
+        assert!(text.starts_with("‹1 "), "{text:?}");
         assert!(text.contains('…'), "{text:?}");
         let (index, r) = hits.iter().find(|(i, _)| *i == 1).copied().unwrap();
         assert_eq!(index, 1);

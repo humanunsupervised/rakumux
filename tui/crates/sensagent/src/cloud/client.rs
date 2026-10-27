@@ -22,12 +22,17 @@ const FEED_TURN_PATH: &str = "/api/v1/feed/turn";
 const FEED_REPLIES_PATH: &str = "/api/v1/feed/replies";
 const FEED_REPLY_STATUS_PATH: &str = "/api/v1/feed/replies/status";
 const FEED_SESSIONS_PATH: &str = "/api/v1/feed/sessions";
-/// The largest feed page read (`contracts/feed/page.schema.json`).
+/// Followed by `/{id}`, a ULID.
+const FEED_ATTACHMENTS_PATH: &str = "/api/v1/feed/replies/attachments";
+/// The largest feed page read (`contracts/feed/page.schema.json`), and the
+/// largest attached file (4 MiB, read up to its declared size).
 pub(crate) const MAX_FEED_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ORIGIN_BYTES: usize = 2048;
 const MAX_AUTHORIZATION_BYTES: usize = 8192;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
+/// An attached file's download, up to 4 MiB: about 70 KB/s at the least.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Explicit reviewed public service origin, with fixed endpoints and no fallback.
 #[derive(Clone)]
@@ -41,6 +46,7 @@ pub struct CloudAIConfig {
     feed_replies: Url,
     feed_reply_status: Url,
     feed_sessions: Url,
+    feed_attachments: Url,
 }
 
 /// The account's feature switches, as the destination reports them.
@@ -103,6 +109,8 @@ pub(crate) enum FeedHttp<'a> {
     ReplyStatus(&'a [u8]),
     /// `POST /api/v1/feed/sessions` with this machine's session list.
     Sessions(&'a [u8]),
+    /// `GET /api/v1/feed/replies/attachments/{id}`: a file of `size` bytes.
+    Attachment { id: &'a str, size: u64 },
 }
 
 /// A feed reply as received: the feed module decodes it against its contract.
@@ -162,6 +170,7 @@ impl CloudAIConfig {
         let (feed_replies, feed_reply_status) =
             (path(FEED_REPLIES_PATH), path(FEED_REPLY_STATUS_PATH));
         let feed_sessions = path(FEED_SESSIONS_PATH);
+        let feed_attachments = path(FEED_ATTACHMENTS_PATH);
         endpoint.set_path(STATUS_PATH);
         Ok(Self {
             endpoint,
@@ -173,6 +182,7 @@ impl CloudAIConfig {
             feed_replies,
             feed_reply_status,
             feed_sessions,
+            feed_attachments,
         })
     }
 }
@@ -351,6 +361,9 @@ impl CloudAIClient {
         cancel: &Cancellation,
     ) -> Result<FeedHttpReply, CloudAIError> {
         cancel.check()?;
+        if let FeedHttp::Attachment { id, size } = request {
+            return self.download(access_token, id, size, cancel);
+        }
         let mut outgoing = match request {
             FeedHttp::Upload(body)
             | FeedHttp::Messages(body)
@@ -385,6 +398,7 @@ impl CloudAIClient {
                 url.set_query(Some(query));
                 Request::new(Method::GET, url)
             }
+            FeedHttp::Attachment { .. } => return Err(CloudAIError::InvalidRequest),
         };
         *outgoing.timeout_mut() = Some(TOTAL_TIMEOUT);
         let headers = outgoing.headers_mut();
@@ -404,6 +418,65 @@ impl CloudAIClient {
         require_json_headers(&reply.headers)?;
         let retry_after = retry_after(&reply.headers);
         let body = read_bounded(reply.body, cancel, MAX_FEED_BODY_BYTES)?;
+        cancel.check()?;
+        Ok(FeedHttpReply {
+            status: reply.status,
+            retry_after,
+            body,
+        })
+    }
+
+    /// Fetch a file attached to a reply once, with the same transport rules as
+    /// `feed` but a deadline long enough for 4 MiB. A 200's body is bytes,
+    /// never parsed, read up to one byte past `size` so another length shows;
+    /// its headers say nothing about it but a content coding, which is
+    /// refused. Any other answer is returned for the feed module to decode
+    /// like every feed error.
+    fn download(
+        &self,
+        access_token: &SecretValue,
+        id: &str,
+        size: u64,
+        cancel: &Cancellation,
+    ) -> Result<FeedHttpReply, CloudAIError> {
+        if !crate::feed::is_entry_id(id) || size > MAX_FEED_BODY_BYTES as u64 {
+            return Err(CloudAIError::InvalidRequest);
+        }
+        let mut url = self.config.feed_attachments.clone();
+        url.set_path(&format!("{FEED_ATTACHMENTS_PATH}/{id}"));
+        let mut outgoing = Request::new(Method::GET, url);
+        *outgoing.timeout_mut() = Some(DOWNLOAD_TIMEOUT);
+        let headers = outgoing.headers_mut();
+        headers.insert(header::AUTHORIZATION, bearer_header(access_token)?);
+        headers.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/octet-stream, application/json"),
+        );
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("identity"),
+        );
+        cancel.check()?;
+        let result = self.transport.send(outgoing);
+        cancel.check()?;
+        let reply = result?;
+        if (300..=399).contains(&reply.status) {
+            return Err(CloudAIError::HttpStatus(reply.status));
+        }
+        if reply.headers.contains_key(header::CONTENT_ENCODING)
+            && !single_header(&reply.headers, header::CONTENT_ENCODING)
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("identity"))
+        {
+            return Err(CloudAIError::InvalidResponse);
+        }
+        let retry_after = retry_after(&reply.headers);
+        // An error's body is JSON of a few hundred bytes; a proxy's page is cut.
+        let limit = if reply.status == 200 {
+            size + 1
+        } else {
+            MAX_BODY_BYTES as u64
+        };
+        let body = read_up_to(reply.body, cancel, limit)?;
         cancel.check()?;
         Ok(FeedHttpReply {
             status: reply.status,
@@ -545,7 +618,20 @@ fn read_bounded(
     cancel: &Cancellation,
     maximum: usize,
 ) -> Result<Vec<u8>, CloudAIError> {
-    let mut bounded = body.take((maximum + 1) as u64);
+    let output = read_up_to(body, cancel, maximum as u64 + 1)?;
+    if output.len() > maximum {
+        return Err(CloudAIError::InvalidResponse);
+    }
+    Ok(output)
+}
+
+/// At most `limit` bytes of `body`; whatever follows is left unread.
+fn read_up_to(
+    body: Box<dyn Read + Send>,
+    cancel: &Cancellation,
+    limit: u64,
+) -> Result<Vec<u8>, CloudAIError> {
+    let mut bounded = body.take(limit);
     let mut output = Vec::new();
     let mut buffer = [0u8; 4096];
     loop {
@@ -557,9 +643,6 @@ fn read_bounded(
             return Ok(output);
         }
         output.extend_from_slice(&buffer[..count]);
-        if output.len() > maximum {
-            return Err(CloudAIError::InvalidResponse);
-        }
     }
 }
 

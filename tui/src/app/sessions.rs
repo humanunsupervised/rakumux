@@ -22,7 +22,7 @@ use super::folders::{self, SyncResult};
 use super::grouping::{Grouping, Section, StatusGroup};
 use super::runtime::{cancel_flag, AppEvent};
 use super::screen::Screen;
-use super::session_list::{ListChange, ListRow, Selection};
+use super::session_list::{ListChange, ListRow, Selection, ShownAs};
 use super::types::*;
 use super::{env_snapshot, App, DividerState, FooterKey, Hit, SessionDrag};
 use crate::layout::{self, SessionLayout};
@@ -690,11 +690,12 @@ impl App {
         }
     }
 
-    /// `1`-`9` in Rakumux mode: into the `n`th session shown (1-based).
+    /// `1`-`9` in Rakumux mode: into the `n`th session shown (1-based; the
+    /// tab numbered `n` in a row of tabs).
     pub fn go_into_nth(&mut self, n: usize) {
         let id = self
             .list
-            .visible()
+            .shown(self.shown_as())
             .get(n.wrapping_sub(1))
             .map(|s| s.id.clone());
         if let Some(id) = id {
@@ -766,22 +767,27 @@ impl App {
     }
 
     /// `J` / `K`: move the selected session down or up one place, within
-    /// its folder and among the pinned sessions or the others; the order
-    /// is saved.
+    /// its folder and among the pinned sessions or the others (in a row of
+    /// tabs, one tab along); the order is saved.
     pub fn move_selected_session(&mut self, delta: isize) {
         let Some(id) = self.list.selected_id().cloned() else {
             self.set_status("Select a session to move.");
             return;
         };
-        if self.list.listed_by_last_read(&id) {
+        let shown = self.shown_as();
+        if shown == ShownAs::List && self.list.listed_by_last_read(&id) {
             self.set_status("Done lists sessions by when you last read them.");
             return;
         }
-        let Some(from) = self.list.visible_position(&id) else {
+        let Some(from) = self.list.position(shown, &id) else {
             return;
         };
         let to = from.saturating_add_signed(delta);
-        if self.list.move_session(&id, to) {
+        let moved = match shown {
+            ShownAs::List => self.list.move_session(&id, to),
+            ShownAs::Tabs => self.list.move_tab(&id, to),
+        };
+        if moved {
             self.save_session_order();
             self.sync_grid();
         }
@@ -942,11 +948,16 @@ impl App {
 
     // ------------------------------------------------------------ navigation
 
-    /// Select the previous (`-1`) or next (`1`) session in list order,
-    /// wrapping. With session focus, the newly selected session takes focus
-    /// too.
+    /// Select the previous (`-1`) or next (`1`) session in the order on
+    /// screen (the list's, or the tabs'), wrapping. With session focus, the
+    /// newly selected session takes focus too.
     pub fn cycle_session(&mut self, delta: i32) {
-        let visible: Vec<SessionId> = self.list.visible().iter().map(|s| s.id.clone()).collect();
+        let visible: Vec<SessionId> = self
+            .list
+            .shown(self.shown_as())
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
         if visible.is_empty() {
             return;
         }
@@ -996,7 +1007,7 @@ impl App {
             }
             SessionLayout::Tabs => {
                 let visible: Vec<SessionId> =
-                    self.list.visible().iter().map(|s| s.id.clone()).collect();
+                    self.list.tab_order().iter().map(|s| s.id.clone()).collect();
                 if visible.is_empty() {
                     return;
                 }
@@ -1015,7 +1026,7 @@ impl App {
     /// row: select a session when there is one.
     pub(super) fn select_default_tab(&mut self) {
         if self.list.selected_id().is_none() {
-            if let Some(first) = self.list.visible().first().map(|s| s.id.clone()) {
+            if let Some(first) = self.list.tab_order().first().map(|s| s.id.clone()) {
                 self.list.select(Selection::Session(first));
             }
         }
@@ -1184,7 +1195,7 @@ impl App {
         }
         if let MouseEventKind::Down(MouseButton::Left) = event.kind {
             if let Some(index) = layout::tab_at(&self.tab_hits, event.column, event.row) {
-                let id = self.list.visible().get(index).map(|s| s.id.clone());
+                let id = self.list.tab_order().get(index).map(|s| s.id.clone());
                 if let Some(id) = id {
                     let from_panel = self.focus == Focus::Terminal;
                     if from_panel {
@@ -1286,15 +1297,15 @@ impl App {
                 }
                 // A tab: the active one opens its modal, another becomes
                 // active. The top row is selected, so ←/→ go on from it.
-                Some(Hit::ListTab(tab)) => {
+                Some(Hit::ListTab(grouping)) => {
                     if self.focus != Focus::List {
                         self.enter_rakumux_mode();
                     }
                     self.list.select(Selection::Folders);
-                    if tab == self.list_tab() {
+                    if grouping == self.list.grouping() {
                         self.open_tab_picker();
                     } else {
-                        self.show_list_tab(tab);
+                        self.show_tab(grouping);
                     }
                     return;
                 }
@@ -1306,11 +1317,17 @@ impl App {
                     self.open_feed_reply();
                     return;
                 }
+                // Hiding or showing the list leaves the mode as it is.
+                Some(Hit::HideList | Hit::ShowList) => {
+                    self.toggle_list();
+                    return;
+                }
                 Some(Hit::ModeBadge) => {
                     // Like the Rakumux key in session mode, Esc in
-                    // Rakumux mode.
+                    // Rakumux mode (from the feed: back to the sessions).
                     match self.focus {
                         Focus::Session | Focus::Terminal => self.enter_rakumux_mode(),
+                        Focus::List if self.feed_shown() => self.feed_back(),
                         Focus::List => self.return_to_session(),
                     }
                     return;
@@ -1327,6 +1344,7 @@ impl App {
                         FooterKey::Settings => super::handlers::settings::open_settings(self),
                         FooterKey::SignIn => self.start_sign_in(),
                         FooterKey::Account => self.open_account_dialog(),
+                        FooterKey::Feed => self.toggle_feed_view(),
                     }
                     return;
                 }
@@ -1470,7 +1488,8 @@ impl App {
         } else {
             self.row_drop_position(row)
         };
-        let (Some(from), Some(to)) = (self.list.visible_position(&id), to) else {
+        let shown = if tabs { ShownAs::Tabs } else { ShownAs::List };
+        let (Some(from), Some(to)) = (self.list.position(shown, &id), to) else {
             return;
         };
         let along = match direction {
@@ -1478,7 +1497,11 @@ impl App {
             Ordering::Less => to < from,
             Ordering::Equal => false,
         };
-        let moved = along && self.list.move_session(&id, to);
+        let moved = along
+            && match shown {
+                ShownAs::List => self.list.move_session(&id, to),
+                ShownAs::Tabs => self.list.move_tab(&id, to),
+            };
         if let Some(drag) = self.drag.as_mut() {
             drag.moved |= moved;
         }

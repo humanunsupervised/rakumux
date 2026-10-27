@@ -164,6 +164,8 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     settings_due: Duration,
     /// Where the feed remembers how far each chat was uploaded.
     chat_cursors: Option<std::path::PathBuf>,
+    /// Where files attached to replies are saved, if anywhere.
+    uploads: Option<std::path::PathBuf>,
     /// Whether replies written elsewhere are typed into this machine's sessions.
     accept_remote: Option<crate::feed::AcceptRemote>,
 }
@@ -191,6 +193,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             turn_settings: None,
             settings_due: Duration::ZERO,
             chat_cursors: None,
+            uploads: None,
             accept_remote: None,
         }
     }
@@ -218,6 +221,20 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where chat cursors are kept, if anywhere.
     pub(crate) fn chat_cursors(&self) -> Option<std::path::PathBuf> {
         self.chat_cursors.clone()
+    }
+
+    /// Save files attached to replies under `path` (absolute: the agent is
+    /// given their paths), one directory per reply, and say so to
+    /// rakumux.com, which then sends this machine replies with files.
+    /// Without it, replies with files never come.
+    pub fn with_uploads(mut self, path: std::path::PathBuf) -> Self {
+        self.uploads = Some(path);
+        self
+    }
+
+    /// Where files attached to replies are saved, if anywhere.
+    pub(crate) fn uploads(&self) -> Option<std::path::PathBuf> {
+        self.uploads.clone()
     }
 
     /// Read the turn settings from `read` now and every [`SETTINGS_INTERVAL`].

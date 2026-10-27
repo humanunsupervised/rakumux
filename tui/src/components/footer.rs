@@ -1,23 +1,29 @@
 //! One-line footer, the last row of every screen (zoom too): a full-width
 //! bar, orange while keys drive Rakumux and a muted blue while they go to a
 //! program. The mode badge (`RAKUMUX`, `SESSION` or `TERMINAL`) is at the
-//! left, then the connection state and a message (a status message, why
-//! the daemon is unreachable, zoom, a pending upgrade); `session: ● <name>`
-//! in the centre (in Rakumux mode the selected session, else the one kept in
-//! view; in session mode the one taking the keys; with the status mark its
-//! list row has, since the detail has no title row); and buttons on the right: Help (`?`) and Settings
-//! (`,`) in Rakumux mode, then the Rakumux account at the right: Sign in while signed out,
-//! `✓ Signed in` (the account dialog) while signed in; the way to Rakumux mode (the
-//! Rakumux key) in session mode. Settings lists every key.
+//! left (in the Feed view followed by a quieter `FEED`), then the
+//! connection state and a message (a status message, why the daemon is
+//! unreachable, zoom, a pending upgrade); `session: ● <name>` in the centre
+//! (in Rakumux mode the selected session, else the one kept in view; in
+//! session mode the one taking the keys; with the status mark its list row
+//! has, since the detail has no title row); and buttons on the right. In
+//! Rakumux mode: the Feed view (`f ≡ Feed`, with `●N` for the entries that
+//! arrived since the feed was last on screen; `f Sessions` while it shows),
+//! Help (`?`), Settings (`,`), then the Rakumux account: Sign in while signed
+//! out, `✓ Signed in` (the account dialog) while signed in. In session mode
+//! the way to Rakumux mode (the Rakumux key). Settings lists every key.
 //!
 //! The footer never wraps or grows: when the row is short the session
 //! gives way first (to its mark and name, then nothing), then the message is
 //! cut (down to [`MIN_MESSAGE`] columns), then buttons are dropped from the
-//! right (the account, then Settings); the badge always shows.
+//! right (the account, Settings, Help, then the Feed's: it carries the
+//! count and is the one tap between the sessions and the feed); the badge
+//! always shows.
 //!
 //! The badge and the buttons are tap targets, for phones and the mouse: the
-//! `SESSION` badge switches to Rakumux mode, the `RAKUMUX` badge goes back
-//! to the session you came from, and a button does what its keys do.
+//! `SESSION` badge switches to Rakumux mode, the `RAKUMUX` badge does what
+//! Esc does (back to the session you came from; from the feed, back to the
+//! sessions), and a button does what its keys do.
 
 use ratatui::{
     layout::Rect,
@@ -49,23 +55,55 @@ const BUTTON_SHADE: f32 = 0.2;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Button {
     pub keys: String,
-    pub label: &'static str,
+    pub label: String,
     pub target: FooterKey,
 }
 
 impl Button {
-    fn new(keys: impl Into<String>, label: &'static str, target: FooterKey) -> Self {
+    fn new(keys: impl Into<String>, label: impl Into<String>, target: FooterKey) -> Self {
         Self {
             keys: keys.into(),
-            label,
+            label: label.into(),
             target,
         }
     }
 
     /// Columns it takes: ` keys label `.
     fn width(&self) -> usize {
-        str_width(&self.keys) + str_width(self.label) + 3
+        str_width(&self.keys) + str_width(&self.label) + 3
     }
+}
+
+/// The most new entries the Feed button counts (`●99+` beyond).
+const MAX_COUNT: usize = 99;
+
+/// The Feed view's button: `≡ Feed` (`≡ Feed ●3` with entries that arrived
+/// since it was last on screen), or `Sessions` while it shows.
+fn feed_button(app: &App) -> Button {
+    let label = if app.feed_shown() {
+        "Sessions".to_owned()
+    } else {
+        let icon = app.icons().feed();
+        match app.feed_unseen() {
+            0 => format!("{icon} Feed"),
+            n if n > MAX_COUNT => format!("{icon} Feed ●{MAX_COUNT}+"),
+            n => format!("{icon} Feed ●{n}"),
+        }
+    };
+    Button::new(FEED_KEY, label, FooterKey::Feed)
+}
+
+/// The key that toggles the Feed view in Rakumux mode.
+pub const FEED_KEY: &str = "f";
+
+/// After the `RAKUMUX` badge while the Feed view shows: a quieter `FEED`
+/// (the buttons' darker orange), so the bar says where Rakumux mode is.
+fn view_chip(app: &App) -> Option<Span<'static>> {
+    if app.focus != Focus::List || !app.feed_shown() {
+        return None;
+    }
+    let (key, _) = button_styles(Focus::List);
+    Some(Span::styled(" FEED ", key))
 }
 
 /// A tap target in the footer: `width` columns from column `x` of the row.
@@ -101,11 +139,12 @@ pub fn mode_badge(app: &App) -> Span<'static> {
     }
 }
 
-/// The footer's buttons: Help and Settings in Rakumux mode, and the Rakumux
-/// account at the right (once it was checked): Sign in while signed out,
-/// `✓ Signed in` while signed in; in session mode the Rakumux key, the way out
-/// (Help and Settings are a tap away from there). Nothing while typing a
-/// filter (those keys type) or while a dialog is open.
+/// The footer's buttons: the Feed view (or back to the sessions), Help and
+/// Settings in Rakumux mode, and the Rakumux account at the right (once it
+/// was checked): Sign in while signed out, `✓ Signed in` while signed in; in
+/// session mode the Rakumux key, the way out (the rest are a tap away from
+/// there). Nothing while typing a filter (those keys type) or while a
+/// dialog is open.
 pub fn buttons(app: &App) -> Vec<Button> {
     if !matches!(app.mode, AppMode::Normal) || app.list.filter_editing {
         return Vec::new();
@@ -113,6 +152,7 @@ pub fn buttons(app: &App) -> Vec<Button> {
     match app.focus {
         Focus::List => {
             let mut buttons = vec![
+                feed_button(app),
                 Button::new("?", "Help", FooterKey::Help),
                 Button::new(
                     crate::help::SETTINGS_KEY_PRIMARY,
@@ -366,7 +406,10 @@ pub fn footer_line(app: &App, width: usize) -> Line<'static> {
 /// takes the centre when there's room for it between them.
 fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
     let badge = mode_badge(app);
-    let badge_width = str_width(&badge.content);
+    let chip = view_chip(app);
+    // The badge (and the view's chip) is one target.
+    let badge_width =
+        str_width(&badge.content) + chip.as_ref().map_or(0, |chip| str_width(&chip.content));
     // The badge, then a space before the message.
     let lead = badge_width + 1;
     let message = message(app);
@@ -379,7 +422,10 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
         u16::try_from(badge_width.min(width)).unwrap_or(u16::MAX),
         Hit::ModeBadge,
     )];
+    // The chip keeps its shade when the bar is inked below.
+    let chip_at = chip.is_some().then_some(1);
     let mut spans = vec![badge];
+    spans.extend(chip);
     if !message.is_empty() {
         spans.push(Span::raw(" "));
         spans.extend(message);
@@ -406,7 +452,10 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
     if app.focus == Focus::List {
         // Dark ink on the orange bar; alerts stand out in bold.
         let palette = theme::palette();
-        for span in &mut spans {
+        for (at, span) in spans.iter_mut().enumerate() {
+            if Some(at) == chip_at {
+                continue;
+            }
             let alert = span.style.fg == Some(palette.accent_pink);
             span.style = span.style.fg(palette.background).bg(palette.accent_orange);
             if alert {
@@ -631,13 +680,17 @@ mod tests {
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
         // Short of room the session gives way first: off the centre, then
         // its name alone, then nothing.
-        let line = text(&footer_line(&h.app, 52));
+        let line = text(&footer_line(&h.app, 62));
         assert!(line.contains("Layout: Tabs ● api "), "{line:?}");
         assert!(!line.contains("session:"), "{line:?}");
         assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
-        let line = text(&footer_line(&h.app, 46));
+        let line = text(&footer_line(&h.app, 57));
         assert!(!line.contains("api"), "{line:?}");
         assert!(line.starts_with(" RAKUMUX  Layout: Tabs "), "{line:?}");
+        assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
+        // Then the buttons go from the right: Settings, then Help.
+        let line = text(&footer_line(&h.app, 52));
+        assert!(line.ends_with(" f ≡ Feed   ? Help  "), "{line:?}");
         // A long message is cut to keep the buttons while it keeps 30
         // columns…
         let long = "A status message long enough to need the whole line here, and then some";
@@ -701,17 +754,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_phone_keeps_the_badge_and_help_longest() {
+    async fn a_phone_keeps_the_badge_the_feed_and_help_longest() {
         let mut h = harness(vec![view("A", "api", 10)]);
-        // Rakumux mode: both buttons fit 40 columns.
-        for width in [40, 45] {
-            let line = text(&footer_line(&h.app, width));
-            assert!(line.starts_with(" RAKUMUX "), "{line:?}");
-            assert!(line.ends_with(" ? Help   , Settings  "), "{line:?}");
-        }
-        // Then Settings goes before Help.
+        // Rakumux mode: the Feed, Help and Settings fit 45 columns (the
+        // account goes first)…
+        let line = text(&footer_line(&h.app, 45));
+        assert!(line.starts_with(" RAKUMUX "), "{line:?}");
+        assert!(
+            line.ends_with(" f ≡ Feed   ? Help   , Settings  "),
+            "{line:?}"
+        );
+        // …then Settings, then Help: the Feed's button stays longest.
+        let line = text(&footer_line(&h.app, 40));
+        assert!(line.ends_with(" f ≡ Feed   ? Help  "), "{line:?}");
         let line = text(&footer_line(&h.app, 26));
-        assert!(line.ends_with(" ? Help  "), "{line:?}");
+        assert!(line.ends_with(" f ≡ Feed  "), "{line:?}");
         // Session mode: the way out fits a phone.
         h.press(KeyCode::Enter).await;
         let line = text(&footer_line(&h.app, 40));
@@ -730,6 +787,55 @@ mod tests {
         assert_eq!(targets[0].2, Hit::ModeBadge);
         assert_eq!(at(&targets[1]), " Ctrl-\\ Rakumux mode ");
         assert_eq!(targets[1].2, Hit::FooterKey(FooterKey::Rakumux));
+    }
+
+    #[test]
+    fn the_feed_button_counts_new_replies_up_to_ninety_nine() {
+        use rakumux_sensagent::feed::{FeedEntry, FeedPage, FeedStatus};
+        let mut h = harness(vec![view("A", "api", 10)]);
+        h.app.account = AccountStatus::Unknown;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let entry = |i: i64| FeedEntry {
+            id: format!("E{i}"),
+            seq: Some(i as u64 + 1),
+            machine: "lab".into(),
+            session_id: "S".into(),
+            session_name: "s".into(),
+            folder: None,
+            branch: None,
+            agent: "codex".into(),
+            conversation_id: None,
+            text: "Done.".into(),
+            truncated: false,
+            finished_at: now + 1_000 + i,
+            position: None,
+            reply_to: None,
+            thread: None,
+            prompt: None,
+        };
+        let page = |entries: Vec<FeedEntry>| FeedPage {
+            status: FeedStatus::Ready,
+            generation: 1,
+            revision: entries.len() as u64,
+            entries,
+            replies: Vec::new(),
+            more: false,
+            open: None,
+        };
+        h.app.feed.apply(page((0..3).map(entry).collect()));
+        // Counted only while the account keeps the feed (signed in, on).
+        assert_eq!(buttons(&h.app)[0].label, "≡ Feed");
+        h.app.account = AccountStatus::SignedIn(crate::account::Account {
+            feed: Some(true),
+            ..crate::app::testing::FakeAccount::person()
+        });
+        assert_eq!(buttons(&h.app)[0].label, "≡ Feed ●3");
+        h.app.feed.apply(page((0..120).map(entry).collect()));
+        assert_eq!(buttons(&h.app)[0].label, "≡ Feed ●99+");
+        assert_eq!(buttons(&h.app)[0].target, FooterKey::Feed);
     }
 
     #[tokio::test]

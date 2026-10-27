@@ -198,7 +198,9 @@ pub enum KeyAction {
     NumberedSession,
     NextSession,
     PreviousSession,
-    /// `→`: the list's next tab (Feed, Status, Folders, App).
+    /// `f`: the Feed view, or back to the sessions.
+    Feed,
+    /// `→`: the list's next tab (Status, Folders, App).
     NextTab,
     /// `←`: the previous tab.
     PreviousTab,
@@ -229,6 +231,8 @@ pub enum KeyAction {
     Filter,
     /// Cycle Master detail, Grid and Tabs in Rakumux mode.
     CycleLayout,
+    /// `b`: hide Master detail's list beside the session, or show it.
+    HideList,
     /// Reveal/focus the independent shell below the detail pane.
     TerminalPanel,
     Help,
@@ -251,7 +255,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 41] = [
+    pub const ALL: [KeyAction; 43] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -260,6 +264,7 @@ impl KeyAction {
         KeyAction::SendRakumuxKey,
         KeyAction::NextSession,
         KeyAction::PreviousSession,
+        KeyAction::Feed,
         KeyAction::NextTab,
         KeyAction::PreviousTab,
         KeyAction::Top,
@@ -282,6 +287,7 @@ impl KeyAction {
         KeyAction::Zoom,
         KeyAction::Filter,
         KeyAction::CycleLayout,
+        KeyAction::HideList,
         KeyAction::TerminalPanel,
         KeyAction::Help,
         KeyAction::Settings,
@@ -306,6 +312,7 @@ impl KeyAction {
             | KeyAction::SendRakumuxKey => "Modes",
             KeyAction::NextSession
             | KeyAction::PreviousSession
+            | KeyAction::Feed
             | KeyAction::NextTab
             | KeyAction::PreviousTab
             | KeyAction::Top
@@ -328,6 +335,7 @@ impl KeyAction {
             | KeyAction::Zoom
             | KeyAction::Filter
             | KeyAction::CycleLayout
+            | KeyAction::HideList
             | KeyAction::TerminalPanel => "Sessions and folders",
             KeyAction::Help
             | KeyAction::Settings
@@ -352,7 +360,8 @@ impl KeyAction {
             KeyAction::NumberedSession => "Go into session 1 to 9",
             KeyAction::NextSession => "Next session",
             KeyAction::PreviousSession => "Previous session",
-            KeyAction::NextTab => "Next tab (Feed, Status, Folders, App)",
+            KeyAction::Feed => "Feed, or back to the sessions",
+            KeyAction::NextTab => "Next tab (Status, Folders, App)",
             KeyAction::PreviousTab => "Previous tab",
             KeyAction::Top => "Top of the list",
             KeyAction::Bottom => "Bottom of the list",
@@ -374,6 +383,7 @@ impl KeyAction {
             KeyAction::Zoom => "Work in the session full screen",
             KeyAction::Filter => "Filter sessions",
             KeyAction::CycleLayout => "Cycle layout (Master detail, Grid, Tabs)",
+            KeyAction::HideList => "Hide or show the session list",
             KeyAction::TerminalPanel => "Terminal panel (show, focus or hide)",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
@@ -408,6 +418,7 @@ impl KeyAction {
             KeyAction::NumberedSession => plain(&["1-9"]),
             KeyAction::NextSession => with_cycle(&k.cycle_next, &["↓", "j"]),
             KeyAction::PreviousSession => with_cycle(&k.cycle_previous, &["↑", "k"]),
+            KeyAction::Feed => plain(&["f"]),
             KeyAction::NextTab => plain(&["→"]),
             KeyAction::PreviousTab => plain(&["←"]),
             KeyAction::Top => plain(&["gg", "Home"]),
@@ -430,6 +441,7 @@ impl KeyAction {
             KeyAction::Zoom => plain(&["z"]),
             KeyAction::Filter => plain(&["/"]),
             KeyAction::CycleLayout => plain(&["v"]),
+            KeyAction::HideList => plain(&["b"]),
             KeyAction::TerminalPanel => plain(&["T"]),
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
@@ -482,8 +494,15 @@ impl KeyAction {
                 None => "Option/Alt+↑/↓ are turned off in your settings; ↑/↓ and j/k move.".into(),
             },
             KeyAction::Top => {
-                "The tabs (Feed, Status, Folders, App) are the first row; ←/→ switch them.".into()
+                "The tabs (Status, Folders, App) are the first row; ←/→ switch them.".into()
             }
+            KeyAction::Feed => "What your agents said when they finished a turn, on every \
+                 machine of your account, newest first, in the list's place (Master detail \
+                 whatever the layout). Enter on a reply made here goes into its session; r \
+                 writes back to it. f or Esc goes back to the sessions; the footer's Feed \
+                 button counts the replies that came since you last looked. Needs your Rakumux \
+                 account with the Agent feed on (Settings → Available on sign-in)."
+                .into(),
             KeyAction::NextFolder | KeyAction::PreviousFolder => {
                 "With several folders shown: the first session under the next or previous \
                  folder's header."
@@ -523,6 +542,11 @@ impl KeyAction {
                  reconnects. Same as `rakumux daemon restart`. R reloads only this UI."
                     .into()
             }
+            KeyAction::HideList => "Master detail, with the list beside the session: the \
+                 session takes the list's columns, and keys still move through the sessions. \
+                 The « Hide list button at the bottom of the list does the same; the » left \
+                 of the session (or b again) brings the list back."
+                .into(),
             KeyAction::TerminalPanel => {
                 "T opens a standalone shell below the main detail in the current directory. \
                  Click a pane to focus it. Use the Rakumux key to return to Rakumux mode; \
@@ -1566,7 +1590,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("The screen");
     match ctx.layout {
         SessionLayout::Sidebar => doc.bullet(format!(
-            "Session list, on the left: the tabs on top (Feed, Status, {} Folders, App), then the \
+            "Session list, on the left: the tabs on top (Status, {} Folders, App), then the \
              sessions in the order you keep them (a new one goes at the bottom), each with a \
              status mark, a bold title, and its app name in muted blue before the git branch; \
              the selected title is white, the others a softer foreground colour. With \
@@ -1586,9 +1610,14 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         )),
     }
     doc.bullet("Detail or Grid cards: terminal screens, updating as the programs run.");
+    doc.bullet(
+        "The Feed (`f`): what your agents said when they finished a turn, on every machine of \
+         your account, in the list's place; `f` or `Esc` brings the sessions back.",
+    );
     doc.bullet(format!(
         "Footer, the bottom row: a full-width orange bar in Rakumux mode, with buttons for \
-         this Help (`?`) and Settings (`,`); a muted blue bar with a SESSION or TERMINAL \
+         the Feed (`f`, with a count of new replies), this Help (`?`) and Settings (`,`); \
+         RAKUMUX FEED at the left while the Feed shows; a muted blue bar with a SESSION or TERMINAL \
          label while a program takes keys, with a `{p}` button, the way to Rakumux mode. The \
          session it's about is named in the middle (session: name). It shows messages and the \
          daemon connection when it isn't up. Settings lists every key."
@@ -1641,11 +1670,15 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         ),
         row(
             "←, →",
-            "Switch between the tabs, Feed, Status, Folders and App (h, l on the tabs too). \
-             The Feed lists what agents said when they finished a turn, on every machine of \
-             your account (turn it on in Settings → Available on sign-in); Enter on a reply \
-             made here goes into its session, and r writes back to it: typed into its \
-             session when its agent waits, and shown with the answer as a thread",
+            "Switch between the tabs, Status, Folders and App (h, l on the tabs too)",
+        ),
+        row(
+            "f",
+            "The Feed, or back to the sessions (Esc too): what agents said when they finished \
+             a turn, on every machine of your account (turn it on in Settings → Available on \
+             sign-in), shown in Master detail whatever the layout. Enter on a reply made here \
+             goes into its session, and r writes back to it: typed into its session when its \
+             agent waits, and shown with the answer as a thread",
         ),
         row(
             "gg, G, Home, End",
@@ -1698,10 +1731,13 @@ fn mouse(doc: &mut Doc) {
     doc.heading("Mouse");
     doc.bullet("Click a session in the list to show it; click the session to work in it.");
     doc.bullet(
-        "Click a tab at the top of the list (Feed, Status, Folders, App): the Feed shows \
-         finished replies (click one to read it, again to open its session), the others \
-         group the list by it; click the active one (▾) to open its modal; click a row there \
-         to show it alone, All to show everything, or outside it to close it.",
+        "Click a tab at the top of the list (Status, Folders, App) to group the list by it; \
+         click the active one (▾) to open its modal; click a row there to show it alone, All \
+         to show everything, or outside it to close it.",
+    );
+    doc.bullet(
+        "Click the footer's Feed button for the Feed (again, Sessions, to come back); click a \
+         reply to read it, again to open its session.",
     );
     doc.bullet(
         "Drag a session up or down the list (or a tab left or right) to move it; a blue bar \
@@ -1713,9 +1749,10 @@ fn mouse(doc: &mut Doc) {
     );
     doc.bullet(
         "Click the mode badge at the bottom left: SESSION switches to Rakumux mode, RAKUMUX \
-         goes back to the session you came from. Click a button on the right of the footer \
-         (`? Help`, `, Settings`, or in a session the Rakumux key) to do what it says. Phones \
-         send taps as clicks, so all of this works there too.",
+         does what Esc does (back to the session you came from; from the Feed, back to the \
+         sessions). Click a button on the right of the footer (`f ≡ Feed`, `? Help`, \
+         `, Settings`, or in a session the Rakumux key) to do what it says. Phones send taps \
+         as clicks, so all of this works there too.",
     );
     doc.bullet(
         "Wheel: scrolls the session's history, or goes to the program when it uses the mouse \
@@ -1998,6 +2035,11 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.text(
         "The session list sits in a column on the left; the selected session fills the right.",
     );
+    doc.text(
+        "`b` or the « Hide list button at the bottom of the list hides it, so the session gets \
+         its columns; the keys still move through the sessions. `b` again, or a click on the » \
+         left of the session, brings it back.",
+    );
     doc.text(format!(
         "Below {} columns (a split window) the list goes on top and the selected session \
          below it, so you see it while you pick one; drag the line between them up or down to \
@@ -2042,8 +2084,11 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("Tabs");
     doc.text(
         "Sessions appear as a row of numbered tabs across the top, and the selected tab's \
-         session fills the rest of the screen. Long names are shortened with …, and ‹ or › \
-         show that more tabs are hidden on that side.",
+         session fills the rest of the screen. Long names are shortened with …, and ‹3 or 5› \
+         say how many tabs are hidden on that side. The tabs are the sessions the list's \
+         active tab shows, in the Folders order (pinned first, then folder by folder, as you \
+         arranged them), so a tab keeps its place and number while its session works and \
+         you read it.",
     );
     let cycle = match &k.cycle {
         Some(cycle) => format!(", `{cycle}`"),
@@ -3695,7 +3740,8 @@ mod tests {
             ("Rakumux mode", "C-a"),
             ("Back to the session you came from", "Esc, C-a"),
             ("Go into the selected session", "Enter, i, l"),
-            ("Next tab (Feed, Status, Folders, App)", "→"),
+            ("Feed, or back to the sessions", "f"),
+            ("Next tab (Status, Folders, App)", "→"),
             ("Previous tab", "←"),
             ("Last session", "Tab"),
             ("Go into session 1 to 9", "1-9"),

@@ -1,7 +1,7 @@
 //! Right pane: the selected session's terminal (running, or its saved
 //! screen), with placeholders for no sessions, loading, the session
-//! Rakumux runs in, errors and the daemon being unreachable; in Rakumux
-//! mode under the Feed tab, the selected reply (`feed.rs`). There's no
+//! Rakumux runs in, errors and the daemon being unreachable; in the Feed
+//! view in Rakumux mode, the selected reply (`feed.rs`). There's no
 //! title row: the footer names the session and its status. Live previews
 //! recede in Rakumux mode; dialogs and saved output use a stronger fade.
 //! The cursor appears only while the session takes keys.

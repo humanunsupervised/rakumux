@@ -4,7 +4,7 @@
   "title": "Agent feed shared definitions",
   "$defs": {
     "ulid": {
-      "description": "A ULID in Crockford base32 capitals: a Rakumux session id, or the id the daemon gave a reply.",
+      "description": "A ULID in Crockford base32 capitals: a Rakumux session id, the id the daemon gave a reply, or the id the cloud gave an attached file.",
       "type": "string",
       "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
     },
@@ -237,15 +237,46 @@
         "pattern": "[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\\p{Cf}\\p{Cs}\\p{Default_Ignorable_Code_Point}]"
       }
     },
+    "fileName": {
+      "description": "An attached file's name as the user's browser gave it: one visible line of at most 128 characters and 255 UTF-8 bytes (what a file name may take on Linux and macOS), never a path (no `/` or `\\`), `.` or `..`. Two files of one reply may share a name.",
+      "type": "string",
+      "$ref": "#/$defs/label",
+      "maxLength": 128,
+      "maxUtf8Bytes": 255,
+      "not": { "anyOf": [{ "pattern": "[/\\\\]" }, { "enum": [".", ".."] }] }
+    },
+    "mediaType": {
+      "description": "An attached file's media type, `type/subtype` in lowercase without parameters: what the user's browser said, or `application/octet-stream` when it said nothing. Informational only: nobody checks it against the file, and the file is always downloaded as `application/octet-stream`.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$"
+    },
+    "attachment": {
+      "description": "A file the user attached to a reply on rakumux.com: its id (for `GET /api/v1/feed/replies/attachments/{id}`), name, media type and size.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "media_type", "size"],
+      "properties": {
+        "id": { "$ref": "#/$defs/ulid" },
+        "name": { "$ref": "#/$defs/fileName" },
+        "media_type": { "$ref": "#/$defs/mediaType" },
+        "size": {
+          "description": "The file's length in bytes, 1 to 4 MiB: what the download's body holds.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4194304
+        }
+      }
+    },
     "replyStatus": {
       "description": "`pending` until the entry's machine types it into the session (`delivered`) or can't (`failed`); `expired` when it stayed pending an hour.",
       "type": "string",
       "enum": ["pending", "delivered", "failed", "expired"]
     },
     "replyFailure": {
-      "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`), or the session refused the text (`refused`).",
+      "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`), the session refused the text (`refused`), or a file attached to it couldn't be fetched or wasn't what the reply said (`attachment_unavailable`). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
-      "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused"]
+      "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused", "attachment_unavailable"]
     },
     "reply": {
       "description": "What the user wrote back to a feed entry, for its machine to type into the entry's session, and where it is up to; or, without `entry` and `thread`, a session message: what the user wrote to a session itself, which has no answer to reply to yet. The agent's next reply there names it as `reply_to`.",
@@ -266,6 +297,13 @@
         "agent": { "$ref": "#/$defs/agent" },
         "conversation_id": { "description": "The chat a reply answers; on a session message, the chat the session showed when it was written, when it said.", "$ref": "#/$defs/conversationId" },
         "text": { "$ref": "#/$defs/promptText" },
+        "attachments": {
+          "description": "Files the user attached on rakumux.com, in the order attached; absent without any. While the reply is pending, its machine fetches each one from `GET /api/v1/feed/replies/attachments/{id}` (authorized like its other feed requests), saves it and types its path after the text; when one can't be fetched or isn't `size` bytes, it types nothing and reports `attachment_unavailable`. The cloud sends a reply with attachments only to a reader whose machine advertises `reply_attachments` (`sessions-upload` `capabilities`), so older machines never see one. Still listed once the reply stops being pending and its files are gone.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/attachment" }
+        },
         "from": { "description": "The machine it was written on; absent when written on rakumux.com.", "$ref": "#/$defs/machine" },
         "status": { "$ref": "#/$defs/replyStatus" },
         "failure": { "$ref": "#/$defs/replyFailure" },

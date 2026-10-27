@@ -342,7 +342,7 @@ impl App {
     }
 
     /// `s`: a new AI summary of the selected session (live ones only; none is
-    /// selected under the Feed tab).
+    /// selected in the Feed view).
     pub fn summarize_selected(&mut self) {
         if self.feed_shown() {
             return;

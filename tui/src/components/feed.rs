@@ -749,6 +749,9 @@ fn reply_state(reply: &FeedReply) -> &'static str {
             "not sent: its machine doesn't take replies from rakumux.com"
         }
         (ReplyStatus::Failed, Some(ReplyFailure::Refused)) => "not sent: the session refused it",
+        (ReplyStatus::Failed, Some(ReplyFailure::AttachmentUnavailable)) => {
+            "not sent: its files couldn't be fetched"
+        }
         (ReplyStatus::Failed, _) => "not sent",
         (ReplyStatus::Expired, _) => "not sent: its agent didn't wait for an hour",
         (ReplyStatus::Unknown, _) => "",
@@ -949,7 +952,8 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::wrap;
+    use super::{reply_state, wrap};
+    use rakumux_sensagent::feed::{FeedReply, ReplyFailure, ReplyStatus};
 
     #[test]
     fn replies_wrap_at_words_and_keep_their_line_breaks() {
@@ -959,5 +963,36 @@ mod tests {
         );
         assert_eq!(wrap("abcdefghij", 4), ["abcd", "efgh", "ij"]);
         assert_eq!(wrap("", 10), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_reply_whose_files_couldnt_be_fetched_says_so() {
+        let mut reply = FeedReply {
+            seq: 2,
+            id: "R1".into(),
+            entry: "E1".into(),
+            thread: "E1".into(),
+            machine: "lab-box".into(),
+            session_id: "Z".into(),
+            session_name: "parser".into(),
+            folder: None,
+            agent: "claude-code".into(),
+            conversation_id: "c".into(),
+            text: "See the screenshot.".into(),
+            attachments: Vec::new(),
+            from: None,
+            status: ReplyStatus::Failed,
+            failure: Some(ReplyFailure::AttachmentUnavailable),
+            response: None,
+            created_at: 1,
+            status_at: 1,
+        };
+        assert_eq!(
+            reply_state(&reply),
+            "not sent: its files couldn't be fetched"
+        );
+        // A reason this build doesn't know is a failure without one.
+        reply.failure = Some(ReplyFailure::Unknown);
+        assert_eq!(reply_state(&reply), "not sent");
     }
 }

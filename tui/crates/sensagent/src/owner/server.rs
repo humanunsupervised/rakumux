@@ -397,8 +397,12 @@ fn handle(
             })
             .map_err(|error| OwnerErrorCode::from(&error)),
         OwnerRequest::FeedReply { .. } => Err(OwnerErrorCode::InvalidRequest),
-        OwnerRequest::Feed { after, generation } => client
-            .feed(after, generation)
+        OwnerRequest::Feed {
+            after,
+            generation,
+            background,
+        } => client
+            .feed(after, generation, !background)
             .map(|feed| OwnerResponse::Feed { feed })
             .map_err(|error| OwnerErrorCode::from(&error)),
     };

@@ -91,6 +91,10 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         }
         KeyAction::NextSession => app.cycle_session(1),
         KeyAction::PreviousSession => app.cycle_session(-1),
+        KeyAction::Feed => {
+            leave(app);
+            app.toggle_feed_view();
+        }
         KeyAction::NextTab | KeyAction::PreviousTab => {
             leave(app);
             app.switch_tab(if action == KeyAction::NextTab { 1 } else { -1 });
@@ -129,6 +133,8 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             });
         }
         KeyAction::NewSession => app.open_new_session(),
+        // The list hides beside a session too: the mode stays.
+        KeyAction::HideList => app.toggle_list(),
         KeyAction::FilterFolders => {
             leave(app);
             app.open_folder_picker();

@@ -54,7 +54,7 @@ impl Icons {
         }
     }
 
-    /// Marks the list's Feed tab: what agents said when they finished.
+    /// Marks the Feed view: what agents said when they finished.
     pub fn feed(self) -> &'static str {
         match self {
             Icons::Plain => "≡",

@@ -183,9 +183,13 @@ pub fn serve(
         .map_err(|_| ServiceError::Setup)?;
 
     let api: Arc<dyn SessionApi> = Arc::new(connect_daemon(home, version)?);
+    // Agents are given these files' paths: absolute, whatever the home says.
+    let uploads = layout.uploads_dir();
+    let uploads = std::path::absolute(&uploads).unwrap_or(uploads);
     let mut refresher = StatusRefresher::new(service)
         .following_account_switch()
-        .with_chat_cursors(layout.status_dir().join("chats.json"));
+        .with_chat_cursors(layout.status_dir().join("chats.json"))
+        .with_uploads(uploads);
     if let Some(TurnSettingsSource(read)) = config.turn_settings {
         refresher = refresher.with_turn_settings(move || read());
     }
