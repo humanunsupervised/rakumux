@@ -34,6 +34,21 @@
       "not": {
         "pattern": "[\\p{Cc}\\p{Cf}\\p{Cs}\\p{Zl}\\p{Zp}\\p{Default_Ignorable_Code_Point}]"
       }
+    },
+    "sessionTitle": {
+      "description": "A short session title in plain text: one line of 1–60 Unicode codepoints and at most 240 UTF-8 bytes, with visible content, no whitespace at either end and no trailing period. The same controls as statusText are rejected.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "maxUtf8Bytes": 240,
+      "pattern": "[\\p{L}\\p{N}\\p{P}\\p{S}]",
+      "not": {
+        "anyOf": [
+          { "pattern": "[\\p{Cc}\\p{Cf}\\p{Cs}\\p{Zl}\\p{Zp}\\p{Default_Ignorable_Code_Point}]" },
+          { "pattern": "^\\s|\\s$" },
+          { "pattern": "\\.$" }
+        ]
+      }
     }
   }
 }

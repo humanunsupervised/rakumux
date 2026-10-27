@@ -6,6 +6,12 @@
     "response": { "version": 1, "request_id": "synthetic-001", "status_text": "Adding validation tests" }
   },
   {
+    "name": "matching_public_id_titled",
+    "valid": true,
+    "request": { "version": 1, "request_id": "synthetic-001", "context": { "lifecycle": "done", "reported_text": "Checking" } },
+    "response": { "version": 1, "request_id": "synthetic-001", "status_text": "Adding validation tests", "title": "Validation tests" }
+  },
+  {
     "name": "different_public_id",
     "valid": false,
     "request": { "version": 1, "request_id": "synthetic-001", "context": { "lifecycle": "working", "reported_text": "Checking" } },

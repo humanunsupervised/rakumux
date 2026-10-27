@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:rakumux:ai:session-status:v1:success",
   "title": "POST /api/v1/ai/session-status success",
-  "$comment": "The consumer must separately compare request_id with the outstanding request. JSON Schema validates one instance, not the relationship between two messages.",
+  "$comment": "The consumer must separately compare request_id with the outstanding request. JSON Schema validates one instance, not the relationship between two messages. `title` is sent only to a request whose URL has the query title=1: clients without it reject every field they don't know.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "request_id", "status_text"],
@@ -16,6 +16,9 @@
     },
     "status_text": {
       "$ref": "urn:rakumux:ai:session-status:v1:common#/$defs/statusText"
+    },
+    "title": {
+      "$ref": "urn:rakumux:ai:session-status:v1:common#/$defs/sessionTitle"
     }
   }
 }

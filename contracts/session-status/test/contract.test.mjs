@@ -102,6 +102,7 @@ for (const fixture of fixtures("correlation")) {
 test("correlation: matching IDs cannot bypass either message schema", () => {
   assert.equal(validateSuccessForRequest({ ...request, version: 2 }, success), false);
   assert.equal(validateSuccessForRequest(request, { ...success, status_text: "\n" }), false);
+  assert.equal(validateSuccessForRequest(request, { ...success, title: "Tests." }), false);
   assert.equal(validateSuccessForRequest(null, success), false);
   assert.equal(validateSuccessForRequest(request, null), false);
 });
@@ -177,6 +178,10 @@ test("agreed field and body limits are explicit in the schema", () => {
   assert.equal(context.recent_output.maxUtf8Bytes, 8192);
   assert.equal(schemas.request["x-maxBodyBytes"], 16384);
   assert.equal(schemas.common.$defs.statusText.maxLength, 140);
+  assert.equal(schemas.common.$defs.sessionTitle.maxLength, 60);
+  assert.equal(schemas.common.$defs.sessionTitle.maxUtf8Bytes, 240);
+  assert.equal(schemas.success.properties.title.$ref.endsWith("#/$defs/sessionTitle"), true);
+  assert.equal(schemas.success.required.includes("title"), false);
   assert.equal(context.reported_text.maxLength, undefined);
   assert.equal(context.recent_output.maxLength, undefined);
 });
@@ -193,7 +198,23 @@ test("both context fields can simultaneously reach their byte caps", () => {
 test("all C0, DEL and C1 output controls are rejected", () => {
   const codepoints = [...Array(32).keys(), ...Array.from({ length: 33 }, (_, index) => index + 127)];
   for (const codepoint of codepoints) {
-    assert.equal(validators.success({ ...success, status_text: `Checking${String.fromCodePoint(codepoint)}` }), false);
+    const text = `Checking${String.fromCodePoint(codepoint)}output`;
+    assert.equal(validators.success({ ...success, status_text: text }), false);
+    assert.equal(validators.success({ ...success, title: text }), false);
+  }
+});
+
+test("a title is optional and never required for status text", () => {
+  assert.equal(validators.success(success), true);
+  assert.equal(validators.success({ ...success, title: "Validation tests" }), true);
+});
+
+test("a title ends without a period or whitespace", () => {
+  for (const title of ["Tests.", "Tests. ", " Tests", "Tests\u3000", "Tests\u2003", "."]) {
+    assert.equal(validators.success({ ...success, title }), false, JSON.stringify(title));
+  }
+  for (const title of ["Tests!", "v0.1.24", "Tests…", "Tests。", "Fix a.b"]) {
+    assert.equal(validators.success({ ...success, title }), true, JSON.stringify(title));
   }
 });
 
@@ -204,7 +225,9 @@ test("additional invisible and bidi controls are rejected", () => {
     0xffa0, 0x1bca0, 0xe0001, 0xe0100,
   ];
   for (const codepoint of codepoints) {
-    assert.equal(validators.success({ ...success, status_text: `Checking${String.fromCodePoint(codepoint)}` }), false);
+    const text = `Checking${String.fromCodePoint(codepoint)}output`;
+    assert.equal(validators.success({ ...success, status_text: text }), false);
+    assert.equal(validators.success({ ...success, title: text }), false);
   }
 });
 

@@ -21,6 +21,12 @@
   { "name": "status_unicode_over", "schema": "success", "field": "status_text", "text": "😀", "count": 141, "suffix": "", "valid": false },
   { "name": "status_combining_codepoints_exact", "schema": "success", "field": "status_text", "text": "é", "count": 70, "suffix": "", "valid": true },
   { "name": "status_combining_not_graphemes", "schema": "success", "field": "status_text", "text": "é", "count": 70, "suffix": "a", "valid": false },
+  { "name": "title_ascii_exact", "schema": "success", "field": "title", "text": "a", "count": 60, "suffix": "", "valid": true },
+  { "name": "title_ascii_over", "schema": "success", "field": "title", "text": "a", "count": 61, "suffix": "", "valid": false },
+  { "name": "title_codepoints_not_utf16_units", "schema": "success", "field": "title", "text": "😀", "count": 60, "suffix": "", "valid": true },
+  { "name": "title_unicode_over", "schema": "success", "field": "title", "text": "😀", "count": 61, "suffix": "", "valid": false },
+  { "name": "title_three_byte_exact", "schema": "success", "field": "title", "text": "界", "count": 60, "suffix": "", "valid": true },
+  { "name": "title_combining_not_graphemes", "schema": "success", "field": "title", "text": "é", "count": 30, "suffix": "a", "valid": false },
   { "name": "error_message_over_codepoints", "schema": "error", "field": "message", "text": "a", "count": 97, "suffix": "", "valid": false },
   { "name": "error_message_over_bytes", "schema": "error", "field": "message", "text": "😀", "count": 25, "suffix": "", "valid": false }
 ]

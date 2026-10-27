@@ -14,10 +14,19 @@ HTTP server, authentication implementation, model client or local runtime.
   and **8192 UTF-8 bytes**, respectively. At least one must contain a Unicode
   letter, number, punctuation mark or symbol. An unused source may be empty.
   Lifecycle/activity alone, whitespace and combining marks alone are insufficient.
-- [Success](success.schema.json): `{version:1, request_id, status_text}`.
+- [Success](success.schema.json): `{version:1, request_id, status_text, title?}`.
   `status_text` is one nonblank line of at most **140 Unicode codepoints**, not
   UTF-16 units, grapheme clusters, bytes or display columns. Text is advisory;
-  it cannot rename a session or change authoritative lifecycle.
+  it cannot change authoritative lifecycle.
+- `title` is a short title for the session, in plain text: one line of **1–60
+  codepoints** and at most **240 UTF-8 bytes**, with visible content, no
+  whitespace at either end, no trailing period (`.`), and the same controls
+  rejected as `status_text`. It is sent only when the request URL asks for it
+  with the query `title=1` (`POST /api/v1/ai/session-status?title=1`): clients
+  without it reject any field they don't know. A service that doesn't know the
+  query ignores it and sends no `title`; one that was asked may still leave it
+  out. The client names the session with it under its own rules (never over a
+  name the user gave); the service never renames anything.
 - [Error](error.schema.json): `{error:{code, message, retry_after_seconds?}}`.
   Each code has exactly one static message in the schema. Messages are additionally
   capped at 96 codepoints/UTF-8 bytes. Optional retry delays are integers **1–3600**,
