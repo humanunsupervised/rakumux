@@ -47,7 +47,8 @@ use crate::app::{app_version, App, AppOptions, ExecMode, Settings};
 /// at once.
 const FRAME: Duration = Duration::from_millis(16);
 const TICK_IDLE: Duration = Duration::from_secs(1);
-const TICK_ANIMATING: Duration = Duration::from_millis(100);
+/// While something animates: a spinner frame, so none is skipped.
+const TICK_ANIMATING: Duration = components::utils::SPINNER_FRAME;
 
 enum RunOutcome {
     Exit,

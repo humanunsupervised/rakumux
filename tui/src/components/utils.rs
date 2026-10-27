@@ -37,7 +37,13 @@ fn fade_by(buf: &mut Buffer, area: Rect, amount: f32) {
     }
 }
 
-/// Shared 100 ms spinner for busy sessions and background operations.
+/// How long each frame of the shared spinner shows. The event loop ticks
+/// this often while something animates (`main.rs`'s `TICK_ANIMATING`), so
+/// every frame is drawn.
+pub const SPINNER_FRAME: std::time::Duration = std::time::Duration::from_millis(70);
+
+/// The shared spinner for busy sessions and background operations: the
+/// next frame every [`SPINNER_FRAME`].
 pub fn get_spinner_char() -> &'static str {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -48,7 +54,7 @@ pub fn get_spinner_char() -> &'static str {
 
 fn spinner_frame(milliseconds: u128) -> &'static str {
     let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let index = ((milliseconds / 100) % spinner_chars.len() as u128) as usize;
+    let index = ((milliseconds / SPINNER_FRAME.as_millis()) % spinner_chars.len() as u128) as usize;
     spinner_chars[index]
 }
 
@@ -190,12 +196,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_shared_working_spinner_advances_every_100_ms() {
-        assert_eq!(spinner_frame(0), spinner_frame(99));
-        for frame in 0..10 {
-            assert_ne!(spinner_frame(frame * 100), spinner_frame((frame + 1) * 100));
+    fn the_shared_working_spinner_advances_every_70_ms() {
+        let frame = SPINNER_FRAME.as_millis();
+        assert_eq!(frame, 70);
+        assert_eq!(spinner_frame(0), spinner_frame(frame - 1));
+        for n in 0..10 {
+            assert_ne!(spinner_frame(n * frame), spinner_frame((n + 1) * frame));
         }
-        assert_eq!(spinner_frame(0), spinner_frame(1000));
+        // Ten frames, then round again.
+        assert_eq!(spinner_frame(0), spinner_frame(10 * frame));
     }
 
     #[test]
