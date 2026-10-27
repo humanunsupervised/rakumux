@@ -8,9 +8,9 @@
 //! Each session is a compact cell after a blank row: its name, then its age
 //! and its mark (an agent's activity, else its status) at the right; then the
 //! agent's latest output, when the daemon has one; then its program and
-//! state; then the folder it works in now, one line (its path, its branch)
-//! behind a blue heavy bar, with `▸` when it has worked in other places,
-//! which open under it as pairs of lines (`app::places`). A row's text
+//! state; then the folder it works in now, one line (its path, its branch),
+//! with `▸` when it has worked in other places, which open under it as
+//! pairs of lines a step further in (`app::places`). A row's text
 //! starts where its header's does, and the gutter left of it, where the
 //! header's mark sits, holds the row's marks: the pin toggle under the
 //! pointer, the summary's ↻, the places' `▸`/`▾` and the copy mark.
@@ -97,27 +97,29 @@ const INDENT: usize = 3;
 /// its header's mark sits.
 const GUTTER: usize = 2;
 
-/// How much further in a row under a sub-header (a worktree's, a read
-/// period's) starts, as that header's text does.
+/// How much further in a row under a worktree's header starts, as that
+/// header's text does.
 const NEST: usize = 2;
 
 /// Columns left of a row's gutter: the drag mark's, in its last one. A row
-/// under a sub-header is `nested`.
+/// under a worktree's header is `nested`.
 fn row_indent(nested: bool) -> usize {
     INDENT - GUTTER + if nested { NEST } else { 0 }
 }
 
-/// For each of `rows`, whether it's under a sub-header: a worktree's inside
-/// its folder, or a read period's under ready.
+/// For each of `rows`, whether it's under a worktree's header inside its
+/// folder. Ready's read periods are in line with ready's header, and so
+/// are their rows.
 fn nesting(rows: &[ListRow]) -> Vec<bool> {
     let mut nested = false;
     rows.iter()
         .map(|row| {
             match row {
-                ListRow::WorktreeHeader(..) | ListRow::ReadPeriodHeader(_) => nested = true,
+                ListRow::WorktreeHeader(..) => nested = true,
                 ListRow::Folders
                 | ListRow::FolderHeader(_)
                 | ListRow::SectionHeader(_)
+                | ListRow::ReadPeriodHeader(_)
                 | ListRow::PinnedHeader
                 | ListRow::NewSession => nested = false,
                 ListRow::Session(_) => return nested,
@@ -318,10 +320,10 @@ pub fn worktree_header_line(
     ])
 }
 
-/// The header of one of ready's sub-sections, indented under ready like a
-/// worktree's under its folder: a clock and when its sessions were last
-/// read (a pin for the pinned ones), a rule, then how many it has, in
-/// `width` columns.
+/// The header of one of ready's sub-sections, in line with ready's: a
+/// clock where ready's mark is and when its sessions were last read where
+/// its name is (a pin for the pinned ones), a rule, then how many it has,
+/// in `width` columns.
 pub fn read_period_header_line(
     app: &App,
     period: ReadPeriod,
@@ -330,12 +332,12 @@ pub fn read_period_header_line(
 ) -> Line<'static> {
     let p = theme::palette();
     let count = sessions_label(app.list.read_period_count(period));
-    // "   ◷ label ─── count": the indent, and at least two rule columns.
+    // " ◷ label ─── count": as a status's header.
     let clock = match period {
         ReadPeriod::Pinned => format!("{PIN_MARK} "),
         _ => format!("{} ", app.icons().clock()),
     };
-    let fixed = 5 + str_width(&clock) + str_width(&count);
+    let fixed = 3 + str_width(&clock) + str_width(&count);
     let label = truncate(period.label(), width.saturating_sub(fixed + 2));
     let rule = width.saturating_sub(fixed + str_width(&label));
     let (label_color, rule_color) = if selected {
@@ -344,7 +346,7 @@ pub fn read_period_header_line(
         (p.label_blue, p.border_dim)
     };
     Line::from(vec![
-        Span::raw("   "),
+        Span::raw(" "),
         // The clock in the amber its sessions' marks have.
         Span::styled(clock, read_period_style(period)),
         Span::styled(
@@ -537,14 +539,9 @@ const PLACES_OPEN: &str = "▾";
 /// In the gutter of a place under the pointer or the list keys (just left
 /// of the current place's `▸`): a click or tap (`y`) copies its path.
 const COPY_MARK: &str = "⧉";
-/// Left of the place a session works now, in the accent: heavier than the
-/// others' bar.
-const CURRENT_BAR: &str = "┃";
-/// Left of both lines of each of its other places.
-const PLACE_BAR: &str = "│";
-/// Columns of a place's bar and the gap after it, in the row's text
-/// column.
-const PLACE_BAR_WIDTH: usize = 2;
+/// How much further in than the row's text (where the current place is)
+/// its other places and the rules between them start.
+const PLACE_INDENT: usize = 2;
 /// Between the current place's path and its branch.
 const PLACE_GAP: &str = "  ";
 /// The fewest columns the current place's branch is cut to (`⎇ fea…`);
@@ -597,15 +594,15 @@ fn fit_place(path: &str, branch: &str, room: usize) -> (String, String) {
 }
 
 /// A session's place lines, under its facts, after the gutter. First the
-/// place it works in now, one line behind the accent's heavy `┃` in the
-/// row's text column: its path, then its branch (`▸` in the gutter when it
-/// has worked in other places). While its places are open (`▾`), each of
-/// the others (where it changed files: every place is), most recent first,
-/// a pair of lines behind a muted `│` in the same column: its path, then its
-/// branch and when; a rule between two. The place the list keys are on (in
+/// place it works in now, one line in the row's text column: its path, then
+/// its branch (`▸` in the gutter when it has worked in other places). While
+/// its places are open (`▾`), each of the others (where it changed files:
+/// every place is), most recent first, a pair of lines [`PLACE_INDENT`]
+/// further in: its path, then its branch and when; a rule above each. No
+/// place has a mark or bar left of it. The place the list keys are on (in
 /// the `selected` session) and the `hovered` one show the copy mark in their
-/// gutter (the current one's left of its `▸`) and their path brighter, an
-/// open one's bar a shade brighter too; the list keys' path is bold.
+/// gutter (the current one's left of its `▸`) and their path brighter; the
+/// list keys' path is bold.
 fn place_content(
     app: &App,
     session: &SessionView,
@@ -616,8 +613,10 @@ fn place_content(
 ) -> PlaceLines {
     let p = theme::palette();
     let icons = app.icons();
-    // After the gutter and the bar.
-    let inner = width.saturating_sub(GUTTER + PLACE_BAR_WIDTH);
+    // The current place's room, after the gutter, and the others', a step
+    // further in.
+    let text = width.saturating_sub(GUTTER);
+    let inner = text.saturating_sub(PLACE_INDENT);
     let (text_color, quiet) = if selected {
         (p.text_primary, p.neutral_gray)
     } else {
@@ -628,16 +627,12 @@ fn place_content(
     // A place's path under the pointer or the list keys.
     let marked_style = Style::default().fg(p.text_bright);
     let blank_slot = || Span::raw(" ".repeat(GUTTER));
+    // The others' step in.
+    let indent = || Span::raw(" ".repeat(PLACE_INDENT));
     let copy_slot = || {
         Span::styled(
             format!("{COPY_MARK:<GUTTER$}"),
             Style::default().fg(p.accent_primary),
-        )
-    };
-    let bar = |mark: &str, color| {
-        Span::styled(
-            format!("{mark:<PLACE_BAR_WIDTH$}"),
-            Style::default().fg(color),
         )
     };
     let branch_of = |git: Option<&session_core::model::GitInfo>| {
@@ -665,18 +660,14 @@ fn place_content(
     let (path, branch) = fit_place(
         &place_label(&session.scope, current),
         &branch_of(session.git.as_ref()),
-        inner,
+        text,
     );
     let path_style = if hovered_current {
         marked_style
     } else {
         label_style
     };
-    let mut line = vec![
-        slot,
-        bar(CURRENT_BAR, p.accent_primary),
-        Span::styled(path, path_style),
-    ];
+    let mut line = vec![slot, Span::styled(path, path_style)];
     if !branch.is_empty() {
         line.push(Span::raw(PLACE_GAP));
         line.push(Span::styled(branch, branch_style));
@@ -703,20 +694,11 @@ fn place_content(
         .and_then(|focus| listed.iter().position(|p| p.path == focus));
     for (index, place) in listed.into_iter().enumerate() {
         lines.push(vec![
-            Span::raw(" ".repeat(GUTTER + PLACE_BAR_WIDTH)),
+            Span::raw(" ".repeat(GUTTER + PLACE_INDENT)),
             Span::styled(PLACE_RULE.repeat(inner), Style::default().fg(p.border_dim)),
         ]);
         let start = lines.len();
         let marked = focus == Some(index) || hovered == Some(PlaceRef::Listed(index));
-        // Never the accent: that's the current place's bar.
-        let place_bar = bar(
-            PLACE_BAR,
-            if marked {
-                p.neutral_gray
-            } else {
-                p.text_subtle
-            },
-        );
         let path_style = if focus == Some(index) {
             marked_style.add_modifier(Modifier::BOLD)
         } else if marked {
@@ -727,7 +709,7 @@ fn place_content(
         let label = place_label(&session.scope, &place.path);
         lines.push(vec![
             if marked { copy_slot() } else { blank_slot() },
-            place_bar.clone(),
+            indent(),
             Span::styled(truncate_start(&label, inner), path_style),
         ]);
         // Under it its branch, and at the right its age; short of room the
@@ -740,7 +722,7 @@ fn place_content(
         let gap = inner.saturating_sub(str_width(&branch) + str_width(&age));
         lines.push(vec![
             blank_slot(),
-            place_bar,
+            indent(),
             Span::styled(branch, branch_style),
             Span::raw(" ".repeat(gap)),
             Span::styled(age, branch_style),
@@ -1446,20 +1428,10 @@ mod tests {
     }
 
     #[test]
-    fn where_a_session_works_now_is_one_line_behind_a_blue_heavy_bar_with_its_toggle() {
+    fn where_a_session_works_now_is_one_line_in_the_rows_text_column_with_its_toggle() {
         use crate::app::testing::harness;
         let p = theme::palette();
         let mut h = harness(vec![]);
-        let bars = |lines: &[Vec<Span>], mark: &str| -> Vec<Option<ratatui::style::Color>> {
-            lines
-                .iter()
-                .map(|line| {
-                    line.iter()
-                        .find(|span| span.content.starts_with(mark))
-                        .and_then(|span| span.style.fg)
-                })
-                .collect()
-        };
         // Nowhere else: its path and branch on one line, no toggle in the
         // gutter.
         let alone = with_places(&[("/repo", "main", 5, false)]);
@@ -1471,28 +1443,29 @@ mod tests {
             places,
             ..
         } = place_content(&h.app, &alone, 40, false, None, 1000);
-        assert_eq!(text(&lines), ["  ┃ repo  ⎇ main"]);
+        assert_eq!(text(&lines), ["  repo  ⎇ main"]);
         assert_eq!(toggle, None);
         assert!(!copy_beside_toggle);
         assert_eq!(current, 0..1);
         assert!(places.is_empty());
-        assert_eq!(bars(&lines, "┃"), [Some(p.accent_primary)]);
+        // Nothing left of its path but the gutter.
+        assert_eq!(lines[0][1].content, "repo");
+        assert_eq!(lines[0][1].style.fg, Some(p.text_muted));
         // Under the pointer, the copy mark in the gutter and its path
-        // brighter; the bar stays the accent.
+        // brighter.
         let PlaceLines {
             lines,
             copy_beside_toggle,
             ..
         } = place_content(&h.app, &alone, 40, false, Some(PlaceRef::Current), 1000);
-        assert_eq!(text(&lines), ["⧉ ┃ repo  ⎇ main"]);
+        assert_eq!(text(&lines), ["⧉ repo  ⎇ main"]);
         assert!(!copy_beside_toggle);
         assert_eq!(lines[0][0].style.fg, Some(p.accent_primary));
-        assert_eq!(lines[0][2].style.fg, Some(p.text_bright));
-        assert_eq!(bars(&lines, "┃"), [Some(p.accent_primary)]);
+        assert_eq!(lines[0][1].style.fg, Some(p.text_bright));
         // Opened, it stays alone: there's nothing else to list.
         h.app.places_open.insert(alone.id.clone());
         let lines = place_content(&h.app, &alone, 40, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["  ┃ repo  ⎇ main"]);
+        assert_eq!(text(&lines), ["  repo  ⎇ main"]);
         h.app.places_open.clear();
 
         // Elsewhere too: ▸ in the gutter, which opens and closes the list;
@@ -1513,7 +1486,7 @@ mod tests {
             copy_beside_toggle,
             ..
         } = place_content(&h.app, &moved, 40, false, None, 1000);
-        assert_eq!(text(&lines), ["▸ ┃ worktrees/fix  ⎇ fix"]);
+        assert_eq!(text(&lines), ["▸ worktrees/fix  ⎇ fix"]);
         assert_eq!(toggle, Some(0..2));
         assert!(!copy_beside_toggle);
         assert_eq!(lines[0][0].style.fg, Some(p.accent_primary));
@@ -1522,20 +1495,20 @@ mod tests {
             copy_beside_toggle,
             ..
         } = place_content(&h.app, &moved, 40, false, Some(PlaceRef::Current), 1000);
-        assert_eq!(text(&lines), ["▸ ┃ worktrees/fix  ⎇ fix"]);
+        assert_eq!(text(&lines), ["▸ worktrees/fix  ⎇ fix"]);
         assert!(copy_beside_toggle);
         // Narrow: the path is cut at its start first, then the branch goes.
         let lines = place_content(&h.app, &moved, 20, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ ┃ …rees/fix  ⎇ fix"]);
-        let lines = place_content(&h.app, &moved, 16, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ ┃ …rktrees/fix"]);
+        assert_eq!(text(&lines), ["▸ …ktrees/fix  ⎇ fix"]);
+        let lines = place_content(&h.app, &moved, 14, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["▸ …rktrees/fix"]);
         // Working somewhere none of its places is (its terminal's
         // directory, outside a repository): every place is another.
         let mut away = moved.clone();
         away.git = None;
         away.cwd = "/srv/scratch".into();
         let lines = place_content(&h.app, &away, 40, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ ┃ /srv/scratch"]);
+        assert_eq!(text(&lines), ["▸ /srv/scratch"]);
         for width in [8, 12, 16, 24, 40, 80] {
             let lines = place_content(&h.app, &moved, width, true, None, 1000).lines;
             assert_eq!(lines.len(), 1, "{width}");
@@ -1592,7 +1565,7 @@ mod tests {
     }
 
     #[test]
-    fn rows_under_a_sub_header_are_nested() {
+    fn only_rows_under_a_worktrees_header_are_nested() {
         use crate::app::grouping::{AppKey, ReadPeriod};
         let session = crate::app::testing::view("A", "a", 0);
         let folder = ScopeRoot::from_canonical("/repo".into());
@@ -1612,12 +1585,15 @@ mod tests {
             ListRow::Session(&session),
             ListRow::NewSession,
         ];
+        // Ready's read periods are in line with ready, and so are their
+        // rows.
         assert_eq!(
             nesting(&rows),
-            [false, false, false, false, false, false, true, false, false, false, true, false]
+            [false, false, false, false, false, false, true, false, false, false, false, false]
         );
         // A top-level row's text in the header's text column, its gutter
-        // where the header's mark is; a nested one's in the sub-header's.
+        // where the header's mark is; a nested one's in the worktree
+        // header's.
         assert_eq!(row_indent(false) + GUTTER, INDENT);
         assert_eq!(row_indent(true) + GUTTER, INDENT + NEST);
     }
@@ -1642,20 +1618,21 @@ mod tests {
             focus,
             ..
         } = place_content(&h.app, &session, 40, false, None, 1000);
-        // The place it works in now is the first line, not again under it;
-        // the others' bars in its bar's column.
+        // The place it works in now is the first line, not again under it,
+        // its path in the row's text column; the others a step further in,
+        // with nothing left of them.
         let rule = |room: usize| format!("    {}", "─".repeat(room));
         let branch =
-            |left: &str, gap: usize, age: &str| format!("  │ {left}{}{age}", " ".repeat(gap));
+            |left: &str, gap: usize, age: &str| format!("    {left}{}{age}", " ".repeat(gap));
         assert_eq!(
             text(&lines),
             [
-                "▾ ┃ repo  ⎇ main".to_string(),
+                "▾ repo  ⎇ main".to_string(),
                 rule(36),
-                "  │ worktrees/fix".into(),
+                "    worktrees/fix".into(),
                 branch("⎇ fix", 28, "now"),
                 rule(36),
-                "  │ /srv/other".into(),
+                "    /srv/other".into(),
                 branch("⎇ dev", 29, "2h"),
             ]
         );
@@ -1663,45 +1640,38 @@ mod tests {
         assert_eq!(current, 0..1);
         assert_eq!(places, [2..4, 5..7]);
         assert_eq!(focus, None);
-        let bar = |lines: &[Vec<Span>], line: usize| {
-            lines[line]
-                .iter()
-                .find(|span| span.content == "│ " || span.content == "┃ ")
-                .and_then(|span| span.style.fg)
+        // Nothing left of any place's text but the gutter and, for the
+        // others, blanks.
+        let blank_beside = |lines: &[Vec<Span>], line: usize| {
+            let span = &lines[line][1];
+            span.content == "  " && span.style == Style::default()
         };
-        assert_eq!(bar(&lines, 0), Some(p.accent_primary));
+        assert_eq!(lines[0].len(), 4, "the toggle, path, gap and branch");
         for line in [2, 3, 5, 6] {
-            assert_eq!(bar(&lines, line), Some(p.text_subtle), "{line}");
+            assert!(blank_beside(&lines, line), "{line}");
         }
         let rule_span = lines[1].iter().find(|span| span.content.starts_with('─'));
         assert_eq!(rule_span.and_then(|span| span.style.fg), Some(p.border_dim));
         // Under the pointer, on either of its lines, a place shows the copy
-        // mark in its gutter and its path brighter, its bar a shade brighter
-        // down both lines: never the accent, which is the current place's.
+        // mark in its gutter and its path brighter.
         let lines =
             place_content(&h.app, &session, 40, false, Some(PlaceRef::Listed(1)), 1000).lines;
         let marked = text(&lines);
-        assert_eq!(marked[5], "⧉ │ /srv/other");
+        assert_eq!(marked[5], "⧉   /srv/other");
         assert_eq!(marked[6], branch("⎇ dev", 29, "2h"));
         assert!(!marked[2].contains('⧉'));
         assert_eq!(lines[5][0].style.fg, Some(p.accent_primary));
         assert_eq!(lines[5][2].style.fg, Some(p.text_bright));
         assert!(!lines[5][2].style.add_modifier.contains(Modifier::BOLD));
-        assert_eq!(bar(&lines, 5), Some(p.neutral_gray));
-        assert_eq!(bar(&lines, 6), Some(p.neutral_gray));
-        assert_eq!(bar(&lines, 2), Some(p.text_subtle));
-        assert_eq!(bar(&lines, 0), Some(p.accent_primary));
+        assert!(blank_beside(&lines, 5) && blank_beside(&lines, 6));
         // The one the list keys are on (in the selected session) too, its
         // path bright and bold.
         h.app.list.select(Selection::Session(session.id.clone()));
         h.app.list.select_place(Some("/repo/worktrees/fix".into()));
         let PlaceLines { lines, focus, .. } = place_content(&h.app, &session, 40, true, None, 1000);
         assert_eq!(focus, Some(0));
-        assert_eq!(text(&lines)[2], "⧉ │ worktrees/fix");
-        assert_eq!(bar(&lines, 2), Some(p.neutral_gray));
-        assert_eq!(bar(&lines, 3), Some(p.neutral_gray));
-        assert_eq!(bar(&lines, 5), Some(p.text_subtle));
-        assert_eq!(bar(&lines, 0), Some(p.accent_primary));
+        assert_eq!(text(&lines)[2], "⧉   worktrees/fix");
+        assert!(blank_beside(&lines, 2) && blank_beside(&lines, 3));
         let path = lines[2].last().unwrap();
         assert_eq!(path.style.fg, Some(p.text_bright));
         assert!(path.style.add_modifier.contains(Modifier::BOLD));
@@ -1712,12 +1682,12 @@ mod tests {
         assert_eq!(
             text(&lines),
             [
-                "▾ ┃ repo  ⎇ main".to_string(),
+                "▾ repo  ⎇ main".to_string(),
                 rule(12),
-                "  │ …rktrees/fix".into(),
+                "    …rktrees/fix".into(),
                 branch("⎇ fix", 4, "now"),
                 rule(12),
-                "  │ /srv/other".into(),
+                "    /srv/other".into(),
                 branch("⎇ dev", 5, "2h"),
             ]
         );

@@ -576,7 +576,7 @@ mod tests {
         assert!(height < 120, "{height} rows");
         let screen = render(&mut h.app, 120, 200);
         assert!(screen.contains("Quit Rakumux"), "every row shows: {screen}");
-        // In the dialog (the list behind it has its current places' bars).
+        // In the dialog (the list's divider behind it can be a `┃` too).
         let buffer = terminal.backend().buffer();
         let left = (0..120)
             .find(|x| buffer.get(*x, corners[0]).symbol() == "╭")
@@ -1421,7 +1421,7 @@ mod tests {
         assert!(list[docs].contains(" docs "), "{wide}");
         assert!(!list[docs].contains('★'), "{wide}");
         // Where it works now: one line, in line with the row's text.
-        assert!(list[docs + 2].starts_with("   ┃ repo  ⎇ main"), "{wide}");
+        assert!(list[docs + 2].starts_with("   repo  ⎇ main"), "{wide}");
         assert!(list[refactor + 1].contains("claude"), "{wide}");
         assert!(list[refactor + 2].contains("⎇ sessions-refactor"), "{wide}");
         assert!(!wide.contains("worktree"), "branch only: {wide}");
@@ -1471,7 +1471,7 @@ mod tests {
         assert!(list[main].starts_with("   main-work "), "{wide}");
         assert!(list[work].starts_with("     feature-work "), "{wide}");
         assert!(
-            list[work + 2].starts_with("     ┃ worktrees/feature  ⎇ feat/login"),
+            list[work + 2].starts_with("     worktrees/feature  ⎇ feat/login"),
             "{wide}"
         );
     }

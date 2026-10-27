@@ -2799,9 +2799,9 @@ async fn done_periods_have_headers_with_counts_and_enter_opens_the_status_modal_
     };
     let mut h = harness(vec![read("A", now - 30), read("B", now - 3 * 86_400)]);
     let screen = screen_rows(&mut h, 160, 48).join("\n");
-    assert!(screen.contains("   ◷ last hour ─"), "{screen}");
+    assert!(screen.contains(" ◷ last hour ─"), "{screen}");
     assert!(screen.contains("─ 1 session"), "{screen}");
-    assert!(screen.contains("   ◷ older ─"), "{screen}");
+    assert!(screen.contains(" ◷ older ─"), "{screen}");
     h.app
         .list
         .select(session_list::Selection::ReadPeriodHeader(ReadPeriod::Older));
@@ -4992,17 +4992,15 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     let header_line = target(&h, Hit::ListRow(header)).unwrap().1;
     assert!(screen[usize::from(header_line)].starts_with(" ★ pinned ─"));
     assert!(header < row, "above the other sessions");
-    // B is under ready's sub-header: its pin where that header's clock is,
-    // its name where its words are.
+    // B is under ready's sub-header, which is in line with ready's: its
+    // pin where the headers' marks are, its name where their words are.
     assert!(
-        screen[usize::from(pin.1)].starts_with("   ☆ b "),
+        screen[usize::from(pin.1)].starts_with(" ☆ b "),
         "{}",
         screen.join("\n")
     );
     assert!(
-        screen
-            .iter()
-            .any(|line| line.starts_with("   ◷ last hour ─")),
+        screen.iter().any(|line| line.starts_with(" ◷ last hour ─")),
         "{}",
         screen.join("\n")
     );
@@ -5222,15 +5220,15 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     };
     // The column `needle` starts in on `line`.
     let column = |line: &str, needle: &str| line.find(needle).map(|at| line[..at].chars().count());
-    // Where it works now: one line behind its bar, ▸ in the gutter left of
-    // it, the bar under the row's name.
+    // Where it works now: one line, ▸ in the gutter left of it, its path
+    // under the row's name.
     let current = |screen: &[String], mark: &str| {
         let at = screen
             .iter()
-            .position(|line| line.contains(&format!("{mark} ┃ repo  ⎇ main")))
-            .unwrap_or_else(|| panic!("{mark} ┃ repo: {}", screen.join("\n")));
+            .position(|line| line.contains(&format!("{mark} repo  ⎇ main")))
+            .unwrap_or_else(|| panic!("{mark} repo: {}", screen.join("\n")));
         assert!(
-            in_list(&screen[at]).ends_with("┃ repo  ⎇ main"),
+            in_list(&screen[at]).ends_with(" repo  ⎇ main"),
             "{:?}",
             screen[at]
         );
@@ -5238,7 +5236,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
             .iter()
             .find(|line| line.contains(" agent "))
             .expect("its name");
-        assert_eq!(column(&screen[at], "┃"), column(name, "agent"));
+        assert_eq!(column(&screen[at], "repo  ⎇"), column(name, "agent"));
         assert_eq!(column(&screen[at], mark), Some(1), "{:?}", screen[at]);
     };
     let screen = screen_rows(&mut h, 160, 48);
@@ -5246,27 +5244,30 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     let text = screen.join("\n");
     assert!(!text.contains("worktrees/fix"), "closed: {text}");
 
-    // Open, the current pair stays, and under it the one other place: its
-    // path, then its branch and age, behind a bar.
+    // Open, the current line stays, and under it the one other place: its
+    // path, then its branch and age, with nothing left of them.
     h.press(KeyCode::Char('w')).await;
     let screen = screen_rows(&mut h, 160, 48);
     current(&screen, "▾");
     let text = screen.join("\n");
     let fix = screen
         .iter()
-        .position(|line| line.contains("│ worktrees/fix"))
+        .position(|line| in_list(line).trim_start() == "worktrees/fix")
         .unwrap_or_else(|| panic!("the worktree: {text}"));
     let branch = in_list(&screen[fix + 1]);
-    assert!(branch.contains("│ ⎇ fix"), "{branch:?}");
+    assert!(branch.trim_start().starts_with("⎇ fix"), "{branch:?}");
     assert!(branch.ends_with(" 30s"), "{branch:?}");
-    // Its bar in the current one's column.
+    // Its text a step further in than the current one's path.
     let now_at = screen
         .iter()
-        .find(|line| line.contains("▾ ┃ repo"))
+        .find(|line| line.contains("▾ repo"))
         .expect("the current place");
-    assert_eq!(column(&screen[fix], "│ worktrees"), column(now_at, "┃"));
+    let step_in = column(now_at, "repo").map(|at| at + 2);
+    assert_eq!(column(&screen[fix], "worktrees"), step_in);
+    assert_eq!(column(&screen[fix + 1], "⎇ fix"), step_in);
+    // (B's place, without a branch, is `repo` in its text column.)
     assert!(
-        !screen.iter().any(|line| line.contains("│ repo")),
+        !screen.iter().any(|line| in_list(line) == "     repo"),
         "where it works now isn't listed again: {text}"
     );
     h.press(KeyCode::Char('w')).await;
@@ -5321,12 +5322,12 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     };
     let screen = screen_rows(&mut h, 160, 48);
     let mark = toggles[0];
-    assert!(screen[usize::from(mark.y)][..].contains("▸ ┃ repo"));
+    assert!(screen[usize::from(mark.y)][..].contains("▸ repo"));
     click(&mut h, mark.x, mark.y);
     assert!(h.app.places_open(&a));
     assert_eq!(h.app.list.selection(), &Selection::Session(b.clone()));
     let screen = screen_rows(&mut h, 160, 48);
-    assert!(screen[usize::from(mark.y)][..].contains("▾ ┃ repo"));
+    assert!(screen[usize::from(mark.y)][..].contains("▾ repo"));
     click(&mut h, mark.x + 1, mark.y);
     assert!(!h.app.places_open(&a));
     let (path, _) = *h
@@ -5404,8 +5405,8 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     assert_eq!(h.app.list.selected_id(), Some(&a));
     assert_eq!(place(&h).as_deref(), Some("/repo/worktrees/fix"));
     let screen = screen_rows(&mut h, 160, 48).join("\n");
-    assert!(screen.contains("⧉ │ worktrees/fix"), "{screen}");
-    assert!(!screen.contains("⧉ │ /srv/other"), "{screen}");
+    assert!(screen.contains("⧉   worktrees/fix"), "{screen}");
+    assert!(!screen.contains("⧉   /srv/other"), "{screen}");
     h.press(KeyCode::Char('y')).await;
     assert_eq!(copied(&mut h), "/repo/worktrees/fix");
 
@@ -5447,8 +5448,8 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
         .expect("A's second place");
     assert_eq!(area.height, 2, "both its lines");
     let lines = screen_rows(&mut h, 160, 48);
-    assert!(lines[usize::from(area.y)].contains("│ /srv/other"));
-    assert!(lines[usize::from(area.y) + 1].contains("│ ⎇ other"));
+    assert!(lines[usize::from(area.y)].contains("    /srv/other"));
+    assert!(lines[usize::from(area.y) + 1].contains("    ⎇ other"));
     let mouse = |kind, row: u16| MouseEvent {
         kind,
         column: area.x + 6,
@@ -5469,8 +5470,8 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
             "{line}"
         );
         let screen = screen_rows(&mut h, 160, 48).join("\n");
-        assert!(screen.contains("⧉ │ /srv/other"), "{screen}");
-        assert!(!screen.contains("⧉ │ worktrees/fix"), "{screen}");
+        assert!(screen.contains("⧉   /srv/other"), "{screen}");
+        assert!(!screen.contains("⧉   worktrees/fix"), "{screen}");
         click(&mut h, line);
         assert_eq!(copied(&mut h), "/srv/other", "{line}");
         assert_eq!(h.app.list.selection(), &Selection::Session(b.clone()));
@@ -5509,7 +5510,7 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     assert_eq!(h.app.hovered_place, Some((row, places::PlaceRef::Current)));
     let at = usize::from(current.y);
     assert!(
-        screen[at].starts_with("⧉▾ ┃ repo  ⎇ main"),
+        screen[at].starts_with("⧉▾ repo  ⎇ main"),
         "{:?}",
         screen[at]
     );
@@ -5517,7 +5518,7 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     assert_eq!(copied(&mut h), "/repo");
     let screen = hover(&mut h, current.x, current.y);
     assert_eq!(h.app.hovered_place, Some((row, places::PlaceRef::Current)));
-    assert!(screen[at].starts_with("⧉▾ ┃"), "{:?}", screen[at]);
+    assert!(screen[at].starts_with("⧉▾ repo"), "{:?}", screen[at]);
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
         MouseEventKind::Up(MouseButton::Left),
@@ -5556,8 +5557,8 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
         h.press(KeyCode::Char('j')).await;
     }
     let screen = list(&mut h);
-    assert!(screen.contains("⧉ │ /srv/place12"), "{screen}");
-    assert!(screen.contains("│ ⎇ place12"), "{screen}");
+    assert!(screen.contains("⧉   /srv/place12"), "{screen}");
+    assert!(screen.contains("    ⎇ place12"), "{screen}");
     assert!(!screen.contains("place01"), "{screen}");
     // The hit targets are where the places are drawn.
     let row = h.app.list.selected_row();
@@ -5633,10 +5634,10 @@ fn paper_links(now: i64) -> session_core::model::SessionView {
 /// A session that started in its folder's main checkout, then made
 /// worktrees and changed files in them, on a phone's 60 and 40 columns. The
 /// daemon lists only the worktrees where files were changed, not the main
-/// checkout it only started in. The place it works in now is one line
-/// behind the blue `┃` in line with the row's app line, `▸` in the gutter
-/// left of it; opened (`▾`), the three others are pairs behind a muted `│`
-/// in that column, a rule between two, the one the keys are on with ⧉.
+/// checkout it only started in. The place it works in now is one line in
+/// line with the row's app line, `▸` in the gutter left of it; opened
+/// (`▾`), the three others are pairs a step further in with nothing left of
+/// them, a rule above each, the one the keys are on with ⧉.
 #[tokio::test]
 async fn open_places_read_as_pairs_on_a_phone() {
     let now = 1_000_000_000;
@@ -5648,7 +5649,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
         let screen = screen_rows(h, width, 24);
         let first = screen
             .iter()
-            .position(|line| line.contains(" ┃ "))
+            .position(|line| line.contains("⎇ paper-links"))
             .unwrap_or_else(|| panic!("{}", screen.join("\n")));
         let block: Vec<String> = screen[first.saturating_sub(3)..]
             .iter()
@@ -5661,12 +5662,12 @@ async fn open_places_read_as_pairs_on_a_phone() {
     };
     assert_eq!(
         places(&mut h, 60),
-        [" ▸ ┃ /work/focal-md-paper-links  ⎇ paper-links"]
+        [" ▸ /work/focal-md-paper-links  ⎇ paper-links"]
     );
     // Short of room, the path is cut at its start before the branch.
     assert_eq!(
         places(&mut h, 40),
-        [" ▸ ┃ …cal-md-paper-links  ⎇ paper-links"]
+        [" ▸ …focal-md-paper-links  ⎇ paper-links"]
     );
     h.app.places_open.insert(a);
     h.press(KeyCode::Char('j')).await;
@@ -5674,31 +5675,31 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 60),
         [
-            " ▾ ┃ /work/focal-md-paper-links  ⎇ paper-links",
+            " ▾ /work/focal-md-paper-links  ⎇ paper-links",
             "     ──────────────────────────────────────────────────────",
-            "   │ /work/focal-md-pubmed-pmc-audit",
-            "   │ ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
+            "     /work/focal-md-pubmed-pmc-audit",
+            "     ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
             "     ──────────────────────────────────────────────────────",
-            " ⧉ │ /work/focal-md-mvp-trial-workspaces",
-            "   │ ⎇ feature/mvp-trial-workspaces                     10d",
+            " ⧉   /work/focal-md-mvp-trial-workspaces",
+            "     ⎇ feature/mvp-trial-workspaces                     10d",
             "     ──────────────────────────────────────────────────────",
-            "   │ /work/focal-md-citations",
-            "   │ ⎇ fix/citation-format                              11d",
+            "     /work/focal-md-citations",
+            "     ⎇ fix/citation-format                              11d",
         ]
     );
     assert_eq!(
         places(&mut h, 40),
         [
-            " ▾ ┃ …cal-md-paper-links  ⎇ paper-links",
+            " ▾ …focal-md-paper-links  ⎇ paper-links",
             "     ──────────────────────────────────",
-            "   │ /work/focal-md-pubmed-pmc-audit",
-            "   │ ⎇ audit/pubmed-pmc-ingest-202… 10d",
+            "     /work/focal-md-pubmed-pmc-audit",
+            "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
             "     ──────────────────────────────────",
-            " ⧉ │ …ork/focal-md-mvp-trial-workspaces",
-            "   │ ⎇ feature/mvp-trial-workspaces 10d",
+            " ⧉   …ork/focal-md-mvp-trial-workspaces",
+            "     ⎇ feature/mvp-trial-workspaces 10d",
             "     ──────────────────────────────────",
-            "   │ /work/focal-md-citations",
-            "   │ ⎇ fix/citation-format          11d",
+            "     /work/focal-md-citations",
+            "     ⎇ fix/citation-format          11d",
         ]
     );
     assert_eq!(
@@ -5709,10 +5710,10 @@ async fn open_places_read_as_pairs_on_a_phone() {
 
 /// A session row's text starts where its header's does, its marks in the
 /// gutter left of it (where a status's mark is), and where it works now is
-/// one line behind the blue `┃` in line with its app line; its other places,
-/// open, are pairs behind a muted `│` in that same column. A row under a
-/// sub-header (ready's `◷ last hour`) starts where that header's words do.
-/// On a phone's 60 and 40 columns, one session's places open, the other's
+/// one line in line with its app line; its other places, open, are pairs a
+/// step further in, nothing left of any of them. Ready's sub-headers
+/// (`◷ last hour`) and their rows are in line with ready's header. On a
+/// phone's 60 and 40 columns, one session's places open, the other's
 /// closed.
 #[tokio::test]
 async fn session_rows_line_up_with_their_headers_text() {
@@ -5764,21 +5765,21 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   Paper links                                         1h ○",
             "   Re-review passed; record committed on the bra…",
             "   claude",
-            " ▾ ┃ /work/focal-md-paper-links  ⎇ paper-links",
+            " ▾ /work/focal-md-paper-links  ⎇ paper-links",
             "     ──────────────────────────────────────────────────────",
-            "   │ /work/focal-md-pubmed-pmc-audit",
-            "   │ ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
+            "     /work/focal-md-pubmed-pmc-audit",
+            "     ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
             "     ──────────────────────────────────────────────────────",
-            " ⧉ │ /work/focal-md-mvp-trial-workspaces",
-            "   │ ⎇ feature/mvp-trial-workspaces                     10d",
+            " ⧉   /work/focal-md-mvp-trial-workspaces",
+            "     ⎇ feature/mvp-trial-workspaces                     10d",
             "     ──────────────────────────────────────────────────────",
-            "   │ /work/focal-md-citations",
-            "   │ ⎇ fix/citation-format                              11d",
+            "     /work/focal-md-citations",
+            "     ⎇ fix/citation-format                              11d",
             "",
             "   Citations                                          10m ●",
             "   Fix the citation format in the export",
             "   codex",
-            " ▸ ┃ /work/focal-md-citations  ⎇ fix/citation-format",
+            " ▸ /work/focal-md-citations  ⎇ fix/citation-format",
             "",
             " + New session",
         ]
@@ -5793,27 +5794,26 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   Paper links                     1h ○",
             "   Re-review passed; record …",
             "   claude",
-            " ▾ ┃ …cal-md-paper-links  ⎇ paper-links",
+            " ▾ …focal-md-paper-links  ⎇ paper-links",
             "     ──────────────────────────────────",
-            "   │ /work/focal-md-pubmed-pmc-audit",
-            "   │ ⎇ audit/pubmed-pmc-ingest-202… 10d",
+            "     /work/focal-md-pubmed-pmc-audit",
+            "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
             "     ──────────────────────────────────",
-            " ⧉ │ …ork/focal-md-mvp-trial-workspaces",
-            "   │ ⎇ feature/mvp-trial-workspaces 10d",
+            " ⧉   …ork/focal-md-mvp-trial-workspaces",
+            "     ⎇ feature/mvp-trial-workspaces 10d",
             "     ──────────────────────────────────",
-            "   │ /work/focal-md-citations",
-            "   │ ⎇ fix/citation-format          11d",
+            "     /work/focal-md-citations",
+            "     ⎇ fix/citation-format          11d",
             "",
             "   Citations                      10m ●",
             "   Fix the citation format i…",
             "   codex",
-            " ▸ ┃ …cal-md-citations  ⎇ fix/citation…",
+            " ▸ …ocal-md-citations  ⎇ fix/citation-…",
             "",
             " + New session",
         ]
     );
-    // The current place's bar is the accent; the place the keys are on has
-    // the copy mark in the accent and its bar only a shade brighter.
+    // The copy mark of the place the keys are on is the accent.
     let colour_at = |h: &mut Harness, symbol: &str, line: &str| {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 40)).unwrap();
@@ -5835,17 +5835,11 @@ async fn session_rows_line_up_with_their_headers_text() {
         buffer.get(x as u16, y as u16).fg
     };
     let p = crate::theme::palette();
-    assert_eq!(colour_at(&mut h, "┃", "▾ ┃ /work"), p.accent_primary);
-    assert_eq!(colour_at(&mut h, "┃", "▸ ┃ /work"), p.accent_primary);
-    assert_eq!(colour_at(&mut h, "⧉", "⧉ │ /work"), p.accent_primary);
-    assert_eq!(colour_at(&mut h, "│", "⧉ │ /work"), p.neutral_gray);
-    assert_eq!(
-        colour_at(&mut h, "│", "│ /work/focal-md-pub"),
-        p.text_subtle
-    );
+    assert_eq!(colour_at(&mut h, "⧉", "⧉   /work"), p.accent_primary);
 
-    // Under ready's sub-header, a row is a step further in: its text where
-    // the sub-header's words are, its gutter under the sub-header's clock.
+    // Ready's sub-header is in line with ready's header, its clock where
+    // ready's mark is, and a row under it is where it would be under any
+    // header: its text where the headers' words are.
     h.app.show_tab(super::grouping::Grouping::Status);
     h.app.process_pending();
     assert_eq!(
@@ -5856,25 +5850,25 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   Citations                                          10m ●",
             "   Fix the citation format in the export",
             "   codex",
-            " ▸ ┃ /work/focal-md-citations  ⎇ fix/citation-format",
+            " ▸ /work/focal-md-citations  ⎇ fix/citation-format",
             "",
             " ○ ready ──────────────────────────────────────── 1 session",
             "",
-            "   ◷ last hour ────────────────────────────────── 1 session",
+            " ◷ last hour ──────────────────────────────────── 1 session",
             "",
-            "     Paper links                                       1h ○",
-            "     Re-review passed; record committed on the b…",
-            "     claude",
-            "   ▾ ┃ /work/focal-md-paper-links  ⎇ paper-links",
-            "       ────────────────────────────────────────────────────",
-            "     │ /work/focal-md-pubmed-pmc-audit",
-            "     │ ⎇ audit/pubmed-pmc-ingest-20261008               10d",
-            "       ────────────────────────────────────────────────────",
-            "   ⧉ │ /work/focal-md-mvp-trial-workspaces",
-            "     │ ⎇ feature/mvp-trial-workspaces                   10d",
-            "       ────────────────────────────────────────────────────",
-            "     │ /work/focal-md-citations",
-            "     │ ⎇ fix/citation-format                            11d",
+            "   Paper links                                         1h ○",
+            "   Re-review passed; record committed on the bra…",
+            "   claude",
+            " ▾ /work/focal-md-paper-links  ⎇ paper-links",
+            "     ──────────────────────────────────────────────────────",
+            "     /work/focal-md-pubmed-pmc-audit",
+            "     ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
+            "     ──────────────────────────────────────────────────────",
+            " ⧉   /work/focal-md-mvp-trial-workspaces",
+            "     ⎇ feature/mvp-trial-workspaces                     10d",
+            "     ──────────────────────────────────────────────────────",
+            "     /work/focal-md-citations",
+            "     ⎇ fix/citation-format                              11d",
             "",
             " + New session",
         ]
