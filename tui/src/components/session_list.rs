@@ -104,30 +104,34 @@ const GUTTER: usize = 2;
 /// header's text does.
 const NEST: usize = 2;
 
-/// Columns left of a row's gutter: the drag mark's, in its last one. A row
-/// under a worktree's header is `nested`.
-fn row_indent(nested: bool) -> usize {
-    INDENT - GUTTER + if nested { NEST } else { 0 }
+/// How much further in than ready's header one of its read periods' headers
+/// (mark and words) and that period's rows start.
+const READ_NEST: usize = 1;
+
+/// Columns left of a row's gutter: the drag mark's, in its last one; a
+/// nested row's (see [`nesting`]) `nested` further in.
+fn row_indent(nested: usize) -> usize {
+    INDENT - GUTTER + nested
 }
 
-/// For each of `rows`, whether it's under a worktree's header inside its
-/// folder. Ready's read periods are in line with ready's header, and so
-/// are their rows.
-fn nesting(rows: &[ListRow]) -> Vec<bool> {
-    let mut nested = false;
+/// For each of `rows`, how many columns further in than a top-level row it
+/// starts: [`NEST`] under a worktree's header inside its folder,
+/// [`READ_NEST`] under one of ready's read periods; headers none.
+fn nesting(rows: &[ListRow]) -> Vec<usize> {
+    let mut nested = 0;
     rows.iter()
         .map(|row| {
             match row {
-                ListRow::WorktreeHeader(..) => nested = true,
+                ListRow::WorktreeHeader(..) => nested = NEST,
+                ListRow::ReadPeriodHeader(_) => nested = READ_NEST,
                 ListRow::Folders
                 | ListRow::FolderHeader(_)
                 | ListRow::SectionHeader(_)
-                | ListRow::ReadPeriodHeader(_)
                 | ListRow::PinnedHeader
-                | ListRow::NewSession => nested = false,
+                | ListRow::NewSession => nested = 0,
                 ListRow::Session(_) => return nested,
             }
-            false
+            0
         })
         .collect()
 }
@@ -323,10 +327,10 @@ pub fn worktree_header_line(
     ])
 }
 
-/// The header of one of ready's sub-sections, in line with ready's: a
-/// clock where ready's mark is and when its sessions were last read where
-/// its name is (a pin for the pinned ones), a rule, then how many it has,
-/// in `width` columns.
+/// The header of one of ready's sub-sections, [`READ_NEST`] further in than
+/// ready's: a clock one column right of ready's mark and when its sessions
+/// were last read one right of its name (a pin for the pinned ones), a
+/// rule, then how many it has, in `width` columns.
 pub fn read_period_header_line(
     app: &App,
     period: ReadPeriod,
@@ -335,12 +339,13 @@ pub fn read_period_header_line(
 ) -> Line<'static> {
     let p = theme::palette();
     let count = sessions_label(app.list.read_period_count(period));
-    // " ◷ label ─── count": as a status's header.
+    // "  ◷ label ─── count": a status's header, a step in.
     let clock = match period {
         ReadPeriod::Pinned => format!("{PIN_MARK} "),
         _ => format!("{} ", app.icons().clock()),
     };
-    let fixed = 3 + str_width(&clock) + str_width(&count);
+    let lead = 1 + READ_NEST;
+    let fixed = lead + 2 + str_width(&clock) + str_width(&count);
     let label = truncate(period.label(), width.saturating_sub(fixed + 2));
     let rule = width.saturating_sub(fixed + str_width(&label));
     let (label_color, rule_color) = if selected {
@@ -349,7 +354,7 @@ pub fn read_period_header_line(
         (p.label_blue, p.border_dim)
     };
     Line::from(vec![
-        Span::raw(" "),
+        Span::raw(" ".repeat(lead)),
         // The clock in the amber its sessions' marks have.
         Span::styled(clock, read_period_style(period)),
         Span::styled(
@@ -1192,7 +1197,7 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
     // A row's content width: its gutter and text, right of its indent, less
     // a right margin.
     let nested = nesting(&rows);
-    let width_of = |nested: bool| (inner.width as usize).saturating_sub(row_indent(nested) + 1);
+    let width_of = |nested: usize| (inner.width as usize).saturating_sub(row_indent(nested) + 1);
     // The list's clock (set every tick), which ready's sub-sections are
     // measured from too.
     let now = app.list.now();
@@ -1234,7 +1239,7 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        truncate("New session", width_of(false).saturating_sub(GUTTER)),
+                        truncate("New session", width_of(0).saturating_sub(GUTTER)),
                         Style::default()
                             .fg(if is_selected {
                                 p.text_bright
@@ -1244,7 +1249,7 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                             .add_modifier(Modifier::BOLD),
                     ),
                 ]];
-                cell_lines(content, height, row_indent(false))
+                cell_lines(content, height, row_indent(0))
             }
             ListRow::FolderHeader(folder) => {
                 let mut lines = vec![Line::default(); height as usize - 1];
@@ -1752,7 +1757,7 @@ mod tests {
     }
 
     #[test]
-    fn only_rows_under_a_worktrees_header_are_nested() {
+    fn rows_under_a_worktree_or_a_read_period_are_nested() {
         use crate::app::grouping::{AppKey, ReadPeriod};
         let session = crate::app::testing::view("A", "a", 0);
         let folder = ScopeRoot::from_canonical("/repo".into());
@@ -1772,17 +1777,17 @@ mod tests {
             ListRow::Session(&session),
             ListRow::NewSession,
         ];
-        // Ready's read periods are in line with ready, and so are their
-        // rows.
+        // A worktree's rows two columns in, a read period's one.
         assert_eq!(
             nesting(&rows),
-            [false, false, false, false, false, false, true, false, false, false, false, false]
+            [0, 0, 0, 0, 0, 0, NEST, 0, 0, 0, READ_NEST, 0]
         );
         // A top-level row's text in the header's text column, its gutter
         // where the header's mark is; a nested one's in the worktree
-        // header's.
-        assert_eq!(row_indent(false) + GUTTER, INDENT);
-        assert_eq!(row_indent(true) + GUTTER, INDENT + NEST);
+        // header's, or a column right of ready's.
+        assert_eq!(row_indent(0) + GUTTER, INDENT);
+        assert_eq!(row_indent(NEST) + GUTTER, INDENT + NEST);
+        assert_eq!(row_indent(READ_NEST) + GUTTER, INDENT + 1);
     }
 
     #[test]

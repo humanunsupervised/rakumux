@@ -5021,15 +5021,17 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     let header_line = target(&h, Hit::ListRow(header)).unwrap().1;
     assert!(screen[usize::from(header_line)].starts_with(" ★ pinned ─"));
     assert!(header < row, "above the other sessions");
-    // B is under ready's sub-header, which is in line with ready's: its
-    // pin where the headers' marks are, its name where their words are.
+    // B is under ready's sub-header, a column in from ready's: its pin
+    // where the sub-header's clock is, its name where its words are.
     assert!(
-        screen[usize::from(pin.1)].starts_with(" ☆ b "),
+        screen[usize::from(pin.1)].starts_with("  ☆ b "),
         "{}",
         screen.join("\n")
     );
     assert!(
-        screen.iter().any(|line| line.starts_with(" ◷ last hour ─")),
+        screen
+            .iter()
+            .any(|line| line.starts_with("  ◷ last hour ─")),
         "{}",
         screen.join("\n")
     );
@@ -5908,7 +5910,7 @@ async fn places_name_their_repository_before_the_branch() {
 /// gutter left of it (where a status's mark is), and where it works now is
 /// one line in line with its app line; its other places, open, are pairs a
 /// step further in, nothing left of any of them. Ready's sub-headers
-/// (`◷ last hour`) and their rows are in line with ready's header. On a
+/// (`◷ last hour`) and their rows are a column in from ready's header. On a
 /// phone's 60 and 40 columns, one session's places open, the other's
 /// closed.
 #[tokio::test]
@@ -6029,9 +6031,9 @@ async fn session_rows_line_up_with_their_headers_text() {
     let p = crate::theme::palette();
     assert_eq!(colour_at(&mut h, "⧉", "⧉   /work"), p.accent_primary);
 
-    // Ready's sub-header is in line with ready's header, its clock where
-    // ready's mark is, and a row under it is where it would be under any
-    // header: its text where the headers' words are.
+    // Ready's sub-header is a column in from ready's header (its clock a
+    // column right of ready's mark), and a row under it a column in from
+    // where it would be under any header: its text, gutter and places.
     h.app.show_tab(super::grouping::Grouping::Status);
     h.app.process_pending();
     assert_eq!(
@@ -6045,20 +6047,20 @@ async fn session_rows_line_up_with_their_headers_text() {
             "",
             " ○ ready ──────────────────────────────────────── 1 session",
             "",
-            " ◷ last hour ──────────────────────────────────── 1 session",
+            "  ◷ last hour ─────────────────────────────────── 1 session",
             "",
-            "   Paper links                                         1h ○",
-            "   claude",
-            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
-            "     ──────────────────────────────────────────────────────",
-            "     /work/focal-md-pubmed-pmc-audit",
-            "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
-            "     ──────────────────────────────────────────────────────",
-            " ⧉   /work/focal-md-mvp-trial-workspaces",
-            "     focal-md ⎇ feature/mvp-trial-workspaces            10d",
-            "     ──────────────────────────────────────────────────────",
-            "     /work/focal-md-citations",
-            "     focal-md ⎇ fix/citation-format                     11d",
+            "    Paper links                                        1h ○",
+            "    claude",
+            "  ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
+            "      ─────────────────────────────────────────────────────",
+            "      /work/focal-md-pubmed-pmc-audit",
+            "      focal-md ⎇ audit/pubmed-pmc-ingest-20261008       10d",
+            "      ─────────────────────────────────────────────────────",
+            "  ⧉   /work/focal-md-mvp-trial-workspaces",
+            "      focal-md ⎇ feature/mvp-trial-workspaces           10d",
+            "      ─────────────────────────────────────────────────────",
+            "      /work/focal-md-citations",
+            "      focal-md ⎇ fix/citation-format                    11d",
             "",
             " + New session",
         ]

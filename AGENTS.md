@@ -1013,8 +1013,9 @@ columns after it: a spinner while a new title is being made, else the ↻ under 
 (`Hit::TitleRefresh`), which makes one; the row has no line for a description or the user's last
 message. A row under a worktree's header starts a step further in, its text where
 that header's words are and its gutter under its mark (`components/session_list.rs::nesting`);
-ready's read-period headers and their rows are in line with ready's. A dragged row's bar is just
-left of its gutter.
+ready's read-period headers (mark and words) and their rows (text, gutter and places) start one
+column further in than ready's header and a row directly under any header (`READ_NEST`). A
+dragged row's bar is just left of its gutter.
 **Pinned sessions** sit in a section of their own at the top of the list, above every folder,
 app and status, under every tab: a `★ pinned` header (`ListRow::PinnedHeader`, the gold pin,
 `pinned` and how many; selectable, Enter does nothing), then each pinned session the active
@@ -1046,7 +1047,8 @@ another header, and never change the folders' order. Ready is the exception
 (`last_active_at`, which going in sets, as it turns an unread reply ready), most recent first,
 under a sub-header per period (`grouping::ReadPeriod`, `ListRow::ReadPeriodHeader`: `◷ last hour`,
 last day, older, the clock from `Icons::clock`, tinted like its sessions' marks; with a session
-count; selectable, Enter opens the Status modal on ready), so reading one moves it to the top.
+count; selectable, Enter opens the Status modal on ready; it and its rows a column in from
+ready's), so reading one moves it to the top.
 A pinned ready session is in the pinned section instead; unpinning puts one back in its period.
 The periods are measured from
 the list's clock (`SessionList::set_clock`, every tick), so sessions move down them as time
