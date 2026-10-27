@@ -22,6 +22,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 
 - Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.
 
+## Design principles (read first)
+
+- Cut taglines, helper text and secondary labels. If a screen needs them to make sense, fix the layout.
+- Make the best decision that will elevate all three: the user experience (UX), developer experience (DX), and agent experience (AX) always, without breaking anything.
+
 ## Architectural requirements
 
 1. **One server, many clients.** Exactly one `rakumux-ptyd` per user owns every session's
