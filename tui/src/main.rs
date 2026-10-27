@@ -408,6 +408,71 @@ impl Drop for InputLog {
 }
 
 #[cfg(test)]
+mod escape_wait_tests {
+    use std::time::{Duration, Instant};
+
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+    use super::*;
+    use crate::app::testing::{harness, view};
+    use crate::app::types::Focus;
+    use crate::escape_time::{EscapeJoiner, Link, ESCAPE_TIME_BRIEF, ESCAPE_TIME_RAKUMUX};
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[tokio::test]
+    async fn esc_leaves_the_feed_at_once_on_a_desktop_over_ssh() {
+        let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
+        h.app.resize(200, 50);
+        h.app.toggle_feed();
+        assert!(h.app.feed_has_keys());
+        let wait = escape_wait(&h.app, Link::Remote);
+        assert_eq!(wait, ESCAPE_TIME_BRIEF);
+        let mut escapes = EscapeJoiner::default();
+        let now = Instant::now();
+        assert_eq!(escapes.feed(key(KeyCode::Esc), now, wait), vec![]);
+        assert_eq!(escapes.deadline(), Some(now + ESCAPE_TIME_BRIEF));
+        let events = escapes.expire(now + ESCAPE_TIME_BRIEF);
+        assert_eq!(events, vec![key(KeyCode::Esc)]);
+        for event in events {
+            h.app.handle_terminal_event(event).await;
+        }
+        assert!(!h.app.feed_has_keys(), "the list has the keys back");
+        assert!(h.app.feed_shown(), "the feed stays beside the session");
+        // The list's own Esc (back to a session) is as quick there.
+        assert_eq!(escape_wait(&h.app, Link::Remote), ESCAPE_TIME_BRIEF);
+    }
+
+    #[tokio::test]
+    async fn an_arrow_in_pieces_from_a_phone_over_ssh_is_still_an_arrow() {
+        let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]);
+        h.app.resize(45, 40);
+        assert!(h.app.phone());
+        let wait = escape_wait(&h.app, Link::Remote);
+        assert_eq!(wait, ESCAPE_TIME_RAKUMUX);
+        let mut escapes = EscapeJoiner::default();
+        let now = Instant::now();
+        assert_eq!(escapes.feed(key(KeyCode::Esc), now, wait), vec![]);
+        // The rest of the arrow 400 ms later still makes an arrow.
+        let later = now + Duration::from_millis(400);
+        assert_eq!(escapes.expire(later), vec![]);
+        let mut events = escapes.feed(key(KeyCode::Char('[')), later, wait);
+        events.extend(escapes.feed(
+            Event::Key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)),
+            later,
+            wait,
+        ));
+        assert_eq!(events, vec![key(KeyCode::Up)]);
+        for event in events {
+            h.app.handle_terminal_event(event).await;
+        }
+        assert_eq!(h.app.focus, Focus::List, "not thrown into a session");
+    }
+}
+
+#[cfg(test)]
 mod input_log_tests {
     use super::*;
 
@@ -469,6 +534,20 @@ fn draw<B: ratatui::backend::Backend + Write>(
     Ok(())
 }
 
+/// How long a lone Esc waits for the rest of a key in the app's state now:
+/// where it would go (the session's program, Rakumux mode, a dialog) and
+/// whether the window is a phone's (`escape_time::wait`).
+fn escape_wait(app: &App, link: escape_time::Link) -> std::time::Duration {
+    let target = if app.keys_go_to_session() {
+        escape_time::EscTarget::Session
+    } else if matches!(app.mode, app::types::AppMode::Normal) {
+        escape_time::EscTarget::List
+    } else {
+        escape_time::EscTarget::Dialog
+    };
+    escape_time::wait(link, app.phone(), target)
+}
+
 async fn run_app<B: ratatui::backend::Backend + Write>(
     terminal: &mut Terminal<B>,
     app: &mut App,
@@ -505,15 +584,7 @@ async fn run_app<B: ratatui::backend::Backend + Write>(
             event = input.next() => match event {
                 Some(Ok(event)) => {
                     input_log.record("read", &event, app);
-                    let target = if app.keys_go_to_session() {
-                        escape_time::EscTarget::Session
-                    } else if matches!(app.mode, app::types::AppMode::Normal) {
-                        escape_time::EscTarget::List
-                    } else {
-                        escape_time::EscTarget::Dialog
-                    };
-                    let wait = escape_time::wait(link, target);
-                    escapes.feed(event, std::time::Instant::now(), wait)
+                    escapes.feed(event, std::time::Instant::now(), escape_wait(app, link))
                 }
                 Some(Err(e)) => return Err(anyhow::anyhow!("Failed to read input events: {e}")),
                 None => return Ok(RunOutcome::Exit),

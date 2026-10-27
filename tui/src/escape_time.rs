@@ -7,17 +7,19 @@
 //! session"). Like tmux's `escape-time`, a lone Esc is held for a while
 //! ([`wait`]): when the rest of a key's sequence follows, that key is
 //! reported instead; otherwise the Esc (and whatever followed) is, in order.
-//! On a local terminal a key's bytes arrive together, so the wait is short.
+//! On a local terminal a key's bytes arrive together, and so do a desktop
+//! terminal's over SSH (one write, one packet), so the wait is short: only a
+//! phone over SSH (a window narrower than `layout::PHONE_BELOW`) waits long.
 
 use std::ffi::OsString;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-/// How long a lone Esc waits for the rest of a sequence while keys go to a
-/// session's program. A phone on a mobile network can leave more than
-/// 100 ms between the pieces; a real Esc reaches the program this much
-/// later.
+/// How long a lone Esc from a phone over SSH waits for the rest of a
+/// sequence while keys go to a session's program or a dialog. A phone on a
+/// mobile network can leave more than 100 ms between the pieces; a real Esc
+/// reaches the program this much later.
 pub const ESCAPE_TIME: Duration = Duration::from_millis(300);
 
 /// The same in Rakumux mode's list, where Esc goes back to a session: an
@@ -25,17 +27,18 @@ pub const ESCAPE_TIME: Duration = Duration::from_millis(300);
 /// packet), and an arrow taken for Esc throws the user into a session.
 pub const ESCAPE_TIME_RAKUMUX: Duration = Duration::from_millis(800);
 
-/// The same on a local terminal (not over SSH), where a key's bytes arrive
-/// in one write: just long enough for a read that splits them anyway.
-pub const ESCAPE_TIME_LOCAL: Duration = Duration::from_millis(25);
+/// The same on a local terminal, or a desktop's over SSH, where a key's
+/// bytes arrive in one write: just long enough for a read that splits them
+/// anyway, so Esc acts at once.
+pub const ESCAPE_TIME_BRIEF: Duration = Duration::from_millis(25);
 
 /// Where the keys come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Link {
     /// A terminal on this machine.
     Local,
-    /// An SSH login (a phone app, another computer): a key's bytes can
-    /// arrive apart.
+    /// An SSH login (a phone app, another computer): a phone app's key
+    /// bytes can arrive apart.
     Remote,
 }
 
@@ -63,14 +66,17 @@ pub enum EscTarget {
     Dialog,
 }
 
-/// How long a lone Esc waits for the rest of a key: briefly on a local
-/// terminal; over SSH [`ESCAPE_TIME`], or [`ESCAPE_TIME_RAKUMUX`] where an
-/// arrow taken for Esc would throw the user into a session.
-pub fn wait(link: Link, target: EscTarget) -> Duration {
-    match (link, target) {
-        (Link::Local, _) => ESCAPE_TIME_LOCAL,
-        (Link::Remote, EscTarget::List) => ESCAPE_TIME_RAKUMUX,
-        (Link::Remote, EscTarget::Session | EscTarget::Dialog) => ESCAPE_TIME,
+/// How long a lone Esc waits for the rest of a key. A phone over SSH
+/// (`phone`: a window narrower than `layout::PHONE_BELOW`), whose keys were
+/// seen arriving in pieces up to 400 ms apart, waits [`ESCAPE_TIME`], or
+/// [`ESCAPE_TIME_RAKUMUX`] where an arrow taken for Esc would throw the user
+/// into a session. Everything else, a local terminal or a desktop's over
+/// SSH, waits [`ESCAPE_TIME_BRIEF`].
+pub fn wait(link: Link, phone: bool, target: EscTarget) -> Duration {
+    match (link, phone, target) {
+        (Link::Remote, true, EscTarget::List) => ESCAPE_TIME_RAKUMUX,
+        (Link::Remote, true, EscTarget::Session | EscTarget::Dialog) => ESCAPE_TIME,
+        (Link::Local, _, _) | (Link::Remote, false, _) => ESCAPE_TIME_BRIEF,
     }
 }
 
@@ -369,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn local_terminals_wait_briefly_and_ssh_waits_where_it_matters() {
+    fn local_terminals_and_desktops_wait_briefly_and_phones_over_ssh_long() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {
             move |name: &str| {
                 pairs
@@ -389,18 +395,25 @@ mod tests {
             assert_eq!(Link::from_env(env(pairs)), Link::Remote, "{name}");
         }
         for target in [EscTarget::Session, EscTarget::List, EscTarget::Dialog] {
-            assert_eq!(wait(Link::Local, target), ESCAPE_TIME_LOCAL);
+            for phone in [false, true] {
+                assert_eq!(wait(Link::Local, phone, target), ESCAPE_TIME_BRIEF);
+            }
+            // A desktop terminal over SSH sends a key in one packet.
+            assert_eq!(wait(Link::Remote, false, target), ESCAPE_TIME_BRIEF);
         }
-        assert!(ESCAPE_TIME_LOCAL <= Duration::from_millis(50));
-        assert_eq!(wait(Link::Remote, EscTarget::Session), ESCAPE_TIME);
-        assert_eq!(wait(Link::Remote, EscTarget::Dialog), ESCAPE_TIME);
-        assert_eq!(wait(Link::Remote, EscTarget::List), ESCAPE_TIME_RAKUMUX);
+        assert!(ESCAPE_TIME_BRIEF <= Duration::from_millis(50));
+        assert_eq!(wait(Link::Remote, true, EscTarget::Session), ESCAPE_TIME);
+        assert_eq!(wait(Link::Remote, true, EscTarget::Dialog), ESCAPE_TIME);
+        assert_eq!(
+            wait(Link::Remote, true, EscTarget::List),
+            ESCAPE_TIME_RAKUMUX
+        );
         // A local Esc comes through at once; a local arrow is one read.
         let mut joiner = EscapeJoiner::default();
         let now = Instant::now();
-        joiner.feed(key(KeyCode::Esc), now, ESCAPE_TIME_LOCAL);
+        joiner.feed(key(KeyCode::Esc), now, ESCAPE_TIME_BRIEF);
         assert_eq!(
-            joiner.expire(now + ESCAPE_TIME_LOCAL),
+            joiner.expire(now + ESCAPE_TIME_BRIEF),
             vec![key(KeyCode::Esc)]
         );
     }

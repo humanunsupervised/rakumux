@@ -317,8 +317,10 @@ tui/
     auth/                    # Clerk auth, deferred (feature flag off)
     escape_time.rs           # keys whose escape sequence arrives in pieces (phones over SSH): a lone
                              # Esc waits for the rest of an arrow, Home/End, PgUp/PgDn, F1-F4 or a focus
-                             # report: 25 ms on a local terminal; over SSH (SSH_CONNECTION, SSH_CLIENT,
-                             # SSH_TTY) 300 ms in session mode and dialogs, 800 ms in Rakumux mode's list
+                             # report: 25 ms on a local terminal and a desktop's over SSH (a key is one
+                             # write); a phone over SSH (SSH_CONNECTION, SSH_CLIENT or SSH_TTY, and under
+                             # layout::PHONE_BELOW columns) 300 ms in session mode and dialogs, 800 ms in
+                             # Rakumux mode (the list and the feed)
     updater.rs, version.rs, theme.rs, icons.rs (plain / emoji / Nerd Font marks)
 ```
 
