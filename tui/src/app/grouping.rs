@@ -4,7 +4,7 @@
 //! section per agent or program). One tab is active at a time: it decides
 //! the section headers and the only filter that applies. Each tab keeps its
 //! own filter while another one is active; none is saved. (The feed isn't
-//! one of them: it's a view of its own, `app/feed`.)
+//! one of them: it's a pane of its own, `app/feed`.)
 //!
 //! Everything here is derived from a `SessionView` alone; nothing draws.
 

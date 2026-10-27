@@ -93,7 +93,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         KeyAction::PreviousSession => app.cycle_session(-1),
         KeyAction::Feed => {
             leave(app);
-            app.toggle_feed_view();
+            app.toggle_feed();
         }
         KeyAction::NextTab | KeyAction::PreviousTab => {
             leave(app);

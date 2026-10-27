@@ -341,12 +341,8 @@ impl App {
         }
     }
 
-    /// `s`: a new AI summary of the selected session (live ones only; none is
-    /// selected in the Feed view).
+    /// `s`: a new AI summary of the selected session (live ones only).
     pub fn summarize_selected(&mut self) {
-        if self.feed_shown() {
-            return;
-        }
         let Some(session) = self.list.selected_session() else {
             self.set_status("Select a session to summarise.");
             return;

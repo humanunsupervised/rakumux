@@ -1,6 +1,6 @@
-//! Frame composition: session list or tab bar, detail pane, the footer
-//! (with the mode badge) on the last row, then the open dialog or the
-//! Settings modal on top.
+//! Frame composition: session list or tab bar, detail pane, the feed, the
+//! footer (with the mode badge) on the last row, then the open dialog or
+//! the Settings modal on top.
 
 use ratatui::{
     layout::Rect,
@@ -11,7 +11,7 @@ use ratatui::{
 };
 
 use crate::app::types::{AppMode, Focus};
-use crate::app::App;
+use crate::app::{App, DividerState};
 use crate::components::{
     auth::draw_auth_menu,
     dialogs::{
@@ -19,6 +19,7 @@ use crate::components::{
         draw_daemon_restart_dialog, draw_feed_reply_dialog, draw_rename_dialog,
         draw_upgrade_dialog,
     },
+    feed::draw_feed,
     folder_picker::draw_folder_picker,
     footer::draw_footer,
     section_picker::draw_section_picker,
@@ -30,12 +31,13 @@ use crate::components::{
 };
 use crate::theme;
 
-/// The line between the list and the detail: a column side by side, a row
-/// when the list is stacked above the detail. Brighter and heavier while
-/// the mouse is on it or dragging it.
-fn draw_divider(f: &mut Frame, app: &App, area: Rect, stacked: bool) {
+/// A draggable line: between the list and the detail (a column side by
+/// side, a row when the list is stacked above the detail), or left of the
+/// docked feed. Brighter and heavier while the mouse is on it or dragging
+/// it.
+fn draw_divider(f: &mut Frame, state: DividerState, area: Rect, stacked: bool) {
     let p = theme::palette();
-    let active = app.divider.hover || app.divider.dragging;
+    let active = state.hover || state.dragging;
     let color = if active {
         p.accent_primary
     } else {
@@ -85,7 +87,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_session_list(f, app, list, &mut hits);
     }
     if let Some(divider) = screen.divider {
-        draw_divider(f, app, divider, screen.stacked);
+        draw_divider(f, app.divider, divider, screen.stacked);
     }
     if let Some(rail) = screen.rail {
         draw_list_rail(f, rail, &mut hits);
@@ -95,7 +97,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         tab_hits = targets;
         app.tab_first = first;
     }
-    let main_cursor = draw_session_detail(f, app, &screen, &mut hits);
+    let main_cursor = draw_session_detail(f, app, &screen);
+    if let Some(feed) = screen.feed {
+        draw_feed(f, app, feed, &mut hits);
+    }
+    if let Some(line) = screen.feed_divider {
+        draw_divider(f, app.feed_divider, line, false);
+    }
     let panel_cursor = draw_terminal_panel(f, app, &mut hits);
     let cursor = if app.focus == Focus::Terminal {
         panel_cursor
@@ -722,23 +730,25 @@ mod tests {
     }
 
     #[test]
-    fn the_feed_view_hides_with_the_list() {
+    fn the_docked_feed_stays_while_the_list_hides() {
         let mut h = harness(vec![view("A", "api", 20)]);
-        h.app.toggle_feed_view();
-        let screen = render(&mut h.app, 160, 48);
-        assert!(
-            screen
-                .lines()
-                .nth(46)
-                .unwrap()
-                .starts_with("   « Hide list"),
-            "{screen}"
-        );
+        h.app.open_feed();
+        render(&mut h.app, 160, 48);
+        let session = h.app.screen().terminal.unwrap();
         tap(&mut h, Hit::HideList);
         let screen = render(&mut h.app, 160, 48);
-        assert!(!screen.contains("≡ Feed "), "{screen}");
         assert!(
             screen.lines().nth(46).unwrap().starts_with("»│"),
+            "{screen}"
+        );
+        // The session takes the list's columns; the feed keeps its own.
+        let hidden = h.app.screen();
+        let feed = hidden.feed.unwrap();
+        assert_eq!(feed.right(), 160);
+        assert_eq!(hidden.terminal.unwrap().right(), session.right());
+        assert!(hidden.terminal.unwrap().width > session.width);
+        assert!(
+            screen.lines().nth(1).unwrap().contains("≡ Feed"),
             "{screen}"
         );
     }
@@ -2121,8 +2131,8 @@ mod tests {
         }
     }
 
-    /// Started with an account whose Feed switch is `on`, the feed's next
-    /// answer `page` (when given), after the first read.
+    /// Started with `account`, the feed's next answer `page` (when given),
+    /// the feed shown with the keys after its first read.
     fn feed_harness(
         account: crate::app::testing::FakeAccount,
         page: Option<rakumux_sensagent::feed::FeedPage>,
@@ -2136,7 +2146,7 @@ mod tests {
         if let Some(page) = page {
             account.queue_feed(page);
         }
-        h.app.open_feed_view();
+        h.app.open_feed();
         h.app
             .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(3));
         h.app.process_pending();
@@ -2190,8 +2200,22 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_feed_view_shows_finished_replies_under_its_band() {
+    /// The columns of `screen` from `x` on, each row's end trimmed.
+    fn pane_column(screen: &str, x: u16) -> Vec<String> {
+        screen
+            .lines()
+            .map(|l| {
+                l.chars()
+                    .skip(usize::from(x))
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn the_feed_pane_shows_finished_replies_at_the_right() {
         use rakumux_sensagent::feed::FeedStatus;
         let machine = rakumux_sensagent::feed::machine_name();
         let mut pending = reply(
@@ -2217,47 +2241,96 @@ mod tests {
             Some(feed_page(FeedStatus::Ready, vec![pending, elsewhere])),
         );
         let wide = render(&mut h.app, 160, 48);
-        let width = usize::from(crate::layout::sidebar_width(160));
-        let list = list_column(&wide, width);
-        // The band says it's the feed; the sessions' tabs are gone.
-        assert_eq!(list[1].trim_end(), "   ≡ Feed", "{wide}");
-        assert_eq!(list[2], "   ▁▁▁▁▁▁", "{wide}");
-        // So does the footer, whose button goes back to the sessions.
-        let footer = wide.lines().last().unwrap();
-        assert!(footer.starts_with(" RAKUMUX  FEED  "), "{footer:?}");
-        assert!(footer.contains(" f Sessions "), "{footer:?}");
+        let screen = h.app.screen();
+        let feed = screen.feed.unwrap();
+        assert_eq!((feed.x, feed.width), (160 - 44, 44));
+        let pane = pane_column(&wide, feed.x);
+        let rows: Vec<&str> = wide.lines().collect();
+        // The list keeps its tabs and the session stays in view, narrower.
+        assert!(rows[1].starts_with("   ◔ Status ▾"), "{wide}");
+        assert!(wide.contains("hello from the fake"), "{wide}");
+        assert_eq!(screen.detail.unwrap().right(), feed.x - 1);
+        // The pane's band names it, bright while it has the keys.
+        assert_eq!(pane[1], "   ≡ Feed", "{wide}");
+        assert_eq!(pane[2], "   ▁▁▁▁▁▁", "{wide}");
+        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
+        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+        let p = crate::theme::palette();
+        let mark = terminal.backend().buffer().get(feed.x + 3, 1).fg;
+        assert_eq!(mark, p.accent_primary);
         // The newest first, each a card: its session, agent and folder (no
         // branch known) on the top border, then its age and `sending` while
-        // it isn't uploaded, `done` once it is.
-        assert!(list[4].starts_with(" ╭ api  claude · repo ─"), "{wide}");
-        assert!(list[4].contains(" now · "), "{wide}");
-        assert!(list[4].ends_with(" sending ╮"), "{wide}");
-        assert!(list[5].starts_with(" │ Done: the parser handles"), "{wide}");
-        assert!(list[8].starts_with(" ╰─"), "{wide}");
+        // it isn't uploaded, `done` once it is (only the mark, short of
+        // room).
+        assert!(pane[4].starts_with(" ╭ api  claude · repo ─"), "{wide}");
+        assert!(pane[4].contains(" now · "), "{wide}");
+        assert!(pane[4].ends_with(" sending ╮"), "{wide}");
+        assert!(pane[5].starts_with(" │ Done: the parser handles"), "{wide}");
+        assert!(pane[8].starts_with(" ╰─"), "{wide}");
         assert!(
-            list[9].starts_with(" ╭ nightly-build  claude · repo ─"),
+            pane[9].starts_with(" ╭ nightly-build  claude · repo ─"),
             "{wide}"
         );
-        assert!(list[9].ends_with(" 5m · ● done ╮"), "{wide}");
-        // The border's corners line up with its sides.
-        let right = |row: &str| row.chars().count();
+        assert!(pane[9].ends_with(" 5m · ● ╮"), "{wide}");
         assert_eq!(
-            right(list[4].as_str()),
-            right(list[5].trim_end_matches(' ')),
+            pane[4].chars().count(),
+            pane[5].trim_end_matches(' ').chars().count(),
             "{wide}"
         );
         assert!(!wide.contains('\u{1b}'), "{wide}");
-        // The detail reads the selected reply whole; it runs here.
+        // The footer's button is the feed's, and names the selected card's
+        // session in its centre.
+        let footer = rows[47];
+        assert!(footer.starts_with(" RAKUMUX  "), "{footer:?}");
+        assert!(!footer.contains("FEED"), "{footer:?}");
+        assert!(footer.contains(" f ≡ Feed "), "{footer:?}");
+        assert!(footer.contains("session: ● api"), "{footer:?}");
+        // Enter: the reply whole in the cards' place, `‹` on the band.
+        h.press(KeyCode::Enter).await;
+        let wide = render(&mut h.app, 160, 48);
+        let pane = pane_column(&wide, feed.x);
+        assert_eq!(pane[1], "   ‹ ≡ Feed", "{wide}");
         assert!(wide.contains("Enter goes into its session"), "{wide}");
         assert!(wide.contains("Run cargo test to check."), "{wide}");
-        assert!(wide.contains("session: ● api"), "{wide}");
-        let narrow = render(&mut h.app, 80, 24);
-        assert!(
-            narrow.lines().nth(1).unwrap().contains("≡ Feed"),
-            "{narrow}"
-        );
+        assert!(wide.contains("hello from the fake"), "{wide}");
+        // The list gets the keys back: the band goes quiet.
+        h.press(KeyCode::Esc).await;
+        h.press(KeyCode::Esc).await;
+        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
+        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+        let mark = terminal.backend().buffer().get(feed.x + 3, 1).fg;
+        assert_eq!(mark, p.neutral_gray);
+        // A narrow window: under the list, where the session was.
+        let narrow = render(&mut h.app, 90, 40);
+        let divider = h.app.screen().divider.unwrap();
         assert!(narrow.contains("api  claude · repo"), "{narrow}");
-        assert!(narrow.contains("Run cargo test to check."), "{narrow}");
+        let feed_band = narrow.lines().nth(usize::from(divider.y) + 2).unwrap();
+        assert!(feed_band.contains("≡ Feed"), "{narrow}");
+    }
+
+    #[tokio::test]
+    async fn a_narrow_pane_puts_the_reply_button_under_the_way_in() {
+        use rakumux_sensagent::feed::FeedStatus;
+        let mut done = reply("R1", "A", "api", "lab-box", 1, "Done.");
+        done.conversation_id = Some("c".into());
+        let mut h = feed_harness(
+            crate::app::testing::FakeAccount::with_feed(),
+            Some(feed_page(FeedStatus::Ready, vec![done])),
+        );
+        h.press(KeyCode::Enter).await;
+        let wide = render(&mut h.app, 160, 48);
+        let pane = pane_column(&wide, h.app.screen().feed.unwrap().x);
+        let at = pane
+            .iter()
+            .position(|row| row.contains("Enter goes into its session"))
+            .unwrap_or_else(|| panic!("{wide}"));
+        assert!(!pane[at].contains("Reply"), "{wide}");
+        assert!(
+            pane[at + 1].trim_start().starts_with("↩ Reply  r"),
+            "{wide}"
+        );
+        tap(&mut h, Hit::FeedReply);
+        assert!(matches!(h.app.mode, AppMode::FeedReply(_)));
     }
 
     #[test]
@@ -2288,13 +2361,14 @@ mod tests {
             status_at: 1,
         }];
         let mut h = feed_harness(crate::app::testing::FakeAccount::with_feed(), Some(page));
-        let wide = render(&mut h.app, 160, 48);
-        let list = list_column(&wide, usize::from(crate::layout::sidebar_width(160)));
+        // A wide screen's pane is a quarter of it.
+        let wide = render(&mut h.app, 200, 48);
+        let pane = pane_column(&wide, h.app.screen().feed.unwrap().x);
         assert!(
-            list[4].starts_with(" ╭ parser  claude · fix/csv ─"),
+            pane[4].starts_with(" ╭ parser  claude · fix/csv ─"),
             "{wide}"
         );
-        assert!(list[4].ends_with(" 3m · ✓ answered ╮"), "{wide}");
+        assert!(pane[4].ends_with(" 3m · ✓ answered ╮"), "{wide}");
         // Short of room, the status's word goes first: the mark stays.
         let phone = render(&mut h.app, 45, 30);
         let top = phone
@@ -2316,9 +2390,14 @@ mod tests {
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("The feed is off."), "{screen}");
         assert!(
-            screen.contains("Turn it on in Settings → Available on sign-in"),
+            screen.contains(", Settings → Available on sign-in"),
             "{screen}"
         );
+        // A narrow pane wraps it rather than cutting it off.
+        h.app.settings.sessions.feed_width = Some(30);
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains(", Settings → Available on"), "{screen}");
+        assert!(screen.contains("sign-in"), "{screen}");
         let mut h = feed_harness(FakeAccount::with_feed(), None);
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("No replies yet"), "{screen}");
@@ -2337,7 +2416,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn f_switches_between_the_feed_and_the_sessions() {
+    async fn f_shows_and_hides_the_feed_beside_the_sessions() {
         let mut h = feed_harness(crate::app::testing::FakeAccount::with_feed(), None);
         let first = |h: &mut Harness| {
             render(&mut h.app, 160, 48)
@@ -2346,16 +2425,19 @@ mod tests {
                 .unwrap()
                 .to_string()
         };
-        assert!(first(&mut h).contains("≡ Feed"), "{}", first(&mut h));
-        assert!(!first(&mut h).contains("◔ Status"), "{}", first(&mut h));
-        h.press(KeyCode::Char('f')).await;
-        let tabs = first(&mut h);
-        assert!(tabs.contains("◔ Status ▾"), "{tabs}");
-        assert!(!tabs.contains("≡"), "{tabs}");
+        let row = first(&mut h);
+        assert!(
+            row.contains("◔ Status ▾") && row.contains("≡ Feed"),
+            "{row}"
+        );
         assert!(render(&mut h.app, 160, 48).contains("+ New session"));
         h.press(KeyCode::Char('f')).await;
+        let row = first(&mut h);
+        assert!(row.contains("◔ Status ▾"), "{row}");
+        assert!(!row.contains("≡"), "{row}");
+        h.press(KeyCode::Char('f')).await;
         let screen = render(&mut h.app, 160, 48);
-        assert!(!screen.contains("+ New session"), "{screen}");
+        assert!(screen.contains("+ New session"), "{screen}");
         assert!(screen.contains("No replies yet"), "{screen}");
     }
 
@@ -2369,8 +2451,8 @@ mod tests {
         let mut options = options(&fake, scope(), &dir);
         options.account = account.clone();
         let mut h = start(options, fake, dir);
-        // Two replies finish while the sessions show; and one from before
-        // this window started, which isn't new.
+        // Two replies finish while it's hidden; and one from before this
+        // window started, which isn't new.
         let new = |id: &str| {
             let mut entry = reply(id, "A", "api", "lab-box", 0, "Done.");
             entry.finished_at += 1_000;
@@ -2390,49 +2472,38 @@ mod tests {
                 .to_string()
         };
         let shown = footer(&mut h);
-        assert!(shown.starts_with(" RAKUMUX  "), "{shown:?}");
-        assert!(!shown.contains("FEED"), "{shown:?}");
         assert!(shown.contains(" f ≡ Feed ●2   ? Help "), "{shown:?}");
-        // A tap: the feed, which the bar names; its button goes back.
+        // A tap: the feed, with the keys; nothing is new any more.
         tap(&mut h, Hit::FooterKey(FooterKey::Feed));
         assert!(h.app.feed_shown());
+        assert!(h.app.feed_has_keys());
         let shown = footer(&mut h);
-        assert!(shown.starts_with(" RAKUMUX  FEED  "), "{shown:?}");
-        assert!(shown.contains(" f Sessions   ? Help "), "{shown:?}");
-        // The FEED chip keeps the buttons' darker shade.
-        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
-        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
-        let p = crate::theme::palette();
-        let chip = terminal.backend().buffer().get(10, 47).bg;
-        assert_ne!(chip, p.accent_orange);
-        assert_eq!(
-            Some(chip),
-            p.faded(p.accent_orange, 0.2).or(Some(p.background))
-        );
-        // The badge (and its chip) does what Esc does: back to the
-        // sessions, with nothing new any more.
-        tap(&mut h, Hit::ModeBadge);
-        assert!(!h.app.feed_view());
-        assert_eq!(h.app.focus, Focus::List);
-        let shown = footer(&mut h);
+        assert!(shown.starts_with(" RAKUMUX  "), "{shown:?}");
         assert!(shown.contains(" f ≡ Feed   ? Help "), "{shown:?}");
-        // The button, twice: there and back.
-        tap(&mut h, Hit::FooterKey(FooterKey::Feed));
+        // The badge does what Esc does: the list gets the keys back, the
+        // feed stays.
+        tap(&mut h, Hit::ModeBadge);
+        assert!(!h.app.feed_has_keys());
         assert!(h.app.feed_shown());
+        assert_eq!(h.app.focus, Focus::List);
+        // The button: the keys again, then it hides.
         render(&mut h.app, 160, 48);
         tap(&mut h, Hit::FooterKey(FooterKey::Feed));
-        assert!(!h.app.feed_view());
+        assert!(h.app.feed_has_keys());
+        render(&mut h.app, 160, 48);
+        tap(&mut h, Hit::FooterKey(FooterKey::Feed));
+        assert!(!h.app.feed_open());
         // On a phone it fits beside the badge and Help.
         h.app.resize(40, 20);
         h.press(KeyCode::Char('f')).await;
         let phone = render(&mut h.app, 40, 20);
         let shown = phone.lines().last().unwrap();
-        assert!(shown.starts_with(" RAKUMUX  FEED "), "{shown:?}");
-        assert!(shown.ends_with(" f Sessions   ? Help  "), "{shown:?}");
+        assert!(shown.starts_with(" RAKUMUX "), "{shown:?}");
+        assert!(shown.ends_with(" f ≡ Feed   ? Help  "), "{shown:?}");
     }
 
     #[tokio::test]
-    async fn on_a_phone_the_feed_fills_the_screen_and_a_reply_is_read_full_screen() {
+    async fn on_a_phone_the_feed_fills_the_screen_and_a_reply_is_read_there() {
         use rakumux_sensagent::feed::FeedStatus;
         let elsewhere = reply(
             "R1",
@@ -2448,17 +2519,98 @@ mod tests {
         );
         h.app.resize(45, 40);
         let phone = render(&mut h.app, 45, 40);
-        assert!(phone.lines().nth(1).unwrap().contains("≡ Feed"), "{phone}");
+        assert_eq!(
+            phone.lines().nth(1).unwrap().trim_end(),
+            "   ≡ Feed",
+            "{phone}"
+        );
         assert!(phone.contains("nightly-build"), "{phone}");
+        assert!(!phone.contains("◔ Status"), "{phone}");
         h.press(KeyCode::Enter).await;
         let reading = render(&mut h.app, 45, 40);
-        assert!(reading.contains("Esc back"), "{reading}");
+        assert_eq!(
+            reading.lines().nth(1).unwrap().trim_end(),
+            "   ‹ ≡ Feed",
+            "{reading}"
+        );
         assert!(reading.contains("finished 5m ago"), "{reading}");
         assert!(
             reading.contains("The build is green again after the"),
             "{reading}"
         );
         h.press(KeyCode::Esc).await;
-        assert!(!render(&mut h.app, 45, 40).contains("Esc back"));
+        assert!(!render(&mut h.app, 45, 40).contains("‹"));
+        h.press(KeyCode::Esc).await;
+        let list = render(&mut h.app, 45, 40);
+        assert!(list.contains("◔ Status"), "{list}");
+        assert!(!list.contains("nightly-build"), "{list}");
+    }
+
+    #[tokio::test]
+    async fn the_feed_tab_leads_the_tab_bar_and_fills_the_body_when_selected() {
+        use rakumux_sensagent::feed::FeedStatus;
+        let fake = FakeApi::new(vec![view("A", "api", 20), view("B", "docs", 10)]);
+        let dir = tempfile::tempdir().unwrap();
+        let account = std::sync::Arc::new(crate::app::testing::FakeAccount::with_feed());
+        let mut options = options(&fake, scope(), &dir);
+        options.account = account.clone();
+        options.settings.sessions.layout = SessionLayout::Tabs;
+        let mut h = start(options, fake, dir);
+        let done = reply("R1", "A", "api", "lab-box", 2, "All tests pass.");
+        account.queue_feed(feed_page(FeedStatus::Ready, vec![done]));
+        h.press(KeyCode::Char('f')).await;
+        let screen = render(&mut h.app, 160, 48);
+        let rows: Vec<&str> = screen.lines().collect();
+        // Before the sessions' tabs and a line, unnumbered.
+        assert!(
+            rows[0].starts_with(" ◔ Status ▾   ≡ Feed  │  1 ● docs "),
+            "{:?}",
+            rows[0]
+        );
+        // Selected: the cards on the left, the selected reply beside them.
+        let width = usize::from(crate::layout::sidebar_width(160));
+        let cards = list_column(&screen, width);
+        assert_eq!(cards[2], "   ≡ Feed", "{screen}");
+        assert!(cards[5].starts_with(" ╭ api  claude · repo ─"), "{screen}");
+        assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
+        assert!(screen.contains("finished 2m ago"), "{screen}");
+        assert!(!screen.contains("hello from the fake"), "{screen}");
+        // The selected tab is highlighted, no session's is.
+        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
+        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+        let p = crate::theme::palette();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer.get(15, 0).bg, p.surface);
+        assert_ne!(buffer.get(26, 0).bg, p.surface);
+        // Esc: the session's tab, the Feed tab still there.
+        h.press(KeyCode::Esc).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(
+            screen.lines().next().unwrap().contains("≡ Feed"),
+            "{screen}"
+        );
+        assert!(screen.contains("hello from the fake"), "{screen}");
+    }
+
+    #[test]
+    fn grid_shows_the_feed_in_a_pane_beside_the_cards() {
+        let mut h = with_layout(
+            vec![view("A", "api", 20), view("B", "docs", 10)],
+            SessionLayout::Grid,
+        );
+        let before = render(&mut h.app, 160, 48);
+        let grid = h.app.screen().grid.unwrap();
+        h.app.open_feed();
+        let screen = render(&mut h.app, 160, 48);
+        let feed = h.app.screen().feed.unwrap();
+        let cards = h.app.screen().grid.unwrap();
+        assert_eq!(cards.right() + 1, feed.x);
+        assert_eq!(feed.right(), grid.right());
+        assert_eq!(pane_column(&screen, feed.x)[1], "   ≡ Feed", "{screen}");
+        assert!(screen.contains("api"), "{screen}");
+        assert_ne!(screen, before);
+        h.app.close_feed();
+        render(&mut h.app, 160, 48);
+        assert_eq!(h.app.screen().grid, Some(grid));
     }
 }

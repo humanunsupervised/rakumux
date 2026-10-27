@@ -2,10 +2,9 @@
 //! what the list is grouped and filtered by; the active one names its
 //! filter, `▤ web ▾`, and Enter or a click on it opens its modal), then the
 //! sessions shown, under a header row per folder (app, status) when there
-//! are several, and "+ New session" last. In the Feed view the pane shows
-//! the feed instead (`feed.rs`) under a band that says so. Beside the
-//! session (Master detail) its last row is `« Hide list`; hidden, a rail at
-//! the left edge (`draw_list_rail`) shows it again.
+//! are several, and "+ New session" last. Beside the session (Master
+//! detail) its last row is `« Hide list`; hidden, a rail at the left edge
+//! (`draw_list_rail`) shows it again.
 //! Each session is a compact cell after a blank row: its name, then its age
 //! and its mark (an agent's activity, else its status) at the right; then the
 //! agent's latest output, when the daemon has one; then its program, branch
@@ -69,7 +68,7 @@ fn description_line<'a>(app: &'a App, session: &'a SessionView) -> Option<&'a st
 
 /// Rows of the tabs' band: its line with a row of padding above and below
 /// (the active tab underlined on it), when the pane has room.
-fn folder_item_height(pane: u16) -> u16 {
+pub(super) fn folder_item_height(pane: u16) -> u16 {
     if pane >= 8 {
         3
     } else {
@@ -749,51 +748,6 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
     }
 }
 
-/// The Feed view's band, where the sessions' tabs are: `≡ Feed`, bold and
-/// underlined like an active tab, so the replies start where the sessions
-/// do.
-fn draw_feed_band(f: &mut Frame, app: &App, area: Rect) {
-    let p = theme::palette();
-    f.render_widget(Block::default().style(Style::default().bg(p.surface)), area);
-    let icon = app.icons().feed();
-    let title = "Feed";
-    let line = Line::from(vec![
-        Span::raw(" ".repeat(INDENT)),
-        Span::styled(icon, Style::default().fg(p.neutral_gray)),
-        Span::raw(" "),
-        Span::styled(
-            title,
-            Style::default()
-                .fg(p.neutral_gray)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
-    f.render_widget(
-        Paragraph::new(line),
-        Rect {
-            y: area.y + area.height / 2,
-            height: 1,
-            ..area
-        },
-    );
-    if area.height >= 3 {
-        let width = str_width(icon) + 1 + str_width(title);
-        f.render_widget(
-            Paragraph::new(Span::styled(
-                "▁".repeat(width),
-                Style::default().fg(p.neutral_gray),
-            )),
-            Rect {
-                x: area.x.saturating_add(INDENT as u16),
-                y: area.bottom() - 1,
-                width: width as u16,
-                height: 1,
-            }
-            .intersection(area),
-        );
-    }
-}
-
 /// The list pane's last row beside the session: a click hides the list.
 fn draw_hide_list(f: &mut Frame, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     let p = theme::palette();
@@ -867,13 +821,8 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         height: folder_item_height(area.height),
         ..area
     };
-    let feed = app.feed_shown();
-    if feed {
-        draw_feed_band(f, app, item);
-    } else {
-        draw_tabs(f, app, item, selected == 0, hits);
-        hits.push((item, Hit::FolderSelector));
-    }
+    draw_tabs(f, app, item, selected == 0, hits);
+    hits.push((item, Hit::FolderSelector));
     let mut inner = Rect {
         y: item.bottom(),
         height: area.height - item.height,
@@ -893,10 +842,6 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         );
     }
     if inner.height == 0 {
-        return;
-    }
-    if feed {
-        super::feed::draw_feed_list(f, app, inner, hits);
         return;
     }
 

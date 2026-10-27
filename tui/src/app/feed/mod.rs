@@ -6,13 +6,13 @@
 //! entries read lately (`AccountAccess::feed_turn`), and the replies written
 //! back to entries (`AccountAccess::feed_reply`, `r`), which with the entries
 //! that answer them make threads, and which entries were on screen, to count
-//! the new ones. Nothing here draws or knows where it's shown: the Feed view
-//! hosts it (`view.rs`), and `components/feed.rs` draws it into any area.
+//! the new ones. Nothing here draws or knows where it's shown: `pane.rs`
+//! puts it on screen, and `components/feed.rs` draws it into any area.
 
+mod pane;
 mod reply;
 #[cfg(test)]
 mod tests;
-mod view;
 
 use std::cmp::Reverse;
 use std::collections::{HashSet, VecDeque};
@@ -196,14 +196,14 @@ pub struct FeedStore {
     revision: Option<u64>,
     /// The selected card's key ([`Card::key`]); `None` selects the newest.
     selected: Option<String>,
-    /// Rows of the selected reply scrolled past (the detail).
+    /// Rows of the selected reply scrolled past.
     pub scroll: usize,
-    /// The selected reply fills the list's area (a phone, which has no
-    /// detail beside the list).
+    /// The selected reply is read whole in the cards' place (Enter on a
+    /// card; Esc goes back to them).
     pub reading: bool,
     /// A page was asked for and hasn't come back.
     pub(super) busy: bool,
-    /// When to ask again while the feed is shown.
+    /// When to ask the service again.
     pub(super) due: Option<Instant>,
     /// Answers for an older request generation are dropped.
     pub(super) request_generation: u64,

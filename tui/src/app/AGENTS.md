@@ -19,10 +19,9 @@ new-session flow, and code boundaries.
   (the rows never shift) and the wheel moves the selection. Help keeps a reading width and tabs. All dialogs leave the footer row visible.
   The detail has no title row: the footer names the session in view (`session: ● <name>`, the
   mark its list row has). The footer is a full-width bar with that in its centre: orange with dark text in
-  Rakumux mode (`f ≡ Feed`, with `●N` new entries, or `f Sessions` in the Feed view,
-  `FooterKey::Feed` → `App::toggle_feed_view`; `? Help` and `, Settings` buttons in a darker
-  orange, and `Sign in` while signed out, `FooterKey::SignIn` → `App::start_sign_in`; a `FEED`
-  chip after the badge in the Feed view), muted blue in session and
+  Rakumux mode (`f ≡ Feed`, with `●N` new entries, `FooterKey::Feed` → `App::toggle_feed`;
+  `? Help` and `, Settings` buttons in a darker orange, and `Sign in` while signed out,
+  `FooterKey::SignIn` → `App::start_sign_in`), muted blue in session and
   terminal input modes (a `Ctrl-\ Rakumux mode` button); the badge and buttons are hit targets.
 - A session the user exits from inside (controller, session mode) is deleted on its `exited`
   stream event (`sessions.rs::on_stream_event`); one ending in the background stays `exited`.
@@ -34,7 +33,7 @@ new-session flow, and code boundaries.
   file; Settings doesn't show them), and
   `sessions { rakumux_key (prefix_key read for older configs), cycle_keys,
   cycle_keys_in_session, welcome_seen, phone_offer_seen, layout, icons, sidebar_width,
-  stacked_list_percent,
+  stacked_list_percent, feed_width,
   session_order }`. Retired
   keys (`selected_projects`) are dropped on load, so the next save leaves them out.
 - `folders.rs`: the folders the daemon knows (`Folders`: `known`
@@ -65,29 +64,38 @@ new-session flow, and code boundaries.
   (an app or a status) and `sort_sections` (agents first, then programs, then `shell`, by name).
   `is_shell` is the one shell list (`format.rs` uses it too).
 - `feed/`: the agent feed (`FeedStore`: state only, entries newest first by `finished_at`,
-  capped at 500, the selection kept by id, the reply's scroll, the service's generation and
-  revision, and the ids that were on screen: `mark_seen`, `unseen` counts the rest that finished
-  after the window started) and `view.rs`, the Feed view hosting it: Rakumux mode's other view,
-  not a tab (`feed_view`; `toggle_feed_view` for `f`, the footer's `FooterKey::Feed` and
-  Settings' `KeyAction::Feed`; `feed_back` for Esc and the badge; `leave_feed_view` when a
-  grouping is picked or a reply's session opened). `feed_shown` is true in Rakumux mode and,
-  in Master detail, beside a session too; `shown_layout` lays the screen out as Master detail
-  while it shows (Grid and Tabs come back in a session; `browsing_grid` is false meanwhile).
-  It polls `AccountAccess::feed` off the UI thread every 2 s while shown, and every 10 s as a
-  background read while the account's Feed switch is on, so `feed_unseen` can count for the
-  footer (again at once while `more`); nothing ever opens it by itself, every start shows the
-  sessions. Its keys (`feed_key`: ←/→ and `h` do nothing, `l` goes in like Enter) and Enter
-  (`open_feed_entry`: a reply whose session is listed here goes into it under the grouping the
-  sessions last had; one from another machine says where it runs; on phones it's read full
-  screen). The reply being read brings its whole turn
+  capped at 500, the selection kept by id, the reply's scroll, `reading` (the selected reply
+  read whole in the cards' place), the service's generation and revision, and the ids that were
+  on screen: `mark_seen`, `unseen` counts the rest that finished after the window started) and
+  `pane.rs`, which puts it on screen. `feed_open` (shown; this window's, hidden at every start,
+  nothing opens it by itself) and `feed_focused` (it has Rakumux mode's keys: `feed_has_keys`;
+  `feed_lost_keys` when session mode or the terminal panel takes them) go to the layout as
+  `PaneSizes::feed` (`layout::FeedShown`), and `Screen::feed` says where it is: docked on the
+  right (Master detail, Grid; `Screen::feed_divider`, `drag_feed_divider` saves
+  `sessions.feed_width`), the session's place on narrower windows in Rakumux mode, the body
+  under the tab bar while the Tabs layout's Feed tab is selected (`feed_tab_shown`;
+  `feed_columns` puts the reply beside the cards from 100 columns), or the screen on a phone
+  while it has the keys. `feed_shown` is whether it's on screen. `toggle_feed` (`f`, the
+  footer's `FooterKey::Feed`, Settings' `KeyAction::Feed`): shown with the keys, the keys, or
+  hidden; `unfocus_feed` (Esc, a click beside it, a grouping picked) gives the list the keys,
+  hiding it where it would leave the screen; `feed_back` is the feed's Esc. Every change runs
+  `feed_moved`: the session on screen takes its new pane size (`sync_terminal_size`), Grid's
+  previews follow their cards. It polls `AccountAccess::feed` off the UI thread every 2 s while
+  on screen, and every 10 s as a background read while the account's Feed switch is on, so
+  `feed_unseen` can count for the footer and the Feed tab (again at once while `more`). Its keys
+  (`feed_key`: ←/→ and `h` do nothing, `l` is Enter, ↑/↓ scroll a reply being read) and Enter
+  (`open_feed_entry`: read the reply whole; from there, or beside the cards, a reply whose
+  session is listed here goes into it under the grouping the sessions last had, one from
+  another machine says where it runs). A reply on screen whole brings its whole turn
   (`AccountAccess::feed_turn`, off the UI thread, the rest asked for at once while `next`;
   `FeedStore` keeps the last 20 turns, `TurnState`), drawn in order by
   `components::feed::turn_lines` (`›` prompts, quiet reasoning, `●` tool calls with the first
-  lines of their output). `components/feed.rs` draws a `FeedStore` into any area;
-  `components/session_list.rs` puts it in the list's place under a `≡ Feed` band.
+  lines of their output). `components/feed.rs::draw_feed` draws it into `Screen::feed`: a band
+  (`≡ Feed`, the accent while it has the keys, `‹` back while reading) over the cards or the
+  reply; `components/session_tabs.rs` draws the Feed tab.
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
   folders / App / Status), `filter_label` (the Tabs layout's selector, Grid's header),
-  `switch_tab`/`show_tab` (both leave the Feed view), `open_tab_picker` (Folders: the Folders modal) and the App and
+  `switch_tab`/`show_tab` (both give the list the keys from the feed), `open_tab_picker` (Folders: the Folders modal) and the App and
   Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
   then `picker_sections` (sessions' apps or every status but unknown, plus the filter's), typing
   narrows by name, Tab ticks (Space too while nothing is typed: status names have spaces), Enter
@@ -118,7 +126,8 @@ new-session flow, and code boundaries.
   `SessionDrag`); `group_target` is `{`/`}` over any headers. A folder filter only sets
   `current_folder` while the Folders tab is active.
 - `screen.rs`: screen geometry for a size, layout, focus, zoom and the dragged pane sizes
-  (`layout::PaneSizes`: `sidebar_width`, `stacked_list_percent`). No header: the panes start at
+  (`layout::PaneSizes`: `sidebar_width`, `stacked_list_percent`, `feed_width`) and the feed
+  (`PaneSizes::feed`, `Screen::feed`; see `feed/`). No header: the panes start at
   the top row and the footer (mode badge, messages, Help/Settings keys) is always exactly the
   last row, zoom included, so modes, selection and messages never move a pane. Phones
   (`layout::is_phone`, under 80 columns, `App::phone`) show the list alone in Rakumux mode
@@ -153,8 +162,12 @@ new-session flow, and code boundaries.
   App and Status modals' rows (`Hit::FolderRow`, `Hit::SectionRow`), and the footer's
   mode badge (`Hit::ModeBadge`: `enter_rakumux_mode` / `return_to_session`) and key hints
   (`Hit::FooterKey`: what the keys do), the list's `« Hide list` row and the hidden list's rail
-  (`Hit::HideList`, `Hit::ShowList`: `toggle_list`, in either mode). The divider drags side to side, or up and down when
-  stacked. Clicking "+ New session" creates and enters its shell immediately at any width,
+  (`Hit::HideList`, `Hit::ShowList`: `toggle_list`, in either mode), and the feed (`Hit::FeedEntry`
+  selects a card, a second click opens it; `Hit::FeedBack`, `Hit::FeedReply`, `Hit::FeedPane`, the
+  Tabs layout's `Hit::FeedTab`): a click on it gives it the keys, a click beside it (not the
+  footer) gives them to the list. The divider drags side to side, or up and down when
+  stacked; the line left of the docked feed (`Screen::feed_divider`) drags side to side.
+  Clicking "+ New session" creates and enters its shell immediately at any width,
   using the current folder; pending creation ignores repeated clicks.
   A click on the previewed session's terminal goes in. On a phone a
   tap on a session row (or "+ New session") opens it, and a tap on a tab switches session in
@@ -192,7 +205,8 @@ new-session flow, and code boundaries.
 - `handlers/`: key handling by target (`Focus::List` = Rakumux mode, `Focus::Session` = main
   session, `Focus::Terminal` = utility shell):
   - Rakumux mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
-    `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs; `f` the Feed view and back),
+    `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs; `f` the feed: shown with the keys,
+    the keys, hidden; `feed_key` while it has them),
     `gg` via `App::pending_key`,
     `d`/`dd` opens delete confirmation, `b` hides or shows the list, Enter/`i`
     go in, Esc (cancel first) or the

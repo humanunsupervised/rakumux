@@ -168,12 +168,18 @@ pub enum Hit {
     /// A tab on the list's top row: activates it, or opens its modal when
     /// it's the active one.
     ListTab(grouping::Grouping),
-    /// A reply in the feed (its index, newest first): selects it, or opens
-    /// it when it's selected already (at once on a phone, and from session
-    /// mode).
+    /// A card in the feed (its index, newest first): focuses the feed and
+    /// selects it, or opens it as Enter does when it's selected already (at
+    /// once on a phone).
     FeedEntry(usize),
-    /// The feed detail's Reply button: writes back to the selected reply.
+    /// The Reply button over a reply read whole: writes back to it.
     FeedReply,
+    /// The `‹` on the feed's band while a reply is read: back to the cards.
+    FeedBack,
+    /// Anywhere else on the feed: focuses it.
+    FeedPane,
+    /// The Tabs layout's Feed tab: selects it.
+    FeedTab,
     /// The open Folders modal (clicks inside it don't close it).
     FolderMenu,
     /// A row of the Folders modal.
@@ -207,8 +213,8 @@ pub enum FooterKey {
     SignIn,
     /// `✓ Signed in` (Rakumux mode, signed in): the account dialog.
     Account,
-    /// `f ≡ Feed` (Rakumux mode; `f Sessions` while the feed is shown):
-    /// the Feed view, or back to the sessions.
+    /// `f ≡ Feed` (Rakumux mode): shows and focuses the feed, focuses it,
+    /// or hides it while it's focused, as `f` does.
     Feed,
 }
 
@@ -291,10 +297,18 @@ pub struct App {
     summaries_refreshing: HashSet<SessionId>,
     /// Sessions a summary was asked for whose request hasn't been answered.
     summary_asks: HashSet<SessionId>,
-    /// The agent feed (`app/feed`), shown by the Feed view.
+    /// The agent feed (`app/feed`).
     pub feed: feed::FeedStore,
-    /// Rakumux mode shows the Feed view instead of the sessions (`f`).
-    feed_view: bool,
+    /// The feed is shown (`f`): a pane on the right, a tab, or the screen on
+    /// a phone. This window only, never saved: every start hides it.
+    feed_open: bool,
+    /// The feed has Rakumux mode's keys (its pane focused, its tab
+    /// selected) rather than the list. Session mode clears it.
+    feed_focused: bool,
+    /// The feed was on screen when last checked: what it showed is seen.
+    feed_on_screen: bool,
+    /// The line left of the docked feed pane: hovered or being dragged.
+    pub feed_divider: DividerState,
     /// A switch was changed from Settings; the next account check says if
     /// saving it failed.
     features_saving: bool,
@@ -416,7 +430,10 @@ impl App {
             summaries_refreshing: HashSet::new(),
             summary_asks: HashSet::new(),
             feed: feed::FeedStore::new(rakumux_sensagent::feed::machine_name()),
-            feed_view: false,
+            feed_open: false,
+            feed_focused: false,
+            feed_on_screen: false,
+            feed_divider: DividerState::default(),
             features_saving: false,
             connection: Connection::Connecting,
             was_connected: false,
@@ -602,13 +619,15 @@ impl App {
         crate::layout::is_phone(self.area.width)
     }
 
-    /// The list sizes set by dragging the dividers, and whether the list
-    /// is hidden.
+    /// The pane sizes set by dragging the dividers, whether the list is
+    /// hidden, and the feed.
     fn pane_sizes(&self) -> crate::layout::PaneSizes {
         crate::layout::PaneSizes {
             list_cols: self.settings.sessions.sidebar_width,
             list_percent: self.settings.sessions.stacked_list_percent,
             list_hidden: self.list_hidden,
+            feed: self.feed_layout(),
+            feed_cols: self.settings.sessions.feed_width,
         }
     }
 
@@ -651,7 +670,7 @@ impl App {
     pub fn shown_as(&self) -> ShownAs {
         let unzoomed = screen::compute(
             self.area,
-            self.shown_layout(self.focus),
+            self.session_layout(),
             self.focus,
             false,
             self.pane_sizes(),
@@ -666,7 +685,7 @@ impl App {
     pub(super) fn screen_for(&self, focus: Focus) -> screen::Screen {
         let screen = screen::compute(
             self.area,
-            self.shown_layout(focus),
+            self.session_layout(),
             focus,
             self.zoomed,
             self.pane_sizes(),

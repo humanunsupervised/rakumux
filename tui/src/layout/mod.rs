@@ -20,6 +20,14 @@
 //!   focus uses the full-screen terminal under tabs; no detail terminal is
 //!   on screen while browsing, so it cannot claim any terminal's size.
 //!
+//! The agent feed ([`PaneSizes::feed`]) docks as a pane on the right in
+//! Master detail and Grid, a one-column divider left of it, while the
+//! session keeps [`FEED_SESSION_MIN_COLS`] beside it; narrower windows show
+//! it in the session's place in Rakumux mode only (the detail, or Grid's
+//! cards while it has the keys). Tabs shows it as a tab, the body under the
+//! tab bar while that tab is selected. Phones show it alone, full screen,
+//! while it has the keys.
+//!
 //! The layout is a user setting (`sessions.layout` in
 //! `~/.rakumux/config.json`) and applies live. This module only computes
 //! rectangles and draws the tab bar; the caller owns state, key routing and
@@ -73,6 +81,17 @@ pub const DETAIL_MIN_COLS: u16 = 40;
 /// Columns a hidden Sidebar list leaves at the left edge: a sliver of the
 /// list pane (its `»` shows it again) and the divider's line.
 pub const RAIL_COLS: u16 = 2;
+
+/// Narrowest docked feed pane.
+pub const FEED_MIN_COLS: u16 = 30;
+/// Docked feed pane width until its divider is dragged, until a quarter of
+/// the screen is wider (see [`default_feed_width`]).
+const FEED_COLS: u16 = 44;
+/// Widest a default feed pane gets on very wide screens.
+const FEED_MAX_DEFAULT_COLS: u16 = 60;
+/// Fewest columns the session keeps beside a docked feed pane. Narrower
+/// windows show the feed in the session's place, in Rakumux mode only.
+pub const FEED_SESSION_MIN_COLS: u16 = 60;
 
 /// Longest session name drawn on a tab before it's cut with `…`.
 pub const TAB_NAME_MAX: usize = 24;
@@ -159,6 +178,19 @@ pub enum PaneFocus {
     Zoomed,
 }
 
+/// Whether the agent feed is shown, and whether it has the keys (its pane
+/// focused, its tab selected) while the list would otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum FeedShown {
+    /// Not on screen anywhere.
+    #[default]
+    Hidden,
+    /// Shown; the list (or tab bar) has the keys.
+    Shown,
+    /// Shown with Rakumux mode's keys.
+    Focused,
+}
+
 /// Rectangles for one frame. Panes that aren't shown are `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LayoutAreas {
@@ -184,6 +216,11 @@ pub struct LayoutAreas {
     /// screen too short to stack, with the list focused); check
     /// `detail.is_empty()` before drawing or resizing a terminal to it.
     pub detail: Rect,
+    /// The agent feed: a docked pane on the right, or wherever it takes
+    /// another pane's place (see [`PaneSizes::feed`]).
+    pub feed: Option<Rect>,
+    /// The draggable line left of a docked feed pane.
+    pub feed_divider: Option<Rect>,
 }
 
 /// The pane sizes the user chose by dragging a divider (`None` sizes that
@@ -199,6 +236,10 @@ pub struct PaneSizes {
     /// rail [`RAIL_COLS`] wide is left of the detail. A stacked or phone
     /// screen shows the list as usual.
     pub list_hidden: bool,
+    /// The agent feed: hidden, shown, or shown with the keys.
+    pub feed: FeedShown,
+    /// Docked feed pane width (see [`docked_feed_width`]).
+    pub feed_cols: Option<u16>,
 }
 
 /// A phone-width screen ([`PHONE_BELOW`]): the list or a session, never
@@ -242,6 +283,40 @@ pub fn list_width(total: u16, preferred: Option<u16>) -> u16 {
     }
 }
 
+/// Docked feed pane width until its divider is dragged: [`FEED_COLS`], a
+/// quarter of a wide screen, at most [`FEED_MAX_DEFAULT_COLS`].
+pub fn default_feed_width(total: u16) -> u16 {
+    (total / 4).clamp(FEED_COLS, FEED_MAX_DEFAULT_COLS)
+}
+
+/// The feed pane's width when it docks in `layout` on a screen `total`
+/// columns wide: `sizes.feed_cols` (else [`default_feed_width`]), narrowed
+/// down to [`FEED_MIN_COLS`] as far as the session needs to keep
+/// [`FEED_SESSION_MIN_COLS`] beside it (and Master detail its list or
+/// rail). `None` when even the narrowest pane doesn't leave that, and in
+/// Tabs and on phones, which don't dock it.
+pub fn docked_feed_width(total: u16, layout: SessionLayout, sizes: PaneSizes) -> Option<u16> {
+    if is_phone(total) || layout == SessionLayout::Tabs {
+        return None;
+    }
+    let session_fits = |main: u16| {
+        let beside = match layout {
+            SessionLayout::Sidebar if sizes.list_hidden => RAIL_COLS,
+            SessionLayout::Sidebar => list_width(main, sizes.list_cols) + 1,
+            SessionLayout::Grid | SessionLayout::Tabs => 0,
+        };
+        main.saturating_sub(beside) >= FEED_SESSION_MIN_COLS
+    };
+    let preferred = sizes
+        .feed_cols
+        .unwrap_or_else(|| default_feed_width(total))
+        .min(total)
+        .max(FEED_MIN_COLS);
+    (FEED_MIN_COLS..=preferred)
+        .rev()
+        .find(|width| total > width + 1 && session_fits(total - width - 1))
+}
+
 /// Height of a stacked list in an area `total` rows tall: `percent` of it
 /// (a dragged divider; 40% when there's none), kept between
 /// [`LIST_MIN_ROWS`] and what leaves the detail [`PREVIEW_MIN_ROWS`]. A
@@ -278,15 +353,81 @@ pub fn split(area: Rect, layout: SessionLayout, focus: PaneFocus) -> LayoutAreas
 }
 
 /// [`split`] with the user's pane sizes (see [`list_width`] and
-/// [`list_rows`]).
+/// [`list_rows`]) and the feed ([`PaneSizes::feed`]).
 pub fn split_with(
     area: Rect,
     layout: SessionLayout,
     focus: PaneFocus,
     sizes: PaneSizes,
 ) -> LayoutAreas {
-    // Only the detail (plus the tab bar in Tabs).
-    let only = |detail: Rect| LayoutAreas {
+    if focus == PaneFocus::Zoomed || sizes.feed == FeedShown::Hidden {
+        return split_sessions(area, layout, focus, sizes);
+    }
+    let without = PaneSizes {
+        feed: FeedShown::Hidden,
+        ..sizes
+    };
+    let rakumux = focus == PaneFocus::List;
+    let focused = rakumux && sizes.feed == FeedShown::Focused;
+    // Alone: a phone, Grid's cards or a list too short to share with it.
+    let alone = || LayoutAreas {
+        feed: Some(area),
+        ..only(hidden(area))
+    };
+    if is_phone(area.width) {
+        return if focused {
+            alone()
+        } else {
+            split_sessions(area, layout, focus, without)
+        };
+    }
+    if let Some(width) = docked_feed_width(area.width, layout, sizes) {
+        let main = Rect {
+            width: area.width - width - 1,
+            ..area
+        };
+        let mut areas = match layout {
+            // The session keeps its columns beside the list, whatever the
+            // main area's width.
+            SessionLayout::Sidebar => side_by_side(main, without),
+            _ => split_sessions(main, layout, focus, without),
+        };
+        areas.feed_divider = Some(Rect {
+            x: main.right(),
+            width: 1,
+            ..area
+        });
+        areas.feed = Some(Rect {
+            x: main.right() + 1,
+            width,
+            ..area
+        });
+        return areas;
+    }
+    let mut areas = split_sessions(area, layout, focus, without);
+    match layout {
+        // The tab bar stays; the selected Feed tab fills the rest.
+        SessionLayout::Tabs if focused => {
+            areas.feed = Some(areas.detail);
+            areas.detail = hidden(areas.detail);
+        }
+        // Too narrow to dock: in the session's place in Rakumux mode.
+        SessionLayout::Sidebar | SessionLayout::Grid if rakumux => {
+            if !areas.detail.is_empty() {
+                areas.feed = Some(areas.detail);
+                areas.detail = hidden(areas.detail);
+            } else if focused {
+                return alone();
+            }
+        }
+        _ => {}
+    }
+    areas
+}
+
+/// Only the detail.
+fn only(detail: Rect) -> LayoutAreas {
+    LayoutAreas {
         grid: None,
         list: None,
         divider: None,
@@ -294,7 +435,48 @@ pub fn split_with(
         rail: None,
         tabs: None,
         detail,
-    };
+        feed: None,
+        feed_divider: None,
+    }
+}
+
+/// Master detail with the list beside the detail: the list (or its rail
+/// while hidden), then the detail.
+fn side_by_side(area: Rect, sizes: PaneSizes) -> LayoutAreas {
+    if sizes.list_hidden {
+        let width = RAIL_COLS.min(area.width);
+        return LayoutAreas {
+            rail: Some(Rect { width, ..area }),
+            ..only(Rect {
+                x: area.x + width,
+                width: area.width - width,
+                ..area
+            })
+        };
+    }
+    let width = list_width(area.width, sizes.list_cols);
+    LayoutAreas {
+        list: Some(Rect { width, ..area }),
+        divider: Some(Rect {
+            x: area.x + width,
+            width: 1,
+            ..area
+        }),
+        ..only(Rect {
+            x: area.x + width + 1,
+            width: area.width - width - 1,
+            ..area
+        })
+    }
+}
+
+/// The sessions' panes for `layout`, without the feed.
+fn split_sessions(
+    area: Rect,
+    layout: SessionLayout,
+    focus: PaneFocus,
+    sizes: PaneSizes,
+) -> LayoutAreas {
     if focus == PaneFocus::Zoomed {
         return only(area);
     }
@@ -338,7 +520,6 @@ pub fn split_with(
             PaneFocus::List if can_stack(area) => {
                 let rows = list_rows(area.height, sizes.list_percent);
                 LayoutAreas {
-                    grid: None,
                     list: Some(Rect {
                         height: rows,
                         ..area
@@ -349,13 +530,11 @@ pub fn split_with(
                         ..area
                     }),
                     stacked: true,
-                    rail: None,
-                    tabs: None,
-                    detail: Rect {
+                    ..only(Rect {
                         y: area.y + rows + 1,
                         height: area.height - rows - 1,
                         ..area
-                    },
+                    })
                 }
             }
             PaneFocus::List => LayoutAreas {
@@ -364,35 +543,32 @@ pub fn split_with(
             },
             PaneFocus::Detail | PaneFocus::Zoomed => only(area),
         },
-        SessionLayout::Sidebar if sizes.list_hidden => {
-            let width = RAIL_COLS.min(area.width);
-            LayoutAreas {
-                rail: Some(Rect { width, ..area }),
-                ..only(Rect {
-                    x: area.x + width,
-                    width: area.width - width,
-                    ..area
-                })
-            }
-        }
-        SessionLayout::Sidebar => {
-            let width = list_width(area.width, sizes.list_cols);
-            LayoutAreas {
-                list: Some(Rect { width, ..area }),
-                divider: Some(Rect {
-                    x: area.x + width,
-                    width: 1,
-                    ..area
-                }),
-                ..only(Rect {
-                    x: area.x + width + 1,
-                    width: area.width - width - 1,
-                    ..area
-                })
-            }
-        }
+        SessionLayout::Sidebar => side_by_side(area, sizes),
         SessionLayout::Tabs | SessionLayout::Grid => tabs_over(area),
     }
+}
+
+/// The Tabs layout's selected Feed tab, when `area` is wide enough for both
+/// (from [`SINGLE_PANE_BELOW`] columns): the cards in a column as wide as
+/// Master detail's list, a one-column line, then the selected reply.
+pub fn feed_tab_columns(area: Rect) -> Option<(Rect, Rect, Rect)> {
+    if area.width < SINGLE_PANE_BELOW {
+        return None;
+    }
+    let width = sidebar_width(area.width);
+    Some((
+        Rect { width, ..area },
+        Rect {
+            x: area.x + width,
+            width: 1,
+            ..area
+        },
+        Rect {
+            x: area.x + width + 1,
+            width: area.width - width - 1,
+            ..area
+        },
+    ))
 }
 
 /// A zero-width rectangle at the right edge of `area`.
@@ -853,6 +1029,7 @@ mod tests {
                 // A stacked height changes nothing side by side.
                 list_percent: Some(70),
                 list_hidden: false,
+                ..PaneSizes::default()
             };
             split_with(area, SessionLayout::Sidebar, PaneFocus::List, sizes)
         };
@@ -1026,10 +1203,144 @@ mod tests {
             list_cols: Some(70),
             list_percent: Some(64),
             list_hidden: false,
+            ..PaneSizes::default()
         };
         let split = split_with(area, SessionLayout::Sidebar, PaneFocus::List, sizes);
         assert_eq!(split.list, Some(rect(0, 0, 90, 25)));
         assert_eq!(split.detail, rect(0, 26, 90, 13));
+    }
+
+    #[test]
+    fn the_feed_docks_on_the_right_while_the_session_keeps_its_columns() {
+        let area = rect(0, 0, 160, 47);
+        let shown = PaneSizes {
+            feed: FeedShown::Shown,
+            ..PaneSizes::default()
+        };
+        for focus in [PaneFocus::List, PaneFocus::Detail] {
+            let areas = split_with(area, SessionLayout::Sidebar, focus, shown);
+            assert_eq!(areas.feed, Some(rect(116, 0, 44, 47)));
+            assert_eq!(areas.feed_divider, Some(rect(115, 0, 1, 47)));
+            assert_eq!(areas.list, Some(rect(0, 0, 48, 47)));
+            assert_eq!(areas.detail, rect(49, 0, 66, 47));
+        }
+        // Grid: the cards, or a session under its tabs, left of it.
+        let grid = split_with(area, SessionLayout::Grid, PaneFocus::List, shown);
+        assert_eq!(grid.grid, Some(rect(0, 0, 115, 47)));
+        assert_eq!(grid.feed, Some(rect(116, 0, 44, 47)));
+        let session = split_with(area, SessionLayout::Grid, PaneFocus::Detail, shown);
+        assert_eq!(session.tabs, Some(rect(0, 0, 115, 1)));
+        assert_eq!(session.detail, rect(0, 1, 115, 46));
+        // Narrowed down to its minimum before it gives up docking.
+        let sidebar = SessionLayout::Sidebar;
+        assert_eq!(docked_feed_width(160, sidebar, shown), Some(44));
+        assert_eq!(docked_feed_width(145, sidebar, shown), Some(35));
+        assert_eq!(docked_feed_width(140, sidebar, shown), Some(FEED_MIN_COLS));
+        assert_eq!(docked_feed_width(139, sidebar, shown), None);
+        // A hidden list leaves room on narrower windows; Grid needs only the
+        // session's columns.
+        let hidden = PaneSizes {
+            list_hidden: true,
+            ..shown
+        };
+        assert_eq!(docked_feed_width(120, sidebar, hidden), Some(44));
+        assert_eq!(docked_feed_width(93, sidebar, hidden), Some(FEED_MIN_COLS));
+        assert_eq!(docked_feed_width(92, sidebar, hidden), None);
+        assert_eq!(docked_feed_width(91, SessionLayout::Grid, shown), Some(30));
+        assert_eq!(docked_feed_width(90, SessionLayout::Grid, shown), None);
+        // A dragged width, within bounds.
+        let dragged = |cols| PaneSizes {
+            feed_cols: Some(cols),
+            ..shown
+        };
+        assert_eq!(
+            docked_feed_width(160, sidebar, dragged(10)),
+            Some(FEED_MIN_COLS)
+        );
+        assert_eq!(docked_feed_width(160, sidebar, dragged(39)), Some(39));
+        assert_eq!(docked_feed_width(160, sidebar, dragged(100)), Some(50));
+        assert_eq!(docked_feed_width(160, sidebar, dragged(u16::MAX)), Some(50));
+        // A quarter of a wide screen, within bounds.
+        assert_eq!(default_feed_width(160), 44);
+        assert_eq!(default_feed_width(200), 50);
+        assert_eq!(default_feed_width(400), 60);
+        // Never in Tabs or on a phone.
+        assert_eq!(docked_feed_width(200, SessionLayout::Tabs, shown), None);
+        assert_eq!(docked_feed_width(79, SessionLayout::Grid, shown), None);
+    }
+
+    #[test]
+    fn a_feed_that_doesnt_dock_takes_a_panes_place() {
+        let shown = PaneSizes {
+            feed: FeedShown::Shown,
+            ..PaneSizes::default()
+        };
+        let focused = PaneSizes {
+            feed: FeedShown::Focused,
+            ..PaneSizes::default()
+        };
+        // Master detail on 120 columns: the session's place in Rakumux mode,
+        // nothing in session mode.
+        let area = rect(0, 0, 120, 39);
+        let plain = split(area, SessionLayout::Sidebar, PaneFocus::List);
+        let list = split_with(area, SessionLayout::Sidebar, PaneFocus::List, shown);
+        assert_eq!(list.feed, Some(plain.detail));
+        assert_eq!((list.list, list.feed_divider), (plain.list, None));
+        assert!(list.detail.is_empty());
+        assert_eq!(
+            split_with(area, SessionLayout::Sidebar, PaneFocus::Detail, shown),
+            split(area, SessionLayout::Sidebar, PaneFocus::Detail)
+        );
+        // Stacked: under the list.
+        let stacked = split_with(
+            rect(0, 0, 90, 39),
+            SessionLayout::Sidebar,
+            PaneFocus::List,
+            shown,
+        );
+        assert!(stacked.stacked);
+        assert_eq!(stacked.feed, Some(rect(0, 16, 90, 23)));
+        // A list too short to share, Grid's cards, a phone: alone, only while
+        // it has the keys.
+        for (area, layout) in [
+            (rect(0, 0, 90, 10), SessionLayout::Sidebar),
+            (rect(0, 0, 85, 39), SessionLayout::Grid),
+            (rect(0, 0, 45, 39), SessionLayout::Sidebar),
+            (rect(0, 0, 45, 39), SessionLayout::Tabs),
+        ] {
+            let alone = split_with(area, layout, PaneFocus::List, focused);
+            assert_eq!(alone.feed, Some(area), "{layout:?} {area:?}");
+            assert!(alone.list.is_none() && alone.grid.is_none() && alone.tabs.is_none());
+            assert!(alone.detail.is_empty());
+            for (focus, sizes) in [(PaneFocus::List, shown), (PaneFocus::Detail, focused)] {
+                assert_eq!(
+                    split_with(area, layout, focus, sizes),
+                    split(area, layout, focus),
+                    "{layout:?} {area:?} {focus:?}"
+                );
+            }
+        }
+        // Tabs: the body under the tab bar while its tab is selected.
+        let area = rect(0, 0, 160, 39);
+        let tab = split_with(area, SessionLayout::Tabs, PaneFocus::List, focused);
+        assert_eq!(tab.tabs, Some(rect(0, 0, 160, 1)));
+        assert_eq!(tab.feed, Some(rect(0, 1, 160, 38)));
+        assert!(tab.detail.is_empty());
+        for (focus, sizes) in [(PaneFocus::List, shown), (PaneFocus::Detail, focused)] {
+            assert_eq!(
+                split_with(area, SessionLayout::Tabs, focus, sizes),
+                split(area, SessionLayout::Tabs, focus)
+            );
+        }
+        // Zoom: the session alone.
+        let zoomed = split_with(area, SessionLayout::Sidebar, PaneFocus::Zoomed, focused);
+        assert_eq!((zoomed.feed, zoomed.detail), (None, area));
+        // The Feed tab, wide enough: the cards, a line, the reply.
+        assert_eq!(
+            feed_tab_columns(rect(0, 1, 160, 38)),
+            Some((rect(0, 1, 48, 38), rect(48, 1, 1, 38), rect(49, 1, 111, 38)))
+        );
+        assert_eq!(feed_tab_columns(rect(0, 1, 99, 38)), None);
     }
 
     #[test]

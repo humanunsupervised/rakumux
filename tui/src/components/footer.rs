@@ -1,29 +1,28 @@
 //! One-line footer, the last row of every screen (zoom too): a full-width
 //! bar, orange while keys drive Rakumux and a muted blue while they go to a
 //! program. The mode badge (`RAKUMUX`, `SESSION` or `TERMINAL`) is at the
-//! left (in the Feed view followed by a quieter `FEED`), then the
-//! connection state and a message (a status message, why the daemon is
-//! unreachable, zoom, a pending upgrade); `session: ● <name>` in the centre
-//! (in Rakumux mode the selected session, else the one kept in view; in
-//! session mode the one taking the keys; with the status mark its list row
-//! has, since the detail has no title row); and buttons on the right. In
-//! Rakumux mode: the Feed view (`f ≡ Feed`, with `●N` for the entries that
-//! arrived since the feed was last on screen; `f Sessions` while it shows),
-//! Help (`?`), Settings (`,`), then the Rakumux account: Sign in while signed
-//! out, `✓ Signed in` (the account dialog) while signed in. In session mode
-//! the way to Rakumux mode (the Rakumux key). Settings lists every key.
+//! left, then the connection state and a message (a status message, why the
+//! daemon is unreachable, zoom, a pending upgrade); `session: ● <name>` in
+//! the centre (in Rakumux mode the selected session, else the one kept in
+//! view, or the selected card's while the feed has the keys; in session mode
+//! the one taking the keys; with the status mark its list row has, since
+//! the detail has no title row); and buttons on the right. In Rakumux mode:
+//! the feed (`f ≡ Feed`, with `●N` for the entries that arrived since the
+//! feed was last on screen), Help (`?`), Settings (`,`), then the Rakumux
+//! account: Sign in while signed out, `✓ Signed in` (the account dialog)
+//! while signed in. In session mode the way to Rakumux mode (the Rakumux
+//! key). Settings lists every key.
 //!
 //! The footer never wraps or grows: when the row is short the session
 //! gives way first (to its mark and name, then nothing), then the message is
 //! cut (down to [`MIN_MESSAGE`] columns), then buttons are dropped from the
 //! right (the account, Settings, Help, then the Feed's: it carries the
-//! count and is the one tap between the sessions and the feed); the badge
-//! always shows.
+//! count and is the one tap that shows the feed); the badge always shows.
 //!
 //! The badge and the buttons are tap targets, for phones and the mouse: the
 //! `SESSION` badge switches to Rakumux mode, the `RAKUMUX` badge does what
-//! Esc does (back to the session you came from; from the feed, back to the
-//! sessions), and a button does what its keys do.
+//! Esc does (back to the session you came from; while the feed has the
+//! keys, the feed's Esc), and a button does what its keys do.
 
 use ratatui::{
     layout::Rect,
@@ -77,34 +76,35 @@ impl Button {
 /// The most new entries the Feed button counts (`●99+` beyond).
 const MAX_COUNT: usize = 99;
 
-/// The Feed view's button: `≡ Feed` (`≡ Feed ●3` with entries that arrived
-/// since it was last on screen), or `Sessions` while it shows.
+/// The feed's button: `≡ Feed`, `≡ Feed ●3` with entries that arrived
+/// since it was last on screen.
 fn feed_button(app: &App) -> Button {
-    let label = if app.feed_shown() {
-        "Sessions".to_owned()
-    } else {
-        let icon = app.icons().feed();
-        match app.feed_unseen() {
-            0 => format!("{icon} Feed"),
-            n if n > MAX_COUNT => format!("{icon} Feed ●{MAX_COUNT}+"),
-            n => format!("{icon} Feed ●{n}"),
-        }
-    };
-    Button::new(FEED_KEY, label, FooterKey::Feed)
+    Button::new(FEED_KEY, feed_label(app), FooterKey::Feed)
 }
 
-/// The key that toggles the Feed view in Rakumux mode.
-pub const FEED_KEY: &str = "f";
-
-/// After the `RAKUMUX` badge while the Feed view shows: a quieter `FEED`
-/// (the buttons' darker orange), so the bar says where Rakumux mode is.
-fn view_chip(app: &App) -> Option<Span<'static>> {
-    if app.focus != Focus::List || !app.feed_shown() {
-        return None;
+/// `≡ Feed`, with `●N` for the entries that arrived since the feed was last
+/// on screen.
+fn feed_label(app: &App) -> String {
+    let icon = app.icons().feed();
+    match feed_count(app) {
+        Some(count) => format!("{icon} Feed {count}"),
+        None => format!("{icon} Feed"),
     }
-    let (key, _) = button_styles(Focus::List);
-    Some(Span::styled(" FEED ", key))
 }
+
+/// `●N` (`●99+`) for the entries that arrived since the feed was last on
+/// screen, none while there are none: the footer's button and the Feed tab
+/// say it.
+pub fn feed_count(app: &App) -> Option<String> {
+    match app.feed_unseen() {
+        0 => None,
+        n if n > MAX_COUNT => Some(format!("●{MAX_COUNT}+")),
+        n => Some(format!("●{n}")),
+    }
+}
+
+/// The key that shows, focuses and hides the feed in Rakumux mode.
+pub const FEED_KEY: &str = "f";
 
 /// A tap target in the footer: `width` columns from column `x` of the row.
 pub type FooterTarget = (u16, u16, Hit);
@@ -139,12 +139,11 @@ pub fn mode_badge(app: &App) -> Span<'static> {
     }
 }
 
-/// The footer's buttons: the Feed view (or back to the sessions), Help and
-/// Settings in Rakumux mode, and the Rakumux account at the right (once it
-/// was checked): Sign in while signed out, `✓ Signed in` while signed in; in
-/// session mode the Rakumux key, the way out (the rest are a tap away from
-/// there). Nothing while typing a filter (those keys type) or while a
-/// dialog is open.
+/// The footer's buttons: the feed, Help and Settings in Rakumux mode, and
+/// the Rakumux account at the right (once it was checked): Sign in while
+/// signed out, `✓ Signed in` while signed in; in session mode the Rakumux
+/// key, the way out (the rest are a tap away from there). Nothing while
+/// typing a filter (those keys type) or while a dialog is open.
 pub fn buttons(app: &App) -> Vec<Button> {
     if !matches!(app.mode, AppMode::Normal) || app.list.filter_editing {
         return Vec::new();
@@ -231,13 +230,13 @@ fn push_buttons(
 
 /// The session the footer names in its centre: in Rakumux mode the
 /// selected one, else the one the detail keeps in view (the tabs, a header
-/// or + New session selected), or with the feed shown the selected reply's
-/// when it runs here; the one taking the keys in session mode; none for the
-/// terminal panel, which isn't a session.
+/// or + New session selected), or while the feed has the keys the selected
+/// card's when it runs here; the one taking the keys in session mode; none
+/// for the terminal panel, which isn't a session.
 fn centred_session(app: &App) -> Option<&SessionView> {
     let in_view = || app.detail.session_id().and_then(|id| app.list.get(id));
     match app.focus {
-        Focus::List if app.feed_shown() => app.feed_session(),
+        Focus::List if app.feed_has_keys() => app.feed_session(),
         Focus::List => app.list.selected_session().or_else(in_view),
         Focus::Session => in_view(),
         Focus::Terminal => None,
@@ -406,10 +405,7 @@ pub fn footer_line(app: &App, width: usize) -> Line<'static> {
 /// takes the centre when there's room for it between them.
 fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
     let badge = mode_badge(app);
-    let chip = view_chip(app);
-    // The badge (and the view's chip) is one target.
-    let badge_width =
-        str_width(&badge.content) + chip.as_ref().map_or(0, |chip| str_width(&chip.content));
+    let badge_width = str_width(&badge.content);
     // The badge, then a space before the message.
     let lead = badge_width + 1;
     let message = message(app);
@@ -422,10 +418,7 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
         u16::try_from(badge_width.min(width)).unwrap_or(u16::MAX),
         Hit::ModeBadge,
     )];
-    // The chip keeps its shade when the bar is inked below.
-    let chip_at = chip.is_some().then_some(1);
     let mut spans = vec![badge];
-    spans.extend(chip);
     if !message.is_empty() {
         spans.push(Span::raw(" "));
         spans.extend(message);
@@ -452,10 +445,7 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
     if app.focus == Focus::List {
         // Dark ink on the orange bar; alerts stand out in bold.
         let palette = theme::palette();
-        for (at, span) in spans.iter_mut().enumerate() {
-            if Some(at) == chip_at {
-                continue;
-            }
+        for span in spans.iter_mut() {
             let alert = span.style.fg == Some(palette.accent_pink);
             span.style = span.style.fg(palette.background).bg(palette.accent_orange);
             if alert {

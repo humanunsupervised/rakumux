@@ -61,8 +61,8 @@ pub struct Settings {
 /// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
 /// `phone_offer_seen`, `remote_replies`, `icons`, `sidebar_width`,
-/// `stacked_list_percent`, `session_order` and `section_order`; other keys in the
-/// section (daemon tuning such as `scrollback_rows`) are kept as they are
+/// `stacked_list_percent`, `feed_width`, `session_order` and `section_order`;
+/// other keys in the section (daemon tuning such as `scrollback_rows`) are kept as they are
 /// when the TUI saves the file, except the retired ones
 /// ([`RETIRED_SESSION_KEYS`]), which are dropped.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -131,6 +131,13 @@ pub struct SessionsConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub stacked_list_percent: Option<u16>,
+    /// Docked feed pane width set by dragging the line left of it; `None`
+    /// sizes it to the screen. Ignored unless it's a number.
+    #[serde(
+        deserialize_with = "lenient_width",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub feed_width: Option<u16>,
     /// The order of each folder's sessions in the list, as the user set it
     /// by dragging or with `J`/`K`. Sessions not listed go after the listed
     /// ones, oldest first. Anything but a map of folders to lists of ids
@@ -167,6 +174,7 @@ impl Default for SessionsConfig {
             ai_summary: AiSummaryConfig::default(),
             sidebar_width: None,
             stacked_list_percent: None,
+            feed_width: None,
             session_order: SessionOrder::new(),
             section_order: SectionOrder::new(),
             other: serde_json::Map::new(),
@@ -523,6 +531,18 @@ mod tests {
         assert!(json.get("stacked_list_percent").is_none());
         let json = serde_json::to_value(read(r#"{"stacked_list_percent":12}"#)).unwrap();
         assert_eq!(json["stacked_list_percent"], 12);
+    }
+
+    #[test]
+    fn the_feed_width_is_optional_and_lenient() {
+        let read = |json: &str| -> SessionsConfig { serde_json::from_str(json).unwrap() };
+        assert_eq!(read("{}").feed_width, None);
+        assert_eq!(read(r#"{"feed_width":52}"#).feed_width, Some(52));
+        assert_eq!(read(r#"{"feed_width":"wide"}"#).feed_width, None);
+        let json = serde_json::to_value(read("{}")).unwrap();
+        assert!(json.get("feed_width").is_none());
+        let json = serde_json::to_value(read(r#"{"feed_width":40}"#)).unwrap();
+        assert_eq!(json["feed_width"], 40);
     }
 
     #[test]

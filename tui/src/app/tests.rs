@@ -1982,7 +1982,7 @@ async fn installation_cannot_be_cancelled_or_started_twice_by_more_keys() {
 }
 
 #[tokio::test]
-async fn settings_shows_the_feed_and_the_sessions_from_either_focus() {
+async fn settings_shows_and_hides_the_feed_from_either_focus() {
     for focus_session in [false, true] {
         let mut h = harness(vec![view("A", "a", 20)]);
         if focus_session {
@@ -2000,9 +2000,10 @@ async fn settings_shows_the_feed_and_the_sessions_from_either_focus() {
         assert!(matches!(h.app.mode, AppMode::Normal));
         assert_eq!(h.app.focus, Focus::List);
         assert!(h.app.feed_shown());
+        assert!(h.app.feed_has_keys());
         run_feed(&mut h);
         h.press(KeyCode::Enter).await;
-        assert!(!h.app.feed_view());
+        assert!(!h.app.feed_open());
     }
 }
 
@@ -3877,7 +3878,7 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     // Status comes first; there they stop (the feed is no tab).
     h.press(KeyCode::Left).await;
     assert_eq!(h.app.list.grouping(), Grouping::Status);
-    assert!(!h.app.feed_shown());
+    assert!(!h.app.feed_open());
     h.press(KeyCode::Right).await;
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);

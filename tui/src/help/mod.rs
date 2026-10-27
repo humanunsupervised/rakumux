@@ -198,7 +198,7 @@ pub enum KeyAction {
     NumberedSession,
     NextSession,
     PreviousSession,
-    /// `f`: the Feed view, or back to the sessions.
+    /// `f`: show the feed with the keys, give it the keys, or hide it.
     Feed,
     /// `→`: the list's next tab (Status, Folders, App).
     NextTab,
@@ -360,7 +360,7 @@ impl KeyAction {
             KeyAction::NumberedSession => "Go into session 1 to 9",
             KeyAction::NextSession => "Next session",
             KeyAction::PreviousSession => "Previous session",
-            KeyAction::Feed => "Feed, or back to the sessions",
+            KeyAction::Feed => "Feed (show, focus or hide)",
             KeyAction::NextTab => "Next tab (Status, Folders, App)",
             KeyAction::PreviousTab => "Previous tab",
             KeyAction::Top => "Top of the list",
@@ -497,11 +497,12 @@ impl KeyAction {
                 "The tabs (Status, Folders, App) are the first row; ←/→ switch them.".into()
             }
             KeyAction::Feed => "What your agents said when they finished a turn, on every \
-                 machine of your account, newest first, in the list's place (Master detail \
-                 whatever the layout). Enter on a reply made here goes into its session; r \
-                 writes back to it. f or Esc goes back to the sessions; the footer's Feed \
-                 button counts the replies that came since you last looked. Needs your Rakumux \
-                 account with the Agent feed on (Settings → Available on sign-in)."
+                 machine of your account, newest first: a pane on the right of Master detail \
+                 and Grid, a tab of its own in Tabs. Enter reads a reply whole, again goes into \
+                 its session when it runs here; r writes back to it; Esc gives the list the \
+                 keys back. The footer's Feed button counts the replies that came since you \
+                 last looked. Needs your Rakumux account with the Agent feed on (Settings → \
+                 Available on sign-in)."
                 .into(),
             KeyAction::NextFolder | KeyAction::PreviousFolder => {
                 "With several folders shown: the first session under the next or previous \
@@ -1611,14 +1612,13 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     }
     doc.bullet("Detail or Grid cards: terminal screens, updating as the programs run.");
     doc.bullet(
-        "The Feed (`f`): what your agents said when they finished a turn, on every machine of \
-         your account, in the list's place; `f` or `Esc` brings the sessions back.",
+        "The feed (`f`): what your agents said when they finished a turn, on every machine of \
+         your account, in a pane on the right (a tab in Tabs); `f` again hides it.",
     );
     doc.bullet(format!(
         "Footer, the bottom row: a full-width orange bar in Rakumux mode, with buttons for \
-         the Feed (`f`, with a count of new replies), this Help (`?`) and Settings (`,`); \
-         RAKUMUX FEED at the left while the Feed shows; a muted blue bar with a SESSION or TERMINAL \
-         label while a program takes keys, with a `{p}` button, the way to Rakumux mode. The \
+         the feed (`f`, with a count of new replies), this Help (`?`) and Settings (`,`); a \
+         muted blue bar with a SESSION or TERMINAL label while a program takes keys, with a `{p}` button, the way to Rakumux mode. The \
          session it's about is named in the middle (session: name). It shows messages and the \
          daemon connection when it isn't up. Settings lists every key."
     ));
@@ -1674,11 +1674,12 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         ),
         row(
             "f",
-            "The Feed, or back to the sessions (Esc too): what agents said when they finished \
-             a turn, on every machine of your account (turn it on in Settings → Available on \
-             sign-in), shown in Master detail whatever the layout. Enter on a reply made here \
-             goes into its session, and r writes back to it: typed into its session when its \
-             agent waits, and shown with the answer as a thread",
+            "The feed: shows it with the keys, gives it the keys, or hides it. What agents \
+             said when they finished a turn, on every machine of your account (turn it on in \
+             Settings → Available on sign-in), in a pane on the right (a tab in Tabs). With \
+             its keys, ↑/↓ go through the replies; Enter reads one whole (Esc back), again goes \
+             into its session; r writes back to it: typed into its session when its agent \
+             waits, and shown with the answer as a thread; Esc gives the list the keys",
         ),
         row(
             "gg, G, Home, End",
@@ -1736,8 +1737,9 @@ fn mouse(doc: &mut Doc) {
          to show everything, or outside it to close it.",
     );
     doc.bullet(
-        "Click the footer's Feed button for the Feed (again, Sessions, to come back); click a \
-         reply to read it, again to open its session.",
+        "Click the footer's Feed button to show the feed (again to hide it). Click a reply to \
+         select it, again to read it; click either side to give it the keys. Drag the line \
+         left of the feed to resize it.",
     );
     doc.bullet(
         "Drag a session up or down the list (or a tab left or right) to move it; a blue bar \
@@ -1749,8 +1751,8 @@ fn mouse(doc: &mut Doc) {
     );
     doc.bullet(
         "Click the mode badge at the bottom left: SESSION switches to Rakumux mode, RAKUMUX \
-         does what Esc does (back to the session you came from; from the Feed, back to the \
-         sessions). Click a button on the right of the footer (`f ≡ Feed`, `? Help`, \
+         does what Esc does (back to the session you came from; while the feed has the keys, \
+         Esc there). Click a button on the right of the footer (`f ≡ Feed`, `? Help`, \
          `, Settings`, or in a session the Rakumux key) to do what it says. Phones send taps \
          as clicks, so all of this works there too.",
     );
@@ -2098,6 +2100,15 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         "In Rakumux mode, switch tabs with `↑`/`↓`, `j`/`k`{cycle} or the number keys, or \
          click a tab. Drag a tab left or right to move it. All other keys work as in the \
           Master detail layout."
+    ));
+
+    doc.heading("The feed");
+    doc.text(format!(
+        "`f` shows the feed: in Master detail and Grid a pane on the right, and the session \
+         narrows to make room while it keeps {} columns; a narrower window shows the feed in \
+         the session's place in Rakumux mode only. Tabs gives it a tab of its own before the \
+         sessions'. On a phone it fills the screen. Every start hides it.",
+        layout::FEED_SESSION_MIN_COLS
     ));
 
     doc.heading("Switching layouts");
@@ -3740,7 +3751,7 @@ mod tests {
             ("Rakumux mode", "C-a"),
             ("Back to the session you came from", "Esc, C-a"),
             ("Go into the selected session", "Enter, i, l"),
-            ("Feed, or back to the sessions", "f"),
+            ("Feed (show, focus or hide)", "f"),
             ("Next tab (Status, Folders, App)", "→"),
             ("Previous tab", "←"),
             ("Last session", "Tab"),

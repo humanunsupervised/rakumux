@@ -2,10 +2,11 @@
 //! has the keys, and the session is previewed. Arrows and Vim keys both
 //! move (←/→ switch the list's tabs); Enter (or `i`) goes into a session;
 //! Esc cancels what's pending, then goes back to the session Rakumux mode
-//! was entered from. `f` switches to the Feed view and back; while it
-//! shows, the moves go through the replies, Enter opens one and Esc goes
-//! back to the sessions (`App::feed_key`). `b` hides Master detail's list
-//! beside the session, and shows it again.
+//! was entered from. `f` shows the feed and gives it the keys, gives them
+//! to it while it's shown, and hides it while it has them; with them, the
+//! moves go through its cards, Enter reads one and Esc gives them back
+//! (`App::feed_key`). `b` hides Master detail's list beside the session,
+//! and shows it again.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -23,7 +24,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
     // The second key of `gg`; anything else drops the first.
     if let Some(first) = app.pending_key.take() {
         match (first, key.code) {
-            ('g', KeyCode::Char('g')) if !ctrl && !alt && app.feed_shown() => {
+            ('g', KeyCode::Char('g')) if !ctrl && !alt && app.feed_has_keys() => {
                 app.feed_to_top();
                 return AppResult::Continue;
             }
@@ -41,14 +42,14 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         return AppResult::Continue;
     }
     if let Some(delta) = app.cycle_direction(&key) {
-        if app.feed_shown() {
+        if app.feed_has_keys() {
             app.move_feed_selection(delta as isize);
         } else {
             app.cycle_session(delta);
         }
         return AppResult::Continue;
     }
-    if app.feed_shown() && app.feed_key(key) {
+    if app.feed_has_keys() && app.feed_key(key) {
         return AppResult::Continue;
     }
     match key.code {
@@ -106,12 +107,8 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('n') => app.open_new_session(),
         KeyCode::Char('T') => app.toggle_terminal_panel(),
         KeyCode::Char('b') => app.toggle_list(),
-        KeyCode::Char('f') => app.toggle_feed_view(),
-        // The layout is the sessions': choosing one shows them.
-        KeyCode::Char('v') => {
-            app.close_feed_view();
-            app.set_layout(app.next_layout());
-        }
+        KeyCode::Char('f') => app.toggle_feed(),
+        KeyCode::Char('v') => app.set_layout(app.next_layout()),
         KeyCode::Char('p') => app.toggle_pin(),
         KeyCode::Char('s') => app.summarize_selected(),
         KeyCode::Char('J') => app.move_selected_session(1),

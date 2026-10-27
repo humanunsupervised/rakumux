@@ -583,6 +583,7 @@ impl App {
         self.came_from_terminal = false;
         self.grid.clear();
         self.focus = Focus::Session;
+        self.feed_lost_keys();
         self.pending_key = None;
         self.came_from = None;
         if let Some(id) = self.detail.session_id().cloned() {
@@ -878,8 +879,7 @@ impl App {
     /// refuses while someone types in the session elsewhere; this tries
     /// again at most every [`CLAIM_INTERVAL`].
     pub(super) fn claim_terminal_size(&mut self) {
-        // The feed covers the detail: no session is on screen to size.
-        if self.focus == Focus::Terminal || self.feed_in_detail() {
+        if self.focus == Focus::Terminal {
             return;
         }
         if self.screen().terminal.is_none() {
@@ -1166,6 +1166,14 @@ impl App {
             }
             return;
         }
+        if self.feed_divider.dragging {
+            match event.kind {
+                MouseEventKind::Drag(MouseButton::Left) => self.drag_feed_divider(event.column),
+                MouseEventKind::Up(_) => self.drop_feed_divider(),
+                _ => {}
+            }
+            return;
+        }
         if self.drag.is_some() {
             if event.kind == MouseEventKind::Drag(MouseButton::Left) {
                 self.drag_session(event.column, event.row);
@@ -1187,13 +1195,30 @@ impl App {
             _ => None,
         });
         self.divider.hover = inside(screen.divider);
+        self.feed_divider.hover = inside(screen.feed_divider);
         if self.divider.hover {
             if event.kind == MouseEventKind::Down(MouseButton::Left) {
                 self.divider.dragging = true;
             }
             return;
         }
+        if self.feed_divider.hover {
+            if event.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.feed_divider.dragging = true;
+            }
+            return;
+        }
         if let MouseEventKind::Down(MouseButton::Left) = event.kind {
+            let hit = self
+                .hits
+                .iter()
+                .find(|(area, _)| inside(Some(*area)))
+                .map(|(_, hit)| *hit);
+            // A click beside the feed gives the list the keys back; the
+            // footer's buttons leave them where they are.
+            if !inside(screen.feed) && !inside(screen.footer) && hit != Some(Hit::FeedTab) {
+                self.unfocus_feed();
+            }
             if let Some(index) = layout::tab_at(&self.tab_hits, event.column, event.row) {
                 let id = self.list.tab_order().get(index).map(|s| s.id.clone());
                 if let Some(id) = id {
@@ -1212,11 +1237,6 @@ impl App {
                 }
                 return;
             }
-            let hit = self
-                .hits
-                .iter()
-                .find(|(area, _)| inside(Some(*area)))
-                .map(|(_, hit)| *hit);
             match hit {
                 Some(Hit::TerminalPanelHide) => {
                     self.hide_terminal_panel();
@@ -1314,7 +1334,17 @@ impl App {
                     return;
                 }
                 Some(Hit::FeedReply) => {
+                    self.focus_feed();
                     self.open_feed_reply();
+                    return;
+                }
+                Some(Hit::FeedBack) => {
+                    self.focus_feed();
+                    self.feed.reading = false;
+                    return;
+                }
+                Some(Hit::FeedPane | Hit::FeedTab) => {
+                    self.focus_feed();
                     return;
                 }
                 // Hiding or showing the list leaves the mode as it is.
@@ -1324,10 +1354,10 @@ impl App {
                 }
                 Some(Hit::ModeBadge) => {
                     // Like the Rakumux key in session mode, Esc in
-                    // Rakumux mode (from the feed: back to the sessions).
+                    // Rakumux mode (the feed's own Esc while it has the keys).
                     match self.focus {
                         Focus::Session | Focus::Terminal => self.enter_rakumux_mode(),
-                        Focus::List if self.feed_shown() => self.feed_back(),
+                        Focus::List if self.feed_has_keys() => self.feed_back(),
                         Focus::List => self.return_to_session(),
                     }
                     return;
@@ -1344,7 +1374,7 @@ impl App {
                         FooterKey::Settings => super::handlers::settings::open_settings(self),
                         FooterKey::SignIn => self.start_sign_in(),
                         FooterKey::Account => self.open_account_dialog(),
-                        FooterKey::Feed => self.toggle_feed_view(),
+                        FooterKey::Feed => self.toggle_feed(),
                     }
                     return;
                 }
@@ -1356,17 +1386,19 @@ impl App {
         }
         if inside(screen.terminal_panel) {
             self.terminal_panel_mouse(event);
-        } else if (self.feed_shown() && inside(screen.list))
-            || (self.feed_in_detail() && inside(screen.terminal))
-        {
-            // The wheel scrolls the reply being read, else goes through
-            // the replies.
+        } else if inside(screen.feed) {
+            // The wheel scrolls the reply under it, else goes through the
+            // cards.
             let step = match event.kind {
                 MouseEventKind::ScrollUp => -1,
                 MouseEventKind::ScrollDown => 1,
                 _ => return,
             };
-            if self.feed.reading || inside(screen.terminal) {
+            let on_reply = match self.feed_columns() {
+                Some((_, _, reply)) => inside(Some(reply)),
+                None => self.feed.reading,
+            };
+            if on_reply {
                 self.feed.scroll_by(step * WHEEL_ROWS as isize);
             } else {
                 self.move_feed_selection(step);
@@ -1444,13 +1476,24 @@ impl App {
         if screen.stacked {
             // The stacked panes fill from the list's top to the detail's
             // bottom.
-            let total = screen.detail.map_or(list.bottom(), |d| d.bottom()) - list.y;
+            let below = screen.detail.or(screen.feed);
+            let total = below.map_or(list.bottom(), |d| d.bottom()) - list.y;
             let rows = event.row.saturating_sub(list.y);
             // The session-mode pane doesn't change: nothing to resize.
             self.settings.sessions.stacked_list_percent = Some(layout::list_percent(total, rows));
             return;
         }
-        let width = layout::list_width(self.area.width, Some(event.column.saturating_sub(list.x)));
+        // Beside a docked feed pane the session keeps the columns it docks
+        // with.
+        let main = screen
+            .feed_divider
+            .map_or(self.area.width, |line| line.x.saturating_sub(self.area.x));
+        let mut width = layout::list_width(main, Some(event.column.saturating_sub(list.x)));
+        if screen.feed_divider.is_some() {
+            width = width
+                .min(main.saturating_sub(layout::FEED_SESSION_MIN_COLS + 1))
+                .max(layout::LIST_MIN_COLS);
+        }
         if Some(width) != self.settings.sessions.sidebar_width {
             self.settings.sessions.sidebar_width = Some(width);
             self.sync_terminal_size();

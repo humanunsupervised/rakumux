@@ -2,7 +2,7 @@
 //! `grouping`) and the App and Status modals. ←/→, or a click, switch tabs;
 //! Enter on the top row, or a click on the active tab, opens the active
 //! tab's modal (the Folders modal for All folders, `folders.rs`). Choosing
-//! one leaves the Feed view (`feed/view.rs`) for the sessions.
+//! one gives the list the keys back from the feed (`feed/pane.rs`).
 //! The App and Status modals list All apps (All statuses), then each app
 //! (status) with its sessions; typing narrows the rows, Tab (Space, while
 //! nothing is typed) ticks several, Enter shows the one under the cursor
@@ -45,9 +45,9 @@ impl App {
     }
 
     /// Make `grouping`'s tab active: its sections and filter apply, and the
-    /// sessions show (not the feed).
+    /// list has the keys.
     pub fn show_tab(&mut self, grouping: Grouping) {
-        self.close_feed_view();
+        self.unfocus_feed();
         if grouping != self.list.grouping() {
             self.list.set_grouping(grouping);
             self.reconcile_detail();
@@ -203,7 +203,7 @@ impl App {
     /// Show these apps or statuses (none: all of them) under their tab,
     /// which becomes the active one.
     pub fn show_sections(&mut self, grouping: Grouping, sections: Vec<Section>) {
-        self.close_feed_view();
+        self.unfocus_feed();
         self.list.set_grouping(grouping);
         self.list.set_section_filter(grouping, sections);
         self.reconcile_detail();

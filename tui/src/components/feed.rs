@@ -1,28 +1,30 @@
-//! The agent feed (`app/feed`) drawn into any area: the replies newest
-//! first, each a card (its session, then its agent and branch, on the left
-//! of its top border; its age and where it's up to on the right; the start
-//! of the reply inside), or what the feed is waiting for (a sign-in, the switch, the
-//! first read). The selected reply is drawn by [`draw_feed_reply`], in the
-//! detail beside the list or in the list's place on a phone: its whole turn
-//! in order once it's read (the prompt, the agent's reasoning, its tool
-//! calls with the start of their output, its text), else the reply alone,
-//! then its thread when someone wrote back (`r`): the entry that started
-//! it, each reply with where it's up to, and the entries that answer them.
-//! Text is stripped of anything a terminal would act on before it's drawn.
+//! The agent feed (`app/feed`) where the screen puts it ([`draw_feed`]): a
+//! band naming it, in the accent while it has the keys, over the replies
+//! newest first, each a card (its session, then its agent and branch, on
+//! the left of its top border; its age and where it's up to on the right;
+//! the start of the reply inside), or what the feed is waiting for (a
+//! sign-in, the switch, the first read). The reply read whole (Enter) takes
+//! the cards' place, a `‹` on the band to go back; a wide Feed tab shows it
+//! beside them. It's its whole turn in order once it's read (the prompt,
+//! the agent's reasoning, its tool calls with the start of their output, its
+//! text), else the reply alone, then its thread when someone wrote back
+//! (`r`): the entry that started it, each reply with where it's up to, and
+//! the entries that answer them. Text is stripped of anything a terminal
+//! would act on before it's drawn.
 
 use rakumux_sensagent::feed::{FeedEntry, FeedReply, FeedStatus, ReplyFailure, ReplyStatus};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
 use super::format::{now_secs, relative_time, truncate};
 use super::markdown;
-use super::session_list::first_visible_row;
+use super::session_list::{first_visible_row, folder_item_height};
 use super::utils::get_spinner_char;
 use crate::app::feed::{agent_name, plain, Card, EntryStatus, ThreadItem, TurnState};
 use crate::app::types::AccountStatus;
@@ -51,14 +53,124 @@ fn status(app: &App) -> FeedStatus {
     }
 }
 
-/// The feed's replies (or its state) in `area`, recording a target per
-/// reply. A reply being read on a phone fills the area instead.
-pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
+/// The feed in `area` (`Screen::feed`): its band over the cards, or the
+/// reply read in their place; in a wide Feed tab, the cards with the
+/// selected reply beside them. A click anywhere on it focuses it.
+pub fn draw_feed(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    if app.feed.reading {
-        draw_feed_reply(f, app, area, hits);
+    let p = theme::palette();
+    let focused = app.feed_has_keys();
+    let (cards, beside) = match app.feed_columns() {
+        Some((cards, line, reply)) => {
+            let lines: Vec<Line> = (0..line.height).map(|_| Line::from("│")).collect();
+            f.render_widget(
+                Paragraph::new(lines).style(Style::default().fg(p.border_dim).bg(p.background)),
+                line,
+            );
+            (cards, Some(reply))
+        }
+        None => (area, None),
+    };
+    f.render_widget(
+        Block::default().style(Style::default().fg(p.text_primary).bg(p.panel)),
+        cards,
+    );
+    let band = Rect {
+        height: folder_item_height(cards.height),
+        ..cards
+    };
+    let reading = app.feed.reading && beside.is_none();
+    draw_band(f, app, band, focused, reading, hits);
+    let below = Rect {
+        y: band.bottom(),
+        height: cards.height - band.height,
+        ..cards
+    };
+    if reading {
+        draw_feed_reply(f, app, below, hits);
+    } else {
+        draw_feed_list(f, app, below, focused, hits);
+    }
+    if let Some(reply) = beside {
+        draw_feed_reply(f, app, reply, hits);
+    }
+    hits.push((area, Hit::FeedPane));
+}
+
+/// The feed's band, as tall as the list's tabs so the cards start where the
+/// sessions do: `≡ Feed`, underlined like an active tab, in the accent while
+/// it has the keys. While a reply is read in the cards' place it starts with
+/// `‹`, and a click on it goes back to them.
+fn draw_band(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    focused: bool,
+    reading: bool,
+    hits: &mut Vec<(Rect, Hit)>,
+) {
+    let p = theme::palette();
+    f.render_widget(Block::default().style(Style::default().bg(p.surface)), area);
+    let (mark, label) = if focused {
+        (p.accent_primary, p.text_bright)
+    } else {
+        (p.neutral_gray, p.neutral_gray)
+    };
+    let icon = app.icons().feed();
+    let title = "Feed";
+    let mut spans = vec![Span::raw(" ".repeat(INDENT))];
+    let mut start = INDENT;
+    if reading {
+        spans.push(Span::styled(
+            "‹ ",
+            Style::default().fg(mark).add_modifier(Modifier::BOLD),
+        ));
+        start += 2;
+        hits.push((area, Hit::FeedBack));
+    }
+    spans.extend([
+        Span::styled(icon, Style::default().fg(mark)),
+        Span::raw(" "),
+        Span::styled(
+            title,
+            Style::default().fg(label).add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    f.render_widget(
+        Paragraph::new(Line::from(spans)),
+        Rect {
+            y: area.y + area.height / 2,
+            height: 1,
+            ..area
+        },
+    );
+    if area.height >= 3 {
+        let width = str_width(icon) + 1 + str_width(title);
+        f.render_widget(
+            Paragraph::new(Span::styled("▁".repeat(width), Style::default().fg(mark))),
+            Rect {
+                x: area.x.saturating_add(start as u16),
+                y: area.bottom() - 1,
+                width: width as u16,
+                height: 1,
+            }
+            .intersection(area),
+        );
+    }
+}
+
+/// The feed's cards (or its state) in `area`, recording a target per card;
+/// the selected card's border is the accent's while the feed has the keys.
+fn draw_feed_list(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    focused: bool,
+    hits: &mut Vec<(Rect, Hit)>,
+) {
+    if area.width == 0 || area.height == 0 {
         return;
     }
     let p = theme::palette();
@@ -69,46 +181,53 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
     let key = Style::default()
         .fg(p.accent_primary)
         .add_modifier(Modifier::BOLD);
-    let message = |lines: Vec<Line<'static>>| {
-        let lines: Vec<Line> = std::iter::once(Line::default()).chain(lines).collect();
-        Paragraph::new(lines)
+    // What the feed waits for, a row down, wrapped at the indent so a
+    // narrow pane keeps all of it.
+    let message = |f: &mut Frame, area: Rect, lines: Vec<Line<'static>>| {
+        let inner = Rect {
+            x: area.x + INDENT as u16,
+            y: area.y + 1,
+            width: area.width.saturating_sub(INDENT as u16 + 1),
+            height: area.height.saturating_sub(1),
+        };
+        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
     };
     let mut area = area;
     match status(app) {
         FeedStatus::SignedOut => {
             let lines = vec![
-                indented(vec![Span::styled("Sign in to see your feed:", strong)]),
-                indented(vec![
+                Line::from(Span::styled("Sign in to see your feed:", strong)),
+                Line::from(vec![
                     Span::styled(",", key),
                     Span::styled(" Settings → Account", muted),
                 ]),
             ];
-            f.render_widget(message(lines), area);
+            message(f, area, lines);
             return;
         }
         FeedStatus::Off => {
             let lines = vec![
-                indented(vec![Span::styled("The feed is off.", strong)]),
-                indented(vec![
-                    Span::styled("Turn it on in ", muted),
-                    Span::styled("Settings → Available on sign-in", key),
+                Line::from(Span::styled("The feed is off.", strong)),
+                Line::from(vec![
+                    Span::styled(",", key),
+                    Span::styled(" Settings → Available on sign-in", muted),
                 ]),
             ];
-            f.render_widget(message(lines), area);
+            message(f, area, lines);
             return;
         }
         FeedStatus::Loading if app.feed.cards().is_empty() => {
-            let line = indented(vec![Span::styled(
+            let line = Line::from(Span::styled(
                 format!("{} Loading the feed…", get_spinner_char()),
                 muted,
-            )]);
-            f.render_widget(message(vec![line]), area);
+            ));
+            message(f, area, vec![line]);
             return;
         }
         FeedStatus::Unavailable | FeedStatus::Unknown => {
             // Kept entries stay; a quiet line says they may be old.
-            let line = indented(vec![Span::styled("can't reach rakumux.com", muted)]);
-            f.render_widget(Paragraph::new(vec![Line::default(), line]), area);
+            let line = Line::from(Span::styled("can't reach rakumux.com", muted));
+            message(f, area, vec![line]);
             area.y += 2;
             area.height = area.height.saturating_sub(2);
         }
@@ -117,18 +236,15 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
     let cards = app.feed.cards();
     if cards.is_empty() {
         if status(app) == FeedStatus::Ready {
-            let lines = vec![
-                indented(vec![Span::styled("No replies yet", strong)]),
-                indented(vec![Span::styled(
-                    "They appear here when an agent finishes a turn.",
-                    muted,
-                )]),
-            ];
-            f.render_widget(message(lines), area);
+            message(
+                f,
+                area,
+                vec![Line::from(Span::styled("No replies yet", strong))],
+            );
         }
         return;
     }
-    // A row between the tabs and the first card.
+    // A row between the band and the first card.
     area.y += 1;
     area.height = area.height.saturating_sub(1);
     let selected = app.feed.selected_index().unwrap_or(0);
@@ -146,7 +262,8 @@ pub fn draw_feed_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect
             height: rows,
             ..area
         };
-        draw_card(f, app, *card, cell, index == selected, now);
+        let chosen = index == selected;
+        draw_card(f, app, *card, cell, chosen, focused, now);
         hits.push((cell, Hit::FeedEntry(index)));
         y += rows;
     }
@@ -163,12 +280,30 @@ fn card_rows(card: &Card) -> u16 {
     }
 }
 
+/// A card's border: the accent's on the selected card while the feed has
+/// the keys, lighter than the others' on it otherwise.
+fn card_border(chosen: bool, focused: bool) -> Style {
+    let p = theme::palette();
+    Style::default().fg(match (chosen, focused) {
+        (true, true) => p.accent_primary,
+        (true, false) => p.neutral_gray,
+        (false, _) => p.border,
+    })
+}
+
 /// One card in `cell`, a column in from each side: the top border names its
 /// session (then, quieter, its agent and branch) on the left and says its
 /// age and status on the right; inside, the prompt's first line, then the
-/// start of the answer (or that it's coming). The selected card's border is
-/// the accent's.
-fn draw_card(f: &mut Frame, app: &App, card_of: Card, cell: Rect, chosen: bool, now: i64) {
+/// start of the answer (or that it's coming).
+fn draw_card(
+    f: &mut Frame,
+    app: &App,
+    card_of: Card,
+    cell: Rect,
+    chosen: bool,
+    focused: bool,
+    now: i64,
+) {
     let p = theme::palette();
     let card = Rect {
         x: cell.x + 1,
@@ -178,7 +313,7 @@ fn draw_card(f: &mut Frame, app: &App, card_of: Card, cell: Rect, chosen: bool, 
     if card.width < 8 {
         return;
     }
-    let border = Style::default().fg(if chosen { p.accent_primary } else { p.border });
+    let border = card_border(chosen, focused);
     f.render_widget(
         Block::default()
             .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
@@ -191,7 +326,14 @@ fn draw_card(f: &mut Frame, app: &App, card_of: Card, cell: Rect, chosen: bool, 
         },
     );
     f.render_widget(
-        Paragraph::new(card_top(app, card_of, card.width as usize, chosen, now)),
+        Paragraph::new(card_top(
+            app,
+            card_of,
+            card.width as usize,
+            chosen,
+            focused,
+            now,
+        )),
         Rect { height: 1, ..card },
     );
     let inner = Rect {
@@ -325,9 +467,16 @@ fn preview(text: &str, width: usize, rows: usize, style: Style) -> Vec<Line<'sta
 /// A card's top border, `width` columns: `╭ session  agent · branch ─── age ·
 /// ● status ╮`. Short of room, the status keeps only its mark, then the
 /// agent and branch give way, then the session's name.
-fn card_top(app: &App, card: Card, width: usize, chosen: bool, now: i64) -> Line<'static> {
+fn card_top(
+    app: &App,
+    card: Card,
+    width: usize,
+    chosen: bool,
+    focused: bool,
+    now: i64,
+) -> Line<'static> {
     let p = theme::palette();
-    let border = Style::default().fg(if chosen { p.accent_primary } else { p.border });
+    let border = card_border(chosen, focused);
     let muted = Style::default().fg(p.text_muted);
     let name_style = Style::default()
         .fg(if chosen {
@@ -440,7 +589,7 @@ fn origin(app: &App, entry: &FeedEntry) -> String {
 /// The selected reply whole in `area`: its session and where it's from,
 /// when it finished, then its text, scrolled by the feed's scroll (stopped
 /// at its end).
-pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
+fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     let p = theme::palette();
     f.render_widget(
         Block::default().style(Style::default().bg(p.background)),
@@ -481,33 +630,13 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rec
         about.push("sending".into());
     }
     let here = app.feed_session().is_some();
-    let mut action = if here {
-        vec![
-            Span::styled("Enter", key),
-            Span::styled(" goes into its session", muted),
-        ]
-    } else if app.feed.reading {
-        vec![Span::styled("Esc", key), Span::styled(" back", muted)]
-    } else {
-        Vec::new()
-    };
+    let goes_in = vec![
+        Span::styled("Enter", key),
+        Span::styled(" goes into its session", muted),
+    ];
     // A button for a click or a tap, `r` from the keyboard.
-    let mut reply_at = None;
-    if app.feed.can_reply(entry) {
-        if !action.is_empty() {
-            action.push(Span::styled(" · ", muted));
-        }
-        let before: usize = action.iter().map(|span| str_width(&span.content)).sum();
-        let button = " ↩ Reply  r ";
-        reply_at = Some((before, str_width(button)));
-        action.push(Span::styled(
-            button,
-            Style::default()
-                .fg(p.background)
-                .bg(p.accent_primary)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
+    let button = " ↩ Reply  r ";
+    let can_reply = app.feed.can_reply(entry);
     let mut lines = vec![
         Line::from(vec![
             Span::styled(
@@ -526,19 +655,38 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rec
         ]),
         Line::from(Span::styled(truncate(&about.join(" · "), width), muted)),
     ];
-    if !action.is_empty() {
-        if let Some((x, width)) = reply_at {
-            let x = inner.x.saturating_add(x as u16);
-            let rect = Rect {
-                x,
-                y: inner.y + lines.len() as u16,
-                width: (width as u16).min(inner.right().saturating_sub(x)),
-                height: 1,
-            };
-            if rect.width > 0 && rect.y < inner.bottom() {
-                hits.push((rect, Hit::FeedReply));
-            }
+    // Both on one line when they fit (a narrow pane puts the button under).
+    let mut action = if here { goes_in } else { Vec::new() };
+    if can_reply {
+        let before: usize = action.iter().map(|span| str_width(&span.content)).sum();
+        let mut x = before + 3;
+        if action.is_empty() {
+            x = 0;
+        } else if x + str_width(button) <= width {
+            action.push(Span::styled(" · ", muted));
+        } else {
+            lines.push(Line::from(std::mem::take(&mut action)));
+            x = 0;
         }
+        let at = inner.x.saturating_add(x as u16);
+        let rect = Rect {
+            x: at,
+            y: inner.y + lines.len() as u16,
+            width: (str_width(button) as u16).min(inner.right().saturating_sub(at)),
+            height: 1,
+        };
+        if rect.width > 0 && rect.y < inner.bottom() {
+            hits.push((rect, Hit::FeedReply));
+        }
+        action.push(Span::styled(
+            button,
+            Style::default()
+                .fg(p.background)
+                .bg(p.accent_primary)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if !action.is_empty() {
         lines.push(Line::from(action));
     }
     lines.push(Line::default());
@@ -589,7 +737,7 @@ pub fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rec
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// A prompt still waiting for its answer, in the detail: its session and
+/// A prompt still waiting for its answer, read whole: its session and
 /// where it's from, when it was sent, the prompt, and that the answer comes
 /// here.
 fn draw_open(f: &mut Frame, app: &App, open: &rakumux_sensagent::feed::OpenTurn, inner: Rect) {
@@ -906,12 +1054,6 @@ fn tool_subject(input: &str) -> String {
         .find(|line| !line.is_empty())
         .unwrap_or_default()
         .to_owned()
-}
-
-fn indented(spans: Vec<Span<'static>>) -> Line<'static> {
-    let mut line = vec![Span::raw(" ".repeat(INDENT))];
-    line.extend(spans);
-    Line::from(line)
 }
 
 /// `text` word-wrapped to `width` columns: its own line breaks kept, words

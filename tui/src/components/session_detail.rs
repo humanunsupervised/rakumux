@@ -1,7 +1,6 @@
 //! Right pane: the selected session's terminal (running, or its saved
 //! screen), with placeholders for no sessions, loading, the session
-//! Rakumux runs in, errors and the daemon being unreachable; in the Feed
-//! view in Rakumux mode, the selected reply (`feed.rs`). There's no
+//! Rakumux runs in, errors and the daemon being unreachable. There's no
 //! title row: the footer names the session and its status. Live previews
 //! recede in Rakumux mode; dialogs and saved output use a stronger fade.
 //! The cursor appears only while the session takes keys.
@@ -26,12 +25,7 @@ use crate::theme;
 
 /// Draws the detail pane; returns the cursor position when a focused
 /// session shows its cursor.
-pub fn draw_session_detail(
-    f: &mut Frame,
-    app: &App,
-    screen: &Screen,
-    hits: &mut Vec<(Rect, crate::app::Hit)>,
-) -> Option<(u16, u16)> {
+pub fn draw_session_detail(f: &mut Frame, app: &App, screen: &Screen) -> Option<(u16, u16)> {
     let p = theme::palette();
     let focused = app.focus == Focus::Session && matches!(app.mode, AppMode::Normal);
 
@@ -42,13 +36,6 @@ pub fn draw_session_detail(
         );
     }
     let area = screen.terminal?;
-    if app.feed_in_detail() {
-        super::feed::draw_feed_reply(f, app, area, hits);
-        if !matches!(app.mode, AppMode::Normal) {
-            fade(f.buffer_mut(), area);
-        }
-        return None;
-    }
     draw_terminal(f, app, area, focused)
 }
 

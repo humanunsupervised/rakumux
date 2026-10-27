@@ -91,7 +91,7 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `Tab` / `1`–`9` | Last session / that session |
 | `n` | New session in the current folder |
 | `←` `→` | Switch tabs: Status, Folders, App |
-| `f` | Feed, or back to the sessions |
+| `f` | Show, focus or hide the feed |
 | `P` / `/` | Filter by folder / by text |
 | `p` | Pin or unpin |
 | `J` `K` | Move down or up (or drag the session) |
@@ -123,9 +123,10 @@ Tabs across the top of the list group your sessions:
 
 Pinned sessions sit above every group.
 
-`f` (or the footer's **≡ Feed** button) swaps the list for the **Feed**: your agents' replies,
-newest first (needs an account). The button counts the replies that came in since you last
-looked. `f` or `Esc` brings the sessions back.
+`f` (or the footer's **≡ Feed** button) shows the **Feed** beside your sessions: your agents'
+replies, newest first (needs an account). It's a pane on the right in Master detail and Grid, a
+tab in Tabs. `Enter` reads a reply, again goes into its session; `Esc` gives the list the keys
+back, and `f` hides the feed. The button counts the replies that came in since you last looked.
 
 ### Status
 

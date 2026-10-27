@@ -182,11 +182,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    request); where each session's chat is up to is kept in `sensagent/status/chats.json`
    (0600), so a restart carries on. Entries carry their turn's last `position`. The TUI reads an
    entry's whole turn with `OwnerRequest::FeedTurn {entry, after?}` (`GET /api/v1/feed/turn`),
-   each part cut to what a detail pane shows and the answer within one owner message (`next`
+   each part cut to what a reply read whole shows and the answer within one owner message (`next`
    continues).
    **Replies and threads** (`feed/replies.rs`, `ReplySync`): the user
    writes back to any entry with a conversation id, on rakumux.com or in a TUI (`r` in the
-   Feed view: `OwnerRequest::FeedReply {entry, text}` → `POST /api/v1/feed/replies`, ≤ 8 KiB, no
+   feed: `OwnerRequest::FeedReply {entry, text}` → `POST /api/v1/feed/replies`, ≤ 8 KiB, no
    controls). Under the same switch the service reads the account's replies as they change
    (`GET /api/v1/feed/replies?after=SEQ&machine=NAME`, as soon as the answer's `poll_ms` says:
    every second while a reply waits for this machine or the user has the website open, every
@@ -222,8 +222,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    there and waits, whatever chat it shows, never into a session without an agent; it never
    reaches TUIs, and the agent's next reply answers it. The agent's next reply in that
    session and conversation is uploaded with `reply_to`, and the cloud links it (`response`,
-   `thread`). Pages to TUIs carry the replies (`FeedPage.replies`), and the Feed detail shows an
-   entry's thread under its turn.
+   `thread`). Pages to TUIs carry the replies (`FeedPage.replies`), and a reply read whole in
+   the TUI's feed shows its thread under its turn.
    **Session list** (`feed/sessions.rs`, `SessionSync`): under the same switch the service
    uploads the machine's whole list of sessions (`POST /api/v1/feed/sessions`, at most 200, never
    private or dead ones): what the TUI's Status, Folders and App tabs group by (name, folder
@@ -538,7 +538,8 @@ accidents; they don't stop a hostile process running as the same user.
   remote_replies (false: replies written to the feed on rakumux.com or other machines are typed
   into this machine's sessions; Settings → Replies from rakumux.com),
   sidebar_width (dragged divider),
-  stacked_list_percent (the list's share of the height on narrow screens, set by dragging the
+  feed_width (the docked feed pane's width, set by dragging the line left of it; left out until
+  dragged), stacked_list_percent (the list's share of the height on narrow screens, set by dragging the
   divider under it, so the split follows a phone keyboard coming and going;
   left out until dragged), session_order ({folder path: [session ids]}: the list order set by
   dragging or `J`/`K`; left out when empty), section_order ({"app:<name>" | "status:<status>":
@@ -707,9 +708,10 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   and App: three ways of grouping the sessions. They decide the list's headers (per status,
   per folder, per app) and the one filter that applies; each keeps its own filter while another
   is active; none is saved, and every start (a restart or a UI reload) opens Status.
-- **Feed view** (`app/feed`, `f`): Rakumux mode's other view besides the sessions: the feed of
-  what agents said, across sessions and machines, in the list's place (laid out as Master
-  detail whatever the layout). Not a tab; every start opens the sessions.
+- **Feed** (`app/feed`, `f`): what agents said, across sessions and machines, beside the
+  sessions: a pane on the right in Master detail and Grid, a tab in Tabs, the screen on a phone.
+  It takes Rakumux mode's keys from the list while focused. Hidden at every start; never opens
+  by itself.
 - **Pin**: a user mark that lists a session in the pinned section, above every folder, app and
   status.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
@@ -719,8 +721,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   only while the status service has reply capture on, for the **feed**: the replies of the
   account's machines, kept on rakumux.com for 30 days while the account's Feed switch is on.
 - **Chat** (transcript): an agent conversation's messages in order (prompts, text,
-  reasoning, tool calls, tools' output), uploaded under the same switch; the Feed detail shows
-  a reply's whole turn from it.
+  reasoning, tool calls, tools' output), uploaded under the same switch; a reply read whole in
+  the feed shows its turn from it.
 - **Reply written back** (`FeedReply`): what the user wrote back to a feed entry, typed into
   the entry's session on its machine once its agent waits; with the entries that answer them
   they make a **thread**.
@@ -756,7 +758,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   list stacked above the detail in Rakumux mode), Grid (`grid`: paged read-only live terminal
   cards), or Tabs (`tabs`, tab bar on top). Not saved: every start opens Master detail. Phones
   offer Master detail (the list, then a session under tabs) and Tabs (the tab bar over the
-  session), not Grid.
+  session), not Grid. The feed docks on the right in Master detail and Grid and is a tab in Tabs.
 - **Contracts**: the crate types and traits that define the architecture.
 
 ## Using Rakumux
@@ -785,7 +787,8 @@ on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the tabs, a header and + New session keep the last session in view,
 one the filters show), `←`/`→` switch between the tabs, Status, Folders and App, wherever the
-selection is (`h`/`l` on the tabs row), `f` the Feed view and back (below),
+selection is (`h`/`l` on the tabs row), `f` the feed (shows it with the keys, gives it the keys,
+hides it; below),
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
 that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
@@ -814,40 +817,52 @@ user set), so a tab keeps its place and number while its session works or is rea
 Tabs that don't fit scroll to keep the selected one in view, holding still while it moves among
 those shown (`layout::render_tabs_from`, `App::tab_first`), and the ends say how many are hidden
 (`‹3`, `5›`; a click goes to the nearest one).
-**The Feed view** (`f`, the footer's Feed button, or Settings; `app/feed/view.rs`) is Rakumux
-mode's other view: the feed in the list's place, under a band that says `≡ Feed`, and the
-selected reply in the detail. It's laid out as Master detail whatever the layout: Grid and
-Tabs give way to it in Rakumux mode (Grid's previews stop) and come back in a session and when
-it's left, and the chosen layout never changes; on a phone it's the list alone, full screen.
-`f` or `Esc` (after cancelling a pending key; a reply read full screen first) goes back to the
-sessions, as does picking a grouping (a tab's modal, `P`) or a layout (`v`); `←`/`→` do nothing
-there. It stays while the user works in a session (in Master detail beside it), so Rakumux
-mode comes back to it. It lists the account's machines' turns, newest first, each a card
+**The feed** (`f`, the footer's Feed button, or Settings; `app/feed/pane.rs`) is hidden at every
+start and never opens by itself; the shown/hidden state is this window's, never saved. Master
+detail and Grid dock it on the right (`layout::split_with`, `Screen::feed`): list (or Grid's
+cards) | session | a one-column line (`Screen::feed_divider`, dragged to resize, saved as
+`sessions.feed_width`) | the feed, `layout::default_feed_width` (44 columns, a quarter of wide
+screens, at most 60) and at least `FEED_MIN_COLS` (30). The session narrows and takes the new
+size at once, as a dragged divider gives it (`sync_terminal_size`); it docks only while the session
+keeps `FEED_SESSION_MIN_COLS` (60) beside it (and Master detail its list or rail: hiding the list
+makes room). Narrower windows from 80 columns show the feed in the session's place in Rakumux mode
+only (beside or under the list; Grid's cards give way only while it has the keys) and session mode
+keeps the session's full width. Tabs gives it the Feed tab, first in the tab bar before a `│`,
+unnumbered, never moved, with the `●N` count; selected, the body under the bar shows the cards
+and, from 100 columns, the selected reply beside them (`layout::feed_tab_columns`). On a phone it
+fills the screen while it has the keys. It has Rakumux mode's keys of its own (`App::feed_has_keys`):
+`f` shows it with them, gives them to it while the list has them, and hides it while it has them;
+a click gives them to the side it lands on; `Esc` (after a pending key) gives them back to the list,
+hiding it where it would leave the screen (a phone, narrow Grid); session mode gives them back too.
+Its band (`≡ Feed`, as tall as the list's tabs) and the selected card's border are in the accent
+while it has the keys. With them `↑`/`↓`/`j`/`k` go through the cards, `Enter` (or a second click,
+a tap on a phone) reads the selected reply whole in the cards' place (a `‹` on the band, or `Esc`,
+goes back; `↑`/`↓` scroll it; `Ctrl-d`/`Ctrl-u`, PgUp/PgDn page it), and `Enter` there (or beside
+the cards) goes into its session when it runs here; `←`/`→` and the keys that act on the list's
+session do nothing. Grid cards stay read-only observers: nothing in the feed sends
+them Promote, Resize, Fit or input. It lists the account's machines' turns, newest first, each a card
 (`components/feed.rs`, `app::feed::Card`): on its top border the session's name, then quieter
 its agent and branch (the folder when no branch is known), and at the right its age and status
 (`done`, `sending`, `working`, or the newest reply written back to it: `reply waiting`, `reply
 typed in`, `answered`, `reply not sent`; only the mark when short of room); inside, the
-prompt's first line (`›`), then the start of the answer, its Markdown drawn
-(`components/markdown.rs`, pulldown-cmark); the selected card's border in the accent. A prompt
+prompt on a bar, then the start of the answer, its Markdown drawn
+(`components/markdown.rs`, pulldown-cmark). A prompt
 still waiting for its answer (rakumux.com's `open` turns, from the uploaded chats) is a card of
-its own, `working`, until the entry that answers it takes the card over; and the detail
-the selected reply whole (`Ctrl-d`/`Ctrl-u`, PgUp/PgDn scroll it), its Markdown drawn, then its
-thread when someone wrote back; Enter (or a click on a selected card, or one click from session
-mode) goes into its session when it runs here, under the grouping the sessions last had, and
-`r` (or a click on its `↩ Reply` button) writes back to it, on a session's newest entry only, as
+its own, `working`, until the entry that answers it takes the card over. A reply read whole is
+its turn, its Markdown drawn, then its thread when someone wrote back; `r` (or a click on its
+`↩ Reply` button) writes back to it, on a session's newest entry only, as
 rakumux.com requires (an entry answering a reply is marked `↳`). The footer,
 always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
-while a program takes the keys. It starts with the mode badge (RAKUMUX, followed by a quieter
-`FEED` chip in the buttons' darker orange while the Feed view shows; or a quiet
+while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
 SESSION/TERMINAL), then messages and the daemon connection while it isn't up (`⠋ connecting`,
 `✕ daemon unavailable`); `session: ● <name>` in the centre with the status mark its list row
-has (in Rakumux mode the selected session, else the one kept in view; the one taking the keys in
-session mode; none for the terminal panel), since the detail has no title row: the session's
+has (in Rakumux mode the selected session, else the one kept in view, or the selected card's
+while the feed has the keys; the one taking the keys in session mode; none for the terminal panel), since the detail has no title row: the session's
 terminal fills it from its top row; and on the right buttons
 (a darker shade of the orange bar; dark chips on the blue one): in Rakumux mode `f ≡ Feed`
 (with `●N`, `●99+` beyond 99, for the feed entries that finished during this run and arrived
 since the feed was last on screen: memory only, `FeedStore::unseen`, counted while the account's
-Feed switch is on; `f Sessions` while the Feed view shows), `? Help` and `, Settings`, then the
+Feed switch is on; it does what `f` does), `? Help` and `, Settings`, then the
 Rakumux account at the bottom right: `a Sign in` while signed out (a tap asks for a sign-in code
 at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\ Rakumux
 mode` in session mode. To count while the feed is hidden the TUI asks the account service for
@@ -857,13 +872,13 @@ cut, then buttons go from the right (the account, Settings, Help, then the Feed'
 carries the count: a 40-column phone keeps it and Help).
 Help and Settings list every key; Settings runs them. A welcome tour
 (`components/welcome.rs`, `AppMode::Welcome`) opens on startup until its "Don't show this on
-startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the list.
+startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the
+list, and the line left of the feed to resize it.
 Beside the session (Master detail, 100 columns or more) the list's last row is `« Hide list`
 (`Hit::HideList`): it, `b` or Settings hides the list (`App::toggle_list`, `PaneSizes::list_hidden`)
 and the session takes its columns, leaving a `layout::RAIL_COLS` (2) wide rail at the left edge, a
 sliver of the list pane with `»` at its bottom and the divider's line (`Hit::ShowList`: a click
-shows the list again, as `b` does). Keys still move through the sessions (or the feed) while it's
-hidden. The session on screen takes the new pane size at once (`sync_terminal_size`, as a dragged
+shows the list again, as `b` does). Keys still move through the sessions while it's hidden. The session on screen takes the new pane size at once (`sync_terminal_size`, as a dragged
 divider does). Stacked and phone screens, Grid and Tabs show no button and ignore it (`b` says so);
 the state is this window's, never saved, and comes back when the window widens again.
 When Tailscale runs on the machine and phone access was never set up (no `remote.json`), Rakumux
@@ -877,8 +892,8 @@ changes it; Settings has no phone or AI naming rows (API keys come from `config.
 Phones (under `layout::PHONE_BELOW` = 80 columns; phone terminals
 are about 40–60 columns in portrait) offer Master detail and Tabs, not Grid (a chosen Grid shows
 as Master detail there, and `v` skips it). Master detail shows one thing at a time: Rakumux mode is
-the session list alone, full screen (the feed in the Feed view, whatever the layout); a tap on a
-session or a reply (or `Enter`) goes into it, and session mode
+the session list alone, full screen (the feed, while it has the keys); a tap on a session (or
+`Enter`) goes into it, and session mode
 gives it the screen under a row of tabs, one per session (no folder filter; a tap on
 a tab switches session and stays in session mode). Tabs keeps that row of tabs over the selected
 session in Rakumux mode too. `Ctrl-\` (or a tap on the SESSION badge) goes back to Rakumux mode.
@@ -894,8 +909,8 @@ Below `STACK_MIN_ROWS` (15 rows above the footer, a 16-row screen) Rakumux mode 
 alone. Session mode fills everything above the footer. Taps arrive as clicks, so the footer is a
 tap target too (`Hit::ModeBadge`, `Hit::FooterKey`, recorded by `components/footer.rs`): the
 SESSION badge and the `Ctrl-\ Rakumux mode` button switch to Rakumux mode like `Ctrl-\`, the RAKUMUX
-badge (with its `FEED` chip) does what `Esc` does (back to the session you came from; from the
-Feed view, back to the sessions), `f ≡ Feed` toggles the Feed view, and `? Help` and
+badge does what `Esc` does (back to the session you came from; while the feed has the keys, its
+`Esc`), `f ≡ Feed` does what `f` does, and `? Help` and
 `, Settings` open them. Dialogs are at least
 min(screen width − 2, 48) columns (`components/utils.rs::popup_width`), wrap their key lines and
 grow to fit their text; the welcome tour tightens its spacing when it doesn't fit, and Settings

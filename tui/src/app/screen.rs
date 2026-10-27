@@ -51,6 +51,12 @@ pub struct Screen {
     /// Independent shell panel below the detail; includes its title row.
     pub terminal_panel: Option<Rect>,
     pub terminal_panel_divider: Option<Rect>,
+    /// The agent feed: a docked pane on the right (Master detail, Grid), the
+    /// session's place (narrower windows, in Rakumux mode), the body under
+    /// the tab bar (Tabs, its tab selected) or the screen (a phone).
+    pub feed: Option<Rect>,
+    /// The draggable line left of a docked feed pane.
+    pub feed_divider: Option<Rect>,
     /// The last row: mode badge, messages, keys. Shown in zoom too.
     pub footer: Option<Rect>,
 }
@@ -98,6 +104,8 @@ pub fn compute(
     screen.stacked = areas.stacked;
     screen.rail = areas.rail;
     screen.tabs = areas.tabs;
+    screen.feed = areas.feed;
+    screen.feed_divider = areas.feed_divider;
     // A zero-width detail means a short narrow Sidebar shows the list
     // alone.
     if !areas.detail.is_empty() {
@@ -191,6 +199,8 @@ mod tests {
             screen.divider,
             screen.rail,
             screen.tabs,
+            screen.feed,
+            screen.feed_divider,
             screen.terminal,
             screen.terminal_panel_divider,
             screen.terminal_panel,
@@ -420,6 +430,41 @@ mod tests {
     }
 
     #[test]
+    fn the_feed_tiles_with_the_panes_at_every_size_and_never_moves_the_footer() {
+        use crate::layout::FeedShown;
+        for (width, height) in [(40, 20), (45, 40), (80, 24), (90, 40), (120, 30), (160, 48)] {
+            for layout in SessionLayout::ALL {
+                for focus in [Focus::List, Focus::Session, Focus::Terminal] {
+                    for feed in [FeedShown::Shown, FeedShown::Focused] {
+                        for list_hidden in [false, true] {
+                            let sizes = PaneSizes {
+                                feed,
+                                list_hidden,
+                                ..PaneSizes::default()
+                            };
+                            let label = format!(
+                                "{width}x{height} {layout:?} {focus:?} {feed:?} {list_hidden}"
+                            );
+                            let screen = compute(area(width, height), layout, focus, false, sizes);
+                            assert_tiled(&screen, &label);
+                            assert_eq!(
+                                screen.footer,
+                                Some(Rect::new(0, height - 1, width, 1)),
+                                "{label}"
+                            );
+                            // Session mode keeps a usable session beside a docked pane.
+                            if let (Some(_), Focus::Session) = (screen.feed_divider, focus) {
+                                let terminal = screen.terminal.expect(&label);
+                                assert!(terminal.width >= layout::FEED_SESSION_MIN_COLS, "{label}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_short_narrow_screen_shows_the_list_alone() {
         // 90×14 (a short narrow window): 13 rows above the
         // footer is too few for both.
@@ -442,6 +487,7 @@ mod tests {
             list_cols: None,
             list_percent: Some(percent),
             list_hidden: false,
+            ..PaneSizes::default()
         };
         let screen = compute(
             area(90, 40),
