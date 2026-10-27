@@ -185,9 +185,9 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   sessions" is on (OpenCode, Pi and Claude Code use them). Terminal.app needs "Use Option as Meta
   key".
 - Mouse: click a session to show it, click the session pane to go in, drag a session to move
-  it, drag the line beside (or under) the list to resize it. Click the mode badge: SESSION
-  switches to Rakumux mode, RAKUMUX goes back to the session you came from. Click a footer
-  button (`? Help`, `, Settings`, `Ctrl-\ Rakumux`) to do what it says. Phone terminals send taps
+  it, drag the line beside (or under) the list to resize it. Click the mode in the middle of the
+  footer: SESSION MODE switches to Rakumux mode, RAKUMUX MODE goes back to the session you came
+  from. Click a footer button (`? Help`, `, Settings`, `Ctrl-\`) to do what it says. Phone terminals send taps
   as clicks, so you can get around without `Ctrl-\`. The wheel moves through Settings and
   scrolls Help. Text selection: Shift+drag (the TUI
   captures the mouse).

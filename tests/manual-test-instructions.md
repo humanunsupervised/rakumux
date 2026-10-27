@@ -65,10 +65,10 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
       `codex`, …), colours and wide characters included.
 - [ ] Resizing the terminal resizes the session; full-screen programs redraw.
 - [ ] Two modes: in a session every key reaches the program (try `Ctrl-b`, `Esc`, `Tab`,
-      `Option+↑`) except `Ctrl-\`, which switches to Rakumux mode (the footer's bottom-left
-      badge: orange RAKUMUX, SESSION in a session; on its right `? help  , settings`, after
-      `Ctrl-\` in a session; switching modes, moving the selection or a message appearing never
-      moves the panes). There: `j`/`k` preview other sessions in full colour (live output still
+      `Option+↑`) except `Ctrl-\`, which switches to Rakumux mode (the middle of the footer:
+      RAKUMUX MODE on orange, SESSION MODE in a session; the session at its left; on its right
+      `? Help  , Settings`, `Ctrl-\` alone in a session; switching modes, moving the selection or
+      a message appearing never moves the panes). There: `j`/`k` preview other sessions in full colour (live output still
       moving; no colour or contrast change when you go in, faded only under Help or
       Settings); on the folder filter, a folder header and + New session the last session stays
       in view, in full colour (never one the folder filter hides);
@@ -198,12 +198,12 @@ layout and create two or three sessions that print something.
 
 - [ ] At 45×40 (either layout), Rakumux mode shows only the list: the folder filter, the
       sessions and + New session, full screen. `j`/`k` move the selection; nothing else changes.
-- [ ] Tap a session row: you're in (SESSION badge), the session fills the screen under a row of
+- [ ] Tap a session row: you're in (SESSION MODE), the session fills the screen under a row of
       tabs, sized to it. Tap another tab: that session, still in session mode.
-- [ ] `Ctrl-\`, or a tap on the SESSION badge: back to the list (not the session). Tap the
-      RAKUMUX badge: back into the session you came from (nothing happens when there's none).
-      Tap `? help` and `, settings` in either mode; in session mode the footer shows
-      `Ctrl-\ rakumux  Ctrl-\ ? help`, and tapping `Ctrl-\ rakumux` switches like the badge.
+- [ ] `Ctrl-\`, or a tap on SESSION MODE: back to the list (not the session). Tap RAKUMUX
+      MODE: back into the session you came from (nothing happens when there's none).
+      Tap `? Help` in Rakumux mode; in session mode the footer shows `session: ● <name>`,
+      `SESSION MODE` and `Ctrl-\`, and tapping `Ctrl-\` switches like the label.
 - [ ] At 40×20 (the keyboard up) the same works.
 - [ ] At 90×40 (a narrow window, not a phone) the list is on top and the selected session below;
       drag the line between them up and down: the list grows and shrinks, keeping the folder

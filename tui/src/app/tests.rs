@@ -678,12 +678,13 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
     let footer: String = (0..120)
         .map(|x| buffer.get(x, 39).symbol().to_string())
         .collect();
-    assert!(footer.starts_with(" RAKUMUX  "), "the mode: {footer:?}");
-    // A in the middle, then the buttons.
-    let at = footer.find("session: ● a ").expect("the session");
-    let label = crate::layout::str_width("session: ● a");
-    assert!(
-        crate::layout::str_width(&footer[..at]).abs_diff((120 - label) / 2) <= 1,
+    assert!(footer.starts_with(" session: ● a "), "A: {footer:?}");
+    // The mode in the middle, then the buttons.
+    let at = footer.find(" RAKUMUX MODE ").expect("the mode");
+    let label = crate::layout::str_width(" RAKUMUX MODE ");
+    assert_eq!(
+        crate::layout::str_width(&footer[..at]),
+        (120 - label) / 2,
         "{footer:?}"
     );
     assert!(
@@ -4208,7 +4209,7 @@ async fn welcome_cards_at_80x24(h: &mut Harness) -> Vec<(String, bool)> {
 async fn welcome_cards_at(h: &mut Harness, width: u16, height: u16) -> Vec<(String, bool)> {
     // The last word of each card's text.
     const ENDS: [&str; crate::components::welcome::CARDS] =
-        ["minute.", "again.", "SESSION.", "one.", "key.", "again."];
+        ["minute.", "again.", "MODE.", "one.", "key.", "again."];
     h.app.open_welcome();
     let mut cards = Vec::new();
     for last_word in ENDS {
@@ -4245,7 +4246,9 @@ async fn welcome_cards_at(h: &mut Harness, width: u16, height: u16) -> Vec<(Stri
         let end = rows.iter().any(|row| row.contains(last_word));
         let keys = rows.iter().any(|row| row.contains("Esc close"));
         let opt_out = rows.iter().any(|row| row.contains("[ ] Don't show"));
-        let footer = rows.last().is_some_and(|row| row.starts_with(" RAKUMUX "));
+        let footer = rows
+            .last()
+            .is_some_and(|row| row.contains(" RAKUMUX MODE "));
         let palette = crate::theme::palette();
         assert!((0..width).all(
             |column| terminal.backend().buffer().get(column, height - 1).bg

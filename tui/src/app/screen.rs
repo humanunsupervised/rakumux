@@ -3,7 +3,7 @@
 //! by drawing and by the app (terminal size for attach/resize, mouse hits).
 //!
 //! The footer is always the last row, in every layout and in zoom, so the
-//! mode badge never moves and nothing above it shifts when the mode, the
+//! mode label never leaves it and nothing above it shifts when the mode, the
 //! selection or a message changes.
 //!
 //! The detail is the session's terminal alone, with no title row: the
@@ -21,8 +21,8 @@ use ratatui::layout::Rect;
 use super::types::Focus;
 use crate::layout::{self, PaneFocus, PaneSizes, SessionLayout};
 
-/// The mode badge, messages and the keys for Help and Settings; every other
-/// key is listed in Settings.
+/// The session, messages, the mode label and the keys for Help and Settings;
+/// every other key is listed in Settings.
 const FOOTER_ROWS: u16 = 1;
 /// Terminal sizes below this make no sense to request.
 const MIN_TERMINAL: u16 = 2;
@@ -57,7 +57,8 @@ pub struct Screen {
     pub feed: Option<Rect>,
     /// The draggable line left of a docked feed pane.
     pub feed_divider: Option<Rect>,
-    /// The last row: mode badge, messages, keys. Shown in zoom too.
+    /// The last row: the session, messages, the mode label, keys. Shown in
+    /// zoom too.
     pub footer: Option<Rect>,
 }
 
@@ -549,7 +550,7 @@ mod tests {
                 PaneSizes::default(),
             );
             assert_eq!(screen.terminal, Some(Rect::new(0, 0, width, height - 1)));
-            // The footer stays, so the mode badge is always on screen.
+            // The footer stays, so the mode label is always on screen.
             assert_eq!(screen.footer, Some(Rect::new(0, height - 1, width, 1)));
             assert!(screen.list.is_none() && screen.detail.is_none() && screen.tabs.is_none());
             assert_eq!(
@@ -573,7 +574,7 @@ mod tests {
         assert!(list.list.is_some());
     }
 
-    /// Switching modes (and so the badge) never moves a pane: the footer is
+    /// Switching modes (and so the label) never moves a pane: the footer is
     /// one row in both, and two-pane layouts keep their rectangles.
     #[test]
     fn switching_modes_keeps_the_panes_still() {

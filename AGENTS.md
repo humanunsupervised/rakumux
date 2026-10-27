@@ -315,8 +315,8 @@ tui/
     qr.rs                    # QR codes drawn with ▀ (pairing: `rakumux remote pair`, the pairing dialog)
     app.rs, app/             # TUI state, folders and the folder filter, handlers, session pipelines, config
                              # (see tui/src/app/AGENTS.md)
-    ui.rs, components/       # rendering: session list, detail, Folders modal, dialogs, footer (mode badge,
-                             # messages), welcome tour, phone access (offer, pairing dialog with QR code)
+    ui.rs, components/       # rendering: session list, detail, Folders modal, dialogs, footer (session,
+                             # messages, mode label), welcome tour, phone access (offer, pairing dialog with QR code)
     terminal_view/           # live terminal pane widget, key/mouse/paste encoding
     layout/                  # Master detail / Grid / Tabs geometry, tab bar, session cycling
     help/                    # Settings modal (General, Keys: actions table) and Help modal (docs, license)
@@ -894,23 +894,25 @@ rakumux.com requires (an entry answering a reply is marked `↳`); on a `working
 session's newest entry when that's in the prompt's chat, else to the session itself (a session
 message). The footer,
 always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
-while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
-SESSION/TERMINAL), then messages and the daemon connection while it isn't up (`⠋ connecting`,
-`✕ daemon unavailable`); `session: ● <name>` in the centre with the status mark its list row
-has (in Rakumux mode the selected session, else the one kept in view, or the selected card's
-while the feed has the keys; the one taking the keys in session mode; none for the terminal panel), since the detail has no title row: the session's
-terminal fills it from its top row; and on the right buttons
+while a program takes the keys. At the left `session: ● <name>` with the status mark its list
+row has (in Rakumux mode the selected session, else the one kept in view, or the selected card's
+while the feed has the keys; the one taking the keys in session mode; none for the terminal
+panel), since the detail has no title row: the session's terminal fills it from its top row;
+then messages and the daemon connection while it isn't up (`⠋ connecting`, `✕ daemon
+unavailable`). In the centre the mode label (`RAKUMUX MODE`, or a quiet `SESSION MODE`/`TERMINAL
+MODE`), centred while it clears both sides, else between them. On the right buttons
 (a darker shade of the orange bar; dark chips on the blue one): in Rakumux mode `f ≡ Feed`
 (with `●N`, `●99+` beyond 99, for the feed entries that finished during this run and arrived
 since the feed was last on screen: memory only, `FeedStore::unseen`, counted while the account's
 Feed switch is on; it does what `f` does), `? Help` and `, Settings`, then the
 Rakumux account at the bottom right: `a Sign in` while signed out (a tap asks for a sign-in code
-at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\ Rakumux
-mode` in session mode. To count while the feed is hidden the TUI asks the account service for
+at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\` alone in
+session mode (the label names the mode). To count while the feed is hidden the TUI asks the account service for
 it every 10 s as a `background` read (every 2 s while it shows). When the row is short the
-session gives way first (off the centre, to its name alone, then nothing), then the message is
-cut, then buttons go from the right (the account, Settings, Help, then the Feed's, which
-carries the count: a 40-column phone keeps it and Help).
+session gives way first (to its name alone, then nothing), then the message is cut, then
+buttons go from the right (the account, Settings, Help, then the Feed's, which carries the
+count: a 40-column phone keeps it and Help, Settings from 48); the label never goes, its short
+word (`RAKUMUX`) under 14 columns.
 Help and Settings list every key; Settings runs them. A welcome tour
 (`components/welcome.rs`, `AppMode::Welcome`) opens on startup until its "Don't show this on
 startup" box (on every card, Space) is ticked; `t` in Help replays it. Drag the divider to resize the
@@ -937,7 +939,7 @@ the session list alone, full screen (the feed, while it has the keys); a tap on 
 `Enter`) goes into it, and session mode
 gives it the screen under a row of tabs, one per session (no folder filter; a tap on
 a tab switches session and stays in session mode). Tabs keeps that row of tabs over the selected
-session in Rakumux mode too. `Ctrl-\` (or a tap on the SESSION badge) goes back to Rakumux mode.
+session in Rakumux mode too. `Ctrl-\` (or a tap on SESSION MODE) goes back to Rakumux mode.
 Moving through Master detail's list on a phone doesn't resize anything: no session is on screen
 there.
 
@@ -949,8 +951,8 @@ the footer, at least `LIST_MIN_ROWS` (10: the tabs, a folder's header and two se
 Below `STACK_MIN_ROWS` (15 rows above the footer, a 16-row screen) Rakumux mode shows the list
 alone. Session mode fills everything above the footer. Taps arrive as clicks, so the footer is a
 tap target too (`Hit::ModeBadge`, `Hit::FooterKey`, recorded by `components/footer.rs`): the
-SESSION badge and the `Ctrl-\ Rakumux mode` button switch to Rakumux mode like `Ctrl-\`, the RAKUMUX
-badge does what `Esc` does (back to the session you came from; while the feed has the keys, its
+SESSION MODE label and the `Ctrl-\` button switch to Rakumux mode like `Ctrl-\`, the RAKUMUX
+MODE label does what `Esc` does (back to the session you came from; while the feed has the keys, its
 `Esc`), `f ≡ Feed` does what `f` does, and `? Help` and
 `, Settings` open them. Dialogs are at least
 min(screen width − 2, 48) columns (`components/utils.rs::popup_width`), wrap their key lines and
@@ -1072,7 +1074,7 @@ and wire spelling stays `sidebar`, now labelled Master detail; `grid` and `tabs`
 **Terminal panel.** `T` in Rakumux mode or Settings → Terminal panel opens a
 temporary daemon-owned login shell under the main detail, without a session record or list entry.
 It starts in the selected session's cwd, otherwise the current folder. `Focus::Terminal` routes keys,
-paste, mouse and cursor only to that attachment, with a distinct TERMINAL footer badge.
+paste, mouse and cursor only to that attachment, with a distinct TERMINAL MODE footer label.
 The Rakumux key demotes it and returns to Rakumux mode; Esc returns to it, and T hides it.
 The hide button keeps the stream and shell running. Exit/EOF closes the pane and releases its
 terminal automatically; there is no session record to delete. Closing/reloading this UI ends

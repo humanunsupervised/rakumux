@@ -1,5 +1,5 @@
 //! Frame composition: session list or tab bar, detail pane, the feed, the
-//! footer (with the mode badge) on the last row, then the open dialog or
+//! footer (with the mode label) on the last row, then the open dialog or
 //! the Settings modal on top.
 
 use ratatui::{
@@ -285,9 +285,9 @@ mod tests {
             assert!(screen.contains("hello from the fake"), "{screen}");
             assert_eq!(role(&h), Some(session_core::api::Role::Controller));
             let footer = screen.lines().last().unwrap();
-            assert!(footer.starts_with(" SESSION "), "{footer:?}");
+            assert!(footer.contains(" SESSION MODE "), "{footer:?}");
             // The way to Rakumux mode is the only button.
-            assert!(footer.ends_with(" Ctrl-\\ Rakumux mode  "), "{footer:?}");
+            assert!(footer.ends_with(" Ctrl-\\  "), "{footer:?}");
             assert!(!footer.contains("Settings"), "{footer:?}");
         }
     }
@@ -340,42 +340,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_footer_badge_uses_the_rakumux_name_in_both_layouts() {
-        let badge = |h: &mut Harness, width: u16, height: u16| {
+    async fn the_footer_label_names_the_mode_in_both_layouts() {
+        // The label's text, where it starts and its colours.
+        let label = |h: &mut Harness, width: u16, height: u16| {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|f| draw(f, &mut h.app)).unwrap();
             let buffer = terminal.backend().buffer();
-            let row = height - 1;
-            let text: String = (0..12)
-                .map(|x| buffer.get(x, row).symbol().to_string())
+            let (area, _) = *h
+                .app
+                .hits
+                .iter()
+                .find(|(_, hit)| *hit == Hit::ModeBadge)
+                .expect("the label");
+            assert_eq!(area.y, height - 1);
+            let text: String = (area.x..area.right())
+                .map(|x| buffer.get(x, area.y).symbol().to_string())
                 .collect();
-            (text, buffer.get(1, row).fg, buffer.get(1, row).bg)
+            let cell = buffer.get(area.x + 1, area.y);
+            (text, area.x, cell.fg, cell.bg)
         };
         let p = theme::palette();
         for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
             let mut h = with_layout(vec![view("A", "api", 10)], layout);
             for (width, height) in [(160, 48), (120, 30), (90, 24), (60, 20), (40, 20)] {
-                // Rakumux mode: bright orange, bottom left.
+                // Rakumux mode: bold dark ink on the orange bar, in the
+                // centre while it's clear of the buttons (all four from
+                // 120 columns), else just before them.
                 if h.app.focus == Focus::Session {
                     h.rakumux().await;
                 }
                 assert_eq!(h.app.focus, Focus::List);
-                let (text, fg, bg) = badge(&mut h, width, height);
-                assert!(text.starts_with(" RAKUMUX "), "{text:?}");
+                let (text, x, fg, bg) = label(&mut h, width, height);
+                assert_eq!(text, " RAKUMUX MODE ");
                 assert_eq!((fg, bg), (p.background, p.accent_orange));
+                let buttons = h
+                    .app
+                    .hits
+                    .iter()
+                    .filter(|(_, hit)| matches!(hit, Hit::FooterKey(_)))
+                    .map(|(area, _)| area.x)
+                    .min()
+                    .expect("buttons");
+                if width >= 120 {
+                    assert_eq!(x, (width - 14) / 2, "{width}");
+                } else {
+                    assert_eq!(x + 14 + 1, buttons, "{width}");
+                }
                 // Help/Settings keep the mode bar visible on short screens too.
                 h.press(KeyCode::Char('?')).await;
-                let mode = crate::components::footer::mode_badge(&h.app);
-                assert_eq!(mode.content, " RAKUMUX ");
+                let mode = crate::components::footer::mode_label(&h.app, width.into());
+                assert_eq!(mode.content, " RAKUMUX MODE ");
                 assert_eq!(mode.style.fg, Some(p.background));
                 assert_eq!(mode.style.bg, Some(p.accent_orange));
                 h.press(KeyCode::Esc).await;
-                // A session: a quiet badge that blends in.
+                // A session: a quiet label that blends in, in the centre
+                // (a phone's just after the session).
                 h.press(KeyCode::Enter).await;
                 assert_eq!(h.app.focus, Focus::Session);
-                let (text, fg, bg) = badge(&mut h, width, height);
-                assert!(text.starts_with(" SESSION "), "{text:?}");
+                let (text, x, fg, bg) = label(&mut h, width, height);
+                assert_eq!(text, " SESSION MODE ");
                 assert_eq!((fg, bg), (p.neutral_gray, p.selection));
+                if width >= 60 {
+                    assert_eq!(x, (width - 14) / 2, "{width}");
+                } else {
+                    // ` session: ● api` and a column clear.
+                    assert_eq!(x, 16, "{width}");
+                }
             }
         }
     }
@@ -407,7 +437,8 @@ mod tests {
             let rows: Vec<&str> = screen.lines().collect();
             assert_eq!(rows.len(), usize::from(height));
             let footer = rows[rows.len() - 1];
-            assert!(footer.starts_with(" RAKUMUX "), "{footer:?}");
+            assert!(footer.starts_with(" session: ● api "), "{footer:?}");
+            assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
             assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
             // No key hints above it: the panes reach the footer.
             for hint in ["select", "new", "rename", "switch pane"] {
@@ -419,8 +450,11 @@ mod tests {
         h.app.set_status("Layout: Tabs");
         let screen = render(&mut h.app, 80, 24);
         let footer = screen.lines().last().unwrap();
-        assert!(footer.starts_with(" RAKUMUX  Layout: Tabs "), "{footer:?}");
-        assert!(footer.contains("session: ● api"), "{footer:?}");
+        assert!(
+            footer.starts_with(" session: ● api  Layout: Tabs "),
+            "{footer:?}"
+        );
+        assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
         assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
     }
 
@@ -455,7 +489,7 @@ mod tests {
                 assert_eq!(still(&h), before, "{layout:?}: message");
                 assert_eq!(screen.lines().count(), usize::from(height));
                 let footer = screen.lines().last().unwrap();
-                assert!(footer.starts_with(" SESSION "), "{footer:?}");
+                assert!(footer.contains(" SESSION MODE "), "{footer:?}");
             }
             h.rakumux().await;
             render(&mut h.app, width, height);
@@ -652,7 +686,18 @@ mod tests {
         );
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
-            assert!(screen.contains("✕ build"), "{screen}");
+            // The footer names it, then says why; at 80 columns the
+            // message keeps the room.
+            let footer = screen.lines().last().unwrap();
+            let named = if width == 160 {
+                " session: ✕ build "
+            } else {
+                ""
+            };
+            assert!(
+                footer.starts_with(&format!("{named} build exited with code 3 ")),
+                "{footer:?}"
+            );
         }
         let wide = render(&mut h.app, 160, 48);
         assert!(
@@ -858,20 +903,20 @@ mod tests {
             assert!(screen.contains("hello from the fake"), "{screen}");
             assert!(!screen.contains("▤ Folders"), "{screen}");
             assert!(!screen.contains("RAKUMUX"), "{screen}");
-            // The terminal starts at the top; the footer keeps the mode, the
-            // zoomed session and the way out.
+            // The terminal starts at the top; the footer keeps the zoomed
+            // session, the mode and the way out.
             assert!(screen.starts_with("hello from the fake"), "{screen}");
             let footer = screen.lines().last().unwrap();
-            assert!(footer.starts_with(" SESSION  zoomed "), "{footer:?}");
-            assert!(footer.contains("session: ● api"), "{footer:?}");
-            assert!(footer.ends_with(" Ctrl-\\ Rakumux mode  "), "{footer:?}");
+            assert!(footer.starts_with(" session: ● api  zoomed "), "{footer:?}");
+            assert!(footer.contains(" SESSION MODE "), "{footer:?}");
+            assert!(footer.ends_with(" Ctrl-\\  "), "{footer:?}");
         }
-        // Back in Rakumux mode the list returns, and the badge says so.
+        // Back in Rakumux mode the list returns, and the label says so.
         h.rakumux().await;
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("▤ Folders"), "{screen}");
         let footer = screen.lines().last().unwrap();
-        assert!(footer.starts_with(" RAKUMUX "), "{footer:?}");
+        assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
     }
 
     #[tokio::test]
@@ -955,13 +1000,15 @@ mod tests {
         assert!(wide.contains("Ctrl-r"), "{wide}");
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("daemon unavailable"), "{narrow}");
-        // The footer says so after the badge, in both widths.
+        // The footer says so at the left, in both widths (no session to
+        // name before it).
         for screen in [wide, narrow] {
             let footer = screen.lines().last().unwrap();
             assert!(
-                footer.starts_with(" RAKUMUX  ✕ daemon unavailable · can't start"),
+                footer.starts_with(" ✕ daemon unavailable · can't "),
                 "{footer:?}"
             );
+            assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
         }
     }
 
@@ -974,8 +1021,10 @@ mod tests {
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             let footer = screen.lines().last().unwrap();
-            assert!(footer.starts_with(" RAKUMUX  "), "{footer:?}");
-            assert!(footer.contains(" connecting "), "{footer:?}");
+            // At the left: a space, the spinner, then what it's doing.
+            let after_spinner: String = footer.chars().skip(2).collect();
+            assert!(after_spinner.starts_with(" connecting "), "{footer:?}");
+            assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
             assert!(footer.ends_with(" , Settings  "), "{footer:?}");
         }
     }
@@ -1379,7 +1428,7 @@ mod tests {
         assert!(wide.contains("──"), "the folder's header: {wide}");
         assert!(list.iter().any(|l| l.ends_with(" live")), "{wide}");
         // No header above the list: the folder filter says what's shown.
-        assert!(wide.lines().last().unwrap().starts_with(" RAKUMUX "));
+        assert!(wide.lines().last().unwrap().contains(" RAKUMUX MODE "));
         // Narrow, the list keeps the selection in view: the pinned section
         // is above it.
         let narrow = render(&mut h.app, 80, 24);
@@ -1565,9 +1614,10 @@ mod tests {
         assert!(narrow.contains("▤ Folders"), "{narrow}");
         assert!(narrow.contains(" api ──"), "{narrow}");
         assert!(narrow.contains("hello from the fake"), "{narrow}");
-        // The footer names the session in view under the header.
+        // The footer names the session in view under the header (its mark
+        // and name: what fits beside the label and the buttons).
         let footer = narrow.lines().last().unwrap();
-        assert!(footer.contains("session: ◐ frontend"), "{footer:?}");
+        assert!(footer.starts_with(" ◐ frontend "), "{footer:?}");
         // On the tabs, the list shows its top again.
         h.app.list.select(crate::app::Selection::Folders);
         let narrow = render(&mut h.app, 80, 24);
@@ -1903,7 +1953,7 @@ mod tests {
             // No session on screen.
             assert!(!screen.contains("hello from the fake"), "{screen}");
             assert!(!screen.contains("observing"), "{screen}");
-            assert!(screen.lines().last().unwrap().starts_with(" RAKUMUX "));
+            assert!(screen.lines().last().unwrap().contains(" RAKUMUX MODE "));
 
             // j: only the selection moves.
             h.press(KeyCode::Char('j')).await;
@@ -1923,7 +1973,7 @@ mod tests {
                 .nth(1)
                 .unwrap()
                 .starts_with("hello from the fake"));
-            assert!(screen.lines().last().unwrap().starts_with(" SESSION "));
+            assert!(screen.lines().last().unwrap().contains(" SESSION MODE "));
             assert_eq!(h.app.terminal_size(), (width, height - 2));
 
             // The Rakumux key: back to the list, not the session.
@@ -2012,8 +2062,8 @@ mod tests {
         let mut h = harness(vec![aged("A", "api", 1, 20), aged("B", "docs", 2, 10)]);
         let (width, height) = (45, 40);
         render(&mut h.app, width, height);
-        // Nowhere to go back to yet: the RAKUMUX badge, like Esc, goes into
-        // the selected session; the SESSION badge comes back out.
+        // Nowhere to go back to yet: the RAKUMUX MODE label, like Esc, goes
+        // into the selected session; the SESSION MODE label comes back out.
         tap(&mut h, Hit::ModeBadge);
         assert_eq!(h.app.focus, Focus::Session);
         render(&mut h.app, width, height);
@@ -2049,34 +2099,39 @@ mod tests {
         assert_eq!(h.selected().as_deref(), Some("B"));
         let screen = render(&mut h.app, width, height);
         let footer = screen.lines().last().unwrap();
-        // The way out is the one button in a session.
-        assert!(footer.ends_with(" Ctrl-\\ Rakumux mode  "), "{footer:?}");
+        // The session, the mode in the middle, and the way out, the one
+        // button in a session.
+        assert_eq!(footer, " session: ● docs  SESSION MODE       Ctrl-\\  ");
 
-        // The SESSION badge: out to Rakumux mode, remembering the session.
+        // The SESSION MODE label: out to Rakumux mode, remembering the
+        // session.
         tap(&mut h, Hit::ModeBadge);
         assert_eq!(h.app.focus, Focus::List);
         assert_eq!(
             h.app.came_from.as_ref().map(|id| id.to_string()),
             Some("B".into())
         );
-        // The RAKUMUX badge: back into it.
+        // The RAKUMUX MODE label: back into it.
         render(&mut h.app, width, height);
         tap(&mut h, Hit::ModeBadge);
         assert_eq!(h.app.focus, Focus::Session);
         assert_eq!(h.selected().as_deref(), Some("B"));
 
-        // `Ctrl-\ Rakumux` does what the badge does.
+        // `Ctrl-\` does what the label does.
         render(&mut h.app, width, height);
         tap(&mut h, Hit::FooterKey(FooterKey::Rakumux));
         assert_eq!(h.app.focus, Focus::List);
 
-        // `? Help` and `, Settings` open them.
+        // `? Help` and `, Settings` open them (Settings from 48 columns).
         render(&mut h.app, width, height);
         tap(&mut h, Hit::FooterKey(FooterKey::Help));
         assert_eq!(modal_tab(&h), Some(Modal::Help.first_tab()));
         h.press(KeyCode::Esc).await;
         render(&mut h.app, width, height);
-        tap(&mut h, Hit::FooterKey(FooterKey::Settings));
+        let settings = Hit::FooterKey(FooterKey::Settings);
+        assert!(!h.app.hits.iter().any(|(_, hit)| *hit == settings));
+        render(&mut h.app, 48, height);
+        tap(&mut h, settings);
         assert_eq!(modal_tab(&h), Some(ModalTab::Settings));
         h.press(KeyCode::Esc).await;
         h.press(KeyCode::Esc).await; // back into the session
@@ -2100,9 +2155,9 @@ mod tests {
 
     /// The footer's targets line up with what it shows.
     #[tokio::test]
-    async fn footer_targets_cover_the_badge_and_the_buttons() {
+    async fn footer_targets_cover_the_label_and_the_buttons() {
         let mut h = harness(vec![view("A", "api", 10)]);
-        for (width, height) in [(40, 20), (45, 40), (160, 48)] {
+        for (width, height) in [(40, 20), (45, 40), (60, 40), (160, 48)] {
             for session in [false, true] {
                 if session {
                     h.press(KeyCode::Enter).await;
@@ -2123,13 +2178,17 @@ mod tests {
                     .filter(|(area, _)| area.y == height - 1)
                     .copied()
                     .collect();
-                let badge = if session { " SESSION " } else { " RAKUMUX " };
-                assert_eq!(text(targets[0].0), badge);
+                let label = if session {
+                    " SESSION MODE "
+                } else {
+                    " RAKUMUX MODE "
+                };
+                assert_eq!(text(targets[0].0), label);
                 assert_eq!(targets[0].1, Hit::ModeBadge);
                 for (area, hit) in &targets[1..] {
                     let shown = text(*area);
                     let wanted = match hit {
-                        Hit::FooterKey(crate::app::FooterKey::Rakumux) => " Ctrl-\\ Rakumux mode ",
+                        Hit::FooterKey(crate::app::FooterKey::Rakumux) => " Ctrl-\\ ",
                         Hit::FooterKey(crate::app::FooterKey::Help) => " ? Help ",
                         Hit::FooterKey(crate::app::FooterKey::Settings) => " , Settings ",
                         Hit::FooterKey(crate::app::FooterKey::Account) => " a ✓ Signed in ",
@@ -2144,8 +2203,9 @@ mod tests {
                 use crate::app::FooterKey::{Feed, Help, Rakumux, Settings};
                 assert_eq!(has(Feed), !session, "{width} {session}");
                 assert_eq!(has(Help), !session, "{width} {session}");
-                // A 40-column phone has room for the Feed and Help.
-                assert_eq!(has(Settings), !session && width > 40, "{width} {session}");
+                // A 40- or 45-column phone has room for the Feed and Help,
+                // Settings from 48 columns.
+                assert_eq!(has(Settings), !session && width >= 48, "{width} {session}");
                 assert_eq!(has(Rakumux), session, "{width} {session}");
             }
         }
@@ -2298,13 +2358,13 @@ mod tests {
             "{wide}"
         );
         assert!(!wide.contains('\u{1b}'), "{wide}");
-        // The footer's button is the feed's, and names the selected card's
-        // session in its centre.
+        // The footer's button is the feed's, and it names the selected
+        // card's session at its left.
         let footer = rows[47];
-        assert!(footer.starts_with(" RAKUMUX  "), "{footer:?}");
+        assert!(footer.starts_with(" session: ● api "), "{footer:?}");
+        assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
         assert!(!footer.contains("FEED"), "{footer:?}");
         assert!(footer.contains(" f ≡ Feed "), "{footer:?}");
-        assert!(footer.contains("session: ● api"), "{footer:?}");
         // Enter: the reply whole in the cards' place, `‹` on the band.
         h.press(KeyCode::Enter).await;
         let wide = render(&mut h.app, 160, 48);
@@ -2498,9 +2558,9 @@ mod tests {
         assert!(h.app.feed_shown());
         assert!(h.app.feed_has_keys());
         let shown = footer(&mut h);
-        assert!(shown.starts_with(" RAKUMUX  "), "{shown:?}");
+        assert!(shown.contains(" RAKUMUX MODE "), "{shown:?}");
         assert!(shown.contains(" f ≡ Feed   ? Help "), "{shown:?}");
-        // The badge does what Esc does: the list gets the keys back, the
+        // The label does what Esc does: the list gets the keys back, the
         // feed stays.
         tap(&mut h, Hit::ModeBadge);
         assert!(!h.app.feed_has_keys());
@@ -2513,13 +2573,15 @@ mod tests {
         render(&mut h.app, 160, 48);
         tap(&mut h, Hit::FooterKey(FooterKey::Feed));
         assert!(!h.app.feed_open());
-        // On a phone it fits beside the badge and Help.
+        // On a phone it fits beside the label and Help.
         h.app.resize(40, 20);
         h.press(KeyCode::Char('f')).await;
         let phone = render(&mut h.app, 40, 20);
         let shown = phone.lines().last().unwrap();
-        assert!(shown.starts_with(" RAKUMUX "), "{shown:?}");
-        assert!(shown.ends_with(" f ≡ Feed   ? Help  "), "{shown:?}");
+        assert!(
+            shown.ends_with(" RAKUMUX MODE   f ≡ Feed   ? Help  "),
+            "{shown:?}"
+        );
     }
 
     #[tokio::test]

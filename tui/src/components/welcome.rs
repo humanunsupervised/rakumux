@@ -59,8 +59,8 @@ fn card(app: &App, index: usize) -> (&'static str, Vec<String>) {
                     "RAKUMUX mode: your keys drive Rakumux. Press `{k}` in a session to switch; \
                      it's the one key a program never gets."
                 ),
-                "The badge at the bottom left always shows which mode you're in: an orange \
-                 RAKUMUX, or SESSION."
+                "The middle of the bottom row always shows which mode you're in: RAKUMUX MODE \
+                 on orange, or SESSION MODE."
                     .into(),
             ],
         ),

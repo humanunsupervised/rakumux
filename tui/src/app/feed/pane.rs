@@ -162,8 +162,9 @@ impl App {
         self.feed_focused = false;
     }
 
-    /// Esc while the feed has the keys (the RAKUMUX badge too): a reply read
-    /// in the cards' place goes back to them, else the list gets the keys.
+    /// Esc while the feed has the keys (the RAKUMUX MODE label too): a reply
+    /// read in the cards' place goes back to them, else the list gets the
+    /// keys.
     pub fn feed_back(&mut self) {
         if self.feed.reading && self.feed_columns().is_none() {
             self.feed.reading = false;

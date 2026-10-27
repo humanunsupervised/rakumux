@@ -195,8 +195,8 @@ pub enum Hit {
     SectionMenu,
     /// A row of the App or Status modal.
     SectionRow(usize),
-    /// The footer's mode badge: `SESSION` switches to Rakumux mode,
-    /// `RAKUMUX` goes back to the session you came from.
+    /// The mode label in the footer's centre: `SESSION MODE` switches to
+    /// Rakumux mode, `RAKUMUX MODE` goes back to the session you came from.
     ModeBadge,
     /// The list pane's last row (Master detail, beside the session): hides
     /// the list.
@@ -210,7 +210,7 @@ pub enum Hit {
 /// What a footer button does when tapped: what its keys do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FooterKey {
-    /// `Ctrl-\ Rakumux` (session mode): switch to Rakumux mode.
+    /// `Ctrl-\` (session and terminal mode): switch to Rakumux mode.
     Rakumux,
     /// `? Help` (Rakumux mode): open Help.
     Help,
