@@ -88,18 +88,30 @@ pub struct ReplyWrite {
 
 impl ReplyWrite {
     pub(crate) fn of(outcome: Result<FeedReply, FeedFailure>) -> Self {
-        let status = match &outcome {
-            Ok(_) => ReplyWriteStatus::Sent,
-            Err(FeedFailure::Unauthorized) => ReplyWriteStatus::SignedOut,
-            Err(FeedFailure::Off) => ReplyWriteStatus::Off,
-            Err(FeedFailure::Invalid) => ReplyWriteStatus::Invalid,
-            Err(FeedFailure::RateLimited(_) | FeedFailure::Unavailable(_)) => {
-                ReplyWriteStatus::Unavailable
-            }
-        };
         Self {
-            status,
+            status: write_status(&outcome),
             reply: outcome.ok(),
+        }
+    }
+
+    /// The answer to a TUI's session message: never a reply, as TUIs don't
+    /// see session messages.
+    pub(crate) fn of_message(outcome: Result<(), FeedFailure>) -> Self {
+        Self {
+            status: write_status(&outcome),
+            reply: None,
+        }
+    }
+}
+
+fn write_status<T>(outcome: &Result<T, FeedFailure>) -> ReplyWriteStatus {
+    match outcome {
+        Ok(_) => ReplyWriteStatus::Sent,
+        Err(FeedFailure::Unauthorized) => ReplyWriteStatus::SignedOut,
+        Err(FeedFailure::Off) => ReplyWriteStatus::Off,
+        Err(FeedFailure::Invalid) => ReplyWriteStatus::Invalid,
+        Err(FeedFailure::RateLimited(_) | FeedFailure::Unavailable(_)) => {
+            ReplyWriteStatus::Unavailable
         }
     }
 }
@@ -408,6 +420,11 @@ impl ReplySync {
     /// when its session runs here.
     pub fn written(&mut self, reply: &FeedReply) {
         self.take(reply);
+    }
+
+    /// The same for a session message written in this machine's TUI.
+    pub fn written_message(&mut self, message: &SessionMessage) {
+        self.take_message(message);
     }
 
     /// The next thing to do, if anything is due: remove files no longer

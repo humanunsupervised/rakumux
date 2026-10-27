@@ -502,6 +502,53 @@ pub(crate) fn reply_upload(id: &str, entry: &str, text: &str, from: &str) -> Opt
 }
 
 #[derive(Serialize)]
+struct SessionMessageUpload<'a> {
+    version: u8,
+    id: &'a str,
+    session: SessionTarget<'a>,
+    text: &'a str,
+    from: &'a str,
+}
+
+#[derive(Serialize)]
+struct SessionTarget<'a> {
+    machine: &'a str,
+    id: &'a str,
+}
+
+/// The upload of a session message written here (`id` its new ULID) to
+/// session `session` of `machine` itself: for a session with nothing to reply
+/// to in the chat it shows. `None` when `text` says nothing or is too long, or
+/// the session isn't one the contract can name.
+pub(crate) fn session_message_upload(
+    id: &str,
+    machine: &str,
+    session: &str,
+    text: &str,
+    from: &str,
+) -> Option<FeedRequest> {
+    if !crate::feed::is_entry_id(session) || !within(machine, 256) {
+        return None;
+    }
+    let text = crate::cloud::prompt_text(text)?;
+    if text.len() > MAX_PROMPT_BYTES {
+        return None;
+    }
+    let body = serde_json::to_vec(&SessionMessageUpload {
+        version: 1,
+        id,
+        session: SessionTarget {
+            machine,
+            id: session,
+        },
+        text: &text,
+        from,
+    })
+    .ok()?;
+    Some(FeedRequest::ReplyUpload { body })
+}
+
+#[derive(Serialize)]
 struct ReplyStatusBody<'a> {
     version: u8,
     id: &'a str,
@@ -1364,6 +1411,45 @@ mod tests {
         );
         assert_eq!(refused(&"a".repeat(MAX_PROMPT_BYTES + 1)), None);
         assert!(refused(&"a".repeat(MAX_PROMPT_BYTES)).is_some());
+    }
+
+    #[test]
+    fn a_session_message_upload_names_the_session_and_its_machine() {
+        let upload = |machine: &str, session: &str, text: &str| {
+            session_message_upload(
+                "01K8A1B2C3D4E5F6G7H8J9K0MN",
+                machine,
+                session,
+                text,
+                "laptop",
+            )
+        };
+        let Some(FeedRequest::ReplyUpload { body }) =
+            upload("studio", "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "  Now the docs.  ")
+        else {
+            panic!("expected an upload");
+        };
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN",
+                "session": {"machine": "studio", "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B"},
+                "text": "Now the docs.", "from": "laptop"})
+        );
+        assert_eq!(upload("studio", "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "  \n"), None);
+        assert_eq!(upload("studio", "session-1", "Now the docs."), None);
+        assert_eq!(
+            upload("", "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "Now the docs."),
+            None
+        );
+        assert_eq!(
+            upload(
+                "studio",
+                "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+                &"a".repeat(MAX_PROMPT_BYTES + 1)
+            ),
+            None
+        );
     }
 
     #[test]

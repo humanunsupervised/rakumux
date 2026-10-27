@@ -223,6 +223,24 @@ impl OwnerClient {
         }
     }
 
+    /// Write `text` to session `session` of `machine` itself (a session
+    /// message, for a session with nothing to reply to in the chat it shows).
+    pub fn session_message(
+        &self,
+        machine: &str,
+        session: &str,
+        text: &str,
+    ) -> Result<ReplyWrite, OwnerError> {
+        match self.request(&OwnerRequest::SessionMessage {
+            machine: machine.to_owned(),
+            session: session.to_owned(),
+            text: text.to_owned(),
+        })? {
+            OwnerResponse::FeedReply { reply } => Ok(reply),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
     /// The feed entries that changed after `after` for a client holding
     /// `generation`; ask again at once while `more`. `background`: the
     /// client keeps the feed without showing it, so the service doesn't read

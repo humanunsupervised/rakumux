@@ -1236,3 +1236,127 @@ async fn cards_show_the_prompt_then_the_answer_or_that_it_is_coming() {
     // The waiting prompt's detail says its answer comes there.
     assert!(text.contains("Waiting for the answer…"), "{text}");
 }
+
+#[test]
+fn a_waiting_prompt_replies_to_its_chats_newest_entry_else_to_its_session() {
+    use super::{Card, ReplyTo};
+    let reply_to = |store: &FeedStore, key: &str| {
+        let card = store
+            .cards()
+            .into_iter()
+            .find(|card| card.key() == key)
+            .unwrap_or_else(|| panic!("no card {key}"));
+        store.reply_to(card)
+    };
+    let to_session = |session: &str| ReplyTo::Session {
+        machine: "studio".into(),
+        session: session.into(),
+    };
+
+    // A prompt waiting in the chat of the session's newest entry: the reply
+    // goes to that entry, so its thread goes on; the entry's own card, no
+    // longer the session's newest, takes none.
+    let mut store = FeedStore::new("studio".into());
+    let mut read = page(1, 1, vec![conversing("A")], false);
+    read.open = Some(vec![open_turn("p2", "S", 2_000, "Now add a test")]);
+    store.apply(read);
+    assert_eq!(
+        reply_to(&store, "open:p2"),
+        Some(ReplyTo::Entry("A".into()))
+    );
+    assert_eq!(reply_to(&store, "A"), None);
+
+    // In a new chat, or a session with no entry yet: the session itself.
+    let mut store = FeedStore::new("studio".into());
+    let mut fresh_chat = open_turn("p3", "S", 2_000, "Start on the parser");
+    fresh_chat.conversation_id = "new".into();
+    let mut read = page(1, 1, vec![conversing("A")], false);
+    read.open = Some(vec![fresh_chat, open_turn("p4", "T", 2_500, "Hello")]);
+    store.apply(read);
+    assert_eq!(reply_to(&store, "open:p3"), Some(to_session("S")));
+    assert_eq!(reply_to(&store, "open:p4"), Some(to_session("T")));
+
+    // The session's newest entry not uploaded yet: rakumux.com doesn't know
+    // it, so the session itself.
+    let mut store = FeedStore::new("studio".into());
+    let mut pending = conversing("L");
+    pending.seq = None;
+    pending.finished_at = 1_500;
+    let mut read = page(1, 1, vec![pending], false);
+    read.open = Some(vec![open_turn("p5", "S", 2_000, "And the docs")]);
+    store.apply(read);
+    assert_eq!(reply_to(&store, "open:p5"), Some(to_session("S")));
+
+    // A prompt older than the session's newest entry (in another chat) isn't
+    // the session's newest card: the entry takes the reply.
+    let mut store = FeedStore::new("studio".into());
+    let mut newer = conversing("B");
+    newer.finished_at = 3_000;
+    newer.seq = Some(2);
+    let mut other_chat = open_turn("p6", "S", 2_000, "Old question");
+    other_chat.conversation_id = "other".into();
+    let mut read = page(1, 1, vec![newer], false);
+    read.open = Some(vec![other_chat]);
+    store.apply(read);
+    assert_eq!(reply_to(&store, "open:p6"), None);
+    assert_eq!(reply_to(&store, "B"), Some(ReplyTo::Entry("B".into())));
+    assert!(matches!(store.cards()[0], Card::Entry(_)));
+}
+
+#[tokio::test]
+async fn r_on_a_working_card_replies_to_its_chat_or_writes_to_its_session() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Tabs);
+    let mut read = page(1, 1, vec![conversing("A")], false);
+    read.open = Some(vec![open_turn("p2", "S", 2_000, "Now add a test")]);
+    account.queue_feed(read);
+    show_feed(&mut h).await;
+    tick(&mut h, Duration::from_secs(3));
+    // The waiting prompt is the session's newest card: it has the button,
+    // and the older entry no longer does.
+    assert!(screen(&mut h).contains("↩ Reply  r"));
+    assert!(h.app.hits.iter().any(|(_, hit)| *hit == Hit::FeedReply));
+    h.press(KeyCode::Down).await;
+    assert!(!screen(&mut h).contains("↩ Reply"));
+    h.press(KeyCode::Up).await;
+    // In the entry's chat: the reply goes to the entry.
+    h.press(KeyCode::Char('r')).await;
+    let AppMode::FeedReply(dialog) = &h.app.mode else {
+        panic!("no reply box");
+    };
+    assert_eq!(dialog.answering, "Now add a test");
+    h.type_text("Use the fixtures").await;
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    assert_eq!(
+        *account.replies_written.lock().unwrap(),
+        [("A".to_owned(), "Use the fixtures".to_owned())]
+    );
+    assert!(account.messages_written.lock().unwrap().is_empty());
+    assert!(matches!(h.app.mode, AppMode::Normal));
+
+    // A prompt in a new chat: a session message to its session.
+    let mut fresh_chat = open_turn("p3", "S", 4_000, "Start on the parser");
+    fresh_chat.conversation_id = "new".into();
+    let mut read = page(1, 2, Vec::new(), false);
+    read.open = Some(vec![fresh_chat]);
+    account.queue_feed(read);
+    tick(&mut h, Duration::from_secs(6));
+    h.press(KeyCode::Home).await;
+    assert_eq!(h.app.feed.selected_card().unwrap().key(), "open:p3");
+    h.press(KeyCode::Char('r')).await;
+    h.type_text("Only the lexer").await;
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    assert_eq!(
+        *account.messages_written.lock().unwrap(),
+        [(
+            "studio".to_owned(),
+            "S".to_owned(),
+            "Only the lexer".to_owned()
+        )]
+    );
+    assert_eq!(account.replies_written.lock().unwrap().len(), 1);
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    let status = h.app.status().unwrap_or_default().to_owned();
+    assert!(status.contains("Sent"), "{status}");
+}

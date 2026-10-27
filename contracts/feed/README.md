@@ -68,8 +68,9 @@ conformance tests, not an HTTP server, database or local runtime.
   the reply's `response`; page entries carry `reply_to` and `thread`. Machines take replies
   written elsewhere only when the user turned that on there (`not_accepted` otherwise).
   Readers take a `failure` they don't know as a failure without a reason.
-- **Session messages:** on rakumux.com the user can also write to a session that has no
-  answer to reply to yet (a new chat, or one whose newest answer is in another chat). It is
+- **Session messages:** on rakumux.com or a machine the user can also write to a session that
+  has no answer to reply to yet (a new chat, or one whose newest answer is in another chat): a
+  machine sends `reply-upload` with `session: {machine, id}` in place of `entry`. It is
   stored as a reply without `entry` and `thread`, with the chat the session showed when it
   said one (`conversation_id`), and reaches only machines that read with
   `session_messages=1`, so an older machine never gets a reply it can't parse. The machine
@@ -120,7 +121,9 @@ conformance tests, not an HTTP server, database or local runtime.
   `invalid_request` with 404; a reply to an entry without a conversation id is
   `invalid_request` (400), and one to an entry that isn't the newest of its session (its
   machine's and session's latest by `finished_at`, then `seq`) is `invalid_request` with 409:
-  only a session's newest message can be answered. A repeated upload of a stored reply still
+  only a session's newest message can be answered. A session message to a session its machine
+  doesn't list is `invalid_request` with 404, and to one that runs no agent or has ended
+  `invalid_request` with 409. A repeated upload of a stored reply still
   answers with the stored reply. An attachment download whose file is gone is `invalid_request`
   with 404 (above).
 

@@ -133,6 +133,16 @@ impl<'a> Card<'a> {
     }
 }
 
+/// Where a reply written in the feed goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplyTo {
+    /// A feed entry (its id): the reply joins its thread.
+    Entry(String),
+    /// A session itself on its machine, a session message: typed in once an
+    /// agent there waits for input, whatever chat it shows.
+    Session { machine: String, session: String },
+}
+
 /// Whether `entry` answers `open`: it names the same prompt, or it finished
 /// in the same chat after the prompt was sent.
 fn answers(entry: &FeedEntry, open: &OpenTurn) -> bool {
@@ -451,6 +461,45 @@ impl FeedStore {
                     && held.session_id == entry.session_id
                     && key(held) > key(entry)
             })
+    }
+
+    /// Where a reply written to `card` goes, when it takes one. Only a
+    /// session's newest card does (its machine's and session's first in
+    /// [`Self::cards`]). An entry is answered itself when it can be
+    /// ([`Self::can_reply`]); a prompt still waiting for its answer answers
+    /// the session's newest entry when that's in the prompt's chat, so the
+    /// thread goes on, and otherwise writes to the session itself.
+    pub fn reply_to(&self, card: Card<'_>) -> Option<ReplyTo> {
+        let newest = self.cards().into_iter().find(|other| {
+            other.machine() == card.machine() && other.session_id() == card.session_id()
+        })?;
+        if newest.key() != card.key() {
+            return None;
+        }
+        match card {
+            Card::Entry(entry) => self
+                .can_reply(entry)
+                .then(|| ReplyTo::Entry(entry.id.clone())),
+            Card::Open(open) => {
+                // Entries are newest first.
+                let latest = self.entries.iter().find(|entry| {
+                    entry.machine == open.machine && entry.session_id == open.session_id
+                });
+                Some(match latest {
+                    Some(entry)
+                        if self.can_reply(entry)
+                            && entry.conversation_id.as_deref()
+                                == Some(open.conversation_id.as_str()) =>
+                    {
+                        ReplyTo::Entry(entry.id.clone())
+                    }
+                    _ => ReplyTo::Session {
+                        machine: open.machine.clone(),
+                        session: open.session_id.clone(),
+                    },
+                })
+            }
+        }
     }
 
     /// Where `entry` is up to: sending, done, or what became of the newest

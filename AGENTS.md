@@ -217,8 +217,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    on rakumux.com or another machine is typed only when this machine's
    `sessions.remote_replies` is on (Settings → Replies from rakumux.com, local, off by default,
    read every 10 s); one written in this machine's TUI always is. A **session message** (written
-   on rakumux.com to a session with no answer to reply to: a reply without `entry` or `thread`,
-   read with `session_messages=1` so older machines never get one) is typed once an agent runs
+   on rakumux.com, or in a TUI on a prompt still waiting for its answer in a new chat, to a
+   session with no answer to reply to: `OwnerRequest::SessionMessage {machine, session, text}`
+   → `POST /api/v1/feed/replies` with `session` in place of `entry`; a reply without `entry` or
+   `thread`, read with `session_messages=1` so older machines never get one) is typed once an agent runs
    there and waits, whatever chat it shows, never into a session without an agent; it never
    reaches TUIs, and the agent's next reply answers it. The agent's next reply in that
    session and conversation is uploaded with `reply_to`, and the cloud links it (`response`,
@@ -852,8 +854,10 @@ prompt on a bar, then the start of the answer, its Markdown drawn
 still waiting for its answer (rakumux.com's `open` turns, from the uploaded chats) is a card of
 its own, `working`, until the entry that answers it takes the card over. A reply read whole is
 its turn, its Markdown drawn, then its thread when someone wrote back; `r` (or a click on its
-`↩ Reply` button) writes back to it, on a session's newest entry only, as
-rakumux.com requires (an entry answering a reply is marked `↳`). The footer,
+`↩ Reply` button) writes back to it, on a session's newest card only (`FeedStore::reply_to`), as
+rakumux.com requires (an entry answering a reply is marked `↳`); on a `working` card, to the
+session's newest entry when that's in the prompt's chat, else to the session itself (a session
+message). The footer,
 always one row at the bottom (in zoom too), is a full-width bar: orange with dark text in Rakumux mode, muted blue (Tokyo Night's `bg_visual`)
 while a program takes the keys. It starts with the mode badge (RAKUMUX, or a quiet
 SESSION/TERMINAL), then messages and the daemon connection while it isn't up (`⠋ connecting`,

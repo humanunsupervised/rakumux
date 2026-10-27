@@ -397,6 +397,17 @@ fn handle(
             })
             .map_err(|error| OwnerErrorCode::from(&error)),
         OwnerRequest::FeedReply { .. } => Err(OwnerErrorCode::InvalidRequest),
+        OwnerRequest::SessionMessage {
+            machine,
+            session,
+            text,
+        } if crate::feed::is_entry_id(&session) => client
+            .session_message(machine, session, text)
+            .map(|outcome| OwnerResponse::FeedReply {
+                reply: ReplyWrite::of_message(outcome),
+            })
+            .map_err(|error| OwnerErrorCode::from(&error)),
+        OwnerRequest::SessionMessage { .. } => Err(OwnerErrorCode::InvalidRequest),
         OwnerRequest::Feed {
             after,
             generation,

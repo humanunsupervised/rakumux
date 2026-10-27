@@ -45,4 +45,4 @@ pub fn is_entry_id(id: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b.is_ascii_uppercase() && !b"ILOU".contains(&b)))
 }
 pub use wire::TurnRead;
-pub(crate) use wire::{reply_upload, FeedRequest};
+pub(crate) use wire::{reply_upload, session_message_upload, FeedRequest, SessionMessage};

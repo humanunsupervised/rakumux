@@ -96,6 +96,15 @@ pub trait AccountAccess: Send + Sync {
     /// Write `text` back to feed entry `entry`, for its machine to type into
     /// the entry's session (this machine at once, when it runs here).
     fn feed_reply(&self, entry: &str, text: &str) -> Result<ReplyWrite, String>;
+    /// Write `text` to session `session` of `machine` itself (a session
+    /// message: a session with nothing to reply to in the chat it shows),
+    /// for that machine to type in once an agent there waits for input.
+    fn session_message(
+        &self,
+        machine: &str,
+        session: &str,
+        text: &str,
+    ) -> Result<ReplyWrite, String>;
 }
 
 /// The feed of a home whose service isn't running: signed out.
@@ -242,6 +251,18 @@ impl AccountAccess for LocalAccount {
     fn feed_reply(&self, entry: &str, text: &str) -> Result<ReplyWrite, String> {
         self.with(false, |client| client.feed_reply(entry, text))?
             .ok_or_else(|| "the account service isn't running".into())
+    }
+
+    fn session_message(
+        &self,
+        machine: &str,
+        session: &str,
+        text: &str,
+    ) -> Result<ReplyWrite, String> {
+        self.with(false, |client| {
+            client.session_message(machine, session, text)
+        })?
+        .ok_or_else(|| "the account service isn't running".into())
     }
 }
 

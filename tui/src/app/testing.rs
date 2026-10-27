@@ -827,6 +827,9 @@ pub struct FakeAccount {
     /// reply); and the entries and texts it was given.
     pub reply_answers: Mutex<std::collections::VecDeque<rakumux_sensagent::feed::ReplyWrite>>,
     pub replies_written: Mutex<Vec<(String, String)>>,
+    /// The session messages `session_message` was given: machine, session
+    /// and text (answered from `reply_answers` too).
+    pub messages_written: Mutex<Vec<(String, String, String)>>,
     pub calls: Mutex<Vec<&'static str>>,
 }
 
@@ -976,6 +979,26 @@ impl crate::account::AccountAccess for FakeAccount {
             .lock()
             .unwrap()
             .push((entry.to_owned(), text.to_owned()));
+        Ok(self.reply_answers.lock().unwrap().pop_front().unwrap_or(
+            rakumux_sensagent::feed::ReplyWrite {
+                status: rakumux_sensagent::feed::ReplyWriteStatus::Sent,
+                reply: None,
+            },
+        ))
+    }
+
+    fn session_message(
+        &self,
+        machine: &str,
+        session: &str,
+        text: &str,
+    ) -> std::result::Result<rakumux_sensagent::feed::ReplyWrite, String> {
+        self.call("session_message");
+        self.messages_written.lock().unwrap().push((
+            machine.to_owned(),
+            session.to_owned(),
+            text.to_owned(),
+        ));
         Ok(self.reply_answers.lock().unwrap().pop_front().unwrap_or(
             rakumux_sensagent::feed::ReplyWrite {
                 status: rakumux_sensagent::feed::ReplyWriteStatus::Sent,

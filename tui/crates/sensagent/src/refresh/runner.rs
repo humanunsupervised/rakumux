@@ -25,7 +25,8 @@ use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
     ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
-    FeedResult, FeedSync, Fetch, Fetched, ReplySync, ReplyWork, SessionSync, TurnRead, Uploads,
+    FeedResult, FeedSync, Fetch, Fetched, ReplySync, ReplyWork, SessionMessage, SessionSync,
+    TurnRead, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -80,6 +81,8 @@ enum Command {
     SetFeatures(FeatureChange, Reply<()>),
     FeedTurn(String, Option<u64>, Sender<Result<TurnRead, FeedFailure>>),
     FeedReply(String, String, Sender<Result<FeedReply, FeedFailure>>),
+    /// A session message: machine, session, text.
+    SessionMessage(String, String, String, Sender<Result<(), FeedFailure>>),
 }
 
 enum Message {
@@ -107,6 +110,11 @@ enum Message {
     ReplyWritten(
         Result<FeedReply, FeedFailure>,
         Sender<Result<FeedReply, FeedFailure>>,
+    ),
+    /// A session message written in a TUI was stored (or not), likewise.
+    MessageWritten(
+        Result<SessionMessage, FeedFailure>,
+        Sender<Result<(), FeedFailure>>,
     ),
     /// The daemon was told to capture replies or not (or refused: an older one).
     CaptureSet(bool),
@@ -143,6 +151,8 @@ enum Work<A, C> {
     CleanUploads(Uploads),
     /// Store a reply written in a TUI, then answer it.
     WriteReply(FeedJob<A, C>, Sender<Result<FeedReply, FeedFailure>>),
+    /// Store a session message written in a TUI, then answer it.
+    WriteMessage(FeedJob<A, C>, Sender<Result<(), FeedFailure>>),
     /// Turn the daemon's reply capture on or off.
     ReplyCapture(bool),
     /// Read the replies the daemon kept after this one (all of them for `None`).
@@ -366,6 +376,20 @@ impl RefreshClient {
         answer.recv().map_err(|_| RefreshError::Stopped)
     }
 
+    /// Write `text` to session `session` of `machine` itself (a session
+    /// message): stored on rakumux.com for that machine to type into the
+    /// session once an agent there waits (here at once when it runs here).
+    pub fn session_message(
+        &self,
+        machine: String,
+        session: String,
+        text: String,
+    ) -> Result<Result<(), FeedFailure>, RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::SessionMessage(machine, session, text, reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
     /// The turn feed entry `entry` finished, from rakumux.com, past `after`
     /// when given.
     pub fn feed_turn(
@@ -549,6 +573,13 @@ fn own<S, A, C>(
                 let _ = answer.send(outcome);
                 follow_replies(&refresher, &mut replies, uploads, work, now);
             }
+            Message::MessageWritten(outcome, answer) => {
+                if let Ok(message) = &outcome {
+                    replies.written_message(message);
+                }
+                let _ = answer.send(outcome.map(|_| ()));
+                follow_replies(&refresher, &mut replies, uploads, work, now);
+            }
             Message::Transcript(session, result) => {
                 chats.read_done(session, result, now);
                 follow_chats(&refresher, &mut chats, replies.watched(), work, now);
@@ -619,6 +650,27 @@ fn own<S, A, C>(
                 match upload.map(|request| refresher.feed_job(request)) {
                     Some(Some(job)) => {
                         let _ = work.send(Work::WriteReply(job, answer));
+                    }
+                    Some(None) => {
+                        let _ = answer.send(Err(FeedFailure::Unauthorized));
+                    }
+                    None => {
+                        let _ = answer.send(Err(FeedFailure::Invalid));
+                    }
+                }
+            }
+            Message::Command(Command::SessionMessage(target, session, text, answer)) => {
+                let id = session_core::ids::ReplyId::generate();
+                let upload = crate::feed::session_message_upload(
+                    id.as_str(),
+                    &target,
+                    &session,
+                    &text,
+                    &machine,
+                );
+                match upload.map(|request| refresher.feed_job(request)) {
+                    Some(Some(job)) => {
+                        let _ = work.send(Work::WriteMessage(job, answer));
                     }
                     Some(None) => {
                         let _ = answer.send(Err(FeedFailure::Unauthorized));
@@ -723,7 +775,10 @@ fn control<S, A, C>(
             let _ = reply.send(());
         }
         // Answered by the owner loop, which holds the feed.
-        Command::Feed(..) | Command::FeedTurn(..) | Command::FeedReply(..) => {}
+        Command::Feed(..)
+        | Command::FeedTurn(..)
+        | Command::FeedReply(..)
+        | Command::SessionMessage(..) => {}
         Command::Summarize(session, reply) => {
             refresher.request(&session);
             let _ = reply.send(());
@@ -1034,6 +1089,18 @@ where
                     Err(_) => Err(FeedFailure::Unavailable(None)),
                 };
                 Message::ReplyWritten(outcome, answer)
+            }
+            Ok(Work::WriteMessage(job, answer)) => {
+                let outcome = match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => match completion.outcome {
+                        Ok(FeedResult::Message(message)) => Ok(message),
+                        // A reply to an entry, for a session message: not the contract.
+                        Ok(_) => Err(FeedFailure::Invalid),
+                        Err(failure) => Err(failure),
+                    },
+                    Err(_) => Err(FeedFailure::Unavailable(None)),
+                };
+                Message::MessageWritten(outcome, answer)
             }
             Ok(Work::Turn(job, reply)) => {
                 let outcome = match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {

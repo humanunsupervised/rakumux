@@ -1,11 +1,16 @@
-//! Writing back to a feed entry (`r` in the Feed): the account service
-//! stores the reply on rakumux.com (`AccountAccess::feed_reply`), and the
-//! entry's machine types it into the entry's session once its agent waits
-//! for input; this machine at once, when the session runs here. The agent's
-//! next reply there answers it, and the detail shows them as a thread.
+//! Writing back from the feed (`r`): only a session's newest card takes a
+//! reply (`FeedStore::reply_to`). The account service stores it on
+//! rakumux.com (`AccountAccess::feed_reply`), and the entry's machine types
+//! it into the entry's session once its agent waits for input; this machine
+//! at once, when the session runs here. The agent's next reply there answers
+//! it, and the detail shows them as a thread. A prompt still waiting for its
+//! answer replies to the session's newest entry in its chat, or with none
+//! writes to the session itself (`AccountAccess::session_message`), typed in
+//! the same way.
 
 use rakumux_sensagent::feed::{ReplyWrite, ReplyWriteStatus};
 
+use super::{Card, ReplyTo};
 use crate::app::runtime::AppEvent;
 use crate::app::types::{AccountStatus, AppMode, FeedReplyDialog};
 use crate::app::{App, TextInput};
@@ -14,7 +19,7 @@ use crate::app::{App, TextInput};
 const MAX_REPLY_BYTES: usize = 8 * 1024;
 
 impl App {
-    /// Open the reply box for the selected entry.
+    /// Open the reply box for the selected card.
     pub fn open_feed_reply(&mut self) {
         if !matches!(self.account, AccountStatus::SignedIn(_)) {
             self.set_status("Sign in to reply: Settings → Account.");
@@ -24,32 +29,35 @@ impl App {
             self.set_status("Select a reply to answer.");
             return;
         };
-        let Some(entry) = card.entry() else {
-            self.set_status("Its answer hasn't come yet: reply to it once it has.");
-            return;
-        };
-        if entry.seq.is_none() {
-            self.set_status("It's still being sent; answer it in a moment.");
-            return;
+        if let Card::Entry(entry) = card {
+            if entry.seq.is_none() {
+                self.set_status("It's still being sent; answer it in a moment.");
+                return;
+            }
+            if entry.conversation_id.is_none() {
+                self.set_status("Its agent's chat isn't known, so it can't be answered.");
+                return;
+            }
         }
-        if entry.conversation_id.is_none() {
-            self.set_status("Its agent's chat isn't known, so it can't be answered.");
-            return;
-        }
-        if !self.feed.can_reply(entry) {
+        let Some(to) = self.feed.reply_to(card) else {
             self.set_status("Only a session's newest message can be answered: reply to that one.");
             return;
-        }
-        let answering = super::plain(&entry.text)
+        };
+        // What the card shows: the answer, or the prompt still waiting for one.
+        let shown = match card {
+            Card::Entry(entry) => &entry.text,
+            Card::Open(open) => &open.prompt.text,
+        };
+        let answering = super::plain(shown)
             .lines()
             .map(str::trim)
             .find(|line| !line.is_empty())
             .unwrap_or_default()
             .to_owned();
-        let machine = (entry.machine != self.feed.machine()).then(|| super::plain(&entry.machine));
+        let machine = (card.machine() != self.feed.machine()).then(|| super::plain(card.machine()));
         self.mode = AppMode::FeedReply(FeedReplyDialog {
-            entry: entry.id.clone(),
-            session_name: super::plain(&entry.session_name),
+            to,
+            session_name: super::plain(card.session_name()),
             machine,
             answering,
             input: TextInput::new(""),
@@ -76,12 +84,17 @@ impl App {
         }
         dialog.busy = true;
         dialog.error_message = None;
-        let entry = dialog.entry.clone();
+        let to = dialog.to.clone();
         let generation = self.feed.request_generation;
         let access = self.account_access.clone();
         self.exec.job(move || AppEvent::FeedReplied {
             generation,
-            result: access.feed_reply(&entry, &text),
+            result: match &to {
+                ReplyTo::Entry(entry) => access.feed_reply(entry, &text),
+                ReplyTo::Session { machine, session } => {
+                    access.session_message(machine, session, &text)
+                }
+            },
         });
     }
 

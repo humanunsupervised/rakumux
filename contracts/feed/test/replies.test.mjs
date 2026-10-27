@@ -17,6 +17,17 @@ test("reply uploads validate", () => {
   }
 });
 
+test("a machine's session message names its session instead of an entry", () => {
+  const { entry: _entry, ...base } = fixtures.replyUpload.valid[0];
+  const session = { machine: "studio", id: "01K8A0RZ0V3X5Q2N9T7W4Y6M8B" };
+  assert.equal(validators.replyUpload({ ...base, session }), true);
+  assert.equal(validators.replyUpload(base), false, "neither an entry nor a session");
+  assert.equal(validators.replyUpload({ ...base, session, entry: _entry }), false, "both");
+  assert.equal(validators.replyUpload({ ...base, session: { id: session.id } }), false, "no machine");
+  assert.equal(validators.replyUpload({ ...base, session: { ...session, id: "session-1" } }), false, "not a ULID");
+  assert.equal(validators.replyUpload({ ...base, session: { ...session, name: "fix" } }), false, "more than its ids");
+});
+
 test("reply text is bounded at 8192 UTF-8 bytes", () => {
   const base = fixtures.replyUpload.valid[0];
   assert.equal(validators.replyUpload({ ...base, text: "a".repeat(8192) }), true);

@@ -45,11 +45,12 @@ pub struct RenameDialog {
     pub busy: bool,
 }
 
-/// Writing back to a feed entry (`r` in the Feed): typed into the entry's
-/// session on its machine once its agent waits.
+/// Writing back to a feed entry, or to the session of a prompt still waiting
+/// for its answer (`r` in the Feed): typed into the session on its machine
+/// once its agent waits.
 #[derive(Debug, Clone)]
 pub struct FeedReplyDialog {
-    pub entry: String,
+    pub to: super::feed::ReplyTo,
     /// Where it goes: the entry's session and machine (`None`: this one).
     pub session_name: String,
     pub machine: Option<String>,

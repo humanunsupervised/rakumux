@@ -543,6 +543,35 @@ fn a_session_message_waits_for_an_agent_then_goes_into_whatever_chat_it_shows() 
 }
 
 #[test]
+fn a_session_message_written_here_is_typed_at_once_when_its_agent_waits() {
+    // This machine takes nothing written elsewhere, but its own TUI's message
+    // goes in without waiting for a read.
+    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut written = message("01K8A4", 9, Some(CHAT));
+    written.from = Some("studio".into());
+    replies.written_message(&written);
+    assert_eq!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Submit {
+            reply: "01K8A4".into(),
+            session: SessionId::from_string("S"),
+            text: "Start on the parser.".into(),
+        })
+    );
+    assert_eq!(
+        ReplyWrite::of_message(Ok(())),
+        ReplyWrite {
+            status: ReplyWriteStatus::Sent,
+            reply: None
+        }
+    );
+    assert_eq!(
+        ReplyWrite::of_message(Err(FeedFailure::Off)).status,
+        ReplyWriteStatus::Off
+    );
+}
+
+#[test]
 fn a_session_message_follows_the_same_rules_for_where_it_may_go() {
     // Written on rakumux.com: not typed here unless this machine takes those.
     let mut replies = on(None, &[view("S", Lifecycle::Idle, None)]);

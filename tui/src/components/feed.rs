@@ -599,9 +599,6 @@ fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
         return;
     }
     let muted = Style::default().fg(p.text_muted);
-    let key = Style::default()
-        .fg(p.accent_primary)
-        .add_modifier(Modifier::BOLD);
     let inner = Rect {
         x: area.x + 2,
         width: area.width.saturating_sub(4),
@@ -611,7 +608,7 @@ fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
     let entry = match app.feed.selected_card() {
         Some(Card::Entry(entry)) => entry,
         Some(Card::Open(open)) => {
-            draw_open(f, app, open, inner);
+            draw_open(f, app, open, inner, hits);
             return;
         }
         None => return,
@@ -629,14 +626,6 @@ fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
     if entry.seq.is_none() {
         about.push("sending".into());
     }
-    let here = app.feed_session().is_some();
-    let goes_in = vec![
-        Span::styled("Enter", key),
-        Span::styled(" goes into its session", muted),
-    ];
-    // A button for a click or a tap, `r` from the keyboard.
-    let button = " ↩ Reply  r ";
-    let can_reply = app.feed.can_reply(entry);
     let mut lines = vec![
         Line::from(vec![
             Span::styled(
@@ -655,40 +644,8 @@ fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
         ]),
         Line::from(Span::styled(truncate(&about.join(" · "), width), muted)),
     ];
-    // Both on one line when they fit (a narrow pane puts the button under).
-    let mut action = if here { goes_in } else { Vec::new() };
-    if can_reply {
-        let before: usize = action.iter().map(|span| str_width(&span.content)).sum();
-        let mut x = before + 3;
-        if action.is_empty() {
-            x = 0;
-        } else if x + str_width(button) <= width {
-            action.push(Span::styled(" · ", muted));
-        } else {
-            lines.push(Line::from(std::mem::take(&mut action)));
-            x = 0;
-        }
-        let at = inner.x.saturating_add(x as u16);
-        let rect = Rect {
-            x: at,
-            y: inner.y + lines.len() as u16,
-            width: (str_width(button) as u16).min(inner.right().saturating_sub(at)),
-            height: 1,
-        };
-        if rect.width > 0 && rect.y < inner.bottom() {
-            hits.push((rect, Hit::FeedReply));
-        }
-        action.push(Span::styled(
-            button,
-            Style::default()
-                .fg(p.background)
-                .bg(p.accent_primary)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-    if !action.is_empty() {
-        lines.push(Line::from(action));
-    }
+    let can_reply = app.feed.reply_to(Card::Entry(entry)).is_some();
+    actions(app, can_reply, inner, &mut lines, hits);
     lines.push(Line::default());
     let head = lines.len();
     // The prompt (when known) and the answer, while the whole turn isn't read.
@@ -737,15 +694,79 @@ fn draw_feed_reply(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// A prompt still waiting for its answer, read whole: its session and
-/// where it's from, when it was sent, the prompt, and that the answer comes
-/// here.
-fn draw_open(f: &mut Frame, app: &App, open: &rakumux_sensagent::feed::OpenTurn, inner: Rect) {
+/// What can be done with the selected card, under its heading: `Enter` goes
+/// into its session when it runs here, and its `↩ Reply` button (`r`) when
+/// it takes a reply; both on one line when they fit (a narrow pane puts the
+/// button under).
+fn actions(
+    app: &App,
+    can_reply: bool,
+    inner: Rect,
+    lines: &mut Vec<Line<'static>>,
+    hits: &mut Vec<(Rect, Hit)>,
+) {
     let p = theme::palette();
     let muted = Style::default().fg(p.text_muted);
     let key = Style::default()
         .fg(p.accent_primary)
         .add_modifier(Modifier::BOLD);
+    let width = inner.width as usize;
+    let mut action = if app.feed_session().is_some() {
+        vec![
+            Span::styled("Enter", key),
+            Span::styled(" goes into its session", muted),
+        ]
+    } else {
+        Vec::new()
+    };
+    if can_reply {
+        // A button for a click or a tap, `r` from the keyboard.
+        let button = " ↩ Reply  r ";
+        let before: usize = action.iter().map(|span| str_width(&span.content)).sum();
+        let mut x = before + 3;
+        if action.is_empty() {
+            x = 0;
+        } else if x + str_width(button) <= width {
+            action.push(Span::styled(" · ", muted));
+        } else {
+            lines.push(Line::from(std::mem::take(&mut action)));
+            x = 0;
+        }
+        let at = inner.x.saturating_add(x as u16);
+        let rect = Rect {
+            x: at,
+            y: inner.y + lines.len() as u16,
+            width: (str_width(button) as u16).min(inner.right().saturating_sub(at)),
+            height: 1,
+        };
+        if rect.width > 0 && rect.y < inner.bottom() {
+            hits.push((rect, Hit::FeedReply));
+        }
+        action.push(Span::styled(
+            button,
+            Style::default()
+                .fg(p.background)
+                .bg(p.accent_primary)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if !action.is_empty() {
+        lines.push(Line::from(action));
+    }
+}
+
+/// A prompt still waiting for its answer, read whole: its session and
+/// where it's from, when it was sent, then (scrolled under that heading, as
+/// a reply is) the prompt and that the answer comes here.
+fn draw_open(
+    f: &mut Frame,
+    app: &App,
+    open: &rakumux_sensagent::feed::OpenTurn,
+    inner: Rect,
+    hits: &mut Vec<(Rect, Hit)>,
+) {
+    let p = theme::palette();
+    let muted = Style::default().fg(p.text_muted);
     let width = inner.width as usize;
     let mut place = vec![plain(agent_name(&open.agent))];
     if let Some(where_) = open.branch.as_ref().or(open.folder.as_ref()) {
@@ -783,22 +804,19 @@ fn draw_open(f: &mut Frame, app: &App, open: &rakumux_sensagent::feed::OpenTurn,
             muted,
         )),
     ];
-    if app.feed_session().is_some() {
-        lines.push(Line::from(vec![
-            Span::styled("Enter", key),
-            Span::styled(" goes into its session", muted),
-        ]));
-    }
+    let can_reply = app.feed.reply_to(Card::Open(open)).is_some();
+    actions(app, can_reply, inner, &mut lines, hits);
     lines.push(Line::default());
-    lines.extend(prompt_bar(&open.prompt.text, width, None, false));
-    lines.push(Line::default());
-    lines.push(Line::from(Span::styled(
+    let head = lines.len();
+    let mut body = prompt_bar(&open.prompt.text, width, None, false);
+    body.push(Line::default());
+    body.push(Line::from(Span::styled(
         format!("{} Waiting for the answer…", get_spinner_char()),
         muted,
     )));
-    let room = inner.height as usize;
-    let scroll = app.feed.scroll.min(lines.len().saturating_sub(room));
-    let lines: Vec<Line> = lines.into_iter().skip(scroll).take(room).collect();
+    let room = (inner.height as usize).saturating_sub(head);
+    let scroll = app.feed.scroll.min(body.len().saturating_sub(room));
+    lines.extend(body.into_iter().skip(scroll).take(room));
     f.render_widget(Paragraph::new(lines), inner);
 }
 

@@ -2,16 +2,42 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:rakumux:feed:v1:reply-upload",
   "title": "POST /api/v1/feed/replies request",
-  "description": "A reply to a feed entry, written on one of the account's machines. `id` is the ULID the machine gave it: sending it again returns the stored reply. The entry needs a conversation id, so its machine can tell the session still shows that chat.",
+  "description": "A reply to a feed entry, or a session message to a session itself (one with nothing to reply to in the chat it shows), written on one of the account's machines. `id` is the ULID the machine gave it: sending it again returns the stored reply. The entry needs a conversation id, so its machine can tell the session still shows that chat; the session must be listed by its machine and run an agent.",
   "x-maxBodyBytes": 65536,
   "type": "object",
-  "additionalProperties": false,
-  "required": ["version", "id", "entry", "text", "from"],
-  "properties": {
-    "version": { "const": 1 },
-    "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
-    "entry": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
-    "text": { "$ref": "urn:rakumux:feed:v1:common#/$defs/promptText" },
-    "from": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" }
-  }
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "id", "entry", "text", "from"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+        "entry": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+        "text": { "$ref": "urn:rakumux:feed:v1:common#/$defs/promptText" },
+        "from": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "id", "session", "text", "from"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+        "session": {
+          "description": "A session message's session: its machine and id.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["machine", "id"],
+          "properties": {
+            "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+            "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" }
+          }
+        },
+        "text": { "$ref": "urn:rakumux:feed:v1:common#/$defs/promptText" },
+        "from": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" }
+      }
+    }
+  ]
 }

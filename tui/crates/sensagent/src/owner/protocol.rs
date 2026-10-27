@@ -123,6 +123,18 @@ pub enum OwnerRequest {
     /// once when the session runs here. Answered with `FeedReply`; later
     /// `Feed` pages carry it as it changes.
     FeedReply { entry: String, text: String },
+    /// Write `text` to session `session` (its id) of machine `machine` itself,
+    /// a session message: for a session with nothing to reply to in the chat
+    /// it shows (a prompt still waiting for its answer in a new chat). Stored
+    /// on rakumux.com for that machine to type into the session once an agent
+    /// there waits for input, here at once when the session runs here; the
+    /// agent's next reply answers it. Answered with `FeedReply`, never with a
+    /// reply: session messages don't reach TUIs.
+    SessionMessage {
+        machine: String,
+        session: String,
+        text: String,
+    },
 }
 
 /// The owner's answers.

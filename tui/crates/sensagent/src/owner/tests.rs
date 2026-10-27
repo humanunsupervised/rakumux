@@ -280,6 +280,33 @@ fn a_feed_reply_is_asked_and_answered_by_name() {
 }
 
 #[test]
+fn a_session_message_is_asked_by_name_and_answered_as_a_feed_reply() {
+    let request = OwnerRequest::SessionMessage {
+        machine: "studio".into(),
+        session: "01K8A0RZ0V3X5Q2N9T7W4Y6M8B".into(),
+        text: "Now the docs.".into(),
+    };
+    let json = serde_json::json!({"op": "session_message", "machine": "studio",
+        "session": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "text": "Now the docs."});
+    assert_eq!(serde_json::to_value(&request).unwrap(), json);
+    assert_eq!(
+        serde_json::from_value::<OwnerRequest>(json).unwrap(),
+        request
+    );
+    let response: OwnerResponse =
+        serde_json::from_str(r#"{"type":"feed_reply","reply":{"status":"sent"}}"#).unwrap();
+    assert_eq!(
+        response,
+        OwnerResponse::FeedReply {
+            reply: crate::feed::ReplyWrite {
+                status: crate::feed::ReplyWriteStatus::Sent,
+                reply: None,
+            }
+        }
+    );
+}
+
+#[test]
 fn folder_entries_accept_fields_a_newer_owner_adds() {
     let consent: ConsentView = serde_json::from_str(
         r#"{"revision":3,"enabled":true,"future":1,
