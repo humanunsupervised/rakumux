@@ -16,7 +16,8 @@
 //! whole ([`Reply`]): what the agent said after its last tool call, or the
 //! turn's last message. The control layer captures it when the turn
 //! finishes, and only while reply capture is on. The whole conversation is
-//! read on demand ([`transcript`]).
+//! read on demand ([`transcript`]), and where the agent works from it
+//! ([`places`]).
 
 use crate::host::ProcessInfo;
 use serde_json::Value;
@@ -32,6 +33,8 @@ mod claude;
 mod codex;
 #[path = "open-code/output.rs"]
 mod opencode;
+#[path = "places.rs"]
+pub mod places;
 #[path = "transcript.rs"]
 pub mod transcript;
 

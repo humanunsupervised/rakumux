@@ -368,7 +368,7 @@
       }
     },
     "sessionState": {
-      "description": "One of a machine's sessions as its TUI's Status, Folders and App tabs see it: its name, folder (last path component) and branch, its agent, or without one of those the `program` its App tab files it under (an agent Rakumux doesn't name, else its foreground program while it runs, else the program it started with; never a shell, absent then), whether it runs (`live`) or has ended (`exited`), what its program is doing (`lifecycle`, and the agent's finer `phase` when it reports one), the conversation it shows, whether it's pinned, and when it was last used. Private sessions are never listed.",
+      "description": "One of a machine's sessions as its TUI's Status, Folders and App tabs see it: its name, folder (last path component) and branch, its agent, or without one of those the `program` its App tab files it under (an agent Rakumux doesn't name, else its foreground program while it runs, else the program it started with; never a shell, absent then), whether it runs (`live`) or has ended (`exited`), what its program is doing (`lifecycle`, and the agent's finer `phase` when it reports one), the conversation it shows, whether it's pinned, when it was last used, and the places it has worked in (`places`, to a cloud that takes them). Private sessions are never listed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name", "status", "lifecycle", "pinned", "last_active_at"],
@@ -399,7 +399,39 @@
         },
         "conversation_id": { "$ref": "#/$defs/conversationId" },
         "pinned": { "type": "boolean" },
-        "last_active_at": { "$ref": "#/$defs/timestampMs" }
+        "last_active_at": { "$ref": "#/$defs/timestampMs" },
+        "places": {
+          "description": "The places the session has worked in, most recent first: the 8 most recent of those its machine keeps. Sent only to a cloud that said it takes them (`sessions-stored` `accepts` has `places`); absent without any.",
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/sessionPlace" }
+        }
+      }
+    },
+    "sessionPlace": {
+      "description": "A place a session has worked in, as its machine read it from the session's agent's conversation and terminal: a git working tree, or a folder outside any repository. `name` is its path in the session's folder when it's there (`inside`; `.` for the folder itself, `worktrees/fix` below it), else its last path component (`rakumux-cloud`): never an absolute path or `..`. `branch` and `worktree` (a linked worktree's name) are its git context when the session last worked there; `edited` says files there were changed; `last_at` is when the session last worked there (the machine's clock, Unix ms).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "inside", "edited", "last_at"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "$ref": "#/$defs/label",
+          "maxLength": 256,
+          "maxUtf8Bytes": 1024,
+          "not": { "pattern": "^[/~]|(^|/)\\.\\.(/|$)" }
+        },
+        "inside": { "type": "boolean" },
+        "branch": { "type": "string", "$ref": "#/$defs/label", "maxLength": 128, "maxUtf8Bytes": 512 },
+        "worktree": {
+          "type": "string",
+          "$ref": "#/$defs/label",
+          "maxLength": 128,
+          "maxUtf8Bytes": 512,
+          "not": { "pattern": "/" }
+        },
+        "edited": { "type": "boolean" },
+        "last_at": { "$ref": "#/$defs/timestampMs" }
       }
     }
   }

@@ -132,11 +132,32 @@ fn read_log(
     from: u64,
     budget: usize,
 ) -> Option<(Vec<TranscriptMessage>, u64, bool)> {
+    let mut messages = Vec::new();
+    let (next, more) = scan_log(path, from, budget, |entry, start| {
+        let message = match agent {
+            LogAgent::Claude => claude::message(entry, start),
+            LogAgent::Codex => codex::message(entry, start),
+        };
+        messages.extend(message);
+    })?;
+    Some((messages, next, more))
+}
+
+/// Hand each complete JSON line of `path` from `from` (its start when the
+/// file is shorter, as after a rewrite) to `each` with where it starts,
+/// until about `budget` bytes were read; a line too long to read is passed
+/// over. Returns where the next unread line starts, and whether more lines
+/// were there.
+pub(super) fn scan_log(
+    path: &Path,
+    from: u64,
+    budget: usize,
+    mut each: impl FnMut(&Value, u64),
+) -> Option<(u64, bool)> {
     let mut file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
     let from = if from > len { 0 } else { from };
     file.seek(SeekFrom::Start(from)).ok()?;
-    let mut messages = Vec::new();
     // Where the line being read starts, and its bytes so far (none while a
     // too long one is passed over).
     let mut start = from;
@@ -147,10 +168,10 @@ fn read_log(
     let mut chunk = vec![0u8; CHUNK];
     loop {
         if read >= budget {
-            return Some((messages, start, start < len));
+            return Some((start, start < len));
         }
         let count = match file.read(&mut chunk) {
-            Ok(0) | Err(_) => return Some((messages, start, false)),
+            Ok(0) | Err(_) => return Some((start, false)),
             Ok(count) => count,
         };
         let mut rest = &chunk[..count];
@@ -158,11 +179,7 @@ fn read_log(
             if !skipping {
                 line.extend_from_slice(&rest[..end]);
                 if let Ok(entry) = serde_json::from_slice::<Value>(&line) {
-                    let message = match agent {
-                        LogAgent::Claude => claude::message(&entry, start),
-                        LogAgent::Codex => codex::message(&entry, start),
-                    };
-                    messages.extend(message);
+                    each(&entry, start);
                 }
             }
             at += end as u64 + 1;
@@ -172,7 +189,7 @@ fn read_log(
             skipping = false;
             rest = &rest[end + 1..];
             if read >= budget {
-                return Some((messages, start, start < len));
+                return Some((start, start < len));
             }
         }
         at += rest.len() as u64;
@@ -288,7 +305,7 @@ fn compact(value: &Value) -> String {
 
 /// An RFC 3339 time (`2026-10-23T10:00:00.123Z`, or with an offset) as Unix
 /// milliseconds.
-fn timestamp(text: &str) -> Option<i64> {
+pub(super) fn timestamp(text: &str) -> Option<i64> {
     let bytes = text.as_bytes();
     let number = |from: usize, to: usize| -> Option<i64> {
         let digits = text.get(from..to)?;

@@ -160,6 +160,9 @@ pub struct SessionList {
     /// What the last snapshot brought in full.
     listed: Listed,
     selection: Selection,
+    /// The open place of the selected session the list keys moved onto
+    /// (`app::places`); selecting anything else drops it.
+    place: Option<(SessionId, PathBuf)>,
     /// Last selected section or single-folder filter. Neutral rows keep
     /// this context so "+ New session" targets the folder the user visited.
     folder_context: Option<ScopeRoot>,
@@ -193,6 +196,7 @@ impl SessionList {
             section_order: HashMap::new(),
             listed: Listed::Folders(Vec::new()),
             selection: Selection::NewSession,
+            place: None,
             folder_context: None,
             filter: TextInput::default(),
             filter_editing: false,
@@ -1114,6 +1118,19 @@ impl SessionList {
         self.selected_id().and_then(|id| self.get(id))
     }
 
+    /// The open place the list keys moved onto in the selected session
+    /// (`app::places`), if they did.
+    pub fn selected_place(&self) -> Option<&Path> {
+        let (id, path) = self.place.as_ref()?;
+        (self.selected_id() == Some(id)).then_some(path.as_path())
+    }
+
+    /// Move onto `place`, one of the selected session's places, or with
+    /// `None` back onto the session itself.
+    pub fn select_place(&mut self, place: Option<PathBuf>) {
+        self.place = place.and_then(|path| Some((self.selected_id()?.clone(), path)));
+    }
+
     /// Row of the selection; the tabs are the first row, "+ New session"
     /// the last, which also stands in for a selection that isn't shown.
     pub fn selected_row(&self) -> usize {
@@ -1222,6 +1239,9 @@ impl SessionList {
     }
 
     pub fn select(&mut self, selection: Selection) {
+        if self.selection != selection {
+            self.place = None;
+        }
         self.selection = selection;
         self.reselect = false;
         // The selected session is shown under App or Status, whatever the

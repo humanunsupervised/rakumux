@@ -17,7 +17,20 @@
             "phase": "waiting_for_response",
             "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
             "pinned": true,
-            "last_active_at": 1761219990000
+            "last_active_at": 1761219990000,
+            "places": [
+              {
+                "name": "worktrees/web-session",
+                "inside": true,
+                "branch": "web-session",
+                "worktree": "web-session",
+                "edited": true,
+                "last_at": 1761219990000
+              },
+              { "name": ".", "inside": true, "branch": "main", "edited": false, "last_at": 1761219000000 },
+              { "name": "rakumux-cloud", "inside": false, "branch": "main", "edited": true, "last_at": 1761218000000 },
+              { "name": "logo", "inside": false, "edited": false, "last_at": 1761210000000 }
+            ]
           },
           {
             "id": "01K89ZQ4D2F6H8J0K2M4N6P8R1",
@@ -60,7 +73,31 @@
       { "note": "an empty capability", "patch": { "capabilities": [""] } },
       { "note": "a capability of 33 characters", "patch": { "capabilities": ["reply_attachments_and_more_things"] } },
       { "note": "a capability that isn't a string", "patch": { "capabilities": [1] } },
-      { "note": "capabilities as one string", "patch": { "capabilities": "reply_attachments" } }
+      { "note": "capabilities as one string", "patch": { "capabilities": "reply_attachments" } },
+      {
+        "note": "a place's absolute path",
+        "session": { "places": [{ "name": "/home/me/repos/x", "inside": false, "edited": false, "last_at": 1761210000000 }] }
+      },
+      {
+        "note": "a place from home",
+        "session": { "places": [{ "name": "~/repos/x", "inside": false, "edited": false, "last_at": 1761210000000 }] }
+      },
+      {
+        "note": "a place above the folder",
+        "session": { "places": [{ "name": "worktrees/../../x", "inside": true, "edited": false, "last_at": 1761210000000 }] }
+      },
+      {
+        "note": "a place without inside",
+        "session": { "places": [{ "name": "x", "edited": false, "last_at": 1761210000000 }] }
+      },
+      {
+        "note": "a place's cwd",
+        "session": { "places": [{ "name": "x", "inside": false, "edited": false, "last_at": 1761210000000, "cwd": "/x" }] }
+      },
+      {
+        "note": "a worktree path",
+        "session": { "places": [{ "name": "x", "inside": false, "worktree": "a/b", "edited": false, "last_at": 1761210000000 }] }
+      }
     ]
   },
   "capabilities": {
@@ -72,7 +109,18 @@
     ]
   },
   "stored": {
-    "valid": [{ "version": 1, "stored": 2 }, { "version": 1, "stored": 0 }],
-    "invalid": [{ "version": 1, "stored": -1 }, { "version": 1 }, { "version": 1, "stored": 201 }]
+    "valid": [
+      { "version": 1, "stored": 2 },
+      { "version": 1, "stored": 0 },
+      { "version": 1, "stored": 2, "accepts": ["places"] },
+      { "version": 1, "stored": 2, "accepts": ["places", "a_later_one"] }
+    ],
+    "invalid": [
+      { "version": 1, "stored": -1 },
+      { "version": 1 },
+      { "version": 1, "stored": 201 },
+      { "version": 1, "stored": 2, "accepts": ["Places"] },
+      { "version": 1, "stored": 2, "accepts": ["places", "places"] }
+    ]
   }
 }

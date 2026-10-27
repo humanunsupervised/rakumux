@@ -255,6 +255,7 @@ fn every_stream_message_is_documented() {
         agent_output: None,
         user_prompt: None,
         agent_turn: None,
+        places: vec![],
         id: SessionId::from_string("i"),
         name: "n".into(),
         scope: ScopeRoot::from_canonical("/p".into()),

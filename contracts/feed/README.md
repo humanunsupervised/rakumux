@@ -108,11 +108,17 @@ conformance tests, not an HTTP server, database or local runtime.
   foreground program while it runs, else the one it started with; never a shell), `status` (`live` or
   `exited`; dead sessions aren't listed), `lifecycle`, the agent's `phase` when it reports one,
   the `conversation_id` it shows, `pinned` and `last_active_at`. Private sessions are never
-  listed. The answer says how many are stored (`sessions-stored`). Kept while the account's
-  Feed switch is on. The upload also says what the machine handles beyond the first version of
-  this contract (`capabilities`, at most 16 unique names matching `^[a-z][a-z0-9_.]{0,31}$`;
-  absent from older machines): `reply_attachments`, it fetches a reply's attachments and gives
-  the agent their paths. The cloud keeps the latest list and ignores names it doesn't know.
+  listed. The answer says how many are stored (`sessions-stored`), and with `accepts` what more
+  the cloud takes in a list: a machine sends those only once an answer named them. Known:
+  **`places`**, the 8 places a session worked in most recently (`sessionPlace` in common: a git
+  working tree, or a folder outside any repository), most recent first, each `{name, inside,
+  branch?, worktree?, edited, last_at}`: `name` is its path in the session's folder when it's
+  there (`inside`; `.` for the folder itself), else its last path component, never an absolute
+  path. Kept while the account's Feed switch is on. The upload also says what the machine
+  handles beyond the first version of this contract (`capabilities`, at most 16 unique names
+  matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
+  fetches a reply's attachments and gives the agent their paths. The cloud keeps the latest list
+  and ignores names it doesn't know.
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
   message per code: `invalid_request` (400, or 413 for an oversized body), `unauthenticated`
   (401), `forbidden` (403: the account's Feed switch is off), `rate_limited` (429) and

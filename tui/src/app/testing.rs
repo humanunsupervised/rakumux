@@ -36,6 +36,7 @@ pub fn view(id: &str, name: &str, last_active_at: i64) -> SessionView {
         agent_output: None,
         user_prompt: None,
         agent_turn: None,
+        places: vec![],
         pinned: false,
         git: None,
         auto_named: false,
@@ -439,6 +440,7 @@ impl SessionApi for FakeApi {
                 session_core::api::CAPABILITY_TURN,
                 session_core::api::CAPABILITY_REPLIES,
                 session_core::api::CAPABILITY_TRANSCRIPT,
+                session_core::api::CAPABILITY_PLACES,
             ]);
         }
         if state.restarts_in_place {

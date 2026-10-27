@@ -17,7 +17,9 @@ use super::audit::AuditEntry;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, TransactionBehavior};
 use session_core::api::{ApiError, ErrorCode};
 use session_core::ids::SessionId;
-use session_core::model::{AgentInfo, Creator, LaunchSpec, Reported, ResumeSpec, ScopeRoot};
+use session_core::model::{
+    AgentInfo, Creator, LaunchSpec, Reported, ResumeSpec, ScopeRoot, SessionPlace,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io;
@@ -25,7 +27,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// `PRAGMA user_version` of the current schema: 2 introduced `sessions_v2`
-/// (0.6), 3 added projects and pinning.
+/// (0.6), 3 added projects and pinning. Tables added since (`session_places`)
+/// are created when missing, so older daemons still open the registry.
 pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 /// Audit entries older than this are pruned when the registry opens.
@@ -82,6 +85,14 @@ CREATE TABLE IF NOT EXISTS projects (
   path TEXT PRIMARY KEY,
   added_at INTEGER NOT NULL,
   last_used_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS session_places (
+  session_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  git_json TEXT,
+  last_at INTEGER NOT NULL,
+  edited INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, path)
 );
 ";
 
@@ -595,8 +606,78 @@ impl Registry {
             [id.as_str()],
         )?;
         tx.execute("DELETE FROM sessions_v2 WHERE id = ?1", [id.as_str()])?;
+        tx.execute(
+            "DELETE FROM session_places WHERE session_id = ?1",
+            [id.as_str()],
+        )?;
         tx.commit()?;
         Ok(orphans)
+    }
+
+    /// Every session's places (`SessionView::places`), in no order. Rows
+    /// that can't be read are left out.
+    pub fn places(&self) -> Result<HashMap<SessionId, Vec<SessionPlace>>> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT session_id, path, git_json, last_at, edited FROM session_places")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, bool>(4)?,
+            ))
+        })?;
+        let mut places: HashMap<SessionId, Vec<SessionPlace>> = HashMap::new();
+        for row in rows {
+            let (id, path, git, last_at, edited) = row?;
+            let git = match git.map(|git| serde_json::from_str(&git)).transpose() {
+                Ok(git) => git,
+                Err(error) => {
+                    crate::log_warn!("registry: place {path} of {id}: {error}");
+                    continue;
+                }
+            };
+            places
+                .entry(SessionId::from_string(id))
+                .or_default()
+                .push(SessionPlace {
+                    path: PathBuf::from(path),
+                    git,
+                    last_at,
+                    edited,
+                });
+        }
+        Ok(places)
+    }
+
+    /// Replace session `id`'s places with `places` (a path that isn't UTF-8
+    /// is left out).
+    pub fn set_places(&self, id: &SessionId, places: &[SessionPlace]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM session_places WHERE session_id = ?1",
+            [id.as_str()],
+        )?;
+        for place in places {
+            let Ok(path) = path_text(&place.path) else {
+                continue;
+            };
+            tx.execute(
+                "INSERT OR REPLACE INTO session_places (session_id, path, git_json, last_at, edited) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    id.as_str(),
+                    path,
+                    opt_json(place.git.as_ref())?,
+                    place.last_at,
+                    place.edited
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Remember a project; adding a known one changes nothing.
@@ -1030,6 +1111,33 @@ mod tests {
         ));
         assert_eq!(registry.get(&original.id).unwrap(), Some(original));
         assert_eq!(registry.count().unwrap(), 2);
+    }
+
+    #[test]
+    fn places_are_saved_replaced_and_deleted_with_their_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = open(&dir);
+        reg.insert(&record("A", "/s", "a", 1)).unwrap();
+        let id = SessionId::from_string("A");
+        let place = |path: &str, last_at: i64| SessionPlace {
+            path: path.into(),
+            git: Some(session_core::model::GitInfo {
+                repo_root: path.into(),
+                branch: Some("main".into()),
+                ..Default::default()
+            }),
+            last_at,
+            edited: true,
+        };
+        reg.set_places(&id, &[place("/s", 5), place("/wt", 9)])
+            .unwrap();
+        let mut stored = reg.places().unwrap().remove(&id).unwrap();
+        stored.sort_by_key(|p| p.last_at);
+        assert_eq!(stored, [place("/s", 5), place("/wt", 9)]);
+        reg.set_places(&id, &[place("/wt", 12)]).unwrap();
+        assert_eq!(reg.places().unwrap()[&id], [place("/wt", 12)]);
+        reg.delete(&id).unwrap();
+        assert!(reg.places().unwrap().is_empty());
     }
 
     #[test]

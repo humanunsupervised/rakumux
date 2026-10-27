@@ -41,6 +41,7 @@ mod list_tabs;
 mod new_session;
 pub mod path_complete;
 mod phone_access;
+pub mod places;
 mod runtime;
 pub mod screen;
 mod session_list;
@@ -158,6 +159,12 @@ pub enum Hit {
     /// The ↻ at the end of a hovered session row's AI description (that list
     /// row): makes a new summary of its session.
     SummaryRefresh(usize),
+    /// A session row's place line, when it has worked elsewhere too (that
+    /// list row): opens or closes its places.
+    PlacesToggle(usize),
+    /// One of a session row's open places (that list row, that index in
+    /// its places): copies its path.
+    Place(usize, usize),
     /// Visible Grid card in filtered session order (last is New session).
     GridCell(usize),
     /// Previous/next Grid page.
@@ -352,6 +359,11 @@ pub struct App {
     /// The list row under the mouse pointer (terminals that report
     /// movement): a session row there shows its pin toggle.
     pub hovered_row: Option<usize>,
+    /// The place under the mouse pointer (its list row and index in its
+    /// session's places): it shows its copy mark.
+    pub hovered_place: Option<(usize, usize)>,
+    /// Sessions whose places are open under their row (`places`).
+    pub places_open: HashSet<SessionId>,
     pub mode: AppMode,
     /// Whole terminal area (kept current by the event loop and `draw`).
     pub area: Rect,
@@ -457,6 +469,8 @@ impl App {
             list_hidden: false,
             drag: None,
             hovered_row: None,
+            hovered_place: None,
+            places_open: HashSet::new(),
             mode: AppMode::Normal,
             area: Rect::new(0, 0, 80, 24),
             hits: Vec::new(),
@@ -656,6 +670,7 @@ impl App {
         self.list_hidden = !self.list_hidden;
         self.divider = DividerState::default();
         self.hovered_row = None;
+        self.hovered_place = None;
         self.sync_terminal_size();
     }
 
@@ -1432,7 +1447,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 11] = [
+const DAEMON_FEATURES: [(&str, &str); 12] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1464,6 +1479,10 @@ const DAEMON_FEATURES: [(&str, &str); 11] = [
     (
         session_core::api::CAPABILITY_TRANSCRIPT,
         "whole chats in the agent feed",
+    ),
+    (
+        session_core::api::CAPABILITY_PLACES,
+        "where each session has worked",
     ),
 ];
 

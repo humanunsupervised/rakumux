@@ -24,6 +24,7 @@ mod import;
 mod lifecycle;
 mod names;
 mod panes;
+mod places;
 mod policy;
 mod registry;
 mod replies;

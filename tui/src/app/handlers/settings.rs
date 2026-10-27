@@ -142,6 +142,9 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         KeyAction::Rename => app.open_rename(),
         KeyAction::Pin => app.toggle_pin(),
         KeyAction::Summarize => app.summarize_selected(),
+        KeyAction::Places => app.toggle_places(),
+        KeyAction::AllPlaces => app.toggle_all_places(),
+        KeyAction::CopyPlace => app.copy_place(),
         KeyAction::MoveDown | KeyAction::MoveUp => {
             leave(app);
             app.move_selected_session(if action == KeyAction::MoveDown { 1 } else { -1 });

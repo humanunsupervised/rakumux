@@ -4,7 +4,7 @@ use std::path::Path;
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use session_core::model::{GitInfo, Lifecycle, SessionStatus, SessionView};
+use session_core::model::{GitInfo, Lifecycle, ScopeRoot, SessionStatus, SessionView};
 
 use crate::app::grouping::{is_shell, ReadPeriod, StatusGroup};
 use crate::icons::Icons;
@@ -167,6 +167,42 @@ pub fn abbreviate_home(path: &Path) -> String {
     path.display().to_string()
 }
 
+/// A place a session worked in, as its row says: its path in the
+/// session's folder (`worktrees/fix`), the folder's name for the folder
+/// itself, else `~/…` under the home directory, else the whole path.
+pub fn place_label(folder: &ScopeRoot, path: &Path) -> String {
+    match path.strip_prefix(folder.path()) {
+        Ok(inside) if inside.as_os_str().is_empty() => folder.path().file_name().map_or_else(
+            || abbreviate_home(path),
+            |name| name.to_string_lossy().into_owned(),
+        ),
+        Ok(inside) => inside.display().to_string(),
+        Err(_) => abbreviate_home(path),
+    }
+}
+
+/// `text` in at most `width` columns, cut at its start (`…/fix`): a path's
+/// end says the most.
+pub fn truncate_start(text: &str, width: usize) -> String {
+    if str_width(text) <= width {
+        return text.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut tail: Vec<char> = Vec::new();
+    let mut used = 0;
+    for ch in text.chars().rev() {
+        let w = char_width(ch);
+        if used + w > width - 1 {
+            break;
+        }
+        used += w;
+        tail.push(ch);
+    }
+    std::iter::once('…').chain(tail.into_iter().rev()).collect()
+}
+
 /// Columns the reported text needs before it's worth adding to a row.
 const REPORT_MIN: usize = 12;
 
@@ -178,7 +214,19 @@ pub fn secondary_line(
     icons: Icons,
     detail_style: Style,
 ) -> Line<'static> {
-    let text = secondary_text(session, width, icons);
+    facts_line(session, width, icons, detail_style, true)
+}
+
+/// [`secondary_line`], with the branch (`branch`) or without (the session
+/// list says it on the session's place line).
+pub fn facts_line(
+    session: &SessionView,
+    width: usize,
+    icons: Icons,
+    detail_style: Style,
+    branch: bool,
+) -> Line<'static> {
+    let text = secondary_text(session, width, icons, branch);
     let Some(program) = session_program(session) else {
         return Line::styled(text, detail_style);
     };
@@ -202,8 +250,8 @@ pub fn program_color(program: &str) -> Color {
 
 /// Description fitted to `width` columns. A plain shell with nothing to
 /// say shows "shell"; reports are included only when there's room.
-fn secondary_text(session: &SessionView, width: usize, icons: Icons) -> String {
-    let base = session_facts(session, icons);
+fn secondary_text(session: &SessionView, width: usize, icons: Icons, branch: bool) -> String {
+    let base = session_facts(session, icons, branch);
     let report = session
         .reported
         .as_ref()
@@ -227,13 +275,14 @@ fn secondary_text(session: &SessionView, width: usize, icons: Icons) -> String {
     truncate(&line, width)
 }
 
-/// Agent or program, branch, state. (The worktree isn't shown for now.)
-fn session_facts(session: &SessionView, icons: Icons) -> Vec<String> {
+/// Agent or program, branch (when `branch`), state. (The worktree isn't
+/// shown for now.)
+fn session_facts(session: &SessionView, icons: Icons, branch: bool) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(program) = session_program(session) {
         parts.push(program.to_string());
     }
-    if let Some(git) = &session.git {
+    if let Some(git) = session.git.as_ref().filter(|_| branch) {
         parts.extend(branch_label(git, icons));
     }
     match session.status {
@@ -366,25 +415,43 @@ mod tests {
         session.cwd = "/repo/docs".into();
         // Working: the mark on the right says so, the line doesn't.
         session.lifecycle = Lifecycle::Working;
-        assert_eq!(secondary_text(&session, 80, Icons::Plain), "shell");
+        assert_eq!(secondary_text(&session, 80, Icons::Plain, true), "shell");
         // The branch, not the worktree.
         session.git = Some(git(Some("main"), None, None));
-        assert_eq!(secondary_text(&session, 80, Icons::Plain), "⎇ main");
+        assert_eq!(secondary_text(&session, 80, Icons::Plain, true), "⎇ main");
         session.git = Some(git(None, Some("1a2b3c4"), Some("feature-x")));
         session.agent = Some(session_core::model::AgentInfo {
             kind: "claude".into(),
             ..Default::default()
         });
         assert_eq!(
-            secondary_text(&session, 80, Icons::Plain),
+            secondary_text(&session, 80, Icons::Plain, true),
             "claude · ⎇ @1a2b3c4"
         );
         // An ended session, with no mark on the right, says so.
         session.status = SessionStatus::Dead;
         assert_eq!(
-            secondary_text(&session, 80, Icons::Plain),
+            secondary_text(&session, 80, Icons::Plain, true),
             "⎇ @1a2b3c4 · dead · ⏎ revive"
         );
+    }
+
+    #[test]
+    fn places_are_named_in_their_folder_else_from_home_and_cut_at_their_start() {
+        let folder = ScopeRoot::from_canonical("/srv/repo".into());
+        assert_eq!(place_label(&folder, Path::new("/srv/repo")), "repo");
+        assert_eq!(
+            place_label(&folder, Path::new("/srv/repo/worktrees/fix")),
+            "worktrees/fix"
+        );
+        assert_eq!(place_label(&folder, Path::new("/opt/other")), "/opt/other");
+        assert_eq!(truncate_start("worktrees/fix", 20), "worktrees/fix");
+        assert_eq!(truncate_start("worktrees/fix", 6), "…s/fix");
+        assert_eq!(truncate_start("界界界", 4), "…界");
+        assert_eq!(truncate_start("abc", 0), "");
+        let mut session = view("A", "a", 0);
+        session.git = Some(git(Some("main"), None, None));
+        assert_eq!(secondary_text(&session, 80, Icons::Plain, false), "shell");
     }
 
     #[test]
@@ -447,20 +514,23 @@ mod tests {
             at: 0,
         });
         assert_eq!(
-            secondary_text(&session, 80, Icons::Plain),
+            secondary_text(&session, 80, Icons::Plain, true),
             "⎇ main · Tests green, ready for review"
         );
         assert_eq!(
-            secondary_text(&session, 23, Icons::Plain),
+            secondary_text(&session, 23, Icons::Plain, true),
             "⎇ main · Tests green, …"
         );
         // Too little room for the report: the facts alone.
-        assert_eq!(secondary_text(&session, 15, Icons::Plain), "⎇ main");
-        assert_eq!(secondary_text(&session, 5, Icons::Plain), "⎇ ma…");
+        assert_eq!(secondary_text(&session, 15, Icons::Plain, true), "⎇ main");
+        assert_eq!(secondary_text(&session, 5, Icons::Plain, true), "⎇ ma…");
         // With nothing else, the report is the whole line.
         session.git = None;
         session.lifecycle = Lifecycle::None;
-        assert_eq!(secondary_text(&session, 12, Icons::Plain), "Tests green…");
+        assert_eq!(
+            secondary_text(&session, 12, Icons::Plain, true),
+            "Tests green…"
+        );
     }
 
     #[test]
@@ -613,9 +683,9 @@ mod tests {
     fn secondary_text_falls_back_to_shell_and_shows_the_program() {
         let mut session = view("A", "a", 0);
         session.cwd = "/repo/deep/inside".into();
-        assert_eq!(secondary_text(&session, 40, Icons::Plain), "shell");
+        assert_eq!(secondary_text(&session, 40, Icons::Plain, true), "shell");
         session.terminal = None;
-        assert_eq!(secondary_text(&session, 40, Icons::Plain), "shell");
+        assert_eq!(secondary_text(&session, 40, Icons::Plain, true), "shell");
         session.terminal = Some(session_core::model::TerminalView {
             pid: Some(1),
             foreground_process: Some("htop".into()),
@@ -625,12 +695,12 @@ mod tests {
             controlled: false,
             alternate_screen: true,
         });
-        assert_eq!(secondary_text(&session, 40, Icons::Plain), "htop");
+        assert_eq!(secondary_text(&session, 40, Icons::Plain, true), "htop");
         session.agent = Some(session_core::model::AgentInfo {
             kind: "claude".into(),
             ..Default::default()
         });
         session.lifecycle = Lifecycle::Blocked;
-        assert_eq!(secondary_text(&session, 40, Icons::Plain), "claude");
+        assert_eq!(secondary_text(&session, 40, Icons::Plain, true), "claude");
     }
 }

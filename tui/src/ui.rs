@@ -1098,8 +1098,9 @@ mod tests {
         assert!(at(&list, "api-refactor") < at(&list, "styles"));
         assert!(headers[1] < at(&list, "storybook") && at(&list, "storybook") < headers[2]);
 
+        // Tall enough for every status: each session has a place line too.
         h.app.show_tab(Grouping::Status);
-        let wide = render(&mut h.app, 160, 48);
+        let wide = render(&mut h.app, 160, 64);
         let list = list_column(&wide, width);
         assert!(list[1].starts_with("   ◔ Status ▾"), "{wide}");
         let headers: Vec<usize> = [
@@ -1350,7 +1351,8 @@ mod tests {
         // the Folders modal. Then the App tab.
         assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
         assert!(list[1].ends_with("▤ Folders ▾  ◇ App"), "{wide}");
-        // Pinned first, with its mark; subtext is program, then git.
+        // Pinned first, with its mark; subtext is program, then the
+        // folder it works in and its branch.
         let docs = list.iter().position(|l| l.contains("docs")).unwrap();
         let refactor = list
             .iter()
@@ -1359,11 +1361,9 @@ mod tests {
         assert!(docs < refactor, "{wide}");
         assert!(list[docs].contains(" docs "), "{wide}");
         assert!(!list[docs].contains('★'), "{wide}");
-        assert!(list[docs + 1].contains("⎇ main"), "{wide}");
-        assert!(
-            list[refactor + 1].contains("claude · ⎇ sessions-refactor"),
-            "{wide}"
-        );
+        assert!(list[docs + 2].contains("⎇ main"), "{wide}");
+        assert!(list[refactor + 1].contains("claude"), "{wide}");
+        assert!(list[refactor + 2].contains("⎇ sessions-refactor"), "{wide}");
         assert!(!wide.contains("worktree"), "branch only: {wide}");
         // The lone folder still has its header, with its name.
         assert!(wide.contains("──"), "the folder's header: {wide}");
@@ -1496,8 +1496,18 @@ mod tests {
                 .position(|l| l.contains(needle))
                 .unwrap_or_else(|| panic!("{needle} missing: {wide}"))
         };
+        // A folder's header, not a session's place line naming the folder.
+        let header = |needle: &str| {
+            list.iter()
+                .position(|l| l.contains(needle) && l.contains("──"))
+                .unwrap_or_else(|| panic!("{needle} header missing: {wide}"))
+        };
         // The launch folder first, then by name (api, then web).
-        let (repo, api, web) = (at(" repo  ⎇"), at(" api ──"), at(" web  ⎇ main"));
+        let (repo, api, web) = (
+            header(" repo  ⎇"),
+            header(" api ──"),
+            header(" web  ⎇ main"),
+        );
         assert!(repo < api && api < web, "{wide}");
         assert!(list[repo].ends_with("2/2 live"), "{wide}");
         assert!(list[web].ends_with("1/2 live"), "{wide}");
@@ -1510,18 +1520,16 @@ mod tests {
             web < at("storybook") && at("storybook") < at("frontend"),
             "{wide}"
         );
+        // The program and state, then the folder and its branch.
+        assert!(list[at("frontend") + 1].contains("codex"), "{wide}");
         assert!(
-            list[at("frontend") + 1].contains("codex · ⎇ feature/login"),
+            list[at("frontend") + 2].contains("⎇ feature/login"),
             "{wide}"
         );
-        assert!(
-            list[at("storybook") + 1].contains("⎇ main · dead"),
-            "{wide}"
-        );
-        assert!(
-            list[at("server") + 1].contains("cargo · ⎇ @1a2b3c4"),
-            "{wide}"
-        );
+        assert!(list[at("storybook") + 1].contains("dead"), "{wide}");
+        assert!(list[at("storybook") + 2].contains("⎇ main"), "{wide}");
+        assert!(list[at("server") + 1].contains("cargo"), "{wide}");
+        assert!(list[at("server") + 2].contains("⎇ @1a2b3c4"), "{wide}");
         // A selected header stands out: its rule turns blue.
         h.app
             .list
@@ -1550,9 +1558,11 @@ mod tests {
         // The footer names the session in view under the header.
         let footer = narrow.lines().last().unwrap();
         assert!(footer.contains("session: ◐ frontend"), "{footer:?}");
+        // On the tabs, the list shows its top again.
         h.app.list.select(crate::app::Selection::Folders);
         let narrow = render(&mut h.app, 80, 24);
-        assert!(narrow.contains(" repo  ⎇ sessions-refactor"), "{narrow}");
+        assert!(narrow.contains("★ pinned"), "{narrow}");
+        assert!(!narrow.contains(" api ──"), "{narrow}");
     }
 
     #[tokio::test]
@@ -1927,14 +1937,14 @@ mod tests {
         for (width, height) in [(90, 40), (90, 20)] {
             h.press(KeyCode::Char('g')).await;
             h.press(KeyCode::Char('g')).await;
-            // The folder's header comes first.
             h.press(KeyCode::Char('j')).await;
-            for i in 1..=6 {
+            for _ in 1..=5 {
                 h.press(KeyCode::Char('j')).await;
                 let screen = render(&mut h.app, width, height);
                 let list = h.app.screen().list.unwrap();
                 let top = rows(&screen, 0, list.bottom());
-                let name = format!("  session-{i} ");
+                let selected = h.app.list.selected_session().expect("a session");
+                let name = format!("  {} ", selected.name);
                 assert!(top.contains(&name), "{name} {width}x{height}: {screen}");
                 assert!(top.contains("▤ Folders"), "{screen}");
             }

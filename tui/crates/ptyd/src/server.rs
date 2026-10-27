@@ -64,6 +64,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_ACTIVITY,
     session_core::api::CAPABILITY_REPLIES,
     session_core::api::CAPABILITY_SUBMIT_QUIET,
+    session_core::api::CAPABILITY_PLACES,
     "attach",
     "subscribe",
     "list",

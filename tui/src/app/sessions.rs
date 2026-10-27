@@ -1119,6 +1119,7 @@ impl App {
         }
         if !matches!(self.mode, AppMode::Normal) {
             self.hovered_row = None;
+            self.hovered_place = None;
             self.terminal_panel.dragging = false;
             // A dialog opened: a held session is let go.
             self.end_session_drag();
@@ -1185,13 +1186,22 @@ impl App {
                 return;
             }
         }
-        // The session row under the pointer shows its pin toggle.
+        // The session row under the pointer shows its pin toggle, and the
+        // place under it its copy mark.
         self.hovered_row = self.hits.iter().find_map(|(area, hit)| match hit {
-            Hit::ListRow(row) | Hit::PinToggle(row) | Hit::SummaryRefresh(row)
+            Hit::ListRow(row)
+            | Hit::PinToggle(row)
+            | Hit::SummaryRefresh(row)
+            | Hit::PlacesToggle(row)
+            | Hit::Place(row, _)
                 if inside(Some(*area)) =>
             {
                 Some(*row)
             }
+            _ => None,
+        });
+        self.hovered_place = self.hits.iter().find_map(|(area, hit)| match hit {
+            Hit::Place(row, index) if inside(Some(*area)) => Some((*row, *index)),
             _ => None,
         });
         self.divider.hover = inside(screen.divider);
@@ -1269,6 +1279,17 @@ impl App {
                         let id = session.id.clone();
                         self.summarize(id);
                     }
+                    return;
+                }
+                Some(Hit::PlacesToggle(row)) => {
+                    if let Some(ListRow::Session(session)) = self.list.rows().get(row) {
+                        let id = session.id.clone();
+                        self.toggle_places_of(id);
+                    }
+                    return;
+                }
+                Some(Hit::Place(row, index)) => {
+                    self.copy_place_at(row, index);
                     return;
                 }
                 Some(Hit::PinToggle(row)) => {

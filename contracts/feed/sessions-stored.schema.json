@@ -2,13 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:rakumux:feed:v1:sessions-stored",
   "title": "POST /api/v1/feed/sessions success",
-  "description": "How many sessions are stored for the machine now.",
+  "description": "How many sessions are stored for the machine now, and what more the cloud takes in a session list (`accepts`).",
   "x-maxBodyBytes": 1024,
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "stored"],
   "properties": {
     "version": { "const": 1 },
-    "stored": { "type": "integer", "minimum": 0, "maximum": 200 }
+    "stored": { "type": "integer", "minimum": 0, "maximum": 200 },
+    "accepts": {
+      "description": "What the cloud takes in `sessions-upload` beyond its first version, so a machine sends it only once the cloud said so; absent from a cloud that takes nothing more. Known: `places` (`sessionState` `places`). Machines ignore names they don't know.",
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.]{0,31}$" }
+    }
   }
 }

@@ -33,6 +33,12 @@ fn agent(mut view: SessionView) -> SessionView {
     view
 }
 
+/// rakumux.com's answer to an upload: it holds one session, and takes
+/// places when `places`.
+fn stored(places: bool) -> wire::SessionsStored {
+    wire::SessionsStored { stored: 1, places }
+}
+
 fn on(views: &[SessionView]) -> SessionSync {
     let mut sessions = SessionSync::new("studio".into(), true);
     sessions.set_enabled(true, NOW);
@@ -89,7 +95,7 @@ fn a_changed_list_goes_once_settled_and_an_unchanged_one_every_minute() {
     let mut sessions = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0")]);
     assert!(sessions.next_request(NOW, WALL).is_some());
     assert!(sessions.next_request(NOW, WALL).is_none(), "one at a time");
-    sessions.done(true, Ok(1), NOW);
+    sessions.done(true, Ok(stored(false)), NOW);
     assert!(sessions
         .next_request(NOW + Duration::from_secs(1), WALL)
         .is_none());
@@ -103,7 +109,7 @@ fn a_changed_list_goes_once_settled_and_an_unchanged_one_every_minute() {
         .is_none());
     let changed = body(sessions.next_request(NOW + SETTLE, WALL));
     assert_eq!(changed["sessions"][0]["lifecycle"], "done");
-    sessions.done(true, Ok(1), NOW + SETTLE);
+    sessions.done(true, Ok(stored(false)), NOW + SETTLE);
 
     // Unchanged: nothing until the heartbeat.
     let later = NOW + SETTLE;
@@ -111,7 +117,7 @@ fn a_changed_list_goes_once_settled_and_an_unchanged_one_every_minute() {
         .next_request(later + Duration::from_secs(30), WALL)
         .is_none());
     assert!(sessions.next_request(later + HEARTBEAT, WALL).is_some());
-    sessions.done(true, Ok(1), later + HEARTBEAT);
+    sessions.done(true, Ok(stored(false)), later + HEARTBEAT);
 
     // A session that goes is left out of the next list.
     sessions.forget(&SessionId::from_string("01K89ZQ4D2F6H8J0K2M4N6P8R0"));
@@ -129,7 +135,7 @@ fn failures_back_off_and_the_switch_turning_on_again_sends_at_once() {
         .is_none());
     assert!(sessions.next_request(NOW + RETRY_MIN, WALL).is_some());
     // An answer for an account signed out meanwhile changes nothing.
-    sessions.done(false, Ok(1), NOW + RETRY_MIN);
+    sessions.done(false, Ok(stored(false)), NOW + RETRY_MIN);
     sessions.set_enabled(false, NOW + RETRY_MIN);
     assert!(sessions.next_request(NOW + HEARTBEAT * 2, WALL).is_none());
     sessions.set_enabled(true, NOW + HEARTBEAT * 2);
@@ -145,7 +151,21 @@ fn rakumux_com_says_how_many_it_holds() {
     };
     assert_eq!(
         wire::sessions_stored(&reply(200, r#"{"version":1,"stored":2}"#)),
-        Ok(2)
+        Ok(wire::SessionsStored {
+            stored: 2,
+            places: false
+        })
+    );
+    // A cloud that takes places says so; names it doesn't know are ignored.
+    assert_eq!(
+        wire::sessions_stored(&reply(
+            200,
+            r#"{"version":1,"stored":2,"accepts":["later","places"]}"#
+        )),
+        Ok(wire::SessionsStored {
+            stored: 2,
+            places: true
+        })
     );
     assert_eq!(
         wire::sessions_stored(&reply(200, r#"{"version":1,"stored":201}"#)),
@@ -201,6 +221,104 @@ fn sessions_without_a_named_agent_say_the_program_the_app_tab_files_them_under()
     // An agent the contract doesn't name is its program; a named one is the agent.
     assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R3"), Some("pi".into()));
     assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R4"), None);
+}
+
+/// `view` worked in its folder, a worktree in it and a repository and a
+/// folder elsewhere (most recent first), and in `extra` more of its folder.
+fn worked(mut view: SessionView, extra: usize) -> SessionView {
+    let place = |path: &str, branch: Option<&str>, worktree: Option<&str>, at: i64| {
+        session_core::model::SessionPlace {
+            path: path.into(),
+            git: branch.map(|branch| GitInfo {
+                repo_root: path.into(),
+                branch: Some(branch.into()),
+                worktree: worktree.map(String::from),
+                ..Default::default()
+            }),
+            last_at: at,
+            edited: at % 2 == 0,
+        }
+    };
+    view.places = vec![
+        place(
+            "/home/me/rakumux/worktrees/fix",
+            Some("fix"),
+            Some("fix"),
+            1_761_219_990,
+        ),
+        place("/home/me/rakumux", Some("main"), None, 1_761_219_000),
+        place(
+            "/home/me/repos/rakumux-cloud",
+            Some("main"),
+            None,
+            1_761_218_001,
+        ),
+        place("/home/me/Downloads/logo", None, None, 1_761_210_000),
+    ];
+    view.places.extend(
+        (0..extra).map(|n| place(&format!("/home/me/rakumux/p{n}"), None, None, 1_761_200_000)),
+    );
+    view
+}
+
+#[test]
+fn places_go_as_names_only_once_rakumux_com_takes_them() {
+    let id = "01K89ZQ4D2F6H8J0K2M4N6P8R0";
+    let mut sessions = on(&[worked(agent(view(id)), 6)]);
+    // A cloud that hasn't said it takes them gets none.
+    let first = body(sessions.next_request(NOW, WALL));
+    assert!(first["sessions"][0].get("places").is_none(), "{first}");
+    sessions.done(true, Ok(stored(true)), NOW);
+    // Once it has, the list changed: the 8 most recent go, as names.
+    let upload = body(sessions.next_request(NOW + SETTLE, WALL));
+    let places = upload["sessions"][0]["places"].as_array().unwrap();
+    assert_eq!(places.len(), 8);
+    assert_eq!(
+        places[..4],
+        [
+            serde_json::json!({"name": "worktrees/fix", "inside": true, "branch": "fix",
+                "worktree": "fix", "edited": true, "last_at": 1_761_219_990_000_i64}),
+            serde_json::json!({"name": ".", "inside": true, "branch": "main",
+                "edited": true, "last_at": 1_761_219_000_000_i64}),
+            serde_json::json!({"name": "rakumux-cloud", "inside": false, "branch": "main",
+                "edited": false, "last_at": 1_761_218_001_000_i64}),
+            serde_json::json!({"name": "logo", "inside": false, "edited": true,
+                "last_at": 1_761_210_000_000_i64}),
+        ]
+    );
+    assert!(!upload.to_string().contains("/home/me"), "{upload}");
+    // A cloud that stops taking them gets none again.
+    sessions.done(true, Ok(stored(false)), NOW + SETTLE);
+    let upload = body(sessions.next_request(NOW + SETTLE * 2, WALL));
+    assert!(upload["sessions"][0].get("places").is_none(), "{upload}");
+}
+
+#[test]
+fn a_list_too_large_with_its_places_goes_without_them_once() {
+    let views: Vec<SessionView> = (0..MAX_SESSIONS)
+        .map(|n| {
+            let mut session = worked(agent(view(&format!("01K89ZQ4D2F6H8J0K2M4N{n:05}"))), 4);
+            session.name = "n".repeat(64);
+            for place in &mut session.places {
+                place.path = place.path.join("a-rather-long-folder-name-".repeat(8));
+            }
+            session
+        })
+        .collect();
+    let mut sessions = on(&views);
+    body(sessions.next_request(NOW, WALL));
+    sessions.done(true, Ok(stored(true)), NOW);
+    let request = sessions.next_request(NOW + SETTLE, WALL);
+    let Some(FeedRequest::Sessions { body: bytes }) = &request else {
+        panic!("expected a session list, got {request:?}");
+    };
+    assert!(bytes.len() <= MAX_BODY_BYTES, "{}", bytes.len());
+    let upload = body(request);
+    assert_eq!(upload["sessions"].as_array().unwrap().len(), MAX_SESSIONS);
+    assert!(upload["sessions"][0].get("places").is_none());
+    // Sent as it is, it isn't sent again until it changes.
+    sessions.done(true, Ok(stored(true)), NOW + SETTLE);
+    assert!(sessions.next_request(NOW + SETTLE * 2, WALL).is_none());
 }
 
 #[test]

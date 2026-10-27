@@ -233,7 +233,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `AppKey`, never a shell), `status`, `lifecycle`, activity `phase`, the conversation shown,
    `pinned`, `last_active_at`), when it changes (at most every 3 s) and every 60 s meanwhile, so
    rakumux.com's Status, Folders and App pages list the account's sessions, show a session's
-   conversation from the uploaded chats, and tell a machine that's away.
+   conversation from the uploaded chats, and tell a machine that's away. Each session's 8 most
+   recent places go too, as names only (`PlaceState`: a path in the session's folder, `.` for
+   the folder itself, else a folder's last component; branch, worktree, `edited`, `last_at`), and
+   only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`); a
+   list that would pass the contract's 256 KiB goes without them.
 
 ## File structure
 
@@ -292,7 +296,8 @@ tui/
       registration.rs        # single-instance claim, socket, service.json
       control_api.rs         # Control trait (server ↔ control)
       control/               # ControlService: registry, scope, identity, permissions, waits, audit,
-                             # replies (reply capture's memory-only ring)
+                             # replies (reply capture's memory-only ring), places (where sessions
+                             # worked)
       host.rs                # TerminalHost trait (control ↔ terminals), SpawnSpec, HostEvent
       terminal/              # Host: PTY actors, emulators, replay ring, attach fan-out, adopt/handoff
       handoff.rs             # restart in place: HandoffState across exec, target check
@@ -337,10 +342,25 @@ tool call or reply as one line, from its conversation log or database: `integrat
 `user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
 messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
 since, whose content `session_turn` returns; the conversation tells chats apart for their one
-automatic AI summary), and `terminal` (pid, foreground process, title, size, `controlled`,
-`alternate_screen`) while live. Folders are `ProjectView {path, name, sessions, live,
+automatic AI summary), `places` (below), and `terminal` (pid, foreground process, title, size,
+`controlled`, `alternate_screen`) while live. Folders are `ProjectView {path, name, sessions, live,
 last_active_at, added_at, git}` on the wire.
 
+- **Places** (capability `session.places`; `integrations/places.rs`, `control/places.rs`):
+  where the session has worked, most recent first, at most 32: `SessionPlace {path, git?,
+  last_at, edited}`. A place is a git working tree (`path` = its `repo_root`, `git` its branch
+  and linked worktree when last worked in), or outside any repository a directory, folded into a
+  listed one above it. The daemon reads them from its agent's conversation, from its start (512
+  KiB a second) and then as it grows: Claude Code's entries' `cwd` and its tools' file paths,
+  search roots, `EnterWorktree` and Bash `cd`/`git -C`; Codex's turns' `cwd`, shell calls'
+  `workdir` and commands, and `apply_patch`'s files; OpenCode's tools' paths and commands. Its
+  agent's working-directory reports and its terminal's directories count too. `edited`: files
+  there were changed. Times are the conversation's own, so reading it again changes nothing, and
+  a place's moves on a minute at a time. The agents' own data directories (`~/.claude`,
+  `~/.codex`, OpenCode's but its worktrees, Claude Code's `/tmp/claude-<uid>`), `/`, home, `/tmp`
+  and `/proc`, `/sys`, `/dev` are never places. Kept in the registry, so ended sessions keep
+  theirs; only paths are read. They stay on this machine (not in `rakumux-api`), except their
+  names in the feed's session list (below).
 - **Status**: `live` (terminal running), `exited` (process ended; final screen kept; Enter
   restarts), `dead` (record without terminal, e.g. after a reboot or daemon restart; saved
   scrollback shown; Enter revives). A session whose program the user ends from inside it in
@@ -528,7 +548,9 @@ accidents; they don't stop a hostile process running as the same user.
   launch_json, resume_json, created_by_json, parent_id, depth, agent_json, reported_json, exit_code,
   created_at, last_active_at, ended_at)`, index `(scope_root, last_active_at DESC)`;
   `audit_log(id, ts, scope_root, caller, method, target_session_id, decision, detail)`, pruned to
-  30 days; `projects(path, added_at, last_used_at)` and a `pinned` column on `sessions_v2`.
+  30 days; `projects(path, added_at, last_used_at)` and a `pinned` column on `sessions_v2`;
+  `session_places(session_id, path, git_json, last_at, edited)`, created when missing (a session's
+  places, replaced together, deleted with it).
   `PRAGMA user_version = 3` (schema 2 is migrated in place, `projects` backfilled from session
   scopes); the 0.5.x `sessions` table is dropped on first open. Live
   state (terminal ids, session tokens) is in daemon memory only.
@@ -721,6 +743,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
 - **Git context**: a session's branch and linked worktree, read from `.git` files (never `git`).
+- **Place**: a working tree (or a folder outside any repository) a session has worked in, as its
+  agent's conversation, its working-directory reports and its terminal show; listed under the
+  session's row (`w`).
 - **Reply** (agent reply): what an agent said when it finished a turn, captured by the daemon
   only while the status service has reply capture on, for the **feed**: the replies of the
   account's machines, kept on rakumux.com for 30 days while the account's Feed switch is on.
@@ -798,7 +823,8 @@ that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and A
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
 `Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
 running session in view), `Tab` last session, `1`-`9` go into that session,
-`n` new, `r` rename, `s` a new AI summary of the session, `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
+`n` new, `r` rename, `s` a new AI summary of the session, `w` where the session has worked (`W`
+every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
 screen, `b` hide Master detail's list beside the session and show it again (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
@@ -982,8 +1008,21 @@ passes. Nothing there can be moved (`J`/`K` say so). A ready session's mark (`�
 shown) is amber like an unread reply's `●` but quieter (`format::read_period_style`: the amber
 faded 30% when read within the hour, 50% within the day, then muted), and ready's header has the
 last hour's. A row's description has no status words
-(its mark on the right says it): the app, branch, subagents and report; an ended session still
-says `exited · ⏎ restart` or `dead · ⏎ revive`. A status
+(its mark on the right says it): the app, subagents and report; an ended session still
+says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's place line
+(`components/session_list.rs::place_content`, `app/places.rs`): the folder the session works in
+now (its git context's working tree, else its cwd; its path in the session's folder, the folder's
+name, or `~/…`) and its branch, `▤ repo  ⎇ main`; with `▸` and how many others (`+3`) when it has
+worked elsewhere, the branch and count on a second line when narrow. `w`, `W` or a click or tap on
+that line opens the places under it (`▾`; closed by default, per window, not saved): each one,
+most recent first, with its branch, `✎` where files were changed, and its age at the right, the
+branch under the path when narrow. `↓`/`↑` (`j`/`k`) step through the selected session's open
+places as if each were a row under it (`App::step`; `SessionList::selected_place`, dropped by any
+other selection), and `y` copies the path of the one they're on, else of the folder the session
+works in now, over OSC 52 (`App::copy_place`). The place under the pointer, and the one the keys
+are on, shows `⧉` left of its path; a click or tap on a place copies it (`Hit::Place`) without
+selecting the row. A session taller than the list (its places open) shows the part around the
+place the keys are on. A status
 change moves a session to another header, but the selected session stays shown when it stops
 matching the filter (an answered question), until something else is selected. Their modals
 (`AppMode::Sections`, `components/section_picker.rs`) work like the Folders modal: All, then each

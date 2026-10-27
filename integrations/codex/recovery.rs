@@ -24,7 +24,7 @@ pub(super) const CODEX_OPTIONS: &[&str] = &[
     "--local-provider",
 ];
 
-fn codex_home() -> Option<PathBuf> {
+pub(crate) fn codex_home() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("CODEX_HOME").filter(|dir| !dir.is_empty()) {
         return Some(PathBuf::from(dir));
     }

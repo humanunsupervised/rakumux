@@ -7,8 +7,10 @@
 //! (`draw_list_rail`) shows it again.
 //! Each session is a compact cell after a blank row: its name, then its age
 //! and its mark (an agent's activity, else its status) at the right; then the
-//! agent's latest output, when the daemon has one; then its program, branch
-//! and state. A pin toggle shows left of the name under the pointer.
+//! agent's latest output, when the daemon has one; then its program and
+//! state; then the folder it works in now and its branch, with `▸ +3` when
+//! it has worked in other places, which open under it (`app::places`). A
+//! pin toggle shows left of the name under the pointer.
 //! The selected item's text is white and the others' muted; nothing has a
 //! background except the tabs' band. A session being dragged has a blue
 //! bar on its left.
@@ -24,8 +26,8 @@ use session_core::model::{ScopeRoot, SessionView};
 
 use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
 use super::format::{
-    activity_badge_at, now_secs, read_period_style, relative_time, secondary_line, status_glyph,
-    status_group_glyph, truncate, PIN_MARK,
+    activity_badge_at, branch_label, facts_line, now_secs, place_label, read_period_style,
+    relative_time, status_glyph, status_group_glyph, truncate, truncate_start, PIN_MARK,
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
@@ -49,11 +51,17 @@ fn row_height(row: &ListRow) -> u16 {
     }
 }
 
-/// [`row_height`], plus a line for a session's AI description.
-fn row_height_in(app: &App, row: &ListRow) -> u16 {
+/// [`row_height`], plus a line for a session's AI description and its
+/// place lines (`width` columns of content).
+fn row_height_in(app: &App, row: &ListRow, width: usize, now: i64) -> u16 {
     match row {
         ListRow::Session(session) => {
-            row_height(row) + u16::from(description_line(app, session).is_some())
+            let places = place_content(app, session, width, false, None, now)
+                .lines
+                .len();
+            row_height(row)
+                + u16::from(description_line(app, session).is_some())
+                + u16::try_from(places).unwrap_or(u16::MAX)
         }
         row => row_height(row),
     }
@@ -103,6 +111,18 @@ pub fn first_visible_row(heights: &[u16], selected: usize, height: u16) -> usize
         first += 1;
     }
     first
+}
+
+/// `area`, in a row drawn `skip` rows on in `shown` (a row taller than the
+/// list), cut to what shows; `None` when none of it does.
+fn scrolled(area: Rect, skip: u16, shown: Rect) -> Option<Rect> {
+    let top = (i32::from(area.y) - i32::from(skip)).max(i32::from(shown.y));
+    let bottom = (i32::from(area.bottom()) - i32::from(skip)).min(i32::from(shown.bottom()));
+    (top < bottom).then(|| Rect {
+        y: top as u16,
+        height: (bottom - top) as u16,
+        ..area
+    })
 }
 
 /// `content` at the bottom of a cell of `height` rows (the blank rows
@@ -431,12 +451,14 @@ fn session_content(
     // The lines under the name end where the right column starts.
     let column = width.saturating_sub(2 + RIGHT_COLUMN);
     let mut second = vec![Span::raw("  ")];
+    // The branch is on the place line (`place_content`).
     second.extend(
-        secondary_line(
+        facts_line(
             session,
             column,
             app.icons(),
             Style::default().fg(detail_color),
+            false,
         )
         .spans,
     );
@@ -460,6 +482,220 @@ fn session_content(
     }
     lines.push(second);
     lines
+}
+
+/// Marks the place line of a session that has worked elsewhere too: `▸`
+/// while its places are closed, `▾` while they're open.
+const PLACES_CLOSED: &str = "▸";
+const PLACES_OPEN: &str = "▾";
+/// Marks a place where files were changed.
+const EDITED_MARK: &str = "✎";
+/// Left of an open place under the pointer or the list keys: a click or tap
+/// (`y`) copies its path.
+const COPY_MARK: &str = "⧉";
+
+/// A session's place lines.
+struct PlaceLines {
+    lines: Vec<Vec<Span<'static>>>,
+    /// How many of the lines (from the first) open and close the places,
+    /// none when there are no others.
+    toggle: usize,
+    /// Each open place's lines, in the order of the session's places.
+    places: Vec<std::ops::Range<usize>>,
+    /// The open place the list keys are on (its index in `places`).
+    focus: Option<usize>,
+}
+
+/// A session's place lines, under its facts: the folder it works in now and
+/// its branch (`▤ rakumux  ⎇ main`, or `▸ rakumux  ⎇ main  +3` when it has
+/// worked in other places), the branch and count on a line of their own
+/// when they don't fit; then, while its places are open (`▾`), each place
+/// it has worked in, most recent first: its path, its branch, ✎ where files
+/// were changed, and when, at the right (the branch on a second line when
+/// the path takes the room). The place the list keys are on (in the
+/// `selected` session) is bright, and it and the `hovered` one show the
+/// copy mark.
+fn place_content(
+    app: &App,
+    session: &SessionView,
+    width: usize,
+    selected: bool,
+    hovered: Option<usize>,
+    now: i64,
+) -> PlaceLines {
+    let p = theme::palette();
+    let icons = app.icons();
+    // After the two columns every line under the name starts with.
+    let room = width.saturating_sub(2);
+    let (text_color, quiet) = if selected {
+        (p.text_primary, p.neutral_gray)
+    } else {
+        (p.text_muted, p.text_muted)
+    };
+    let current = crate::app::places::current_place(session);
+    let others = crate::app::places::other_places(session);
+    let open = app.places_open(&session.id) && !session.places.is_empty();
+    let (mark, mark_color) = if open {
+        (PLACES_OPEN, p.accent_primary)
+    } else if others > 0 {
+        (PLACES_CLOSED, p.accent_primary)
+    } else {
+        (icons.folder(), quiet)
+    };
+    let mark_width = str_width(mark) + 1;
+    let lead = |mut spans: Vec<Span<'static>>| {
+        spans.insert(0, Span::raw("  "));
+        spans
+    };
+    let label = place_label(&session.scope, current);
+    let branch = session
+        .git
+        .as_ref()
+        .filter(|_| !open)
+        .and_then(|git| branch_label(git, icons));
+    let tail = branch
+        .into_iter()
+        .chain((others > 0).then(|| format!("+{others}")))
+        .collect::<Vec<_>>()
+        .join("  ");
+    let mark = Span::styled(format!("{mark} "), Style::default().fg(mark_color));
+    let label_style = Style::default().fg(text_color);
+    let tail_style = Style::default().fg(quiet);
+    let tail_width = if tail.is_empty() {
+        0
+    } else {
+        2 + str_width(&tail)
+    };
+    let mut lines = Vec::new();
+    if mark_width + str_width(&label) + tail_width <= room {
+        let mut spans = vec![mark, Span::styled(label, label_style)];
+        if !tail.is_empty() {
+            spans.push(Span::styled(format!("  {tail}"), tail_style));
+        }
+        lines.push(lead(spans));
+    } else {
+        let label = truncate_start(&label, room.saturating_sub(mark_width));
+        lines.push(lead(vec![mark, Span::styled(label, label_style)]));
+        if !tail.is_empty() {
+            lines.push(lead(vec![
+                Span::raw(" ".repeat(mark_width)),
+                Span::styled(truncate(&tail, room.saturating_sub(mark_width)), tail_style),
+            ]));
+        }
+    }
+    let toggle = if others > 0 || open { lines.len() } else { 0 };
+    let mut places = Vec::new();
+    if !open {
+        return PlaceLines {
+            lines,
+            toggle,
+            places,
+            focus: None,
+        };
+    }
+    let focus = selected
+        .then(|| app.list.selected_place())
+        .flatten()
+        .and_then(|focus| session.places.iter().position(|p| p.path == focus));
+    // Each place, indented under the mark, its age at the right.
+    let room = room.saturating_sub(mark_width);
+    for (index, place) in session.places.iter().enumerate() {
+        let start = lines.len();
+        let label_style = if focus == Some(index) {
+            Style::default()
+                .fg(p.text_bright)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            label_style
+        };
+        let indent = Span::raw(" ".repeat(mark_width));
+        let label = place_label(&session.scope, &place.path);
+        let age = relative_time(now, place.last_at);
+        let branch = place
+            .git
+            .as_ref()
+            .and_then(|git| branch_label(git, icons))
+            .unwrap_or_default();
+        let edited = if place.edited { EDITED_MARK } else { "" };
+        let extra = [branch.as_str(), edited]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let extra_width = if extra.is_empty() {
+            0
+        } else {
+            1 + str_width(&extra)
+        };
+        let age_style = Style::default().fg(quiet);
+        let extra_spans = |extra: String| {
+            let (branch, edited) = match extra.strip_suffix(EDITED_MARK) {
+                Some(branch) => (branch.to_string(), true),
+                None => (extra, false),
+            };
+            let mut spans = vec![Span::styled(branch, tail_style)];
+            if edited {
+                spans.push(Span::styled(
+                    EDITED_MARK,
+                    Style::default().fg(p.accent_gold),
+                ));
+            }
+            spans
+        };
+        let fits = str_width(&label) + extra_width + 2 + str_width(&age) <= room;
+        if fits || extra.is_empty() {
+            let label = truncate_start(&label, room.saturating_sub(2 + str_width(&age)));
+            let used = str_width(&label) + if fits { extra_width } else { 0 };
+            let mut spans = vec![indent.clone(), Span::styled(label, label_style)];
+            if fits && !extra.is_empty() {
+                spans.push(Span::raw(" "));
+                spans.extend(extra_spans(extra));
+            }
+            spans.push(Span::raw(
+                " ".repeat(room.saturating_sub(used + str_width(&age))),
+            ));
+            spans.push(Span::styled(age, age_style));
+            lines.push(lead(spans));
+        } else {
+            lines.push(lead(vec![
+                indent.clone(),
+                Span::styled(truncate_start(&label, room), label_style),
+            ]));
+            // Under the path, a little further in; in a very narrow list
+            // the gap goes first, then the branch, then the age is cut.
+            let age = truncate(&age, room);
+            let extra = truncate(&extra, room.saturating_sub(4 + str_width(&age)));
+            let gap = if 2 + str_width(&extra) + str_width(&age) <= room {
+                2
+            } else {
+                0
+            };
+            let used = gap + str_width(&extra);
+            let mut spans = vec![indent.clone(), Span::raw(" ".repeat(gap))];
+            spans.extend(extra_spans(extra));
+            spans.push(Span::raw(
+                " ".repeat(room.saturating_sub(used + str_width(&age))),
+            ));
+            spans.push(Span::styled(age, age_style));
+            lines.push(lead(spans));
+        }
+        if focus == Some(index) || hovered == Some(index) {
+            // In the indent, after the two columns every line starts with.
+            if let Some(slot) = lines[start].get_mut(1) {
+                *slot = Span::styled(
+                    format!("{COPY_MARK:<mark_width$}"),
+                    Style::default().fg(p.accent_primary),
+                );
+            }
+        }
+        places.push(start..lines.len());
+    }
+    PlaceLines {
+        lines,
+        toggle,
+        places,
+        focus,
+    }
 }
 
 /// Shown before a hovered session's AI description: a click or tap makes a
@@ -845,26 +1081,33 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         return;
     }
 
-    let heights: Vec<u16> = rows.iter().map(|row| row_height_in(app, row)).collect();
-    let first = first_visible_row(&heights, selected.max(1), inner.height).max(1);
     // Content width: everything right of the indent, less a right margin.
     let width = (inner.width as usize).saturating_sub(INDENT + 1);
     let now = now_secs();
+    let heights: Vec<u16> = rows
+        .iter()
+        .map(|row| row_height_in(app, row, width, now))
+        .collect();
+    let first = first_visible_row(&heights, selected.max(1), inner.height).max(1);
     let mut y = inner.y;
     let bottom = inner.y + inner.height;
 
     for (index, row) in rows.iter().enumerate().skip(first) {
         let height = heights[index];
-        if y + height > bottom {
+        let is_selected = index == selected;
+        // A selected session taller than the list (its places open) shows
+        // as much of it as fits, scrolled to where the list keys are.
+        if y + height > bottom && !(is_selected && y == inner.y) {
             break;
         }
         let row_area = Rect {
             x: inner.x,
             y,
             width: inner.width,
-            height,
+            height: height.min(bottom - y),
         };
-        let is_selected = index == selected;
+        let mut skip = 0;
+        let mut row_hits = Vec::new();
         let lines = match row {
             ListRow::Folders => Vec::new(),
             ListRow::NewSession => {
@@ -939,38 +1182,77 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 lines
             }
             ListRow::Session(session) => {
-                let mut lines = cell_lines(
-                    session_content(app, session, width, is_selected, now),
-                    height,
-                );
+                let mut content = session_content(app, session, width, is_selected, now);
                 let hovered = app.hovered_row == Some(index);
-                // The description is the line under the name, the second
-                // from the end (the program line comes last); with AI
+                let dragged = app.dragged_session() == Some(&session.id);
+                let hovered_place = app
+                    .hovered_place
+                    .filter(|(row, _)| *row == index && !dragged)
+                    .map(|(_, place)| place);
+                let places = place_content(app, session, width, is_selected, hovered_place, now);
+                let places_at = content.len();
+                content.extend(places.lines);
+                // The cell's content is at its bottom, after blank rows.
+                let top = (height as usize).saturating_sub(content.len());
+                let mut lines = cell_lines(content, height);
+                // The whole row, of which `row_area` shows `skip` rows on.
+                let full = Rect { height, ..row_area };
+                let line_area = |line: usize, count: usize| {
+                    Rect {
+                        x: full.x + INDENT as u16,
+                        y: full.y.saturating_add(line as u16),
+                        width: full.width.saturating_sub(INDENT as u16),
+                        height: count as u16,
+                    }
+                    .intersection(full)
+                };
+                if height > row_area.height {
+                    let focus = places.focus.and_then(|at| places.places.get(at));
+                    let end = top + places_at + focus.map_or(1, |lines| lines.end);
+                    skip = (end as u16).saturating_sub(row_area.height);
+                }
+                // The description is the line under the name; with AI
                 // summaries on, its ↻ makes a new one.
                 if app.summaries_on() && description_line(app, session).is_some() {
                     let refreshing = app.summary_refreshing(&session.id);
-                    let dragged = app.dragged_session() == Some(&session.id);
-                    let line = lines.len().saturating_sub(2);
+                    let line = top + 1;
                     if let Some(refresh) =
-                        mark_summary(&mut lines, line, refreshing, hovered && !dragged, row_area)
+                        mark_summary(&mut lines, line, refreshing, hovered && !dragged, full)
                     {
-                        hits.push((refresh, Hit::SummaryRefresh(index)));
+                        row_hits.push((refresh, Hit::SummaryRefresh(index)));
                     }
                 }
-                if app.dragged_session() == Some(&session.id) {
+                if !dragged {
+                    // The place line opens and closes the places under it.
+                    if places.toggle > 0 {
+                        let area = line_area(top + places_at, places.toggle);
+                        row_hits.push((area, Hit::PlacesToggle(index)));
+                    }
+                    // A click on an open place copies its path.
+                    for (place, range) in places.places.iter().enumerate() {
+                        let area = line_area(top + places_at + range.start, range.len());
+                        row_hits.push((area, Hit::Place(index, place)));
+                    }
+                }
+                if dragged {
                     mark_dragged(&mut lines);
                 } else if hovered {
                     // Before the row's own target, which would take the tap.
-                    if let Some(pin) = mark_hovered(&mut lines, session.pinned, row_area) {
-                        hits.push((pin, Hit::PinToggle(index)));
+                    if let Some(pin) = mark_hovered(&mut lines, session.pinned, full) {
+                        row_hits.push((pin, Hit::PinToggle(index)));
                     }
                 }
                 lines
             }
         };
-        f.render_widget(Paragraph::new(lines), row_area);
+        f.render_widget(Paragraph::new(lines).scroll((skip, 0)), row_area);
+        hits.extend(
+            row_hits
+                .into_iter()
+                .filter_map(|(area, hit)| Some((scrolled(area, skip, row_area)?, hit))),
+        );
         hits.push((row_area, Hit::ListRow(index)));
-        y += height;
+        y += row_area.height;
     }
 
     if y < bottom && app.list.visible().is_empty() {
@@ -1016,16 +1298,151 @@ mod tests {
             let second = &lines[1];
             assert_eq!(second[1].content, "opencode");
             assert_eq!(second[1].style.fg, Some(p.label_slate_blue));
-            assert_eq!(second[2].content, " · ⎇ main");
+            // The branch is on the place line, in the details' colour.
+            let facts: String = second.iter().map(|span| span.content.as_ref()).collect();
+            assert_eq!(facts, "  opencode");
+            let places = place_content(&h.app, &session, 40, selected, None, 0).lines;
+            let branch = places[0].last().unwrap();
+            assert_eq!(branch.content, "  ⎇ main");
             assert_eq!(
-                second[2].style.fg,
+                branch.style.fg,
                 Some(if selected {
-                    p.text_primary
+                    p.neutral_gray
                 } else {
                     p.text_muted
                 })
             );
         }
+    }
+
+    /// `session` with `places` (paths in its folder `/repo`, a branch each,
+    /// how long ago), working in `/repo` on `main` now.
+    fn with_places(places: &[(&str, &str, i64, bool)]) -> SessionView {
+        let mut session = crate::app::testing::view("A", "a", 0);
+        session.git = crate::app::testing::on_branch("main");
+        session.places = places
+            .iter()
+            .map(
+                |(path, branch, ago, edited)| session_core::model::SessionPlace {
+                    path: path.into(),
+                    git: Some(session_core::model::GitInfo {
+                        repo_root: path.into(),
+                        branch: Some(branch.to_string()),
+                        ..Default::default()
+                    }),
+                    last_at: 1000 - ago,
+                    edited: *edited,
+                },
+            )
+            .collect();
+        session
+    }
+
+    fn text(lines: &[Vec<Span>]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|line| line.iter().map(|span| span.content.as_ref()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn the_place_line_names_the_folder_worked_in_now_and_how_many_others() {
+        use crate::app::testing::harness;
+        let h = harness(vec![]);
+        // Nowhere else: the folder mark, no toggle.
+        let alone = with_places(&[("/repo", "main", 5, false)]);
+        let PlaceLines { lines, toggle, .. } = place_content(&h.app, &alone, 40, false, None, 1000);
+        assert_eq!(text(&lines), ["  ▤ repo  ⎇ main"]);
+        assert_eq!(toggle, 0);
+        // Elsewhere too: ▸ and the count, which open and close the list.
+        let mut moved = with_places(&[
+            ("/repo/worktrees/fix", "fix", 5, true),
+            ("/repo", "main", 300, false),
+            ("/srv/other", "dev", 7200, false),
+        ]);
+        moved.git = Some(session_core::model::GitInfo {
+            repo_root: "/repo/worktrees/fix".into(),
+            branch: Some("fix".into()),
+            ..Default::default()
+        });
+        let PlaceLines { lines, toggle, .. } = place_content(&h.app, &moved, 40, false, None, 1000);
+        assert_eq!(text(&lines), ["  ▸ worktrees/fix  ⎇ fix  +2"]);
+        assert_eq!(toggle, 1);
+        // Narrow: the branch and count on a line of their own, the path cut
+        // at its start.
+        let PlaceLines { lines, toggle, .. } = place_content(&h.app, &moved, 16, false, None, 1000);
+        assert_eq!(text(&lines), ["  ▸ …rktrees/fix", "    ⎇ fix  +2"]);
+        assert_eq!(toggle, 2);
+        for width in [8, 12, 16, 24, 40, 80] {
+            let lines = place_content(&h.app, &moved, width, true, None, 1000).lines;
+            for line in &lines {
+                assert!(
+                    Line::from(line.clone()).width() <= width.max(4),
+                    "{width}: {:?}",
+                    text(&lines)
+                );
+            }
+        }
+        assert_eq!(
+            row_height_in(&h.app, &ListRow::Session(&moved), 40, 1000),
+            4
+        );
+    }
+
+    #[test]
+    fn open_places_list_each_with_its_branch_edits_and_age() {
+        use crate::app::testing::harness;
+        let mut h = harness(vec![]);
+        let session = with_places(&[
+            ("/repo/worktrees/fix", "fix", 5, true),
+            ("/repo", "main", 300, false),
+            ("/srv/other", "dev", 7200, false),
+        ]);
+        h.app.places_open.insert(session.id.clone());
+        let PlaceLines { lines, toggle, .. } =
+            place_content(&h.app, &session, 40, false, None, 1000);
+        assert_eq!(
+            text(&lines),
+            [
+                "  ▾ repo  +2",
+                "    worktrees/fix ⎇ fix ✎            now",
+                "    repo ⎇ main                       5m",
+                "    /srv/other ⎇ dev                  2h",
+            ]
+        );
+        assert_eq!(toggle, 1);
+        let edited = lines[1].iter().find(|span| span.content == EDITED_MARK);
+        assert_eq!(
+            edited.and_then(|span| span.style.fg),
+            Some(theme::palette().accent_gold)
+        );
+        // Under the pointer, a place shows the copy mark.
+        let PlaceLines { lines, places, .. } =
+            place_content(&h.app, &session, 40, false, Some(1), 1000);
+        assert_eq!(text(&lines)[2], "  ⧉ repo ⎇ main                       5m");
+        assert_eq!(places, [1..2, 2..3, 3..4]);
+        // Narrow: a place's branch goes under its path.
+        let PlaceLines { lines, places, .. } =
+            place_content(&h.app, &session, 24, false, None, 1000);
+        assert_eq!(
+            text(&lines)[1..3],
+            ["    worktrees/fix", "      ⎇ fix ✎        now"]
+        );
+        assert_eq!(places, [1..3, 3..4, 4..5]);
+        for width in [8, 12, 24, 40, 80] {
+            let lines = place_content(&h.app, &session, width, false, None, 1000).lines;
+            for line in &lines {
+                assert!(
+                    Line::from(line.clone()).width() <= width.max(6),
+                    "{width}: {:?}",
+                    text(&lines)
+                );
+            }
+        }
+        assert_eq!(
+            row_height_in(&h.app, &ListRow::Session(&session), 40, 1000),
+            7
+        );
     }
 
     #[test]

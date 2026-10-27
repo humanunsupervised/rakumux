@@ -543,6 +543,9 @@ pub const CAPABILITY_TURN: &str = "session.turn";
 /// `session_transcript`: a running agent's whole conversation.
 pub const CAPABILITY_TRANSCRIPT: &str = "session.transcript";
 
+/// `SessionView::places`: where a session has worked.
+pub const CAPABILITY_PLACES: &str = "session.places";
+
 /// `session_submit`'s `quiet_ms`: refused while someone typed in the session.
 pub const CAPABILITY_SUBMIT_QUIET: &str = "session.submit.quiet";
 

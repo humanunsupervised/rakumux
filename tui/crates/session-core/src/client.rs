@@ -1370,6 +1370,7 @@ mod tests {
             agent_output: None,
             user_prompt: None,
             agent_turn: None,
+            places: vec![],
             pinned: false,
             git: None,
             auto_named: false,

@@ -221,6 +221,13 @@ pub enum KeyAction {
     Pin,
     /// `s`: a new AI summary of the selected session.
     Summarize,
+    /// `w`: where the selected session has worked, under its row.
+    Places,
+    /// `W`: where every session has worked.
+    AllPlaces,
+    /// `y`: the path of the open place the list keys are on, else of where
+    /// the selected session works now, on the clipboard.
+    CopyPlace,
     /// `J`: one place down in the list (dragging does the same).
     MoveDown,
     /// `K`: one place up.
@@ -255,7 +262,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 43] = [
+    pub const ALL: [KeyAction; 46] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -280,6 +287,9 @@ impl KeyAction {
         KeyAction::Rename,
         KeyAction::Pin,
         KeyAction::Summarize,
+        KeyAction::Places,
+        KeyAction::AllPlaces,
+        KeyAction::CopyPlace,
         KeyAction::MoveDown,
         KeyAction::MoveUp,
         KeyAction::Close,
@@ -328,6 +338,9 @@ impl KeyAction {
             | KeyAction::Rename
             | KeyAction::Pin
             | KeyAction::Summarize
+            | KeyAction::Places
+            | KeyAction::AllPlaces
+            | KeyAction::CopyPlace
             | KeyAction::MoveDown
             | KeyAction::MoveUp
             | KeyAction::Close
@@ -376,6 +389,9 @@ impl KeyAction {
             KeyAction::Rename => "Rename session",
             KeyAction::Pin => "Pin or unpin session",
             KeyAction::Summarize => "Summarise the session (AI)",
+            KeyAction::Places => "Where the session has worked",
+            KeyAction::AllPlaces => "Where every session has worked",
+            KeyAction::CopyPlace => "Copy a place's path",
             KeyAction::MoveDown => "Move session down",
             KeyAction::MoveUp => "Move session up",
             KeyAction::Close => "Close session (end its program)",
@@ -434,6 +450,9 @@ impl KeyAction {
             KeyAction::Rename => plain(&["r"]),
             KeyAction::Pin => plain(&["p"]),
             KeyAction::Summarize => plain(&["s"]),
+            KeyAction::Places => plain(&["w"]),
+            KeyAction::AllPlaces => plain(&["W"]),
+            KeyAction::CopyPlace => plain(&["y"]),
             KeyAction::MoveDown => plain(&["J"]),
             KeyAction::MoveUp => plain(&["K"]),
             KeyAction::Close => plain(&["x"]),
@@ -523,6 +542,20 @@ impl KeyAction {
             }
             KeyAction::Delete => {
                 "Press d or dd; both ask before deleting. Confirm with y or Enter.".into()
+            }
+            KeyAction::Places | KeyAction::AllPlaces => {
+                "Each session shows the folder it works in now. w opens the list under it (W \
+                 every session's, a click on the line too): every working tree and folder it \
+                 has worked in, most recent first, with its branch, ✎ where files were \
+                 changed, and when. Read on this machine from what the agent did; it stays \
+                 here."
+                    .into()
+            }
+            KeyAction::CopyPlace => {
+                "In an open list, ↓ and ↑ step through the places too, and y copies the path of \
+                 the one marked ⧉ (a click on a place does the same); elsewhere, y copies the \
+                 folder the session works in now. Copied through your terminal (OSC 52)."
+                    .into()
             }
             KeyAction::Summarize => {
                 "Each agent chat gets one AI summary by itself, at its fifth output or when it \

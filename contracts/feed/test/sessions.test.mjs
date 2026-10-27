@@ -29,6 +29,18 @@ test("a machine lists at most 200 sessions", () => {
   assert.equal(validators.sessionsUpload(many(201)), false);
 });
 
+test("a session lists at most 8 places", () => {
+  const base = fixtures.upload.valid[0];
+  const place = base.sessions[0].places[3];
+  const withPlaces = (count) => {
+    const upload = structuredClone(base);
+    upload.sessions[0].places = Array.from({ length: count }, (_, index) => ({ ...place, name: `p${index}` }));
+    return upload;
+  };
+  assert.equal(validators.sessionsUpload(withPlaces(8)), true);
+  assert.equal(validators.sessionsUpload(withPlaces(9)), false);
+});
+
 test("a machine says what it handles beyond the first version", () => {
   const base = fixtures.upload.valid[0];
   for (const capabilities of fixtures.capabilities.valid) {

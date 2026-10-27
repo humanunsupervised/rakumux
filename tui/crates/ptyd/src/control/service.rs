@@ -18,6 +18,7 @@ use super::events::{EventBus, Filter, Scopes};
 use super::git_context::{self, GitContexts};
 use super::lifecycle::LifecycleTracker;
 use super::names;
+use super::places::{self, Places};
 use super::policy::{self, Op, Target};
 use super::registry::{
     self, ProjectRecord, ProjectRemoval, ProjectSessions, Registry, SessionRecord,
@@ -57,6 +58,11 @@ const RESUME_CHECK_MS: i64 = 5_000;
 /// How often a running agent's conversation log is read for its latest
 /// line, at most (on its terminal's output).
 const OUTPUT_CHECK_MS: i64 = 1_000;
+/// How often a running agent's conversation is read for where it works.
+const PLACES_CHECK_MS: i64 = 1_000;
+/// How much of it is read at once: a long one is read from its start over
+/// several checks.
+const PLACES_BUDGET: usize = 512 * 1024;
 /// A shell must sit at its prompt this long before the resume command is
 /// forgotten (programs killed during a reboot leave the prompt for a
 /// moment).
@@ -114,6 +120,10 @@ struct LiveSession {
     user_prompt: Option<String>,
     /// The agent's current turn (`session_turn`, `SessionView::agent_turn`).
     turn: Option<crate::agent_output::Turn>,
+    /// The agent's conversation, read for where it works
+    /// (`SessionView::places`), and when it last was.
+    places_scan: Option<crate::agent_output::places::PlaceScan>,
+    places_checked_ms: i64,
 }
 
 impl LiveSession {
@@ -137,6 +147,8 @@ impl LiveSession {
             reply_key: None,
             user_prompt: None,
             turn: None,
+            places_scan: None,
+            places_checked_ms: 0,
         }
     }
 }
@@ -157,6 +169,9 @@ struct State {
     views: HashMap<SessionId, SessionView>,
     /// Git context per session, for the directory it was read from.
     git: GitContexts,
+    /// Where each session has worked (`SessionView::places`), as the
+    /// registry holds it.
+    places: Places,
     /// When each session last created sessions, within the past minute
     /// (`Limits::max_creates_per_minute`).
     recent_creates: HashMap<SessionId, Vec<Instant>>,
@@ -204,6 +219,8 @@ pub(super) struct Inner {
     pub(super) stop: Arc<AtomicBool>,
     /// The user stopped the daemon: nothing is revived on the next start.
     stopped_by_user: AtomicBool,
+    /// Directories that are never places.
+    places_excluded: places::Excluded,
 }
 
 impl Inner {
@@ -213,7 +230,12 @@ impl Inner {
         registry: Registry,
         detector: Detector,
     ) -> Self {
+        let saved_places = registry.places().unwrap_or_else(|error| {
+            crate::log_warn!("control: reading places: {error}");
+            Default::default()
+        });
         Self {
+            places_excluded: places::Excluded::of_this_machine(),
             store: ScrollbackStore::new(config.layout.clone()),
             config,
             host,
@@ -230,6 +252,7 @@ impl Inner {
                 replies: ReplyRing::default(),
                 views: HashMap::new(),
                 git: GitContexts::default(),
+                places: Places::new(saved_places),
             }),
             changed: Condvar::new(),
             events: EventBus::default(),
@@ -1093,6 +1116,7 @@ impl Inner {
         state.bindings.remove(&record.id);
         state.views.remove(&record.id);
         state.git.remove(&record.id);
+        state.places.remove(&record.id);
         self.save_running(state);
         if let Err(error) = self.store.remove(&record.id) {
             crate::log_warn!("control: delete {}: saved output: {error}", record.id);
@@ -1273,6 +1297,10 @@ impl Inner {
             agent,
             resume,
         } = report;
+        if let Some(context) = &working_directory {
+            let place = self.resolve_places(vec![context.path.clone()]);
+            self.note_places(state, &record.id, place);
+        }
         if let (Some(context), Some(live)) = (working_directory, state.live.get_mut(&record.id)) {
             live.working_directory_pid = self
                 .host
@@ -1843,10 +1871,12 @@ impl Inner {
             } => {
                 // Read the git files before taking the lock.
                 let git = git::detect(&path);
+                let place = self.resolve_places(vec![path.clone()]);
                 let mut state = self.lock();
                 if !state.is_current(&session_id, id) {
                     return;
                 }
+                self.note_places(&mut state, &session_id, place);
                 if let Err(error) = registry(&state.registry)
                     .and_then(|r| r.set_cwd(&session_id, &path).map_err(ApiError::from))
                 {
@@ -1908,10 +1938,26 @@ impl Inner {
             .filter(|(_, live)| live.reply_due.is_some())
             .map(|(id, live)| (id.clone(), live.terminal))
             .collect();
+        // Long conversations are read on while their agent is quiet.
+        let behind: Vec<(SessionId, TerminalId)> = state
+            .live
+            .iter()
+            .filter(|(_, live)| {
+                live.places_scan
+                    .as_ref()
+                    .is_some_and(crate::agent_output::places::PlaceScan::behind)
+                    && now.saturating_sub(live.places_checked_ms) >= PLACES_CHECK_MS
+            })
+            .map(|(id, live)| (id.clone(), live.terminal))
+            .collect();
         // The files are read without the lock.
         drop(state);
         if let Some(targets) = due {
             self.poll_git(targets);
+        }
+        for (id, terminal) in behind {
+            self.scan_places(terminal, &id, now);
+            self.refresh(&mut self.lock(), &id);
         }
         // A finished turn's reply may reach its log after the screen settles.
         for (id, terminal) in replies {
@@ -1938,6 +1984,7 @@ impl Inner {
         let now = now_ms();
         let plan = self.resume_plan(terminal, session_id, now);
         self.follow_output(terminal, session_id, process.as_ref(), now);
+        self.scan_places(terminal, session_id, now);
         let mut state = self.lock();
         if let Some(plan) = plan {
             self.record_resume(&mut state, session_id, terminal, plan, now);
@@ -2044,6 +2091,81 @@ impl Inner {
             live.output = follower;
         }
         self.capture_reply(&mut state, session_id, now);
+    }
+
+    /// Read on in the running agent's conversation for where it works (a
+    /// long one from its start, [`PLACES_BUDGET`] at a time), at most every
+    /// [`PLACES_CHECK_MS`]: from its start again when the agent shows
+    /// another conversation. Reads files of other programs, so it runs
+    /// without the state lock; a change is published by the caller's
+    /// `refresh`.
+    fn scan_places(&self, terminal: TerminalId, session_id: &SessionId, now: i64) {
+        let (scan, source, pid) = {
+            let mut state = self.lock();
+            let Some(live) = state
+                .live
+                .get_mut(session_id)
+                .filter(|live| live.terminal == terminal)
+            else {
+                return;
+            };
+            if now.saturating_sub(live.places_checked_ms) < PLACES_CHECK_MS {
+                return;
+            }
+            let follower = live.output.as_ref();
+            let Some(source) = follower.and_then(|follower| follower.transcript_source()) else {
+                live.places_scan = None;
+                return;
+            };
+            live.places_checked_ms = now;
+            let pid = follower.map(|follower| follower.pid());
+            (live.places_scan.take(), source, pid)
+        };
+        let mut scan = match scan {
+            Some(scan) if *scan.source() == source => scan,
+            _ => crate::agent_output::places::PlaceScan::new(
+                source,
+                pid.and_then(crate::procinfo::cwd_of),
+            ),
+        };
+        let touches = scan.read(PLACES_BUDGET);
+        let worked = places::resolve(touches, &self.places_excluded, now);
+        let mut state = self.lock();
+        let Some(live) = state
+            .live
+            .get_mut(session_id)
+            .filter(|live| live.terminal == terminal)
+        else {
+            return;
+        };
+        live.places_scan = Some(scan);
+        self.note_places(&mut state, session_id, worked);
+    }
+
+    /// The places of directories worked in now. Reads files.
+    fn resolve_places(&self, dirs: Vec<PathBuf>) -> Vec<places::Resolved> {
+        let touches = dirs
+            .into_iter()
+            .map(|dir| crate::agent_output::places::Touch {
+                dir,
+                edited: false,
+                at: None,
+            })
+            .collect();
+        places::resolve(touches, &self.places_excluded, now_ms())
+    }
+
+    /// Record that `id` worked in `worked`, saving its list when it
+    /// changed (the caller refreshes the view).
+    fn note_places(&self, state: &mut State, id: &SessionId, worked: Vec<places::Resolved>) {
+        let Some(list) = state.places.apply(id, worked) else {
+            return;
+        };
+        let saved = registry(&state.registry)
+            .and_then(|registry| registry.set_places(id, list).map_err(ApiError::from));
+        if let Err(error) = saved {
+            crate::log_warn!("control: places of {id}: {error}");
+        }
     }
 
     /// What to record as `session_id`'s resume command (`resume::plan`),
@@ -2348,6 +2470,9 @@ impl Inner {
                     record.id.clone(),
                     LiveSession::new(info.id, record.scope.clone()),
                 );
+                // Callers publish the session afterwards.
+                let started = self.resolve_places(vec![record.cwd.clone()]);
+                self.note_places(state, &record.id, started);
                 state.spawn_env.insert(record.id.clone(), child_env);
                 self.save_running(state);
                 Ok(())
@@ -2522,6 +2647,7 @@ impl Inner {
                 .flatten(),
             pinned: record.pinned,
             git,
+            places: state.places.get(&record.id).to_vec(),
             id: record.id.clone(),
             name: record.name.clone(),
             scope: record.scope.clone(),

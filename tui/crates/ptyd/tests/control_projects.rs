@@ -1016,3 +1016,123 @@ fn agent_working_directory_survives_handoff_and_rejects_invalid_paths() {
     assert_eq!(restored.cwd, repo);
     assert_eq!(restored.scope, h.scope);
 }
+
+#[test]
+fn places_follow_where_a_session_works_and_outlive_its_terminal() {
+    use ptyd::host::ProcessInfo;
+    use session_core::api::{AgentWorkingDirectory, Report};
+    let mut h = Harness::new();
+    let root = h.scope.path().to_path_buf();
+    git_repo(&root, "main");
+    let other = h.root().join("other");
+    git_repo(&other, "fix");
+    std::fs::create_dir_all(other.join("src")).unwrap();
+    let checkout = h.root().join("checkout");
+    let admin = root.join(".git/worktrees/review");
+    std::fs::create_dir_all(&admin).unwrap();
+    set_head(&admin, "review-branch");
+    std::fs::write(admin.join("commondir"), "../..\n").unwrap();
+    std::fs::create_dir_all(&checkout).unwrap();
+    std::fs::write(
+        checkout.join(".git"),
+        format!("gitdir: {}\n", admin.display()),
+    )
+    .unwrap();
+    let places = |view: &SessionView| {
+        let mut places: Vec<(PathBuf, Option<String>, Option<String>)> = view
+            .places
+            .iter()
+            .map(|place| {
+                let git = place.git.as_ref();
+                (
+                    place.path.clone(),
+                    git.and_then(|git| git.branch.clone()),
+                    git.and_then(|git| git.worktree.clone()),
+                )
+            })
+            .collect();
+        places.sort();
+        places
+    };
+
+    // Started in its folder.
+    let s = h.create(Some("agent"));
+    assert_eq!(places(&s), [(root.clone(), Some("main".into()), None)]);
+
+    // The terminal goes into another repository: its working tree, published.
+    let watch = h
+        .control
+        .subscribe(
+            &h.user,
+            &SubscribeRequest {
+                scope: Some(h.scope.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    h.host.emit(HostEvent::Cwd {
+        id: h.host.terminal_of(&s.id),
+        session_id: s.id.clone(),
+        path: other.join("src"),
+    });
+    let view = eventually("an update with the other repository", || {
+        updated(&drain(&watch), &s.id).filter(|view| view.places.len() == 2)
+    });
+    assert_eq!(
+        places(&view),
+        [
+            (other.clone(), Some("fix".into()), None),
+            (root.clone(), Some("main".into()), None)
+        ]
+    );
+
+    // The agent reports a linked worktree it works in.
+    h.host.set_foreground(
+        &s.id,
+        ProcessInfo {
+            pid: 4242,
+            name: "claude".into(),
+            cmdline: vec!["claude".into()],
+        },
+    );
+    let caller = h.session_caller(&s.id);
+    assert_eq!(
+        h.handle(
+            &caller,
+            Request::SessionReport(Report {
+                working_directory: Some(AgentWorkingDirectory {
+                    agent: "claude".into(),
+                    conversation_id: Some("conversation".into()),
+                    path: checkout.clone(),
+                }),
+                ..Report::default()
+            })
+        ),
+        Response::Ok
+    );
+    let expected = [
+        (
+            checkout.clone(),
+            Some("review-branch".into()),
+            Some("review".into()),
+        ),
+        (other.clone(), Some("fix".into()), None),
+        (root.clone(), Some("main".into()), None),
+    ];
+    assert_eq!(places(&h.get(&s.id)), expected);
+
+    // A dead session keeps them; deleting it removes them.
+    h.restart();
+    let dead = h.get(&s.id);
+    assert_eq!(dead.status, SessionStatus::Dead);
+    assert_eq!(places(&dead), expected);
+    assert_eq!(
+        h.handle(&h.user, Request::SessionDelete { id: s.id.clone() }),
+        Response::Ok
+    );
+    let left: i64 = h
+        .db()
+        .query_row("SELECT COUNT(*) FROM session_places", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(left, 0);
+}

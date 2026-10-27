@@ -230,6 +230,36 @@ pub struct SessionView {
     /// files; no git commands). `None` outside a repository.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<GitInfo>,
+    /// Where the session has worked, most recent first (capability
+    /// `session.places`): the working trees (and directories outside any
+    /// repository) its agent worked in, read files from or changed, as its
+    /// conversation shows them, and its terminal's directories. Read by the
+    /// daemon on this machine; at most [`MAX_PLACES`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub places: Vec<SessionPlace>,
+}
+
+/// The most places a session keeps: the most recently worked in.
+pub const MAX_PLACES: usize = 32;
+
+/// A place a session worked in: a git working tree (a repository's main
+/// worktree or a linked one), or a directory outside any repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionPlace {
+    /// The working tree's top (`GitInfo::repo_root`), or the directory
+    /// itself outside a repository. Canonical.
+    pub path: PathBuf,
+    /// Its git context when the session last worked there: the branch, and
+    /// the linked worktree. `None` outside a repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<GitInfo>,
+    /// Unix seconds: when the session last worked there, by the agent's own
+    /// clock for what its conversation shows.
+    pub last_at: i64,
+    /// Files there were changed (written or edited), not only read,
+    /// searched or worked beside.
+    #[serde(default)]
+    pub edited: bool,
 }
 
 /// Where a directory sits in git: its branch, and the linked worktree when
@@ -332,10 +362,12 @@ mod tests {
             agent_output: None,
             user_prompt: None,
             agent_turn: None,
+            places: vec![],
         };
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("exit_code"));
         assert!(!json.contains("activity"));
+        assert!(!json.contains("places"));
         assert!(json.contains(r#""created_by":{"kind":"user"}"#));
         let back: SessionView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, view);

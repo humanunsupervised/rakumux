@@ -2988,7 +2988,8 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
                 "your last message in each session",
                 "AI summaries of each agent's turn",
                 "the agent feed",
-                "whole chats in the agent feed"
+                "whole chats in the agent feed",
+                "where each session has worked"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -3508,7 +3509,8 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "your last message in each session",
                 "AI summaries of each agent's turn",
                 "the agent feed",
-                "whole chats in the agent feed"
+                "whole chats in the agent feed",
+                "where each session has worked"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -5154,4 +5156,255 @@ async fn turning_ai_summaries_off_clears_the_descriptions_and_the_refresh() {
         h.app.status(),
         Some("Sign in and turn on AI summaries: Settings → Available on sign-in.")
     );
+}
+
+/// Where a session has worked opens under its row: `w` for the selected
+/// one, `W` for all of them, a click on its place line; a session that has
+/// worked nowhere else says so.
+#[tokio::test]
+async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use session_core::model::{GitInfo, SessionPlace};
+    let now = crate::components::format::now_secs();
+    let place = |path: &str, branch: &str, ago: i64, edited: bool| SessionPlace {
+        path: path.into(),
+        git: Some(GitInfo {
+            repo_root: path.into(),
+            branch: Some(branch.into()),
+            ..GitInfo::default()
+        }),
+        last_at: now - ago,
+        edited,
+    };
+    let mut agent = view("A", "agent", 20);
+    agent.git = on_branch("main");
+    agent.places = vec![
+        place("/repo/worktrees/fix", "fix", 30, true),
+        place("/repo", "main", 600, false),
+    ];
+    let mut h = harness(vec![agent, view("B", "plain", 10)]).on_folders_tab();
+    let a = SessionId::from_string("A");
+    h.app.list.select(Selection::Session(a.clone()));
+    let screen = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(screen.contains("▸ repo  ⎇ main  +1"), "{screen}");
+    assert!(!screen.contains("worktrees/fix"), "closed: {screen}");
+
+    h.press(KeyCode::Char('w')).await;
+    let screen = screen_rows(&mut h, 160, 48);
+    let text = screen.join("\n");
+    assert!(text.contains("▾ repo  +1"), "{text}");
+    let fix = screen
+        .iter()
+        .find(|line| line.contains("worktrees/fix ⎇ fix ✎"))
+        .unwrap_or_else(|| panic!("the worktree: {text}"));
+    let in_list = |line: &str| {
+        line.split('│')
+            .next()
+            .unwrap_or_default()
+            .trim_end()
+            .to_string()
+    };
+    assert!(in_list(fix).ends_with("30s"), "{fix:?}");
+    let repo = screen
+        .iter()
+        .find(|line| line.contains("repo ⎇ main") && !line.contains('▾'))
+        .unwrap_or_else(|| panic!("the folder: {text}"));
+    assert!(in_list(repo).ends_with("10m"), "{repo:?}");
+    h.press(KeyCode::Char('w')).await;
+    assert!(!h.app.places_open(&a));
+
+    // B has worked nowhere else.
+    let b = SessionId::from_string("B");
+    h.app.list.select(Selection::Session(b.clone()));
+    h.press(KeyCode::Char('w')).await;
+    assert!(!h.app.places_open(&b));
+    assert_eq!(
+        h.app.status(),
+        Some("plain hasn't worked anywhere else yet.")
+    );
+
+    // W opens every session's that has somewhere else, then closes them.
+    h.press(KeyCode::Char('W')).await;
+    assert!(h.app.places_open(&a) && !h.app.places_open(&b));
+    h.press(KeyCode::Char('W')).await;
+    assert!(!h.app.places_open(&a));
+
+    // A click on A's place line opens its places, and B stays selected.
+    screen_rows(&mut h, 160, 48);
+    let row = h
+        .app
+        .list
+        .rows()
+        .iter()
+        .position(|row| matches!(row, ListRow::Session(s) if s.id == a))
+        .unwrap();
+    let (area, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::PlacesToggle(row))
+        .expect("A's place line");
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        h.app.handle_mouse(MouseEvent {
+            kind,
+            column: area.x + 4,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    assert!(h.app.places_open(&a));
+    assert_eq!(h.app.list.selection(), &Selection::Session(b));
+}
+
+/// What a test copied to the clipboard (OSC 52).
+fn copied(h: &mut Harness) -> String {
+    use base64::Engine;
+    let out = String::from_utf8(h.app.take_terminal_output()).unwrap();
+    let data = out
+        .strip_prefix("\x1b]52;c;")
+        .and_then(|rest| rest.strip_suffix('\x07'))
+        .unwrap_or_else(|| panic!("not a copy: {out:?}"));
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .unwrap();
+    String::from_utf8(bytes).unwrap()
+}
+
+/// A session with `places`, each worked in a minute ago, working in
+/// `/repo` on `main`.
+fn worked_in(id: &str, name: &str, places: &[&str]) -> session_core::model::SessionView {
+    let now = crate::components::format::now_secs();
+    let mut session = view(id, name, 20);
+    session.git = on_branch("main");
+    session.places = places
+        .iter()
+        .map(|path| session_core::model::SessionPlace {
+            path: path.into(),
+            git: None,
+            last_at: now - 60,
+            edited: false,
+        })
+        .collect();
+    session
+}
+
+/// The list keys step through a session's open places as rows under it,
+/// and `y` copies the path of the one they're on, else of where the session
+/// works now. Under the pointer a place shows ⧉, and a click copies it,
+/// leaving the selection.
+#[tokio::test]
+async fn an_open_places_path_copies_with_y_or_a_click() {
+    let agent = worked_in("A", "agent", &["/repo/worktrees/fix", "/srv/other"]);
+    let mut h = harness(vec![agent, view("B", "plain", 10)]).on_folders_tab();
+    let a = SessionId::from_string("A");
+    h.app.list.select(Selection::Session(a.clone()));
+    screen_rows(&mut h, 160, 48);
+    let place = |h: &Harness| h.app.list.selected_place().map(|p| p.display().to_string());
+
+    // Closed, `↓` moves on, and `y` copies where A works now.
+    h.press(KeyCode::Char('y')).await;
+    assert_eq!(copied(&mut h), "/repo");
+    assert_eq!(h.app.status(), Some("Copied /repo"));
+
+    h.press(KeyCode::Char('w')).await;
+    h.press(KeyCode::Char('j')).await;
+    assert_eq!(h.app.list.selected_id(), Some(&a));
+    assert_eq!(place(&h).as_deref(), Some("/repo/worktrees/fix"));
+    let screen = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(screen.contains("⧉ worktrees/fix"), "{screen}");
+    assert!(!screen.contains("⧉ /srv/other"), "{screen}");
+    h.press(KeyCode::Char('y')).await;
+    assert_eq!(copied(&mut h), "/repo/worktrees/fix");
+
+    // Past the last place, on to the next row; back up, onto it again.
+    h.press(KeyCode::Down).await;
+    assert_eq!(place(&h).as_deref(), Some("/srv/other"));
+    h.press(KeyCode::Down).await;
+    assert_ne!(h.app.list.selected_id(), Some(&a));
+    assert_eq!(place(&h), None);
+    h.press(KeyCode::Up).await;
+    assert_eq!(h.app.list.selected_id(), Some(&a));
+    assert_eq!(place(&h).as_deref(), Some("/srv/other"));
+    h.press(KeyCode::Char('k')).await;
+    h.press(KeyCode::Char('k')).await;
+    assert_eq!((h.app.list.selected_id(), place(&h)), (Some(&a), None));
+    // Another selection forgets the place.
+    h.press(KeyCode::Char('j')).await;
+    let b = SessionId::from_string("B");
+    h.app.list.select(Selection::Session(b.clone()));
+    h.app.list.select(Selection::Session(a.clone()));
+    assert_eq!(place(&h), None);
+
+    // With B selected, the pointer over A's second place shows ⧉ there,
+    // and a click copies it.
+    h.app.list.select(Selection::Session(b.clone()));
+    screen_rows(&mut h, 160, 48);
+    let row = h
+        .app
+        .list
+        .rows()
+        .iter()
+        .position(|row| matches!(row, ListRow::Session(s) if s.id == a))
+        .unwrap();
+    let (area, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::Place(row, 1))
+        .expect("A's second place");
+    let mouse = |kind| MouseEvent {
+        kind,
+        column: area.x + 6,
+        row: area.y,
+        modifiers: KeyModifiers::NONE,
+    };
+    h.app.handle_mouse(mouse(MouseEventKind::Moved));
+    assert_eq!(h.app.hovered_place, Some((row, 1)));
+    let screen = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(screen.contains("⧉ /srv/other"), "{screen}");
+    assert!(!screen.contains("⧉ worktrees/fix"), "{screen}");
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left)));
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left)));
+    assert_eq!(copied(&mut h), "/srv/other");
+    assert_eq!(h.app.list.selection(), &Selection::Session(b));
+    assert!(h.app.places_open(&a));
+}
+
+/// A session whose open places make it taller than the list still shows,
+/// scrolled to the place the list keys are on.
+#[tokio::test]
+async fn a_session_taller_than_the_list_scrolls_to_its_place() {
+    let paths: Vec<String> = (1..=12).map(|n| format!("/srv/place{n:02}")).collect();
+    let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
+    let mut h = harness(vec![worked_in("A", "agent", &paths)]).on_folders_tab();
+    let a = SessionId::from_string("A");
+    h.app.list.select(Selection::Session(a.clone()));
+    h.app.places_open.insert(a);
+    // Above the footer, which names the selected session too.
+    let list = |h: &mut Harness| screen_rows(h, 160, 16)[..15].join("\n");
+    let screen = list(&mut h);
+    assert!(screen.contains("agent"), "{screen}");
+    assert!(screen.contains("place01"), "{screen}");
+    assert!(!screen.contains("place12"), "{screen}");
+    for _ in 0..12 {
+        h.press(KeyCode::Char('j')).await;
+    }
+    let screen = list(&mut h);
+    assert!(screen.contains("⧉ /srv/place12"), "{screen}");
+    assert!(!screen.contains("place01"), "{screen}");
+    // The hit targets are where the places are drawn.
+    let row = h.app.list.selected_row();
+    let (area, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::Place(row, 11))
+        .expect("the last place");
+    let line = &screen_rows(&mut h, 160, 16)[usize::from(area.y)];
+    assert!(line.contains("/srv/place12"), "{line}");
 }

@@ -306,22 +306,37 @@ pub(crate) fn sessions_upload(
 }
 
 #[derive(Deserialize)]
-struct SessionsStored {
+struct SessionsStoredWire {
     version: u8,
     stored: u32,
+    #[serde(default)]
+    accepts: Vec<String>,
 }
 
-/// How many sessions rakumux.com holds for this machine now.
-pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<u32, FeedFailure> {
+/// What rakumux.com holds for this machine now, and what more it takes in
+/// a session list (`sessions-stored`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SessionsStored {
+    pub stored: u32,
+    /// It takes each session's places (`accepts` has `places`).
+    pub places: bool,
+}
+
+/// How many sessions rakumux.com holds for this machine now, and whether it
+/// takes their places.
+pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<SessionsStored, FeedFailure> {
     if reply.status != 200 {
         return Err(failure(reply));
     }
-    let stored: SessionsStored =
+    let stored: SessionsStoredWire =
         serde_json::from_slice(&reply.body).map_err(|_| FeedFailure::Invalid)?;
     if stored.version != 1 || stored.stored > 200 {
         return Err(FeedFailure::Invalid);
     }
-    Ok(stored.stored)
+    Ok(SessionsStored {
+        stored: stored.stored,
+        places: stored.accepts.iter().any(|name| name == "places"),
+    })
 }
 
 #[derive(Deserialize)]

@@ -36,8 +36,9 @@ pub(crate) enum FeedResult {
     Message(wire::SessionMessage),
     /// The account's changed replies.
     Replies(RepliesRead),
-    /// This machine's session list was stored: how many sessions it holds.
-    SessionsStored(u32),
+    /// This machine's session list was stored: how many sessions it holds,
+    /// and what more the cloud takes.
+    SessionsStored(wire::SessionsStored),
     /// A file attached to a reply, or that it's gone.
     Download(Download),
 }

@@ -47,8 +47,8 @@ pub(crate) use claude::claude_config_dir;
 #[cfg(test)]
 use claude::claude_flags;
 use claude::claude_resume;
-pub(crate) use codex::codex_open_rollout;
 use codex::codex_resume;
+pub(crate) use codex::{codex_home, codex_open_rollout};
 use opencode::opencode_resume;
 pub(crate) use opencode::{opencode_database, opencode_recent_session};
 

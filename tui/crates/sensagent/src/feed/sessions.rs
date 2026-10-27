@@ -4,8 +4,10 @@
 //! session it follows (never a private one, and the daemon's list leaves out
 //! dead ones) and uploads the whole list whenever it changes, at most every
 //! [`SETTLE`], and every [`HEARTBEAT`] meanwhile, so the website can tell a
-//! machine that's away from one with nothing running. Driven by the owner
-//! thread with its own clock.
+//! machine that's away from one with nothing running. Each session's places
+//! (where it has worked, as names: [`PlaceState`]) go only to a cloud whose
+//! answer said it takes them (`accepts`). Driven by the owner thread with
+//! its own clock.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -13,7 +15,7 @@ use std::time::Duration;
 use serde::Serialize;
 use session_core::activity::ActivityPhase;
 use session_core::ids::SessionId;
-use session_core::model::{Lifecycle, SessionStatus, SessionView};
+use session_core::model::{Lifecycle, ScopeRoot, SessionPlace, SessionStatus, SessionView};
 
 use super::wire::{self, FeedFailure, FeedRequest};
 
@@ -26,6 +28,11 @@ const RETRY_MIN: Duration = Duration::from_secs(5);
 const RETRY_MAX: Duration = Duration::from_secs(300);
 /// The most sessions one machine lists (the contract's bound).
 const MAX_SESSIONS: usize = 200;
+/// The most places a session lists: its most recent (the contract's bound).
+const MAX_PLACES: usize = 8;
+/// The largest upload the contract takes (`x-maxBodyBytes`): a list that
+/// would be larger goes without its places.
+const MAX_BODY_BYTES: usize = 262_144;
 
 /// One session as the website lists it (`contracts/feed/` `sessionState`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -49,6 +56,55 @@ pub(crate) struct SessionState {
     conversation_id: Option<String>,
     pinned: bool,
     last_active_at: i64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    places: Vec<PlaceState>,
+}
+
+/// A place a session worked in, as the website lists it (`contracts/feed/`
+/// `sessionPlace`): its path in the session's folder (`.` for the folder
+/// itself), else its folder's name; never a path outside the session's
+/// folder.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct PlaceState {
+    name: String,
+    inside: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worktree: Option<String>,
+    edited: bool,
+    last_at: i64,
+}
+
+impl PlaceState {
+    /// `place` of a session in `folder`, or `None` when it can't be named
+    /// within the contract.
+    fn of(folder: &ScopeRoot, place: &SessionPlace) -> Option<Self> {
+        let (name, inside) = match place.path.strip_prefix(folder.path()) {
+            Ok(rest) if rest.as_os_str().is_empty() => (".".to_owned(), true),
+            Ok(rest) => (rest.to_str()?.to_owned(), true),
+            Err(_) => (place.path.file_name()?.to_str()?.to_owned(), false),
+        };
+        let name = wire::label(&name, 256)?;
+        if name.starts_with(['/', '~']) || name.split('/').any(|part| part == "..") {
+            return None;
+        }
+        let git = place.git.as_ref();
+        Some(Self {
+            name,
+            inside,
+            branch: git
+                .and_then(|git| git.branch.as_deref())
+                .and_then(|branch| wire::label(branch, 128)),
+            worktree: git
+                .and_then(|git| git.worktree.as_deref())
+                .filter(|worktree| !worktree.contains('/'))
+                .and_then(|worktree| wire::label(worktree, 128)),
+            edited: place.edited,
+            // Unix seconds on the daemon's side; never before 2020 on the wire.
+            last_at: place.last_at.saturating_mul(1000).max(1_577_836_800_000),
+        })
+    }
 }
 
 impl SessionState {
@@ -128,6 +184,12 @@ impl SessionState {
                 .last_active_at
                 .saturating_mul(1000)
                 .max(1_577_836_800_000),
+            places: view
+                .places
+                .iter()
+                .filter_map(|place| PlaceState::of(&view.scope, place))
+                .take(MAX_PLACES)
+                .collect(),
         })
     }
 }
@@ -176,6 +238,8 @@ pub(crate) struct SessionSync {
     /// What else this machine handles, said with every upload.
     capabilities: Vec<&'static str>,
     enabled: bool,
+    /// The cloud's last answer said it takes places.
+    places: bool,
     sessions: BTreeMap<SessionId, SessionState>,
     /// What rakumux.com was last sent; `None` until it was, since the switch
     /// was turned on.
@@ -201,6 +265,7 @@ impl SessionSync {
             machine,
             capabilities,
             enabled: false,
+            places: false,
             sessions: BTreeMap::new(),
             sent: None,
             sending: None,
@@ -218,6 +283,7 @@ impl SessionSync {
             return;
         }
         self.enabled = enabled;
+        self.places = false;
         self.sent = None;
         self.retry = RETRY_MIN;
         self.retry_at = now;
@@ -248,11 +314,14 @@ impl SessionSync {
     }
 
     /// The list as it stands, the most recently used first, within the
-    /// contract's bound.
+    /// contract's bound; with places when the cloud takes them.
     fn list(&self) -> Vec<SessionState> {
         let mut list: Vec<SessionState> = self.sessions.values().cloned().collect();
         list.sort_by(|a, b| (b.last_active_at, &a.id).cmp(&(a.last_active_at, &b.id)));
         list.truncate(MAX_SESSIONS);
+        if !self.places {
+            without_places(&mut list);
+        }
         list
     }
 
@@ -268,20 +337,35 @@ impl SessionSync {
         if !due {
             return None;
         }
-        let request = wire::sessions_upload(&self.machine, &list, wall_ms, &self.capabilities)?;
+        let capabilities = &self.capabilities;
+        let mut request = wire::sessions_upload(&self.machine, &list, wall_ms, capabilities)?;
+        if matches!(&request, FeedRequest::Sessions { body } if body.len() > MAX_BODY_BYTES) {
+            // Too large with them: the same list without places (and it
+            // counts as sent, so it isn't sent again until it changes).
+            let mut smaller = list.clone();
+            without_places(&mut smaller);
+            request = wire::sessions_upload(&self.machine, &smaller, wall_ms, capabilities)?;
+        }
         self.sending = Some(list);
         Some(request)
     }
 
     /// An upload finished; `current` says whether it was made for the
-    /// account still signed in.
-    pub fn done(&mut self, current: bool, outcome: Result<u32, FeedFailure>, now: Duration) {
+    /// account still signed in. The answer says whether the cloud takes
+    /// places, for the uploads that follow.
+    pub fn done(
+        &mut self,
+        current: bool,
+        outcome: Result<wire::SessionsStored, FeedFailure>,
+        now: Duration,
+    ) {
         let sent = self.sending.take();
         if !current || !self.enabled {
             return;
         }
         match outcome {
-            Ok(_) => {
+            Ok(stored) => {
+                self.places = stored.places;
                 self.sent = sent;
                 self.retry = RETRY_MIN;
                 self.next_send = now + SETTLE;
@@ -297,6 +381,13 @@ impl SessionSync {
                 self.retry_at = now + wait.min(Duration::from_secs(86_400));
             }
         }
+    }
+}
+
+/// `list` without its sessions' places.
+fn without_places(list: &mut [SessionState]) {
+    for session in list {
+        session.places.clear();
     }
 }
 
