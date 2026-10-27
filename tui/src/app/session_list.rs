@@ -173,8 +173,8 @@ pub struct SessionList {
     /// The folder filter left nothing to select: the next snapshot selects
     /// the most recent session, like the first one.
     reselect: bool,
-    /// The wall clock (seconds) ready's sub-sections are measured from
-    /// ([`Self::set_clock`]).
+    /// The wall clock (seconds) the list is drawn at: its ages and ready's
+    /// sub-sections ([`Self::set_clock`]).
     now: i64,
 }
 
@@ -206,9 +206,9 @@ impl SessionList {
         }
     }
 
-    /// Set the wall clock (seconds) ready's sub-sections are measured from.
-    /// Returns whether a session went into another one, so the rows
-    /// changed.
+    /// Set the wall clock (seconds) the list is drawn at: its ages and
+    /// ready's sub-sections. Returns whether a session went into another
+    /// sub-section, so the rows changed.
     pub fn set_clock(&mut self, now: i64) -> bool {
         let before = std::mem::replace(&mut self.now, now);
         let moved = self.grouping == Grouping::Status
@@ -220,6 +220,11 @@ impl SessionList {
             self.ensure_selection_visible();
         }
         moved
+    }
+
+    /// The wall clock (seconds) the list is drawn at ([`Self::set_clock`]).
+    pub fn now(&self) -> i64 {
+        self.now
     }
 
     /// The ready sub-section `session` is listed under: under Status, when

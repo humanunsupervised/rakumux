@@ -5169,7 +5169,7 @@ async fn turning_ai_summaries_off_clears_the_descriptions_and_the_refresh() {
 async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     use session_core::model::{GitInfo, SessionPlace};
-    let now = crate::components::format::now_secs();
+    let now = 1_000_000;
     let place = |path: &str, branch: &str, ago: i64, edited: bool| SessionPlace {
         path: path.into(),
         git: Some(GitInfo {
@@ -5187,6 +5187,9 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         place("/repo", "main", 600, false),
     ];
     let mut h = harness(vec![agent, view("B", "plain", 10)]).on_folders_tab();
+    // The list draws its ages from its clock: fixed, so a second passing
+    // can't change them.
+    h.app.list.set_clock(now);
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
     // The list's part of a screen row: up to the divider beside it.
@@ -5524,7 +5527,7 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
 #[tokio::test]
 async fn open_places_read_as_pairs_on_a_phone() {
     use session_core::model::{GitInfo, SessionPlace};
-    let now = crate::components::format::now_secs();
+    let now = 1_000_000_000;
     let place = |path: &str, branch: &str, days: i64| SessionPlace {
         path: path.into(),
         git: Some(GitInfo {
@@ -5563,6 +5566,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
         place("/work/focal-md-citations", "fix/citation-format", 11),
     ];
     let mut h = harness(vec![agent]);
+    h.app.list.set_clock(now);
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
     let places = |h: &mut Harness, width: u16| {

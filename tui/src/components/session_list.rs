@@ -27,8 +27,8 @@ use session_core::model::{ScopeRoot, SessionView};
 
 use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
 use super::format::{
-    activity_badge_at, branch_label, facts_line, now_secs, place_label, read_period_style,
-    relative_time, status_glyph, status_group_glyph, truncate, truncate_start, PIN_MARK,
+    activity_badge_at, branch_label, facts_line, place_label, read_period_style, relative_time,
+    status_glyph, status_group_glyph, truncate, truncate_start, PIN_MARK,
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
@@ -1066,7 +1066,9 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
 
     // Content width: everything right of the indent, less a right margin.
     let width = (inner.width as usize).saturating_sub(INDENT + 1);
-    let now = now_secs();
+    // The list's clock (set every tick), which ready's sub-sections are
+    // measured from too.
+    let now = app.list.now();
     let heights: Vec<u16> = rows
         .iter()
         .map(|row| row_height_in(app, row, width, now))
