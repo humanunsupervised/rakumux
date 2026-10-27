@@ -189,6 +189,7 @@ pub fn serve(
     let mut refresher = StatusRefresher::new(service)
         .following_account_switch()
         .with_chat_cursors(layout.status_dir().join("chats.json"))
+        .with_titles(layout.status_dir().join("titles.json"))
         .with_uploads(uploads);
     if let Some(TurnSettingsSource(read)) = config.turn_settings {
         refresher = refresher.with_turn_settings(move || read());

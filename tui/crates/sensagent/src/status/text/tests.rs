@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-use super::{StatusStoreError, StatusText};
+use super::{SessionTitle, StatusStoreError, StatusText};
 
 const SUCCESSES: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -22,7 +22,17 @@ struct SuccessFixture {
 #[derive(Deserialize)]
 struct StatusValue {
     // Preserve invalid surrogate escapes until StatusText's own decoder sees them.
-    status_text: Box<RawValue>,
+    #[serde(default, deserialize_with = "raw")]
+    status_text: Option<Box<RawValue>>,
+    // Likewise for SessionTitle's, keeping an explicit `null`.
+    #[serde(default, deserialize_with = "raw")]
+    title: Option<Box<RawValue>>,
+}
+
+fn raw<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Box<RawValue>>, D::Error> {
+    Box::<RawValue>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Deserialize)]
@@ -67,14 +77,18 @@ fn unicode_validation_profile_compiles() {
 #[test]
 fn canonical_success_fixtures_validate_text_independently_of_envelope() {
     let fixtures: Vec<SuccessFixture> = serde_json::from_str(SUCCESSES).unwrap();
-    assert_eq!(fixtures.len(), 26);
+    assert_eq!(fixtures.len(), 48);
     for fixture in fixtures {
         // These envelopes fail only their other fields, not their status text.
         let text_valid = match fixture.name.as_str() {
             "tool_proposal" | "missing_request_id" | "wrong_version" => true,
+            _ if fixture.value.title.is_some() => true,
             _ => fixture.valid,
         };
-        let json = fixture.value.status_text.get();
+        let Some(json) = fixture.value.status_text.as_ref().map(|raw| raw.get()) else {
+            assert_eq!(fixture.name, "title_without_status");
+            continue;
+        };
         let decoded = serde_json::from_str::<StatusText>(json);
         assert_eq!(decoded.is_ok(), text_valid, "{}", fixture.name);
         if !text_valid {
@@ -125,6 +139,88 @@ fn canonical_status_boundaries_count_codepoints_not_bytes_units_or_graphemes() {
         checked += 1;
     }
     assert_eq!(checked, 6);
+}
+
+#[test]
+fn canonical_title_fixtures_validate_the_title_independently_of_envelope() {
+    let fixtures: Vec<SuccessFixture> = serde_json::from_str(SUCCESSES).unwrap();
+    let mut checked = 0;
+    for fixture in fixtures {
+        let Some(json) = fixture.value.title.as_ref().map(|raw| raw.get()) else {
+            continue;
+        };
+        // That envelope fails only its missing status text.
+        let valid = fixture.valid || fixture.name == "title_without_status";
+        assert_eq!(
+            serde_json::from_str::<SessionTitle>(json).is_ok(),
+            valid,
+            "{}",
+            fixture.name
+        );
+        match serde_json::from_str::<String>(json) {
+            Ok(text) => assert_eq!(
+                SessionTitle::try_from(text).is_ok(),
+                valid,
+                "{}",
+                fixture.name
+            ),
+            Err(_) => assert!(
+                matches!(
+                    fixture.name.as_str(),
+                    "title_lone_surrogate" | "structured_title" | "null_title"
+                ),
+                "unexpected non-string fixture: {}",
+                fixture.name
+            ),
+        }
+        checked += 1;
+    }
+    assert_eq!(checked, 22);
+}
+
+#[test]
+fn canonical_title_boundaries_count_codepoints_not_bytes_units_or_graphemes() {
+    let fixtures: Vec<BoundaryFixture> = serde_json::from_str(BOUNDARIES).unwrap();
+    let mut checked = 0;
+    for fixture in fixtures {
+        if fixture.schema != "success" || fixture.field != "title" {
+            continue;
+        }
+        let text = fixture.text.repeat(fixture.count) + &fixture.suffix;
+        assert_eq!(text.chars().count(), if fixture.valid { 60 } else { 61 });
+        assert_eq!(
+            SessionTitle::try_from(text).is_ok(),
+            fixture.valid,
+            "{}",
+            fixture.name
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 6);
+}
+
+#[test]
+fn titles_end_without_whitespace_or_a_period_and_keep_their_text() {
+    for value in [
+        "Fix tests.",
+        " Fix tests",
+        "Fix tests ",
+        "Fix tests\u{3000}",
+        "...",
+        "",
+    ] {
+        assert_eq!(
+            SessionTitle::try_from(value.to_owned()),
+            Err(StatusStoreError::InvalidData),
+            "{value:?}"
+        );
+    }
+    for value in ["Fix tests!", "v0.1.24", "Fix a.b", "Why?", "検証テスト"] {
+        let title = SessionTitle::try_from(value.to_owned()).unwrap();
+        assert_eq!(title.as_str(), value);
+        assert_eq!(String::from(title.clone()), value);
+        assert_eq!(format!("{title:?}"), "SessionTitle([REDACTED])");
+    }
 }
 
 #[test]

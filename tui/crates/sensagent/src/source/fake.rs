@@ -1,7 +1,7 @@
 //! In-memory SessionApi for AI-status source tests: scripted views and output, a
 //! listed session set, queued event streams and recorded calls. Every operation other
-//! than `get`, `read`, `turn` (once set), `list_all` and `subscribe` fails and is
-//! recorded.
+//! than `get`, `read`, `turn` (once set), `list`, `list_all`, `rename` (of listed
+//! sessions) and `subscribe` fails and is recorded.
 
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -159,8 +159,14 @@ impl SessionApi for FakeSessionApi {
         &self.caller
     }
 
-    fn list(&self, _scope: Option<&ScopeRoot>, _include_dead: bool) -> Result<Vec<SessionView>> {
-        self.refuse("list")
+    fn list(&self, scope: Option<&ScopeRoot>, _include_dead: bool) -> Result<Vec<SessionView>> {
+        self.calls.lock().unwrap().push("list".into());
+        let listed = self.listed.lock().unwrap();
+        Ok(listed
+            .iter()
+            .filter(|view| scope.is_none_or(|scope| &view.scope == scope))
+            .cloned()
+            .collect())
     }
 
     fn get(&self, id: &SessionId) -> Result<SessionView> {
@@ -194,8 +200,34 @@ impl SessionApi for FakeSessionApi {
         self.refuse("create")
     }
 
-    fn rename(&self, _id: &SessionId, _name: &str) -> Result<SessionView> {
-        self.refuse("rename")
+    /// Renames a listed session, as the daemon does: a name another session
+    /// of its folder has is refused, and a rename clears `auto_named`.
+    fn rename(&self, id: &SessionId, name: &str) -> Result<SessionView> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("rename {id} {name}"));
+        let mut listed = self.listed.lock().unwrap();
+        let Some(scope) = listed
+            .iter()
+            .find(|view| &view.id == id)
+            .map(|v| v.scope.clone())
+        else {
+            return Err(ApiError::new(ErrorCode::NotFound, "synthetic-missing"));
+        };
+        if listed
+            .iter()
+            .any(|view| &view.id != id && view.scope == scope && view.name == name)
+        {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "synthetic-name-taken",
+            ));
+        }
+        let view = listed.iter_mut().find(|view| &view.id == id).unwrap();
+        view.name = name.to_owned();
+        view.auto_named = false;
+        Ok(view.clone())
     }
 
     fn kill(&self, _id: &SessionId, _tree: bool) -> Result<Vec<SessionId>> {

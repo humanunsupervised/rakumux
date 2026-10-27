@@ -176,7 +176,7 @@ impl OwnerClient {
         }
     }
 
-    /// Make a new AI summary of `session` now.
+    /// Make a new AI title (and description) of `session` now.
     pub fn summarize(&self, session: &SessionId) -> Result<(), OwnerError> {
         match self.request(&OwnerRequest::Summarize {
             session: session.clone(),

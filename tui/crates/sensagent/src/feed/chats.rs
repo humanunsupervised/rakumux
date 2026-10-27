@@ -538,7 +538,7 @@ impl Cursors {
 }
 
 /// Replace `path` with `bytes`, readable by its owner only.
-fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let staged = path.with_extension("json.tmp");

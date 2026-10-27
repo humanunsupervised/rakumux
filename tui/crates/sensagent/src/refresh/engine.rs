@@ -9,6 +9,7 @@ use session_core::ids::SessionId;
 use session_core::model::{ScopeRoot, SessionView};
 
 use super::schedule::{conversation, Outcome, RefreshFailure, RefreshScheduler, MAX_RUNNING};
+use super::titles::{Retitle, RetitleOutcome, Retitled, Titles};
 use crate::auth::{
     AccountError, AccountService, AccountSession, ApplyResult, CredentialRevision, CredentialStore,
     SystemClock, WallClock,
@@ -40,7 +41,7 @@ pub struct AIStatus {
     pub view: StatusView,
     /// Why the last refresh produced no text, until one succeeds.
     pub failure: Option<RefreshFailure>,
-    /// A summary was asked for or is being made.
+    /// A new title (and description) was asked for or is being made.
     pub refreshing: bool,
 }
 
@@ -53,8 +54,8 @@ pub struct RefreshState {
     pub rate_limited: bool,
     /// The account was refused; nothing refreshes until it or consent changes.
     pub unauthorized: bool,
-    /// The account's AI session summaries switch, once read; `None` when signed out
-    /// or not yet known.
+    /// The account's AI session titles switch (`ai_session_summaries` on the
+    /// wire), once read; `None` when signed out or not yet known.
     pub summaries: Option<bool>,
     /// The account's Feed switch, likewise.
     pub feed: Option<bool>,
@@ -168,6 +169,8 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     uploads: Option<std::path::PathBuf>,
     /// Whether replies written elsewhere are typed into this machine's sessions.
     accept_remote: Option<crate::feed::AcceptRemote>,
+    /// The name this service last gave each session (its AI title).
+    titles: Titles,
 }
 
 impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> {
@@ -195,7 +198,16 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             chat_cursors: None,
             uploads: None,
             accept_remote: None,
+            titles: Titles::default(),
         }
+    }
+
+    /// Remember the titles this service gave sessions in `path`, so a
+    /// restarted service still tells them from names the user chose (memory
+    /// only without it).
+    pub fn with_titles(mut self, path: std::path::PathBuf) -> Self {
+        self.titles = Titles::load(Some(path));
+        self
     }
 
     /// Type replies written on rakumux.com or other machines into this
@@ -274,7 +286,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         result
     }
 
-    /// The user asked for a new summary of `session` (the refresh icon or `s`).
+    /// The user asked for a new title of `session` (the ↻ or `s`): it renames
+    /// the session whatever its name.
     pub fn request(&mut self, session: &SessionId) {
         self.scheduler.request(session);
     }
@@ -301,6 +314,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         let result = self.service.apply_event(event);
         if event.event == SessionEvent::Removed {
             self.scheduler.forget(session);
+            self.titles.forget(session);
         }
         result
     }
@@ -400,20 +414,52 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         }
     }
 
-    /// Apply a finished request; its slot is freed.
-    pub fn completed(&mut self, completed: Completed, now: Duration) {
+    /// Apply a finished request; its slot is freed. When the service sent a
+    /// title with text that applied, returns the rename to run with
+    /// [`Retitle::apply`] off this thread (pass its result to `retitled`).
+    pub fn completed(&mut self, completed: Completed, now: Duration) -> Option<Retitle> {
         let Completed {
             session,
             completion,
         } = completed;
         self.running.remove(&session);
         self.observed.remove(&session);
-        let result = match self.service.finish(completion) {
-            Ok(ApplyResult::Applied) => Outcome::Done,
-            Ok(ApplyResult::Ignored) => Outcome::Interrupted,
-            Err(error) => outcome(&error),
+        let asked = self.scheduler.asked(&session);
+        let (result, title) = match self.service.finish_titled(completion) {
+            Ok((ApplyResult::Applied, title)) => (Outcome::Done, title),
+            Ok((ApplyResult::Ignored, _)) => (Outcome::Interrupted, None),
+            Err(error) => (outcome(&error), None),
         };
         self.scheduler.finished(&session, result, now);
+        let title = title?;
+        Some(Retitle {
+            previous: self.titles.get(&session),
+            session,
+            title,
+            asked,
+        })
+    }
+
+    /// A rename from `completed` finished: a session named after its title
+    /// counts as AI-titled until the user renames it.
+    pub fn retitled(&mut self, retitled: Retitled) {
+        match retitled.outcome {
+            RetitleOutcome::Named(name) => self.titles.set(&retitled.session, name),
+            RetitleOutcome::Kept => {}
+            RetitleOutcome::Failed => {
+                let line = "rakumux-status: naming a session after its title failed";
+                if self.last_note.as_deref() != Some(line) {
+                    eprintln!("{line}");
+                    self.last_note = Some(line.into());
+                }
+            }
+        }
+    }
+
+    /// The name this service last gave `session`, if any.
+    #[cfg(test)]
+    pub(crate) fn title_of(&self, session: &SessionId) -> Option<String> {
+        self.titles.get(session)
     }
 
     /// A session's status and its last refresh failure.

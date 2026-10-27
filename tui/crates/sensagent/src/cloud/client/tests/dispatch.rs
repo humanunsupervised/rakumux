@@ -188,6 +188,8 @@ struct FakeTransport {
     saves: Arc<AtomicBool>,
     /// The account's Feed switch, which only a save changes.
     feed: AtomicBool,
+    /// The session title sent with status text; none (an older service) by default.
+    title: Arc<Mutex<Option<String>>>,
 }
 
 impl HttpTransport for FakeTransport {
@@ -240,12 +242,15 @@ impl HttpTransport for FakeTransport {
         let mut detached = request.body_mut().take().unwrap();
         let body = detached.buffer().unwrap().to_vec();
         let value: Value = serde_json::from_slice(&body).unwrap();
-        let response = serde_json::to_vec(&json!({
+        let mut response = json!({
             "version": 1,
             "request_id": value["request_id"],
             "status_text": STATUS,
-        }))
-        .unwrap();
+        });
+        if let Some(title) = self.title.lock().unwrap().clone() {
+            response["title"] = json!(title);
+        }
+        let response = serde_json::to_vec(&response).unwrap();
         self.requests.lock().unwrap().push(RecordedRequest {
             request,
             body,
@@ -307,6 +312,7 @@ fn cloud(origin: &str, requests: Requests, mode: ReplyMode) -> CloudAIClient {
         mode,
         Arc::new(AtomicBool::new(true)),
         Arc::new(AtomicBool::new(true)),
+        Arc::default(),
     )
 }
 
@@ -316,6 +322,7 @@ fn cloud_switched(
     mode: ReplyMode,
     summaries: Arc<AtomicBool>,
     saves: Arc<AtomicBool>,
+    title: Arc<Mutex<Option<String>>>,
 ) -> CloudAIClient {
     CloudAIClient::with_transport(
         CloudAIConfig::new(origin).unwrap(),
@@ -325,6 +332,7 @@ fn cloud_switched(
             summaries,
             saves,
             feed: AtomicBool::new(false),
+            title,
         }),
     )
 }
@@ -344,6 +352,8 @@ struct Fixture {
     summaries: Arc<AtomicBool>,
     /// Whether the fake service saves changes to the switches.
     saves: Arc<AtomicBool>,
+    /// The session title the fake service sends; none by default.
+    title: Arc<Mutex<Option<String>>>,
     owner: Owner,
 }
 
@@ -365,6 +375,7 @@ impl Fixture {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let summaries = Arc::new(AtomicBool::new(true));
         let saves = Arc::new(AtomicBool::new(true));
+        let title = Arc::<Mutex<Option<String>>>::default();
         let mut owner = StatusDispatchService::new(
             account.clone(),
             store.clone(),
@@ -374,6 +385,7 @@ impl Fixture {
                 mode,
                 summaries.clone(),
                 saves.clone(),
+                title.clone(),
             ),
         );
         owner.set_account_session(Some(session.clone())).unwrap();
@@ -388,6 +400,7 @@ impl Fixture {
             requests,
             summaries,
             saves,
+            title,
             owner,
         }
     }
@@ -764,7 +777,7 @@ fn happy_path_sends_only_selected_redacted_context_and_caches_only_after_finish(
         assert_eq!(recorded.request.method(), Method::POST);
         assert_eq!(
             recorded.request.url().as_str(),
-            format!("{ORIGIN}{STATUS_PATH}")
+            format!("{ORIGIN}{STATUS_PATH}?{STATUS_QUERY}")
         );
         assert_eq!(recorded.request.headers().len(), 5);
         assert_eq!(

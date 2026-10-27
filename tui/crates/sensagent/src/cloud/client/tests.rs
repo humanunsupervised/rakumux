@@ -142,7 +142,7 @@ fn reviewed_clean_https_root_configuration_only() {
     ] {
         let config = CloudAIConfig::new(origin).unwrap();
         assert_eq!(config.endpoint.path(), STATUS_PATH);
-        assert!(config.endpoint.query().is_none());
+        assert_eq!(config.endpoint.query(), Some("title=1"));
         assert!(config.endpoint.fragment().is_none());
     }
     for origin in [
@@ -195,7 +195,7 @@ fn recorded_request_has_only_fixed_native_headers_and_sealed_body() {
     assert_eq!(outgoing.method(), Method::POST);
     assert_eq!(
         outgoing.url().as_str(),
-        "https://reviewed.example:8443/api/v1/ai/session-status"
+        "https://reviewed.example:8443/api/v1/ai/session-status?title=1"
     );
     assert_eq!(outgoing.headers().len(), 5);
     assert_eq!(

@@ -70,6 +70,8 @@ struct Timing {
     failures: u32,
     /// A summary was asked for (the refresh icon or `s`) and hasn't started.
     requested: bool,
+    /// The running job was asked for: its title replaces any name.
+    asked: bool,
     /// The running job is this conversation's automatic summary.
     auto: Option<String>,
     /// Conversations whose automatic summary was made: one per chat.
@@ -123,6 +125,14 @@ impl RefreshScheduler {
         self.sessions
             .get(session)
             .is_some_and(|timing| timing.requested)
+    }
+
+    /// Whether the job running for `session` was asked for (the refresh icon
+    /// or `s`), rather than its chat's automatic one.
+    pub fn asked(&self, session: &SessionId) -> bool {
+        self.sessions
+            .get(session)
+            .is_some_and(|timing| timing.asked)
     }
 
     /// `conversation` of `session` has a summary already (one made before this
@@ -186,6 +196,7 @@ impl RefreshScheduler {
     /// A summary of `due` started.
     pub fn started(&mut self, due: &Due, now: Duration) {
         let timing = self.sessions.entry(due.session.clone()).or_default();
+        timing.asked = timing.requested;
         timing.requested = false;
         timing.auto = due.auto.clone();
         self.starts.push_back(now);
@@ -216,6 +227,7 @@ impl RefreshScheduler {
             return;
         };
         let auto = timing.auto.take();
+        timing.asked = false;
         match outcome {
             Outcome::Done => {
                 timing.failure = None;

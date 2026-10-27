@@ -7,9 +7,10 @@ use session_core::paths::Layout;
 
 use super::protocol::{
     read_message, write_message, ConsentView, Hello, LineState, OwnerRequest, OwnerResponse,
-    MAX_MESSAGE, PROTOCOL,
+    OwnerState, StatusLine, MAX_MESSAGE, PROTOCOL,
 };
 use super::*;
+use session_core::ids::SessionId;
 
 fn home() -> (tempfile::TempDir, OwnerLayout) {
     let directory = tempfile::Builder::new()
@@ -304,6 +305,36 @@ fn a_session_message_is_asked_by_name_and_answered_as_a_feed_reply() {
             }
         }
     );
+}
+
+#[test]
+fn titles_keep_the_ops_and_switch_names_older_peers_know() {
+    // A new title is asked for as a summary always was.
+    let ask = OwnerRequest::Summarize {
+        session: SessionId::from_string("synthetic-session"),
+    };
+    let json = serde_json::json!({"op": "summarize", "session": "synthetic-session"});
+    assert_eq!(serde_json::to_value(&ask).unwrap(), json);
+    assert_eq!(serde_json::from_value::<OwnerRequest>(json).unwrap(), ask);
+    // The AI session titles switch keeps its wire name.
+    let off = OwnerRequest::SetFeatures {
+        ai_session_summaries: Some(false),
+        feed: None,
+    };
+    assert_eq!(
+        serde_json::to_value(&off).unwrap(),
+        serde_json::json!({"op": "set_features", "ai_session_summaries": false})
+    );
+    // A title being made shows as `refreshing`, with or without text.
+    let line: StatusLine = serde_json::from_str(
+        r#"{"session":"synthetic-session","state":"pending","refreshing":true}"#,
+    )
+    .unwrap();
+    assert!(line.refreshing && line.text.is_none());
+    let state: OwnerState =
+        serde_json::from_str(r#"{"consent":{"revision":1,"enabled":true},"summaries":true}"#)
+            .unwrap();
+    assert_eq!(state.summaries, Some(true));
 }
 
 #[test]

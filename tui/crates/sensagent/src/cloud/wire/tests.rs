@@ -234,6 +234,18 @@ fn constants_patterns_fields_and_messages_match_canonical_schemas() {
         "[^A-Za-z0-9._-]"
     );
     assert_eq!(common["$defs"]["statusText"]["maxLength"], 140);
+    assert_eq!(
+        common["$defs"]["sessionTitle"]["maxLength"],
+        crate::status::MAX_TITLE_CHARS
+    );
+    assert_eq!(
+        common["$defs"]["sessionTitle"]["maxUtf8Bytes"],
+        crate::status::MAX_TITLE_BYTES
+    );
+    assert_eq!(
+        common["$defs"]["sessionTitle"]["pattern"],
+        common["$defs"]["statusText"]["pattern"]
+    );
     let patterns = CONTEXT_PATTERNS.as_ref().unwrap();
     assert_eq!(
         patterns.meaningful.as_str(),
@@ -275,7 +287,10 @@ fn constants_patterns_fields_and_messages_match_canonical_schemas() {
                 "reported_text",
             ],
         ),
-        (&success, vec!["request_id", "status_text", "version"]),
+        (
+            &success,
+            vec!["request_id", "status_text", "title", "version"],
+        ),
         (&error, vec!["error"]),
         (code_schema, vec!["code", "message", "retry_after_seconds"]),
     ] {
@@ -581,4 +596,38 @@ fn response_bounds_utf8_surrogates_and_diagnostics_never_bypass_validation() {
     assert_eq!(response.request_id(), request.request_id());
     assert_eq!(response.text().as_str(), "Adding validation tests");
     assert_eq!(response.into_text().as_str(), "Adding validation tests");
+}
+
+#[test]
+fn a_title_is_optional_and_kept_exactly() {
+    let titled = decode_success(
+        br#"{"version":1,"request_id":"public","status_text":"Checking","title":"Fix the login redirect"}"#,
+        "public",
+    )
+    .unwrap();
+    assert_eq!(
+        titled.title().map(SessionTitle::as_str),
+        Some("Fix the login redirect")
+    );
+    assert!(!format!("{titled:?}").contains("login"));
+    let (text, title) = titled.into_parts();
+    assert_eq!(text.as_str(), "Checking");
+    assert!(title.is_some());
+    // An older service sends none.
+    let untitled = decode_success(
+        br#"{"version":1,"request_id":"public","status_text":"Checking"}"#,
+        "public",
+    )
+    .unwrap();
+    assert!(untitled.title().is_none());
+    for body in [
+        &br#"{"version":1,"request_id":"public","status_text":"Checking","title":null}"#[..],
+        br#"{"version":1,"request_id":"public","status_text":"Checking","title":"Fix it."}"#,
+        br#"{"version":1,"request_id":"public","status_text":"Checking","title":"Fix","title":"Fix"}"#,
+    ] {
+        assert_eq!(
+            decode_success(body, "public").unwrap_err(),
+            CloudAIError::InvalidResponse
+        );
+    }
 }

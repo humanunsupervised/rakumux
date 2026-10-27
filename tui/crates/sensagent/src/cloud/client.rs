@@ -14,6 +14,10 @@ use super::wire::{decode_error, decode_success, MAX_BODY_BYTES};
 use super::{CloudAIError, StatusResponse, ValidatedStatusRequest};
 
 const STATUS_PATH: &str = "/api/v1/ai/session-status";
+/// Asks the status service for a session title too (`contracts/session-status`).
+/// A deploy from before titles refuses the query (`invalid_request`): that
+/// request counts as rejected, like any other, until the user asks again.
+const STATUS_QUERY: &str = "title=1";
 const FEATURES_PATH: &str = "/api/v1/features";
 const FEED_PATH: &str = "/api/v1/feed";
 const FEED_ENTRIES_PATH: &str = "/api/v1/feed/entries";
@@ -52,7 +56,8 @@ pub struct CloudAIConfig {
 /// The account's feature switches, as the destination reports them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AccountFeatures {
-    /// AI session summaries: on unless the user turned them off on the website.
+    /// AI session titles (`ai_session_summaries` on the wire): on unless the
+    /// user turned them off on the website.
     pub ai_session_summaries: bool,
     /// The agent feed: off unless the user turned it on on the website.
     pub feed: bool,
@@ -172,6 +177,7 @@ impl CloudAIConfig {
         let feed_sessions = path(FEED_SESSIONS_PATH);
         let feed_attachments = path(FEED_ATTACHMENTS_PATH);
         endpoint.set_path(STATUS_PATH);
+        endpoint.set_query(Some(STATUS_QUERY));
         Ok(Self {
             endpoint,
             features,

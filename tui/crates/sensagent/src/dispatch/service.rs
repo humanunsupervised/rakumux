@@ -17,8 +17,8 @@ use crate::source::{
 };
 use crate::status::{
     AISessionStatusService, AccountGate, AccountSessionGate, ConsentPolicy, ConsentRevision,
-    ConsentSnapshot, FolderConsent, GenerationTicket, Preparation, StatusError, StatusSource,
-    StatusStore, StatusView,
+    ConsentSnapshot, FolderConsent, GenerationTicket, Preparation, SessionTitle, StatusError,
+    StatusSource, StatusStore, StatusView,
 };
 
 use super::job::JobKey;
@@ -534,9 +534,19 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
     /// Apply one finished worker after all local work stopped. Foreign, revoked,
     /// stale and replayed results cannot expose text or populate the cache.
     pub fn finish(&mut self, completion: DispatchCompletion) -> Result<ApplyResult, DispatchError> {
+        self.finish_titled(completion).map(|(applied, _)| applied)
+    }
+
+    /// `finish`, and the session title the service sent with the text: only
+    /// when the text was applied, so a revoked, stale or replayed result never
+    /// names a session either. An older service sends no title.
+    pub fn finish_titled(
+        &mut self,
+        completion: DispatchCompletion,
+    ) -> Result<(ApplyResult, Option<SessionTitle>), DispatchError> {
         self.check_owner(&completion.key)?;
         let Some(pending) = self.pending.get(&completion.key.request_id) else {
-            return Ok(ApplyResult::Ignored);
+            return Ok((ApplyResult::Ignored, None));
         };
         if pending.phase != Phase::Committed {
             return Err(DispatchError::InvalidStage);
@@ -557,15 +567,15 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
             .ok_or(DispatchError::Canceled)?;
         if !current || !self.confirmed || pending.cancel.is_canceled() {
             self.policy.abandon(&pending.ticket);
-            return Ok(ApplyResult::Ignored);
+            return Ok((ApplyResult::Ignored, None));
         }
         match completion.outcome {
             Ok(response) => {
                 let request_id = response.request_id().to_owned();
-                let result =
-                    self.policy
-                        .complete(&pending.ticket, &request_id, response.into_text());
-                self.policy_result(result)
+                let (text, title) = response.into_parts();
+                let result = self.policy.complete(&pending.ticket, &request_id, text);
+                let applied = self.policy_result(result)?;
+                Ok((applied, title.filter(|_| applied == ApplyResult::Applied)))
             }
             Err(error) => {
                 self.policy.abandon(&pending.ticket);

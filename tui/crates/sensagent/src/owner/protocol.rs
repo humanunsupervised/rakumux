@@ -96,14 +96,16 @@ pub enum OwnerRequest {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         background: bool,
     },
-    /// Make a new AI summary of `session` now: its agent's latest prompt and
-    /// outputs since, or its screen for other programs. Answered with `Done`;
-    /// `Statuses` shows `refreshing` until it's made.
+    /// Make a new AI title (and description) of `session` now, from its
+    /// agent's latest prompt and outputs since, or its screen for other
+    /// programs; the title renames the session whatever its name. Answered
+    /// with `Done`; `Statuses` shows `refreshing` until it's made.
     Summarize { session: SessionId },
     /// Turn the account's feature switches on or off (as rakumux.com/features
     /// does); an absent one stays as it is. Answered with `Done`; `State` shows
     /// them changed at once, and `features_unsaved` if saving them failed.
     SetFeatures {
+        /// AI session titles.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ai_session_summaries: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -193,8 +195,8 @@ pub struct OwnerState {
     /// The account was refused; sign in or confirm consent again.
     #[serde(default)]
     pub unauthorized: bool,
-    /// The account's AI session summaries switch (on the website), once read;
-    /// absent when signed out or not yet known.
+    /// The account's AI session titles switch (`ai_session_summaries` on
+    /// rakumux.com's wire), once read; absent when signed out or not yet known.
     #[serde(default)]
     pub summaries: Option<bool>,
     /// The account's Feed switch, likewise.
@@ -360,7 +362,7 @@ pub struct StatusLine {
     /// Why the last refresh produced no text.
     #[serde(default)]
     pub failure: Option<FailureCode>,
-    /// A new summary was asked for or is being made.
+    /// A new title (and description) was asked for or is being made.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub refreshing: bool,
 }

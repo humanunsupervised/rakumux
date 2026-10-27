@@ -83,6 +83,16 @@ owner applies that view, so wrong facts (an event replayed after a list) can't b
 session forever. If an event or list for that session arrived while the job ran, the view
 may be older than it and is dropped.
 
+## Titles
+
+Requests ask for a session title too (`?title=1`). When a finished request's text applies
+and the service sent a title, `completed` returns a `Retitle` (`titles.rs`) that a worker
+runs: it renames the session through the daemon (`session_rename`, as the user) only while
+its name is the generated one (`auto_named`) or exactly the title this service last gave it
+(`titles.json`, 0600), or when the user asked (`request`). A title another session of the
+folder has gets ` 2`, ` 3`, …; one taken meanwhile is chosen again once. A service without
+titles names nothing. A removed session's title is forgotten.
+
 ## Failures and threads
 
 - `RefreshFailure` is static and per session, shown until a refresh succeeds:

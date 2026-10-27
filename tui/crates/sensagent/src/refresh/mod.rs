@@ -10,6 +10,7 @@ mod renewal;
 mod runner;
 mod schedule;
 mod sign_in;
+mod titles;
 
 pub use engine::{
     AIStatus, CaptureWork, Captured, Completed, Dispatch, RefreshState, StatusRefresher,
@@ -20,3 +21,4 @@ pub use schedule::{
     MAX_ERROR_BACKOFF, MAX_RUNNING,
 };
 pub use sign_in::{SignInFailure, SignInPrompt, SignInState};
+pub use titles::{Retitle, Retitled};

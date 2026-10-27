@@ -9,7 +9,7 @@ use serde::de::{Error as _, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
-use crate::status::StatusText;
+use crate::status::{SessionTitle, StatusText};
 
 use super::CloudAIError;
 
@@ -112,6 +112,7 @@ impl fmt::Debug for ValidatedStatusRequest {
 pub struct StatusResponse {
     request_id: String,
     text: StatusText,
+    title: Option<SessionTitle>,
 }
 
 impl StatusResponse {
@@ -128,6 +129,16 @@ impl StatusResponse {
     /// Consume the response and retain only its advisory text.
     pub fn into_text(self) -> StatusText {
         self.text
+    }
+
+    /// The session title, when the service sent one (an older one never does).
+    pub fn title(&self) -> Option<&SessionTitle> {
+        self.title.as_ref()
+    }
+
+    /// Consume the response: its advisory text and its title, if any.
+    pub fn into_parts(self) -> (StatusText, Option<SessionTitle>) {
+        (self.text, self.title)
     }
 }
 
@@ -225,6 +236,7 @@ pub(crate) fn decode_success(
     Ok(StatusResponse {
         request_id: response.request_id,
         text: response.status_text,
+        title: response.title,
     })
 }
 
@@ -349,6 +361,8 @@ struct SuccessEnvelope {
     _version: VersionOne,
     request_id: String,
     status_text: StatusText,
+    #[serde(default, deserialize_with = "present")]
+    title: Option<SessionTitle>,
 }
 
 #[derive(Deserialize)]

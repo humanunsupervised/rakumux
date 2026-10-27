@@ -20,4 +20,4 @@ pub use service::{
 #[cfg(unix)]
 pub use sqlite_store::SqliteStatusStore;
 pub use store::{StatusStore, StatusStoreError, MAX_CACHE_ENTRIES};
-pub use text::StatusText;
+pub use text::{SessionTitle, StatusText, MAX_TITLE_BYTES, MAX_TITLE_CHARS};

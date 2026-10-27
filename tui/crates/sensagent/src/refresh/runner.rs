@@ -19,6 +19,7 @@ use super::engine::{AIStatus, CaptureWork, Captured, Completed, Dispatch, Refres
 use super::renewal::{self, Renewal, RenewalEvent};
 use super::schedule::MAX_RUNNING;
 use super::sign_in::{self, SignInEvent, SignInFailure, SignInState};
+use super::titles::{Retitle, Retitled};
 use super::StatusRefresher;
 use crate::auth::{AccountSession, AccountWebsite, CredentialRevision, CredentialStore, WallClock};
 use crate::cloud::FeatureChange;
@@ -91,6 +92,8 @@ enum Message {
     Disconnected,
     Captured(Box<Captured>),
     Completed(Completed),
+    /// A session was named after its title (or wasn't).
+    Retitled(Retitled),
     FeaturesRead(FeaturesCompletion),
     FeedDone(FeedCompletion),
     /// A chat read from the daemon, or why it couldn't be.
@@ -129,6 +132,8 @@ enum Message {
 enum Work<A, C> {
     Capture(CaptureWork),
     Dispatch(Dispatch<A, C>),
+    /// Name a session after the title a request brought.
+    Retitle(Retitle),
     Features(FeaturesJob<A, C>),
     Feed(FeedJob<A, C>),
     /// Read a session's chat after a cursor.
@@ -349,7 +354,8 @@ impl RefreshClient {
         answer.recv().map_err(|_| RefreshError::Stopped)
     }
 
-    /// Make a new summary of `session` now (the refresh icon or `s`).
+    /// Make a new title (and description) of `session` now (the ↻ or `s`): it
+    /// renames the session whatever its name.
     pub fn summarize(&self, session: SessionId) -> Result<(), RefreshError> {
         let (reply, answer) = mpsc::channel();
         self.send(Command::Summarize(session, reply))?;
@@ -607,7 +613,12 @@ fn own<S, A, C>(
                     let _ = work.send(Work::Dispatch(dispatch));
                 }
             }
-            Message::Completed(completed) => refresher.completed(completed, now),
+            Message::Completed(completed) => {
+                if let Some(retitle) = refresher.completed(completed, now) {
+                    let _ = work.send(Work::Retitle(retitle));
+                }
+            }
+            Message::Retitled(retitled) => refresher.retitled(retitled),
             Message::FeaturesRead(completion) => refresher.features_read(completion, now),
             // A replaced attempt's progress is ignored; its login was fenced anyway.
             Message::SignIn(attempt, event) if attempt == sign_in.attempt => {
@@ -1011,6 +1022,7 @@ where
                     Err(_) => continue,
                 }
             }
+            Ok(Work::Retitle(retitle)) => Message::Retitled(retitle.apply(api)),
             Ok(Work::Features(job)) => match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
                 Ok(completion) => Message::FeaturesRead(completion),
                 Err(_) => continue,

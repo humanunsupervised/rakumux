@@ -25,7 +25,7 @@ pub use cache::{
     FeedEntry, FeedPage, FeedPrompt, FeedReply, FeedStatus, OpenTurn, ReplyAttachment,
     ReplyFailure, ReplyStatus,
 };
-pub(crate) use chats::{ChatSync, ChatWork, READ_BYTES};
+pub(crate) use chats::{write_private, ChatSync, ChatWork, READ_BYTES};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
 pub use replies::{AcceptRemote, ReplyWrite, ReplyWriteStatus};
