@@ -285,7 +285,8 @@ pub trait TerminalHost: Send + Sync + 'static {
     ) -> Result<ReadResult, HostError>;
     /// Write bytes regardless of controller (policy is the caller's job).
     fn write(&self, id: TerminalId, bytes: &[u8]) -> Result<(), HostError>;
-    /// Bracketed-paste-aware text followed by Enter, written atomically.
+    /// Bracketed-paste-aware text, then Enter in a write of its own after a
+    /// short pause, with nothing else written in between.
     fn submit(&self, id: TerminalId, text: &str) -> Result<(), HostError>;
     /// [`submit`](Self::submit), unless its controller sent input within
     /// `quiet`: then [`HostError::Typing`] and nothing is written.

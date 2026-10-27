@@ -196,9 +196,14 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    Enter; the same for Claude Code, Codex and OpenCode, which have no API for a running
    interactive session), only while it's live, not private, shows the entry's conversation
    (`agent_turn.conversation_id`) and its agent waits (`idle`/`done`; `working`, `blocked` or an
-   unknown chat waits, the cloud expires a reply after an hour), one at a time per session,
-   and not while someone typed in that session in the last 10 s (`session_submit`'s `quiet_ms`,
-   so it isn't added to what they're writing; tried again 2 s later).
+   unknown chat waits, the cloud expires a reply after an hour), and not while someone typed
+   in that session in the last 10 s (`session_submit`'s `quiet_ms`, so it isn't added to what
+   they're writing; tried again 2 s later). A session takes its replies and session messages
+   one at a time, in rakumux.com's order (`seq`; a later one waits behind an earlier one that
+   waits): each is `delivered` once its agent is seen to take it (`working`/`blocked`, or a new
+   `agent_turn` in its chat; a view still showing it waiting proves nothing, as the lifecycle
+   lags), else after 30 s all the same; the next goes in once the agent waits again (after
+   being seen busy, or 5 s on). Typed in but its session ended or chat changed first, it fails.
    It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
    `private`, `not_accepted`, `refused`, `attachment_unavailable`;
    `POST /api/v1/feed/replies/status`). **Files attached** on rakumux.com (`attachments`, at
@@ -432,9 +437,11 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   advertise the additions. `session_turn {id}` (user only, capability `session.turn`) returns a
   live agent's current turn: `TurnContent {id, prompt?, messages, total}`, the newest 100
   messages, each one line of at most 600 characters, for AI summaries. `session_submit {id, text,
-  quiet_ms?}` (paste, then Enter): with `quiet_ms` (capability `session.submit.quiet`) it's
-  refused with `session_in_use`, unaudited, while the session's controller typed within that
-  time; a daemon without it submits anyway.
+  quiet_ms?}` (paste, then Enter in a write of its own 500 ms later, nothing written between
+  them: Claude Code drops an Enter that comes with a paste ending in `.png`/`.jpg`/`.gif`/
+  `.webp` while it checks for an image, leaving the text unsent): with `quiet_ms` (capability
+  `session.submit.quiet`) it's refused with `session_in_use`, unaudited, while the session's
+  controller typed within that time; a daemon without it submits anyway.
 - `session_import {source}` (user only, capability `session.import`) restores an archive directory
   containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.
   The daemon preserves ids and metadata, refuses existing ids or names, stages files privately,

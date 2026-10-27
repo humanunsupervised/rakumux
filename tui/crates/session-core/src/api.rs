@@ -141,7 +141,10 @@ pub enum Request {
     SessionWait(WaitRequest),
     /// Write keys/text to a session without attaching (agents, scripts).
     SessionSend(SendRequest),
-    /// Paste-aware text + Enter as one ordered submission.
+    /// Paste-aware text + Enter as one ordered submission: the Enter in a
+    /// write of its own half a second after the paste (programs that take a
+    /// paste in steps drop an Enter that comes with it), nothing else written
+    /// to the session in between. Answered once both are queued.
     SessionSubmit {
         id: SessionId,
         text: String,

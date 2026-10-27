@@ -32,7 +32,7 @@ use crate::persist::ScrollbackStore;
 use crate::{log_debug, log_error, log_info, log_warn};
 use actor::{Actor, ActorMsg, ActorParts, Adopted, AttachReply};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use pty_io::PtyMaster;
+use pty_io::{PtyInput, PtyMaster};
 use session_core::api::{ReadResult, ReadSource, Role, TextFormat};
 use session_core::ids::{PaneId, SessionId, TerminalId};
 use session_core::paths::Layout;
@@ -50,6 +50,13 @@ const ACTOR_QUEUE: usize = 64;
 const WRITER_QUEUE: usize = 256;
 /// How long input waits for a program that doesn't read its input.
 const INPUT_PATIENCE: Duration = Duration::from_secs(5);
+/// A submitted text's Enter is written this long after its paste, in a write
+/// of its own. Programs that take a paste in steps hold back an Enter that
+/// comes with it, and can drop it: Claude Code drops one that arrives while it
+/// checks whether a paste ending in `.png`, `.jpg`, `.gif` or `.webp` names an
+/// image (asking the clipboard, through `osascript` on macOS), so such a reply
+/// stayed in its prompt unsent and the next one was added to it.
+const SUBMIT_ENTER_AFTER: Duration = Duration::from_millis(500);
 /// Smallest size applied to a PTY and its emulator (vt100 panics below 2×2).
 pub const MIN_COLS: u16 = 2;
 pub const MIN_ROWS: u16 = 2;
@@ -135,7 +142,7 @@ pub(crate) struct Shared {
     commands: SyncSender<ActorMsg>,
     state: Mutex<SharedState>,
     /// PTY input queue; `None` once the terminal ended.
-    input: Mutex<Option<SyncSender<Vec<u8>>>>,
+    input: Mutex<Option<SyncSender<PtyInput>>>,
     /// Set by `forget`. Every scrollback save holds this lock while it
     /// checks the flag and writes, so once `forget` returns no save is in
     /// progress and none will start: the control layer can delete the
@@ -176,6 +183,10 @@ impl Shared {
         if bytes.is_empty() {
             return Ok(());
         }
+        self.queue_input(PtyInput::from(bytes))
+    }
+
+    fn queue_input(&self, input: PtyInput) -> Result<(), HostError> {
         let sender = self
             .input
             .lock()
@@ -183,16 +194,16 @@ impl Shared {
             .clone()
             .ok_or(HostError::NotRunning)?;
         let deadline = Instant::now() + INPUT_PATIENCE;
-        let mut bytes = bytes;
+        let mut input = input;
         loop {
-            match sender.try_send(bytes) {
+            match sender.try_send(input) {
                 Ok(()) => return Ok(()),
                 Err(TrySendError::Disconnected(_)) => return Err(HostError::NotRunning),
                 Err(TrySendError::Full(back)) => {
                     if Instant::now() >= deadline {
                         return Err(HostError::Io("the program is not reading its input".into()));
                     }
-                    bytes = back;
+                    input = back;
                     std::thread::sleep(Duration::from_millis(2));
                 }
             }
@@ -713,9 +724,11 @@ impl TerminalHost for Host {
         let modes = shared.lock().modes;
         // The text must not be able to open or close a paste bracket itself.
         let text = text.replace("\x1b[200~", "").replace("\x1b[201~", "");
-        let mut bytes = vt::input::encode_paste(&text, &modes);
-        bytes.push(b'\r');
-        shared.send_input(bytes)
+        // The Enter goes in a read of its own once the program took the paste in.
+        shared.queue_input(PtyInput {
+            bytes: vt::input::encode_paste(&text, &modes),
+            then: Some((SUBMIT_ENTER_AFTER, b"\r".to_vec())),
+        })
     }
 
     fn submit_when_quiet(

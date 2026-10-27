@@ -10,6 +10,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Bytes per PTY read.
 const READ_CHUNK: usize = 16 * 1024;
@@ -69,13 +70,35 @@ pub(crate) fn run_reader(mut pty: File, tx: SyncSender<ActorMsg>, stop: Arc<Atom
     let _ = tx.send(ActorMsg::Eof);
 }
 
+/// Input for a terminal's writer: bytes written in one go, then optionally
+/// more once the program has had a while to take them in, with nothing else
+/// written to the PTY in between.
+pub(crate) struct PtyInput {
+    pub(crate) bytes: Vec<u8>,
+    /// Written after the pause, in a write (and so a read) of its own.
+    pub(crate) then: Option<(Duration, Vec<u8>)>,
+}
+
+impl From<Vec<u8>> for PtyInput {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self { bytes, then: None }
+    }
+}
+
 /// Write queued input to the PTY in order until the queue closes or a write
-/// fails.
-pub(crate) fn run_writer(mut pty: File, rx: Receiver<Vec<u8>>) {
-    for bytes in rx {
-        if let Err(e) = pty.write_all(&bytes) {
+/// fails. A pause holds back what was queued after it.
+pub(crate) fn run_writer(mut pty: File, rx: Receiver<PtyInput>) {
+    for input in rx {
+        if let Err(e) = pty.write_all(&input.bytes) {
             log_debug!("pty write failed: {e}");
             break;
+        }
+        if let Some((pause, bytes)) = input.then {
+            std::thread::sleep(pause);
+            if let Err(e) = pty.write_all(&bytes) {
+                log_debug!("pty write failed: {e}");
+                break;
+            }
         }
     }
 }

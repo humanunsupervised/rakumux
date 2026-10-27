@@ -6,8 +6,11 @@
 //! says so. It delivers only to the entry's own session, while it runs, isn't
 //! private, still shows the entry's conversation and its agent waits for
 //! input; a busy or blocked agent is waited for (the cloud expires a reply
-//! after an hour). A session message (written on rakumux.com to a session
-//! with no answer to reply to) is typed once an agent runs there and waits,
+//! after an hour). A session's replies go in one at a time, oldest first, and
+//! each is reported delivered only once its agent is seen to take it (see
+//! `Delivery`); the next waits for the agent to wait again. A session message
+//! (written on rakumux.com to a session with no answer to reply to) goes in
+//! the same queue: it is typed once an agent runs there and waits,
 //! whatever chat it shows; never into a session without an agent, which is
 //! waited for. Session messages never reach TUIs. A reply written on rakumux.com or another machine is
 //! typed only when this machine's user turned that on in Settings; one
@@ -57,6 +60,15 @@ const MAX_HANDLED: usize = 1_000;
 pub(crate) const TYPING_QUIET: Duration = Duration::from_secs(10);
 /// After the daemon refused because someone was typing, try that session again this much later.
 pub(crate) const TYPING_HOLD: Duration = Duration::from_secs(2);
+/// A reply typed in is delivered once its agent is seen to take it (working,
+/// asking something, or a new prompt in its chat); this long after it was
+/// typed it counts as delivered all the same, so its session's next replies
+/// never wait on it for ever.
+pub(crate) const TAKE_WITHIN: Duration = Duration::from_secs(30);
+/// A reply taken without its agent being seen busy (its lifecycle can lag a
+/// new prompt) holds its session's next one this long before the agent's
+/// waiting is believed.
+pub(crate) const SETTLE: Duration = Duration::from_secs(5);
 
 /// Whether this machine takes replies written on rakumux.com or other machines.
 pub type AcceptRemote = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -219,6 +231,8 @@ struct Seen {
     private: bool,
     lifecycle: Lifecycle,
     conversation: Option<String>,
+    /// The agent's current turn (`agent_turn.id`): a new prompt makes a new one.
+    turn: Option<u64>,
 }
 
 impl Seen {
@@ -231,7 +245,18 @@ impl Seen {
                 .agent_turn
                 .as_ref()
                 .and_then(|turn| turn.conversation_id.clone()),
+            turn: view.agent_turn.as_ref().map(|turn| turn.id),
         }
+    }
+
+    /// Its agent waits for input.
+    fn waits(&self) -> bool {
+        matches!(self.lifecycle, Lifecycle::Idle | Lifecycle::Done)
+    }
+
+    /// Its agent works, or asks something.
+    fn busy(&self) -> bool {
+        matches!(self.lifecycle, Lifecycle::Working | Lifecycle::Blocked)
     }
 }
 
@@ -247,6 +272,8 @@ enum Target {
 /// A reply (or session message) pending for this machine.
 #[derive(Clone, Debug)]
 struct Pending {
+    /// rakumux.com's order: a session's replies go in in it.
+    seq: u64,
     session_id: String,
     target: Target,
     text: String,
@@ -258,6 +285,7 @@ struct Pending {
 impl Pending {
     fn reply(reply: &FeedReply) -> Self {
         Self {
+            seq: reply.seq,
             session_id: reply.session_id.clone(),
             target: Target::Chat(reply.conversation_id.clone()),
             text: reply.text.clone(),
@@ -268,12 +296,81 @@ impl Pending {
 
     fn message(message: &SessionMessage) -> Self {
         Self {
+            seq: message.seq,
             session_id: message.session_id.clone(),
             target: Target::Session,
             text: message.text.clone(),
             attachments: message.attachments.clone(),
             from: message.from.clone(),
         }
+    }
+}
+
+/// A reply going into its session, and what its agent showed since: nothing
+/// else is typed there until the agent is seen to take it (it works or asks
+/// something, or its chat shows a new prompt) and then waits again. Seen
+/// taken, it's reported delivered; its session ended or its chat changed
+/// first, failed. The agent's lifecycle can lag what it does, so a view
+/// that still shows it waiting proves nothing.
+struct Delivery {
+    reply: String,
+    target: Target,
+    /// When it was handed to the daemon.
+    since: Duration,
+    /// The daemon typed it in.
+    typed: bool,
+    /// The agent's turn and chat just before: another turn after is a new prompt.
+    turn: (Option<u64>, Option<String>),
+    /// The agent was seen working or asking something since.
+    busy: bool,
+    /// When it was seen taken (and reported delivered).
+    taken: Option<Duration>,
+}
+
+/// What a typed-in reply's agent has shown of it.
+enum Taking {
+    Waiting,
+    Taken,
+    Failed(ReplyFailure),
+}
+
+impl Delivery {
+    /// Typed in and not yet taken: what its session's latest view says.
+    fn taking(&self, seen: Option<&Seen>, now: Duration) -> Taking {
+        let Some(seen) = seen.filter(|seen| seen.live) else {
+            return Taking::Failed(ReplyFailure::SessionGone);
+        };
+        if self.busy {
+            return Taking::Taken;
+        }
+        if let Target::Chat(wanted) = &self.target {
+            let changed = seen.lifecycle == Lifecycle::None
+                || seen
+                    .conversation
+                    .as_ref()
+                    .is_some_and(|shown| shown != wanted);
+            if changed {
+                return Taking::Failed(ReplyFailure::ConversationChanged);
+            }
+        }
+        let new_prompt =
+            seen.turn.is_some() && (seen.turn, &seen.conversation) != (self.turn.0, &self.turn.1);
+        if new_prompt || now.saturating_sub(self.since) >= TAKE_WITHIN {
+            Taking::Taken
+        } else {
+            Taking::Waiting
+        }
+    }
+
+    /// Taken: whether its session takes the next reply now.
+    fn done(&self, seen: Option<&Seen>, now: Duration) -> bool {
+        let Some(seen) = seen.filter(|seen| seen.live) else {
+            return true;
+        };
+        let settled = self
+            .taken
+            .is_some_and(|taken| now.saturating_sub(taken) >= SETTLE);
+        seen.waits() && (self.busy || settled)
     }
 }
 
@@ -322,8 +419,8 @@ pub(crate) struct ReplySync {
     pending: HashMap<String, Pending>,
     /// Typed (or refused) here, to tell rakumux.com: the id and why it failed.
     reports: VecDeque<(String, Option<ReplyFailure>)>,
-    /// Being typed now.
-    submitting: HashSet<String>,
+    /// The reply going into each session, until its agent took it and waits again.
+    deliveries: HashMap<SessionId, Delivery>,
     handled: HashSet<String>,
     handled_order: VecDeque<String>,
     awaiting: HashMap<SessionId, Awaiting>,
@@ -358,7 +455,7 @@ impl ReplySync {
             report_retry: Backoff::new(Duration::ZERO),
             pending: HashMap::new(),
             reports: VecDeque::new(),
-            submitting: HashSet::new(),
+            deliveries: HashMap::new(),
             handled: HashSet::new(),
             handled_order: VecDeque::new(),
             awaiting: HashMap::new(),
@@ -400,14 +497,18 @@ impl ReplySync {
 
     /// The daemon (re)connected: these are its sessions.
     pub fn connected(&mut self, views: &[SessionView]) {
-        self.sessions = views
-            .iter()
-            .map(|view| (view.id.clone(), Seen::of(view)))
-            .collect();
+        self.sessions.clear();
+        for view in views {
+            self.observe(view);
+        }
     }
 
     pub fn observe(&mut self, view: &SessionView) {
-        self.sessions.insert(view.id.clone(), Seen::of(view));
+        let seen = Seen::of(view);
+        if let Some(delivery) = self.deliveries.get_mut(&view.id) {
+            delivery.busy |= seen.busy();
+        }
+        self.sessions.insert(view.id.clone(), seen);
     }
 
     pub fn forget(&mut self, session: &SessionId) {
@@ -474,40 +575,46 @@ impl ReplySync {
     fn deliver(&mut self, now: Duration) -> Option<ReplyWork> {
         let remote = self.accepts_remote(now);
         self.held.retain(|_, until| *until > now);
-        // A session being typed into (or whose reply's file is being fetched)
-        // takes nothing else until it says it waits again, and one someone is
-        // typing in nothing until they pause.
+        self.follow_deliveries(now);
+        // A session a reply is going into (or whose reply's file is being
+        // fetched) takes nothing else until its agent took it and waits
+        // again, and one someone is typing in nothing until they pause.
         let being_typed: HashSet<&str> = self
-            .submitting
-            .iter()
-            .chain(&self.fetching)
-            .filter_map(|id| self.pending.get(id))
-            .map(|reply| reply.session_id.as_str())
+            .deliveries
+            .keys()
+            .map(SessionId::as_str)
+            .chain(
+                self.fetching
+                    .iter()
+                    .filter_map(|id| self.pending.get(id))
+                    .map(|reply| reply.session_id.as_str()),
+            )
             .collect();
-        let mut ids: Vec<&String> = self
+        let mut ids: Vec<(u64, &String)> = self
             .pending
             .iter()
             .filter(|(id, reply)| {
-                !self.submitting.contains(*id)
-                    && !self.handled.contains(*id)
+                !self.handled.contains(*id)
                     && !being_typed.contains(reply.session_id.as_str())
                     && !self.held.contains_key(&reply.session_id)
             })
-            .map(|(id, _)| id)
+            .map(|(id, reply)| (reply.seq, id))
             .collect();
+        // Oldest first: a session's replies go in in the order they were written.
         ids.sort();
         let fetch_ready = self.fetching.is_none() && self.fetch_retry.ready(now);
-        // Sessions whose earlier reply waits to fetch its files: later ones wait behind it.
+        // Sessions whose earlier reply waits (for its agent, or to fetch its
+        // files): later ones wait behind it.
         let mut behind: HashSet<&str> = HashSet::new();
         let mut decided = None;
-        for id in ids {
+        for (_, id) in ids {
             let reply = &self.pending[id];
             if behind.contains(reply.session_id.as_str()) {
                 continue;
             }
             let elsewhere = reply.from.as_deref() != Some(self.machine.as_str());
             let session = SessionId::from_string(reply.session_id.clone());
-            let waits = |seen: &Seen| matches!(seen.lifecycle, Lifecycle::Idle | Lifecycle::Done);
+            let waits = Seen::waits;
             let outcome = match self.sessions.get(&session) {
                 _ if elsewhere && !remote => Err(ReplyFailure::NotAccepted),
                 None => Err(ReplyFailure::SessionGone),
@@ -533,7 +640,10 @@ impl ReplySync {
                 },
             };
             match outcome {
-                Ok(false) => continue,
+                Ok(false) => {
+                    behind.insert(reply.session_id.as_str());
+                    continue;
+                }
                 Ok(true) if !fetch_ready && self.unfetched(id).is_some() => {
                     behind.insert(reply.session_id.as_str());
                     continue;
@@ -568,7 +678,20 @@ impl ReplySync {
                 let reply = self.pending.get(&id)?;
                 let saved = self.files.get(&id).map_or(&[][..], Vec::as_slice);
                 let text = typed(&reply.text, saved);
-                self.submitting.insert(id.clone());
+                let seen = self.sessions.get(&session);
+                let delivery = Delivery {
+                    reply: id.clone(),
+                    target: reply.target.clone(),
+                    since: now,
+                    typed: false,
+                    turn: (
+                        seen.and_then(|seen| seen.turn),
+                        seen.and_then(|seen| seen.conversation.clone()),
+                    ),
+                    busy: false,
+                    taken: None,
+                };
+                self.deliveries.insert(session.clone(), delivery);
                 Some(ReplyWork::Submit {
                     reply: id,
                     session,
@@ -581,6 +704,47 @@ impl ReplySync {
                 self.deliver(now)
             }
         }
+    }
+
+    /// Follow the replies typed in (see [`Delivery`]): one its agent took is
+    /// reported delivered, one whose session ended or chat changed first
+    /// failed, and a session whose agent took its reply and waits again takes
+    /// the next.
+    fn follow_deliveries(&mut self, now: Duration) {
+        let mut settled = Vec::new();
+        let sessions = &self.sessions;
+        self.deliveries.retain(|session, delivery| {
+            let seen = sessions.get(session);
+            if !delivery.typed {
+                // The daemon hasn't answered yet.
+                return true;
+            }
+            if delivery.taken.is_some() {
+                return !delivery.done(seen, now);
+            }
+            match delivery.taking(seen, now) {
+                Taking::Waiting => true,
+                Taking::Taken => {
+                    delivery.taken = Some(now);
+                    settled.push((delivery.reply.clone(), None));
+                    !delivery.done(seen, now)
+                }
+                Taking::Failed(failure) => {
+                    settled.push((delivery.reply.clone(), Some(failure)));
+                    false
+                }
+            }
+        });
+        for (reply, failure) in settled {
+            self.settle(&reply, failure, true);
+        }
+    }
+
+    /// A reply is going into its session now (or was, until it's decided).
+    fn delivering(&self, id: &str) -> bool {
+        self.deliveries
+            .values()
+            .any(|delivery| delivery.reply == id && delivery.taken.is_none())
     }
 
     /// The first of a pending reply's files not saved yet, if any.
@@ -632,62 +796,76 @@ impl ReplySync {
         self.remote
     }
 
-    /// Typed into its session (or the daemon refused it): rakumux.com hears
-    /// next, and the agent's next reply there answers it.
+    /// The session a reply handed to the daemon goes into, while the daemon
+    /// hasn't answered.
+    fn submitting(&self, reply: &str) -> Option<SessionId> {
+        self.deliveries
+            .iter()
+            .find(|(_, delivery)| delivery.reply == reply && !delivery.typed)
+            .map(|(session, _)| session.clone())
+    }
+
+    /// Typed into its session (or the daemon refused it). Typed in, it's
+    /// delivered once its agent is seen to take it (see [`Delivery`]), and
+    /// the agent's next reply there answers it.
     pub fn submitted(&mut self, reply: String, result: Result<(), ErrorCode>, now_ms: i64) {
-        self.submitting.remove(&reply);
-        let Some(pending) = self.pending.get(&reply) else {
+        let Some(session) = self.submitting(&reply) else {
             return;
         };
         match result {
             Ok(()) => {
-                let session = SessionId::from_string(pending.session_id.clone());
+                let Some(delivery) = self.deliveries.get_mut(&session) else {
+                    return;
+                };
+                delivery.typed = true;
                 // A reply is answered in its chat; a session message in the
                 // chat the session shows now, or any when it doesn't say.
-                let conversation = match &pending.target {
+                let conversation = match &delivery.target {
                     Target::Chat(conversation) => Some(conversation.clone()),
                     Target::Session => self
                         .sessions
                         .get(&session)
                         .and_then(|seen| seen.conversation.clone()),
                 };
-                // Its agent has input now: nothing else is typed there until
-                // the session says it waits again.
-                if let Some(seen) = self.sessions.get_mut(&session) {
-                    seen.lifecycle = Lifecycle::Working;
-                }
                 self.awaiting.insert(
                     session,
                     Awaiting {
-                        reply: reply.clone(),
+                        reply,
                         conversation,
                         since_ms: now_ms,
                     },
                 );
-                self.handle(&reply, None);
             }
-            Err(_) => self.handle(&reply, Some(ReplyFailure::Refused)),
+            Err(_) => {
+                self.deliveries.remove(&session);
+                self.handle(&reply, Some(ReplyFailure::Refused));
+            }
         }
     }
 
     /// The daemon refused it because someone was typing in its session: it
     /// stays pending, and that session is tried again after [`TYPING_HOLD`].
     pub fn typing(&mut self, reply: String, now: Duration) {
-        self.submitting.remove(&reply);
-        if let Some(pending) = self.pending.get(&reply) {
+        if let Some(session) = self.submitting(&reply) {
+            self.deliveries.remove(&session);
             self.held
-                .insert(pending.session_id.clone(), now + TYPING_HOLD);
+                .insert(session.as_str().to_owned(), now + TYPING_HOLD);
         }
     }
 
     fn handle(&mut self, id: &str, failure: Option<ReplyFailure>) {
+        self.settle(id, failure, false);
+    }
+
+    /// Decided: rakumux.com hears, and it's never typed (again). Its files
+    /// stay for the agent once `typed_in`, else go when it failed.
+    fn settle(&mut self, id: &str, failure: Option<ReplyFailure>, typed_in: bool) {
         let attached = self
             .pending
             .remove(id)
             .is_some_and(|reply| !reply.attachments.is_empty());
-        // Typed in, its files stay for the agent; else they go.
         self.files.remove(id);
-        if attached && failure.is_some() {
+        if attached && failure.is_some() && !typed_in {
             self.discards.push_back(id.to_owned());
         }
         self.reports.push_back((id.to_owned(), failure));
@@ -818,10 +996,10 @@ impl ReplySync {
             self.pending.insert(id.to_owned(), pending());
         } else if self.pending.remove(id).is_some()
             && self.files.remove(id).is_some()
-            && !self.submitting.contains(id)
+            && !self.delivering(id)
         {
             // No longer pending (expired, say) before it was typed in; one
-            // being typed in now keeps its files for the agent.
+            // typed in (or being typed in) keeps its files for the agent.
             self.discards.push_back(id.to_owned());
         }
     }

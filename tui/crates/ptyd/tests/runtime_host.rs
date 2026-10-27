@@ -329,6 +329,41 @@ echo PASTE_OFF_OK
 }
 
 #[test]
+fn submit_writes_the_enter_apart_from_the_paste() {
+    let home = TestHome::new();
+    let host = home.host();
+    // One read(2) per `dd`, in non-canonical mode: what each read returned.
+    // Claude Code drops an Enter that arrives with a paste ending in `.png`
+    // (it checks for an image first), leaving the text unsent in its prompt.
+    let program = r#"
+stty -icanon -icrnl -echo min 1 time 0
+printf '\033[?2004hREADY\n'
+first=$(dd bs=65536 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+second=$(dd bs=65536 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+echo "FIRST=$first."
+echo "SECOND=$second."
+"#;
+    let mut argv = bash_argv();
+    argv.extend(["-c".into(), program.into()]);
+    let info = host.spawn(home.spec(argv, 80, 24, b"")).unwrap();
+    wait_for_screen(&*host, info.id, "READY");
+    assert!(wait_until(TIMEOUT, || host
+        .info(info.id)
+        .unwrap()
+        .bracketed_paste));
+    // Let the first `dd` block in its read.
+    std::thread::sleep(Duration::from_millis(200));
+    host.submit(info.id, "hi").unwrap();
+    let screen = wait_for_screen(&*host, info.id, "SECOND=");
+    assert!(
+        screen.contains("FIRST=1b5b3230307e68691b5b3230317e."),
+        "the paste alone first: {screen}"
+    );
+    assert!(screen.contains("SECOND=0d."), "then the Enter: {screen}");
+    host.shutdown();
+}
+
+#[test]
 fn tiny_sizes_are_clamped_and_wide_chars_do_not_panic() {
     let home = TestHome::new();
     let host = home.host();
@@ -465,7 +500,12 @@ fn reads_cover_history_unwrapped_lines_and_ansi() {
         r"for i in 1 2 3 4 5 6 7 8; do echo L$i; done; printf '\e[31mRED\e[0m\n'",
     )
     .unwrap();
-    wait_for_screen(&*host, info.id, "RED");
+    // The red output, not the command line (shown before its Enter).
+    let red = || {
+        host.read(info.id, ReadSource::Visible, None, TextFormat::Ansi)
+            .is_ok_and(|read| read.text.contains("\x1b[0;31mRED"))
+    };
+    assert!(wait_until(TIMEOUT, red));
     let recent = host
         .read(info.id, ReadSource::Recent, None, TextFormat::Text)
         .unwrap();

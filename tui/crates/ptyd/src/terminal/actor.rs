@@ -3,7 +3,7 @@
 //! the attachments. Output, commands and child exit arrive on one bounded
 //! channel and are handled strictly in order.
 
-use super::pty_io::{self, PtyMaster};
+use super::pty_io::{self, PtyInput, PtyMaster};
 use super::read::{formatted_scrollback, read_screen};
 use super::ring::ReplayRing;
 use super::sink::{AttachmentId, Sink};
@@ -154,7 +154,7 @@ pub(crate) struct ActorParts {
     pub(crate) host: Arc<HostInner>,
     pub(crate) master: PtyMaster,
     pub(crate) rx: Receiver<ActorMsg>,
-    pub(crate) writer: SyncSender<Vec<u8>>,
+    pub(crate) writer: SyncSender<PtyInput>,
     pub(crate) reader_stop: Arc<AtomicBool>,
     pub(crate) pid: u32,
     pub(crate) cols: u16,
@@ -181,7 +181,7 @@ pub(crate) struct Actor {
     master: PtyMaster,
     rx: Receiver<ActorMsg>,
     /// Query replies and startup input; `None` once the terminal ended.
-    writer: Option<SyncSender<Vec<u8>>>,
+    writer: Option<SyncSender<PtyInput>>,
     reader_stop: Arc<AtomicBool>,
     pid: u32,
     emulator: Emulator,
@@ -1037,7 +1037,7 @@ impl Actor {
         let Some(writer) = &self.writer else {
             return;
         };
-        match writer.try_send(bytes) {
+        match writer.try_send(PtyInput::from(bytes)) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => log_warn!(
                 "terminal {}: input queue full, dropped a terminal query reply",
@@ -1051,9 +1051,9 @@ impl Actor {
         let (Some(input), Some(writer)) = (self.startup.take(), &self.writer) else {
             return;
         };
-        if let Err(TrySendError::Full(input)) = writer.try_send(input) {
+        if let Err(TrySendError::Full(input)) = writer.try_send(PtyInput::from(input)) {
             // Retry on the next tick.
-            self.startup = Some(input);
+            self.startup = Some(input.bytes);
         }
     }
 
