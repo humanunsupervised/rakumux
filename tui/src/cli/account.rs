@@ -1,5 +1,5 @@
 //! `rakumux account login | logout | status [--json]`: the Rakumux account
-//! that turns on AI session descriptions, and the hidden
+//! that turns on AI session titles and the agent feed, and the hidden
 //! `rakumux status-service` that holds it (see `crate::account`).
 
 use std::io::Write;
@@ -124,7 +124,7 @@ fn logout(access: &dyn AccountAccess, out: &mut dyn Write) -> Result<i32, CliErr
             access.sign_out().map_err(CliError::internal)?;
             writeln!(
                 out,
-                "Signed out {}. AI session descriptions stopped.",
+                "Signed out {}. AI session titles stopped.",
                 account.name()
             )
             .map_err(output_error)?;
@@ -141,7 +141,7 @@ fn status(
 ) -> Result<i32, CliError> {
     let account = access.account().map_err(CliError::internal)?;
     let described = match &account {
-        Some(_) => descriptions(api, access)?,
+        Some(_) => live_descriptions(api, access)?,
         None => Vec::new(),
     };
     let text = if as_json {
@@ -154,7 +154,9 @@ fn status(
         json!({
             "signed_in": account.is_some(),
             "email": account.as_ref().and_then(|a| a.email.clone()),
-            "ai_session_summaries": account.as_ref().and_then(|a| a.summaries),
+            "ai_session_titles": account.as_ref().and_then(|a| a.titles),
+            // The switch's name before titles, kept for scripts.
+            "ai_session_summaries": account.as_ref().and_then(|a| a.titles),
             "feed": account.as_ref().and_then(|a| a.feed),
             "sessions": sessions,
         })
@@ -171,7 +173,7 @@ fn status(
 }
 
 /// The live sessions of every folder that have an AI description.
-fn descriptions(
+fn live_descriptions(
     api: &dyn SessionApi,
     access: &dyn AccountAccess,
 ) -> Result<Vec<(SessionView, String)>, CliError> {
@@ -182,7 +184,7 @@ fn descriptions(
         .take(account::MAX_SESSIONS)
         .collect();
     let ids: Vec<_> = live.iter().map(|session| session.id.clone()).collect();
-    let lines = access.descriptions(&ids).map_err(CliError::internal)?;
+    let lines = access.statuses(&ids).map_err(CliError::internal)?;
     Ok(live
         .into_iter()
         .zip(lines)
@@ -195,10 +197,9 @@ fn descriptions(
 
 fn describe(account: Option<&Account>) -> String {
     let Some(account) = account else {
-        return "Not signed in. `rakumux account login` signs in for AI session descriptions."
-            .into();
+        return "Not signed in. `rakumux account login` signs in for AI session titles.".into();
     };
-    let summaries = match account.summaries {
+    let titles = match account.titles {
         Some(true) => "on",
         Some(false) => "off (turn them on at rakumux.com/features)",
         None => "not checked yet",
@@ -209,7 +210,7 @@ fn describe(account: Option<&Account>) -> String {
         None => "not checked yet",
     };
     format!(
-        "Signed in as {}.\nAI session summaries: {summaries}.\nFeed: {feed}.",
+        "Signed in as {}.\nAI session titles: {titles}.\nFeed: {feed}.",
         account.name()
     )
 }
@@ -224,13 +225,13 @@ mod tests {
         let account = Account {
             email: Some("person@example.com".into()),
             subject: "user_1".into(),
-            summaries: Some(false),
+            titles: Some(false),
             feed: Some(true),
             features_unsaved: false,
         };
         let text = describe(Some(&account));
         assert!(text.contains("Signed in as person@example.com."));
-        assert!(text.contains("AI session summaries: off"));
+        assert!(text.contains("AI session titles: off"));
         assert!(text.contains("Feed: on."));
     }
 

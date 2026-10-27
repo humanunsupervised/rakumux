@@ -110,7 +110,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('f') => app.toggle_feed(),
         KeyCode::Char('v') => app.set_layout(app.next_layout()),
         KeyCode::Char('p') => app.toggle_pin(),
-        KeyCode::Char('s') => app.summarize_selected(),
+        KeyCode::Char('s') => app.retitle_selected(),
         KeyCode::Char('w') => app.toggle_places(),
         KeyCode::Char('W') => app.toggle_all_places(),
         KeyCode::Char('y') => app.copy_place(),

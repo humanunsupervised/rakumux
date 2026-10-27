@@ -240,13 +240,14 @@ new-session flow, and code boundaries.
     tests): checked once the daemon connects (`AppEvent::AccountChecked`), which starts the
     service only for a saved account. Settings → Account opens `AppMode::Account`: Enter asks for
     a code (`AppEvent::SignIn`), its status is polled every second, Esc abandons it, `o` signs
-    out. Signed in, the visible live sessions' AI descriptions are read every 2 s
-    (`AppEvent::Descriptions`, generation-checked) into `App::description`, the session list's
-    italic description line (with whether the service is making a new one); a refresh in
-    progress keeps the last one. `summarize` asks for a new one (`AccountAccess::summarize`,
-    `AppEvent::Summarized`): the ↻ that hovering a described row shows at the line's right end
-    (`Hit::SummaryRefresh`, a 2-column slot that never moves the text, a spinner while making
-    one) or `s` (`summarize_selected`; a footer message when signed out or summaries are off).
+    out. Signed in with AI session titles on (`App::titles_on`), the service names sessions
+    itself; the visible live sessions' status is read every 2 s (`AppEvent::Statuses`,
+    generation-checked) for which have a title being made (`App::title_refreshing`). `retitle`
+    asks for a new one (`AccountAccess::summarize`, `AppEvent::TitleAsked`): the ↻ that
+    hovering a live row shows right after its name (`Hit::TitleRefresh`, a 2-column slot kept
+    after the name so it never moves the text, a spinner while one is made) or `s`
+    (`retitle_selected`; a footer message when signed out or titles are off). Rows show no
+    description or last message. Local AI naming (`auto_name.rs`) waits while titles are on.
   - the prefix commands work in both panes (`handlers/list.rs` routes them too).
 
 ## Data flow

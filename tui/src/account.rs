@@ -1,8 +1,8 @@
-//! The Rakumux account, AI session descriptions and the agent feed. A
-//! per-home service (`rakumux status-service`, `rakumux_sensagent::service`)
-//! holds the sign-in, follows the daemon's sessions, describes them and
-//! keeps the feed; the TUI and `rakumux account` are its clients. It starts
-//! on demand: when someone signs in, or when this home has a saved account.
+//! The Rakumux account, AI session titles and the agent feed. A per-home
+//! service (`rakumux status-service`, `rakumux_sensagent::service`) holds the
+//! sign-in, follows the daemon's sessions, titles them and keeps the feed;
+//! the TUI and `rakumux account` are its clients. It starts on demand: when
+//! someone signs in, or when this home has a saved account.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,7 +16,7 @@ use rakumux_sensagent::source::TurnSettings;
 use session_core::ids::SessionId;
 use session_core::paths::Layout;
 
-pub use rakumux_sensagent::owner::protocol::{LineState, MAX_SESSIONS};
+pub use rakumux_sensagent::owner::protocol::MAX_SESSIONS;
 
 /// The signed-in account, as the service reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,9 +24,9 @@ pub struct Account {
     pub email: Option<String>,
     /// The provider's stable id, shown when there's no email.
     pub subject: String,
-    /// The account's AI session summaries switch (rakumux.com/features);
+    /// The account's AI session titles switch (rakumux.com/features);
     /// `None` until read.
-    pub summaries: Option<bool>,
+    pub titles: Option<bool>,
     /// The account's Feed switch (rakumux.com/features); `None` until read.
     pub feed: Option<bool>,
     /// The last change to the switches couldn't be saved to the account.
@@ -40,7 +40,7 @@ impl Account {
         state.account.map(|account| Self {
             email: account.email,
             subject: account.subject,
-            summaries,
+            titles: summaries,
             feed,
             features_unsaved,
         })
@@ -52,7 +52,7 @@ impl Account {
     }
 }
 
-/// What the TUI does with the account and its AI descriptions; blocking, so
+/// What the TUI does with the account and its AI titles; blocking, so
 /// the TUI runs it off the UI thread. Tests use a fake.
 pub trait AccountAccess: Send + Sync {
     /// The signed-in account; `None` when signed out. Starts the service
@@ -64,11 +64,12 @@ pub trait AccountAccess: Send + Sync {
     fn sign_in_status(&self) -> Result<SignInView, String>;
     /// Abandon an unfinished sign-in.
     fn cancel_sign_in(&self) -> Result<(), String>;
-    /// Stop describing sessions and remove this machine's sign-in.
+    /// Stop titling sessions and remove this machine's sign-in.
     fn sign_out(&self) -> Result<(), String>;
-    /// The AI descriptions of `sessions` (at most [`MAX_SESSIONS`]), in
-    /// order; empty when the service isn't running.
-    fn descriptions(&self, sessions: &[SessionId]) -> Result<Vec<StatusLine>, String>;
+    /// The AI status of `sessions` (at most [`MAX_SESSIONS`]), in order:
+    /// whether a title is being made, and its description; empty when the
+    /// service isn't running.
+    fn statuses(&self, sessions: &[SessionId]) -> Result<Vec<StatusLine>, String>;
     /// The feed entries that changed after `after` for a client holding
     /// `generation`. Asking while `shown` says the feed is on screen (the
     /// service reads it from rakumux.com more often); otherwise this window
@@ -80,15 +81,15 @@ pub trait AccountAccess: Send + Sync {
         generation: Option<u64>,
         shown: bool,
     ) -> Result<FeedPage, String>;
-    /// Make a new AI summary of `session` now (the refresh icon or `s`). Starts
+    /// Make a new AI title of `session` now (the ↻ or `s`). Starts
     /// the service only when this home has a saved account; signed out without
     /// one, it does nothing.
     fn summarize(&self, session: &SessionId) -> Result<(), String>;
-    /// Turn the account's AI session summaries or Agent feed switch on or
+    /// Turn the account's AI session titles or Agent feed switch on or
     /// off (`None` leaves one as it is), saved to the account as on
     /// rakumux.com/features. The service applies it at once and saves it
     /// next; [`Account::features_unsaved`] says when that failed.
-    fn set_features(&self, summaries: Option<bool>, feed: Option<bool>) -> Result<(), String>;
+    fn set_features(&self, titles: Option<bool>, feed: Option<bool>) -> Result<(), String>;
     /// The whole turn feed entry `entry` finished, past `after` when given:
     /// the prompt, the agent's text, reasoning and tool calls, and the tools'
     /// output, in order, as rakumux.com keeps it.
@@ -211,7 +212,7 @@ impl AccountAccess for LocalAccount {
             .map(|_| ())
     }
 
-    fn descriptions(&self, sessions: &[SessionId]) -> Result<Vec<StatusLine>, String> {
+    fn statuses(&self, sessions: &[SessionId]) -> Result<Vec<StatusLine>, String> {
         let sessions = &sessions[..sessions.len().min(MAX_SESSIONS)];
         Ok(self
             .with(false, |client| client.statuses(sessions))?
@@ -236,9 +237,9 @@ impl AccountAccess for LocalAccount {
             .map(|_| ())
     }
 
-    fn set_features(&self, summaries: Option<bool>, feed: Option<bool>) -> Result<(), String> {
+    fn set_features(&self, titles: Option<bool>, feed: Option<bool>) -> Result<(), String> {
         self.with(self.has_saved_account(), |client| {
-            client.set_features(summaries, feed)
+            client.set_features(titles, feed)
         })?
         .ok_or_else(|| "the account service isn't running".into())
     }
@@ -397,10 +398,7 @@ mod tests {
             "0.0.0",
         );
         assert_eq!(account.account(), Ok(None));
-        assert_eq!(
-            account.descriptions(&[SessionId::from_string("a")]),
-            Ok(vec![])
-        );
+        assert_eq!(account.statuses(&[SessionId::from_string("a")]), Ok(vec![]));
         assert_eq!(account.sign_in_status(), Ok(SignInView::Idle));
         assert_eq!(account.feed(None, None, true), Ok(signed_out_feed()));
     }

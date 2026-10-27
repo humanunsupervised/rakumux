@@ -141,7 +141,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         }
         KeyAction::Rename => app.open_rename(),
         KeyAction::Pin => app.toggle_pin(),
-        KeyAction::Summarize => app.summarize_selected(),
+        KeyAction::Retitle => app.retitle_selected(),
         KeyAction::Places => app.toggle_places(),
         KeyAction::AllPlaces => app.toggle_all_places(),
         KeyAction::CopyPlace => app.copy_place(),
@@ -198,7 +198,7 @@ fn open_item(app: &mut App, item: SettingsItem) {
             app.settings.sessions.icons = next;
             save_config(app, format!("Icons: {}", next.label()));
         }
-        SettingsItem::AiSummaries => app.toggle_feature(AccountFeature::AiSummaries),
+        SettingsItem::AiTitles => app.toggle_feature(AccountFeature::AiTitles),
         SettingsItem::AgentFeed => app.toggle_feature(AccountFeature::AgentFeed),
         SettingsItem::RemoteReplies => {
             if !matches!(app.account, AccountStatus::SignedIn(_)) {

@@ -1,13 +1,14 @@
-//! The Rakumux account and AI session descriptions (`crate::account`).
-//! Checked once the daemon connects; signed in, live sessions shown get a
-//! short AI description under them, read from the account service every few
-//! seconds. The service makes one per agent chat by itself; after that a new
-//! one is made only when asked: `s`, or the ↻ shown over a hovered
-//! description.
+//! The Rakumux account and AI session titles (`crate::account`). Checked
+//! once the daemon connects. Signed in with AI session titles on, the account
+//! service names each agent chat's session by itself (a name the user gave
+//! stays); after that a new title is made only when asked: `s`, or the ↻
+//! after a hovered session's name. The live sessions shown are read from
+//! the service every few seconds for which have one being made (a spinner
+//! after the name).
 //! Settings → Account opens the account dialog: sign in with a code
 //! approved in any browser, see who is signed in, sign out. Settings →
-//! Available on sign-in turns the account's AI summaries and Agent feed on
-//! and off, saved to the account as on rakumux.com/features.
+//! Available on sign-in turns the account's AI session titles and Agent feed
+//! on and off, saved to the account as on rakumux.com/features.
 
 use std::time::{Duration, Instant};
 
@@ -18,12 +19,12 @@ use session_core::model::SessionStatus;
 use super::runtime::AppEvent;
 use super::types::{AccountDialog, AccountDialogState, AccountFeature, AccountStatus, AppMode};
 use super::App;
-use crate::account::{self, Account, LineState, MAX_SESSIONS};
+use crate::account::{self, Account, MAX_SESSIONS};
 
-/// How often descriptions are read while signed in.
-const DESCRIPTIONS_EVERY: Duration = Duration::from_secs(2);
+/// How often the sessions' AI status is read while signed in.
+const STATUSES_EVERY: Duration = Duration::from_secs(2);
 /// How often the account is checked again while signed in (the AI session
-/// summaries switch, a sign-out elsewhere).
+/// titles switch, a sign-out elsewhere).
 const ACCOUNT_EVERY: Duration = Duration::from_secs(60);
 /// How often a sign-in in progress is checked.
 const SIGN_IN_EVERY: Duration = Duration::from_secs(1);
@@ -72,15 +73,15 @@ impl App {
         match &status {
             AccountStatus::SignedIn(account) => {
                 self.account_check_at = Some(Instant::now() + ACCOUNT_EVERY);
-                self.descriptions_at.get_or_insert_with(Instant::now);
+                self.statuses_at.get_or_insert_with(Instant::now);
                 if std::mem::take(&mut self.features_saving) && account.features_unsaved {
                     self.set_status("Couldn't save that to your account. Try again.");
                 }
-                if account.summaries == Some(false) {
-                    self.descriptions.clear();
+                if account.titles == Some(false) {
+                    self.titles_refreshing.clear();
                 }
             }
-            _ => self.forget_descriptions(),
+            _ => self.forget_statuses(),
         }
         self.account = status;
         self.on_feed_switch();
@@ -101,9 +102,9 @@ impl App {
             return;
         };
         let on = !on;
-        let (summaries, feed) = match feature {
-            AccountFeature::AiSummaries => {
-                account.summaries = Some(on);
+        let (titles, feed) = match feature {
+            AccountFeature::AiTitles => {
+                account.titles = Some(on);
                 (Some(on), None)
             }
             AccountFeature::AgentFeed => {
@@ -112,8 +113,8 @@ impl App {
             }
         };
         account.features_unsaved = false;
-        if summaries == Some(false) {
-            self.descriptions.clear();
+        if titles == Some(false) {
+            self.titles_refreshing.clear();
         }
         self.on_feed_switch();
         self.features_saving = true;
@@ -121,7 +122,7 @@ impl App {
         self.set_status(format!("{}: {state}", feature.label()));
         let access = self.account_access.clone();
         self.exec
-            .job(move || AppEvent::FeaturesSet(access.set_features(summaries, feed)));
+            .job(move || AppEvent::FeaturesSet(access.set_features(titles, feed)));
     }
 
     pub(super) fn on_features_set(&mut self, result: Result<(), String>) {
@@ -206,7 +207,7 @@ impl App {
                 dialog.state = AccountDialogState::Loading;
                 self.account_checking = false;
                 self.check_account();
-                self.set_status("Signed in. AI descriptions appear under each session.");
+                self.set_status("Signed in.");
             }
             Ok(SignInView::Failed { reason }) => {
                 dialog.state = AccountDialogState::Failed(account::failure_text(reason).into())
@@ -243,12 +244,12 @@ impl App {
         match result {
             Ok(()) => {
                 self.account = AccountStatus::SignedOut;
-                self.forget_descriptions();
+                self.forget_statuses();
                 self.on_feed_switch();
                 if let AppMode::Account(dialog) = &mut self.mode {
                     dialog.state = AccountDialogState::SignedOut;
                 }
-                self.set_status("Signed out. AI descriptions stopped.");
+                self.set_status("Signed out.");
             }
             Err(error) => match &mut self.mode {
                 AppMode::Account(dialog) => dialog.state = AccountDialogState::Failed(error),
@@ -258,7 +259,7 @@ impl App {
     }
 
     /// The tick's account work: a sign-in's progress, the periodic account
-    /// check and reading descriptions.
+    /// check and reading which titles are being made.
     pub(super) fn account_timers(&mut self, now: Instant) {
         if self.sign_in_poll_at.is_some_and(|at| now >= at) && !self.sign_in_polling {
             self.sign_in_poll_at = None;
@@ -272,14 +273,14 @@ impl App {
         if self.account_check_at.is_some_and(|at| now >= at) {
             self.check_account();
         }
-        if self.descriptions_at.is_some_and(|at| now >= at) && !self.descriptions_busy {
-            self.read_descriptions(now);
+        if self.statuses_at.is_some_and(|at| now >= at) && !self.statuses_busy {
+            self.read_statuses(now);
         }
     }
 
-    fn read_descriptions(&mut self, now: Instant) {
-        self.descriptions_at = Some(now + DESCRIPTIONS_EVERY);
-        if !self.summaries_on() {
+    fn read_statuses(&mut self, now: Instant) {
+        self.statuses_at = Some(now + STATUSES_EVERY);
+        if !self.titles_on() {
             return;
         }
         let sessions: Vec<_> = self
@@ -293,136 +294,104 @@ impl App {
         if sessions.is_empty() {
             return;
         }
-        self.descriptions_busy = true;
-        let generation = self.descriptions_generation;
+        self.statuses_busy = true;
+        let generation = self.statuses_generation;
         let access = self.account_access.clone();
-        self.exec.job(move || AppEvent::Descriptions {
+        self.exec.job(move || AppEvent::Statuses {
             generation,
-            result: access.descriptions(&sessions),
+            result: access.statuses(&sessions),
         });
     }
 
-    pub(super) fn on_descriptions(
-        &mut self,
-        generation: u64,
-        result: Result<Vec<StatusLine>, String>,
-    ) {
-        if generation != self.descriptions_generation {
+    pub(super) fn on_statuses(&mut self, generation: u64, result: Result<Vec<StatusLine>, String>) {
+        if generation != self.statuses_generation {
             return;
         }
-        self.descriptions_busy = false;
+        self.statuses_busy = false;
         // A failure (the service restarting) keeps what's shown.
         let Ok(lines) = result else { return };
         for line in lines {
             if line.refreshing {
-                self.summaries_refreshing.insert(line.session.clone());
+                self.titles_refreshing.insert(line.session);
             } else {
-                self.summaries_refreshing.remove(&line.session);
-            }
-            match (line.state, line.text) {
-                (LineState::Ready, Some(text)) => {
-                    self.descriptions.insert(line.session, text);
-                }
-                // Refreshing, or nothing new to say: the last one stays.
-                (
-                    LineState::Pending
-                    | LineState::Stale
-                    | LineState::Missing
-                    | LineState::NoContext
-                    | LineState::Ready
-                    | LineState::Unknown,
-                    _,
-                ) => {}
-                // Not described: off, signed out, private, ended.
-                _ => {
-                    self.descriptions.remove(&line.session);
-                }
+                self.titles_refreshing.remove(&line.session);
             }
         }
     }
 
-    /// `s`: a new AI summary of the selected session (live ones only).
-    pub fn summarize_selected(&mut self) {
+    /// `s`: a new AI title of the selected session (live ones only).
+    pub fn retitle_selected(&mut self) {
         let Some(session) = self.list.selected_session() else {
-            self.set_status("Select a session to summarise.");
+            self.set_status("Select a session to title.");
             return;
         };
         if session.status != SessionStatus::Live {
-            self.set_status("Only running sessions are summarised.");
+            self.set_status("Only running sessions get AI titles.");
             return;
         }
-        let (id, name) = (session.id.clone(), session.name.clone());
-        if self.summarize(id.clone()) && self.description(&id).is_none() {
-            self.set_status(format!("Summarising {name}…"));
-        }
+        let id = session.id.clone();
+        self.retitle(id);
     }
 
-    /// `s`, or a click on a description's ↻: the account service makes a new
-    /// AI summary of `session` (its agent's latest prompt and outputs since,
-    /// else its screen). Signed out or with summaries off, says how to turn
+    /// `s`, or a click on the ↻ after a session's name: the account service
+    /// makes a new AI title of `session` (from its agent's latest prompt and
+    /// outputs since, else its screen) and names the session with it,
+    /// whatever its name. Signed out or with titles off, says how to turn
     /// them on; while one is being made, does nothing. True when asked.
-    pub fn summarize(&mut self, session: SessionId) -> bool {
-        let on = matches!(
-            &self.account,
-            AccountStatus::SignedIn(account) if account.summaries != Some(false)
-        );
-        if !on {
-            self.set_status("Sign in and turn on AI summaries: Settings → Available on sign-in.");
+    pub fn retitle(&mut self, session: SessionId) -> bool {
+        if !self.titles_on() {
+            self.set_status(
+                "Sign in and turn on AI session titles: Settings → Available on sign-in.",
+            );
             return false;
         }
-        if self.summary_refreshing(&session) {
+        if self.title_refreshing(&session) {
             return false;
         }
-        self.summary_asks.insert(session.clone());
+        self.title_asks.insert(session.clone());
         let access = self.account_access.clone();
         self.exec.job(move || {
             let result = access.summarize(&session);
-            AppEvent::Summarized { session, result }
+            AppEvent::TitleAsked { session, result }
         });
         true
     }
 
-    pub(super) fn on_summarized(&mut self, session: SessionId, result: Result<(), String>) {
-        self.summary_asks.remove(&session);
+    pub(super) fn on_title_asked(&mut self, session: SessionId, result: Result<(), String>) {
+        self.title_asks.remove(&session);
         match result {
             Ok(()) => {
-                self.summaries_refreshing.insert(session);
+                self.titles_refreshing.insert(session);
                 // A read under way predates the request: read again now.
-                self.descriptions_generation += 1;
-                self.descriptions_busy = false;
-                self.descriptions_at = Some(Instant::now());
+                self.statuses_generation += 1;
+                self.statuses_busy = false;
+                self.statuses_at = Some(Instant::now());
             }
-            Err(error) => self.set_status(format!("Couldn't summarise: {error}")),
+            Err(error) => self.set_status(format!("Couldn't make a title: {error}")),
         }
     }
 
-    /// A new AI summary of `session` was asked for or is being made.
-    pub fn summary_refreshing(&self, session: &SessionId) -> bool {
-        self.summary_asks.contains(session) || self.summaries_refreshing.contains(session)
+    /// A new AI title of `session` was asked for or is being made.
+    pub fn title_refreshing(&self, session: &SessionId) -> bool {
+        self.title_asks.contains(session) || self.titles_refreshing.contains(session)
     }
 
-    fn forget_descriptions(&mut self) {
-        self.descriptions.clear();
-        self.summaries_refreshing.clear();
-        self.summary_asks.clear();
-        self.descriptions_at = None;
-        self.descriptions_busy = false;
-        self.descriptions_generation += 1;
+    fn forget_statuses(&mut self) {
+        self.titles_refreshing.clear();
+        self.title_asks.clear();
+        self.statuses_at = None;
+        self.statuses_busy = false;
+        self.statuses_generation += 1;
         self.account_check_at = None;
     }
 
-    /// The session's AI description, when signed in with AI summaries on
-    /// and one was written.
-    pub fn description(&self, session: &session_core::ids::SessionId) -> Option<&str> {
-        self.descriptions.get(session).map(String::as_str)
-    }
-
-    /// Signed in with AI summaries on (or not yet read): a description's ↻
-    /// and `s` make new ones.
-    pub fn summaries_on(&self) -> bool {
+    /// Signed in with AI session titles on (or not yet read): the service
+    /// titles sessions, the ↻ and `s` make new titles, and the TUI's own AI
+    /// naming waits.
+    pub fn titles_on(&self) -> bool {
         matches!(
             &self.account,
-            AccountStatus::SignedIn(account) if account.summaries != Some(false)
+            AccountStatus::SignedIn(account) if account.titles != Some(false)
         )
     }
 }

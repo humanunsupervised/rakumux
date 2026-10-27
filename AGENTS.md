@@ -131,29 +131,36 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `api.json` and starts `rakumux-api --detach` when needed; forwards `RAKUMUX_SESSION_ID`/
    `RAKUMUX_SESSION_TOKEN` as identity headers; returns terminal text sanitized, capped and inside
    a nonce-delimited untrusted block. See `mcp/README.md`.
-10. **Account and AI session descriptions** (`tui/crates/sensagent`, `tui/src/account.rs`): a
+10. **Account and AI session titles** (`tui/crates/sensagent`, `tui/src/account.rs`): a
    per-home service, the hidden `rakumux status-service` (`rakumux_sensagent::service::serve`),
    holds the Rakumux account (Clerk OAuth device sign-in, credentials under
    `~/.rakumux/sensagent/credentials`), follows the daemon's sessions as a user client and asks
-   `https://rakumux.com/api/v1/ai/session-status` for a short description of each live session
-   (cached in `~/.rakumux/sensagent/status/status.sqlite3`). It is started detached (`setsid`)
+   `https://rakumux.com/api/v1/ai/session-status?title=1` for a short title and description of
+   each live session (contract `contracts/session-status/`; descriptions cached in
+   `~/.rakumux/sensagent/status/status.sqlite3`). It is started detached (`setsid`)
    on demand: by `rakumux account login` or the TUI's sign-in, or when the home has a saved
    account; it then runs until SIGTERM. Clients talk to it over a private Unix socket
-   (`rakumux_sensagent::owner`). It shares sessions only while the account's AI session summaries
-   switch (`GET /api/v1/features`, read every 2 minutes) is on: then it consents for the folders
-   of live sessions (never private ones), and off it stops. **One summary per chat**: an agent
-   conversation the daemon follows (`session_turn`) is described once, when its agent has
-   written 5 messages (`sessions.ai_summary.every_messages`) or its turn finishes sooner, from
-   the prompt and its messages (never the screen); after that only when asked:
-   `OwnerRequest::Summarize` (the ↻ that hovering a session's description shows just before it, or `s`), from the
+   (`rakumux_sensagent::owner`). It shares sessions only while the account's AI session titles
+   switch (`ai_session_summaries` in `GET /api/v1/features`, read every 2 minutes) is on: then
+   it consents for the folders of live sessions (never private ones), and off it stops. **One
+   title per chat**: an agent conversation the daemon follows (`session_turn`) is titled once,
+   when its agent has written 5 messages (`sessions.ai_summary.every_messages`) or its turn
+   finishes sooner, from the prompt and its messages (never the screen); after that only when
+   asked: `OwnerRequest::Summarize` (the ↻ after a hovered session's name, or `s`), from the
    latest prompt and the newest messages, or the screen for other programs. Nothing refreshes on
-   a timer, and shown text stays through lifecycle changes, renewals and consent that only adds
-   folders, until that terminal ends. Settings → Account signs in (a code, link and QR code),
-   the summaries show under each session's name (before one, the user's last message; a
-   spinner while one is made), Settings → Available on sign-in turns the account's AI
-   summaries and Agent feed on and off (greyed out when signed out; `OwnerRequest::SetFeatures`,
-   applied at once and saved to the account with `PATCH /api/v1/features`, as the website's
-   Features page saves them), and `rakumux account status` lists them. Its stderr, static failure codes only, goes to
+   a timer. **The title names the session** (`refresh/titles.rs`): a worker renames it through
+   the daemon (`session_rename`, as the user) only while its name is the generated one
+   (`auto_named`) or exactly the title the service last gave it (kept per session in
+   `sensagent/status/titles.json`, 0600), so once the user renames it (`r`, `rakumux rename`,
+   the API or MCP) automatic titles leave it alone; one asked for always applies, and the
+   session counts as AI-titled again. A title another session of the folder has gets ` 2`,
+   ` 3`, … (names are unique within a folder). A service answer without `title` renames
+   nothing. Settings → Account signs in (a code, link and QR code); while a title is being made
+   a spinner sits right after the session's name; Settings → Available on sign-in turns the
+   account's AI session titles and Agent feed on and off (greyed out when signed out;
+   `OwnerRequest::SetFeatures`, applied at once and saved to the account with
+   `PATCH /api/v1/features`, as the website's Features page saves them), and `rakumux account
+   status` lists them and each live session's AI description. Its stderr, static failure codes only, goes to
    `~/.rakumux/logs/status-service.log`. Clerk has no custom scopes, so production names
    `profile` as the AI status scope (`DeviceAuthConfig::with_status_scope`), matching the
    website's check. Clerk's access tokens last 24 hours: the service renews them with the
@@ -328,7 +335,7 @@ tui/
     terminal_view/           # live terminal pane widget, key/mouse/paste encoding
     layout/                  # Master detail / Grid / Tabs geometry, tab bar, session cycling
     help/                    # Settings modal (General, Keys: actions table) and Help modal (docs, license)
-    naming/                  # AI session naming (Anthropic / OpenAI over HTTPS)
+    naming/                  # AI session naming (Anthropic / OpenAI over HTTPS), not while AI titles are on
     auth/                    # Clerk auth, deferred (feature flag off)
     escape_time.rs           # keys whose escape sequence arrives in pieces (phones over SSH): a lone
                              # Esc waits for the rest of an arrow, Home/End, PgUp/PgDn, F1-F4 or a focus
@@ -352,7 +359,7 @@ tool call or reply as one line, from its conversation log or database: `integrat
 `user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
 messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
 since, whose content `session_turn` returns; the conversation tells chats apart for their one
-automatic AI summary), `places` (below), and `terminal` (pid, foreground process, title, size,
+automatic AI title), `places` (below), and `terminal` (pid, foreground process, title, size,
 `controlled`, `alternate_screen`) while live. Folders are `ProjectView {path, name, sessions, live,
 last_active_at, added_at, git}` on the wire.
 
@@ -441,7 +448,7 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `projects`, `session.pin`, `session.git`, `auth.delegated`, `sessions.all` and `daemon.restart`
   advertise the additions. `session_turn {id}` (user only, capability `session.turn`) returns a
   live agent's current turn: `TurnContent {id, prompt?, messages, total}`, the newest 100
-  messages, each one line of at most 600 characters, for AI summaries. `session_submit {id, text,
+  messages, each one line of at most 600 characters, for AI titles. `session_submit {id, text,
   quiet_ms?}` (paste, then Enter in a write of its own 500 ms later, nothing written between
   them: Claude Code drops an Enter that comes with a paste ending in `.png`/`.jpg`/`.gif`/
   `.webp` while it checks for an image, leaving the text unsent): with `quiet_ms` (capability
@@ -558,7 +565,8 @@ accidents; they don't stop a hostile process running as the same user.
   session.json                   auth SessionRecord {session_id, token, email} (Clerk; deferred, unrelated to Rakumux sessions)
   sensagent/                     the account service (`rakumux status-service`): credentials/
                                  (the sign-in, 0600), status/ (descriptions and sharing consent,
-                                 SQLite), its registration and private socket
+                                 SQLite; titles.json: the title it last gave each session;
+                                 chats.json), its registration and private socket
   uploads/<reply id>/            0700: files attached to feed replies (0600), fetched by the
                                  account service and typed to the agent as paths; kept 7 days
 ~/.rakumux/run/                ($RAKUMUX_HOME/run), 0700: the same from every login
@@ -715,9 +723,11 @@ and token, and the resume command as startup input → the TUI attaches.
 
 ### AI naming
 
-When a session with a generated name first goes `idle` or `done`, the TUI reads
-`~/.rakumux/history/<id>.log` and the visible screen (`session_read`), calls
-`naming::suggest_session_name`, and renames the session if a name comes back.
+Signed in with the account's AI session titles on, the account service names sessions (component
+10) and the TUI's own naming waits (`App::titles_on`). Otherwise, when a session with a generated
+name first goes `idle` or `done`, the TUI reads `~/.rakumux/history/<id>.log` and the visible
+screen (`session_read`), calls `naming::suggest_session_name` (the API keys in `config.json`),
+and renames the session if a name comes back.
 
 ### Updates
 
@@ -766,6 +776,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   not part of the registry.
 - **Git context**: a session's branch, linked worktree and repository name, read from `.git` files
   (never `git`).
+- **AI title**: a session's name when the account service gave it (once per agent chat, or when
+  asked with `s`/↻); a name the user gave is never replaced automatically.
 - **Place**: a git working tree (main checkout or linked worktree) where a session's agent
   changed files, as its conversation shows; listed under the session's row (`w`).
 - **Reply** (agent reply): what an agent said when it finished a turn, captured by the daemon
@@ -827,7 +839,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
 | `rakumux daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
-| `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session descriptions (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in, whether AI session summaries are on (rakumux.com/features) and each described session |
+| `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in, whether AI session titles are on (rakumux.com/features) and each live session's AI description (`--json`: `ai_session_titles`, and `ai_session_summaries` as before) |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux-api [--port N] [--detach] [--remote-listen ADDR:PORT]...` | External HTTP API on 127.0.0.1, plus the remote listener when remote access is on (`api/README.md`) |
 | `rakumux-mcp` | MCP server for agents, e.g. `claude mcp add --scope user rakumux -- rakumux-mcp` (`mcp/README.md`) |
@@ -845,7 +857,7 @@ that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and A
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
 `Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
 running session in view), `Tab` last session, `1`-`9` go into that session,
-`n` new, `r` rename, `s` a new AI summary of the session, `w` where the session has worked (`W`
+`n` new, `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
 every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
 screen, `b` hide Master detail's list beside the session and show it again (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
@@ -995,8 +1007,11 @@ set, and sessions without a place go last, oldest first, so a new session appear
 "+ New session". All layouts share it (a row of session tabs always in this order).
 Headers' names (a folder's, an app's, a status's, `pinned`) and their rows' text start in one
 column; the two left of it are the gutter, where a status's or the pinned header's mark sits and
-a row's marks go: its pin toggle, the summary's ↻, the places' `▸`/`▾`, the copy mark, and
-`+ New session`'s `+`. A row under a worktree's header starts a step further in, its text where
+a row's marks go: its pin toggle, the places' `▸`/`▾`, the copy mark, and
+`+ New session`'s `+`. With AI session titles on, a live session's name (its title) keeps two
+columns after it: a spinner while a new title is being made, else the ↻ under the pointer
+(`Hit::TitleRefresh`), which makes one; the row has no line for a description or the user's last
+message. A row under a worktree's header starts a step further in, its text where
 that header's words are and its gutter under its mark (`components/session_list.rs::nesting`);
 ready's read-period headers and their rows are in line with ready's. A dragged row's bar is just
 left of its gutter.
@@ -1038,7 +1053,7 @@ the list's clock (`SessionList::set_clock`, every tick), so sessions move down t
 passes. Nothing there can be moved (`J`/`K` say so). A ready session's mark (`○`, wherever it's
 shown) is amber like an unread reply's `●` but quieter (`format::read_period_style`: the amber
 faded 30% when read within the hour, 50% within the day, then muted), and ready's header has the
-last hour's. A row's description has no status words
+last hour's. A row's details line has no status words
 (its mark on the right says it): the app, subagents and report; an ended session still
 says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's places
 (`components/session_list.rs::place_content`, `app/places.rs`). First the folder the session

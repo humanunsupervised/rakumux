@@ -805,9 +805,10 @@ impl crate::remote_access::PhoneAccess for FakePhone {
 }
 
 /// The Rakumux account in tests: signed out unless set. `sign_in` waits for
-/// approval until `approve`; descriptions come from `descriptions` (missing
-/// ones are `pending`), `refreshing` while in `refreshing`, which `summarize`
-/// adds the session to (and records it in `summarized`); the feed answers with `feed_pages` in turn, then an
+/// approval until `approve`; statuses carry the service's descriptions from
+/// `descriptions` (missing ones are `pending`), and `refreshing` while in
+/// `refreshing`, which `summarize` (a new title) adds the session to (and
+/// records it in `summarized`); the feed answers with `feed_pages` in turn, then an
 /// empty page at the asked revision (signed out, off or ready, as the
 /// account is). Every call is recorded, and each feed question in `feed_asks`
 /// (with whether the feed was shown in `feed_shown`).
@@ -820,9 +821,9 @@ pub struct FakeAccount {
     pub feed_pages: Mutex<std::collections::VecDeque<rakumux_sensagent::feed::FeedPage>>,
     pub feed_asks: Mutex<Vec<(Option<u64>, Option<u64>)>>,
     pub feed_shown: Mutex<Vec<bool>>,
-    /// Sessions whose description is being made (`refreshing`).
+    /// Sessions whose title is being made (`refreshing`).
     pub refreshing: Mutex<std::collections::HashSet<SessionId>>,
-    /// Sessions a summary was asked for, in order.
+    /// Sessions a title was asked for, in order.
     pub summarized: Mutex<Vec<SessionId>>,
     /// What `feed_turn` answers in turn, then an empty turn; and what it was asked.
     pub turns: Mutex<std::collections::VecDeque<rakumux_sensagent::feed::FeedTurn>>,
@@ -842,7 +843,7 @@ impl FakeAccount {
         crate::account::Account {
             email: Some("person@example.com".into()),
             subject: "user_synthetic".into(),
-            summaries: Some(true),
+            titles: Some(true),
             feed: Some(false),
             features_unsaved: false,
         }
@@ -939,12 +940,12 @@ impl crate::account::AccountAccess for FakeAccount {
         Ok(())
     }
 
-    fn descriptions(
+    fn statuses(
         &self,
         sessions: &[SessionId],
     ) -> std::result::Result<Vec<rakumux_sensagent::owner::protocol::StatusLine>, String> {
         use rakumux_sensagent::owner::protocol::{LineState, StatusLine};
-        self.call("descriptions");
+        self.call("statuses");
         let descriptions = self.descriptions.lock().unwrap();
         Ok(sessions
             .iter()
@@ -1035,13 +1036,13 @@ impl crate::account::AccountAccess for FakeAccount {
 
     fn set_features(
         &self,
-        summaries: Option<bool>,
+        titles: Option<bool>,
         feed: Option<bool>,
     ) -> std::result::Result<(), String> {
         self.call("set_features");
         let mut account = self.account.lock().unwrap();
         let account = account.as_mut().ok_or("signed out")?;
-        account.summaries = summaries.or(account.summaries);
+        account.titles = titles.or(account.titles);
         account.feed = feed.or(account.feed);
         Ok(())
     }

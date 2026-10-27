@@ -1,6 +1,6 @@
 //! The account dialog (Settings → Account): signing in to the Rakumux
 //! account with a code approved in any browser (a link and its QR code),
-//! who is signed in and whether AI session summaries are on, signing out.
+//! who is signed in and whether AI session titles are on, signing out.
 
 use ratatui::{
     layout::{Alignment, Rect},
@@ -46,22 +46,19 @@ pub fn draw_account(f: &mut Frame, dialog: &AccountDialog, area: Rect) {
         AccountDialogState::SigningOut => (vec![spinner("Signing out…")], vec![]),
         AccountDialogState::SignedOut => (
             vec![
-                Line::from(
-                    "Sign in to see a short AI description under each session, written from \
-                     what it's doing.",
-                ),
+                Line::from("Sign in and each agent session gets an AI title from what it's doing."),
                 Line::from(""),
                 Line::from(Span::styled(
                     "Live sessions' recent terminal output and agent reports are sent to \
                      rakumux.com to write them (secrets it recognises are removed first). Turn \
-                     AI summaries off any time in Settings → Available on sign-in.",
+                     AI session titles off any time in Settings → Available on sign-in.",
                     muted,
                 )),
             ],
             vec![("Enter", "Sign in"), close],
         ),
         AccountDialogState::SignedIn(account) => {
-            let summaries = match account.summaries {
+            let titles = match account.titles {
                 Some(true) => "on",
                 Some(false) => "off",
                 None => "checking…",
@@ -70,7 +67,7 @@ pub fn draw_account(f: &mut Frame, dialog: &AccountDialog, area: Rect) {
                 vec![
                     Line::from(format!("Signed in as {}.", account.name())),
                     Line::from(""),
-                    Line::from(format!("AI session summaries: {summaries}")),
+                    Line::from(format!("AI session titles: {titles}")),
                     Line::from(""),
                     Line::from(Span::styled(
                         "Turn them on or off in Settings → Available on sign-in.",

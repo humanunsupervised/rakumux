@@ -219,8 +219,8 @@ pub enum KeyAction {
     FilterFolders,
     Rename,
     Pin,
-    /// `s`: a new AI summary of the selected session.
-    Summarize,
+    /// `s`: a new AI title of the selected session.
+    Retitle,
     /// `w`: where the selected session has worked, under its row.
     Places,
     /// `W`: where every session has worked.
@@ -286,7 +286,7 @@ impl KeyAction {
         KeyAction::FilterFolders,
         KeyAction::Rename,
         KeyAction::Pin,
-        KeyAction::Summarize,
+        KeyAction::Retitle,
         KeyAction::Places,
         KeyAction::AllPlaces,
         KeyAction::CopyPlace,
@@ -337,7 +337,7 @@ impl KeyAction {
             | KeyAction::FilterFolders
             | KeyAction::Rename
             | KeyAction::Pin
-            | KeyAction::Summarize
+            | KeyAction::Retitle
             | KeyAction::Places
             | KeyAction::AllPlaces
             | KeyAction::CopyPlace
@@ -388,7 +388,7 @@ impl KeyAction {
             KeyAction::FilterFolders => "Filter by folder",
             KeyAction::Rename => "Rename session",
             KeyAction::Pin => "Pin or unpin session",
-            KeyAction::Summarize => "Summarise the session (AI)",
+            KeyAction::Retitle => "New AI title",
             KeyAction::Places => "Where the session has worked",
             KeyAction::AllPlaces => "Where every session has worked",
             KeyAction::CopyPlace => "Copy a place's path",
@@ -449,7 +449,7 @@ impl KeyAction {
             KeyAction::FilterFolders => plain(&["P"]),
             KeyAction::Rename => plain(&["r"]),
             KeyAction::Pin => plain(&["p"]),
-            KeyAction::Summarize => plain(&["s"]),
+            KeyAction::Retitle => plain(&["s"]),
             KeyAction::Places => plain(&["w"]),
             KeyAction::AllPlaces => plain(&["W"]),
             KeyAction::CopyPlace => plain(&["y"]),
@@ -557,11 +557,12 @@ impl KeyAction {
                  folder the session works in now. Copied through your terminal (OSC 52)."
                     .into()
             }
-            KeyAction::Summarize => {
-                "Each agent chat gets one AI summary by itself, at its fifth output or when it \
-                 finishes. s (or the ↻ over a description) makes a new one: the agent's latest \
-                 request and what it has done since, or the screen for other programs. Needs \
-                 your Rakumux account with AI session summaries on."
+            KeyAction::Retitle => {
+                "Each agent chat names its session by itself, at its fifth output or when it \
+                 finishes; a name you gave stays. s (or the ↻ after a hovered session's name) \
+                 makes a new title from the agent's latest request and what it has done since, \
+                 or the screen for other programs, and renames the session with it. Needs your \
+                 Rakumux account with AI session titles on."
                     .into()
             }
             KeyAction::Restart => {
@@ -592,7 +593,7 @@ impl KeyAction {
             }
             KeyAction::Account => "Signed out, it asks for a sign-in code to approve in any \
                  browser (the footer's Sign in does too); signed in, it shows the account and \
-                 whether AI session summaries are on."
+                 whether AI session titles are on."
                 .into(),
             KeyAction::CheckForUpdate => {
                 "Shift+U checks the installed release channel. Enter confirms installation and \
@@ -2051,12 +2052,16 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     );
     doc.heading("AI naming");
     doc.text(
-        "A session you didn't name gets a better name the first time it settles (its program \
-         goes idle or finishes a task): Rakumux sends the session's recent commands and \
-         screen text to your AI provider and renames the session with its suggestion.",
+        "Signed in with AI session titles on (Settings → Available on sign-in), each agent \
+         chat names its session by itself, once its agent has written 5 messages or \
+         finished. `s` or the ↻ after a hovered session's name makes a new title. A name you \
+         gave (`r`) stays until you ask for one.",
     );
     doc.text(
-        "It uses Anthropic or OpenAI with the API key in ~/.rakumux/config.json \
+        "Otherwise a session you didn't name gets a better name the first time it settles \
+         (its program goes idle or finishes a task): Rakumux sends the session's recent \
+         commands and screen text to your AI provider and renames the session with its \
+         suggestion. It uses Anthropic or OpenAI with the API key in ~/.rakumux/config.json \
          (`anthropic_api_key`, `openai_api_key`) or the ANTHROPIC_API_KEY or OPENAI_API_KEY \
          environment variable. Without a key, sessions keep their generated names. Names you \
          choose are never replaced.",

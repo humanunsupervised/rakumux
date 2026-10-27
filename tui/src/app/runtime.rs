@@ -144,13 +144,13 @@ pub enum AppEvent {
     /// An unfinished sign-in was abandoned.
     SignInCancelled(Result<(), String>),
     SignedOut(Result<(), String>),
-    /// The sessions' AI descriptions.
-    Descriptions {
+    /// The sessions' AI status: which have a title being made.
+    Statuses {
         generation: u64,
         result: Result<Vec<rakumux_sensagent::owner::protocol::StatusLine>, String>,
     },
-    /// A new AI summary of `session` was asked for.
-    Summarized {
+    /// A new AI title of `session` was asked for.
+    TitleAsked {
         session: session_core::ids::SessionId,
         result: Result<(), String>,
     },

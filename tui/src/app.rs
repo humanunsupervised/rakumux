@@ -7,7 +7,7 @@
 //! observer and takes control when the user focuses it. Other TUIs and CLI
 //! calls may act on the same sessions at any time.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -156,9 +156,9 @@ pub enum Hit {
     /// The pin left of a hovered session row's name (that list row):
     /// pins or unpins its session.
     PinToggle(usize),
-    /// The ↻ at the end of a hovered session row's AI description (that list
-    /// row): makes a new summary of its session.
-    SummaryRefresh(usize),
+    /// The ↻ after a hovered session row's name (that list row): makes a
+    /// new AI title of its session.
+    TitleRefresh(usize),
     /// The `▸`/`▾` of a session row's current place, when it has worked
     /// elsewhere too (that list row): opens or closes its places.
     PlacesToggle(usize),
@@ -242,7 +242,7 @@ pub struct AppOptions {
     pub namer: Namer,
     /// Remote access for the phone app (`LocalPhoneAccess` in production).
     pub phone: Arc<dyn PhoneAccess>,
-    /// The Rakumux account and AI descriptions (`LocalAccount` in production).
+    /// The Rakumux account and AI titles (`LocalAccount` in production).
     pub account: Arc<dyn AccountAccess>,
     /// Update checks and installation, replaced by a fake in tests.
     pub updater: Arc<dyn crate::updater::UpdateService>,
@@ -295,15 +295,15 @@ pub struct App {
     /// When to ask where a sign-in is up to; a question is outstanding.
     sign_in_poll_at: Option<Instant>,
     sign_in_polling: bool,
-    /// Each session's latest AI description, shown under its name.
-    descriptions: HashMap<SessionId, String>,
-    descriptions_at: Option<Instant>,
-    descriptions_busy: bool,
-    descriptions_generation: u64,
-    /// Sessions whose new AI summary is being made, as the service said.
-    summaries_refreshing: HashSet<SessionId>,
-    /// Sessions a summary was asked for whose request hasn't been answered.
-    summary_asks: HashSet<SessionId>,
+    /// When to read the live sessions' AI status next; a read is out; its
+    /// generation (a newer one drops a late answer).
+    statuses_at: Option<Instant>,
+    statuses_busy: bool,
+    statuses_generation: u64,
+    /// Sessions whose new AI title is being made, as the service said.
+    titles_refreshing: HashSet<SessionId>,
+    /// Sessions a title was asked for whose request hasn't been answered.
+    title_asks: HashSet<SessionId>,
     /// The agent feed (`app/feed`).
     pub feed: feed::FeedStore,
     /// The feed is shown (`f`): a pane on the right, a tab, or the screen on
@@ -435,12 +435,11 @@ impl App {
             account_check_at: None,
             sign_in_poll_at: None,
             sign_in_polling: false,
-            descriptions: HashMap::new(),
-            descriptions_at: None,
-            descriptions_busy: false,
-            descriptions_generation: 0,
-            summaries_refreshing: HashSet::new(),
-            summary_asks: HashSet::new(),
+            statuses_at: None,
+            statuses_busy: false,
+            statuses_generation: 0,
+            titles_refreshing: HashSet::new(),
+            title_asks: HashSet::new(),
             feed: feed::FeedStore::new(rakumux_sensagent::feed::machine_name()),
             feed_open: false,
             feed_focused: false,
@@ -882,12 +881,12 @@ impl App {
                 (
                     "Account",
                     value,
-                    "Sign in to your Rakumux account for AI summaries under each session and the agent feed (Available on sign-in, below). Same as `rakumux account login`.",
+                    "Sign in to your Rakumux account for AI session titles and the agent feed (Available on sign-in, below). Same as `rakumux account login`.",
                 )
             }
-            SettingsItem::AiSummaries | SettingsItem::AgentFeed => {
+            SettingsItem::AiTitles | SettingsItem::AgentFeed => {
                 let feature = match item {
-                    SettingsItem::AiSummaries => AccountFeature::AiSummaries,
+                    SettingsItem::AiTitles => AccountFeature::AiTitles,
                     _ => AccountFeature::AgentFeed,
                 };
                 let (value, disabled) = match &self.account {
@@ -899,7 +898,7 @@ impl App {
                     _ => ("On Off", true),
                 };
                 let note = match feature {
-                    AccountFeature::AiSummaries => "A short AI summary of each agent chat under the session's name, made once the agent has written 5 messages or finished, then when you ask (the ↻ on a hovered summary, or `s`). Your prompt and the agent's messages since are sent to rakumux.com to write it; private sessions never are. Without one the line shows your last message. Saved to your account, as on rakumux.com/features.",
+                    AccountFeature::AiTitles => "Each agent chat names its session with a short AI title, made once the agent has written 5 messages or finished, then when you ask (the ↻ after a hovered session's name, or `s`). A name you gave stays until you ask. Your prompt and the agent's messages since are sent to rakumux.com to write it; private sessions never are. Saved to your account, as on rakumux.com/features.",
                     AccountFeature::AgentFeed => "The Feed (f): what your agents said when they finished a turn, from every machine signed in to your account, newest first. Each finished reply and its chat are sent to rakumux.com, keys and tokens masked, private sessions never, and kept for 30 days; so is the list of this machine's sessions (names, folder names, branches, agents and what they're doing), for rakumux.com's Status and Folder pages. Saved to your account, as on rakumux.com/features.",
                 };
                 return SettingRow {
@@ -1093,10 +1092,8 @@ impl App {
                 }
             }
             AppEvent::SignedOut(result) => self.on_signed_out(result),
-            AppEvent::Descriptions { generation, result } => {
-                self.on_descriptions(generation, result)
-            }
-            AppEvent::Summarized { session, result } => self.on_summarized(session, result),
+            AppEvent::Statuses { generation, result } => self.on_statuses(generation, result),
+            AppEvent::TitleAsked { session, result } => self.on_title_asked(session, result),
             AppEvent::FeaturesSet(result) => self.on_features_set(result),
             AppEvent::FeedTurn {
                 generation,
@@ -1447,7 +1444,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 12] = [
+const DAEMON_FEATURES: [(&str, &str); 11] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1468,12 +1465,8 @@ const DAEMON_FEATURES: [(&str, &str); 12] = [
         "each agent's latest output",
     ),
     (
-        session_core::api::CAPABILITY_USER_PROMPT,
-        "your last message in each session",
-    ),
-    (
         session_core::api::CAPABILITY_TURN,
-        "AI summaries of each agent's turn",
+        "AI titles of each agent's chat",
     ),
     (session_core::api::CAPABILITY_REPLIES, "the agent feed"),
     (

@@ -2084,7 +2084,9 @@ async fn auto_named_sessions_are_named_when_they_settle() {
     let fake = FakeApi::new(vec![view_in(&scope, "A", "user-named", 10)]);
     fake.set_read("N1", "$ cargo test\nok");
     let home = tempfile::tempdir().unwrap();
-    let options = options(&fake, scope.clone(), &home);
+    let mut options = options(&fake, scope.clone(), &home);
+    // Signed out: no AI session titles from the account.
+    options.account = Arc::new(testing::FakeAccount::default());
     let mut h = start(options, fake, home);
     h.press(KeyCode::Char('n')).await;
     h.press(KeyCode::Enter).await;
@@ -2132,6 +2134,37 @@ async fn auto_named_sessions_are_named_when_they_settle() {
     );
     h.app.process_pending();
     assert!(!h.fake.calls().iter().any(|c| c.starts_with("rename A")));
+}
+
+#[tokio::test]
+async fn ai_naming_waits_while_the_accounts_ai_session_titles_are_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let scope = ScopeRoot::resolve(dir.path()).unwrap();
+    let fake = FakeApi::new(vec![view_in(&scope, "A", "user-named", 10)]);
+    fake.set_read("N1", "$ cargo test\nok");
+    let home = tempfile::tempdir().unwrap();
+    // Signed in with AI session titles on (the harness's account).
+    let options = options(&fake, scope.clone(), &home);
+    let mut h = start(options, fake, home);
+    assert!(h.app.titles_on());
+    h.press(KeyCode::Char('n')).await;
+    h.press(KeyCode::Enter).await;
+    let settle = |h: &mut Harness| {
+        for lifecycle in [Lifecycle::Working, Lifecycle::Idle] {
+            h.fake
+                .emit_in(&scope, "N1", SessionEvent::Lifecycle { lifecycle });
+            h.app.process_pending();
+        }
+    };
+    settle(&mut h);
+    assert!(!h.fake.calls().iter().any(|c| c.starts_with("rename")));
+    assert_eq!(h.app.list.get(&id("N1")).unwrap().name, "auto-1");
+
+    // Turned off, the next settle names it here.
+    h.app.toggle_feature(super::types::AccountFeature::AiTitles);
+    h.app.process_pending();
+    settle(&mut h);
+    assert!(h.fake.calls().contains(&"rename N1 fixed_name".to_string()));
 }
 
 #[test]
@@ -2990,8 +3023,7 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
                 "the terminal panel",
                 "the branch an agent works on",
                 "each agent's latest output",
-                "your last message in each session",
-                "AI summaries of each agent's turn",
+                "AI titles of each agent's chat",
                 "the agent feed",
                 "whole chats in the agent feed",
                 "where each session has worked"
@@ -3511,8 +3543,7 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "the terminal panel",
                 "the branch an agent works on",
                 "each agent's latest output",
-                "your last message in each session",
-                "AI summaries of each agent's turn",
+                "AI titles of each agent's chat",
                 "the agent feed",
                 "whole chats in the agent feed",
                 "where each session has worked"
@@ -4537,13 +4568,13 @@ fn account_tick(h: &mut Harness) {
 }
 
 #[tokio::test]
-async fn signing_in_from_settings_shows_a_code_then_descriptions_under_sessions() {
+async fn signing_in_from_settings_shows_a_code_then_never_a_description_under_sessions() {
     let (mut h, account) = account_harness(testing::FakeAccount::default());
     assert_eq!(h.app.account, super::types::AccountStatus::SignedOut);
     assert_eq!(account.calls(), ["account"]);
-    // Signed out: no descriptions are asked for.
+    // Signed out: no statuses are asked for.
     account_tick(&mut h);
-    assert!(!account.calls().contains(&"descriptions"));
+    assert!(!account.calls().contains(&"statuses"));
 
     h.press(KeyCode::Char('o')).await;
     for _ in 0..SettingsItem::Account.index() {
@@ -4590,18 +4621,15 @@ async fn signing_in_from_settings_shows_a_code_then_descriptions_under_sessions(
     h.press(KeyCode::Esc).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
 
+    // The service's description isn't shown: the session's name is its title.
     account.descriptions.lock().unwrap().insert(
         SessionId::from_string("A"),
         "Fixing the flaky login test".into(),
     );
     account_tick(&mut h);
-    assert_eq!(
-        h.app.description(&SessionId::from_string("A")),
-        Some("Fixing the flaky login test")
-    );
-    assert_eq!(h.app.description(&SessionId::from_string("B")), None);
+    assert!(account.calls().contains(&"statuses"));
     let rows = screen_rows(&mut h, 160, 48).join("\n");
-    assert!(rows.contains("Fixing the flaky login test"), "{rows}");
+    assert!(!rows.contains("Fixing the flaky login test"), "{rows}");
 }
 
 #[tokio::test]
@@ -4618,18 +4646,15 @@ async fn closing_the_dialog_abandons_the_sign_in() {
 }
 
 #[tokio::test]
-async fn signing_out_stops_the_descriptions() {
+async fn signing_out_stops_the_titles() {
     let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
     account
-        .descriptions
+        .refreshing
         .lock()
         .unwrap()
-        .insert(SessionId::from_string("A"), "Reviewing the parser".into());
+        .insert(SessionId::from_string("A"));
     account_tick(&mut h);
-    assert_eq!(
-        h.app.description(&SessionId::from_string("A")),
-        Some("Reviewing the parser")
-    );
+    assert!(h.app.title_refreshing(&SessionId::from_string("A")));
     h.app.open_account_dialog();
     h.press(KeyCode::Char('o')).await;
     assert!(account.calls().contains(&"sign_out"));
@@ -4638,7 +4663,8 @@ async fn signing_out_stops_the_descriptions() {
         account_state(&h),
         Some(super::types::AccountDialogState::SignedOut)
     );
-    assert_eq!(h.app.description(&SessionId::from_string("A")), None);
+    assert!(!h.app.title_refreshing(&SessionId::from_string("A")));
+    assert!(!h.app.titles_on());
 }
 
 fn mouse_at(h: &mut Harness, kind: crossterm::event::MouseEventKind, (column, row): (u16, u16)) {
@@ -4669,26 +4695,28 @@ fn row_of(h: &Harness, name: &str) -> usize {
         .unwrap()
 }
 
-/// Signed in, with A described.
-async fn described() -> (Harness, Arc<testing::FakeAccount>) {
+/// Signed in with AI session titles on, the service read once.
+async fn titled() -> (Harness, Arc<testing::FakeAccount>) {
     let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
-    account.descriptions.lock().unwrap().insert(
-        SessionId::from_string("A"),
-        "Fixing the flaky login test".into(),
-    );
     account_tick(&mut h);
     (h, account)
 }
 
+/// The list's part of a screen line: left of the divider when the detail is
+/// beside it.
+fn list_part(line: &str) -> &str {
+    line.split('│').next().unwrap()
+}
+
 #[tokio::test]
-async fn hovering_a_description_shows_a_refresh_that_a_click_sends() {
+async fn hovering_a_session_shows_a_refresh_after_its_name_that_a_click_sends() {
     use crossterm::event::{MouseButton, MouseEventKind};
-    let (mut h, account) = described().await;
+    let (mut h, account) = titled().await;
     let selected = h.app.list.selection().clone();
     for width in [160, 80] {
         // The pointer away from the list.
         mouse_at(&mut h, MouseEventKind::Moved, (0, 0));
-        let screen = screen_rows(&mut h, width, 48);
+        let away = screen_rows(&mut h, width, 48);
         let (a, b) = (row_of(&h, "a"), row_of(&h, "b"));
         let height = |h: &Harness, row| {
             h.app
@@ -4698,29 +4726,26 @@ async fn hovering_a_description_shows_a_refresh_that_a_click_sends() {
                 .map(|(area, _)| area.height)
         };
         let before = height(&h, a);
-        assert!(screen
-            .iter()
-            .any(|line| line.contains("Fixing the flaky login test")));
-        assert_eq!(
-            hit_at(&h, Hit::SummaryRefresh(a)),
-            None,
-            "only when hovered"
-        );
-        // B has no description: nothing to refresh there.
+        assert_eq!(hit_at(&h, Hit::TitleRefresh(a)), None, "only when hovered");
+        // Over B: its own ↻, A's goes.
         let over_b = hit_at(&h, Hit::ListRow(b)).unwrap();
         mouse_at(&mut h, MouseEventKind::Moved, (over_b.0 + 5, over_b.1));
         screen_rows(&mut h, width, 48);
-        assert_eq!(hit_at(&h, Hit::SummaryRefresh(b)), None);
-        // Over A: the ↻ just before its description, the row as tall as before.
+        assert!(hit_at(&h, Hit::TitleRefresh(b)).is_some());
+        assert_eq!(hit_at(&h, Hit::TitleRefresh(a)), None);
+        // Over A: the ↻ right after its name, the row as tall as before.
         let over_a = hit_at(&h, Hit::ListRow(a)).unwrap();
         mouse_at(&mut h, MouseEventKind::Moved, (over_a.0 + 5, over_a.1));
         let screen = screen_rows(&mut h, width, 48);
-        let refresh = hit_at(&h, Hit::SummaryRefresh(a)).expect("the refresh");
-        // The list's column: left of the divider when the detail is beside it.
-        let line = screen[usize::from(refresh.1)].split('│').next().unwrap();
-        assert!(line.contains("↻ Fixing the flaky login test"), "{line:?}");
+        let refresh = hit_at(&h, Hit::TitleRefresh(a)).expect("the refresh");
+        let line = list_part(&screen[usize::from(refresh.1)]);
+        assert!(line.contains(" a ↻ "), "{line:?}");
+        // The target is the space and the ↻.
         let at = line.chars().position(|c| c == '↻').unwrap();
-        assert_eq!(at, usize::from(refresh.0), "{line:?}");
+        assert_eq!(at, usize::from(refresh.0) + 1, "{line:?}");
+        // Nothing moves: the ↻ (and the pin toggle) take blank columns.
+        let unmarked = line.replace(['↻', '☆'], " ");
+        assert_eq!(unmarked, list_part(&away[usize::from(refresh.1)]));
         assert!(line.chars().count() <= usize::from(width));
         assert_eq!(
             height(&h, a),
@@ -4728,7 +4753,7 @@ async fn hovering_a_description_shows_a_refresh_that_a_click_sends() {
             "hovering never changes a row's height"
         );
     }
-    let refresh = hit_at(&h, Hit::SummaryRefresh(row_of(&h, "a"))).unwrap();
+    let refresh = hit_at(&h, Hit::TitleRefresh(row_of(&h, "a"))).unwrap();
     mouse_at(
         &mut h,
         MouseEventKind::Down(MouseButton::Left),
@@ -4744,41 +4769,45 @@ async fn hovering_a_description_shows_a_refresh_that_a_click_sends() {
         [SessionId::from_string("A")]
     );
     assert_eq!(h.app.list.selection(), &selected, "the selection stays");
-    // Being made: a spinner where the ↻ was, hovered or not, the text kept.
-    assert!(h.app.summary_refreshing(&SessionId::from_string("A")));
+    // Being made: a spinner where the ↻ was, hovered or not, the name kept.
+    assert!(h.app.title_refreshing(&SessionId::from_string("A")));
     mouse_at(&mut h, MouseEventKind::Moved, (100, 2));
     let screen = screen_rows(&mut h, 160, 48);
-    let line = screen
+    let spinning: Vec<&str> = screen
         .iter()
-        .find(|line| line.contains("Fixing the flaky login test"))
-        .unwrap()
-        .split('│')
-        .next()
-        .unwrap();
+        .map(|line| list_part(line))
+        .filter(|line| line.chars().any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)))
+        .collect();
+    assert_eq!(spinning.len(), 1, "{screen:#?}");
+    let line = spinning[0];
     assert!(!line.contains('↻'), "{line:?}");
-    let spinner = line.trim_start().chars().next().unwrap();
-    assert!(('\u{2800}'..='\u{28ff}').contains(&spinner), "{line:?}");
+    let spinner = line
+        .chars()
+        .position(|c| ('\u{2800}'..='\u{28ff}').contains(&c))
+        .unwrap();
+    let before: String = line.chars().take(spinner).collect();
+    assert!(before.ends_with(" a "), "{line:?}");
     // The service says so until it's made.
     account_tick(&mut h);
-    assert!(h.app.summary_refreshing(&SessionId::from_string("A")));
+    assert!(h.app.title_refreshing(&SessionId::from_string("A")));
     account.refreshing.lock().unwrap().clear();
     // Past the next read, every 2 s.
     h.app
         .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(240));
     h.app.process_pending();
-    assert!(!h.app.summary_refreshing(&SessionId::from_string("A")));
+    assert!(!h.app.title_refreshing(&SessionId::from_string("A")));
 }
 
 #[tokio::test]
-async fn s_summarises_the_selected_session_once_at_a_time() {
-    let (mut h, account) = described().await;
+async fn s_retitles_the_selected_session_once_at_a_time() {
+    let (mut h, account) = titled().await;
     let selected = h.app.list.selected_id().unwrap().clone();
     h.press(KeyCode::Char('s')).await;
     assert_eq!(*account.summarized.lock().unwrap(), [selected.clone()]);
     // Already being made: nothing more.
     h.press(KeyCode::Char('s')).await;
     assert_eq!(account.summarized.lock().unwrap().len(), 1);
-    // A session without a description says it's on its way.
+    // Another session: its spinner says it's on its way, no message.
     account.refreshing.lock().unwrap().clear();
     account_tick(&mut h);
     h.app.list.select(super::session_list::Selection::Session(
@@ -4786,20 +4815,21 @@ async fn s_summarises_the_selected_session_once_at_a_time() {
     ));
     h.press(KeyCode::Char('s')).await;
     assert_eq!(account.summarized.lock().unwrap().len(), 2);
-    assert_eq!(h.app.status(), Some("Summarising b…"));
+    assert!(h.app.title_refreshing(&SessionId::from_string("B")));
+    assert_eq!(h.app.status(), None);
 }
 
 #[tokio::test]
-async fn s_says_how_to_turn_summaries_on() {
+async fn s_says_how_to_turn_titles_on() {
     let (mut h, account) = account_harness(testing::FakeAccount::default());
     h.press(KeyCode::Char('s')).await;
     assert_eq!(
         h.app.status(),
-        Some("Sign in and turn on AI summaries: Settings → Available on sign-in.")
+        Some("Sign in and turn on AI session titles: Settings → Available on sign-in.")
     );
     let off = testing::FakeAccount::default();
     *off.account.lock().unwrap() = Some(crate::account::Account {
-        summaries: Some(false),
+        titles: Some(false),
         ..testing::FakeAccount::person()
     });
     let (mut h, off) = account_harness(off);
@@ -4807,11 +4837,10 @@ async fn s_says_how_to_turn_summaries_on() {
     assert!(h.app.status().unwrap().starts_with("Sign in and turn on"));
     assert!(account.summarized.lock().unwrap().is_empty());
     assert!(off.summarized.lock().unwrap().is_empty());
-    // Signed in with them on: before its first summary, one is made.
+    // Signed in with them on: one is made.
     let (mut h, on) = account_harness(testing::FakeAccount::signed_in());
     account_tick(&mut h);
     h.press(KeyCode::Char('s')).await;
-    assert_eq!(h.app.status(), Some("Summarising a…"));
     assert_eq!(on.summarized.lock().unwrap().len(), 1);
 }
 
@@ -5038,51 +5067,47 @@ async fn a_signs_in_and_c_copies_the_sign_in_link() {
 }
 
 #[tokio::test]
-async fn an_agents_latest_output_shows_under_its_name_above_its_details() {
+async fn a_sessions_details_follow_its_name_with_no_message_or_description_between() {
     let mut with_output = view("A", "api", 20);
     with_output.agent_output = Some("Bash: Run the tests".into());
     with_output.user_prompt = Some("Fix the flaky test".into());
-    let mut h = harness(vec![with_output, view("B", "docs", 10)]).on_folders_tab();
-    // Signed out, your last message: there's no AI summary.
-    let screen = screen_rows(&mut h, 160, 48);
-    let title = screen.iter().position(|row| row.contains(" api ")).unwrap();
-    assert!(
-        screen[title + 1].contains("Fix the flaky test"),
-        "{}",
-        screen.join("\n")
-    );
-    // The details follow it; a session without a message has none.
-    assert!(
-        !screen[title + 2].trim().is_empty(),
-        "{}",
-        screen.join("\n")
-    );
-    let docs = screen
-        .iter()
-        .position(|row| row.contains(" docs "))
-        .unwrap();
-    assert!(!screen[docs + 1].contains("Fix the"));
+    let mut h = harness(vec![with_output.clone(), view("B", "docs", 10)]).on_folders_tab();
+    let plain = screen_rows(&mut h, 160, 48);
+    let screen = plain.join("\n");
+    assert!(!screen.contains("Fix the flaky test"), "{screen}");
+    assert!(!screen.contains("Run the tests"), "{screen}");
+    // Its rows are as tall as a session's without either.
+    let mut without = with_output;
+    without.agent_output = None;
+    without.user_prompt = None;
+    let mut h = harness(vec![without, view("B", "docs", 10)]).on_folders_tab();
+    assert_eq!(screen_rows(&mut h, 160, 48), plain);
 }
 
 #[tokio::test]
 async fn the_lines_under_a_name_stop_short_of_its_age_and_mark() {
     let mut long = view("A", "api", 20);
-    long.user_prompt = Some("word ".repeat(60));
+    long.reported = Some(session_core::model::Reported {
+        state: None,
+        text: Some("word ".repeat(60)),
+        result: None,
+        at: 0,
+    });
     let mut h = harness(vec![long]).on_folders_tab();
     let screen = screen_rows(&mut h, 160, 48);
     let title = screen.iter().position(|row| row.contains(" api ")).unwrap();
     let list_width = usize::from(crate::layout::sidebar_width(160));
     let row = |line: &str| -> String { line.chars().take(list_width).collect() };
     let mark_end = row(&screen[title]).trim_end().chars().count();
-    for below in [title + 1, title + 2] {
-        let end = row(&screen[below]).trim_end().chars().count();
-        assert!(
-            end + 9 <= mark_end,
-            "{:?}\n{:?}",
-            row(&screen[title]),
-            row(&screen[below])
-        );
-    }
+    let below = title + 1;
+    let end = row(&screen[below]).trim_end().chars().count();
+    assert!(end > 20, "{:?}", row(&screen[below]));
+    assert!(
+        end + 9 <= mark_end,
+        "{:?}\n{:?}",
+        row(&screen[title]),
+        row(&screen[below])
+    );
 }
 
 #[tokio::test]
@@ -5091,7 +5116,7 @@ async fn settings_turn_the_accounts_switches_on_and_off_once_signed_in() {
         |item: SettingsItem, h: &Harness| h.app.modal_context(false).general[item.index()].clone();
     // Signed out: both are greyed out and do nothing.
     let (mut h, account) = account_harness(testing::FakeAccount::default());
-    for item in [SettingsItem::AiSummaries, SettingsItem::AgentFeed] {
+    for item in [SettingsItem::AiTitles, SettingsItem::AgentFeed] {
         let setting = row(item, &h);
         assert_eq!(setting.section, "Available on sign-in");
         assert!(setting.disabled);
@@ -5110,7 +5135,7 @@ async fn settings_turn_the_accounts_switches_on_and_off_once_signed_in() {
 
     // Signed in: they show the account's and change it.
     let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
-    assert_eq!(row(SettingsItem::AiSummaries, &h).value, "[On] Off");
+    assert_eq!(row(SettingsItem::AiTitles, &h).value, "[On] Off");
     assert_eq!(row(SettingsItem::AgentFeed, &h).value, "On [Off]");
     assert!(!row(SettingsItem::AgentFeed, &h).disabled);
     h.press(KeyCode::Char(',')).await;
@@ -5163,22 +5188,35 @@ async fn replies_from_rakumux_com_are_this_machines_own_setting() {
 }
 
 #[tokio::test]
-async fn turning_ai_summaries_off_clears_the_descriptions_and_the_refresh() {
-    let (mut h, account) = described().await;
-    assert!(h.app.summaries_on());
-    h.app
-        .toggle_feature(super::types::AccountFeature::AiSummaries);
+async fn turning_ai_titles_off_clears_the_spinners_and_the_refresh() {
+    use crossterm::event::MouseEventKind;
+    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
+    account
+        .refreshing
+        .lock()
+        .unwrap()
+        .insert(SessionId::from_string("A"));
+    account_tick(&mut h);
+    assert!(h.app.titles_on());
+    assert!(h.app.title_refreshing(&SessionId::from_string("A")));
+    h.app.toggle_feature(super::types::AccountFeature::AiTitles);
     h.app.process_pending();
-    assert!(!h.app.summaries_on());
-    assert_eq!(h.app.description(&SessionId::from_string("A")), None);
+    assert!(!h.app.titles_on());
+    assert!(!h.app.title_refreshing(&SessionId::from_string("A")));
     assert_eq!(
-        account.account.lock().unwrap().as_ref().unwrap().summaries,
+        account.account.lock().unwrap().as_ref().unwrap().titles,
         Some(false)
     );
-    h.app.summarize_selected();
+    // No ↻ under the pointer either.
+    screen_rows(&mut h, 160, 48);
+    let over_a = hit_at(&h, Hit::ListRow(row_of(&h, "a"))).unwrap();
+    mouse_at(&mut h, MouseEventKind::Moved, (over_a.0 + 5, over_a.1));
+    screen_rows(&mut h, 160, 48);
+    assert_eq!(hit_at(&h, Hit::TitleRefresh(row_of(&h, "a"))), None);
+    h.app.retitle_selected();
     assert_eq!(
         h.app.status(),
-        Some("Sign in and turn on AI summaries: Settings → Available on sign-in.")
+        Some("Sign in and turn on AI session titles: Settings → Available on sign-in.")
     );
 }
 
@@ -5654,14 +5692,14 @@ async fn open_places_read_as_pairs_on_a_phone() {
             .iter()
             .position(|line| line.contains("⎇ paper-links"))
             .unwrap_or_else(|| panic!("{}", screen.join("\n")));
-        let block: Vec<String> = screen[first.saturating_sub(3)..]
+        let block: Vec<String> = screen[first.saturating_sub(2)..]
             .iter()
             .map(|line| line.trim_end().to_string())
             .take_while(|line| !line.is_empty())
             .collect();
         // The whole row, for `--nocapture`; the place lines are checked.
         eprintln!("{width} columns:\n{}\n", block.join("\n"));
-        block[3.min(block.len())..].to_vec()
+        block[2.min(block.len())..].to_vec()
     };
     assert_eq!(
         places(&mut h, 60),
@@ -5810,7 +5848,6 @@ async fn places_name_their_repository_before_the_branch() {
             "   focal-md ────────────────────────────────────── 3/3 live",
             "",
             "   Paper links                                         1h ○",
-            "   Re-review passed; record committed on the bra…",
             "   claude",
             " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
             "     ──────────────────────────────────────────────────────",
@@ -5824,12 +5861,10 @@ async fn places_name_their_repository_before_the_branch() {
             "     focal-md ⎇ fix/citation-format                     11d",
             "",
             "   Citations                                          10m ○",
-            "   Fix the citation format in the export",
             "   codex",
             " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
             "",
             "   Release notes                                       2m ○",
-            "   Draft the release notes",
             "   claude",
             "   focal-md  ⎇ main",
             "",
@@ -5844,7 +5879,6 @@ async fn places_name_their_repository_before_the_branch() {
             "   focal-md ────────────────── 3/3 live",
             "",
             "   Paper links                     1h ○",
-            "   Re-review passed; record …",
             "   claude",
             " ▾ …focal-md-paper-links  ⎇ paper-links",
             "     ──────────────────────────────────",
@@ -5858,12 +5892,10 @@ async fn places_name_their_repository_before_the_branch() {
             "     focal-md ⎇ fix/citation-format 11d",
             "",
             "   Citations                      10m ○",
-            "   Fix the citation format i…",
             "   codex",
             " ▸ …ocal-md-citations  ⎇ fix/citation-…",
             "",
             "   Release notes                   2m ○",
-            "   Draft the release notes",
             "   claude",
             "   focal-md  ⎇ main",
             "",
@@ -5927,7 +5959,6 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   focal-md ────────────────────────────────────── 2/2 live",
             "",
             "   Paper links                                         1h ○",
-            "   Re-review passed; record committed on the bra…",
             "   claude",
             " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
             "     ──────────────────────────────────────────────────────",
@@ -5941,7 +5972,6 @@ async fn session_rows_line_up_with_their_headers_text() {
             "     focal-md ⎇ fix/citation-format                     11d",
             "",
             "   Citations                                          10m ●",
-            "   Fix the citation format in the export",
             "   codex",
             " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
             "",
@@ -5956,7 +5986,6 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   focal-md ────────────────── 2/2 live",
             "",
             "   Paper links                     1h ○",
-            "   Re-review passed; record …",
             "   claude",
             " ▾ …focal-md-paper-links  ⎇ paper-links",
             "     ──────────────────────────────────",
@@ -5970,7 +5999,6 @@ async fn session_rows_line_up_with_their_headers_text() {
             "     focal-md ⎇ fix/citation-format 11d",
             "",
             "   Citations                      10m ●",
-            "   Fix the citation format i…",
             "   codex",
             " ▸ …ocal-md-citations  ⎇ fix/citation-…",
             "",
@@ -6012,7 +6040,6 @@ async fn session_rows_line_up_with_their_headers_text() {
             " ● unread ─────────────────────────────────────── 1 session",
             "",
             "   Citations                                          10m ●",
-            "   Fix the citation format in the export",
             "   codex",
             " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
             "",
@@ -6021,7 +6048,6 @@ async fn session_rows_line_up_with_their_headers_text() {
             " ◷ last hour ──────────────────────────────────── 1 session",
             "",
             "   Paper links                                         1h ○",
-            "   Re-review passed; record committed on the bra…",
             "   claude",
             " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
             "     ──────────────────────────────────────────────────────",

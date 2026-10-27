@@ -332,10 +332,10 @@ pub enum SettingsItem {
     RestartServer,
     /// Independent shell below the main detail pane.
     TerminalPanel,
-    /// Sign in to the Rakumux account (AI session descriptions).
+    /// Sign in to the Rakumux account (AI session titles, the agent feed).
     Account,
-    /// The account's AI session summaries switch (as on rakumux.com/features).
-    AiSummaries,
+    /// The account's AI session titles switch (as on rakumux.com/features).
+    AiTitles,
     /// The account's Agent feed switch (likewise).
     AgentFeed,
     /// Type replies written on rakumux.com or other machines into this
@@ -347,7 +347,7 @@ impl SettingsItem {
     /// In Settings' order: signing in first, then what it brings, then the rest.
     pub const ALL: [SettingsItem; 11] = [
         SettingsItem::Account,
-        SettingsItem::AiSummaries,
+        SettingsItem::AiTitles,
         SettingsItem::AgentFeed,
         SettingsItem::RemoteReplies,
         SettingsItem::Layout,
@@ -369,7 +369,7 @@ impl SettingsItem {
             | SettingsItem::RestartServer
             | SettingsItem::TerminalPanel => "App",
             SettingsItem::Account => "Account",
-            SettingsItem::AiSummaries | SettingsItem::AgentFeed | SettingsItem::RemoteReplies => {
+            SettingsItem::AiTitles | SettingsItem::AgentFeed | SettingsItem::RemoteReplies => {
                 "Available on sign-in"
             }
         }
@@ -519,7 +519,7 @@ pub enum AccountStatus {
 /// turns on and off, as rakumux.com/features does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountFeature {
-    AiSummaries,
+    AiTitles,
     AgentFeed,
 }
 
@@ -527,7 +527,7 @@ impl AccountFeature {
     /// What Settings calls it.
     pub fn label(self) -> &'static str {
         match self {
-            AccountFeature::AiSummaries => "AI summaries",
+            AccountFeature::AiTitles => "AI session titles",
             AccountFeature::AgentFeed => "Agent feed",
         }
     }
@@ -535,7 +535,7 @@ impl AccountFeature {
     /// Whether `account` has it on; `None` until read.
     pub fn of(self, account: &crate::account::Account) -> Option<bool> {
         match self {
-            AccountFeature::AiSummaries => account.summaries,
+            AccountFeature::AiTitles => account.titles,
             AccountFeature::AgentFeed => account.feed,
         }
     }

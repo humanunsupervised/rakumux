@@ -1191,7 +1191,7 @@ impl App {
         self.hovered_row = self.hits.iter().find_map(|(area, hit)| match hit {
             Hit::ListRow(row)
             | Hit::PinToggle(row)
-            | Hit::SummaryRefresh(row)
+            | Hit::TitleRefresh(row)
             | Hit::PlacesToggle(row)
             | Hit::Place(row, _)
                 if inside(Some(*area)) =>
@@ -1279,10 +1279,10 @@ impl App {
                     return;
                 }
                 // The selection stays where it is.
-                Some(Hit::SummaryRefresh(row)) => {
+                Some(Hit::TitleRefresh(row)) => {
                     if let Some(ListRow::Session(session)) = self.list.rows().get(row) {
                         let id = session.id.clone();
-                        self.summarize(id);
+                        self.retitle(id);
                     }
                     return;
                 }

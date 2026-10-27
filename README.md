@@ -205,8 +205,8 @@ Everything above works without an account.
 **Sign in** with `a` in Rakumux mode, or `rakumux account login`. Then turn features on under
 **Settings → Available on sign-in**.
 
-**AI session summaries** add a short description under each agent session's name. Press `s` to
-refresh one.
+**AI session titles** name each agent session after what it's doing. A name you give (`r`)
+stays. Press `s`, or the `↻` after a hovered name, for a new title.
 
 **Agent feed** collects your agents' replies and chats from every signed-in machine:
 

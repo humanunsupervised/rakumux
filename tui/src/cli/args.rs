@@ -122,15 +122,16 @@ pub enum Command {
         #[command(subcommand)]
         command: RemoteCommand,
     },
-    /// Your Rakumux account: sign in for AI session descriptions
+    /// Your Rakumux account: sign in for AI session titles and the agent feed
     ///
-    /// Signed in, a background service describes each session in a few
-    /// words. AI session summaries can be turned off on rakumux.com/features.
+    /// Signed in, a background service titles each agent session in a few
+    /// words (a name you gave stays). AI session titles can be turned off on
+    /// rakumux.com/features.
     Account {
         #[command(subcommand)]
         command: AccountCommand,
     },
-    /// Run the account and AI description service for this Rakumux home
+    /// Run the account and AI title service for this Rakumux home
     /// (started on demand)
     #[command(hide = true)]
     StatusService,
@@ -266,10 +267,10 @@ pub enum RemoteCommand {
 pub enum AccountCommand {
     /// Sign in with a code approved in any browser
     Login,
-    /// Sign out on this machine (AI descriptions stop)
+    /// Sign out on this machine (AI titles stop)
     Logout,
-    /// Show who is signed in, whether AI session summaries are on, and the
-    /// sessions described
+    /// Show who is signed in, whether AI session titles are on, and each
+    /// live session's AI description
     Status {
         /// Print JSON
         #[arg(long)]

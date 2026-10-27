@@ -1,7 +1,8 @@
 //! AI naming: a session whose name Rakumux generated (`auto_named`, from
 //! whichever client created it) gets an AI-suggested name the first time it
 //! settles (`Idle`/`Done`), from its command history and visible screen
-//! (`crate::naming`).
+//! (`crate::naming`). Signed in with the account's AI session titles on, it
+//! waits: the account service titles sessions instead.
 
 use std::path::Path;
 
@@ -62,6 +63,10 @@ impl App {
             return;
         };
         if !session.auto_named || !matches!(session.lifecycle, Lifecycle::Idle | Lifecycle::Done) {
+            return;
+        }
+        // The account's AI session titles win; tried again if they go off.
+        if self.titles_on() {
             return;
         }
         let Some(api) = self.connection.api() else {

@@ -5,15 +5,17 @@
 //! are several, and "+ New session" last. Beside the session (Master
 //! detail) its last row is `« Hide list`; hidden, a rail at the left edge
 //! (`draw_list_rail`) shows it again.
-//! Each session is a compact cell after a blank row: its name, then its age
-//! and its mark (an agent's activity, else its status) at the right; then the
-//! agent's latest output, when the daemon has one; then its program and
-//! state; then the folder it works in now, one line (its path, its
-//! repository's name, its branch), with `▸` when it has worked in other places, which open under it as
-//! pairs of lines a step further in (`app::places`). A row's text
-//! starts where its header's does, and the gutter left of it, where the
-//! header's mark sits, holds the row's marks: the pin toggle under the
-//! pointer, the summary's ↻, the places' `▸`/`▾` and the copy mark.
+//! Each session is a compact cell after a blank row: its name (its AI title
+//! with AI session titles on), then its age and its mark (an agent's
+//! activity, else its status) at the right; then its program and state; then
+//! the folder it works in now, one line (its path, its repository's name,
+//! its branch), with `▸` when it has worked in other places, which open
+//! under it as pairs of lines a step further in (`app::places`). With AI
+//! session titles on, a live session's name keeps two columns after it: a
+//! spinner while a new title is being made, else the ↻ under the pointer,
+//! which makes one. A row's text starts where its header's does, and the
+//! gutter left of it, where the header's mark sits, holds the row's marks:
+//! the pin toggle under the pointer, the places' `▸`/`▾` and the copy mark.
 //! The selected item's text is white and the others' muted; nothing has a
 //! background except the tabs' band. A session being dragged has a blue
 //! bar on its left.
@@ -25,7 +27,7 @@ use ratatui::{
     widgets::{Block, Paragraph},
     Frame,
 };
-use session_core::model::{ScopeRoot, SessionView};
+use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
 use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
 use super::format::{
@@ -55,27 +57,28 @@ fn row_height(row: &ListRow) -> u16 {
     }
 }
 
-/// [`row_height`], plus a line for a session's AI description and its
-/// place lines (`width` columns of content).
+/// [`row_height`], plus a session's place lines (`width` columns of
+/// content).
 fn row_height_in(app: &App, row: &ListRow, width: usize, now: i64) -> u16 {
     match row {
         ListRow::Session(session) => {
             let places = place_content(app, session, width, false, None, now)
                 .lines
                 .len();
-            row_height(row)
-                + u16::from(description_line(app, session).is_some())
-                + u16::try_from(places).unwrap_or(u16::MAX)
+            row_height(row) + u16::try_from(places).unwrap_or(u16::MAX)
         }
         row => row_height(row),
     }
 }
 
-/// The line under a session's name: its AI summary, or before one (signed
-/// out, or with AI summaries off) your last message to its agent.
-fn description_line<'a>(app: &'a App, session: &'a SessionView) -> Option<&'a str> {
-    app.description(&session.id)
-        .or(session.user_prompt.as_deref())
+/// Columns kept after a session's name for its title mark: a space and the
+/// ↻ (or the spinner while a title is being made).
+const TITLE_SLOT: usize = 2;
+
+/// Whether `session`'s name keeps [`TITLE_SLOT`] after it: AI session titles
+/// are on and it can get one (live, not private).
+fn has_title_slot(app: &App, session: &SessionView) -> bool {
+    app.titles_on() && session.status == SessionStatus::Live && !session.private
 }
 
 /// Rows of the tabs' band: its line with a row of padding above and below
@@ -93,8 +96,8 @@ pub(super) fn folder_item_height(pane: u16) -> u16 {
 const INDENT: usize = 3;
 
 /// Columns a row keeps left of its text for its marks (the pin toggle, the
-/// summary's ↻, the places' `▸`/`▾`, the copy mark: one and a gap), where
-/// its header's mark sits.
+/// places' `▸`/`▾`, the copy mark: one and a gap), where its header's mark
+/// sits.
 const GUTTER: usize = 2;
 
 /// How much further in a row under a worktree's header starts, as that
@@ -434,8 +437,10 @@ pub fn pinned_header_line(app: &App, width: usize, selected: bool) -> Line<'stat
     ])
 }
 
-/// The content lines of a session cell: two, and its AI description, each
-/// after its gutter (two columns).
+/// The content lines of a session cell: two, each after its gutter (two
+/// columns). The first is its gutter's mark, a space, its name, its title
+/// slot (empty without one; see [`mark_title`]), then the age and mark at
+/// the right.
 fn session_content(
     app: &App,
     session: &SessionView,
@@ -463,10 +468,16 @@ fn session_content(
     if app.is_self_session(&session.id) {
         name.push_str(" (this)");
     }
-    // Leading marker slot, name, at least one space, age + badge. A pin
-    // shows only under the pointer, left of the row (`mark_hovered`).
-    let name = truncate(&name, width.saturating_sub(right_width + 3));
-    let pad = width.saturating_sub(2 + str_width(&name) + right_width);
+    // Leading marker slot, name, its title slot, at least one space, age +
+    // badge. A pin shows only under the pointer, left of the row
+    // (`mark_hovered`); the ↻ too, in the title slot (`mark_title`).
+    let slot = if has_title_slot(app, session) {
+        TITLE_SLOT
+    } else {
+        0
+    };
+    let name = truncate(&name, width.saturating_sub(right_width + 3 + slot));
+    let pad = width.saturating_sub(2 + str_width(&name) + slot + right_width);
     let (name_style, detail_color, age_color) = if selected {
         (
             Style::default()
@@ -488,6 +499,7 @@ fn session_content(
         Span::styled(glyph, glyph_style),
         Span::raw(" "),
         Span::styled(name, name_style),
+        Span::raw(" ".repeat(slot)),
     ];
     first.push(Span::raw(" ".repeat(pad)));
     first.push(Span::styled(age, Style::default().fg(age_color)));
@@ -509,26 +521,7 @@ fn session_content(
         )
         .spans,
     );
-    let mut lines = vec![first];
-    // Under the name: its summary, or your last message.
-    if let Some(output) = description_line(app, session) {
-        // A terminal has one font size: italic and a shade quieter than the
-        // details make it read as the smaller print.
-        let quiet = if selected {
-            p.neutral_gray
-        } else {
-            p.text_muted
-        };
-        lines.push(vec![
-            Span::raw("  "),
-            Span::styled(
-                truncate(output, column),
-                Style::default().fg(quiet).add_modifier(Modifier::ITALIC),
-            ),
-        ]);
-    }
-    lines.push(second);
-    lines
+    vec![first, second]
 }
 
 /// In the gutter of the place a session works now when it has worked
@@ -813,41 +806,39 @@ fn place_content(
     }
 }
 
-/// Shown before a hovered session's AI description: a click or tap makes a
-/// new summary.
-const SUMMARY_REFRESH: &str = "↻";
+/// After a hovered session's name: a click or tap makes a new AI title.
+const TITLE_REFRESH: &str = "↻";
 
-/// The start of a session's description line (`line`), in its gutter
-/// (`indent` columns in), the two columns before its text: a spinner while a
-/// new summary is being made, else the ↻ when `hovered`. Returns where the ↻
-/// is.
-fn mark_summary(
+/// The title slot after a session's name, on its first line (`line`, after
+/// its indent: the gutter's mark, a space, the name, the slot; see
+/// `session_content`): a spinner while a new title is being made, else the
+/// ↻ when `hovered`. Returns where the ↻ is, its space included.
+fn mark_title(
     lines: &mut [Line<'_>],
     line: usize,
     refreshing: bool,
     hovered: bool,
     area: Rect,
-    indent: usize,
 ) -> Option<Rect> {
     let p = theme::palette();
     let (mark, style) = if refreshing {
         (get_spinner_char(), Style::default().fg(p.accent_primary))
     } else if hovered {
-        (SUMMARY_REFRESH, Style::default().fg(p.accent_primary))
+        (TITLE_REFRESH, Style::default().fg(p.accent_primary))
     } else {
         return None;
     };
-    // After the indent, the gutter (see `session_content`).
-    let slot = lines.get_mut(line)?.spans.get_mut(1)?;
-    *slot = Span::styled(format!("{mark} "), style);
+    let spans = &mut lines.get_mut(line)?.spans;
+    let x: usize = spans.get(..4)?.iter().map(Span::width).sum();
+    *spans.get_mut(4)? = Span::styled(format!(" {mark}"), style);
     if refreshing {
         return None;
     }
-    let x = area.x + u16::try_from(indent).ok()?;
+    let x = area.x + u16::try_from(x).ok()?;
     Some(Rect {
         x,
         y: area.y + u16::try_from(line).ok()?,
-        width: 2.min(area.right().saturating_sub(x)),
+        width: (TITLE_SLOT as u16).min(area.right().saturating_sub(x)),
         height: 1,
     })
 }
@@ -1352,20 +1343,14 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                     let end = top + places_at + focus.unwrap_or(&places.current).end;
                     skip = (end as u16).saturating_sub(row_area.height);
                 }
-                // The description is the line under the name; with AI
-                // summaries on, its ↻ makes a new one.
-                if app.summaries_on() && description_line(app, session).is_some() {
-                    let refreshing = app.summary_refreshing(&session.id);
-                    let line = top + 1;
-                    if let Some(refresh) = mark_summary(
-                        &mut lines,
-                        line,
-                        refreshing,
-                        hovered && !dragged,
-                        full,
-                        indent,
-                    ) {
-                        row_hits.push((refresh, Hit::SummaryRefresh(index)));
+                // After the name, with AI session titles on: the ↻ makes a
+                // new title, a spinner while one is being made.
+                if has_title_slot(app, session) {
+                    let refreshing = app.title_refreshing(&session.id);
+                    if let Some(refresh) =
+                        mark_title(&mut lines, top, refreshing, hovered && !dragged, full)
+                    {
+                        row_hits.push((refresh, Hit::TitleRefresh(index)));
                     }
                 }
                 if !dragged {
