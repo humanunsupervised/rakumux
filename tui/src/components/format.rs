@@ -27,6 +27,15 @@ pub fn branch_label(git: &GitInfo, icons: Icons) -> Option<String> {
     }
 }
 
+/// The name of `git`'s repository, as a place shows it before its branch:
+/// none when it's the working tree's own folder name (a main checkout
+/// named like its repository), ignoring case.
+pub fn repo_label(git: &GitInfo) -> Option<&str> {
+    let repo = git.repo.as_deref().filter(|repo| !repo.is_empty())?;
+    let folder = git.repo_root.file_name().and_then(|name| name.to_str());
+    (!folder.is_some_and(|folder| folder.eq_ignore_ascii_case(repo))).then_some(repo)
+}
+
 /// Unix seconds now.
 pub fn now_secs() -> i64 {
     std::time::SystemTime::now()
@@ -381,6 +390,7 @@ mod tests {
             branch: branch.map(Into::into),
             detached_at: detached.map(Into::into),
             worktree: worktree.map(Into::into),
+            repo: None,
         }
     }
 
@@ -407,6 +417,24 @@ mod tests {
             Some("⎇ @1a2b3c4")
         );
         assert_eq!(branch_label(&git(None, None, None), Icons::Plain), None);
+    }
+
+    #[test]
+    fn a_places_repository_is_named_unless_its_folder_says_it() {
+        let named = |root: &str, repo: Option<&str>| GitInfo {
+            repo_root: root.into(),
+            repo: repo.map(Into::into),
+            ..git(Some("main"), None, None)
+        };
+        assert_eq!(
+            repo_label(&named("/work/focal-md-paper-links", Some("focal-md"))),
+            Some("focal-md")
+        );
+        assert_eq!(repo_label(&named("/code/rakumux", Some("rakumux"))), None);
+        assert_eq!(repo_label(&named("/code/Rakumux", Some("rakumux"))), None);
+        assert_eq!(repo_label(&named("/code/rakumux", None)), None);
+        assert_eq!(repo_label(&named("/code/rakumux", Some(""))), None);
+        assert_eq!(repo_label(&named("/", Some("root"))), Some("root"));
     }
 
     #[test]

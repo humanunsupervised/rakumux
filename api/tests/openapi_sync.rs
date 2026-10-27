@@ -40,6 +40,7 @@ fn git() -> GitInfo {
         branch: Some("main".into()),
         detached_at: Some("abc1234".into()),
         worktree: Some("wt".into()),
+        repo: Some("r".into()),
     }
 }
 

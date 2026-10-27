@@ -280,6 +280,12 @@ pub struct GitInfo {
     /// main worktree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<String>,
+    /// The repository's name, for display: its `origin` remote's (the URL's
+    /// last path component without `.git`), else its main working tree's
+    /// folder name. `None` from an older daemon, or when the repository's
+    /// files can't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
 }
 
 /// A project: a directory sessions belong to (the wire calls it `scope`).

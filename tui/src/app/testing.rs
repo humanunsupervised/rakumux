@@ -107,6 +107,8 @@ pub fn on_branch(branch: &str) -> Option<GitInfo> {
         branch: Some(branch.into()),
         detached_at: None,
         worktree: None,
+        // No remote: the folder's own name, which places don't repeat.
+        repo: Some("repo".into()),
     })
 }
 

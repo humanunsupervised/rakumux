@@ -8,8 +8,8 @@
 //! Each session is a compact cell after a blank row: its name, then its age
 //! and its mark (an agent's activity, else its status) at the right; then the
 //! agent's latest output, when the daemon has one; then its program and
-//! state; then the folder it works in now, one line (its path, its branch),
-//! with `▸` when it has worked in other places, which open under it as
+//! state; then the folder it works in now, one line (its path, its
+//! repository's name, its branch), with `▸` when it has worked in other places, which open under it as
 //! pairs of lines a step further in (`app::places`). A row's text
 //! starts where its header's does, and the gutter left of it, where the
 //! header's mark sits, holds the row's marks: the pin toggle under the
@@ -30,7 +30,7 @@ use session_core::model::{ScopeRoot, SessionView};
 use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
 use super::format::{
     activity_badge_at, branch_label, facts_line, place_label, read_period_style, relative_time,
-    status_glyph, status_group_glyph, truncate, truncate_start, PIN_MARK,
+    repo_label, status_glyph, status_group_glyph, truncate, truncate_start, PIN_MARK,
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
@@ -542,11 +542,16 @@ const COPY_MARK: &str = "⧉";
 /// How much further in than the row's text (where the current place is)
 /// its other places and the rules between them start.
 const PLACE_INDENT: usize = 2;
-/// Between the current place's path and its branch.
+/// Between the current place's path and its repository's name and branch.
 const PLACE_GAP: &str = "  ";
+/// Between a place's repository's name and its branch.
+const REPO_GAP: &str = " ";
 /// The fewest columns the current place's branch is cut to (`⎇ fea…`);
 /// with less room, it goes.
 const BRANCH_MIN: usize = 6;
+/// The fewest columns a place's repository's name is cut to (`focal…`);
+/// with less room, it goes.
+const REPO_MIN: usize = 6;
 /// Between two places, under their text.
 const PLACE_RULE: &str = "─";
 
@@ -569,11 +574,44 @@ struct PlaceLines {
     focus: Option<usize>,
 }
 
-/// The current place's `path` and `branch` on one line of `room` columns:
-/// the path is cut at its start first, down to half the line, then the
-/// branch at its end; a branch it would cut to fewer than [`BRANCH_MIN`]
-/// columns goes, and the path takes the line.
-fn fit_place(path: &str, branch: &str, room: usize) -> (String, String) {
+/// The current place's `path`, its repository's name `repo` and its
+/// `branch` on one line of `room` columns: the path is cut at its start
+/// first, down to half the line, then the name at its end, down to
+/// [`REPO_MIN`] columns, then it goes (the path taking back what it can),
+/// then the branch as [`fit_label`] cuts it.
+fn fit_place(path: &str, repo: &str, branch: &str, room: usize) -> (String, String, String) {
+    if repo.is_empty() || branch.is_empty() {
+        let (path, label) = fit_label(path, if branch.is_empty() { repo } else { branch }, room);
+        return if branch.is_empty() {
+            (path, label, String::new())
+        } else {
+            (path, String::new(), label)
+        };
+    }
+    let (gap, between) = (str_width(PLACE_GAP), str_width(REPO_GAP));
+    let (path_width, branch_width) = (str_width(path), str_width(branch));
+    let git_width = str_width(repo) + between + branch_width;
+    if path_width + gap + git_width <= room {
+        return (path.to_string(), repo.to_string(), branch.to_string());
+    }
+    let path_room = room
+        .saturating_sub(gap + git_width)
+        .max(path_width.min(room / 2));
+    let cut = truncate_start(path, path_room);
+    let repo_room = room.saturating_sub(str_width(&cut) + gap + between + branch_width);
+    if repo_room >= REPO_MIN.min(str_width(repo)) {
+        return (cut, truncate(repo, repo_room), branch.to_string());
+    }
+    let (path, branch) = fit_label(path, branch, room);
+    (path, String::new(), branch)
+}
+
+/// A place's `path` and one label after it (its branch, or its
+/// repository's name alone) on one line of `room` columns: the path is cut
+/// at its start first, down to half the line, then the label at its end; a
+/// label it would cut to fewer than [`BRANCH_MIN`] columns goes, and the
+/// path takes the line.
+fn fit_label(path: &str, branch: &str, room: usize) -> (String, String) {
     let (path_width, branch_width) = (str_width(path), str_width(branch));
     let gap = str_width(PLACE_GAP);
     if branch.is_empty() {
@@ -593,12 +631,44 @@ fn fit_place(path: &str, branch: &str, room: usize) -> (String, String) {
     (cut, truncate(branch, branch_room))
 }
 
+/// A place's repository's name and branch in `room` columns: the name is
+/// cut at its end first, down to [`REPO_MIN`] columns, then goes, then the
+/// branch is cut at its end.
+fn fit_git(repo: &str, branch: &str, room: usize) -> (String, String) {
+    if repo.is_empty() || branch.is_empty() {
+        return (truncate(repo, room), truncate(branch, room));
+    }
+    let repo_room = room.saturating_sub(str_width(REPO_GAP) + str_width(branch));
+    if repo_room >= REPO_MIN.min(str_width(repo)) {
+        return (truncate(repo, repo_room), branch.to_string());
+    }
+    (String::new(), truncate(branch, room))
+}
+
+/// A place's repository's name and branch as spans in `style`, with the
+/// gap between them.
+fn git_spans(repo: String, branch: String, style: Style) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let both = !repo.is_empty() && !branch.is_empty();
+    if !repo.is_empty() {
+        spans.push(Span::styled(repo, style));
+    }
+    if both {
+        spans.push(Span::raw(REPO_GAP));
+    }
+    if !branch.is_empty() {
+        spans.push(Span::styled(branch, style));
+    }
+    spans
+}
+
 /// A session's place lines, under its facts, after the gutter. First the
 /// place it works in now, one line in the row's text column: its path, then
-/// its branch (`▸` in the gutter when it has worked in other places). While
-/// its places are open (`▾`), each of the others (where it changed files:
-/// every place is), most recent first, a pair of lines [`PLACE_INDENT`]
-/// further in: its path, then its branch and when; a rule above each. No
+/// its repository's name (unless its folder has that name) and branch (`▸`
+/// in the gutter when it has worked in other places). While its places are
+/// open (`▾`), each of the others (where it changed files: every place is),
+/// most recent first, a pair of lines [`PLACE_INDENT`] further in: its path,
+/// then its repository's name, branch and when; a rule above each. No
 /// place has a mark or bar left of it. The place the list keys are on (in
 /// the `selected` session) and the `hovered` one show the copy mark in their
 /// gutter (the current one's left of its `▸`) and their path brighter; the
@@ -635,9 +705,16 @@ fn place_content(
             Style::default().fg(p.accent_primary),
         )
     };
-    let branch_of = |git: Option<&session_core::model::GitInfo>| {
-        git.and_then(|git| branch_label(git, icons))
-            .unwrap_or_default()
+    // A place's repository's name (when its folder doesn't say it) and its
+    // branch.
+    let git_of = |git: Option<&session_core::model::GitInfo>| -> (String, String) {
+        git.map(|git| {
+            (
+                repo_label(git).unwrap_or_default().to_string(),
+                branch_label(git, icons).unwrap_or_default(),
+            )
+        })
+        .unwrap_or_default()
     };
 
     // Where it works now, with the toggle when there are others.
@@ -657,20 +734,18 @@ fn place_content(
     } else {
         blank_slot()
     };
-    let (path, branch) = fit_place(
-        &place_label(&session.scope, current),
-        &branch_of(session.git.as_ref()),
-        text,
-    );
+    let (repo, branch) = git_of(session.git.as_ref());
+    let (path, repo, branch) =
+        fit_place(&place_label(&session.scope, current), &repo, &branch, text);
     let path_style = if hovered_current {
         marked_style
     } else {
         label_style
     };
     let mut line = vec![slot, Span::styled(path, path_style)];
-    if !branch.is_empty() {
+    if !repo.is_empty() || !branch.is_empty() {
         line.push(Span::raw(PLACE_GAP));
-        line.push(Span::styled(branch, branch_style));
+        line.extend(git_spans(repo, branch, branch_style));
     }
     let mut lines = vec![line];
     let toggle = (others > 0).then_some(0..GUTTER);
@@ -712,21 +787,20 @@ fn place_content(
             indent(),
             Span::styled(truncate_start(&label, inner), path_style),
         ]);
-        // Under it its branch, and at the right its age; short of room the
-        // branch is cut first, then the age.
+        // Under it its repository's name and branch, and at the right its
+        // age; short of room the name is cut first, then the branch, then
+        // the age.
         let age = truncate(&relative_time(now, place.last_at), inner);
-        let branch = truncate(
-            &branch_of(place.git.as_ref()),
-            inner.saturating_sub(str_width(&age) + 1),
-        );
-        let gap = inner.saturating_sub(str_width(&branch) + str_width(&age));
-        lines.push(vec![
-            blank_slot(),
-            indent(),
-            Span::styled(branch, branch_style),
-            Span::raw(" ".repeat(gap)),
-            Span::styled(age, branch_style),
-        ]);
+        let (repo, branch) = git_of(place.git.as_ref());
+        let (repo, branch) = fit_git(&repo, &branch, inner.saturating_sub(str_width(&age) + 1));
+        let git = git_spans(repo, branch, branch_style);
+        let used: usize = git.iter().map(|span| str_width(&span.content)).sum();
+        let gap = inner.saturating_sub(used + str_width(&age));
+        let mut second = vec![blank_slot(), indent()];
+        second.extend(git);
+        second.push(Span::raw(" ".repeat(gap)));
+        second.push(Span::styled(age, branch_style));
+        lines.push(second);
         places.push(start..lines.len());
     }
     PlaceLines {
@@ -1527,9 +1601,56 @@ mod tests {
     }
 
     #[test]
+    fn a_places_repository_goes_before_its_branch_in_the_same_colour() {
+        use crate::app::testing::harness;
+        let p = theme::palette();
+        let mut h = harness(vec![]);
+        // Working in a worktree of `focal-md`, and earlier in the folder's
+        // main checkout, named like its repository.
+        let mut session = with_places(&[
+            ("/repo/worktrees/fix", "fix", 5, true),
+            ("/repo", "main", 300, true),
+        ]);
+        let named = |git: &mut Option<session_core::model::GitInfo>, repo: &str| {
+            if let Some(git) = git.as_mut() {
+                git.repo = Some(repo.into());
+            }
+        };
+        session.git = session.places[0].git.clone();
+        named(&mut session.git, "focal-md");
+        named(&mut session.places[0].git, "focal-md");
+        named(&mut session.places[1].git, "repo");
+        h.app.places_open.insert(session.id.clone());
+        for selected in [false, true] {
+            let lines = place_content(&h.app, &session, 40, selected, None, 1000).lines;
+            assert_eq!(
+                text(&lines),
+                [
+                    "▾ worktrees/fix  focal-md ⎇ fix".to_string(),
+                    format!("    {}", "─".repeat(36)),
+                    "    repo".into(),
+                    format!("    ⎇ main{}5m", " ".repeat(28)),
+                ]
+            );
+            let quiet = Some(if selected {
+                p.neutral_gray
+            } else {
+                p.text_muted
+            });
+            let repo = &lines[0][3];
+            assert_eq!(repo.content, "focal-md");
+            assert_eq!(repo.style.fg, quiet);
+            assert_eq!(lines[0][4].content, " ");
+            assert_eq!(lines[0][5].content, "⎇ fix");
+            assert_eq!(lines[0][5].style.fg, quiet);
+        }
+    }
+
+    #[test]
     fn the_current_places_path_is_cut_before_its_branch_and_never_wraps() {
         let fit = |path: &str, branch: &str, room| {
-            let (path, branch) = fit_place(path, branch, room);
+            let (path, repo, branch) = fit_place(path, "", branch, room);
+            assert_eq!(repo, "");
             assert!(
                 str_width(&path) + str_width(&branch) + if branch.is_empty() { 0 } else { 2 }
                     <= room,
@@ -1562,6 +1683,87 @@ mod tests {
         for room in 0..90 {
             fit(path, branch, room);
         }
+    }
+
+    #[test]
+    fn short_of_room_the_path_goes_first_then_the_repository_then_the_branch() {
+        let fit = |path: &str, repo: &str, branch: &str, room| {
+            let fitted = fit_place(path, repo, branch, room);
+            let (path, repo, branch) = &fitted;
+            let git = match (repo.is_empty(), branch.is_empty()) {
+                (true, true) => 0,
+                (false, false) => str_width(repo) + 1 + str_width(branch) + 2,
+                _ => str_width(repo) + str_width(branch) + 2,
+            };
+            assert!(str_width(path) + git <= room, "{room}: {fitted:?}");
+            fitted
+        };
+        let s = |text: &str| text.to_string();
+        let path = "/work/focal-md-pubmed-pmc-audit";
+        let (repo, branch) = ("focal-md", "⎇ audit/pubmed-pmc-ingest-20261008");
+        // Room for all three, whole.
+        assert_eq!(fit(path, repo, branch, 80), (s(path), s(repo), s(branch)));
+        // The path first, from its start, down to half the line.
+        assert_eq!(
+            fit(path, repo, "⎇ main", 36),
+            (s("…d-pubmed-pmc-audit"), s(repo), s("⎇ main"))
+        );
+        // Then the repository's name, from its end, to six columns.
+        assert_eq!(
+            fit(path, "focal-md-research", "⎇ main", 34),
+            (s("…pubmed-pmc-audit"), s("focal-m…"), s("⎇ main"))
+        );
+        assert_eq!(
+            fit(path, "focal-md-research", "⎇ main-line", 39),
+            (s("…d-pubmed-pmc-audit"), s("focal…"), s("⎇ main-line"))
+        );
+        // Then it goes, and the path takes back what it can.
+        assert_eq!(
+            fit(path, "focal-md-research", "⎇ main-line", 38),
+            (s("…ocal-md-pubmed-pmc-audit"), s(""), s("⎇ main-line"))
+        );
+        // Then the branch is cut from its end.
+        assert_eq!(
+            fit(path, repo, branch, 50),
+            (
+                s("…ocal-md-pubmed-pmc-audit"),
+                s(""),
+                s("⎇ audit/pubmed-pmc-ing…")
+            )
+        );
+        assert_eq!(
+            fit(path, repo, branch, 12),
+            (s("…d-pmc-audit"), s(""), s(""))
+        );
+        // Without a branch (a repository whose HEAD isn't in its `HEAD`
+        // file), the name alone in the branch's place.
+        assert_eq!(fit(path, repo, "", 80), (s(path), s(repo), s("")));
+        assert_eq!(
+            fit(path, repo, "", 28),
+            (s("…-pubmed-pmc-audit"), s(repo), s(""))
+        );
+        assert_eq!(fit(path, repo, "", 14), (s("…med-pmc-audit"), s(""), s("")));
+        // A detached HEAD keeps its commit.
+        assert_eq!(
+            fit("/code/x", repo, "⎇ @1a2b3c4", 40),
+            (s("/code/x"), s(repo), s("⎇ @1a2b3c4"))
+        );
+        for room in 0..90 {
+            fit(path, repo, branch, room);
+            fit(path, "focal-md-research", "⎇ main", room);
+            fit(path, repo, "", room);
+        }
+        // An open place's second line: the name is cut first, then goes,
+        // then the branch is cut.
+        assert_eq!(fit_git(repo, "⎇ main", 20), (s(repo), s("⎇ main")));
+        assert_eq!(
+            fit_git("focal-md-research", "⎇ main", 16),
+            (s("focal-md…"), s("⎇ main"))
+        );
+        assert_eq!(fit_git(repo, "⎇ main", 12), (s(""), s("⎇ main")));
+        assert_eq!(fit_git(repo, "⎇ main", 4), (s(""), s("⎇ m…")));
+        assert_eq!(fit_git(repo, "", 6), (s("focal…"), s("")));
+        assert_eq!(fit_git("", "", 6), (s(""), s("")));
     }
 
     #[test]

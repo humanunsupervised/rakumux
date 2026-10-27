@@ -138,6 +138,7 @@ mod tests {
             branch: Some("main".into()),
             detached_at: None,
             worktree: None,
+            repo: None,
         };
         assert_eq!(git_text(&git), "main");
         git.worktree = Some("fix-login".into());

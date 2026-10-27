@@ -546,9 +546,9 @@ impl KeyAction {
             KeyAction::Places | KeyAction::AllPlaces => {
                 "Each session shows the folder it works in now. w opens the list under it (W \
                  every session's, a click on its ▸ too): every other git working \
-                 tree where it changed files, most recent first, with its branch and when. \
-                 Read on this machine from what the agent did. With the Agent feed on, their \
-                 names, branches and times go to rakumux.com, never full paths."
+                 tree where it changed files, most recent first, with its repository, branch \
+                 and when. Read on this machine from what the agent did. With the Agent feed \
+                 on, their names, branches and times go to rakumux.com, never full paths."
                     .into()
             }
             KeyAction::CopyPlace => {

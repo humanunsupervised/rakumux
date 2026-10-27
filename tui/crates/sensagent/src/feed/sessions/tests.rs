@@ -235,6 +235,7 @@ fn worked(mut view: SessionView, extra: usize) -> SessionView {
                 branch: branch.map(String::from),
                 detached_at: branch.is_none().then(|| "1a2b3c4".into()),
                 worktree: worktree.map(String::from),
+                repo: Some("rakumux".into()),
             }),
             last_at: at,
             edited: true,
@@ -289,6 +290,8 @@ fn places_go_as_names_only_once_rakumux_com_takes_them() {
         ]
     );
     assert!(!upload.to_string().contains("/home/me"), "{upload}");
+    // Nor their repositories' names, which the contract doesn't take yet.
+    assert!(!upload.to_string().contains("\"repo\""), "{upload}");
     // A cloud that stops taking them gets none again.
     sessions.done(true, Ok(stored(false)), NOW + SETTLE);
     let upload = body(sessions.next_request(NOW + SETTLE * 2, WALL));

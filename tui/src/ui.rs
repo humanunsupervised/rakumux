@@ -1070,6 +1070,7 @@ mod tests {
             branch: None,
             detached_at: Some("1a2b3c4".into()),
             worktree: None,
+            repo: None,
         });
         if let Some(terminal) = server.terminal.as_mut() {
             terminal.foreground_process = Some("cargo".into());
@@ -1445,6 +1446,7 @@ mod tests {
             branch: Some("feat/login".into()),
             detached_at: None,
             worktree: Some("feature".into()),
+            repo: None,
         });
         let mut h = harness(vec![view("A", "main-work", 10), feature]).on_folders_tab();
         let wide = render(&mut h.app, 160, 48);

@@ -173,12 +173,15 @@ fn set_head(git_dir: &Path, branch: &str) {
     std::fs::write(git_dir.join("HEAD"), format!("ref: refs/heads/{branch}\n")).unwrap();
 }
 
-fn branch(name: &str, repo_root: &Path, worktree: Option<&str>) -> Option<GitInfo> {
+/// The git context of `repo_root` on branch `name`, in `worktree` (a
+/// linked one's name) of the repository named `repo`.
+fn branch(name: &str, repo_root: &Path, worktree: Option<&str>, repo: &str) -> Option<GitInfo> {
     Some(GitInfo {
         repo_root: repo_root.to_path_buf(),
         branch: Some(name.into()),
         detached_at: None,
         worktree: worktree.map(str::to_string),
+        repo: Some(repo.into()),
     })
 }
 
@@ -738,7 +741,7 @@ fn git_context_follows_the_cwd_and_head() {
     let repo = h.scope.path().to_path_buf();
     git_repo(&repo, "main");
     let s = h.create(Some("s"));
-    assert_eq!(s.git, branch("main", &repo, None));
+    assert_eq!(s.git, branch("main", &repo, None, "project"));
     let watch = h
         .control
         .subscribe(
@@ -757,7 +760,7 @@ fn git_context_follows_the_cwd_and_head() {
             .recv_timeout(Duration::from_millis(100))
             .ok()
             .and_then(|e| updated(&[e], &s.id))
-            .filter(|v| v.git == branch("feature", &repo, None))
+            .filter(|v| v.git == branch("feature", &repo, None, "project"))
     });
     assert_eq!(view.cwd, repo);
 
@@ -785,7 +788,10 @@ fn git_context_follows_the_cwd_and_head() {
         updated(&drain(&watch), &s.id)
     });
     assert_eq!(view.cwd, checkout.join("src"));
-    assert_eq!(view.git, branch("review-fix", &checkout, Some("review")));
+    assert_eq!(
+        view.git,
+        branch("review-fix", &checkout, Some("review"), "project")
+    );
 
     // Out of any repository (the temp dir is not inside one).
     if h.root().ancestors().all(|a| !a.join(".git").exists()) {
@@ -799,7 +805,7 @@ fn git_context_follows_the_cwd_and_head() {
         .into_iter()
         .find(|p| p.path == h.scope)
         .unwrap();
-    assert_eq!(mine.git, branch("feature", &repo, None));
+    assert_eq!(mine.git, branch("feature", &repo, None, "project"));
 
     // After a restart dead sessions use their stored cwd.
     cwd(checkout.clone());
@@ -809,7 +815,10 @@ fn git_context_follows_the_cwd_and_head() {
     h.restart();
     let dead = h.get(&s.id);
     assert_eq!(dead.status, SessionStatus::Dead);
-    assert_eq!(dead.git, branch("review-fix", &checkout, Some("review")));
+    assert_eq!(
+        dead.git,
+        branch("review-fix", &checkout, Some("review"), "project")
+    );
     let listed = h.list(true);
     assert_eq!(listed[0].git, dead.git);
 }
@@ -861,7 +870,7 @@ fn agent_working_directory_follows_internal_worktree_switches_without_changing_s
         let active = h.get(&started.id);
         assert_eq!(
             active.git,
-            branch("agent-feature", &checkout, Some("active")),
+            branch("agent-feature", &checkout, Some("active"), "project"),
             "{agent}"
         );
         assert_eq!(active.scope, h.scope);
@@ -906,7 +915,7 @@ fn agent_working_directory_follows_internal_worktree_switches_without_changing_s
         });
         assert_eq!(
             update.git,
-            branch("renamed-agent-branch", &checkout, Some("active"))
+            branch("renamed-agent-branch", &checkout, Some("active"), "project")
         );
         assert_eq!(
             h.get(&started.id).git,
@@ -923,7 +932,7 @@ fn agent_working_directory_follows_internal_worktree_switches_without_changing_s
         );
         assert_eq!(
             h.get(&started.id).git,
-            branch("main", &root, None),
+            branch("main", &root, None, "project"),
             "a non-agent uses its terminal cwd"
         );
         h.host.set_foreground(
@@ -936,7 +945,7 @@ fn agent_working_directory_follows_internal_worktree_switches_without_changing_s
         );
         assert_eq!(
             h.get(&started.id).git,
-            branch("main", &root, None),
+            branch("main", &root, None, "project"),
             "a new agent process cannot inherit an old process's worktree"
         );
     }
@@ -1012,7 +1021,10 @@ fn agent_working_directory_survives_handoff_and_rejects_invalid_paths() {
     )
     .unwrap();
     let restored = h.get(&started.id);
-    assert_eq!(restored.git, branch("agent-branch", &checkout, None));
+    assert_eq!(
+        restored.git,
+        branch("agent-branch", &checkout, None, "agent-work")
+    );
     assert_eq!(restored.cwd, repo);
     assert_eq!(restored.scope, h.scope);
 }
@@ -1020,7 +1032,8 @@ fn agent_working_directory_survives_handoff_and_rejects_invalid_paths() {
 /// A session's places are the working trees where its agent changed files
 /// (here Codex, this process, with its rollout open): where it started, the
 /// directories its terminal went to and the worktree it reported are
-/// kept, out of sight, until a patch changes files there.
+/// kept, out of sight, until a patch changes files there. Each names its
+/// repository: the origin's, else the main checkout's folder.
 #[cfg(target_os = "linux")]
 #[test]
 fn places_are_where_a_sessions_agent_changed_files_and_outlive_its_terminal() {
@@ -1037,6 +1050,11 @@ fn places_are_where_a_sessions_agent_changed_files_and_outlive_its_terminal() {
     let mut h = Harness::with_detector(codex_detector);
     let root = h.scope.path().to_path_buf();
     git_repo(&root, "main");
+    std::fs::write(
+        root.join(".git/config"),
+        "[remote \"origin\"]\n\turl = git@github.com:acme/rakumux.git\n",
+    )
+    .unwrap();
     let other = h.root().join("other");
     git_repo(&other, "fix");
     std::fs::create_dir_all(other.join("src")).unwrap();
@@ -1051,8 +1069,9 @@ fn places_are_where_a_sessions_agent_changed_files_and_outlive_its_terminal() {
         format!("gitdir: {}\n", admin.display()),
     )
     .unwrap();
+    type Named = (PathBuf, Option<String>, Option<String>, Option<String>);
     let places = |view: &SessionView| {
-        let mut places: Vec<(PathBuf, Option<String>, Option<String>)> = view
+        let mut places: Vec<Named> = view
             .places
             .iter()
             .map(|place| {
@@ -1062,6 +1081,7 @@ fn places_are_where_a_sessions_agent_changed_files_and_outlive_its_terminal() {
                     place.path.clone(),
                     git.and_then(|git| git.branch.clone()),
                     git.and_then(|git| git.worktree.clone()),
+                    git.and_then(|git| git.repo.clone()),
                 )
             })
             .collect();
@@ -1149,7 +1169,8 @@ fn places_are_where_a_sessions_agent_changed_files_and_outlive_its_terminal() {
         [(
             checkout.clone(),
             Some("review-branch".into()),
-            Some("review".into())
+            Some("review".into()),
+            Some("rakumux".into())
         )]
     );
     // A patch in the other repository makes it a place too.
@@ -1159,8 +1180,14 @@ fn places_are_where_a_sessions_agent_changed_files_and_outlive_its_terminal() {
             checkout.clone(),
             Some("review-branch".into()),
             Some("review".into()),
+            Some("rakumux".into()),
         ),
-        (other.clone(), Some("fix".into()), None),
+        (
+            other.clone(),
+            Some("fix".into()),
+            None,
+            Some("other".into()),
+        ),
     ];
     assert_eq!(places(&placed(2)), expected);
 

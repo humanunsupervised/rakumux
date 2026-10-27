@@ -36,8 +36,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    running.
 2. **No git operations.** No worktree creation, git status, merge helpers or env-copy, and no
    `rakumux-cli`; the product never runs `git`. The one exception is read-only **git context**:
-   the daemon reads `.git` files to show a session's branch and linked worktree
-   (`ptyd/src/git.rs`). Users run git inside a session like any other program.
+   the daemon reads `.git` files to show a session's branch, linked worktree and repository
+   name (`ptyd/src/git.rs`). Users run git inside a session like any other program.
 3. **Sessions belong to folders.** A folder is a directory (canonical path; the wire calls it a
    scope, `ScopeRoot`, and keeps `project_*` requests and `ProjectView`). Every session belongs to
    the folder it was started in, and its cwd must be inside it when created. The TUI shows the
@@ -344,8 +344,10 @@ tui/
 `session_core::model::SessionView` is what every client sees: `id` (ULID, opaque), `name` (unique
 within the scope), `scope`, `is_self`, `cwd`, `status`, `exit_code`, `lifecycle`, `agent`,
 `reported`, `created_by`, `parent_id`, `depth`, `children`, `launch`, `resume`, `created_at`,
-`last_active_at`, `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree}` of the
-current cwd), `agent_output` (a live Claude Code, Codex or OpenCode session's latest reasoning,
+`last_active_at`, `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree, repo}` of
+the current cwd; `repo`: the `origin` remote URL's last path component without `.git`, from the
+common git dir's `config`, else the main working tree's folder name (a bare repository's own,
+`x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex or OpenCode session's latest reasoning,
 tool call or reply as one line, from its conversation log or database: `integrations/output.rs`),
 `user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
 messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
@@ -357,8 +359,8 @@ last_active_at, added_at, git}` on the wire.
 - **Places** (capability `session.places`; `integrations/places.rs`, `control/places.rs`):
   where the session has changed files, most recent first, at most 32: `SessionPlace {path, git?,
   last_at, edited}`. A place is a git working tree, a repository's main checkout or a linked
-  worktree (`path` = its `repo_root`, `git` its branch, or a detached HEAD's commit, and linked
-  worktree when last worked in), where its agent changed files (`edited`, always true): written
+  worktree (`path` = its `repo_root`, `git` its branch, or a detached HEAD's commit, linked
+  worktree and repository name when last worked in; one kept before names gets it when touched), where its agent changed files (`edited`, always true): written
   or edited with its file tools (Claude Code's `Write`, `Edit`, `MultiEdit`, `NotebookEdit`;
   OpenCode's `write`, `edit`, `multiedit`) or patched (`apply_patch` however Codex calls it,
   OpenCode's `patch`). Working trees it only worked in (started in, `cd`'d into, searched, read
@@ -762,7 +764,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   status.
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
-- **Git context**: a session's branch and linked worktree, read from `.git` files (never `git`).
+- **Git context**: a session's branch, linked worktree and repository name, read from `.git` files
+  (never `git`).
 - **Place**: a git working tree (main checkout or linked worktree) where a session's agent
   changed files, as its conversation shows; listed under the session's row (`w`).
 - **Reply** (agent reply): what an agent said when it finished a turn, captured by the daemon
@@ -1041,13 +1044,16 @@ says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's places
 (`components/session_list.rs::place_content`, `app/places.rs`). First the folder the session
 works in now (`PlaceRef::Current`: its git context's working tree, else its cwd; its path in the
 session's folder, the folder's name, or `~/…`), one line in the row's text column: its path, then
-its branch, even before it changed anything
-there; short of room the path is cut at its start first (down to half the line), then the branch
-at its end, never wrapped (`fit_place`). When it has other places, `▸` sits in the gutter left
+its repository's name (`format::repo_label`: not when its folder has that name) and branch
+(`focal-md ⎇ paper-links`), even before it changed anything
+there; short of room the path is cut at its start first (down to half the line), then the
+repository's name (to 6 columns, then gone), then the branch at its end, never wrapped
+(`fit_place`). When it has other places, `▸` sits in the gutter left
 of it, with no count; `w`, `W` or a click
 or tap on it (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per window, not
 saved; `app::places::listed_places`, never the current one): each one, most recent first, a pair
-of lines two columns further in: its path, then its branch and its age at the right; a muted rule
+of lines two columns further in: its path, then its repository's name, branch and its age at the
+right; a muted rule
 (`─`) above each. No place has a mark or bar left of it. The list is the daemon's places, so a checkout the session only started in or
 read from isn't among them. Paths are cut at their
 start when narrow, the same on phones. `↓`/`↑` (`j`/`k`) step through the selected session's

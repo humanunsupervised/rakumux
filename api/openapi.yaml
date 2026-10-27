@@ -785,6 +785,12 @@ components:
         branch: { type: string }
         detached_at: { type: string, description: Short commit id when HEAD is detached. }
         worktree: { type: string, description: Linked worktree name; absent in the main worktree. }
+        repo:
+          type: string
+          description: >
+            The repository's name, for display: its `origin` remote's (the URL's last
+            path component without `.git`), else its main working tree's folder name.
+            Absent from older daemons.
     CreateSession:
       type: object
       additionalProperties: false

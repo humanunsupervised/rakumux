@@ -2144,6 +2144,7 @@ mod tests {
             branch: Some(branch.into()),
             detached_at: None,
             worktree: Some(name),
+            repo: None,
         });
         session
     }

@@ -140,7 +140,9 @@ impl Places {
     /// tree, edited or not) when that changed, to save; the caller's refresh
     /// publishes what [`Places::shown`] says now. A working tree's time is
     /// its latest touch's, moving on by [`MIN_STEP_SECS`] at least; its git
-    /// context is the latest touch's; it's edited once any touch was.
+    /// context is the latest touch's (any touch names the repository of one
+    /// an earlier daemon kept without its name); it's edited once any touch
+    /// was.
     pub fn apply(&mut self, id: &SessionId, resolved: Vec<Resolved>) -> Option<&[SessionPlace]> {
         if resolved.is_empty() {
             return None;
@@ -155,6 +157,8 @@ impl Places {
                     }
                     if place.at >= listed.last_at {
                         listed.git = Some(place.git);
+                    } else if let Some(git) = listed.git.as_mut().filter(|git| git.repo.is_none()) {
+                        git.repo = place.git.repo;
                     }
                     listed.edited |= place.edited;
                 }
@@ -340,6 +344,96 @@ mod tests {
             paths(list),
             ["/home/me/repos/app 400", "/home/me/repos/wt 200"]
         );
+    }
+
+    #[test]
+    fn places_carry_their_repositorys_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(dir.path()).unwrap();
+        // A main checkout of `focal-md`, and a worktree of it beside it.
+        let main = root.join("focal-md-main");
+        fs::create_dir_all(main.join(".git/worktrees/paper-links")).unwrap();
+        fs::write(main.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            main.join(".git/config"),
+            "[remote \"origin\"]\n\turl = git@github.com:acme/focal-md.git\n",
+        )
+        .unwrap();
+        let admin = main.join(".git/worktrees/paper-links");
+        fs::write(admin.join("HEAD"), "ref: refs/heads/paper-links\n").unwrap();
+        fs::write(admin.join("commondir"), "../..\n").unwrap();
+        let worktree = root.join("focal-md-paper-links");
+        fs::create_dir_all(worktree.join("src")).unwrap();
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", admin.display()),
+        )
+        .unwrap();
+        let touch = |dir: PathBuf, at: i64| Touch {
+            dir,
+            edited: true,
+            at: Some(at),
+        };
+        let found = resolve(
+            vec![
+                touch(worktree.join("src"), 5_000),
+                touch(main.clone(), 9_000),
+            ],
+            &Excluded::default(),
+            70_000,
+        );
+        let named: Vec<(PathBuf, Option<String>, Option<String>)> = found
+            .iter()
+            .map(|r| (r.path.clone(), r.git.repo.clone(), r.git.branch.clone()))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                (
+                    worktree.clone(),
+                    Some("focal-md".into()),
+                    Some("paper-links".into())
+                ),
+                (main.clone(), Some("focal-md".into()), Some("main".into())),
+            ]
+        );
+        let mut places = Places::default();
+        let id = SessionId::from_string("A");
+        places.apply(&id, found);
+        let shown: Vec<Option<String>> = places
+            .shown(&id)
+            .iter()
+            .map(|place| place.git.as_ref().and_then(|git| git.repo.clone()))
+            .collect();
+        assert_eq!(shown, [Some("focal-md".into()), Some("focal-md".into())]);
+
+        // A place an earlier daemon kept, without the name: any touch names
+        // it, an older one too, keeping its time and branch.
+        let stored = SessionPlace {
+            path: worktree.clone(),
+            git: Some(GitInfo {
+                repo_root: worktree.clone(),
+                branch: Some("old-branch".into()),
+                ..GitInfo::default()
+            }),
+            last_at: 100,
+            edited: true,
+        };
+        let mut places = Places::new(HashMap::from([(id.clone(), vec![stored])]));
+        let list = places
+            .apply(
+                &id,
+                resolve(
+                    vec![touch(worktree.clone(), 50_000)],
+                    &Excluded::default(),
+                    0,
+                ),
+            )
+            .unwrap();
+        let git = list[0].git.as_ref().unwrap();
+        assert_eq!(list[0].last_at, 100);
+        assert_eq!(git.branch.as_deref(), Some("old-branch"));
+        assert_eq!(git.repo.as_deref(), Some("focal-md"));
     }
 
     #[test]

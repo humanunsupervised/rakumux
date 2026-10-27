@@ -120,6 +120,7 @@ mod tests {
             branch: Some(branch.into()),
             detached_at: None,
             worktree: None,
+            repo: None,
         })
     }
 

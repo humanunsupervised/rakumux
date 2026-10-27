@@ -716,6 +716,7 @@ mod tests {
                 branch: Some("main".into()),
                 detached_at: None,
                 worktree: None,
+                repo: Some("rakumux".into()),
             }),
         }
     }

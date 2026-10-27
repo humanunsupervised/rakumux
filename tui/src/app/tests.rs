@@ -5572,7 +5572,8 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
     assert!(line.contains("/srv/place12"), "{line}");
 }
 
-/// A session in the folder `/work/focal-md` that works in the worktree
+/// A session in the folder `/work/focal-md` (the main checkout of the
+/// repository `focal-md`) that works in its worktree
 /// `/work/focal-md-<worktree>` on `branch` now (last used `ago` seconds
 /// before `now`), running `agent`, after `prompt`, and has changed files in
 /// `places` (worktrees, branches, days ago).
@@ -5596,6 +5597,7 @@ fn in_focal_md(
     session.git = Some(GitInfo {
         repo_root: path(current).into(),
         branch: Some(branch.into()),
+        repo: Some("focal-md".into()),
         ..GitInfo::default()
     });
     session.places = places
@@ -5605,6 +5607,7 @@ fn in_focal_md(
             git: Some(GitInfo {
                 repo_root: path(worktree).into(),
                 branch: Some(branch.to_string()),
+                repo: Some("focal-md".into()),
                 ..GitInfo::default()
             }),
             last_at: now - days * 86_400,
@@ -5662,9 +5665,10 @@ async fn open_places_read_as_pairs_on_a_phone() {
     };
     assert_eq!(
         places(&mut h, 60),
-        [" ▸ /work/focal-md-paper-links  ⎇ paper-links"]
+        [" ▸ /work/focal-md-paper-links  focal-md ⎇ paper-links"]
     );
-    // Short of room, the path is cut at its start before the branch.
+    // Short of room, the path is cut at its start, then the repository's
+    // name goes before the branch.
     assert_eq!(
         places(&mut h, 40),
         [" ▸ …focal-md-paper-links  ⎇ paper-links"]
@@ -5675,16 +5679,16 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 60),
         [
-            " ▾ /work/focal-md-paper-links  ⎇ paper-links",
+            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
-            "     ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
+            "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
             "     ──────────────────────────────────────────────────────",
             " ⧉   /work/focal-md-mvp-trial-workspaces",
-            "     ⎇ feature/mvp-trial-workspaces                     10d",
+            "     focal-md ⎇ feature/mvp-trial-workspaces            10d",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-citations",
-            "     ⎇ fix/citation-format                              11d",
+            "     focal-md ⎇ fix/citation-format                     11d",
         ]
     );
     assert_eq!(
@@ -5699,12 +5703,172 @@ async fn open_places_read_as_pairs_on_a_phone() {
             "     ⎇ feature/mvp-trial-workspaces 10d",
             "     ──────────────────────────────────",
             "     /work/focal-md-citations",
-            "     ⎇ fix/citation-format          11d",
+            "     focal-md ⎇ fix/citation-format 11d",
         ]
     );
     assert_eq!(
         h.app.list.selected_place(),
         Some(std::path::Path::new("/work/focal-md-mvp-trial-workspaces"))
+    );
+}
+
+/// A place names its repository before its branch (`focal-md ⎇
+/// paper-links`), but not where its folder has the repository's name (a
+/// main checkout: `focal-md  ⎇ main`, or `/work/rakumux`'s `⎇ main`). On a
+/// phone's 60 and 40 columns: one session's places open with the keys on
+/// one, another's closed, and one working in its folder's main checkout.
+/// Short of room the path is cut first, then the repository's name, then
+/// the branch.
+#[tokio::test]
+async fn places_name_their_repository_before_the_branch() {
+    use session_core::model::{GitInfo, Lifecycle, SessionPlace};
+    let now = 1_000_000_000;
+    let mut paper = in_focal_md(
+        ("A", "Paper links", 3_600),
+        ("claude", "Re-review passed; record committed on the branch"),
+        ("paper-links", "paper-links"),
+        &[
+            ("paper-links", "paper-links", 9),
+            ("pubmed-pmc-audit", "audit/pubmed-pmc-ingest-20261008", 10),
+            ("citations", "fix/citation-format", 11),
+        ],
+        now,
+    );
+    paper.lifecycle = Lifecycle::Idle;
+    // It changed files in another repository too, a main checkout named
+    // like it.
+    paper.places.insert(
+        2,
+        SessionPlace {
+            path: "/work/rakumux".into(),
+            git: Some(GitInfo {
+                repo_root: "/work/rakumux".into(),
+                branch: Some("main".into()),
+                repo: Some("rakumux".into()),
+                ..GitInfo::default()
+            }),
+            last_at: now - 10 * 86_400,
+            edited: true,
+        },
+    );
+    let mut citations = in_focal_md(
+        ("B", "Citations", 600),
+        ("codex", "Fix the citation format in the export"),
+        ("citations", "fix/citation-format"),
+        &[
+            ("citations", "fix/citation-format", 0),
+            ("paper-links", "paper-links", 2),
+        ],
+        now,
+    );
+    citations.lifecycle = Lifecycle::Idle;
+    let mut release = in_focal_md(
+        ("C", "Release notes", 120),
+        ("claude", "Draft the release notes"),
+        ("main", "main"),
+        &[],
+        now,
+    );
+    release.lifecycle = Lifecycle::Idle;
+    release.git = Some(GitInfo {
+        repo_root: "/work/focal-md".into(),
+        branch: Some("main".into()),
+        repo: Some("focal-md".into()),
+        ..GitInfo::default()
+    });
+    let mut h = harness(vec![paper, citations, release]).on_folders_tab();
+    h.app.list.set_clock(now);
+    let a = SessionId::from_string("A");
+    h.app.list.select(Selection::Session(a.clone()));
+    h.app.places_open.insert(a);
+    h.press(KeyCode::Char('j')).await;
+    h.press(KeyCode::Char('j')).await;
+    assert_eq!(
+        h.app.list.selected_place(),
+        Some(std::path::Path::new("/work/rakumux"))
+    );
+    let list = |h: &mut Harness, width: u16| {
+        let screen = screen_rows(h, width, 48);
+        let first = screen
+            .iter()
+            .position(|line| line.contains(" ─"))
+            .unwrap_or_else(|| panic!("{}", screen.join("\n")));
+        let last = screen
+            .iter()
+            .position(|line| line.contains("+ New session"))
+            .unwrap_or_else(|| panic!("{}", screen.join("\n")));
+        let block: Vec<String> = screen[first..=last]
+            .iter()
+            .map(|line| line.trim_end().to_string())
+            .collect();
+        eprintln!("{width} columns:\n{}\n", block.join("\n"));
+        block
+    };
+    assert_eq!(
+        list(&mut h, 60),
+        [
+            "   focal-md ────────────────────────────────────── 3/3 live",
+            "",
+            "   Paper links                                         1h ○",
+            "   Re-review passed; record committed on the bra…",
+            "   claude",
+            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
+            "     ──────────────────────────────────────────────────────",
+            "     /work/focal-md-pubmed-pmc-audit",
+            "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
+            "     ──────────────────────────────────────────────────────",
+            " ⧉   /work/rakumux",
+            "     ⎇ main                                             10d",
+            "     ──────────────────────────────────────────────────────",
+            "     /work/focal-md-citations",
+            "     focal-md ⎇ fix/citation-format                     11d",
+            "",
+            "   Citations                                          10m ○",
+            "   Fix the citation format in the export",
+            "   codex",
+            " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
+            "",
+            "   Release notes                                       2m ○",
+            "   Draft the release notes",
+            "   claude",
+            "   focal-md  ⎇ main",
+            "",
+            " + New session",
+        ]
+    );
+    // Short of room, the path is cut at its start, then the repository's
+    // name goes, then the branch is cut; nothing wraps.
+    assert_eq!(
+        list(&mut h, 40),
+        [
+            "   focal-md ────────────────── 3/3 live",
+            "",
+            "   Paper links                     1h ○",
+            "   Re-review passed; record …",
+            "   claude",
+            " ▾ …focal-md-paper-links  ⎇ paper-links",
+            "     ──────────────────────────────────",
+            "     /work/focal-md-pubmed-pmc-audit",
+            "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
+            "     ──────────────────────────────────",
+            " ⧉   /work/rakumux",
+            "     ⎇ main                         10d",
+            "     ──────────────────────────────────",
+            "     /work/focal-md-citations",
+            "     focal-md ⎇ fix/citation-format 11d",
+            "",
+            "   Citations                      10m ○",
+            "   Fix the citation format i…",
+            "   codex",
+            " ▸ …ocal-md-citations  ⎇ fix/citation-…",
+            "",
+            "   Release notes                   2m ○",
+            "   Draft the release notes",
+            "   claude",
+            "   focal-md  ⎇ main",
+            "",
+            " + New session",
+        ]
     );
 }
 
@@ -5765,21 +5929,21 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   Paper links                                         1h ○",
             "   Re-review passed; record committed on the bra…",
             "   claude",
-            " ▾ /work/focal-md-paper-links  ⎇ paper-links",
+            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
-            "     ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
+            "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
             "     ──────────────────────────────────────────────────────",
             " ⧉   /work/focal-md-mvp-trial-workspaces",
-            "     ⎇ feature/mvp-trial-workspaces                     10d",
+            "     focal-md ⎇ feature/mvp-trial-workspaces            10d",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-citations",
-            "     ⎇ fix/citation-format                              11d",
+            "     focal-md ⎇ fix/citation-format                     11d",
             "",
             "   Citations                                          10m ●",
             "   Fix the citation format in the export",
             "   codex",
-            " ▸ /work/focal-md-citations  ⎇ fix/citation-format",
+            " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
             "",
             " + New session",
         ]
@@ -5803,7 +5967,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "     ⎇ feature/mvp-trial-workspaces 10d",
             "     ──────────────────────────────────",
             "     /work/focal-md-citations",
-            "     ⎇ fix/citation-format          11d",
+            "     focal-md ⎇ fix/citation-format 11d",
             "",
             "   Citations                      10m ●",
             "   Fix the citation format i…",
@@ -5850,7 +6014,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   Citations                                          10m ●",
             "   Fix the citation format in the export",
             "   codex",
-            " ▸ /work/focal-md-citations  ⎇ fix/citation-format",
+            " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
             "",
             " ○ ready ──────────────────────────────────────── 1 session",
             "",
@@ -5859,16 +6023,16 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   Paper links                                         1h ○",
             "   Re-review passed; record committed on the bra…",
             "   claude",
-            " ▾ /work/focal-md-paper-links  ⎇ paper-links",
+            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
-            "     ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
+            "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
             "     ──────────────────────────────────────────────────────",
             " ⧉   /work/focal-md-mvp-trial-workspaces",
-            "     ⎇ feature/mvp-trial-workspaces                     10d",
+            "     focal-md ⎇ feature/mvp-trial-workspaces            10d",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-citations",
-            "     ⎇ fix/citation-format                              11d",
+            "     focal-md ⎇ fix/citation-format                     11d",
             "",
             " + New session",
         ]
