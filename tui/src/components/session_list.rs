@@ -8,9 +8,10 @@
 //! Each session is a compact cell after a blank row: its name, then its age
 //! and its mark (an agent's activity, else its status) at the right; then the
 //! agent's latest output, when the daemon has one; then its program and
-//! state; then the folder it works in now and its branch, with `▸ +3` when
-//! it has worked in other places, which open under it (`app::places`). A
-//! pin toggle shows left of the name under the pointer.
+//! state; then the folder it works in now, a pair of lines (its path, its
+//! branch) behind a green bar, with `▸` and `+3` when it has worked in other
+//! places, which open under it as pairs of their own (`app::places`). A pin
+//! toggle shows left of the name under the pointer.
 //! The selected item's text is white and the others' muted; nothing has a
 //! background except the tabs' band. A session being dragged has a blue
 //! bar on its left.
@@ -32,6 +33,7 @@ use super::format::{
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
 use crate::app::grouping::{Grouping, ReadPeriod, Section};
+use crate::app::places::PlaceRef;
 use crate::app::{App, Connection, Hit, ListRow};
 use crate::layout::str_width;
 use crate::theme;
@@ -484,27 +486,34 @@ fn session_content(
     lines
 }
 
-/// Marks the place line of a session that has worked elsewhere too: `▸`
-/// while its places are closed, `▾` while they're open.
+/// Beside the place a session works now when it has worked elsewhere too:
+/// `▸` while its other places are closed, `▾` while they're open.
 const PLACES_CLOSED: &str = "▸";
 const PLACES_OPEN: &str = "▾";
-/// Left of an open place under the pointer or the list keys: a click or tap
-/// (`y`) copies its path.
+/// Beside a place under the pointer or the list keys: a click or tap (`y`)
+/// copies its path.
 const COPY_MARK: &str = "⧉";
-/// Left of both lines of an open place, holding its path and its branch
-/// together.
+/// Left of both lines of the place a session works now, holding its path
+/// and its branch together.
+const CURRENT_BAR: &str = "┃";
+/// Left of both lines of each of its other places.
 const PLACE_BAR: &str = "│";
-/// Columns of [`PLACE_BAR`] and the gap after it.
+/// Columns left of a place's text: its toggle or copy mark and a gap, its
+/// bar and a gap.
+const PLACE_SLOT_WIDTH: usize = 2;
 const PLACE_BAR_WIDTH: usize = 2;
-/// Between two open places, under their text.
+/// Between two places, under their text.
 const PLACE_RULE: &str = "─";
 
 /// A session's place lines.
 struct PlaceLines {
     lines: Vec<Vec<Span<'static>>>,
-    /// How many of the lines (from the first) open and close the places,
-    /// none when there are no others.
-    toggle: usize,
+    /// Where its `▸`/`▾` and count are (a line, and its columns from the
+    /// content's start), which open and close its other places; none when
+    /// there are none.
+    toggle: Vec<(usize, std::ops::Range<usize>)>,
+    /// The lines of the place it works in now.
+    current: std::ops::Range<usize>,
     /// Each open place's two lines, in the order of the session's
     /// [`crate::app::places::listed_places`].
     places: Vec<std::ops::Range<usize>>,
@@ -512,125 +521,152 @@ struct PlaceLines {
     focus: Option<usize>,
 }
 
-/// A session's place lines, under its facts: the folder it works in now and
-/// its branch (`▤ rakumux  ⎇ main`, or `▸ rakumux  ⎇ main  +3` when it has
-/// worked in other places), the branch and count on a line of their own
-/// when they don't fit; then, while its places are open (`▾`), each of the
-/// others (where it changed files: every place is), most recent first, as a
-/// pair of lines behind a bar: its path, then its branch and, at the right,
-/// when; a rule between two. The place the list keys are on (in the `selected`
-/// session) is bright, and its bar and the `hovered` one's are blue, with
-/// the copy mark beside their path.
+/// A session's place lines, under its facts, each place a pair of lines
+/// behind a bar: first the place it works in now, behind the green `┃`: its
+/// path, `+3` at the right when it has worked in other places (with `▸`
+/// left of the bar), then its branch. While its places are open (`▾`), each
+/// of the others (where it changed files: every place is), most recent
+/// first, behind a muted `│`: its path, then its branch and when; a rule
+/// between two. The place the list keys are on (in the `selected` session)
+/// is bright, and its bar and the `hovered` one's are blue, with the copy
+/// mark beside them (the current place's under its `▸`).
 fn place_content(
     app: &App,
     session: &SessionView,
     width: usize,
     selected: bool,
-    hovered: Option<usize>,
+    hovered: Option<PlaceRef>,
     now: i64,
 ) -> PlaceLines {
     let p = theme::palette();
     let icons = app.icons();
-    // After the two columns every line under the name starts with.
-    let room = width.saturating_sub(2);
+    // After the two columns every line under the name starts with, the
+    // slot and the bar.
+    let lead_width = 2;
+    let inner = width.saturating_sub(lead_width + PLACE_SLOT_WIDTH + PLACE_BAR_WIDTH);
     let (text_color, quiet) = if selected {
         (p.text_primary, p.neutral_gray)
     } else {
         (p.text_muted, p.text_muted)
     };
+    let label_style = Style::default().fg(text_color);
+    let branch_style = Style::default().fg(quiet);
+    let lead = |mut spans: Vec<Span<'static>>| {
+        spans.insert(0, Span::raw(" ".repeat(lead_width)));
+        spans
+    };
+    let blank_slot = || Span::raw(" ".repeat(PLACE_SLOT_WIDTH));
+    let copy_slot = || {
+        Span::styled(
+            format!("{COPY_MARK:<PLACE_SLOT_WIDTH$}"),
+            Style::default().fg(p.accent_primary),
+        )
+    };
+    let bar = |mark: &str, color| {
+        Span::styled(
+            format!("{mark:<PLACE_BAR_WIDTH$}"),
+            Style::default().fg(color),
+        )
+    };
+    let branch_of = |git: Option<&session_core::model::GitInfo>| {
+        git.and_then(|git| branch_label(git, icons))
+            .unwrap_or_default()
+    };
+
+    // Where it works now, with the toggle and count when there are others.
     let current = crate::app::places::current_place(session);
     let listed: Vec<_> = crate::app::places::listed_places(session).collect();
     let others = listed.len();
     let open = app.places_open(&session.id) && others > 0;
-    let (mark, mark_color) = if open {
-        (PLACES_OPEN, p.accent_primary)
-    } else if others > 0 {
-        (PLACES_CLOSED, p.accent_primary)
+    let hovered_current = hovered == Some(PlaceRef::Current);
+    let count = if others > 0 {
+        truncate(&format!("+{others}"), inner)
     } else {
-        (icons.folder(), quiet)
+        String::new()
     };
-    let mark_width = str_width(mark) + 1;
-    let lead = |mut spans: Vec<Span<'static>>| {
-        spans.insert(0, Span::raw("  "));
-        spans
-    };
-    let label = place_label(&session.scope, current);
-    let branch = session
-        .git
-        .as_ref()
-        .and_then(|git| branch_label(git, icons));
-    let tail = branch
-        .into_iter()
-        .chain((others > 0).then(|| format!("+{others}")))
-        .collect::<Vec<_>>()
-        .join("  ");
-    let mark = Span::styled(format!("{mark} "), Style::default().fg(mark_color));
-    let label_style = Style::default().fg(text_color);
-    let tail_style = Style::default().fg(quiet);
-    let tail_width = if tail.is_empty() {
-        0
+    let count_width = str_width(&count);
+    let path_room = if count.is_empty() {
+        inner
     } else {
-        2 + str_width(&tail)
+        inner.saturating_sub(count_width + 1)
     };
-    let mut lines = Vec::new();
-    if mark_width + str_width(&label) + tail_width <= room {
-        let mut spans = vec![mark, Span::styled(label, label_style)];
-        if !tail.is_empty() {
-            spans.push(Span::styled(format!("  {tail}"), tail_style));
-        }
-        lines.push(lead(spans));
+    let path = truncate_start(&place_label(&session.scope, current), path_room);
+    let gap = inner.saturating_sub(str_width(&path) + count_width);
+    let current_bar = bar(CURRENT_BAR, p.accent_green);
+    let first_slot = if others > 0 {
+        let mark = if open { PLACES_OPEN } else { PLACES_CLOSED };
+        Span::styled(
+            format!("{mark:<PLACE_SLOT_WIDTH$}"),
+            Style::default().fg(p.accent_primary),
+        )
+    } else if hovered_current {
+        copy_slot()
     } else {
-        let label = truncate_start(&label, room.saturating_sub(mark_width));
-        lines.push(lead(vec![mark, Span::styled(label, label_style)]));
-        if !tail.is_empty() {
-            lines.push(lead(vec![
-                Span::raw(" ".repeat(mark_width)),
-                Span::styled(truncate(&tail, room.saturating_sub(mark_width)), tail_style),
-            ]));
-        }
+        blank_slot()
+    };
+    let second_slot = if others > 0 && hovered_current {
+        copy_slot()
+    } else {
+        blank_slot()
+    };
+    let mut first = vec![
+        first_slot,
+        current_bar.clone(),
+        Span::styled(path, label_style),
+    ];
+    if !count.is_empty() {
+        first.push(Span::raw(" ".repeat(gap)));
+        first.push(Span::styled(count, branch_style));
     }
-    let toggle = if others > 0 { lines.len() } else { 0 };
+    let branch = truncate(&branch_of(session.git.as_ref()), inner);
+    let mut lines = vec![
+        lead(first),
+        lead(vec![
+            second_slot,
+            current_bar,
+            Span::styled(branch, branch_style),
+        ]),
+    ];
+    let toggle = if others > 0 {
+        let text = lead_width + PLACE_SLOT_WIDTH + PLACE_BAR_WIDTH;
+        vec![
+            (0, lead_width..lead_width + PLACE_SLOT_WIDTH),
+            (0, text + inner - count_width..text + inner),
+        ]
+    } else {
+        Vec::new()
+    };
     let mut places = Vec::new();
     if !open {
         return PlaceLines {
             lines,
             toggle,
+            current: 0..2,
             places,
             focus: None,
         };
     }
+
+    // Under it, the others.
     let focus = selected
         .then(|| app.list.selected_place())
         .flatten()
         .and_then(|focus| listed.iter().position(|p| p.path == focus));
-    // Each place's text: right of the mark's columns and its bar.
-    let inner = room.saturating_sub(mark_width + PLACE_BAR_WIDTH);
-    let age_style = Style::default().fg(quiet);
     for (index, place) in listed.into_iter().enumerate() {
-        if index > 0 {
-            lines.push(lead(vec![
-                Span::raw(" ".repeat(mark_width + PLACE_BAR_WIDTH)),
-                Span::styled(PLACE_RULE.repeat(inner), Style::default().fg(p.border_dim)),
-            ]));
-        }
+        lines.push(lead(vec![
+            Span::raw(" ".repeat(PLACE_SLOT_WIDTH + PLACE_BAR_WIDTH)),
+            Span::styled(PLACE_RULE.repeat(inner), Style::default().fg(p.border_dim)),
+        ]));
         let start = lines.len();
-        let marked = focus == Some(index) || hovered == Some(index);
-        let bar = Span::styled(
-            format!("{PLACE_BAR:<PLACE_BAR_WIDTH$}"),
-            Style::default().fg(if marked {
+        let marked = focus == Some(index) || hovered == Some(PlaceRef::Listed(index));
+        let place_bar = bar(
+            PLACE_BAR,
+            if marked {
                 p.accent_primary
             } else {
                 p.text_subtle
-            }),
+            },
         );
-        let slot = if marked {
-            Span::styled(
-                format!("{COPY_MARK:<mark_width$}"),
-                Style::default().fg(p.accent_primary),
-            )
-        } else {
-            Span::raw(" ".repeat(mark_width))
-        };
         let path_style = if focus == Some(index) {
             Style::default()
                 .fg(p.text_bright)
@@ -640,32 +676,31 @@ fn place_content(
         };
         let label = place_label(&session.scope, &place.path);
         lines.push(lead(vec![
-            slot,
-            bar.clone(),
+            if marked { copy_slot() } else { blank_slot() },
+            place_bar.clone(),
             Span::styled(truncate_start(&label, inner), path_style),
         ]));
         // Under it its branch, and at the right its age; short of room the
         // branch is cut first, then the age.
         let age = truncate(&relative_time(now, place.last_at), inner);
-        let branch = place
-            .git
-            .as_ref()
-            .and_then(|git| branch_label(git, icons))
-            .unwrap_or_default();
-        let branch = truncate(&branch, inner.saturating_sub(str_width(&age) + 1));
+        let branch = truncate(
+            &branch_of(place.git.as_ref()),
+            inner.saturating_sub(str_width(&age) + 1),
+        );
         let gap = inner.saturating_sub(str_width(&branch) + str_width(&age));
         lines.push(lead(vec![
-            Span::raw(" ".repeat(mark_width)),
-            bar,
-            Span::styled(branch, tail_style),
+            blank_slot(),
+            place_bar,
+            Span::styled(branch, branch_style),
             Span::raw(" ".repeat(gap)),
-            Span::styled(age, age_style),
+            Span::styled(age, branch_style),
         ]));
         places.push(start..lines.len());
     }
     PlaceLines {
         lines,
         toggle,
+        current: 0..2,
         places,
         focus,
     }
@@ -1181,7 +1216,7 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 };
                 if height > row_area.height {
                     let focus = places.focus.and_then(|at| places.places.get(at));
-                    let end = top + places_at + focus.map_or(1, |lines| lines.end);
+                    let end = top + places_at + focus.unwrap_or(&places.current).end;
                     skip = (end as u16).saturating_sub(row_area.height);
                 }
                 // The description is the line under the name; with AI
@@ -1196,15 +1231,25 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                     }
                 }
                 if !dragged {
-                    // The place line opens and closes the places under it.
-                    if places.toggle > 0 {
-                        let area = line_area(top + places_at, places.toggle);
+                    // The current place's ▸ and count open and close the
+                    // places under it, before its own target.
+                    for (line, columns) in &places.toggle {
+                        let area = Rect {
+                            x: full.x + (INDENT + columns.start) as u16,
+                            y: full.y.saturating_add((top + places_at + line) as u16),
+                            width: columns.len() as u16,
+                            height: 1,
+                        }
+                        .intersection(full);
                         row_hits.push((area, Hit::PlacesToggle(index)));
                     }
-                    // A click on an open place copies its path.
+                    // A click on a place copies its path.
+                    let current = &places.current;
+                    let area = line_area(top + places_at + current.start, current.len());
+                    row_hits.push((area, Hit::Place(index, PlaceRef::Current)));
                     for (place, range) in places.places.iter().enumerate() {
                         let area = line_area(top + places_at + range.start, range.len());
-                        row_hits.push((area, Hit::Place(index, place)));
+                        row_hits.push((area, Hit::Place(index, PlaceRef::Listed(place))));
                     }
                 }
                 if dragged {
@@ -1275,8 +1320,8 @@ mod tests {
             let facts: String = second.iter().map(|span| span.content.as_ref()).collect();
             assert_eq!(facts, "  opencode");
             let places = place_content(&h.app, &session, 40, selected, None, 0).lines;
-            let branch = places[0].last().unwrap();
-            assert_eq!(branch.content, "  ⎇ main");
+            let branch = places[1].last().unwrap();
+            assert_eq!(branch.content, "⎇ main");
             assert_eq!(
                 branch.style.fg,
                 Some(if selected {
@@ -1319,21 +1364,45 @@ mod tests {
     }
 
     #[test]
-    fn the_place_line_names_the_folder_worked_in_now_and_how_many_others() {
+    fn where_a_session_works_now_is_a_pair_behind_a_green_bar_with_its_toggle_and_count() {
         use crate::app::testing::harness;
+        let p = theme::palette();
         let mut h = harness(vec![]);
-        // Nowhere else: the folder mark, no toggle.
+        let bars = |lines: &[Vec<Span>], mark: &str| -> Vec<Option<ratatui::style::Color>> {
+            lines
+                .iter()
+                .map(|line| {
+                    line.iter()
+                        .find(|span| span.content.starts_with(mark))
+                        .and_then(|span| span.style.fg)
+                })
+                .collect()
+        };
+        // Nowhere else: the pair alone, no toggle, no count.
         let alone = with_places(&[("/repo", "main", 5, false)]);
-        let PlaceLines { lines, toggle, .. } = place_content(&h.app, &alone, 40, false, None, 1000);
-        assert_eq!(text(&lines), ["  ▤ repo  ⎇ main"]);
-        assert_eq!(toggle, 0);
-        // Opened, it stays that line: there's nothing else to list.
-        h.app.places_open.insert(alone.id.clone());
-        let PlaceLines { lines, places, .. } = place_content(&h.app, &alone, 40, false, None, 1000);
-        assert_eq!(text(&lines), ["  ▤ repo  ⎇ main"]);
+        let PlaceLines {
+            lines,
+            toggle,
+            current,
+            places,
+            ..
+        } = place_content(&h.app, &alone, 40, false, None, 1000);
+        assert_eq!(text(&lines), ["    ┃ repo", "    ┃ ⎇ main"]);
+        assert!(toggle.is_empty());
+        assert_eq!(current, 0..2);
         assert!(places.is_empty());
+        assert_eq!(bars(&lines, "┃"), [Some(p.accent_green); 2]);
+        // Under the pointer, the copy mark beside its path.
+        let lines = place_content(&h.app, &alone, 40, false, Some(PlaceRef::Current), 1000).lines;
+        assert_eq!(text(&lines), ["  ⧉ ┃ repo", "    ┃ ⎇ main"]);
+        // Opened, it stays alone: there's nothing else to list.
+        h.app.places_open.insert(alone.id.clone());
+        let lines = place_content(&h.app, &alone, 40, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["    ┃ repo", "    ┃ ⎇ main"]);
         h.app.places_open.clear();
-        // Elsewhere too: ▸ and the count, which open and close the list.
+
+        // Elsewhere too: ▸ left of the bar and the count at the right,
+        // which open and close the list; the copy mark goes under the ▸.
         let mut moved = with_places(&[
             ("/repo/worktrees/fix", "fix", 5, true),
             ("/repo", "main", 300, false),
@@ -1345,45 +1414,35 @@ mod tests {
             ..Default::default()
         });
         let PlaceLines { lines, toggle, .. } = place_content(&h.app, &moved, 40, false, None, 1000);
-        assert_eq!(text(&lines), ["  ▸ worktrees/fix  ⎇ fix  +2"]);
-        assert_eq!(toggle, 1);
-        // Narrow: the branch and count on a line of their own, the path cut
-        // at its start.
-        let PlaceLines { lines, toggle, .. } = place_content(&h.app, &moved, 16, false, None, 1000);
-        assert_eq!(text(&lines), ["  ▸ …rktrees/fix", "    ⎇ fix  +2"]);
-        assert_eq!(toggle, 2);
-        // Open, it keeps its branch, and the count is the places listed.
-        h.app.places_open.insert(moved.id.clone());
-        for width in [16, 40] {
-            let PlaceLines {
-                lines,
-                toggle,
-                places,
-                ..
-            } = place_content(&h.app, &moved, width, false, None, 1000);
-            let text = text(&lines);
-            assert_eq!(text[..toggle].join("").matches("⎇ fix").count(), 1);
-            assert!(text[toggle - 1].ends_with("+2"), "{text:?}");
-            assert_eq!(places.len(), 2, "{text:?}");
-            assert!(
-                !text[toggle..].iter().any(|line| line.contains("fix")),
-                "the place worked in now is on the place line only: {text:?}"
-            );
-        }
+        assert_eq!(
+            text(&lines),
+            ["  ▸ ┃ worktrees/fix                   +2", "    ┃ ⎇ fix"]
+        );
+        assert_eq!(toggle, [(0, 2..4), (0, 38..40)]);
+        assert_eq!(lines[0][1].style.fg, Some(p.accent_primary));
+        let lines = place_content(&h.app, &moved, 40, false, Some(PlaceRef::Current), 1000).lines;
+        assert_eq!(
+            text(&lines),
+            ["  ▸ ┃ worktrees/fix                   +2", "  ⧉ ┃ ⎇ fix"]
+        );
+        // Narrow: the path is cut at its start before the count.
+        let lines = place_content(&h.app, &moved, 16, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["  ▸ ┃ …es/fix +2", "    ┃ ⎇ fix"]);
         // Working somewhere none of its places is (its terminal's
-        // directory): every place is another.
+        // directory, outside a repository): every place is another.
         let mut away = moved.clone();
         away.git = None;
         away.cwd = "/srv/scratch".into();
-        let PlaceLines { lines, places, .. } = place_content(&h.app, &away, 40, false, None, 1000);
-        assert_eq!(text(&lines)[0], "  ▾ /srv/scratch  +3");
-        assert_eq!(places.len(), 3);
-        h.app.places_open.clear();
+        let lines = place_content(&h.app, &away, 40, false, None, 1000).lines;
+        assert_eq!(
+            text(&lines),
+            ["  ▸ ┃ /srv/scratch                    +3", "    ┃ "]
+        );
         for width in [8, 12, 16, 24, 40, 80] {
             let lines = place_content(&h.app, &moved, width, true, None, 1000).lines;
             for line in &lines {
                 assert!(
-                    Line::from(line.clone()).width() <= width.max(4),
+                    Line::from(line.clone()).width() <= width.max(6),
                     "{width}: {:?}",
                     text(&lines)
                 );
@@ -1391,12 +1450,12 @@ mod tests {
         }
         assert_eq!(
             row_height_in(&h.app, &ListRow::Session(&moved), 40, 1000),
-            4
+            5
         );
     }
 
     #[test]
-    fn open_places_are_pairs_of_lines_behind_a_bar_with_a_rule_between() {
+    fn open_places_are_pairs_under_the_current_one_with_a_rule_between() {
         use crate::app::testing::harness;
         use crate::app::Selection;
         let p = theme::palette();
@@ -1410,14 +1469,18 @@ mod tests {
         let PlaceLines {
             lines,
             toggle,
+            current,
             places,
             focus,
         } = place_content(&h.app, &session, 40, false, None, 1000);
-        // The place worked in now is on the place line, not again under it.
+        // The place it works in now is the first pair, not again under it;
+        // the count is the pairs under it.
         assert_eq!(
             text(&lines),
             [
-                "  ▾ repo  ⎇ main  +2",
+                "  ▾ ┃ repo                            +2",
+                "    ┃ ⎇ main",
+                "      ──────────────────────────────────",
                 "    │ worktrees/fix",
                 "    │ ⎇ fix                          now",
                 "      ──────────────────────────────────",
@@ -1425,46 +1488,47 @@ mod tests {
                 "    │ ⎇ dev                           2h",
             ]
         );
-        assert_eq!(toggle, 1);
-        assert_eq!(places, [1..3, 4..6]);
+        assert_eq!(toggle.len(), 2);
+        assert_eq!(current, 0..2);
+        assert_eq!(places, [3..5, 6..8]);
         assert_eq!(focus, None);
-        let fg = |line: usize, content: &str| {
-            lines[line]
-                .iter()
-                .find(|span| span.content == content)
-                .and_then(|span| span.style.fg)
-        };
-        assert_eq!(fg(3, &"─".repeat(34)), Some(p.border_dim));
-        for line in [1, 2, 4, 5] {
-            assert_eq!(fg(line, "│ "), Some(p.text_subtle), "{line}");
-        }
-        // Under the pointer, on either of its lines, a place shows the copy
-        // mark beside its path and its bar turns blue down both lines.
-        let PlaceLines { lines, .. } = place_content(&h.app, &session, 40, false, Some(1), 1000);
-        let marked = text(&lines);
-        assert_eq!(marked[4], "  ⧉ │ /srv/other");
-        assert_eq!(marked[5], "    │ ⎇ dev                           2h");
-        assert!(!marked[1].contains('⧉'));
         let bar = |lines: &[Vec<Span>], line: usize| {
             lines[line]
                 .iter()
-                .find(|span| span.content == "│ ")
+                .find(|span| span.content == "│ " || span.content == "┃ ")
                 .and_then(|span| span.style.fg)
         };
-        assert_eq!(bar(&lines, 4), Some(p.accent_primary));
-        assert_eq!(bar(&lines, 5), Some(p.accent_primary));
-        assert_eq!(bar(&lines, 1), Some(p.text_subtle));
+        for line in [0, 1] {
+            assert_eq!(bar(&lines, line), Some(p.accent_green), "{line}");
+        }
+        for line in [3, 4, 6, 7] {
+            assert_eq!(bar(&lines, line), Some(p.text_subtle), "{line}");
+        }
+        let rule = lines[2].iter().find(|span| span.content.starts_with('─'));
+        assert_eq!(rule.and_then(|span| span.style.fg), Some(p.border_dim));
+        // Under the pointer, on either of its lines, a place shows the copy
+        // mark beside its path and its bar turns blue down both lines.
+        let lines =
+            place_content(&h.app, &session, 40, false, Some(PlaceRef::Listed(1)), 1000).lines;
+        let marked = text(&lines);
+        assert_eq!(marked[6], "  ⧉ │ /srv/other");
+        assert_eq!(marked[7], "    │ ⎇ dev                           2h");
+        assert!(!marked[3].contains('⧉'));
+        assert_eq!(bar(&lines, 6), Some(p.accent_primary));
+        assert_eq!(bar(&lines, 7), Some(p.accent_primary));
+        assert_eq!(bar(&lines, 3), Some(p.text_subtle));
+        assert_eq!(bar(&lines, 0), Some(p.accent_green));
         // The one the list keys are on (in the selected session) too, its
         // path bright.
         h.app.list.select(Selection::Session(session.id.clone()));
         h.app.list.select_place(Some("/repo/worktrees/fix".into()));
         let PlaceLines { lines, focus, .. } = place_content(&h.app, &session, 40, true, None, 1000);
         assert_eq!(focus, Some(0));
-        assert_eq!(text(&lines)[1], "  ⧉ │ worktrees/fix");
-        assert_eq!(bar(&lines, 1), Some(p.accent_primary));
-        assert_eq!(bar(&lines, 2), Some(p.accent_primary));
-        assert_eq!(bar(&lines, 4), Some(p.text_subtle));
-        let path = lines[1].last().unwrap();
+        assert_eq!(text(&lines)[3], "  ⧉ │ worktrees/fix");
+        assert_eq!(bar(&lines, 3), Some(p.accent_primary));
+        assert_eq!(bar(&lines, 4), Some(p.accent_primary));
+        assert_eq!(bar(&lines, 6), Some(p.text_subtle));
+        let path = lines[3].last().unwrap();
         assert_eq!(path.style.fg, Some(p.text_bright));
         assert!(path.style.add_modifier.contains(Modifier::BOLD));
         // Narrow: the same pairs, paths cut at their start, the branch cut
@@ -1474,8 +1538,9 @@ mod tests {
         assert_eq!(
             text(&lines),
             [
-                "  ▾ repo",
-                "    ⎇ main  +2",
+                "  ▾ ┃ repo    +2",
+                "    ┃ ⎇ main",
+                "      ──────────",
                 "    │ …trees/fix",
                 "    │ ⎇ fix  now",
                 "      ──────────",
@@ -1483,7 +1548,7 @@ mod tests {
                 "    │ ⎇ dev   2h",
             ]
         );
-        assert_eq!(places, [2..4, 5..7]);
+        assert_eq!(places, [3..5, 6..8]);
         for width in [8, 12, 16, 24, 40, 80] {
             let PlaceLines { lines, places, .. } =
                 place_content(&h.app, &session, width, false, None, 1000);
@@ -1498,7 +1563,7 @@ mod tests {
         }
         assert_eq!(
             row_height_in(&h.app, &ListRow::Session(&session), 40, 1000),
-            9
+            11
         );
     }
 

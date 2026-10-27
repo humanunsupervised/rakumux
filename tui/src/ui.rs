@@ -542,7 +542,17 @@ mod tests {
         assert!(height < 120, "{height} rows");
         let screen = render(&mut h.app, 120, 200);
         assert!(screen.contains("Quit Rakumux"), "every row shows: {screen}");
-        assert!(!screen.contains('┃'), "no scrollbar: {screen}");
+        // In the dialog (the list behind it has its current places' bars).
+        let buffer = terminal.backend().buffer();
+        let left = (0..120)
+            .find(|x| buffer.get(*x, corners[0]).symbol() == "╭")
+            .unwrap();
+        let right = (0..120)
+            .find(|x| buffer.get(*x, corners[0]).symbol() == "╮")
+            .unwrap();
+        let scrollbar =
+            (corners[0]..=bottom).any(|y| (left..=right).any(|x| buffer.get(x, y).symbol() == "┃"));
+        assert!(!scrollbar, "no scrollbar: {screen}");
         // The wheel moves the selection, a row per notch.
         let wheel = |kind| MouseEvent {
             kind,
@@ -1068,7 +1078,7 @@ mod tests {
         let mut h = harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Sidebar);
         let width = usize::from(crate::layout::sidebar_width(160));
         h.app.show_tab(Grouping::App);
-        let wide = render(&mut h.app, 160, 48);
+        let wide = render(&mut h.app, 160, 60);
         let list = list_column(&wide, width);
         assert!(
             list[1].starts_with("   ◔ Status    ▤ Folders    ◇ App ▾"),
@@ -1100,7 +1110,7 @@ mod tests {
 
         // Tall enough for every status: each session has a place line too.
         h.app.show_tab(Grouping::Status);
-        let wide = render(&mut h.app, 160, 64);
+        let wide = render(&mut h.app, 160, 80);
         let list = list_column(&wide, width);
         assert!(list[1].starts_with("   ◔ Status ▾"), "{wide}");
         let headers: Vec<usize> = [
@@ -1361,9 +1371,9 @@ mod tests {
         assert!(docs < refactor, "{wide}");
         assert!(list[docs].contains(" docs "), "{wide}");
         assert!(!list[docs].contains('★'), "{wide}");
-        assert!(list[docs + 2].contains("⎇ main"), "{wide}");
+        assert!(list[docs + 3].contains("⎇ main"), "{wide}");
         assert!(list[refactor + 1].contains("claude"), "{wide}");
-        assert!(list[refactor + 2].contains("⎇ sessions-refactor"), "{wide}");
+        assert!(list[refactor + 3].contains("⎇ sessions-refactor"), "{wide}");
         assert!(!wide.contains("worktree"), "branch only: {wide}");
         // The lone folder still has its header, with its name.
         assert!(wide.contains("──"), "the folder's header: {wide}");
@@ -1523,13 +1533,13 @@ mod tests {
         // The program and state, then the folder and its branch.
         assert!(list[at("frontend") + 1].contains("codex"), "{wide}");
         assert!(
-            list[at("frontend") + 2].contains("⎇ feature/login"),
+            list[at("frontend") + 3].contains("⎇ feature/login"),
             "{wide}"
         );
         assert!(list[at("storybook") + 1].contains("dead"), "{wide}");
-        assert!(list[at("storybook") + 2].contains("⎇ main"), "{wide}");
+        assert!(list[at("storybook") + 3].contains("⎇ main"), "{wide}");
         assert!(list[at("server") + 1].contains("cargo"), "{wide}");
-        assert!(list[at("server") + 2].contains("⎇ @1a2b3c4"), "{wide}");
+        assert!(list[at("server") + 3].contains("⎇ @1a2b3c4"), "{wide}");
         // A selected header stands out: its rule turns blue.
         h.app
             .list

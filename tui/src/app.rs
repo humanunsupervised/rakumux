@@ -159,12 +159,12 @@ pub enum Hit {
     /// The ↻ at the end of a hovered session row's AI description (that list
     /// row): makes a new summary of its session.
     SummaryRefresh(usize),
-    /// A session row's place line, when it has worked elsewhere too (that
-    /// list row): opens or closes its places.
+    /// The `▸`/`▾` and `+N` of a session row's current place, when it has
+    /// worked elsewhere too (that list row): opens or closes its places.
     PlacesToggle(usize),
-    /// One of a session row's open places, both its lines (that list row,
-    /// that index in its `places::listed_places`): copies its path.
-    Place(usize, usize),
+    /// One of a session row's places, both its lines (that list row, that
+    /// place): copies its path.
+    Place(usize, places::PlaceRef),
     /// Visible Grid card in filtered session order (last is New session).
     GridCell(usize),
     /// Previous/next Grid page.
@@ -360,9 +360,8 @@ pub struct App {
     /// movement): a session row there shows its pin toggle.
     pub hovered_row: Option<usize>,
     /// The place under the mouse pointer, on either of its lines (its list
-    /// row and index in its session's `places::listed_places`): it shows its
-    /// copy mark.
-    pub hovered_place: Option<(usize, usize)>,
+    /// row, and which of its session's): it shows its copy mark.
+    pub hovered_place: Option<(usize, places::PlaceRef)>,
     /// Sessions whose places are open under their row (`places`).
     pub places_open: HashSet<SessionId>,
     pub mode: AppMode,

@@ -5159,8 +5159,9 @@ async fn turning_ai_summaries_off_clears_the_descriptions_and_the_refresh() {
 }
 
 /// Where a session has worked opens under its row: `w` for the selected
-/// one, `W` for all of them, a click on its place line; a session that has
-/// worked nowhere else says so.
+/// one, `W` for all of them, a click on the `▸` or count of the place it
+/// works in now (a click on its path copies it); a session that has worked
+/// nowhere else says so.
 #[tokio::test]
 async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
@@ -5185,21 +5186,36 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     let mut h = harness(vec![agent, view("B", "plain", 10)]).on_folders_tab();
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
-    let screen = screen_rows(&mut h, 160, 48).join("\n");
-    assert!(screen.contains("▸ repo  ⎇ main  +1"), "{screen}");
-    assert!(!screen.contains("worktrees/fix"), "closed: {screen}");
-
-    // Open, the place line stays, and under it the one other place: its
-    // path, then its branch and age, behind a bar.
-    h.press(KeyCode::Char('w')).await;
-    let screen = screen_rows(&mut h, 160, 48);
-    let text = screen.join("\n");
-    assert!(text.contains("▾ repo  ⎇ main  +1"), "{text}");
     // The list's part of a screen row: up to the divider beside it.
     let in_list = |line: &str| {
         let end = line.rfind('│').unwrap_or(line.len());
         line[..end].trim_end().to_string()
     };
+    // Where it works now: a pair behind its bar, ▸ and the count of the
+    // others with it.
+    let current = |screen: &[String], mark: &str| {
+        let at = screen
+            .iter()
+            .position(|line| line.contains(&format!("{mark} ┃ repo")))
+            .unwrap_or_else(|| panic!("{mark} ┃ repo: {}", screen.join("\n")));
+        assert!(in_list(&screen[at]).ends_with(" +1"), "{:?}", screen[at]);
+        assert!(
+            screen[at + 1].contains("  ┃ ⎇ main"),
+            "{:?}",
+            screen[at + 1]
+        );
+    };
+    let screen = screen_rows(&mut h, 160, 48);
+    current(&screen, "▸");
+    let text = screen.join("\n");
+    assert!(!text.contains("worktrees/fix"), "closed: {text}");
+
+    // Open, the current pair stays, and under it the one other place: its
+    // path, then its branch and age, behind a bar.
+    h.press(KeyCode::Char('w')).await;
+    let screen = screen_rows(&mut h, 160, 48);
+    current(&screen, "▾");
+    let text = screen.join("\n");
     let fix = screen
         .iter()
         .position(|line| line.contains("│ worktrees/fix"))
@@ -5230,7 +5246,8 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     h.press(KeyCode::Char('W')).await;
     assert!(!h.app.places_open(&a));
 
-    // A click on A's place line opens its places, and B stays selected.
+    // A click on A's ▸ opens its places, one on its count closes them,
+    // and B stays selected; one on its path copies it.
     screen_rows(&mut h, 160, 48);
     let row = h
         .app
@@ -5239,24 +5256,46 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         .iter()
         .position(|row| matches!(row, ListRow::Session(s) if s.id == a))
         .unwrap();
-    let (area, _) = *h
+    let toggles: Vec<ratatui::layout::Rect> = h
         .app
         .hits
         .iter()
-        .find(|(_, hit)| *hit == Hit::PlacesToggle(row))
-        .expect("A's place line");
-    for kind in [
-        MouseEventKind::Down(MouseButton::Left),
-        MouseEventKind::Up(MouseButton::Left),
-    ] {
-        h.app.handle_mouse(MouseEvent {
-            kind,
-            column: area.x + 4,
-            row: area.y,
-            modifiers: KeyModifiers::NONE,
-        });
-    }
+        .filter(|(_, hit)| *hit == Hit::PlacesToggle(row))
+        .map(|(area, _)| *area)
+        .collect();
+    assert_eq!(toggles.len(), 2, "its ▸ and its count");
+    let click = |h: &mut Harness, column: u16, row: u16| {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            h.app.handle_mouse(MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+    };
+    let screen = screen_rows(&mut h, 160, 48);
+    let (mark, count) = (toggles[0], toggles[1]);
+    assert!(screen[usize::from(mark.y)][..].contains("▸ ┃ repo"));
+    click(&mut h, mark.x, mark.y);
     assert!(h.app.places_open(&a));
+    assert_eq!(h.app.list.selection(), &Selection::Session(b.clone()));
+    screen_rows(&mut h, 160, 48);
+    click(&mut h, count.x, count.y);
+    assert!(!h.app.places_open(&a));
+    let (path, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::Place(row, places::PlaceRef::Current))
+        .expect("A's current place");
+    assert_eq!(path.height, 2, "both its lines");
+    click(&mut h, path.x + 6, path.y + 1);
+    assert_eq!(copied(&mut h), "/repo");
+    assert!(!h.app.places_open(&a));
     assert_eq!(h.app.list.selection(), &Selection::Session(b));
 }
 
@@ -5361,7 +5400,7 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
         .app
         .hits
         .iter()
-        .find(|(_, hit)| *hit == Hit::Place(row, 1))
+        .find(|(_, hit)| *hit == Hit::Place(row, places::PlaceRef::Listed(1)))
         .expect("A's second place");
     assert_eq!(area.height, 2, "both its lines");
     let lines = screen_rows(&mut h, 160, 48);
@@ -5381,7 +5420,11 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     };
     for line in [area.y, area.y + 1] {
         h.app.handle_mouse(mouse(MouseEventKind::Moved, line));
-        assert_eq!(h.app.hovered_place, Some((row, 1)), "{line}");
+        assert_eq!(
+            h.app.hovered_place,
+            Some((row, places::PlaceRef::Listed(1))),
+            "{line}"
+        );
         let screen = screen_rows(&mut h, 160, 48).join("\n");
         assert!(screen.contains("⧉ │ /srv/other"), "{screen}");
         assert!(!screen.contains("⧉ │ worktrees/fix"), "{screen}");
@@ -5394,11 +5437,43 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
         .app
         .hits
         .iter()
-        .find(|(_, hit)| *hit == Hit::Place(row, 0))
+        .find(|(_, hit)| *hit == Hit::Place(row, places::PlaceRef::Listed(0)))
         .expect("A's first place");
     click(&mut h, first.y + 1);
     assert_eq!(copied(&mut h), "/repo/worktrees/fix");
     assert!(h.app.places_open(&a));
+
+    // The place it works in now too: under the pointer, its copy mark
+    // under its ▾ (not over the ▾ itself, which closes the list).
+    let (current, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::Place(row, places::PlaceRef::Current))
+        .expect("A's current place");
+    let hover = |h: &mut Harness, column: u16, row: u16| {
+        h.app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+        screen_rows(h, 160, 48)
+    };
+    let screen = hover(&mut h, current.x + 6, current.y);
+    assert_eq!(h.app.hovered_place, Some((row, places::PlaceRef::Current)));
+    let at = usize::from(current.y);
+    assert!(screen[at].contains("▾ ┃ repo"), "{:?}", screen[at]);
+    assert!(
+        screen[at + 1].contains("⧉ ┃ ⎇ main"),
+        "{:?}",
+        screen[at + 1]
+    );
+    click(&mut h, current.y);
+    assert_eq!(copied(&mut h), "/repo");
+    let screen = hover(&mut h, current.x + 2, current.y);
+    assert_eq!(h.app.hovered_place, None, "over its ▾");
+    assert!(!screen[at + 1].contains('⧉'), "{:?}", screen[at + 1]);
 }
 
 /// A session whose open places make it taller than the list still shows,
@@ -5430,19 +5505,19 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
         .app
         .hits
         .iter()
-        .find(|(_, hit)| *hit == Hit::Place(row, 11))
+        .find(|(_, hit)| *hit == Hit::Place(row, places::PlaceRef::Listed(11)))
         .expect("the last place");
     let line = &screen_rows(&mut h, 160, 16)[usize::from(area.y)];
     assert!(line.contains("/srv/place12"), "{line}");
 }
 
 /// A session that started in its folder's main checkout, then made
-/// worktrees and changed files in them, its places open, on a phone's 60
-/// and 40 columns. The daemon lists only the worktrees where files were
-/// changed, not the main checkout it only started in: the place line says
-/// the one it works in now and `+3`, and under it the three others, as
-/// pairs of lines behind a bar with a rule between, the one the keys are on
-/// with ⧉.
+/// worktrees and changed files in them, on a phone's 60 and 40 columns. The
+/// daemon lists only the worktrees where files were changed, not the main
+/// checkout it only started in. The place it works in now is a pair behind
+/// the green `┃`, with `▸` and `+3`; opened (`▾`), the three others are
+/// pairs behind a muted `│` under it, a rule between two, the one the keys
+/// are on with ⧉.
 #[tokio::test]
 async fn open_places_read_as_pairs_on_a_phone() {
     use session_core::model::{GitInfo, SessionPlace};
@@ -5487,15 +5562,11 @@ async fn open_places_read_as_pairs_on_a_phone() {
     let mut h = harness(vec![agent]);
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
-    h.app.places_open.insert(a);
-    screen_rows(&mut h, 60, 24);
-    h.press(KeyCode::Char('j')).await;
-    h.press(KeyCode::Char('j')).await;
     let places = |h: &mut Harness, width: u16| {
         let screen = screen_rows(h, width, 24);
         let first = screen
             .iter()
-            .position(|line| line.contains("▾ /work"))
+            .position(|line| line.contains("┃ /work"))
             .unwrap_or_else(|| panic!("{}", screen.join("\n")));
         let block: Vec<String> = screen[first.saturating_sub(3)..]
             .iter()
@@ -5509,7 +5580,26 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 60),
         [
-            "     ▾ /work/focal-md-paper-links  ⎇ paper-links  +3",
+            "     ▸ ┃ /work/focal-md-paper-links                      +3",
+            "       ┃ ⎇ paper-links",
+        ]
+    );
+    assert_eq!(
+        places(&mut h, 40),
+        [
+            "     ▸ ┃ /work/focal-md-paper-links  +3",
+            "       ┃ ⎇ paper-links",
+        ]
+    );
+    h.app.places_open.insert(a);
+    h.press(KeyCode::Char('j')).await;
+    h.press(KeyCode::Char('j')).await;
+    assert_eq!(
+        places(&mut h, 60),
+        [
+            "     ▾ ┃ /work/focal-md-paper-links                      +3",
+            "       ┃ ⎇ paper-links",
+            "         ──────────────────────────────────────────────────",
             "       │ /work/focal-md-pubmed-pmc-audit",
             "       │ ⎇ audit/pubmed-pmc-ingest-20261008             10d",
             "         ──────────────────────────────────────────────────",
@@ -5523,8 +5613,9 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 40),
         [
-            "     ▾ /work/focal-md-paper-links",
-            "       ⎇ paper-links  +3",
+            "     ▾ ┃ /work/focal-md-paper-links  +3",
+            "       ┃ ⎇ paper-links",
+            "         ──────────────────────────────",
             "       │ …ork/focal-md-pubmed-pmc-audit",
             "       │ ⎇ audit/pubmed-pmc-ingest… 10d",
             "         ──────────────────────────────",

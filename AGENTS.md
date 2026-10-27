@@ -1018,24 +1018,25 @@ shown) is amber like an unread reply's `●` but quieter (`format::read_period_s
 faded 30% when read within the hour, 50% within the day, then muted), and ready's header has the
 last hour's. A row's description has no status words
 (its mark on the right says it): the app, subagents and report; an ended session still
-says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's place line
-(`components/session_list.rs::place_content`, `app/places.rs`): the folder the session works in
-now (its git context's working tree, else its cwd; its path in the session's folder, the folder's
-name, or `~/…`) and its branch, `▤ repo  ⎇ main`, open or closed; with `▸` and how many other
-places (`+3`) when it has worked elsewhere, the branch and count on a second line when narrow.
-`w`, `W` or a click or tap on that line opens those others under it (`▾`; closed by default, per
-window, not saved; `app::places::listed_places`, never the one the line names, so the count is
-what's listed): each one, most recent first, a pair of lines behind a muted bar (`│`): its path
-(cut at its start when narrow), then its branch and its age at the right; a muted rule (`─`)
-between two pairs. The line names where the session works now even before it changed anything
-there; the count and the list are the daemon's places, so a checkout it only started in or read
-from isn't among them. `↓`/`↑` (`j`/`k`) step through the selected
-session's open places pair by pair as if each were a row under it (`App::step`;
+says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's places
+(`components/session_list.rs::place_content`, `app/places.rs`), each a pair of lines behind a
+bar. First the folder the session works in now (`PlaceRef::Current`: its git context's working
+tree, else its cwd; its path in the session's folder, the folder's name, or `~/…`), behind a
+green `┃`: its path, then its branch, even before it changed anything there. When it has other
+places, `▸` sits left of that bar and how many (`+3`) at the right of its path; `w`, `W` or a
+click or tap on either (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per
+window, not saved; `app::places::listed_places`, never the current one, so the count is what's
+listed): each one, most recent first, behind a muted `│`: its path, then its branch and its age
+at the right; a muted rule (`─`) above each. The count and the list are the daemon's places, so
+a checkout the session only started in or read from isn't among them. Paths are cut at their
+start when narrow, the same on phones. `↓`/`↑` (`j`/`k`) step through the selected session's
+open places pair by pair as if each were a row under it (`App::step`;
 `SessionList::selected_place`, dropped by any other selection), and `y` copies the path of the
 one they're on, else of the folder the session works in now, over OSC 52 (`App::copy_place`).
-The place under the pointer (on either of its lines), and the one the keys are on, has its bar
-in the accent and `⧉` left of its path; a click or tap on either line copies it (`Hit::Place`)
-without selecting the row. A session taller than the list (its places open) shows the part around the
+The place under the pointer (on either of its lines, not over the `▸`), and the one the keys are
+on, shows `⧉` left of its bar (the current one's under its `▸`), and an open one's bar turns the
+accent; a click or tap on either line of any of them copies its path (`Hit::Place`) without
+selecting the row. A session taller than the list (its places open) shows the part around the
 place the keys are on. A status
 change moves a session to another header, but the selected session stays shown when it stops
 matching the filter (an answered question), until something else is selected. Their modals

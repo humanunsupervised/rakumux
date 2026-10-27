@@ -1,13 +1,13 @@
 //! Where sessions have worked (`SessionView::places`: the git working trees
 //! where the daemon saw them change files), shown in the session list: each
-//! row has a line with the directory it works in now, and under it, when
-//! opened, every other place, most recent first ([`listed_places`]).
-//! Closed by default, and per window: `w` opens or closes the selected
-//! session's, `W` every one's, a click or tap on the line too. Not saved.
-//! The list keys step through the selected session's open places as if
-//! each were a row under it, and `y` copies the path of the one they are
-//! on (else of where the session works now); a click or tap on a place
-//! copies its path too.
+//! row has a pair of lines for the directory it works in now, and under it,
+//! when opened, a pair for every other place, most recent first
+//! ([`listed_places`]). Closed by default, and per window: `w` opens or
+//! closes the selected session's, `W` every one's, a click or tap on its
+//! `▸`/`▾` or count too. Not saved. The list keys step through the selected
+//! session's open places as if each were a row under it, and `y` copies the
+//! path of the one they are on (else of where the session works now); a
+//! click or tap on a place, the current one too, copies its path.
 
 use session_core::ids::SessionId;
 use session_core::model::{SessionPlace, SessionView};
@@ -15,6 +15,17 @@ use std::path::{Path, PathBuf};
 
 use super::App;
 use crate::layout::SessionLayout;
+
+/// One of a session row's places, as the list shows them: each a pair of
+/// lines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaceRef {
+    /// Where the session works now ([`current_place`]), under its facts.
+    Current,
+    /// That index in its [`listed_places`], under the current one while
+    /// they're open.
+    Listed(usize),
+}
 
 /// The directory `session` works in now: its git context's working tree
 /// (which follows its agent's), else its terminal's directory.
@@ -145,13 +156,18 @@ impl App {
         self.copy_path(&path);
     }
 
-    /// A click or tap on an open place (list row `row`, `index` in its
-    /// session's [`listed_places`]): its path on the clipboard.
-    pub(super) fn copy_place_at(&mut self, row: usize, index: usize) {
-        let path = match self.list.rows().get(row) {
-            Some(super::ListRow::Session(session)) => listed_places(session)
-                .nth(index)
-                .map(|place| place.path.clone()),
+    /// A click or tap on a place of the session at list row `row`: its
+    /// path on the clipboard.
+    pub(super) fn copy_place_at(&mut self, row: usize, place: PlaceRef) {
+        let path = match (self.list.rows().get(row), place) {
+            (Some(super::ListRow::Session(session)), PlaceRef::Current) => {
+                Some(current_place(session).to_path_buf())
+            }
+            (Some(super::ListRow::Session(session)), PlaceRef::Listed(index)) => {
+                listed_places(session)
+                    .nth(index)
+                    .map(|place| place.path.clone())
+            }
             _ => None,
         };
         if let Some(path) = path {

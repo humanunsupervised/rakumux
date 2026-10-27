@@ -1200,10 +1200,15 @@ impl App {
             }
             _ => None,
         });
-        self.hovered_place = self.hits.iter().find_map(|(area, hit)| match hit {
-            Hit::Place(row, index) if inside(Some(*area)) => Some((*row, *index)),
-            _ => None,
-        });
+        // What a click there would do: not over the current place's toggle.
+        self.hovered_place = self
+            .hits
+            .iter()
+            .find(|(area, _)| inside(Some(*area)))
+            .and_then(|(_, hit)| match hit {
+                Hit::Place(row, place) => Some((*row, *place)),
+                _ => None,
+            });
         self.divider.hover = inside(screen.divider);
         self.feed_divider.hover = inside(screen.feed_divider);
         if self.divider.hover {
