@@ -23,8 +23,8 @@ HTTP server, authentication implementation, model client or local runtime.
   whitespace at either end, no trailing period (`.`), and the same controls
   rejected as `status_text`. It is sent only when the request URL asks for it
   with the query `title=1` (`POST /api/v1/ai/session-status?title=1`): clients
-  without it reject any field they don't know. A service that doesn't know the
-  query ignores it and sends no `title`; one that was asked may still leave it
+  without it reject any field they don't know. A service refuses a query it
+  doesn't know (`invalid_request`); one that was asked may still leave `title`
   out. The client names the session with it under its own rules (never over a
   name the user gave); the service never renames anything.
 - [Error](error.schema.json): `{error:{code, message, retry_after_seconds?}}`.
