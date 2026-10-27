@@ -990,6 +990,12 @@ list never reorders by itself: activity doesn't move a session or a group. The l
 group comes first, then the others by folder name, then path. Sessions follow the order the user
 set, and sessions without a place go last, oldest first, so a new session appears just above
 "+ New session". All layouts share it (a row of session tabs always in this order).
+Headers' names (a folder's, an app's, a status's, `pinned`) and their rows' text start in one
+column; the two left of it are the gutter, where a status's or the pinned header's mark sits and
+a row's marks go: its pin toggle, the summary's ↻, the places' `▸`/`▾`, the copy mark, and
+`+ New session`'s `+`. A row under a sub-header (a worktree's, a read period's) starts a step
+further in, its text where that header's words are and its gutter under its mark
+(`components/session_list.rs::nesting`); a dragged row's bar is just left of its gutter.
 **Pinned sessions** sit in a section of their own at the top of the list, above every folder,
 app and status, under every tab: a `★ pinned` header (`ListRow::PinnedHeader`, the gold pin,
 `pinned` and how many; selectable, Enter does nothing), then each pinned session the active
@@ -998,8 +1004,8 @@ session drops its header. The section has an order of its own, the same under ev
 (`sessions.section_order` under `pinned`): the order the user gave it, then the rest folder by
 folder. In the list they show no other mark, while the tab bar and Grid show ★ after their
 name (`layout::PIN_MARK`). In terminals that report pointer movement (desktop terminals, also
-over SSH; not phones), the session row under the pointer shows its pin toggle just left of its
-name, in its status mark's place (covering it while hovered): `☆` to pin it,
+over SSH; not phones), the session row under the pointer shows its pin toggle in the gutter
+just left of its name: `☆` to pin it,
 the gold `★` to unpin it; a click there (`Hit::PinToggle`) does that without selecting the row,
 and `p` still pins the selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
 held); `J`/`K` move it one place. Moves stay in the session's part of the list: the pinned
@@ -1031,23 +1037,26 @@ faded 30% when read within the hour, 50% within the day, then muted), and ready'
 last hour's. A row's description has no status words
 (its mark on the right says it): the app, subagents and report; an ended session still
 says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's places
-(`components/session_list.rs::place_content`, `app/places.rs`), each a pair of lines behind a
-bar. First the folder the session works in now (`PlaceRef::Current`: its git context's working
-tree, else its cwd; its path in the session's folder, the folder's name, or `~/…`), behind a
-green `┃`: its path, then its branch, even before it changed anything there. When it has other
-places, `▸` sits left of that bar, with no count; `w`, `W` or a click
+(`components/session_list.rs::place_content`, `app/places.rs`), their bars in the row's text
+column. First the folder the session works in now (`PlaceRef::Current`: its git context's
+working tree, else its cwd; its path in the session's folder, the folder's name, or `~/…`), one
+line behind a heavy `┃` in the accent (blue): its path, then its branch, even before it changed anything
+there; short of room the path is cut at its start first (down to half the line), then the branch
+at its end, never wrapped (`fit_place`). When it has other places, `▸` sits in the gutter left
+of that bar, with no count; `w`, `W` or a click
 or tap on it (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per window, not
-saved; `app::places::listed_places`, never the current one): each one, most recent first,
-behind a muted `│`: its path, then its branch and its age at the right; a muted rule (`─`) above
-each. The list is the daemon's places, so a checkout the session only started in or read from
-isn't among them. Paths are cut at their
+saved; `app::places::listed_places`, never the current one): each one, most recent first, a pair
+of lines behind a muted `│`: its path, then its branch and its age at the right; a muted rule
+(`─`) above each. The list is the daemon's places, so a checkout the session only started in or
+read from isn't among them. Paths are cut at their
 start when narrow, the same on phones. `↓`/`↑` (`j`/`k`) step through the selected session's
 open places pair by pair as if each were a row under it (`App::step`;
 `SessionList::selected_place`, dropped by any other selection), and `y` copies the path of the
 one they're on, else of the folder the session works in now, over OSC 52 (`App::copy_place`).
-The place under the pointer (on either of its lines, not over the `▸`), and the one the keys are
-on, shows `⧉` left of its bar (the current one's under its `▸`), and an open one's bar turns the
-accent; a click or tap on either line of any of them copies its path (`Hit::Place`) without
+The place under the pointer (on any of its lines, not over the `▸`), and the one the keys are
+on, shows `⧉` in its gutter (the current one's just left of its `▸`) and its path brighter (bold
+for the keys); an open one's bar turns a shade brighter, never the accent, which marks the
+current place. A click or tap on any of their lines copies its path (`Hit::Place`) without
 selecting the row. A session taller than the list (its places open) shows the part around the
 place the keys are on. A status
 change moves a session to another header, but the selected session stays shown when it stops

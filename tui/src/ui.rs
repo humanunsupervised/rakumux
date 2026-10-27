@@ -1420,9 +1420,10 @@ mod tests {
         assert!(docs < refactor, "{wide}");
         assert!(list[docs].contains(" docs "), "{wide}");
         assert!(!list[docs].contains('★'), "{wide}");
-        assert!(list[docs + 3].contains("⎇ main"), "{wide}");
+        // Where it works now: one line, in line with the row's text.
+        assert!(list[docs + 2].starts_with("   ┃ repo  ⎇ main"), "{wide}");
         assert!(list[refactor + 1].contains("claude"), "{wide}");
-        assert!(list[refactor + 3].contains("⎇ sessions-refactor"), "{wide}");
+        assert!(list[refactor + 2].contains("⎇ sessions-refactor"), "{wide}");
         assert!(!wide.contains("worktree"), "branch only: {wide}");
         // The lone folder still has its header, with its name.
         assert!(wide.contains("──"), "the folder's header: {wide}");
@@ -1464,6 +1465,15 @@ mod tests {
             .position(|l| l.contains("feature-work"))
             .unwrap();
         assert!(main < header && header < work, "{wide}");
+        // The folder's own sessions in line with its name; the worktree's
+        // a step in, in line with its header's words, their place lines too.
+        assert!(list.iter().any(|l| l.starts_with("   repo ─")), "{wide}");
+        assert!(list[main].starts_with("   main-work "), "{wide}");
+        assert!(list[work].starts_with("     feature-work "), "{wide}");
+        assert!(
+            list[work + 2].starts_with("     ┃ worktrees/feature  ⎇ feat/login"),
+            "{wide}"
+        );
     }
 
     #[test]
@@ -1569,6 +1579,11 @@ mod tests {
         );
         assert!(repo < api && api < web, "{wide}");
         assert!(list[repo].ends_with("2/2 live"), "{wide}");
+        // Headers' names and sessions' text start in one column (a status's
+        // or the pinned one's mark in the gutter left of it).
+        assert!(list[repo].starts_with("   repo  ⎇"), "{wide}");
+        assert!(list[at(" docs ")].starts_with("   docs "), "{wide}");
+        assert!(list[at("★ pinned")].starts_with(" ★ pinned"), "{wide}");
         assert!(list[web].ends_with("1/2 live"), "{wide}");
         // Pinned sessions above every folder, under their own header; the
         // rows' pins show only under the pointer. Then oldest first.
@@ -1582,13 +1597,13 @@ mod tests {
         // The program and state, then the folder and its branch.
         assert!(list[at("frontend") + 1].contains("codex"), "{wide}");
         assert!(
-            list[at("frontend") + 3].contains("⎇ feature/login"),
+            list[at("frontend") + 2].contains("⎇ feature/login"),
             "{wide}"
         );
         assert!(list[at("storybook") + 1].contains("dead"), "{wide}");
-        assert!(list[at("storybook") + 3].contains("⎇ main"), "{wide}");
+        assert!(list[at("storybook") + 2].contains("⎇ main"), "{wide}");
         assert!(list[at("server") + 1].contains("cargo"), "{wide}");
-        assert!(list[at("server") + 3].contains("⎇ @1a2b3c4"), "{wide}");
+        assert!(list[at("server") + 2].contains("⎇ @1a2b3c4"), "{wide}");
         // A selected header stands out: its rule turns blue.
         h.app
             .list

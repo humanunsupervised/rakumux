@@ -2398,19 +2398,23 @@ async fn dragging_a_session_moves_it_live_and_saves_the_order_on_release() {
     h.app
         .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, a.y + 1));
     assert_eq!(h.selected().as_deref(), Some("A"));
-    // Not dragged yet: no drag bar (the pointer's row shows its pin).
+    // Not dragged yet: no drag bar (the pointer's row shows its pin in
+    // the gutter beside it).
     let buffer = draw(&mut h);
-    assert_ne!(buffer.get(a.x + 1, a.y + 1).symbol(), "▎");
-    // Over B: A takes its place, marked as dragged, still selected.
+    assert_ne!(buffer.get(a.x, a.y + 1).symbol(), "▎");
+    assert_eq!(buffer.get(a.x + 1, a.y + 1).symbol(), "☆");
+    // Over B: A takes its place, marked as dragged (left of its gutter),
+    // still selected.
     h.app
         .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x, b.y + 1));
     assert_eq!(visible_ids(&h), ["B", "A", "C"]);
     assert_eq!(h.selected().as_deref(), Some("A"));
     let buffer = draw(&mut h);
-    let mark = buffer.get(b.x + 1, b.y + 1);
+    let mark = buffer.get(b.x, b.y + 1);
     assert_eq!(mark.symbol(), "▎");
     assert_eq!(mark.fg, crate::theme::palette().accent_primary);
-    assert_eq!(buffer.get(b.x + 1, b.y + 2).symbol(), "▎");
+    assert_eq!(buffer.get(b.x, b.y + 2).symbol(), "▎");
+    assert_eq!(buffer.get(b.x + 1, b.y + 1).symbol(), " ");
     // Nothing is saved while it's held.
     assert!(!h.home.path().join("config.json").exists());
     // Over C, then back up past the top: clamped to the first place.
@@ -2435,7 +2439,7 @@ async fn dragging_a_session_moves_it_live_and_saves_the_order_on_release() {
     assert_eq!(h.app.drag, None);
     let buffer = draw(&mut h);
     let a = list_row(&h, "A");
-    assert_eq!(buffer.get(a.x + 1, a.y + 1).symbol(), " ");
+    assert_eq!(buffer.get(a.x, a.y + 1).symbol(), " ");
     // Activity doesn't undo it.
     h.event(
         "B",
@@ -4917,16 +4921,22 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
         .position(|row| matches!(row, ListRow::Session(s) if s.name == "b"))
         .unwrap();
     assert_eq!(target(&h, Hit::PinToggle(row)), None);
-    // The pointer over B's row: its pin shows left of its name.
+    // The pointer over B's row: its pin shows in the gutter left of its
+    // name, which starts where its folder's header's does.
     let over = target(&h, Hit::ListRow(row)).unwrap();
     mouse(&mut h, MouseEventKind::Moved, over);
     assert_eq!(h.app.hovered_row, Some(row));
     let screen = screen_rows(&mut h, 160, 48);
     let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
     assert!(
-        screen[usize::from(pin.1)].starts_with("   ☆ "),
+        screen[usize::from(pin.1)].starts_with(" ☆ b "),
         "{:?}",
         screen[usize::from(pin.1)]
+    );
+    assert!(
+        screen.iter().any(|line| line.starts_with("   repo ─")),
+        "{}",
+        screen.join("\n")
     );
     // A click on it pins B without selecting it.
     mouse(&mut h, MouseEventKind::Down(MouseButton::Left), pin);
@@ -4946,7 +4956,7 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     mouse(&mut h, MouseEventKind::Moved, over);
     let screen = screen_rows(&mut h, 160, 48);
     let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
-    assert!(screen[usize::from(pin.1)].starts_with("   ★ "));
+    assert!(screen[usize::from(pin.1)].starts_with(" ★ b "));
     mouse(&mut h, MouseEventKind::Down(MouseButton::Left), pin);
     assert!(h.fake.calls().contains(&"pin B false".to_string()));
     // Off the list, no pin shows.
@@ -4982,7 +4992,20 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     let header_line = target(&h, Hit::ListRow(header)).unwrap().1;
     assert!(screen[usize::from(header_line)].starts_with(" ★ pinned ─"));
     assert!(header < row, "above the other sessions");
-    assert!(screen[usize::from(pin.1)].contains('☆'));
+    // B is under ready's sub-header: its pin where that header's clock is,
+    // its name where its words are.
+    assert!(
+        screen[usize::from(pin.1)].starts_with("   ☆ b "),
+        "{}",
+        screen.join("\n")
+    );
+    assert!(
+        screen
+            .iter()
+            .any(|line| line.starts_with("   ◷ last hour ─")),
+        "{}",
+        screen.join("\n")
+    );
 }
 
 #[tokio::test]
@@ -5197,18 +5220,26 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         let end = line.rfind('│').unwrap_or(line.len());
         line[..end].trim_end().to_string()
     };
-    // Where it works now: a pair behind its bar, ▸ beside it.
+    // The column `needle` starts in on `line`.
+    let column = |line: &str, needle: &str| line.find(needle).map(|at| line[..at].chars().count());
+    // Where it works now: one line behind its bar, ▸ in the gutter left of
+    // it, the bar under the row's name.
     let current = |screen: &[String], mark: &str| {
         let at = screen
             .iter()
-            .position(|line| line.contains(&format!("{mark} ┃ repo")))
+            .position(|line| line.contains(&format!("{mark} ┃ repo  ⎇ main")))
             .unwrap_or_else(|| panic!("{mark} ┃ repo: {}", screen.join("\n")));
-        assert!(in_list(&screen[at]).ends_with("┃ repo"), "{:?}", screen[at]);
         assert!(
-            screen[at + 1].contains("  ┃ ⎇ main"),
+            in_list(&screen[at]).ends_with("┃ repo  ⎇ main"),
             "{:?}",
-            screen[at + 1]
+            screen[at]
         );
+        let name = screen
+            .iter()
+            .find(|line| line.contains(" agent "))
+            .expect("its name");
+        assert_eq!(column(&screen[at], "┃"), column(name, "agent"));
+        assert_eq!(column(&screen[at], mark), Some(1), "{:?}", screen[at]);
     };
     let screen = screen_rows(&mut h, 160, 48);
     current(&screen, "▸");
@@ -5228,6 +5259,12 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     let branch = in_list(&screen[fix + 1]);
     assert!(branch.contains("│ ⎇ fix"), "{branch:?}");
     assert!(branch.ends_with(" 30s"), "{branch:?}");
+    // Its bar in the current one's column.
+    let now_at = screen
+        .iter()
+        .find(|line| line.contains("▾ ┃ repo"))
+        .expect("the current place");
+    assert_eq!(column(&screen[fix], "│ worktrees"), column(now_at, "┃"));
     assert!(
         !screen.iter().any(|line| line.contains("│ repo")),
         "where it works now isn't listed again: {text}"
@@ -5298,8 +5335,8 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         .iter()
         .find(|(_, hit)| *hit == Hit::Place(row, places::PlaceRef::Current))
         .expect("A's current place");
-    assert_eq!(path.height, 2, "both its lines");
-    click(&mut h, path.x + 6, path.y + 1);
+    assert_eq!(path.height, 1, "its one line");
+    click(&mut h, path.x + 6, path.y);
     assert_eq!(copied(&mut h), "/repo");
     assert!(!h.app.places_open(&a));
     assert_eq!(h.app.list.selection(), &Selection::Session(b));
@@ -5450,13 +5487,15 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     assert!(h.app.places_open(&a));
 
     // The place it works in now too: under the pointer, its copy mark
-    // under its ▾ (not over the ▾ itself, which closes the list).
+    // just left of its ▾ (not over the ▾ itself, which closes the list),
+    // where a click copies it too.
     let (current, _) = *h
         .app
         .hits
         .iter()
         .find(|(_, hit)| *hit == Hit::Place(row, places::PlaceRef::Current))
         .expect("A's current place");
+    assert_eq!(current.height, 1, "its one line");
     let hover = |h: &mut Harness, column: u16, row: u16| {
         h.app.handle_mouse(MouseEvent {
             kind: MouseEventKind::Moved,
@@ -5469,17 +5508,32 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     let screen = hover(&mut h, current.x + 6, current.y);
     assert_eq!(h.app.hovered_place, Some((row, places::PlaceRef::Current)));
     let at = usize::from(current.y);
-    assert!(screen[at].contains("▾ ┃ repo"), "{:?}", screen[at]);
     assert!(
-        screen[at + 1].contains("⧉ ┃ ⎇ main"),
+        screen[at].starts_with("⧉▾ ┃ repo  ⎇ main"),
         "{:?}",
-        screen[at + 1]
+        screen[at]
     );
     click(&mut h, current.y);
     assert_eq!(copied(&mut h), "/repo");
-    let screen = hover(&mut h, current.x + 2, current.y);
+    let screen = hover(&mut h, current.x, current.y);
+    assert_eq!(h.app.hovered_place, Some((row, places::PlaceRef::Current)));
+    assert!(screen[at].starts_with("⧉▾ ┃"), "{:?}", screen[at]);
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        h.app.handle_mouse(MouseEvent {
+            kind,
+            column: current.x,
+            row: current.y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    assert_eq!(copied(&mut h), "/repo");
+    assert!(h.app.places_open(&a));
+    let screen = hover(&mut h, current.x + 1, current.y);
     assert_eq!(h.app.hovered_place, None, "over its ▾");
-    assert!(!screen[at + 1].contains('⧉'), "{:?}", screen[at + 1]);
+    assert!(!screen[at].contains('⧉'), "{:?}", screen[at]);
 }
 
 /// A session whose open places make it taller than the list still shows,
@@ -5517,55 +5571,76 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
     assert!(line.contains("/srv/place12"), "{line}");
 }
 
+/// A session in the folder `/work/focal-md` that works in the worktree
+/// `/work/focal-md-<worktree>` on `branch` now (last used `ago` seconds
+/// before `now`), running `agent`, after `prompt`, and has changed files in
+/// `places` (worktrees, branches, days ago).
+fn in_focal_md(
+    (id, name, ago): (&str, &str, i64),
+    (agent, prompt): (&str, &str),
+    (current, branch): (&str, &str),
+    places: &[(&str, &str, i64)],
+    now: i64,
+) -> session_core::model::SessionView {
+    use session_core::model::{GitInfo, SessionPlace};
+    let path = |worktree: &str| format!("/work/focal-md-{worktree}");
+    let mut session = view(id, name, now - ago);
+    session.scope = ScopeRoot::from_canonical("/work/focal-md".into());
+    session.cwd = "/work/focal-md".into();
+    session.user_prompt = Some(prompt.into());
+    session.agent = Some(session_core::model::AgentInfo {
+        kind: agent.into(),
+        ..Default::default()
+    });
+    session.git = Some(GitInfo {
+        repo_root: path(current).into(),
+        branch: Some(branch.into()),
+        ..GitInfo::default()
+    });
+    session.places = places
+        .iter()
+        .map(|(worktree, branch, days)| SessionPlace {
+            path: path(worktree).into(),
+            git: Some(GitInfo {
+                repo_root: path(worktree).into(),
+                branch: Some(branch.to_string()),
+                ..GitInfo::default()
+            }),
+            last_at: now - days * 86_400,
+            edited: true,
+        })
+        .collect();
+    session
+}
+
+/// "Paper links", working in its `paper-links` worktree, which has also
+/// changed files in three others.
+fn paper_links(now: i64) -> session_core::model::SessionView {
+    in_focal_md(
+        ("A", "Paper links", 3_600),
+        ("claude", "Re-review passed; record committed on the branch"),
+        ("paper-links", "paper-links"),
+        &[
+            ("paper-links", "paper-links", 9),
+            ("pubmed-pmc-audit", "audit/pubmed-pmc-ingest-20261008", 10),
+            ("mvp-trial-workspaces", "feature/mvp-trial-workspaces", 10),
+            ("citations", "fix/citation-format", 11),
+        ],
+        now,
+    )
+}
+
 /// A session that started in its folder's main checkout, then made
 /// worktrees and changed files in them, on a phone's 60 and 40 columns. The
 /// daemon lists only the worktrees where files were changed, not the main
-/// checkout it only started in. The place it works in now is a pair behind
-/// the green `┃`, with `▸`; opened (`▾`), the three others are
-/// pairs behind a muted `│` under it, a rule between two, the one the keys
-/// are on with ⧉.
+/// checkout it only started in. The place it works in now is one line
+/// behind the blue `┃` in line with the row's app line, `▸` in the gutter
+/// left of it; opened (`▾`), the three others are pairs behind a muted `│`
+/// in that column, a rule between two, the one the keys are on with ⧉.
 #[tokio::test]
 async fn open_places_read_as_pairs_on_a_phone() {
-    use session_core::model::{GitInfo, SessionPlace};
     let now = 1_000_000_000;
-    let place = |path: &str, branch: &str, days: i64| SessionPlace {
-        path: path.into(),
-        git: Some(GitInfo {
-            repo_root: path.into(),
-            branch: Some(branch.into()),
-            ..GitInfo::default()
-        }),
-        last_at: now - days * 86_400,
-        edited: true,
-    };
-    let mut agent = view("A", "Paper links", now - 3_600);
-    agent.scope = ScopeRoot::from_canonical("/work/focal-md".into());
-    agent.cwd = "/work/focal-md".into();
-    agent.user_prompt = Some("Re-review passed; record committed on the branch".into());
-    agent.agent = Some(session_core::model::AgentInfo {
-        kind: "claude".into(),
-        ..Default::default()
-    });
-    agent.git = Some(GitInfo {
-        repo_root: "/work/focal-md-paper-links".into(),
-        branch: Some("paper-links".into()),
-        ..GitInfo::default()
-    });
-    agent.places = vec![
-        place("/work/focal-md-paper-links", "paper-links", 9),
-        place(
-            "/work/focal-md-pubmed-pmc-audit",
-            "audit/pubmed-pmc-ingest-20261008",
-            10,
-        ),
-        place(
-            "/work/focal-md-mvp-trial-workspaces",
-            "feature/mvp-trial-workspaces",
-            10,
-        ),
-        place("/work/focal-md-citations", "fix/citation-format", 11),
-    ];
-    let mut h = harness(vec![agent]);
+    let mut h = harness(vec![paper_links(now)]);
     h.app.list.set_clock(now);
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
@@ -5573,7 +5648,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
         let screen = screen_rows(h, width, 24);
         let first = screen
             .iter()
-            .position(|line| line.contains("┃ /work"))
+            .position(|line| line.contains(" ┃ "))
             .unwrap_or_else(|| panic!("{}", screen.join("\n")));
         let block: Vec<String> = screen[first.saturating_sub(3)..]
             .iter()
@@ -5586,17 +5661,12 @@ async fn open_places_read_as_pairs_on_a_phone() {
     };
     assert_eq!(
         places(&mut h, 60),
-        [
-            "     ▸ ┃ /work/focal-md-paper-links",
-            "       ┃ ⎇ paper-links",
-        ]
+        [" ▸ ┃ /work/focal-md-paper-links  ⎇ paper-links"]
     );
+    // Short of room, the path is cut at its start before the branch.
     assert_eq!(
         places(&mut h, 40),
-        [
-            "     ▸ ┃ /work/focal-md-paper-links",
-            "       ┃ ⎇ paper-links",
-        ]
+        [" ▸ ┃ …cal-md-paper-links  ⎇ paper-links"]
     );
     h.app.places_open.insert(a);
     h.press(KeyCode::Char('j')).await;
@@ -5604,37 +5674,209 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 60),
         [
-            "     ▾ ┃ /work/focal-md-paper-links",
-            "       ┃ ⎇ paper-links",
-            "         ──────────────────────────────────────────────────",
-            "       │ /work/focal-md-pubmed-pmc-audit",
-            "       │ ⎇ audit/pubmed-pmc-ingest-20261008             10d",
-            "         ──────────────────────────────────────────────────",
-            "     ⧉ │ /work/focal-md-mvp-trial-workspaces",
-            "       │ ⎇ feature/mvp-trial-workspaces                 10d",
-            "         ──────────────────────────────────────────────────",
-            "       │ /work/focal-md-citations",
-            "       │ ⎇ fix/citation-format                          11d",
+            " ▾ ┃ /work/focal-md-paper-links  ⎇ paper-links",
+            "     ──────────────────────────────────────────────────────",
+            "   │ /work/focal-md-pubmed-pmc-audit",
+            "   │ ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
+            "     ──────────────────────────────────────────────────────",
+            " ⧉ │ /work/focal-md-mvp-trial-workspaces",
+            "   │ ⎇ feature/mvp-trial-workspaces                     10d",
+            "     ──────────────────────────────────────────────────────",
+            "   │ /work/focal-md-citations",
+            "   │ ⎇ fix/citation-format                              11d",
         ]
     );
     assert_eq!(
         places(&mut h, 40),
         [
-            "     ▾ ┃ /work/focal-md-paper-links",
-            "       ┃ ⎇ paper-links",
-            "         ──────────────────────────────",
-            "       │ …ork/focal-md-pubmed-pmc-audit",
-            "       │ ⎇ audit/pubmed-pmc-ingest… 10d",
-            "         ──────────────────────────────",
-            "     ⧉ │ …focal-md-mvp-trial-workspaces",
-            "       │ ⎇ feature/mvp-trial-works… 10d",
-            "         ──────────────────────────────",
-            "       │ /work/focal-md-citations",
-            "       │ ⎇ fix/citation-format      11d",
+            " ▾ ┃ …cal-md-paper-links  ⎇ paper-links",
+            "     ──────────────────────────────────",
+            "   │ /work/focal-md-pubmed-pmc-audit",
+            "   │ ⎇ audit/pubmed-pmc-ingest-202… 10d",
+            "     ──────────────────────────────────",
+            " ⧉ │ …ork/focal-md-mvp-trial-workspaces",
+            "   │ ⎇ feature/mvp-trial-workspaces 10d",
+            "     ──────────────────────────────────",
+            "   │ /work/focal-md-citations",
+            "   │ ⎇ fix/citation-format          11d",
         ]
     );
     assert_eq!(
         h.app.list.selected_place(),
         Some(std::path::Path::new("/work/focal-md-mvp-trial-workspaces"))
+    );
+}
+
+/// A session row's text starts where its header's does, its marks in the
+/// gutter left of it (where a status's mark is), and where it works now is
+/// one line behind the blue `┃` in line with its app line; its other places,
+/// open, are pairs behind a muted `│` in that same column. A row under a
+/// sub-header (ready's `◷ last hour`) starts where that header's words do.
+/// On a phone's 60 and 40 columns, one session's places open, the other's
+/// closed.
+#[tokio::test]
+async fn session_rows_line_up_with_their_headers_text() {
+    use session_core::model::Lifecycle;
+    let now = 1_000_000_000;
+    let mut paper = paper_links(now);
+    paper.lifecycle = Lifecycle::Idle;
+    let mut citations = in_focal_md(
+        ("B", "Citations", 600),
+        ("codex", "Fix the citation format in the export"),
+        ("citations", "fix/citation-format"),
+        &[
+            ("citations", "fix/citation-format", 0),
+            ("paper-links", "paper-links", 2),
+        ],
+        now,
+    );
+    citations.lifecycle = Lifecycle::Done;
+    let mut h = harness(vec![paper, citations]).on_folders_tab();
+    h.app.list.set_clock(now);
+    let a = SessionId::from_string("A");
+    h.app.list.select(Selection::Session(a.clone()));
+    h.app.places_open.insert(a);
+    h.press(KeyCode::Char('j')).await;
+    h.press(KeyCode::Char('j')).await;
+    // The list, from its first header to `+ New session`.
+    let list = |h: &mut Harness, width: u16, height: u16| {
+        let screen = screen_rows(h, width, height);
+        let first = screen
+            .iter()
+            .position(|line| line.contains(" ─"))
+            .unwrap_or_else(|| panic!("{}", screen.join("\n")));
+        let last = screen
+            .iter()
+            .position(|line| line.contains("+ New session"))
+            .unwrap_or_else(|| panic!("{}", screen.join("\n")));
+        let block: Vec<String> = screen[first..=last]
+            .iter()
+            .map(|line| line.trim_end().to_string())
+            .collect();
+        eprintln!("{width} columns:\n{}\n", block.join("\n"));
+        block
+    };
+    assert_eq!(
+        list(&mut h, 60, 40),
+        [
+            "   focal-md ────────────────────────────────────── 2/2 live",
+            "",
+            "   Paper links                                         1h ○",
+            "   Re-review passed; record committed on the bra…",
+            "   claude",
+            " ▾ ┃ /work/focal-md-paper-links  ⎇ paper-links",
+            "     ──────────────────────────────────────────────────────",
+            "   │ /work/focal-md-pubmed-pmc-audit",
+            "   │ ⎇ audit/pubmed-pmc-ingest-20261008                 10d",
+            "     ──────────────────────────────────────────────────────",
+            " ⧉ │ /work/focal-md-mvp-trial-workspaces",
+            "   │ ⎇ feature/mvp-trial-workspaces                     10d",
+            "     ──────────────────────────────────────────────────────",
+            "   │ /work/focal-md-citations",
+            "   │ ⎇ fix/citation-format                              11d",
+            "",
+            "   Citations                                          10m ●",
+            "   Fix the citation format in the export",
+            "   codex",
+            " ▸ ┃ /work/focal-md-citations  ⎇ fix/citation-format",
+            "",
+            " + New session",
+        ]
+    );
+    // Short of room, a path is cut at its start, then the branch at its
+    // end; nothing wraps.
+    assert_eq!(
+        list(&mut h, 40, 40),
+        [
+            "   focal-md ────────────────── 2/2 live",
+            "",
+            "   Paper links                     1h ○",
+            "   Re-review passed; record …",
+            "   claude",
+            " ▾ ┃ …cal-md-paper-links  ⎇ paper-links",
+            "     ──────────────────────────────────",
+            "   │ /work/focal-md-pubmed-pmc-audit",
+            "   │ ⎇ audit/pubmed-pmc-ingest-202… 10d",
+            "     ──────────────────────────────────",
+            " ⧉ │ …ork/focal-md-mvp-trial-workspaces",
+            "   │ ⎇ feature/mvp-trial-workspaces 10d",
+            "     ──────────────────────────────────",
+            "   │ /work/focal-md-citations",
+            "   │ ⎇ fix/citation-format          11d",
+            "",
+            "   Citations                      10m ●",
+            "   Fix the citation format i…",
+            "   codex",
+            " ▸ ┃ …cal-md-citations  ⎇ fix/citation…",
+            "",
+            " + New session",
+        ]
+    );
+    // The current place's bar is the accent; the place the keys are on has
+    // the copy mark in the accent and its bar only a shade brighter.
+    let colour_at = |h: &mut Harness, symbol: &str, line: &str| {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 40)).unwrap();
+        terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let rows: Vec<String> = buffer
+            .content()
+            .chunks(60)
+            .map(|row| row.iter().map(|c| c.symbol()).collect())
+            .collect();
+        let y = rows
+            .iter()
+            .position(|row| row.contains(line))
+            .unwrap_or_else(|| panic!("{line}: {}", rows.join("\n")));
+        let x = rows[y]
+            .chars()
+            .position(|c| c.to_string() == symbol)
+            .unwrap();
+        buffer.get(x as u16, y as u16).fg
+    };
+    let p = crate::theme::palette();
+    assert_eq!(colour_at(&mut h, "┃", "▾ ┃ /work"), p.accent_primary);
+    assert_eq!(colour_at(&mut h, "┃", "▸ ┃ /work"), p.accent_primary);
+    assert_eq!(colour_at(&mut h, "⧉", "⧉ │ /work"), p.accent_primary);
+    assert_eq!(colour_at(&mut h, "│", "⧉ │ /work"), p.neutral_gray);
+    assert_eq!(
+        colour_at(&mut h, "│", "│ /work/focal-md-pub"),
+        p.text_subtle
+    );
+
+    // Under ready's sub-header, a row is a step further in: its text where
+    // the sub-header's words are, its gutter under the sub-header's clock.
+    h.app.show_tab(super::grouping::Grouping::Status);
+    h.app.process_pending();
+    assert_eq!(
+        list(&mut h, 60, 40),
+        [
+            " ● unread ─────────────────────────────────────── 1 session",
+            "",
+            "   Citations                                          10m ●",
+            "   Fix the citation format in the export",
+            "   codex",
+            " ▸ ┃ /work/focal-md-citations  ⎇ fix/citation-format",
+            "",
+            " ○ ready ──────────────────────────────────────── 1 session",
+            "",
+            "   ◷ last hour ────────────────────────────────── 1 session",
+            "",
+            "     Paper links                                       1h ○",
+            "     Re-review passed; record committed on the b…",
+            "     claude",
+            "   ▾ ┃ /work/focal-md-paper-links  ⎇ paper-links",
+            "       ────────────────────────────────────────────────────",
+            "     │ /work/focal-md-pubmed-pmc-audit",
+            "     │ ⎇ audit/pubmed-pmc-ingest-20261008               10d",
+            "       ────────────────────────────────────────────────────",
+            "   ⧉ │ /work/focal-md-mvp-trial-workspaces",
+            "     │ ⎇ feature/mvp-trial-workspaces                   10d",
+            "       ────────────────────────────────────────────────────",
+            "     │ /work/focal-md-citations",
+            "     │ ⎇ fix/citation-format                            11d",
+            "",
+            " + New session",
+        ]
     );
 }

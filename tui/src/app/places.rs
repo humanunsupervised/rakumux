@@ -1,7 +1,7 @@
 //! Where sessions have worked (`SessionView::places`: the git working trees
 //! where the daemon saw them change files), shown in the session list: each
-//! row has a pair of lines for the directory it works in now, and under it,
-//! when opened, a pair for every other place, most recent first
+//! row has a line for the directory it works in now, and under it, when
+//! opened, a pair of lines for every other place, most recent first
 //! ([`listed_places`]). Closed by default, and per window: `w` opens or
 //! closes the selected session's, `W` every one's, a click or tap on its
 //! `▸`/`▾` too. Not saved. The list keys step through the selected
@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 use super::App;
 use crate::layout::SessionLayout;
 
-/// One of a session row's places, as the list shows them: each a pair of
-/// lines.
+/// One of a session row's places, as the list shows them: the current one
+/// a line, each other a pair of lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlaceRef {
     /// Where the session works now ([`current_place`]), under its facts.
