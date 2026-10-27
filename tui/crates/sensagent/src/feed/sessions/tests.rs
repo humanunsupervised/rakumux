@@ -223,9 +223,9 @@ fn sessions_without_a_named_agent_say_the_program_the_app_tab_files_them_under()
     assert_eq!(program("01K89ZQ4D2F6H8J0K2M4N6P8R4"), None);
 }
 
-/// `view` worked in its folder, a worktree in it and two repositories
-/// elsewhere, one at a detached HEAD (`branch` `None`), most recent first,
-/// and in `extra` more worktrees in its folder.
+/// `view` changed files in its folder, a worktree in it and two
+/// repositories elsewhere, one at a detached HEAD (`branch` `None`), most
+/// recent first, and in `extra` more worktrees in its folder.
 fn worked(mut view: SessionView, extra: usize) -> SessionView {
     let place = |path: &str, branch: Option<&str>, worktree: Option<&str>, at: i64| {
         session_core::model::SessionPlace {
@@ -237,7 +237,7 @@ fn worked(mut view: SessionView, extra: usize) -> SessionView {
                 worktree: worktree.map(String::from),
             }),
             last_at: at,
-            edited: at % 2 == 0,
+            edited: true,
         }
     };
     view.places = vec![
@@ -283,7 +283,7 @@ fn places_go_as_names_only_once_rakumux_com_takes_them() {
             serde_json::json!({"name": ".", "inside": true, "branch": "main",
                 "edited": true, "last_at": 1_761_219_000_000_i64}),
             serde_json::json!({"name": "rakumux-cloud", "inside": false, "branch": "main",
-                "edited": false, "last_at": 1_761_218_001_000_i64}),
+                "edited": true, "last_at": 1_761_218_001_000_i64}),
             serde_json::json!({"name": "logo", "inside": false, "edited": true,
                 "last_at": 1_761_210_000_000_i64}),
         ]

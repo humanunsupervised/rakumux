@@ -3,16 +3,19 @@
 //! working-directory reports and its terminal's directories.
 //!
 //! A place is a git working tree (a repository's main worktree or a linked
-//! one, found from `.git` files only): a touched directory becomes the
-//! working tree it is in ([`resolve`], which reads files and so runs without
-//! the state lock), and a directory outside any repository is no place at
-//! all, nor is one read from the registry ([`Places::new`]). Working trees
-//! in the agents' own data directories (but OpenCode's worktrees) and the
-//! kernel's (`/proc`, `/sys`, `/dev`) are never places. Each session keeps
-//! its [`MAX_PLACES`] most recent, in memory and in the registry
-//! (`session_places`), so ended sessions keep theirs; a place's time moves
-//! on by at least [`MIN_STEP_SECS`] at a time, so an agent at work saves its
-//! list at most about once a minute.
+//! one, found from `.git` files only) where the session changed files: a
+//! touched directory becomes the working tree it is in ([`resolve`], which
+//! reads files and so runs without the state lock), and a directory outside
+//! any repository is no place at all, nor is one read from the registry
+//! ([`Places::new`]). Working trees in the agents' own data directories (but
+//! OpenCode's worktrees) and the kernel's (`/proc`, `/sys`, `/dev`) are
+//! never places. Working trees only worked in (started in, gone into,
+//! searched, read from) are kept too, out of sight, so one becomes a place
+//! when files there are changed later ([`Places::shown`]). Each session
+//! keeps its [`MAX_PLACES`] most recent of each, in memory and in the
+//! registry (`session_places`), so ended sessions keep theirs; a working
+//! tree's time moves on by at least [`MIN_STEP_SECS`] at a time, so an agent
+//! at work saves its list at most about once a minute.
 
 use crate::agent_output::places::Touch;
 use crate::git;
@@ -98,7 +101,8 @@ pub(super) fn resolve(touches: Vec<Touch>, excluded: &Excluded, now_ms: i64) -> 
     resolved
 }
 
-/// Every session's places, most recent first.
+/// Every session's working trees, most recent first: its places (`edited`)
+/// and the ones it only worked in.
 #[derive(Debug, Default)]
 pub(super) struct Places {
     by_session: HashMap<SessionId, Vec<SessionPlace>>,
@@ -116,17 +120,27 @@ impl Places {
         Self { by_session }
     }
 
-    pub fn get(&self, id: &SessionId) -> &[SessionPlace] {
-        self.by_session.get(id).map_or(&[], Vec::as_slice)
+    /// `id`'s places (`SessionView::places`): the working trees where it
+    /// changed files, most recent first.
+    pub fn shown(&self, id: &SessionId) -> Vec<SessionPlace> {
+        self.by_session
+            .get(id)
+            .into_iter()
+            .flatten()
+            .filter(|place| place.edited)
+            .cloned()
+            .collect()
     }
 
     pub fn remove(&mut self, id: &SessionId) {
         self.by_session.remove(id);
     }
 
-    /// Record that `id` worked in `resolved`. Returns its list when that
-    /// changed (to save and publish). A place's time moves on by
-    /// [`MIN_STEP_SECS`] at least; its git context is the latest touch's.
+    /// Record that `id` worked in `resolved`. Returns its list (every working
+    /// tree, edited or not) when that changed, to save; the caller's refresh
+    /// publishes what [`Places::shown`] says now. A working tree's time is
+    /// its latest touch's, moving on by [`MIN_STEP_SECS`] at least; its git
+    /// context is the latest touch's; it's edited once any touch was.
     pub fn apply(&mut self, id: &SessionId, resolved: Vec<Resolved>) -> Option<&[SessionPlace]> {
         if resolved.is_empty() {
             return None;
@@ -153,7 +167,18 @@ impl Places {
             }
         }
         sort(list);
-        list.truncate(MAX_PLACES);
+        // The most recent MAX_PLACES of each kind: working in many trees
+        // never pushes out one where files were changed.
+        let (mut edited, mut only_worked_in) = (0, 0);
+        list.retain(|place| {
+            let kept = if place.edited {
+                &mut edited
+            } else {
+                &mut only_worked_in
+            };
+            *kept += 1;
+            *kept <= MAX_PLACES
+        });
         (*list != before).then_some(list.as_slice())
     }
 }
@@ -220,13 +245,60 @@ mod tests {
         assert!(places
             .apply(&id, vec![resolved("/repo", 10, true)])
             .is_some_and(|list| list[0].edited && list[0].last_at == 1070));
-        // At most MAX_PLACES: the oldest go.
-        let many = (0..MAX_PLACES as i64)
-            .map(|n| resolved(&format!("/r/{n}"), 2000 + n, false))
-            .collect();
-        let list = places.apply(&id, many).unwrap();
+        // At most MAX_PLACES of each kind: the oldest go, and working in
+        // many more trees keeps every one where files were changed.
+        let many = |from: i64, edited: bool| {
+            (0..MAX_PLACES as i64 + 8)
+                .map(|n| resolved(&format!("/r/{from}/{n}"), from + n, edited))
+                .collect()
+        };
+        let list = places.apply(&id, many(2000, true)).unwrap();
         assert_eq!(list.len(), MAX_PLACES);
-        assert!(list.iter().all(|place| place.path.starts_with("/r")));
+        assert!(list.iter().all(|place| place.edited));
+        assert!(!list.iter().any(|place| place.path.starts_with("/repo")));
+        let list = places.apply(&id, many(3000, false)).unwrap();
+        assert_eq!(list.len(), MAX_PLACES * 2);
+        assert_eq!(places.shown(&id).len(), MAX_PLACES);
+        assert!(places
+            .shown(&id)
+            .iter()
+            .all(|place| place.path.starts_with("/r/2000")));
+    }
+
+    #[test]
+    fn only_working_trees_where_files_were_changed_are_shown() {
+        let mut places = Places::default();
+        let id = SessionId::from_string("A");
+        // Started in the main checkout, then made a worktree, went into it
+        // and changed files there.
+        let list = places
+            .apply(
+                &id,
+                vec![
+                    resolved("/repo", 1000, false),
+                    resolved("/repo/worktrees/fix", 1100, false),
+                    resolved("/repo/worktrees/fix", 1200, true),
+                ],
+            )
+            .unwrap();
+        // Both are kept, to save; only the worktree is a place.
+        assert_eq!(paths(list), ["/repo/worktrees/fix 1200", "/repo 1000"]);
+        assert_eq!(paths(&places.shown(&id)), ["/repo/worktrees/fix 1200"]);
+        // Reading in the main checkout later still isn't changing it.
+        places.apply(&id, vec![resolved("/repo", 1300, false)]);
+        assert_eq!(paths(&places.shown(&id)), ["/repo/worktrees/fix 1200"]);
+        // Changing a file there makes it a place, at its latest touch.
+        places.apply(&id, vec![resolved("/repo", 1310, true)]);
+        assert_eq!(
+            paths(&places.shown(&id)),
+            ["/repo 1300", "/repo/worktrees/fix 1200"]
+        );
+        // A session that changed nothing has no places.
+        let idle = SessionId::from_string("B");
+        assert!(places
+            .apply(&idle, vec![resolved("/repo", 1000, false)])
+            .is_some());
+        assert!(places.shown(&idle).is_empty());
     }
 
     #[test]
@@ -239,7 +311,7 @@ mod tests {
                 ..GitInfo::default()
             }),
             last_at,
-            edited: false,
+            edited: true,
         };
         let id = SessionId::from_string("A");
         let only_folders = SessionId::from_string("B");
@@ -256,10 +328,10 @@ mod tests {
             (only_folders.clone(), vec![place("/srv", false, 10)]),
         ]));
         assert_eq!(
-            paths(places.get(&id)),
+            paths(&places.shown(&id)),
             ["/home/me/repos/wt 200", "/home/me/repos/app 100"]
         );
-        assert!(places.get(&only_folders).is_empty());
+        assert!(places.shown(&only_folders).is_empty());
         // The next change saves the list without them.
         let list = places
             .apply(&id, vec![resolved("/home/me/repos/app", 400, false)])

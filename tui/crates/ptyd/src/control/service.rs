@@ -2647,7 +2647,7 @@ impl Inner {
                 .flatten(),
             pinned: record.pinned,
             git,
-            places: state.places.get(&record.id).to_vec(),
+            places: state.places.shown(&record.id),
             id: record.id.clone(),
             name: record.name.clone(),
             scope: record.scope.clone(),

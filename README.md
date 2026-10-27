@@ -94,7 +94,7 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `f` | Show, focus or hide the feed |
 | `P` / `/` | Filter by folder / by text |
 | `p` | Pin or unpin |
-| `w` / `W` | Where the session (every session) has worked: its git working trees |
+| `w` / `W` | Where the session (every session) has worked: the git working trees where it changed files |
 | `y` | Copy the path of a place (`↓` steps onto them), or of where the session works now |
 | `J` `K` | Move down or up (or drag the session) |
 | `r` | Rename |

@@ -1,7 +1,7 @@
 //! Where sessions have worked (`SessionView::places`: the git working trees
-//! the daemon found), shown in the session list: each row has a line with
-//! the directory it works in now, and under it, when opened, every other
-//! working tree it has worked in, most recent first ([`listed_places`]).
+//! where the daemon saw them change files), shown in the session list: each
+//! row has a line with the directory it works in now, and under it, when
+//! opened, every other place, most recent first ([`listed_places`]).
 //! Closed by default, and per window: `w` opens or closes the selected
 //! session's, `W` every one's, a click or tap on the line too. Not saved.
 //! The list keys step through the selected session's open places as if
@@ -55,7 +55,7 @@ impl App {
         let id = session.id.clone();
         if !self.places_open(&id) && other_places(session) == 0 {
             let name = session.name.clone();
-            self.set_status(format!("{name} hasn't worked anywhere else yet."));
+            self.set_status(format!("{name} hasn't changed files anywhere else yet."));
             return;
         }
         self.toggle_places_of(id);
@@ -74,7 +74,7 @@ impl App {
         if !elsewhere.is_empty() && elsewhere.iter().all(|id| self.places_open(id)) {
             self.places_open.clear();
         } else if elsewhere.is_empty() && self.places_open.is_empty() {
-            self.set_status("No session has worked anywhere else yet.");
+            self.set_status("No session has changed files anywhere else yet.");
         } else {
             self.places_open.extend(elsewhere);
         }

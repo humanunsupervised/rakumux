@@ -347,18 +347,26 @@ automatic AI summary), `places` (below), and `terminal` (pid, foreground process
 last_active_at, added_at, git}` on the wire.
 
 - **Places** (capability `session.places`; `integrations/places.rs`, `control/places.rs`):
-  where the session has worked, most recent first, at most 32: `SessionPlace {path, git?,
+  where the session has changed files, most recent first, at most 32: `SessionPlace {path, git?,
   last_at, edited}`. A place is a git working tree, a repository's main checkout or a linked
   worktree (`path` = its `repo_root`, `git` its branch, or a detached HEAD's commit, and linked
-  worktree when last worked in); a directory outside any repository is never one, and those an
-  earlier daemon kept are dropped as the registry is read (and from it at the session's next
-  save). The daemon reads them from its agent's conversation, from its start (512
-  KiB a second) and then as it grows: Claude Code's entries' `cwd` and its tools' file paths,
-  search roots, `EnterWorktree` and Bash `cd`/`git -C`; Codex's turns' `cwd`, shell calls'
-  `workdir` and commands, and `apply_patch`'s files; OpenCode's tools' paths and commands. Its
-  agent's working-directory reports and its terminal's directories count too. `edited`: files
-  there were changed. Times are the conversation's own, so reading it again changes nothing, and
-  a place's moves on a minute at a time. Working trees in the agents' own data directories
+  worktree when last worked in), where its agent changed files (`edited`, always true): written
+  or edited with its file tools (Claude Code's `Write`, `Edit`, `MultiEdit`, `NotebookEdit`;
+  OpenCode's `write`, `edit`, `multiedit`) or patched (`apply_patch` however Codex calls it,
+  OpenCode's `patch`). Working trees it only worked in (started in, `cd`'d into, searched, read
+  from) are kept in memory and the registry, never listed, so one becomes a place, at its latest
+  touch's time, once files there change: a session started in a main checkout that made a
+  worktree and changed files only there lists that worktree alone. A known limit: other shell
+  commands' writes (`sed -i`, a redirect, a script) aren't seen. A directory outside any
+  repository is never a place, and those an earlier daemon kept are dropped as the registry is
+  read (and from it at the session's next save). The daemon reads them from its agent's
+  conversation, from its start (512 KiB a second) and then as it grows: Claude Code's entries'
+  `cwd` and its tools' file paths, search roots, `EnterWorktree` and Bash `cd`/`git -C`; Codex's
+  turns' `cwd`, shell calls' `workdir` and commands, and `apply_patch`'s files; OpenCode's tools'
+  paths and commands. Its agent's working-directory reports and its terminal's directories count
+  as worked in. Times are the conversation's own, so reading it again changes nothing, and a
+  working tree's moves on a minute at a time; each session keeps 32 of each kind (changed, only
+  worked in). Working trees in the agents' own data directories
   (`~/.claude`, `~/.codex`, OpenCode's but its worktrees, Claude Code's `/tmp/claude-<uid>`) and
   in `/proc`, `/sys`, `/dev` are never places. Kept in the registry, so ended sessions keep
   theirs; only paths are read. They stay on this machine (not in `rakumux-api`), except their
@@ -745,9 +753,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
 - **Git context**: a session's branch and linked worktree, read from `.git` files (never `git`).
-- **Place**: a git working tree (main checkout or linked worktree) a session has worked in, as its
-  agent's conversation, its working-directory reports and its terminal show; listed under the
-  session's row (`w`).
+- **Place**: a git working tree (main checkout or linked worktree) where a session's agent
+  changed files, as its conversation shows; listed under the session's row (`w`).
 - **Reply** (agent reply): what an agent said when it finished a turn, captured by the daemon
   only while the status service has reply capture on, for the **feed**: the replies of the
   account's machines, kept on rakumux.com for 30 days while the account's Feed switch is on.
@@ -1019,8 +1026,10 @@ places (`+3`) when it has worked elsewhere, the branch and count on a second lin
 `w`, `W` or a click or tap on that line opens those others under it (`▾`; closed by default, per
 window, not saved; `app::places::listed_places`, never the one the line names, so the count is
 what's listed): each one, most recent first, a pair of lines behind a muted bar (`│`): its path
-(cut at its start when narrow), then its branch with `✎` where files were changed and its age
-at the right; a muted rule (`─`) between two pairs. `↓`/`↑` (`j`/`k`) step through the selected
+(cut at its start when narrow), then its branch and its age at the right; a muted rule (`─`)
+between two pairs. The line names where the session works now even before it changed anything
+there; the count and the list are the daemon's places, so a checkout it only started in or read
+from isn't among them. `↓`/`↑` (`j`/`k`) step through the selected
 session's open places pair by pair as if each were a row under it (`App::step`;
 `SessionList::selected_place`, dropped by any other selection), and `y` copies the path of the
 one they're on, else of the folder the session works in now, over OSC 52 (`App::copy_place`).

@@ -1,7 +1,9 @@
 //! Where Codex works, from its rollout file: the thread's and each turn's
 //! directory (`session_meta` and `turn_context`'s `cwd`), each shell call's
 //! working directory and command, and the files `apply_patch` changes
-//! (relative to the turn's directory).
+//! (relative to the turn's directory, or its shell call's), whichever way
+//! it's called: its own tool, or a shell call of it (`apply_patch <<EOF`).
+//! Other shell commands' writes aren't known.
 use super::{resolve, Collect, Touch};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -36,7 +38,14 @@ pub(super) fn entry(
             let arguments: Value = field("arguments")
                 .and_then(|arguments| serde_json::from_str(arguments).ok())
                 .unwrap_or(Value::Null);
-            shell(&arguments, "workdir", &mut collect);
+            match field("name") {
+                Some("apply_patch") => {
+                    if let Some(input) = arguments.get("input").and_then(Value::as_str) {
+                        collect.patch(input);
+                    }
+                }
+                _ => shell(&arguments, "workdir", &mut collect),
+            }
         }
         (Some("response_item"), Some("local_shell_call")) => {
             if let Some(action) = payload.get("action") {
@@ -79,9 +88,17 @@ fn shell(arguments: &Value, key: &str, collect: &mut Collect) {
         }
         _ => return,
     };
-    match dir {
-        Some(dir) => collect.command_in(&command, Some(&dir)),
-        None => collect.command(&command),
+    let dir = dir.as_deref().or(collect.cwd);
+    // Codex applies a patch it's given as a command itself.
+    if command
+        .trim_start()
+        .strip_prefix("apply_patch")
+        .or_else(|| command.trim_start().strip_prefix("applypatch"))
+        .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    {
+        collect.patch_in(&command, dir);
+    } else {
+        collect.command_in(&command, dir);
     }
 }
 
@@ -162,6 +179,36 @@ mod tests {
                 "/repo/src (edited)",
                 "/wt/c",
                 "/wt/d"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_patch_counts_however_codex_applies_it_and_other_commands_change_nothing() {
+        assert_eq!(
+            touches(&[
+                json!({"type": "turn_context", "payload": {"cwd": "/repo"}}),
+                item(json!({"type": "function_call", "name": "apply_patch",
+                    "arguments": "{\"input\":\"*** Begin Patch\\n*** Add File: a/new.rs\\n+x\\n*** End Patch\"}"})),
+                item(json!({"type": "function_call", "name": "shell",
+                    "arguments": serde_json::to_string(&json!({
+                        "command": ["apply_patch", "*** Begin Patch\n*** Update File: b.rs\n*** End Patch"],
+                        "workdir": "/wt/x"})).unwrap()})),
+                item(json!({"type": "function_call", "name": "shell",
+                    "arguments": serde_json::to_string(&json!({
+                        "command": ["bash", "-lc", "apply_patch <<'EOF'\n*** Begin Patch\n*** Delete File: c/old.rs\n*** End Patch\nEOF"],
+                        "workdir": "/wt/y"})).unwrap()})),
+                item(json!({"type": "function_call", "name": "exec_command",
+                    "arguments": "{\"cmd\":\"sed -i s/a/b/ d.rs > e.txt\",\"workdir\":\"/wt/z\"}"})),
+            ]),
+            [
+                "/repo",
+                "/repo/a (edited)",
+                "/wt/x",
+                "/wt/x (edited)",
+                "/wt/y",
+                "/wt/y/c (edited)",
+                "/wt/z"
             ]
         );
     }

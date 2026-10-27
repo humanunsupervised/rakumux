@@ -1017,11 +1017,24 @@ fn agent_working_directory_survives_handoff_and_rejects_invalid_paths() {
     assert_eq!(restored.scope, h.scope);
 }
 
+/// A session's places are the working trees where its agent changed files
+/// (here Codex, this process, with its rollout open): where it started, the
+/// directories its terminal went to and the worktree it reported are
+/// kept, out of sight, until a patch changes files there.
+#[cfg(target_os = "linux")]
 #[test]
-fn places_follow_where_a_session_works_and_outlive_its_terminal() {
+fn places_are_where_a_sessions_agent_changed_files_and_outlive_its_terminal() {
+    use ptyd::detect::{DetectInput, Detection};
     use ptyd::host::ProcessInfo;
     use session_core::api::{AgentWorkingDirectory, Report};
-    let mut h = Harness::new();
+    use std::io::Write;
+    fn codex_detector(input: &DetectInput<'_>) -> Detection {
+        Detection {
+            agent: Some("codex".into()),
+            ..marker_detector(input)
+        }
+    }
+    let mut h = Harness::with_detector(codex_detector);
     let root = h.scope.path().to_path_buf();
     git_repo(&root, "main");
     let other = h.root().join("other");
@@ -1032,7 +1045,7 @@ fn places_follow_where_a_session_works_and_outlive_its_terminal() {
     std::fs::create_dir_all(&admin).unwrap();
     set_head(&admin, "review-branch");
     std::fs::write(admin.join("commondir"), "../..\n").unwrap();
-    std::fs::create_dir_all(&checkout).unwrap();
+    std::fs::create_dir_all(checkout.join("src")).unwrap();
     std::fs::write(
         checkout.join(".git"),
         format!("gitdir: {}\n", admin.display()),
@@ -1043,6 +1056,7 @@ fn places_follow_where_a_session_works_and_outlive_its_terminal() {
             .places
             .iter()
             .map(|place| {
+                assert!(place.edited, "{place:?}");
                 let git = place.git.as_ref();
                 (
                     place.path.clone(),
@@ -1054,58 +1068,45 @@ fn places_follow_where_a_session_works_and_outlive_its_terminal() {
         places.sort();
         places
     };
+    let rows = |h: &Harness| -> i64 {
+        h.db()
+            .query_row("SELECT COUNT(*) FROM session_places", [], |row| row.get(0))
+            .unwrap()
+    };
 
-    // Started in its folder.
+    // Started in its main checkout: worked in, so kept, but no place.
     let s = h.create(Some("agent"));
-    assert_eq!(places(&s), [(root.clone(), Some("main".into()), None)]);
+    assert!(s.places.is_empty(), "{:?}", s.places);
+    assert_eq!(rows(&h), 1);
 
-    // The terminal goes into another repository: its working tree, published.
-    let watch = h
-        .control
-        .subscribe(
-            &h.user,
-            &SubscribeRequest {
-                scope: Some(h.scope.clone()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    h.host.emit(HostEvent::Cwd {
-        id: h.host.terminal_of(&s.id),
-        session_id: s.id.clone(),
-        path: other.join("src"),
-    });
-    let view = eventually("an update with the other repository", || {
-        updated(&drain(&watch), &s.id).filter(|view| view.places.len() == 2)
-    });
-    assert_eq!(
-        places(&view),
-        [
-            (other.clone(), Some("fix".into()), None),
-            (root.clone(), Some("main".into()), None)
-        ]
-    );
-
-    // A directory outside any repository is no place.
-    let plain = h.root().join("plain");
-    std::fs::create_dir_all(&plain).unwrap();
-    h.host.emit(HostEvent::Cwd {
-        id: h.host.terminal_of(&s.id),
-        session_id: s.id.clone(),
-        path: plain.clone(),
-    });
-    let view = eventually("an update in the plain directory", || {
-        updated(&drain(&watch), &s.id).filter(|view| view.cwd == plain)
-    });
-    assert_eq!(places(&view).len(), 2, "{:?}", view.places);
-
-    // The agent reports a linked worktree it works in.
+    // Its terminal goes into another repository and a plain directory, and
+    // its agent (Codex, with its rollout open) reports the linked worktree
+    // it works in: still no places.
+    for path in [other.join("src"), h.root()] {
+        h.host.emit(HostEvent::Cwd {
+            id: h.host.terminal_of(&s.id),
+            session_id: s.id.clone(),
+            path: path.clone(),
+        });
+        eventually("the terminal's directory", || {
+            (h.get(&s.id).cwd == path).then_some(())
+        });
+    }
+    let codex = h.dir.path().join("codex");
+    std::fs::create_dir_all(&codex).unwrap();
+    let thread = "019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5c";
+    let mut rollout =
+        std::fs::File::create(codex.join(format!("rollout-2026-10-23T10-00-00-{thread}.jsonl")))
+            .unwrap();
+    let mut log = |line: serde_json::Value| writeln!(rollout, "{line}").unwrap();
+    log(serde_json::json!({"type": "session_meta",
+        "payload": {"id": thread, "source": "cli", "cwd": root}}));
     h.host.set_foreground(
         &s.id,
         ProcessInfo {
-            pid: 4242,
-            name: "claude".into(),
-            cmdline: vec!["claude".into()],
+            pid: std::process::id(),
+            name: "codex".into(),
+            cmdline: vec!["codex".into()],
         },
     );
     let caller = h.session_caller(&s.id);
@@ -1114,8 +1115,8 @@ fn places_follow_where_a_session_works_and_outlive_its_terminal() {
             &caller,
             Request::SessionReport(Report {
                 working_directory: Some(AgentWorkingDirectory {
-                    agent: "claude".into(),
-                    conversation_id: Some("conversation".into()),
+                    agent: "codex".into(),
+                    conversation_id: Some(thread.into()),
                     path: checkout.clone(),
                 }),
                 ..Report::default()
@@ -1123,6 +1124,36 @@ fn places_follow_where_a_session_works_and_outlive_its_terminal() {
         ),
         Response::Ok
     );
+    let patch = |file: &Path| {
+        serde_json::json!({"type": "response_item", "payload": {"type": "custom_tool_call",
+            "name": "apply_patch", "input": format!(
+                "*** Begin Patch\n*** Add File: {}\n+x\n*** End Patch", file.display())}})
+    };
+    // Its agent reads in the main checkout, then changes a file in the
+    // worktree: that is its one place.
+    log(
+        serde_json::json!({"type": "response_item", "payload": {"type": "function_call",
+        "name": "shell", "arguments": serde_json::json!({
+            "command": ["bash", "-lc", "cat README.md"], "workdir": root}).to_string()}}),
+    );
+    log(patch(&checkout.join("src/new.rs")));
+    let placed = |want: usize| {
+        eventually(&format!("{want} places"), || {
+            h.host.show(&s.id, "> [idle]");
+            let view = h.get(&s.id);
+            (view.places.len() == want).then_some(view)
+        })
+    };
+    assert_eq!(
+        places(&placed(1)),
+        [(
+            checkout.clone(),
+            Some("review-branch".into()),
+            Some("review".into())
+        )]
+    );
+    // A patch in the other repository makes it a place too.
+    log(patch(&other.join("src/lib.rs")));
     let expected = [
         (
             checkout.clone(),
@@ -1130,12 +1161,13 @@ fn places_follow_where_a_session_works_and_outlive_its_terminal() {
             Some("review".into()),
         ),
         (other.clone(), Some("fix".into()), None),
-        (root.clone(), Some("main".into()), None),
     ];
-    assert_eq!(places(&h.get(&s.id)), expected);
+    assert_eq!(places(&placed(2)), expected);
 
-    // A dead session keeps them, but a folder outside any repository that
-    // an earlier release kept; deleting it removes them.
+    // A dead session keeps them (but a folder outside any repository that
+    // an earlier release kept); deleting it removes them.
+    let plain = h.root().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
     h.db()
         .execute(
             "INSERT INTO session_places (session_id, path, git_json, last_at, edited) \
@@ -1151,9 +1183,5 @@ fn places_follow_where_a_session_works_and_outlive_its_terminal() {
         h.handle(&h.user, Request::SessionDelete { id: s.id.clone() }),
         Response::Ok
     );
-    let left: i64 = h
-        .db()
-        .query_row("SELECT COUNT(*) FROM session_places", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(left, 0);
+    assert_eq!(rows(&h), 0);
 }

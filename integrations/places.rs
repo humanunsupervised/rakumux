@@ -4,7 +4,9 @@
 //! read or changed, each as a [`Touch`] of a directory (`SessionView::places`).
 //! Only paths are taken: never file contents, commands' output or prompts.
 //! The control layer turns touches into places: the git working trees they
-//! are in (a touch outside any repository is no place).
+//! are in (a touch outside any repository is no place), listing only those
+//! where a touch changed files (`edited`: a file tool's write or edit, a
+//! patch). Other shell commands' writes (`sed -i`, a redirect) aren't seen.
 //!
 //! A conversation is read from its start, a piece at a time ([`PlaceScan`]),
 //! then on as it grows. Provider mappings live beside their hooks in
@@ -256,6 +258,12 @@ impl<'a> Collect<'a> {
     /// from its `*** Add File:`, `*** Update File:`, `*** Delete File:` and
     /// `*** Move to:` lines.
     pub(super) fn patch(&mut self, patch: &str) {
+        self.patch_in(patch, self.cwd);
+    }
+
+    /// [`Collect::patch`] for a patch applied in `dir` (a shell call's own
+    /// working directory).
+    pub(super) fn patch_in(&mut self, patch: &str, dir: Option<&Path>) {
         for line in patch.lines() {
             let file = [
                 "*** Add File:",
@@ -265,8 +273,11 @@ impl<'a> Collect<'a> {
             ]
             .iter()
             .find_map(|header| line.strip_prefix(header));
-            if let Some(file) = file {
-                self.file(file, true);
+            let dir = file
+                .and_then(|file| resolve(file, dir, self.home))
+                .and_then(|file| file.parent().map(Path::to_path_buf));
+            if let Some(dir) = dir {
+                self.push(dir, true);
             }
         }
     }

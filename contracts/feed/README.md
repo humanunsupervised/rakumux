@@ -111,7 +111,7 @@ conformance tests, not an HTTP server, database or local runtime.
   listed. The answer says how many are stored (`sessions-stored`), and with `accepts` what more
   the cloud takes in a list: a machine sends those only once an answer named them. Known:
   **`places`**, the 8 places a session worked in most recently (`sessionPlace` in common: a git
-  working tree; no `branch` while its HEAD is detached), most recent first, each `{name, inside,
+  working tree where it changed files; no `branch` while its HEAD is detached), most recent first, each `{name, inside,
   branch?, worktree?, edited, last_at}`: `name` is its path in the session's folder when it's
   there (`inside`; `.` for the folder itself), else its last path component, never an absolute
   path. Kept while the account's Feed switch is on. The upload also says what the machine

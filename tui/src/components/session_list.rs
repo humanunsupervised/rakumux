@@ -488,8 +488,6 @@ fn session_content(
 /// while its places are closed, `▾` while they're open.
 const PLACES_CLOSED: &str = "▸";
 const PLACES_OPEN: &str = "▾";
-/// Marks a place where files were changed.
-const EDITED_MARK: &str = "✎";
 /// Left of an open place under the pointer or the list keys: a click or tap
 /// (`y`) copies its path.
 const COPY_MARK: &str = "⧉";
@@ -518,9 +516,9 @@ struct PlaceLines {
 /// its branch (`▤ rakumux  ⎇ main`, or `▸ rakumux  ⎇ main  +3` when it has
 /// worked in other places), the branch and count on a line of their own
 /// when they don't fit; then, while its places are open (`▾`), each of the
-/// others, most recent first, as a pair of lines behind a bar: its path,
-/// then its branch, with ✎ where files were changed and when at the right;
-/// a rule between two. The place the list keys are on (in the `selected`
+/// others (where it changed files: every place is), most recent first, as a
+/// pair of lines behind a bar: its path, then its branch and, at the right,
+/// when; a rule between two. The place the list keys are on (in the `selected`
 /// session) is bright, and its bar and the `hovered` one's are blue, with
 /// the copy mark beside their path.
 fn place_content(
@@ -646,32 +644,23 @@ fn place_content(
             bar.clone(),
             Span::styled(truncate_start(&label, inner), path_style),
         ]));
-        // Under it its branch, and at the right ✎ and its age; short of
-        // room the branch is cut first, then the ✎ goes, then the age is cut.
-        let age = relative_time(now, place.last_at);
-        let edited = place.edited && str_width(&age) + 2 <= inner;
-        let age = truncate(&age, inner);
-        let right = str_width(&age) + if edited { 2 } else { 0 };
+        // Under it its branch, and at the right its age; short of room the
+        // branch is cut first, then the age.
+        let age = truncate(&relative_time(now, place.last_at), inner);
         let branch = place
             .git
             .as_ref()
             .and_then(|git| branch_label(git, icons))
             .unwrap_or_default();
-        let branch = truncate(&branch, inner.saturating_sub(right + 1));
-        let mut spans = vec![
+        let branch = truncate(&branch, inner.saturating_sub(str_width(&age) + 1));
+        let gap = inner.saturating_sub(str_width(&branch) + str_width(&age));
+        lines.push(lead(vec![
             Span::raw(" ".repeat(mark_width)),
             bar,
-            Span::styled(branch.clone(), tail_style),
-            Span::raw(" ".repeat(inner.saturating_sub(str_width(&branch) + right))),
-        ];
-        if edited {
-            spans.push(Span::styled(
-                format!("{EDITED_MARK} "),
-                Style::default().fg(p.accent_gold),
-            ));
-        }
-        spans.push(Span::styled(age, age_style));
-        lines.push(lead(spans));
+            Span::styled(branch, tail_style),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(age, age_style),
+        ]));
         places.push(start..lines.len());
     }
     PlaceLines {
@@ -1430,7 +1419,7 @@ mod tests {
             [
                 "  ▾ repo  ⎇ main  +2",
                 "    │ worktrees/fix",
-                "    │ ⎇ fix                        ✎ now",
+                "    │ ⎇ fix                          now",
                 "      ──────────────────────────────────",
                 "    │ /srv/other",
                 "    │ ⎇ dev                           2h",
@@ -1445,7 +1434,6 @@ mod tests {
                 .find(|span| span.content == content)
                 .and_then(|span| span.style.fg)
         };
-        assert_eq!(fg(2, "✎ "), Some(p.accent_gold));
         assert_eq!(fg(3, &"─".repeat(34)), Some(p.border_dim));
         for line in [1, 2, 4, 5] {
             assert_eq!(fg(line, "│ "), Some(p.text_subtle), "{line}");
@@ -1489,7 +1477,7 @@ mod tests {
                 "  ▾ repo",
                 "    ⎇ main  +2",
                 "    │ …trees/fix",
-                "    │ ⎇ f… ✎ now",
+                "    │ ⎇ fix  now",
                 "      ──────────",
                 "    │ /srv/other",
                 "    │ ⎇ dev   2h",

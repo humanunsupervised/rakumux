@@ -5190,7 +5190,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     assert!(!screen.contains("worktrees/fix"), "closed: {screen}");
 
     // Open, the place line stays, and under it the one other place: its
-    // path, then its branch, ✎ and age, behind a bar.
+    // path, then its branch and age, behind a bar.
     h.press(KeyCode::Char('w')).await;
     let screen = screen_rows(&mut h, 160, 48);
     let text = screen.join("\n");
@@ -5206,7 +5206,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         .unwrap_or_else(|| panic!("the worktree: {text}"));
     let branch = in_list(&screen[fix + 1]);
     assert!(branch.contains("│ ⎇ fix"), "{branch:?}");
-    assert!(branch.ends_with("✎ 30s"), "{branch:?}");
+    assert!(branch.ends_with(" 30s"), "{branch:?}");
     assert!(
         !screen.iter().any(|line| line.contains("│ repo")),
         "where it works now isn't listed again: {text}"
@@ -5221,7 +5221,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     assert!(!h.app.places_open(&b));
     assert_eq!(
         h.app.status(),
-        Some("plain hasn't worked anywhere else yet.")
+        Some("plain hasn't changed files anywhere else yet.")
     );
 
     // W opens every session's that has somewhere else, then closes them.
@@ -5436,16 +5436,18 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
     assert!(line.contains("/srv/place12"), "{line}");
 }
 
-/// A session that has worked in three working trees besides the one it
-/// works in now, its places open, on a phone's 60 and 40 columns: the
-/// place line says where it works now and `+3`, and under it the three, as
+/// A session that started in its folder's main checkout, then made
+/// worktrees and changed files in them, its places open, on a phone's 60
+/// and 40 columns. The daemon lists only the worktrees where files were
+/// changed, not the main checkout it only started in: the place line says
+/// the one it works in now and `+3`, and under it the three others, as
 /// pairs of lines behind a bar with a rule between, the one the keys are on
 /// with ⧉.
 #[tokio::test]
 async fn open_places_read_as_pairs_on_a_phone() {
     use session_core::model::{GitInfo, SessionPlace};
     let now = crate::components::format::now_secs();
-    let place = |path: &str, branch: &str, days: i64, edited: bool| SessionPlace {
+    let place = |path: &str, branch: &str, days: i64| SessionPlace {
         path: path.into(),
         git: Some(GitInfo {
             repo_root: path.into(),
@@ -5453,7 +5455,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
             ..GitInfo::default()
         }),
         last_at: now - days * 86_400,
-        edited,
+        edited: true,
     };
     let mut agent = view("A", "Paper links", now - 3_600);
     agent.scope = ScopeRoot::from_canonical("/work/focal-md".into());
@@ -5469,20 +5471,18 @@ async fn open_places_read_as_pairs_on_a_phone() {
         ..GitInfo::default()
     });
     agent.places = vec![
-        place("/work/focal-md-paper-links", "paper-links", 9, true),
-        place("/work/focal-md", "main", 10, false),
+        place("/work/focal-md-paper-links", "paper-links", 9),
         place(
             "/work/focal-md-pubmed-pmc-audit",
             "audit/pubmed-pmc-ingest-20261008",
             10,
-            false,
         ),
         place(
             "/work/focal-md-mvp-trial-workspaces",
             "feature/mvp-trial-workspaces",
             10,
-            true,
         ),
+        place("/work/focal-md-citations", "fix/citation-format", 11),
     ];
     let mut h = harness(vec![agent]);
     let a = SessionId::from_string("A");
@@ -5510,14 +5510,14 @@ async fn open_places_read_as_pairs_on_a_phone() {
         places(&mut h, 60),
         [
             "     ▾ /work/focal-md-paper-links  ⎇ paper-links  +3",
-            "       │ focal-md",
-            "       │ ⎇ main                                         10d",
-            "         ──────────────────────────────────────────────────",
-            "     ⧉ │ /work/focal-md-pubmed-pmc-audit",
+            "       │ /work/focal-md-pubmed-pmc-audit",
             "       │ ⎇ audit/pubmed-pmc-ingest-20261008             10d",
             "         ──────────────────────────────────────────────────",
-            "       │ /work/focal-md-mvp-trial-workspaces",
-            "       │ ⎇ feature/mvp-trial-workspaces               ✎ 10d",
+            "     ⧉ │ /work/focal-md-mvp-trial-workspaces",
+            "       │ ⎇ feature/mvp-trial-workspaces                 10d",
+            "         ──────────────────────────────────────────────────",
+            "       │ /work/focal-md-citations",
+            "       │ ⎇ fix/citation-format                          11d",
         ]
     );
     assert_eq!(
@@ -5525,18 +5525,18 @@ async fn open_places_read_as_pairs_on_a_phone() {
         [
             "     ▾ /work/focal-md-paper-links",
             "       ⎇ paper-links  +3",
-            "       │ focal-md",
-            "       │ ⎇ main                     10d",
-            "         ──────────────────────────────",
-            "     ⧉ │ …ork/focal-md-pubmed-pmc-audit",
+            "       │ …ork/focal-md-pubmed-pmc-audit",
             "       │ ⎇ audit/pubmed-pmc-ingest… 10d",
             "         ──────────────────────────────",
-            "       │ …focal-md-mvp-trial-workspaces",
-            "       │ ⎇ feature/mvp-trial-wor… ✎ 10d",
+            "     ⧉ │ …focal-md-mvp-trial-workspaces",
+            "       │ ⎇ feature/mvp-trial-works… 10d",
+            "         ──────────────────────────────",
+            "       │ /work/focal-md-citations",
+            "       │ ⎇ fix/citation-format      11d",
         ]
     );
     assert_eq!(
         h.app.list.selected_place(),
-        Some(std::path::Path::new("/work/focal-md-pubmed-pmc-audit"))
+        Some(std::path::Path::new("/work/focal-md-mvp-trial-workspaces"))
     );
 }

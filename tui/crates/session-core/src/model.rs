@@ -231,20 +231,21 @@ pub struct SessionView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<GitInfo>,
     /// Where the session has worked, most recent first (capability
-    /// `session.places`): the git working trees its agent worked in, read
-    /// files from or changed, as its conversation shows them, and its
-    /// terminal's directories in them. Read by the
-    /// daemon on this machine; at most [`MAX_PLACES`].
+    /// `session.places`): the git working trees where its agent changed
+    /// files, as its conversation shows them (its file tools and patches;
+    /// not other shell commands' writes). Read by the daemon on this
+    /// machine; at most [`MAX_PLACES`]. Earlier daemons also listed trees
+    /// only worked in (`edited` false).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub places: Vec<SessionPlace>,
 }
 
-/// The most places a session keeps: the most recently worked in.
+/// The most places a session lists: the most recently worked in.
 pub const MAX_PLACES: usize = 32;
 
 /// A place a session worked in: a git working tree (a repository's main
-/// worktree or a linked one). Earlier daemons also listed directories
-/// outside any repository, without `git`.
+/// worktree or a linked one) where it changed files. Earlier daemons also
+/// listed directories outside any repository, without `git`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionPlace {
     /// The working tree's top (`GitInfo::repo_root`). Canonical.
@@ -257,8 +258,8 @@ pub struct SessionPlace {
     /// Unix seconds: when the session last worked there, by the agent's own
     /// clock for what its conversation shows.
     pub last_at: i64,
-    /// Files there were changed (written or edited), not only read,
-    /// searched or worked beside.
+    /// Files there were changed (written, edited or patched): always, from a
+    /// daemon that lists only such places.
     #[serde(default)]
     pub edited: bool,
 }
