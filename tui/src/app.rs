@@ -162,8 +162,8 @@ pub enum Hit {
     /// A session row's place line, when it has worked elsewhere too (that
     /// list row): opens or closes its places.
     PlacesToggle(usize),
-    /// One of a session row's open places (that list row, that index in
-    /// its places): copies its path.
+    /// One of a session row's open places, both its lines (that list row,
+    /// that index in its `places::listed_places`): copies its path.
     Place(usize, usize),
     /// Visible Grid card in filtered session order (last is New session).
     GridCell(usize),
@@ -359,8 +359,9 @@ pub struct App {
     /// The list row under the mouse pointer (terminals that report
     /// movement): a session row there shows its pin toggle.
     pub hovered_row: Option<usize>,
-    /// The place under the mouse pointer (its list row and index in its
-    /// session's places): it shows its copy mark.
+    /// The place under the mouse pointer, on either of its lines (its list
+    /// row and index in its session's `places::listed_places`): it shows its
+    /// copy mark.
     pub hovered_place: Option<(usize, usize)>,
     /// Sessions whose places are open under their row (`places`).
     pub places_open: HashSet<SessionId>,

@@ -545,7 +545,7 @@ impl KeyAction {
             }
             KeyAction::Places | KeyAction::AllPlaces => {
                 "Each session shows the folder it works in now. w opens the list under it (W \
-                 every session's, a click on the line too): every working tree and folder it \
+                 every session's, a click on the line too): every other git working tree it \
                  has worked in, most recent first, with its branch, ✎ where files were \
                  changed, and when. Read on this machine from what the agent did; it stays \
                  here."

@@ -5189,27 +5189,28 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     assert!(screen.contains("▸ repo  ⎇ main  +1"), "{screen}");
     assert!(!screen.contains("worktrees/fix"), "closed: {screen}");
 
+    // Open, the place line stays, and under it the one other place: its
+    // path, then its branch, ✎ and age, behind a bar.
     h.press(KeyCode::Char('w')).await;
     let screen = screen_rows(&mut h, 160, 48);
     let text = screen.join("\n");
-    assert!(text.contains("▾ repo  +1"), "{text}");
+    assert!(text.contains("▾ repo  ⎇ main  +1"), "{text}");
+    // The list's part of a screen row: up to the divider beside it.
+    let in_list = |line: &str| {
+        let end = line.rfind('│').unwrap_or(line.len());
+        line[..end].trim_end().to_string()
+    };
     let fix = screen
         .iter()
-        .find(|line| line.contains("worktrees/fix ⎇ fix ✎"))
+        .position(|line| line.contains("│ worktrees/fix"))
         .unwrap_or_else(|| panic!("the worktree: {text}"));
-    let in_list = |line: &str| {
-        line.split('│')
-            .next()
-            .unwrap_or_default()
-            .trim_end()
-            .to_string()
-    };
-    assert!(in_list(fix).ends_with("30s"), "{fix:?}");
-    let repo = screen
-        .iter()
-        .find(|line| line.contains("repo ⎇ main") && !line.contains('▾'))
-        .unwrap_or_else(|| panic!("the folder: {text}"));
-    assert!(in_list(repo).ends_with("10m"), "{repo:?}");
+    let branch = in_list(&screen[fix + 1]);
+    assert!(branch.contains("│ ⎇ fix"), "{branch:?}");
+    assert!(branch.ends_with("✎ 30s"), "{branch:?}");
+    assert!(
+        !screen.iter().any(|line| line.contains("│ repo")),
+        "where it works now isn't listed again: {text}"
+    );
     h.press(KeyCode::Char('w')).await;
     assert!(!h.app.places_open(&a));
 
@@ -5273,8 +5274,9 @@ fn copied(h: &mut Harness) -> String {
     String::from_utf8(bytes).unwrap()
 }
 
-/// A session with `places`, each worked in a minute ago, working in
-/// `/repo` on `main`.
+/// A session with `places` (working trees on a branch named after their
+/// last component), each worked in a minute ago, working in `/repo` on
+/// `main`.
 fn worked_in(id: &str, name: &str, places: &[&str]) -> session_core::model::SessionView {
     let now = crate::components::format::now_secs();
     let mut session = view(id, name, 20);
@@ -5283,7 +5285,13 @@ fn worked_in(id: &str, name: &str, places: &[&str]) -> session_core::model::Sess
         .iter()
         .map(|path| session_core::model::SessionPlace {
             path: path.into(),
-            git: None,
+            git: Some(session_core::model::GitInfo {
+                repo_root: path.into(),
+                branch: std::path::Path::new(path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned()),
+                ..Default::default()
+            }),
             last_at: now - 60,
             edited: false,
         })
@@ -5293,8 +5301,8 @@ fn worked_in(id: &str, name: &str, places: &[&str]) -> session_core::model::Sess
 
 /// The list keys step through a session's open places as rows under it,
 /// and `y` copies the path of the one they're on, else of where the session
-/// works now. Under the pointer a place shows ⧉, and a click copies it,
-/// leaving the selection.
+/// works now. Under the pointer, on either of its two lines, a place shows
+/// ⧉, and a click on either copies it, leaving the selection.
 #[tokio::test]
 async fn an_open_places_path_copies_with_y_or_a_click() {
     let agent = worked_in("A", "agent", &["/repo/worktrees/fix", "/srv/other"]);
@@ -5314,8 +5322,8 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     assert_eq!(h.app.list.selected_id(), Some(&a));
     assert_eq!(place(&h).as_deref(), Some("/repo/worktrees/fix"));
     let screen = screen_rows(&mut h, 160, 48).join("\n");
-    assert!(screen.contains("⧉ worktrees/fix"), "{screen}");
-    assert!(!screen.contains("⧉ /srv/other"), "{screen}");
+    assert!(screen.contains("⧉ │ worktrees/fix"), "{screen}");
+    assert!(!screen.contains("⧉ │ /srv/other"), "{screen}");
     h.press(KeyCode::Char('y')).await;
     assert_eq!(copied(&mut h), "/repo/worktrees/fix");
 
@@ -5355,23 +5363,41 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
         .iter()
         .find(|(_, hit)| *hit == Hit::Place(row, 1))
         .expect("A's second place");
-    let mouse = |kind| MouseEvent {
+    assert_eq!(area.height, 2, "both its lines");
+    let lines = screen_rows(&mut h, 160, 48);
+    assert!(lines[usize::from(area.y)].contains("│ /srv/other"));
+    assert!(lines[usize::from(area.y) + 1].contains("│ ⎇ other"));
+    let mouse = |kind, row: u16| MouseEvent {
         kind,
         column: area.x + 6,
-        row: area.y,
+        row,
         modifiers: KeyModifiers::NONE,
     };
-    h.app.handle_mouse(mouse(MouseEventKind::Moved));
-    assert_eq!(h.app.hovered_place, Some((row, 1)));
-    let screen = screen_rows(&mut h, 160, 48).join("\n");
-    assert!(screen.contains("⧉ /srv/other"), "{screen}");
-    assert!(!screen.contains("⧉ worktrees/fix"), "{screen}");
-    h.app
-        .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left)));
-    h.app
-        .handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left)));
-    assert_eq!(copied(&mut h), "/srv/other");
-    assert_eq!(h.app.list.selection(), &Selection::Session(b));
+    let click = |h: &mut Harness, row: u16| {
+        h.app
+            .handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), row));
+        h.app
+            .handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), row));
+    };
+    for line in [area.y, area.y + 1] {
+        h.app.handle_mouse(mouse(MouseEventKind::Moved, line));
+        assert_eq!(h.app.hovered_place, Some((row, 1)), "{line}");
+        let screen = screen_rows(&mut h, 160, 48).join("\n");
+        assert!(screen.contains("⧉ │ /srv/other"), "{screen}");
+        assert!(!screen.contains("⧉ │ worktrees/fix"), "{screen}");
+        click(&mut h, line);
+        assert_eq!(copied(&mut h), "/srv/other", "{line}");
+        assert_eq!(h.app.list.selection(), &Selection::Session(b.clone()));
+    }
+    // The first place's branch line copies the first.
+    let (first, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::Place(row, 0))
+        .expect("A's first place");
+    click(&mut h, first.y + 1);
+    assert_eq!(copied(&mut h), "/repo/worktrees/fix");
     assert!(h.app.places_open(&a));
 }
 
@@ -5395,7 +5421,8 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
         h.press(KeyCode::Char('j')).await;
     }
     let screen = list(&mut h);
-    assert!(screen.contains("⧉ /srv/place12"), "{screen}");
+    assert!(screen.contains("⧉ │ /srv/place12"), "{screen}");
+    assert!(screen.contains("│ ⎇ place12"), "{screen}");
     assert!(!screen.contains("place01"), "{screen}");
     // The hit targets are where the places are drawn.
     let row = h.app.list.selected_row();
@@ -5407,4 +5434,109 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
         .expect("the last place");
     let line = &screen_rows(&mut h, 160, 16)[usize::from(area.y)];
     assert!(line.contains("/srv/place12"), "{line}");
+}
+
+/// A session that has worked in three working trees besides the one it
+/// works in now, its places open, on a phone's 60 and 40 columns: the
+/// place line says where it works now and `+3`, and under it the three, as
+/// pairs of lines behind a bar with a rule between, the one the keys are on
+/// with ⧉.
+#[tokio::test]
+async fn open_places_read_as_pairs_on_a_phone() {
+    use session_core::model::{GitInfo, SessionPlace};
+    let now = crate::components::format::now_secs();
+    let place = |path: &str, branch: &str, days: i64, edited: bool| SessionPlace {
+        path: path.into(),
+        git: Some(GitInfo {
+            repo_root: path.into(),
+            branch: Some(branch.into()),
+            ..GitInfo::default()
+        }),
+        last_at: now - days * 86_400,
+        edited,
+    };
+    let mut agent = view("A", "Paper links", now - 3_600);
+    agent.scope = ScopeRoot::from_canonical("/work/focal-md".into());
+    agent.cwd = "/work/focal-md".into();
+    agent.user_prompt = Some("Re-review passed; record committed on the branch".into());
+    agent.agent = Some(session_core::model::AgentInfo {
+        kind: "claude".into(),
+        ..Default::default()
+    });
+    agent.git = Some(GitInfo {
+        repo_root: "/work/focal-md-paper-links".into(),
+        branch: Some("paper-links".into()),
+        ..GitInfo::default()
+    });
+    agent.places = vec![
+        place("/work/focal-md-paper-links", "paper-links", 9, true),
+        place("/work/focal-md", "main", 10, false),
+        place(
+            "/work/focal-md-pubmed-pmc-audit",
+            "audit/pubmed-pmc-ingest-20261008",
+            10,
+            false,
+        ),
+        place(
+            "/work/focal-md-mvp-trial-workspaces",
+            "feature/mvp-trial-workspaces",
+            10,
+            true,
+        ),
+    ];
+    let mut h = harness(vec![agent]);
+    let a = SessionId::from_string("A");
+    h.app.list.select(Selection::Session(a.clone()));
+    h.app.places_open.insert(a);
+    screen_rows(&mut h, 60, 24);
+    h.press(KeyCode::Char('j')).await;
+    h.press(KeyCode::Char('j')).await;
+    let places = |h: &mut Harness, width: u16| {
+        let screen = screen_rows(h, width, 24);
+        let first = screen
+            .iter()
+            .position(|line| line.contains("▾ /work"))
+            .unwrap_or_else(|| panic!("{}", screen.join("\n")));
+        let block: Vec<String> = screen[first.saturating_sub(3)..]
+            .iter()
+            .map(|line| line.trim_end().to_string())
+            .take_while(|line| !line.is_empty())
+            .collect();
+        // The whole row, for `--nocapture`; the place lines are checked.
+        eprintln!("{width} columns:\n{}\n", block.join("\n"));
+        block[3.min(block.len())..].to_vec()
+    };
+    assert_eq!(
+        places(&mut h, 60),
+        [
+            "     ▾ /work/focal-md-paper-links  ⎇ paper-links  +3",
+            "       │ focal-md",
+            "       │ ⎇ main                                         10d",
+            "         ──────────────────────────────────────────────────",
+            "     ⧉ │ /work/focal-md-pubmed-pmc-audit",
+            "       │ ⎇ audit/pubmed-pmc-ingest-20261008             10d",
+            "         ──────────────────────────────────────────────────",
+            "       │ /work/focal-md-mvp-trial-workspaces",
+            "       │ ⎇ feature/mvp-trial-workspaces               ✎ 10d",
+        ]
+    );
+    assert_eq!(
+        places(&mut h, 40),
+        [
+            "     ▾ /work/focal-md-paper-links",
+            "       ⎇ paper-links  +3",
+            "       │ focal-md",
+            "       │ ⎇ main                     10d",
+            "         ──────────────────────────────",
+            "     ⧉ │ …ork/focal-md-pubmed-pmc-audit",
+            "       │ ⎇ audit/pubmed-pmc-ingest… 10d",
+            "         ──────────────────────────────",
+            "       │ …focal-md-mvp-trial-workspaces",
+            "       │ ⎇ feature/mvp-trial-wor… ✎ 10d",
+        ]
+    );
+    assert_eq!(
+        h.app.list.selected_place(),
+        Some(std::path::Path::new("/work/focal-md-pubmed-pmc-audit"))
+    );
 }

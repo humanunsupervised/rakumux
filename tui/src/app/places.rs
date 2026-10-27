@@ -1,15 +1,16 @@
-//! Where sessions have worked (`SessionView::places`), shown in the session
-//! list: each row has a line with the directory it works in now, and under
-//! it, when opened, every working tree and folder it has worked in, most
-//! recent first. Closed by default, and per window: `w` opens or closes the
-//! selected session's, `W` every one's, a click or tap on the line too.
-//! Not saved. The list keys step through the selected session's open places
-//! as if each were a row under it, and `y` copies the path of the one they
-//! are on (else of where the session works now); a click or tap on a place
+//! Where sessions have worked (`SessionView::places`: the git working trees
+//! the daemon found), shown in the session list: each row has a line with
+//! the directory it works in now, and under it, when opened, every other
+//! working tree it has worked in, most recent first ([`listed_places`]).
+//! Closed by default, and per window: `w` opens or closes the selected
+//! session's, `W` every one's, a click or tap on the line too. Not saved.
+//! The list keys step through the selected session's open places as if
+//! each were a row under it, and `y` copies the path of the one they are
+//! on (else of where the session works now); a click or tap on a place
 //! copies its path too.
 
 use session_core::ids::SessionId;
-use session_core::model::SessionView;
+use session_core::model::{SessionPlace, SessionView};
 use std::path::{Path, PathBuf};
 
 use super::App;
@@ -24,14 +25,19 @@ pub fn current_place(session: &SessionView) -> &Path {
         .map_or(session.cwd.as_path(), |git| git.repo_root.as_path())
 }
 
-/// How many places `session` has worked in besides [`current_place`].
-pub fn other_places(session: &SessionView) -> usize {
+/// The places `session`'s open list shows: every one but
+/// [`current_place`] (its place line says that one), most recent first.
+pub fn listed_places(session: &SessionView) -> impl Iterator<Item = &SessionPlace> {
     let current = current_place(session);
     session
         .places
         .iter()
-        .filter(|place| place.path != current)
-        .count()
+        .filter(move |place| place.path != current)
+}
+
+/// How many places `session` has worked in besides [`current_place`].
+pub fn other_places(session: &SessionView) -> usize {
+    listed_places(session).count()
 }
 
 impl App {
@@ -88,7 +94,7 @@ impl App {
             return None;
         }
         let session = self.list.selected_session()?;
-        let paths: Vec<PathBuf> = session.places.iter().map(|p| p.path.clone()).collect();
+        let paths: Vec<PathBuf> = listed_places(session).map(|p| p.path.clone()).collect();
         (self.places_open(&session.id) && !paths.is_empty()).then_some(paths)
     }
 
@@ -140,12 +146,12 @@ impl App {
     }
 
     /// A click or tap on an open place (list row `row`, `index` in its
-    /// session's places): its path on the clipboard.
+    /// session's [`listed_places`]): its path on the clipboard.
     pub(super) fn copy_place_at(&mut self, row: usize, index: usize) {
         let path = match self.list.rows().get(row) {
-            Some(super::ListRow::Session(session)) => {
-                session.places.get(index).map(|place| place.path.clone())
-            }
+            Some(super::ListRow::Session(session)) => listed_places(session)
+                .nth(index)
+                .map(|place| place.path.clone()),
             _ => None,
         };
         if let Some(path) = path {
