@@ -4,7 +4,7 @@
 //! when opened, a pair for every other place, most recent first
 //! ([`listed_places`]). Closed by default, and per window: `w` opens or
 //! closes the selected session's, `W` every one's, a click or tap on its
-//! `▸`/`▾` or count too. Not saved. The list keys step through the selected
+//! `▸`/`▾` too. Not saved. The list keys step through the selected
 //! session's open places as if each were a row under it, and `y` copies the
 //! path of the one they are on (else of where the session works now); a
 //! click or tap on a place, the current one too, copies its path.

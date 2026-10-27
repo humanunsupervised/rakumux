@@ -159,8 +159,8 @@ pub enum Hit {
     /// The ↻ at the end of a hovered session row's AI description (that list
     /// row): makes a new summary of its session.
     SummaryRefresh(usize),
-    /// The `▸`/`▾` and `+N` of a session row's current place, when it has
-    /// worked elsewhere too (that list row): opens or closes its places.
+    /// The `▸`/`▾` of a session row's current place, when it has worked
+    /// elsewhere too (that list row): opens or closes its places.
     PlacesToggle(usize),
     /// One of a session row's places, both its lines (that list row, that
     /// place): copies its path.

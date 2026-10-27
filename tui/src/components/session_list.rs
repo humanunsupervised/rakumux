@@ -9,9 +9,9 @@
 //! and its mark (an agent's activity, else its status) at the right; then the
 //! agent's latest output, when the daemon has one; then its program and
 //! state; then the folder it works in now, a pair of lines (its path, its
-//! branch) behind a green bar, with `▸` and `+3` when it has worked in other
-//! places, which open under it as pairs of their own (`app::places`). A pin
-//! toggle shows left of the name under the pointer.
+//! branch) behind a green bar, with `▸` when it has worked in other places,
+//! which open under it as pairs of their own (`app::places`). A pin toggle
+//! shows left of the name under the pointer.
 //! The selected item's text is white and the others' muted; nothing has a
 //! background except the tabs' band. A session being dragged has a blue
 //! bar on its left.
@@ -508,10 +508,10 @@ const PLACE_RULE: &str = "─";
 /// A session's place lines.
 struct PlaceLines {
     lines: Vec<Vec<Span<'static>>>,
-    /// Where its `▸`/`▾` and count are (a line, and its columns from the
-    /// content's start), which open and close its other places; none when
-    /// there are none.
-    toggle: Vec<(usize, std::ops::Range<usize>)>,
+    /// Where its `▸`/`▾` is (its columns from the content's start, on the
+    /// first line), which opens and closes its other places; none when there
+    /// are none.
+    toggle: Option<std::ops::Range<usize>>,
     /// The lines of the place it works in now.
     current: std::ops::Range<usize>,
     /// Each open place's two lines, in the order of the session's
@@ -523,8 +523,8 @@ struct PlaceLines {
 
 /// A session's place lines, under its facts, each place a pair of lines
 /// behind a bar: first the place it works in now, behind the green `┃`: its
-/// path, `+3` at the right when it has worked in other places (with `▸`
-/// left of the bar), then its branch. While its places are open (`▾`), each
+/// path (with `▸` left of the bar when it has worked in other places), then
+/// its branch. While its places are open (`▾`), each
 /// of the others (where it changed files: every place is), most recent
 /// first, behind a muted `│`: its path, then its branch and when; a rule
 /// between two. The place the list keys are on (in the `selected` session)
@@ -573,25 +573,13 @@ fn place_content(
             .unwrap_or_default()
     };
 
-    // Where it works now, with the toggle and count when there are others.
+    // Where it works now, with the toggle when there are others.
     let current = crate::app::places::current_place(session);
     let listed: Vec<_> = crate::app::places::listed_places(session).collect();
     let others = listed.len();
     let open = app.places_open(&session.id) && others > 0;
     let hovered_current = hovered == Some(PlaceRef::Current);
-    let count = if others > 0 {
-        truncate(&format!("+{others}"), inner)
-    } else {
-        String::new()
-    };
-    let count_width = str_width(&count);
-    let path_room = if count.is_empty() {
-        inner
-    } else {
-        inner.saturating_sub(count_width + 1)
-    };
-    let path = truncate_start(&place_label(&session.scope, current), path_room);
-    let gap = inner.saturating_sub(str_width(&path) + count_width);
+    let path = truncate_start(&place_label(&session.scope, current), inner);
     let current_bar = bar(CURRENT_BAR, p.accent_green);
     let first_slot = if others > 0 {
         let mark = if open { PLACES_OPEN } else { PLACES_CLOSED };
@@ -609,33 +597,20 @@ fn place_content(
     } else {
         blank_slot()
     };
-    let mut first = vec![
-        first_slot,
-        current_bar.clone(),
-        Span::styled(path, label_style),
-    ];
-    if !count.is_empty() {
-        first.push(Span::raw(" ".repeat(gap)));
-        first.push(Span::styled(count, branch_style));
-    }
     let branch = truncate(&branch_of(session.git.as_ref()), inner);
     let mut lines = vec![
-        lead(first),
+        lead(vec![
+            first_slot,
+            current_bar.clone(),
+            Span::styled(path, label_style),
+        ]),
         lead(vec![
             second_slot,
             current_bar,
             Span::styled(branch, branch_style),
         ]),
     ];
-    let toggle = if others > 0 {
-        let text = lead_width + PLACE_SLOT_WIDTH + PLACE_BAR_WIDTH;
-        vec![
-            (0, lead_width..lead_width + PLACE_SLOT_WIDTH),
-            (0, text + inner - count_width..text + inner),
-        ]
-    } else {
-        Vec::new()
-    };
+    let toggle = (others > 0).then_some(lead_width..lead_width + PLACE_SLOT_WIDTH);
     let mut places = Vec::new();
     if !open {
         return PlaceLines {
@@ -1231,12 +1206,12 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                     }
                 }
                 if !dragged {
-                    // The current place's ▸ and count open and close the
-                    // places under it, before its own target.
-                    for (line, columns) in &places.toggle {
+                    // The current place's ▸ opens and closes the places
+                    // under it, before its own target.
+                    if let Some(columns) = &places.toggle {
                         let area = Rect {
                             x: full.x + (INDENT + columns.start) as u16,
-                            y: full.y.saturating_add((top + places_at + line) as u16),
+                            y: full.y.saturating_add((top + places_at) as u16),
                             width: columns.len() as u16,
                             height: 1,
                         }
@@ -1364,7 +1339,7 @@ mod tests {
     }
 
     #[test]
-    fn where_a_session_works_now_is_a_pair_behind_a_green_bar_with_its_toggle_and_count() {
+    fn where_a_session_works_now_is_a_pair_behind_a_green_bar_with_its_toggle() {
         use crate::app::testing::harness;
         let p = theme::palette();
         let mut h = harness(vec![]);
@@ -1378,7 +1353,7 @@ mod tests {
                 })
                 .collect()
         };
-        // Nowhere else: the pair alone, no toggle, no count.
+        // Nowhere else: the pair alone, no toggle.
         let alone = with_places(&[("/repo", "main", 5, false)]);
         let PlaceLines {
             lines,
@@ -1388,7 +1363,7 @@ mod tests {
             ..
         } = place_content(&h.app, &alone, 40, false, None, 1000);
         assert_eq!(text(&lines), ["    ┃ repo", "    ┃ ⎇ main"]);
-        assert!(toggle.is_empty());
+        assert_eq!(toggle, None);
         assert_eq!(current, 0..2);
         assert!(places.is_empty());
         assert_eq!(bars(&lines, "┃"), [Some(p.accent_green); 2]);
@@ -1401,8 +1376,8 @@ mod tests {
         assert_eq!(text(&lines), ["    ┃ repo", "    ┃ ⎇ main"]);
         h.app.places_open.clear();
 
-        // Elsewhere too: ▸ left of the bar and the count at the right,
-        // which open and close the list; the copy mark goes under the ▸.
+        // Elsewhere too: ▸ left of the bar, which opens and closes the
+        // list; the copy mark goes under it.
         let mut moved = with_places(&[
             ("/repo/worktrees/fix", "fix", 5, true),
             ("/repo", "main", 300, false),
@@ -1414,30 +1389,21 @@ mod tests {
             ..Default::default()
         });
         let PlaceLines { lines, toggle, .. } = place_content(&h.app, &moved, 40, false, None, 1000);
-        assert_eq!(
-            text(&lines),
-            ["  ▸ ┃ worktrees/fix                   +2", "    ┃ ⎇ fix"]
-        );
-        assert_eq!(toggle, [(0, 2..4), (0, 38..40)]);
+        assert_eq!(text(&lines), ["  ▸ ┃ worktrees/fix", "    ┃ ⎇ fix"]);
+        assert_eq!(toggle, Some(2..4));
         assert_eq!(lines[0][1].style.fg, Some(p.accent_primary));
         let lines = place_content(&h.app, &moved, 40, false, Some(PlaceRef::Current), 1000).lines;
-        assert_eq!(
-            text(&lines),
-            ["  ▸ ┃ worktrees/fix                   +2", "  ⧉ ┃ ⎇ fix"]
-        );
-        // Narrow: the path is cut at its start before the count.
+        assert_eq!(text(&lines), ["  ▸ ┃ worktrees/fix", "  ⧉ ┃ ⎇ fix"]);
+        // Narrow: the path is cut at its start.
         let lines = place_content(&h.app, &moved, 16, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["  ▸ ┃ …es/fix +2", "    ┃ ⎇ fix"]);
+        assert_eq!(text(&lines), ["  ▸ ┃ …trees/fix", "    ┃ ⎇ fix"]);
         // Working somewhere none of its places is (its terminal's
         // directory, outside a repository): every place is another.
         let mut away = moved.clone();
         away.git = None;
         away.cwd = "/srv/scratch".into();
         let lines = place_content(&h.app, &away, 40, false, None, 1000).lines;
-        assert_eq!(
-            text(&lines),
-            ["  ▸ ┃ /srv/scratch                    +3", "    ┃ "]
-        );
+        assert_eq!(text(&lines), ["  ▸ ┃ /srv/scratch", "    ┃ "]);
         for width in [8, 12, 16, 24, 40, 80] {
             let lines = place_content(&h.app, &moved, width, true, None, 1000).lines;
             for line in &lines {
@@ -1473,12 +1439,11 @@ mod tests {
             places,
             focus,
         } = place_content(&h.app, &session, 40, false, None, 1000);
-        // The place it works in now is the first pair, not again under it;
-        // the count is the pairs under it.
+        // The place it works in now is the first pair, not again under it.
         assert_eq!(
             text(&lines),
             [
-                "  ▾ ┃ repo                            +2",
+                "  ▾ ┃ repo",
                 "    ┃ ⎇ main",
                 "      ──────────────────────────────────",
                 "    │ worktrees/fix",
@@ -1488,7 +1453,7 @@ mod tests {
                 "    │ ⎇ dev                           2h",
             ]
         );
-        assert_eq!(toggle.len(), 2);
+        assert_eq!(toggle, Some(2..4));
         assert_eq!(current, 0..2);
         assert_eq!(places, [3..5, 6..8]);
         assert_eq!(focus, None);
@@ -1538,7 +1503,7 @@ mod tests {
         assert_eq!(
             text(&lines),
             [
-                "  ▾ ┃ repo    +2",
+                "  ▾ ┃ repo",
                 "    ┃ ⎇ main",
                 "      ──────────",
                 "    │ …trees/fix",

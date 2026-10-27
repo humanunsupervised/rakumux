@@ -5159,9 +5159,9 @@ async fn turning_ai_summaries_off_clears_the_descriptions_and_the_refresh() {
 }
 
 /// Where a session has worked opens under its row: `w` for the selected
-/// one, `W` for all of them, a click on the `▸` or count of the place it
-/// works in now (a click on its path copies it); a session that has worked
-/// nowhere else says so.
+/// one, `W` for all of them, a click on the `▸` of the place it works in
+/// now (a click on its path copies it); a session that has worked nowhere
+/// else says so.
 #[tokio::test]
 async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
@@ -5191,14 +5191,13 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         let end = line.rfind('│').unwrap_or(line.len());
         line[..end].trim_end().to_string()
     };
-    // Where it works now: a pair behind its bar, ▸ and the count of the
-    // others with it.
+    // Where it works now: a pair behind its bar, ▸ beside it.
     let current = |screen: &[String], mark: &str| {
         let at = screen
             .iter()
             .position(|line| line.contains(&format!("{mark} ┃ repo")))
             .unwrap_or_else(|| panic!("{mark} ┃ repo: {}", screen.join("\n")));
-        assert!(in_list(&screen[at]).ends_with(" +1"), "{:?}", screen[at]);
+        assert!(in_list(&screen[at]).ends_with("┃ repo"), "{:?}", screen[at]);
         assert!(
             screen[at + 1].contains("  ┃ ⎇ main"),
             "{:?}",
@@ -5246,8 +5245,8 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     h.press(KeyCode::Char('W')).await;
     assert!(!h.app.places_open(&a));
 
-    // A click on A's ▸ opens its places, one on its count closes them,
-    // and B stays selected; one on its path copies it.
+    // A click on A's ▸ opens its places, another closes them, and B
+    // stays selected; one on its path copies it.
     screen_rows(&mut h, 160, 48);
     let row = h
         .app
@@ -5263,7 +5262,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         .filter(|(_, hit)| *hit == Hit::PlacesToggle(row))
         .map(|(area, _)| *area)
         .collect();
-    assert_eq!(toggles.len(), 2, "its ▸ and its count");
+    assert_eq!(toggles.len(), 1, "its ▸");
     let click = |h: &mut Harness, column: u16, row: u16| {
         for kind in [
             MouseEventKind::Down(MouseButton::Left),
@@ -5278,13 +5277,14 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         }
     };
     let screen = screen_rows(&mut h, 160, 48);
-    let (mark, count) = (toggles[0], toggles[1]);
+    let mark = toggles[0];
     assert!(screen[usize::from(mark.y)][..].contains("▸ ┃ repo"));
     click(&mut h, mark.x, mark.y);
     assert!(h.app.places_open(&a));
     assert_eq!(h.app.list.selection(), &Selection::Session(b.clone()));
-    screen_rows(&mut h, 160, 48);
-    click(&mut h, count.x, count.y);
+    let screen = screen_rows(&mut h, 160, 48);
+    assert!(screen[usize::from(mark.y)][..].contains("▾ ┃ repo"));
+    click(&mut h, mark.x + 1, mark.y);
     assert!(!h.app.places_open(&a));
     let (path, _) = *h
         .app
@@ -5515,7 +5515,7 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
 /// worktrees and changed files in them, on a phone's 60 and 40 columns. The
 /// daemon lists only the worktrees where files were changed, not the main
 /// checkout it only started in. The place it works in now is a pair behind
-/// the green `┃`, with `▸` and `+3`; opened (`▾`), the three others are
+/// the green `┃`, with `▸`; opened (`▾`), the three others are
 /// pairs behind a muted `│` under it, a rule between two, the one the keys
 /// are on with ⧉.
 #[tokio::test]
@@ -5580,14 +5580,14 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 60),
         [
-            "     ▸ ┃ /work/focal-md-paper-links                      +3",
+            "     ▸ ┃ /work/focal-md-paper-links",
             "       ┃ ⎇ paper-links",
         ]
     );
     assert_eq!(
         places(&mut h, 40),
         [
-            "     ▸ ┃ /work/focal-md-paper-links  +3",
+            "     ▸ ┃ /work/focal-md-paper-links",
             "       ┃ ⎇ paper-links",
         ]
     );
@@ -5597,7 +5597,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 60),
         [
-            "     ▾ ┃ /work/focal-md-paper-links                      +3",
+            "     ▾ ┃ /work/focal-md-paper-links",
             "       ┃ ⎇ paper-links",
             "         ──────────────────────────────────────────────────",
             "       │ /work/focal-md-pubmed-pmc-audit",
@@ -5613,7 +5613,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 40),
         [
-            "     ▾ ┃ /work/focal-md-paper-links  +3",
+            "     ▾ ┃ /work/focal-md-paper-links",
             "       ┃ ⎇ paper-links",
             "         ──────────────────────────────",
             "       │ …ork/focal-md-pubmed-pmc-audit",

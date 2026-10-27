@@ -1023,12 +1023,12 @@ says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's places
 bar. First the folder the session works in now (`PlaceRef::Current`: its git context's working
 tree, else its cwd; its path in the session's folder, the folder's name, or `~/…`), behind a
 green `┃`: its path, then its branch, even before it changed anything there. When it has other
-places, `▸` sits left of that bar and how many (`+3`) at the right of its path; `w`, `W` or a
-click or tap on either (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per
-window, not saved; `app::places::listed_places`, never the current one, so the count is what's
-listed): each one, most recent first, behind a muted `│`: its path, then its branch and its age
-at the right; a muted rule (`─`) above each. The count and the list are the daemon's places, so
-a checkout the session only started in or read from isn't among them. Paths are cut at their
+places, `▸` sits left of that bar, with no count; `w`, `W` or a click
+or tap on it (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per window, not
+saved; `app::places::listed_places`, never the current one): each one, most recent first,
+behind a muted `│`: its path, then its branch and its age at the right; a muted rule (`─`) above
+each. The list is the daemon's places, so a checkout the session only started in or read from
+isn't among them. Paths are cut at their
 start when narrow, the same on phones. `↓`/`↑` (`j`/`k`) step through the selected session's
 open places pair by pair as if each were a row under it (`App::step`;
 `SessionList::selected_place`, dropped by any other selection), and `y` copies the path of the
