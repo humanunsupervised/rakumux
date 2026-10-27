@@ -340,3 +340,30 @@ fn the_list_says_this_machine_takes_replies_with_files_when_it_saves_them() {
     let upload = body(sessions.next_request(NOW, WALL));
     assert!(upload.get("capabilities").is_none(), "{upload}");
 }
+
+#[test]
+fn the_name_is_confirmed_by_rakumux_coms_answer_and_renamed_when_another_machine_holds_it() {
+    let mut sessions = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0")]);
+    assert!(!sessions.confirmed(), "not before rakumux.com took a list");
+    body(sessions.next_request(NOW, WALL));
+    // A failure for now says nothing about the name.
+    sessions.done(true, Err(FeedFailure::Unavailable(None)), NOW);
+    assert!(!sessions.confirmed());
+    // Another machine holds it: not confirmed, and renamed, the list goes at
+    // once under the new name.
+    let later = NOW + Duration::from_secs(60);
+    body(sessions.next_request(later, WALL));
+    sessions.done(true, Err(FeedFailure::MachineTaken), later);
+    assert!(!sessions.confirmed());
+    sessions.rename("studio-6m8b".into(), later);
+    assert_eq!(
+        body(sessions.next_request(later, WALL))["machine"],
+        "studio-6m8b"
+    );
+    sessions.done(true, Ok(stored(true)), later);
+    assert!(sessions.confirmed());
+    // The switch going off forgets it.
+    sessions.set_enabled(false, later);
+    sessions.set_enabled(true, later);
+    assert!(!sessions.confirmed());
+}

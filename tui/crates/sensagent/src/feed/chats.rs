@@ -151,6 +151,20 @@ impl ChatSync {
         }
     }
 
+    /// Another machine held this one's name: chats go up under `machine` now,
+    /// at once, and whole, as rakumux.com keeps a chat per machine name.
+    pub fn rename(&mut self, machine: String, now: Duration) {
+        self.machine = machine;
+        self.cursors.clear();
+        self.pending = None;
+        for session in self.sessions.values_mut() {
+            session.due = true;
+            session.next = now;
+        }
+        self.retry = RETRY_MIN;
+        self.retry_at = now;
+    }
+
     /// Whether replies are read every second (`ReplySync::watched`): then
     /// chats are too, a session waiting out the slower pace no longer than that.
     pub fn set_watched(&mut self, watched: bool, now: Duration) {
@@ -517,6 +531,12 @@ impl Cursors {
             };
             self.entries.remove(&oldest);
         }
+        self.save();
+    }
+
+    /// Forget where every chat is up to: each is read from its start.
+    fn clear(&mut self) {
+        self.entries.clear();
         self.save();
     }
 

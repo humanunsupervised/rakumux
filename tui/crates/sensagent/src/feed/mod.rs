@@ -14,6 +14,7 @@
 mod cache;
 mod chats;
 mod job;
+mod machine;
 mod replies;
 mod sessions;
 mod sync;
@@ -28,6 +29,7 @@ pub use cache::{
 pub(crate) use chats::{write_private, ChatSync, ChatWork, READ_BYTES};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
+pub(crate) use machine::MachineIdentity;
 pub use replies::{AcceptRemote, ReplyWrite, ReplyWriteStatus};
 pub(crate) use replies::{Fetch, Fetched, ReplySync, ReplyWork, TYPING_QUIET};
 pub(crate) use sessions::SessionSync;

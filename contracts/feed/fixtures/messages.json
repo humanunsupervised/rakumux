@@ -124,6 +124,7 @@
       { "error": { "code": "invalid_request", "message": "Invalid feed request." } },
       { "error": { "code": "unauthenticated", "message": "Sign in to use the feed." } },
       { "error": { "code": "forbidden", "message": "The feed is off for this account." } },
+      { "error": { "code": "machine_taken", "message": "Another machine uses this name." } },
       { "error": { "code": "rate_limited", "message": "Too many feed requests.", "retry_after_seconds": 60 } },
       { "error": { "code": "unavailable", "message": "The feed is temporarily unavailable.", "retry_after_seconds": 5 } }
     ],
@@ -131,6 +132,8 @@
       { "error": { "code": "forbidden", "message": "Feed disabled for user_123." } },
       { "error": { "code": "invalid_request", "message": "Invalid feed request.", "retry_after_seconds": 5 } },
       { "error": { "code": "rate_limited", "message": "Too many feed requests.", "retry_after_seconds": 0 } },
+      { "error": { "code": "machine_taken", "message": "Another machine uses this name.", "retry_after_seconds": 5 } },
+      { "error": { "code": "machine_taken", "message": "Invalid feed request." } },
       { "error": { "code": "teapot", "message": "Invalid feed request." } }
     ]
   }

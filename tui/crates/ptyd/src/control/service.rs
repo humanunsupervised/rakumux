@@ -472,9 +472,18 @@ impl Inner {
             Request::SessionRead(request) => self.read(caller, request),
             Request::SessionWait(request) => self.wait(caller, request),
             Request::SessionSend(request) => self.send(caller, request),
-            Request::SessionSubmit { id, text, quiet_ms } => {
-                self.submit(caller, &id, &text, quiet_ms.map(Duration::from_millis))
-            }
+            Request::SessionSubmit {
+                id,
+                text,
+                quiet_ms,
+                expect_foreground,
+            } => self.submit(
+                caller,
+                &id,
+                &text,
+                quiet_ms.map(Duration::from_millis),
+                expect_foreground.as_deref(),
+            ),
             Request::SessionTouch { id } => self.touch(caller, &id),
             Request::SessionTurn { id } => self.turn(caller, &id),
             Request::SessionTranscript {
@@ -1517,27 +1526,34 @@ impl Inner {
     }
 
     /// `session_submit`; with `quiet`, refused while someone typed in the
-    /// session that recently (not audited: the caller tries again).
+    /// session that recently, and with `foreground`, unless that program is
+    /// in its foreground now (neither audited: the caller tries again). The
+    /// terminal is asked without the state lock, as it may wait for its
+    /// input queue or its actor.
     fn submit(
         &self,
         caller: &Caller,
         id: &SessionId,
         text: &str,
         quiet: Option<Duration>,
+        foreground: Option<&str>,
     ) -> Result<Response, ApiError> {
-        let state = self.lock();
-        let record = self.target(&state, caller, Op::Submit, id)?;
-        let terminal = self.running_terminal(&state, id);
-        let written = terminal.map(|terminal| match quiet {
-            Some(quiet) => self.host.submit_when_quiet(terminal, text, quiet),
-            None => self.host.submit(terminal, text),
+        let (record, terminal) = {
+            let state = self.lock();
+            let record = self.target(&state, caller, Op::Submit, id)?;
+            (record, self.running_terminal(&state, id))
+        };
+        let written = terminal.map(|terminal| {
+            self.host
+                .submit_expecting(terminal, text, quiet, foreground)
         });
-        if let Some(Err(HostError::Typing)) = written {
-            return Err(host_error(HostError::Typing));
+        if let Some(Err(error @ (HostError::Typing | HostError::ForegroundChanged))) = written {
+            return Err(host_error(error));
         }
         let result = written
             .ok_or_else(|| not_live(id))
             .and_then(|written| written.map_err(host_error));
+        let state = self.lock();
         self.audit_outcome(
             &state,
             caller,
@@ -3265,6 +3281,9 @@ fn host_error(error: HostError) -> ApiError {
         }
         HostError::NotController | HostError::Typing => {
             ApiError::new(ErrorCode::SessionInUse, error.to_string())
+        }
+        HostError::ForegroundChanged => {
+            ApiError::new(ErrorCode::ForegroundChanged, error.to_string())
         }
         HostError::InvalidKey(_) => invalid(error.to_string()),
         HostError::Spawn(message) => invalid(format!("could not start the session: {message}")),

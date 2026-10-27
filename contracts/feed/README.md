@@ -60,13 +60,19 @@ conformance tests, not an HTTP server, database or local runtime.
   belongs to that reply's thread). The machine reads the account's replies after a seq
   (`replies`, naming itself with `machine`; a reply takes a new seq whenever it changes, and
   pending ones older than an hour are `expired` first) as often as the answer's `poll_ms` says
-  (1000 while a reply waits for that machine or the user has the website open, 15000
-  otherwise; within 1–60 s; a machine keeps its own pace when it's absent), types each pending one into its session when the session still shows
+  (1000 while a reply that machine hasn't read yet waits for it, or the user has the website
+  open, 15000 otherwise; within 1–60 s; a machine keeps its own pace when it's absent). An
+  account's seqs are given in the order their changes commit, so a reader that continues past
+  the greatest seq it read (and past `latest_seq` once `more` is false) never misses one. It
+  types each pending one into its session when the session still shows
   that conversation and the agent waits for input, and reports `delivered` or `failed` with a
   `failure` code (`reply-status`; only the reply's own machine, only a pending reply). The
   agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as
   the reply's `response`; page entries carry `reply_to` and `thread`. Machines take replies
-  written elsewhere only when the user turned that on there (`not_accepted` otherwise).
+  written elsewhere only when the user turned that on there (`not_accepted` otherwise). `from`
+  names the machine a reply was written on, for showing; a machine counts a reply as written
+  there only when it made the reply's `id` itself, so another machine naming it in `from` can't
+  get past that setting.
   Readers take a `failure` they don't know as a failure without a reason.
 - **Session messages:** on rakumux.com or a machine the user can also write to a session that
   has no answer to reply to yet (a new chat, or one whose newest answer is in another chat): a
@@ -119,9 +125,16 @@ conformance tests, not an HTTP server, database or local runtime.
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
   fetches a reply's attachments and gives the agent their paths. The cloud keeps the latest list
   and ignores names it doesn't know.
+- **Machine id:** a machine sends its own id with every request, `X-Rakumux-Machine-Id`: a ULID
+  it keeps, so two of the account's machines with one name are told apart. The first id to send
+  a session list under a name holds that name. A request from another id that names it (`machine`
+  in an upload, a reply status or the replies read) is `machine_taken` (409) and changes nothing;
+  that machine then takes another name. A request without the header (an older machine) is never
+  checked, and an id that isn't a ULID is `invalid_request`.
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
   message per code: `invalid_request` (400, or 413 for an oversized body), `unauthenticated`
-  (401), `forbidden` (403: the account's Feed switch is off), `rate_limited` (429) and
+  (401), `forbidden` (403: the account's Feed switch is off), `machine_taken` (409: another
+  machine holds the name, above), `rate_limited` (429) and
   `unavailable` (503). Retry delays are 1–86400 seconds, only for the last two. A turn, reply
   upload or reply status naming an entry or reply the account doesn't have is
   `invalid_request` with 404; a reply to an entry without a conversation id is

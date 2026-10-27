@@ -275,6 +275,7 @@ fn session_caller_permission_matrix() {
             id: other.id.clone(),
             text: "rm -rf /".into(),
             quiet_ms: None,
+            expect_foreground: None,
         },
         Request::SessionKill {
             id: other.id.clone(),
@@ -613,6 +614,7 @@ fn audit_records_mutations_and_denials_but_not_reads() {
             id: b.id.clone(),
             text: format!("echo {}", "x".repeat(500)),
             quiet_ms: None,
+            expect_foreground: None,
         },
     );
     h.handle(&h.user, Request::SessionGet { id: a.id.clone() });

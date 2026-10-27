@@ -67,7 +67,7 @@ fn page_of(
 }
 
 fn on(accept_remote: Option<AcceptRemote>, views: &[SessionView]) -> ReplySync {
-    let mut replies = ReplySync::new("studio".into(), accept_remote);
+    let mut replies = ReplySync::new("studio".into(), accept_remote, None);
     replies.set_enabled(true, NOW);
     replies.connected(views);
     replies
@@ -92,8 +92,15 @@ fn report_of(work: Option<ReplyWork>) -> serde_json::Value {
     }
 }
 
-/// Read `pending`, then return what comes next.
+/// Read `pending`, then return what comes next. Those from "studio" were
+/// written here: this machine made their ids.
 fn after_reading(replies: &mut ReplySync, pending: Vec<FeedReply>) -> Option<ReplyWork> {
+    for reply in pending
+        .iter()
+        .filter(|reply| reply.from.as_deref() == Some("studio"))
+    {
+        replies.wrote(&reply.id);
+    }
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, read(pending), NOW);
     replies.next_work(NOW)
@@ -128,11 +135,12 @@ fn a_reply_written_here_is_typed_reported_and_answered() {
             reply: "01K8A1".into(),
             session: SessionId::from_string("S"),
             text: "Now add a test.".into(),
+            foreground: Some("synthetic-agent".into()),
         })
     );
     // Typed once, whatever is read meanwhile.
     assert_eq!(replies.next_work(NOW), None);
-    replies.submitted("01K8A1".into(), Ok(()), 2_000);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
     // Delivered once its agent is seen to take it.
     assert_eq!(replies.next_work(NOW), None);
     taken(&mut replies);
@@ -181,7 +189,7 @@ fn one_reply_at_a_time_goes_into_a_session() {
     let second = reply("01K8A2", 5, Some("studio"));
     let work = after_reading(&mut replies, vec![second, first]);
     assert!(matches!(work, Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"));
-    replies.submitted("01K8A1".into(), Ok(()), 2_000);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
     // Its report goes once its agent took it; the second waits for the agent
     // to wait again.
     taken(&mut replies);
@@ -206,7 +214,7 @@ fn a_session_being_typed_into_takes_nothing_else_meanwhile() {
         replies.next_work(NOW),
         Some(ReplyWork::Submit { .. })
     ));
-    replies.submitted("01K8A1".into(), Ok(()), 2_000);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
     taken(&mut replies);
     report_of(replies.next_work(NOW));
     replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
@@ -303,7 +311,7 @@ fn a_reply_that_cant_be_typed_fails_with_why() {
     // The daemon refused the text.
     let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
     after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
-    replies.submitted("01K8A1".into(), Err(ErrorCode::SessionNotLive), 2_000);
+    replies.submitted("01K8A1".into(), Err(ErrorCode::SessionNotLive), NOW, 2_000);
     assert_eq!(report_of(replies.next_work(NOW))["failure"], "refused");
     assert_eq!(replies.answered(&answer(Some(CHAT), 3_000)), None);
 }
@@ -323,12 +331,13 @@ fn only_this_machines_pending_replies_are_typed_and_never_twice() {
 
     // Typed, then read again still pending before the report landed.
     let pending = reply("01K8A3", 6, Some("studio"));
+    replies.wrote("01K8A3");
     replies.written(&pending);
     assert!(matches!(
         replies.next_work(NOW),
         Some(ReplyWork::Submit { .. })
     ));
-    replies.submitted("01K8A3".into(), Ok(()), 2_000);
+    replies.submitted("01K8A3".into(), Ok(()), NOW, 2_000);
     taken(&mut replies);
     report_of(replies.next_work(NOW));
     replies.request_done(true, Err(FeedFailure::Unavailable(None)), NOW);
@@ -379,36 +388,44 @@ fn reports_and_reads_wait_out_their_own_failures() {
     let hour = Duration::from_secs(3_600);
     let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
+    // rakumux.com asks to wait an hour (until its quota's window ends): reads
+    // hold back a minute at most, as a refused read isn't counted and
+    // pending replies expire within the hour.
     replies.request_done(true, Err(FeedFailure::RateLimited(Some(hour))), NOW);
     assert_eq!(replies.next_work(NOW + READ_EVERY), None);
 
-    // Reads wait an hour; a reply typed in meanwhile is reported at once.
-    let later = NOW + Duration::from_secs(60);
+    // A reply typed in meanwhile is reported at once.
+    let later = NOW + Duration::from_secs(30);
+    replies.wrote("01K8A1");
     replies.written(&reply("01K8A1", 4, Some("studio")));
     assert!(matches!(
         replies.next_work(later),
         Some(ReplyWork::Submit { .. })
     ));
-    replies.submitted("01K8A1".into(), Ok(()), 2_000);
+    replies.submitted("01K8A1".into(), Ok(()), later, 2_000);
     taken(&mut replies);
     assert_eq!(report_of(replies.next_work(later))["status"], "delivered");
     assert_eq!(replies.next_work(later), None, "one request at a time");
     let mut delivered = reply("01K8A1", 5, Some("studio"));
     delivered.status = ReplyStatus::Delivered;
     replies.request_done(true, Ok(FeedResult::Reply(delivered)), later);
-    assert_eq!(replies.next_work(NOW + hour - Duration::from_secs(1)), None);
-    let read_at = NOW + hour;
+    assert_eq!(
+        replies.next_work(NOW + RATE_LIMIT_MAX - Duration::from_secs(1)),
+        None
+    );
+    let read_at = NOW + RATE_LIMIT_MAX;
     assert_eq!(read_after(replies.next_work(read_at)), 0);
     replies.request_done(true, read(vec![]), read_at);
 
     // Reports rate-limited in turn don't hold back reads.
     replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
+    replies.wrote("01K8A2");
     replies.written(&reply("01K8A2", 6, Some("studio")));
     assert!(matches!(
         replies.next_work(read_at),
         Some(ReplyWork::Submit { .. })
     ));
-    replies.submitted("01K8A2".into(), Ok(()), 3_000);
+    replies.submitted("01K8A2".into(), Ok(()), read_at, 3_000);
     taken(&mut replies);
     report_of(replies.next_work(read_at));
     replies.request_done(true, Err(FeedFailure::RateLimited(Some(hour))), read_at);
@@ -418,8 +435,31 @@ fn reports_and_reads_wait_out_their_own_failures() {
         "reads go on"
     );
     replies.request_done(true, read(vec![]), read_at + READ_EVERY);
-    // The report goes again once its hour is over, before the read due then.
-    assert_eq!(report_of(replies.next_work(read_at + hour))["id"], "01K8A2");
+    // The report goes again a minute later, not an hour.
+    assert_eq!(
+        report_of(replies.next_work(read_at + RATE_LIMIT_MAX))["id"],
+        "01K8A2"
+    );
+}
+
+#[test]
+fn the_waits_rakumux_com_asks_for_are_capped() {
+    let mut backoff = Backoff::new(NOW);
+    backoff.failed(
+        FeedFailure::RateLimited(Some(Duration::from_secs(3_600))),
+        NOW,
+    );
+    assert!(!backoff.ready(NOW + RATE_LIMIT_MAX - Duration::from_secs(1)));
+    assert!(backoff.ready(NOW + RATE_LIMIT_MAX));
+    backoff.failed(
+        FeedFailure::Unavailable(Some(Duration::from_secs(86_400))),
+        NOW,
+    );
+    assert!(!backoff.ready(NOW + RETRY_MAX - Duration::from_secs(1)));
+    assert!(backoff.ready(NOW + RETRY_MAX));
+    // A shorter wait is taken as asked.
+    backoff.failed(FeedFailure::RateLimited(Some(Duration::from_secs(2))), NOW);
+    assert!(backoff.ready(NOW + Duration::from_secs(2)));
 }
 
 #[test]
@@ -432,6 +472,7 @@ fn a_pending_reply_on_a_later_page_is_typed_in() {
     old.status = ReplyStatus::Delivered;
     replies.request_done(true, page_of(vec![old], 100, 250, true), NOW);
     assert_eq!(read_after(replies.next_work(NOW)), 100);
+    replies.wrote("01K8A1");
     let pending = reply("01K8A1", 250, Some("studio"));
     replies.request_done(true, page_of(vec![pending], 250, 250, false), NOW);
     assert!(matches!(
@@ -537,9 +578,10 @@ fn a_session_message_waits_for_an_agent_then_goes_into_whatever_chat_it_shows() 
             reply: "01K8A2".into(),
             session: SessionId::from_string("S"),
             text: "Start on the parser.".into(),
+            foreground: Some("synthetic-agent".into()),
         })
     );
-    replies.submitted("01K8A2".into(), Ok(()), 2_000);
+    replies.submitted("01K8A2".into(), Ok(()), NOW, 2_000);
     replies.observe(&view("S", Lifecycle::Working, Some("another")));
     let body = report_of(replies.next_work(NOW));
     assert_eq!(body["id"], "01K8A2");
@@ -564,6 +606,7 @@ fn a_session_message_written_here_is_typed_at_once_when_its_agent_waits() {
     let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
     let mut written = message("01K8A4", 9, Some(CHAT));
     written.from = Some("studio".into());
+    replies.wrote("01K8A4");
     replies.written_message(&written);
     assert_eq!(
         replies.next_work(NOW),
@@ -571,6 +614,7 @@ fn a_session_message_written_here_is_typed_at_once_when_its_agent_waits() {
             reply: "01K8A4".into(),
             session: SessionId::from_string("S"),
             text: "Start on the parser.".into(),
+            foreground: Some("synthetic-agent".into()),
         })
     );
     assert_eq!(
@@ -614,7 +658,7 @@ fn a_session_message_follows_the_same_rules_for_where_it_may_go() {
         replies.next_work(NOW),
         Some(ReplyWork::Submit { .. })
     ));
-    replies.submitted("01K8A5".into(), Ok(()), 2_000);
+    replies.submitted("01K8A5".into(), Ok(()), NOW, 2_000);
     assert_eq!(
         replies.answered(&answer(Some(CHAT), 3_000)),
         Some("01K8A5".into())
@@ -716,7 +760,7 @@ fn a_replys_files_are_fetched_then_its_text_typed_with_their_paths() {
         )
     );
     assert_eq!(std::fs::read(dir.join("Shot (2).PNG")).unwrap(), b"GIF");
-    replies.submitted(ATTACHED.into(), Ok(()), 2_000);
+    replies.submitted(ATTACHED.into(), Ok(()), NOW, 2_000);
     taken(&mut replies);
     assert_eq!(report_of(replies.next_work(NOW))["status"], "delivered");
     // Typed in: its files stay for the agent.
@@ -876,7 +920,7 @@ fn a_replys_files_go_when_it_wont_be_typed_in() {
     // The daemon refused the text.
     let (_home, mut replies) = saved_reply(&[view("S", Lifecycle::Done, Some(CHAT))]);
     typed_text(replies.next_work(NOW));
-    replies.submitted(ATTACHED.into(), Err(ErrorCode::SessionNotLive), 2_000);
+    replies.submitted(ATTACHED.into(), Err(ErrorCode::SessionNotLive), NOW, 2_000);
     assert_eq!(
         replies.next_work(NOW),
         Some(ReplyWork::Discard(ATTACHED.into()))
@@ -969,7 +1013,7 @@ fn two_replies() -> ReplySync {
     let second = reply("01K8A2", 5, Some("studio"));
     let work = after_reading(&mut replies, vec![second, first]);
     assert!(matches!(work, Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"));
-    replies.submitted("01K8A1".into(), Ok(()), 2_000);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
     replies
 }
 
@@ -1112,7 +1156,7 @@ fn a_reply_typed_in_keeps_its_files_whatever_becomes_of_it() {
         NOW,
     );
     typed_text(replies.next_work(NOW));
-    replies.submitted(ATTACHED.into(), Ok(()), 2_000);
+    replies.submitted(ATTACHED.into(), Ok(()), NOW, 2_000);
     // Expired on rakumux.com, then its session ended, before it was seen taken.
     let mut expired = with_files(ATTACHED, vec![file('A', "shot.png", 4)]);
     expired.seq = 5;
@@ -1155,7 +1199,7 @@ fn a_sessions_replies_and_messages_go_in_in_the_order_they_were_written() {
         submitted_reply(replies.next_work(NOW)).as_deref(),
         Some("01K8A9")
     );
-    replies.submitted("01K8A9".into(), Ok(()), 2_000);
+    replies.submitted("01K8A9".into(), Ok(()), NOW, 2_000);
     taken(&mut replies);
     report_of(replies.next_work(NOW));
     replies.request_done(true, Ok(FeedResult::Reply(reply("01K8A9", 6, None))), NOW);
@@ -1173,7 +1217,7 @@ fn someone_typing_or_a_refusal_frees_the_session_for_its_next_reply() {
     let first = reply("01K8A1", 4, Some("studio"));
     let second = reply("01K8A2", 5, Some("studio"));
     after_reading(&mut replies, vec![first, second]);
-    replies.submitted("01K8A1".into(), Err(ErrorCode::SessionNotLive), 2_000);
+    replies.submitted("01K8A1".into(), Err(ErrorCode::SessionNotLive), NOW, 2_000);
     assert_eq!(
         submitted_reply(replies.next_work(NOW)).as_deref(),
         Some("01K8A2")
@@ -1191,4 +1235,206 @@ fn someone_typing_or_a_refusal_frees_the_session_for_its_next_reply() {
         submitted_reply(next_at(&mut replies, NOW + TYPING_HOLD)).as_deref(),
         Some("01K8A1")
     );
+}
+
+#[test]
+fn a_reply_naming_this_machine_as_its_writer_counts_as_written_here_only_with_an_id_it_made() {
+    // Another machine of the account (or a token taken from one) says the
+    // reply was written on studio: without the setting, it isn't typed.
+    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read(vec![reply("01K8A1", 4, Some("studio"))]), NOW);
+    let body = report_of(replies.next_work(NOW));
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["failure"], "not_accepted");
+}
+
+/// Replies for studio keeping what's typed in in `path`, with session S.
+fn kept_at(path: &std::path::Path, views: &[SessionView]) -> ReplySync {
+    let mut replies = ReplySync::new("studio".into(), None, Some(path.to_path_buf()));
+    replies.set_enabled(true, NOW);
+    replies.connected(views);
+    replies
+}
+
+#[test]
+fn a_reply_handed_to_the_daemon_is_never_typed_again_after_a_restart_and_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    let views = [view("S", Lifecycle::Done, Some(CHAT))];
+    let pending = reply("01K8A1", 4, Some("studio"));
+    {
+        let mut replies = kept_at(&path, &views);
+        let work = after_reading(&mut replies, vec![pending.clone()]);
+        assert!(matches!(work, Some(ReplyWork::Submit { .. })));
+        // The service stops (an update replaces it) before the daemon
+        // answered, or before the agent was seen to take it.
+    }
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let mut replies = kept_at(&path, &views);
+    // It's reported delivered…
+    let body = report_of(replies.next_work(NOW));
+    assert_eq!(body["id"], "01K8A1");
+    assert_eq!(body["status"], "delivered");
+    let mut delivered = pending.clone();
+    delivered.status = ReplyStatus::Delivered;
+    replies.request_done(true, Ok(FeedResult::Reply(delivered)), NOW);
+    // …and a read from the start that still says pending types nothing.
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read(vec![pending]), NOW);
+    assert_eq!(replies.next_work(NOW), None);
+}
+
+#[test]
+fn reports_not_yet_taken_survive_the_switch_going_off_and_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    let mut replies = kept_at(&path, &[]);
+    // Its session is gone: decided at once, but rakumux.com can't be reached.
+    let body = report_of(after_reading(
+        &mut replies,
+        vec![reply("01K8A1", 4, Some("studio"))],
+    ));
+    assert_eq!(body["failure"], "session_gone");
+    replies.request_done(true, Err(FeedFailure::Unavailable(None)), NOW);
+    // The switch goes off and on again: the report still goes.
+    replies.set_enabled(false, NOW);
+    replies.set_enabled(true, NOW);
+    assert_eq!(report_of(replies.next_work(NOW))["id"], "01K8A1");
+    drop(replies);
+    // Restarted before it was taken: it goes again; taken, never again.
+    let mut replies = kept_at(&path, &[]);
+    assert_eq!(report_of(replies.next_work(NOW))["id"], "01K8A1");
+    let mut failed = reply("01K8A1", 5, Some("studio"));
+    failed.status = ReplyStatus::Failed;
+    replies.request_done(true, Ok(FeedResult::Reply(failed)), NOW);
+    assert!(replies.kept.reports().is_empty());
+    drop(replies);
+    let mut replies = kept_at(&path, &[]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0, "no report left");
+}
+
+#[test]
+fn replies_this_machine_wrote_are_still_its_own_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    kept_at(&path, &[]).wrote("01K8A1");
+    let mut replies = kept_at(&path, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read(vec![reply("01K8A1", 4, Some("studio"))]), NOW);
+    assert!(matches!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"
+    ));
+}
+
+#[test]
+fn a_renamed_machine_reads_its_replies_from_the_start_under_its_new_name() {
+    let mut replies = on(None, &[]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    let mut old = reply("01K8A1", 4, None);
+    old.status = ReplyStatus::Delivered;
+    replies.request_done(true, read(vec![old]), NOW);
+    replies.rename("studio-6m8b".into(), NOW);
+    match replies.next_work(NOW) {
+        Some(ReplyWork::Request(FeedRequest::Replies { after, machine })) => {
+            assert_eq!((after, machine.as_str()), (0, "studio-6m8b"));
+        }
+        other => panic!("expected a read, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_reply_is_typed_only_while_the_program_seen_is_in_its_sessions_foreground() {
+    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    assert!(
+        matches!(&work, Some(ReplyWork::Submit { foreground: Some(program), .. }) if program == "synthetic-agent")
+    );
+    // The daemon found another program there (the agent exited): it stays
+    // pending, unreported, until the session's view says what runs there.
+    replies.foreground_changed("01K8A1".into(), NOW);
+    let meanwhile = replies.next_work(NOW + TYPING_HOLD / 2);
+    assert!(!matches!(meanwhile, Some(ReplyWork::Submit { .. })));
+    assert!(!matches!(
+        meanwhile,
+        Some(ReplyWork::Request(FeedRequest::ReplyStatus { .. }))
+    ));
+    if matches!(
+        meanwhile,
+        Some(ReplyWork::Request(FeedRequest::Replies { .. }))
+    ) {
+        replies.request_done(true, read(vec![]), NOW + TYPING_HOLD / 2);
+    }
+    // No agent runs there now: it fails as its chat is no longer shown.
+    replies.observe(&view("S", Lifecycle::None, None));
+    let body = report_of(replies.next_work(NOW + TYPING_HOLD));
+    assert_eq!(body["id"], "01K8A1");
+    assert_eq!(body["failure"], "conversation_changed");
+}
+
+/// Type the next of `replies`'s pending replies (it must be `id`) at `at`
+/// (`at_ms` on the wall clock); its agent takes it, and it's reported.
+fn type_and_take(replies: &mut ReplySync, id: &str, at: Duration, at_ms: i64) {
+    assert_eq!(submitted_reply(replies.next_work(at)).as_deref(), Some(id));
+    replies.submitted(id.into(), Ok(()), at, at_ms);
+    taken(replies);
+    assert_eq!(report_of(replies.next_work(at))["id"], id);
+    let mut delivered = reply(id, 9, Some("studio"));
+    delivered.status = ReplyStatus::Delivered;
+    replies.request_done(true, Ok(FeedResult::Reply(delivered)), at);
+}
+
+#[test]
+fn back_to_back_replies_each_get_their_own_answer() {
+    let mut replies = on(None, &[view("S", Lifecycle::Idle, Some(CHAT))]);
+    let first = reply("01K8A1", 4, Some("studio"));
+    let second = reply("01K8A2", 5, Some("studio"));
+    assert!(matches!(
+        after_reading(&mut replies, vec![first, second]),
+        Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"
+    ));
+    replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
+    taken(&mut replies);
+    report_of(replies.next_work(NOW));
+    replies.request_done(true, read(vec![]), NOW);
+    // Its turn ends at 2.9 s; the second goes in at once, before the
+    // daemon captured the first's answer.
+    let later = NOW + Duration::from_secs(1);
+    replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
+    type_and_take(&mut replies, "01K8A2", later, 3_100);
+    // The first's answer (its turn finished at 2.9 s) is the first's; the
+    // next one is the second's.
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), 2_900)),
+        Some("01K8A1".into())
+    );
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), 9_000)),
+        Some("01K8A2".into())
+    );
+    assert_eq!(replies.answered(&answer(Some(CHAT), 12_000)), None);
+}
+
+#[test]
+fn a_reply_whose_turn_ended_without_an_answer_never_takes_a_later_one() {
+    let mut replies = on(None, &[view("S", Lifecycle::Idle, Some(CHAT))]);
+    after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
+    taken(&mut replies);
+    report_of(replies.next_work(NOW));
+    replies.request_done(true, read(vec![]), NOW);
+    // The user interrupts it: its turn ends at 3 s with no answer captured.
+    replies.observe(&view("S", Lifecycle::Idle, Some(CHAT)));
+    let ended = NOW + Duration::from_secs(1);
+    replies.next_work(ended);
+    // A prompt typed at the desk a minute later is answered: not the reply's.
+    assert_eq!(replies.answered(&answer(Some(CHAT), 62_000)), None);
+    // Forgotten once no answer can come.
+    replies.next_work(ended + ANSWER_WAIT);
+    assert!(replies.awaiting.is_empty());
 }

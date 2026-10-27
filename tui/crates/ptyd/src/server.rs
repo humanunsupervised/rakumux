@@ -64,6 +64,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_ACTIVITY,
     session_core::api::CAPABILITY_REPLIES,
     session_core::api::CAPABILITY_SUBMIT_QUIET,
+    session_core::api::CAPABILITY_SUBMIT_EXPECT,
     session_core::api::CAPABILITY_PLACES,
     "attach",
     "subscribe",
@@ -1125,6 +1126,7 @@ fn host_error(error: HostError) -> ApiError {
     let code = match error {
         HostError::NotFound | HostError::NotRunning => ErrorCode::SessionNotLive,
         HostError::NotController | HostError::Typing => ErrorCode::SessionInUse,
+        HostError::ForegroundChanged => ErrorCode::ForegroundChanged,
         HostError::InvalidKey(_) => ErrorCode::InvalidArgument,
         HostError::Spawn(_) | HostError::Io(_) => ErrorCode::Internal,
     };
@@ -1689,6 +1691,7 @@ mod tests {
                 id: id.clone(),
                 text: "t".into(),
                 quiet_ms: None,
+                expect_foreground: None,
             },
             Request::SessionTouch { id: id.clone() },
             Request::SessionTurn { id: id.clone() },

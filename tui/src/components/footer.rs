@@ -975,6 +975,7 @@ mod tests {
             replies: Vec::new(),
             more: false,
             open: None,
+            machine: None,
         };
         h.app.feed.apply(page((0..3).map(entry).collect()));
         // Counted only while the account keeps the feed (signed in, on).

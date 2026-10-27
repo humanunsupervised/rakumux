@@ -215,6 +215,30 @@ fn where_chats_are_up_to_is_kept_for_the_next_service() {
 }
 
 #[test]
+fn a_renamed_machine_uploads_its_chats_whole_under_its_new_name() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("chats.json");
+    let mut chats = on(Some(path.clone()));
+    let (session, _) = read_of(chats.next_work(NOW));
+    chats.read_done(session, Ok(page(Vec::new(), 64, false)), NOW);
+    // Another machine held "studio": the chat is read from its start, and
+    // goes up under the new name.
+    chats.rename("studio-6m8b".into(), NOW);
+    let (session, after) = read_of(chats.next_work(NOW));
+    assert_eq!(after, None);
+    chats.read_done(
+        session,
+        Ok(page(vec![message(0, vec![text("Fixed it.")])], 120, false)),
+        NOW,
+    );
+    assert_eq!(upload_of(chats.next_work(NOW))["machine"], "studio-6m8b");
+    // Kept: a restart doesn't go back to where the old name was up to.
+    chats.upload_done(true, Ok(()), NOW);
+    let (_, after) = read_of(on(Some(path)).next_work(NOW));
+    assert_eq!(after, Some(cursor(120)));
+}
+
+#[test]
 fn messages_are_cleaned_before_they_leave_the_machine() {
     // Split so secret scanners don't take the fixture for a key.
     let key = concat!("sk-", "abcdefghijklmnopqrstuvwxyz");

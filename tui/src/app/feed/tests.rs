@@ -45,6 +45,7 @@ pub fn page(generation: u64, revision: u64, entries: Vec<FeedEntry>, more: bool)
         replies: Vec::new(),
         more,
         open: None,
+        machine: None,
     }
 }
 
@@ -1359,4 +1360,16 @@ async fn r_on_a_working_card_replies_to_its_chat_or_writes_to_its_session() {
     assert!(matches!(h.app.mode, AppMode::Normal));
     let status = h.app.status().unwrap_or_default().to_owned();
     assert!(status.contains("Sent"), "{status}");
+}
+
+#[test]
+fn the_services_name_for_this_machine_replaces_the_hostname() {
+    let mut store = FeedStore::new("studio".into());
+    store.apply(page(1, 1, vec![], false));
+    assert_eq!(store.machine(), "studio", "an older service names none");
+    store.apply(FeedPage {
+        machine: Some("studio-6m8b".into()),
+        ..page(1, 2, vec![], false)
+    });
+    assert_eq!(store.machine(), "studio-6m8b");
 }

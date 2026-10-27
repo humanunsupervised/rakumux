@@ -948,6 +948,46 @@ fn the_feed_switch_defaults_off() {
 }
 
 #[test]
+fn feed_requests_name_this_machine_by_its_id_when_it_has_one() {
+    const ID: &str = "01K8A0RZ0V3X5Q2N9T7W4Y6M8B";
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let transport = FakeTransport {
+        requests: requests.clone(),
+        replies: Mutex::new(VecDeque::from([
+            Ok(reply(
+                200,
+                r#"{"version":1,"replies":[],"latest_seq":0,"more":false}"#,
+            )),
+            Ok(reply(200, r#"{"version":1,"accepted":[]}"#)),
+        ])),
+        cancel_after_send: None,
+    };
+    let client =
+        CloudAIClient::with_transport(config().with_machine_id(ID).unwrap(), Box::new(transport));
+    for request in [
+        FeedHttp::Replies("after=0&machine=studio"),
+        FeedHttp::Upload(b"{\"version\":1}"),
+    ] {
+        client
+            .feed(&token(), request, &Cancellation::new())
+            .unwrap();
+    }
+    for recorded in requests.lock().unwrap().iter() {
+        assert_eq!(recorded.request.headers()["x-rakumux-machine-id"], ID);
+    }
+    // Without one, none; and an id that isn't a ULID is refused.
+    let (client, recorded) = client_with(Ok(reply(200, r#"{"version":1,"accepted":[]}"#)), None);
+    client
+        .feed(&token(), FeedHttp::Upload(b"{}"), &Cancellation::new())
+        .unwrap();
+    assert!(!recorded.lock().unwrap()[0]
+        .request
+        .headers()
+        .contains_key("x-rakumux-machine-id"));
+    assert!(config().with_machine_id("studio").is_err());
+}
+
+#[test]
 fn feed_uploads_are_one_sized_post_and_reads_one_get() {
     let (client, recorded) = client_with(Ok(reply(200, r#"{"version":1,"accepted":[]}"#)), None);
     let upload = client

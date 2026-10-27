@@ -118,6 +118,7 @@ pub fn signed_out_feed() -> FeedPage {
         replies: Vec::new(),
         more: false,
         open: None,
+        machine: None,
     }
 }
 

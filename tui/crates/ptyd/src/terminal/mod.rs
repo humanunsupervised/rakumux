@@ -523,6 +523,43 @@ fn kill_group(pid: u32) {
 }
 
 impl Host {
+    /// Paste `text`, then Enter in a write of its own once the program took
+    /// the paste in; with `same_foreground`, the Enter only while the process
+    /// group that had the foreground at the paste still has it.
+    fn queue_submit(
+        &self,
+        id: TerminalId,
+        text: &str,
+        same_foreground: bool,
+    ) -> Result<(), HostError> {
+        let shared = self.inner.get(id)?;
+        if !shared.is_running() {
+            return Err(HostError::NotRunning);
+        }
+        let modes = shared.lock().modes;
+        // The text must not be able to open or close a paste bracket itself.
+        let text = text.replace("\x1b[200~", "").replace("\x1b[201~", "");
+        shared.queue_input(PtyInput {
+            bytes: vt::input::encode_paste(&text, &modes),
+            then: Some((SUBMIT_ENTER_AFTER, b"\r".to_vec())),
+            same_foreground,
+        })
+    }
+
+    /// [`HostError::Typing`] while the controller sent input within `quiet`.
+    fn refuse_typing(&self, id: TerminalId, quiet: Duration) -> Result<(), HostError> {
+        let typing = self
+            .inner
+            .get(id)?
+            .lock()
+            .controller_input_at
+            .is_some_and(|at| at.elapsed() < quiet);
+        if typing {
+            return Err(HostError::Typing);
+        }
+        Ok(())
+    }
+
     fn spawn_process(
         &self,
         spec: TerminalProgram,
@@ -717,18 +754,7 @@ impl TerminalHost for Host {
     }
 
     fn submit(&self, id: TerminalId, text: &str) -> Result<(), HostError> {
-        let shared = self.inner.get(id)?;
-        if !shared.is_running() {
-            return Err(HostError::NotRunning);
-        }
-        let modes = shared.lock().modes;
-        // The text must not be able to open or close a paste bracket itself.
-        let text = text.replace("\x1b[200~", "").replace("\x1b[201~", "");
-        // The Enter goes in a read of its own once the program took the paste in.
-        shared.queue_input(PtyInput {
-            bytes: vt::input::encode_paste(&text, &modes),
-            then: Some((SUBMIT_ENTER_AFTER, b"\r".to_vec())),
-        })
+        self.queue_submit(id, text, false)
     }
 
     fn submit_when_quiet(
@@ -737,15 +763,32 @@ impl TerminalHost for Host {
         text: &str,
         quiet: Duration,
     ) -> Result<(), HostError> {
-        let shared = self.inner.get(id)?;
-        let typing = shared
-            .lock()
-            .controller_input_at
-            .is_some_and(|at| at.elapsed() < quiet);
-        if typing {
-            return Err(HostError::Typing);
-        }
+        self.refuse_typing(id, quiet)?;
         self.submit(id, text)
+    }
+
+    fn submit_expecting(
+        &self,
+        id: TerminalId,
+        text: &str,
+        quiet: Option<Duration>,
+        foreground: Option<&str>,
+    ) -> Result<(), HostError> {
+        if let Some(expected) = foreground {
+            // Read now, not the last poll's: the agent may have just exited.
+            let now = self
+                .inner
+                .get(id)?
+                .request(|reply| ActorMsg::Foreground { reply })?;
+            if now.as_deref() != Some(expected) {
+                return Err(HostError::ForegroundChanged);
+            }
+        }
+        if let Some(quiet) = quiet {
+            self.refuse_typing(id, quiet)?;
+        }
+        // Expecting a program, its Enter goes only to it.
+        self.queue_submit(id, text, foreground.is_some())
     }
 
     fn send_keys(

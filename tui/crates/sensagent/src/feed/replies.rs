@@ -17,6 +17,12 @@
 //! written in this machine's TUI always is. The agent's next reply in that
 //! session is uploaded as the reply's answer (`reply_to`).
 //!
+//! A reply counts as written here only when this machine made its id (`from`
+//! is what the writer said, and any machine of the account can say anything).
+//! Which replies were written here, typed in or decided, and the reports not
+//! yet taken, are kept across a restart (`kept`), so a reply is typed at most
+//! once whatever happens to the service.
+//!
 //! A reply with files attached (`attachments`) has them fetched once it is
 //! otherwise ready to be typed in, one at a time and each only once, saved
 //! under `uploads/<reply id>/` (see `uploads`); then its text is typed with a
@@ -42,6 +48,9 @@ use super::cache::{FeedReply, ReplyAttachment, ReplyFailure, ReplyStatus};
 use super::job::FeedResult;
 use super::wire::{self, FeedFailure, FeedRequest, RepliesRead, SessionMessage};
 
+mod kept;
+use kept::Kept;
+
 /// How often the account's replies are read while the feed is on, unless
 /// rakumux.com's answer says otherwise (`poll_ms`: every second while a reply
 /// waits for this machine or the website is open, and for 30 s after the
@@ -54,10 +63,20 @@ const WATCHED_POLL: Duration = Duration::from_secs(1);
 /// The first and longest waits after a failed request.
 const RETRY_MIN: Duration = Duration::from_secs(5);
 const RETRY_MAX: Duration = Duration::from_secs(300);
+/// The longest wait a refusal for too many requests holds a kind of request
+/// back, whatever rakumux.com asks: its quotas count fixed windows, and it
+/// asks to wait until the window ends (up to an hour, a day for daily ones),
+/// while a refused request isn't counted. Pending replies expire in an hour.
+const RATE_LIMIT_MAX: Duration = Duration::from_secs(60);
 /// How long the "replies from elsewhere" setting is trusted before it's read again.
 const SETTING_EVERY: Duration = Duration::from_secs(10);
-/// Replies remembered as handled here, so a stale pending one isn't typed twice.
-const MAX_HANDLED: usize = 1_000;
+/// A reply typed in is answered by its agent's next reply in its turn, which
+/// the daemon captures within 10 s of the turn ending: one whose turn ended
+/// this long ago without an answer has none, and is forgotten.
+const ANSWER_WAIT: Duration = Duration::from_secs(30);
+/// An answer's turn ended within this of when its reply's turn was seen to
+/// end (the daemon notes the end first; this service hears of it after).
+const ANSWER_SLACK_MS: i64 = 1_000;
 /// Nothing is typed into a session someone typed in this recently, so a reply
 /// isn't added to what they're writing (`session_submit`'s `quiet_ms`).
 pub(crate) const TYPING_QUIET: Duration = Duration::from_secs(10);
@@ -125,9 +144,11 @@ fn write_status<T>(outcome: &Result<T, FeedFailure>) -> ReplyWriteStatus {
         Err(FeedFailure::Unauthorized) => ReplyWriteStatus::SignedOut,
         Err(FeedFailure::Off) => ReplyWriteStatus::Off,
         Err(FeedFailure::Invalid) => ReplyWriteStatus::Invalid,
-        Err(FeedFailure::RateLimited(_) | FeedFailure::Unavailable(_)) => {
-            ReplyWriteStatus::Unavailable
-        }
+        // Another machine held this one's name: it takes another, and a try
+        // again goes through.
+        Err(
+            FeedFailure::RateLimited(_) | FeedFailure::Unavailable(_) | FeedFailure::MachineTaken,
+        ) => ReplyWriteStatus::Unavailable,
     }
 }
 
@@ -136,11 +157,12 @@ fn write_status<T>(outcome: &Result<T, FeedFailure>) -> ReplyWriteStatus {
 pub(crate) enum ReplyWork {
     /// Ask rakumux.com (a read, or a status report).
     Request(FeedRequest),
-    /// Type `text` into `session`.
+    /// Type `text` into `session`, while `foreground` is the program there.
     Submit {
         reply: String,
         session: SessionId,
         text: String,
+        foreground: Option<String>,
     },
     /// Fetch one of a reply's files from rakumux.com and save it.
     Fetch(Fetch),
@@ -220,11 +242,12 @@ impl Backoff {
 
     fn failed(&mut self, failure: FeedFailure, now: Duration) {
         let wait = match failure {
-            FeedFailure::RateLimited(Some(delay)) | FeedFailure::Unavailable(Some(delay)) => delay,
+            FeedFailure::RateLimited(Some(delay)) => delay.min(RATE_LIMIT_MAX),
+            FeedFailure::Unavailable(Some(delay)) => delay.min(RETRY_MAX),
             _ => self.wait,
         };
         self.wait = self.wait.saturating_mul(2).min(RETRY_MAX);
-        self.at = now + wait.min(Duration::from_secs(86_400));
+        self.at = now + wait;
     }
 }
 
@@ -236,6 +259,9 @@ struct Seen {
     conversation: Option<String>,
     /// The agent's current turn (`agent_turn.id`): a new prompt makes a new one.
     turn: Option<u64>,
+    /// The program in its foreground: a reply is typed only while it's still
+    /// there (`session_submit`'s `expect_foreground`).
+    foreground: Option<String>,
 }
 
 impl Seen {
@@ -249,6 +275,10 @@ impl Seen {
                 .as_ref()
                 .and_then(|turn| turn.conversation_id.clone()),
             turn: view.agent_turn.as_ref().map(|turn| turn.id),
+            foreground: view
+                .terminal
+                .as_ref()
+                .and_then(|terminal| terminal.foreground_process.clone()),
         }
     }
 
@@ -281,8 +311,6 @@ struct Pending {
     target: Target,
     text: String,
     attachments: Vec<ReplyAttachment>,
-    /// The machine it was written on; `None` on rakumux.com.
-    from: Option<String>,
 }
 
 impl Pending {
@@ -293,7 +321,6 @@ impl Pending {
             target: Target::Chat(reply.conversation_id.clone()),
             text: reply.text.clone(),
             attachments: reply.attachments.clone(),
-            from: reply.from.clone(),
         }
     }
 
@@ -304,7 +331,6 @@ impl Pending {
             target: Target::Session,
             text: message.text.clone(),
             attachments: message.attachments.clone(),
-            from: message.from.clone(),
         }
     }
 }
@@ -391,12 +417,32 @@ fn typed(text: &str, files: &[PathBuf]) -> String {
     format!("{}\n\n{}", text.trim_end(), paths.join("\n"))
 }
 
-/// A delivered reply waiting for the agent's answer, in `conversation` (any
-/// of the session's chats when it's `None`).
+/// A reply typed in, waiting for the agent's answer in `conversation` (any of
+/// the session's chats when it's `None`). Its answer is the agent's reply that
+/// finished after it was typed and, once its turn was seen to end, by then: so
+/// a reply typed in behind it never takes its answer, and one whose turn ended
+/// without an answer (interrupted, an error) never takes a later one.
 struct Awaiting {
     reply: String,
     conversation: Option<String>,
+    /// When it was typed in, on the wall clock (as answers' `finished_at`)
+    /// and the owner thread's.
     since_ms: i64,
+    since: Duration,
+    /// When its turn was seen to end (its agent took it and waits again),
+    /// on both clocks.
+    ended: Option<(i64, Duration)>,
+}
+
+impl Awaiting {
+    /// Its turn was seen to end at `now` on the owner's clock.
+    fn end(&mut self, now: Duration) {
+        if self.ended.is_none() {
+            let since =
+                i64::try_from(now.saturating_sub(self.since).as_millis()).unwrap_or(i64::MAX);
+            self.ended = Some((self.since_ms.saturating_add(since), now));
+        }
+    }
 }
 
 /// Replies' state on the owner thread.
@@ -420,13 +466,13 @@ pub(crate) struct ReplySync {
     report_retry: Backoff,
     /// This machine's pending replies and session messages, by id, as last read.
     pending: HashMap<String, Pending>,
-    /// Typed (or refused) here, to tell rakumux.com: the id and why it failed.
-    reports: VecDeque<(String, Option<ReplyFailure>)>,
     /// The reply going into each session, until its agent took it and waits again.
     deliveries: HashMap<SessionId, Delivery>,
-    handled: HashSet<String>,
-    handled_order: VecDeque<String>,
-    awaiting: HashMap<SessionId, Awaiting>,
+    /// Replies written, typed in or decided here, and reports not yet taken,
+    /// kept across a restart.
+    kept: Kept,
+    /// Each session's replies typed in and not yet answered, oldest first.
+    awaiting: HashMap<SessionId, VecDeque<Awaiting>>,
     /// Sessions someone was typing in, by session id: nothing is typed there until then.
     held: HashMap<String, Duration>,
     /// Each pending reply's files saved so far, in its attachments' order.
@@ -441,8 +487,13 @@ pub(crate) struct ReplySync {
 
 impl ReplySync {
     /// Replies for `machine`; `accept_remote` says whether replies written
-    /// elsewhere are typed here (never without it).
-    pub fn new(machine: String, accept_remote: Option<AcceptRemote>) -> Self {
+    /// elsewhere are typed here (never without it); `kept` is the file that
+    /// keeps what's typed in across a restart (memory only without it).
+    pub fn new(
+        machine: String,
+        accept_remote: Option<AcceptRemote>,
+        kept: Option<PathBuf>,
+    ) -> Self {
         Self {
             machine,
             enabled: false,
@@ -457,10 +508,8 @@ impl ReplySync {
             read_retry: Backoff::new(Duration::ZERO),
             report_retry: Backoff::new(Duration::ZERO),
             pending: HashMap::new(),
-            reports: VecDeque::new(),
             deliveries: HashMap::new(),
-            handled: HashSet::new(),
-            handled_order: VecDeque::new(),
+            kept: Kept::load(kept),
             awaiting: HashMap::new(),
             held: HashMap::new(),
             files: HashMap::new(),
@@ -471,7 +520,9 @@ impl ReplySync {
     }
 
     /// Follow the account: signed in with its Feed switch on. Off, replies are
-    /// read again from the start next time.
+    /// read again from the start next time; reports not yet taken are kept,
+    /// and go once it's on again (one for another account is refused, and
+    /// dropped).
     pub fn set_enabled(&mut self, enabled: bool, now: Duration) {
         if enabled == self.enabled {
             return;
@@ -480,7 +531,6 @@ impl ReplySync {
         self.cursor = 0;
         self.poll = None;
         self.pending.clear();
-        self.reports.clear();
         self.awaiting.clear();
         // Nothing pending is typed in now: files saved for it go. A fetch
         // still out is removed when it's done.
@@ -521,6 +571,23 @@ impl ReplySync {
         self.held.remove(session.as_str());
     }
 
+    /// rakumux.com named another machine as holding this one's name: from
+    /// now on it goes by `machine`, and reads its replies from the start.
+    pub fn rename(&mut self, machine: String, now: Duration) {
+        self.machine = machine;
+        self.cursor = 0;
+        self.poll = None;
+        self.pending.clear();
+        self.next_read = now;
+    }
+
+    /// This machine made the id of a reply it's about to write: one read with
+    /// it counts as written here (a reply's `from` is only what its writer
+    /// said).
+    pub fn wrote(&mut self, id: &str) {
+        self.kept.wrote(id);
+    }
+
     /// A reply written in this machine's TUI was stored: typed here at once
     /// when its session runs here.
     pub fn written(&mut self, reply: &FeedReply) {
@@ -552,16 +619,14 @@ impl ReplySync {
             return None;
         }
         if self.report_retry.ready(now) {
-            while let Some((id, failure)) = self.reports.front() {
-                match wire::reply_status(id, &self.machine, *failure) {
+            while let Some(report) = self.kept.next_report() {
+                match wire::reply_status(&report.id, &self.machine, report.failure) {
                     Some(request) => {
                         self.out = Some(Out::Report);
                         return Some(ReplyWork::Request(request));
                     }
                     // An id the contract can't carry: nothing to tell.
-                    None => {
-                        self.reports.pop_front();
-                    }
+                    None => self.kept.reported(),
                 }
             }
         }
@@ -598,7 +663,7 @@ impl ReplySync {
             .pending
             .iter()
             .filter(|(id, reply)| {
-                !self.handled.contains(*id)
+                !self.kept.handled(id)
                     && !being_typed.contains(reply.session_id.as_str())
                     && !self.held.contains_key(&reply.session_id)
             })
@@ -616,7 +681,9 @@ impl ReplySync {
             if behind.contains(reply.session_id.as_str()) {
                 continue;
             }
-            let elsewhere = reply.from.as_deref() != Some(self.machine.as_str());
+            // Written here only when this machine made its id: `from` is
+            // whatever its writer said.
+            let elsewhere = !self.kept.is_own(id);
             let session = SessionId::from_string(reply.session_id.clone());
             let waits = Seen::waits;
             let outcome = match self.sessions.get(&session) {
@@ -682,10 +749,15 @@ impl ReplySync {
                 let reply = self.pending.get(&id)?;
                 let saved = self.files.get(&id).map_or(&[][..], Vec::as_slice);
                 let text = typed(&reply.text, saved);
+                let target = reply.target.clone();
+                // Never typed again from now on, even if this service stops
+                // before the daemon answers.
+                self.kept.typing(&id);
                 let seen = self.sessions.get(&session);
+                let foreground = seen.and_then(|seen| seen.foreground.clone());
                 let delivery = Delivery {
                     reply: id.clone(),
-                    target: reply.target.clone(),
+                    target,
                     since: now,
                     typed: false,
                     turn: (
@@ -700,6 +772,7 @@ impl ReplySync {
                     reply: id,
                     session,
                     text,
+                    foreground,
                 })
             }
             None => {
@@ -716,6 +789,10 @@ impl ReplySync {
     /// the next.
     fn follow_deliveries(&mut self, now: Duration) {
         let mut settled = Vec::new();
+        // Replies whose turn ended (taken, and their agent waits again), and
+        // those that failed after all, by session.
+        let mut ended = Vec::new();
+        let mut gone = Vec::new();
         let sessions = &self.sessions;
         self.deliveries.retain(|session, delivery| {
             let seen = sessions.get(session);
@@ -723,25 +800,50 @@ impl ReplySync {
                 // The daemon hasn't answered yet.
                 return true;
             }
-            if delivery.taken.is_some() {
-                return !delivery.done(seen, now);
-            }
-            match delivery.taking(seen, now) {
-                Taking::Waiting => true,
-                Taking::Taken => {
-                    delivery.taken = Some(now);
-                    settled.push((delivery.reply.clone(), None));
-                    !delivery.done(seen, now)
+            if delivery.taken.is_none() {
+                match delivery.taking(seen, now) {
+                    Taking::Waiting => return true,
+                    Taking::Taken => {
+                        delivery.taken = Some(now);
+                        settled.push((delivery.reply.clone(), None));
+                    }
+                    Taking::Failed(failure) => {
+                        settled.push((delivery.reply.clone(), Some(failure)));
+                        gone.push((session.clone(), delivery.reply.clone()));
+                        return false;
+                    }
                 }
-                Taking::Failed(failure) => {
-                    settled.push((delivery.reply.clone(), Some(failure)));
-                    false
-                }
             }
+            let done = delivery.done(seen, now);
+            if done {
+                ended.push((session.clone(), delivery.reply.clone()));
+            }
+            !done
         });
         for (reply, failure) in settled {
             self.settle(&reply, failure, true);
         }
+        for (session, reply) in ended {
+            if let Some(awaiting) = self.awaiting.get_mut(&session) {
+                for entry in awaiting.iter_mut().filter(|entry| entry.reply == reply) {
+                    entry.end(now);
+                }
+            }
+        }
+        for (session, reply) in gone {
+            if let Some(awaiting) = self.awaiting.get_mut(&session) {
+                awaiting.retain(|entry| entry.reply != reply);
+            }
+        }
+        // Answers come within seconds of their turn's end, or never.
+        for awaiting in self.awaiting.values_mut() {
+            awaiting.retain(|entry| {
+                entry
+                    .ended
+                    .is_none_or(|(_, at)| now.saturating_sub(at) < ANSWER_WAIT)
+            });
+        }
+        self.awaiting.retain(|_, awaiting| !awaiting.is_empty());
     }
 
     /// A reply is going into its session now (or was, until it's decided).
@@ -809,10 +911,17 @@ impl ReplySync {
             .map(|(session, _)| session.clone())
     }
 
-    /// Typed into its session (or the daemon refused it). Typed in, it's
+    /// Typed into its session (or the daemon refused it), at `now` on the
+    /// owner's clock and `now_ms` on the wall clock. Typed in, it's
     /// delivered once its agent is seen to take it (see [`Delivery`]), and
-    /// the agent's next reply there answers it.
-    pub fn submitted(&mut self, reply: String, result: Result<(), ErrorCode>, now_ms: i64) {
+    /// the agent's next reply in its turn answers it (see [`Awaiting`]).
+    pub fn submitted(
+        &mut self,
+        reply: String,
+        result: Result<(), ErrorCode>,
+        now: Duration,
+        now_ms: i64,
+    ) {
         let Some(session) = self.submitting(&reply) else {
             return;
         };
@@ -831,14 +940,20 @@ impl ReplySync {
                         .get(&session)
                         .and_then(|seen| seen.conversation.clone()),
                 };
-                self.awaiting.insert(
-                    session,
-                    Awaiting {
-                        reply,
-                        conversation,
-                        since_ms: now_ms,
-                    },
-                );
+                let awaiting = self.awaiting.entry(session).or_default();
+                // Typed in only once the turns before ended.
+                for earlier in awaiting.iter_mut() {
+                    if earlier.ended.is_none() {
+                        earlier.ended = Some((now_ms, now));
+                    }
+                }
+                awaiting.push_back(Awaiting {
+                    reply,
+                    conversation,
+                    since_ms: now_ms,
+                    since: now,
+                    ended: None,
+                });
             }
             Err(_) => {
                 self.deliveries.remove(&session);
@@ -850,8 +965,21 @@ impl ReplySync {
     /// The daemon refused it because someone was typing in its session: it
     /// stays pending, and that session is tried again after [`TYPING_HOLD`].
     pub fn typing(&mut self, reply: String, now: Duration) {
+        self.hold_back(reply, now);
+    }
+
+    /// The daemon refused it because another program than the one seen has
+    /// its session's foreground (its agent just exited, say): it stays
+    /// pending, and that session is looked at again after [`TYPING_HOLD`],
+    /// by when its view says what runs there.
+    pub fn foreground_changed(&mut self, reply: String, now: Duration) {
+        self.hold_back(reply, now);
+    }
+
+    fn hold_back(&mut self, reply: String, now: Duration) {
         if let Some(session) = self.submitting(&reply) {
             self.deliveries.remove(&session);
+            self.kept.untyped(&reply);
             self.held
                 .insert(session.as_str().to_owned(), now + TYPING_HOLD);
         }
@@ -872,31 +1000,35 @@ impl ReplySync {
         if attached && failure.is_some() && !typed_in {
             self.discards.push_back(id.to_owned());
         }
-        self.reports.push_back((id.to_owned(), failure));
-        if self.handled.insert(id.to_owned()) {
-            self.handled_order.push_back(id.to_owned());
-            while self.handled_order.len() > MAX_HANDLED {
-                if let Some(old) = self.handled_order.pop_front() {
-                    self.handled.remove(&old);
-                }
-            }
-        }
+        self.kept.decided(id, failure);
     }
 
-    /// The reply `answer` answers, when it's the agent's next one after a
-    /// reply was typed into its session, in that conversation.
+    /// The reply `answer` answers: of those typed into its session in its
+    /// conversation, the latest typed in before its turn finished, unless
+    /// that one's turn had been seen to end before (see [`Awaiting`]). The
+    /// replies typed in before it lost their answers.
     pub fn answered(&mut self, answer: &AgentReply) -> Option<String> {
-        let awaiting = self.awaiting.get(&answer.session_id)?;
-        let same_chat = awaiting
-            .conversation
-            .as_deref()
-            .is_none_or(|conversation| answer.conversation_id.as_deref() == Some(conversation));
-        if !same_chat || answer.finished_at < awaiting.since_ms {
+        let awaiting = self.awaiting.get_mut(&answer.session_id)?;
+        let at = awaiting.iter().rposition(|entry| {
+            let same_chat = entry
+                .conversation
+                .as_deref()
+                .is_none_or(|conversation| answer.conversation_id.as_deref() == Some(conversation));
+            same_chat && entry.since_ms <= answer.finished_at
+        })?;
+        let entry = &awaiting[at];
+        if entry
+            .ended
+            .is_some_and(|(ended_ms, _)| answer.finished_at > ended_ms + ANSWER_SLACK_MS)
+        {
             return None;
         }
-        self.awaiting
-            .remove(&answer.session_id)
-            .map(|awaiting| awaiting.reply)
+        let reply = entry.reply.clone();
+        awaiting.drain(..=at);
+        if awaiting.is_empty() {
+            self.awaiting.remove(&answer.session_id);
+        }
+        Some(reply)
     }
 
     /// A read or report finished; `current` says whether it was made for the
@@ -996,7 +1128,7 @@ impl ReplySync {
         pending: impl FnOnce() -> Pending,
     ) {
         let mine = machine == self.machine;
-        if mine && status == ReplyStatus::Pending && !self.handled.contains(id) {
+        if mine && status == ReplyStatus::Pending && !self.kept.handled(id) {
             self.pending.insert(id.to_owned(), pending());
         } else if self.pending.remove(id).is_some()
             && self.files.remove(id).is_some()
@@ -1023,12 +1155,12 @@ impl ReplySync {
         match outcome {
             Ok(reply) => {
                 self.report_retry.succeeded();
-                self.reports.pop_front();
+                self.kept.reported();
                 reply
             }
             // A report the cloud refuses is dropped, not retried forever.
             Err(FeedFailure::Invalid) => {
-                self.reports.pop_front();
+                self.kept.reported();
                 None
             }
             Err(failure) => {

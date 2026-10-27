@@ -169,6 +169,10 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     uploads: Option<std::path::PathBuf>,
     /// Whether replies written elsewhere are typed into this machine's sessions.
     accept_remote: Option<crate::feed::AcceptRemote>,
+    /// Where replies keep what was typed in across a restart.
+    reply_state: Option<std::path::PathBuf>,
+    /// This machine's id and name for the feed, until the owner takes it.
+    machine: Option<crate::feed::MachineIdentity>,
     /// The name this service last gave each session (its AI title).
     titles: Titles,
 }
@@ -198,6 +202,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             chat_cursors: None,
             uploads: None,
             accept_remote: None,
+            reply_state: None,
+            machine: None,
             titles: Titles::default(),
         }
     }
@@ -233,6 +239,33 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where chat cursors are kept, if anywhere.
     pub(crate) fn chat_cursors(&self) -> Option<std::path::PathBuf> {
         self.chat_cursors.clone()
+    }
+
+    /// Keep which replies were written, typed in or decided here, and the
+    /// reports not yet taken, in `path`, so a restarted service never types
+    /// a reply twice (memory only without it).
+    pub fn with_reply_state(mut self, path: std::path::PathBuf) -> Self {
+        self.reply_state = Some(path);
+        self
+    }
+
+    /// Where replies keep their state, if anywhere.
+    pub(crate) fn reply_state(&self) -> Option<std::path::PathBuf> {
+        self.reply_state.clone()
+    }
+
+    /// Go by `machine` in the feed (made from the hostname, memory only,
+    /// without it).
+    pub(crate) fn with_machine(mut self, machine: crate::feed::MachineIdentity) -> Self {
+        self.machine = Some(machine);
+        self
+    }
+
+    /// This machine's identity for the feed, taken once by the owner.
+    pub(crate) fn take_machine(&mut self) -> crate::feed::MachineIdentity {
+        self.machine
+            .take()
+            .unwrap_or_else(|| crate::feed::MachineIdentity::load(None))
     }
 
     /// Save files attached to replies under `path` (absolute: the agent is

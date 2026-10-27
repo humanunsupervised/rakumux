@@ -220,6 +220,10 @@ pub struct FeedPage {
     /// when they changed since the TUI's revision; absent: as they were.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open: Option<Vec<OpenTurn>>,
+    /// This machine's name in the feed (its entries' `machine`), which may
+    /// differ from its hostname; absent from an older service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 struct Cached {
@@ -461,6 +465,7 @@ impl FeedCache {
             replies,
             more,
             open: (self.open_revision > after).then(|| self.open.clone()),
+            machine: None,
         }
     }
 

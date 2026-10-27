@@ -384,6 +384,11 @@ impl FeedStore {
         if let Some(open) = page.open {
             self.open = open;
         }
+        // The service's name for this machine (it keeps one, and takes
+        // another when a machine of the account had it), not the hostname.
+        if let Some(machine) = page.machine {
+            self.machine = machine;
+        }
         for reply in page.replies {
             self.take_reply(reply);
         }

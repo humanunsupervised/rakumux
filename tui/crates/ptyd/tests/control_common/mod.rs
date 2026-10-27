@@ -317,6 +317,30 @@ impl TerminalHost for FakeHost {
         self.submit(id, text)
     }
 
+    fn submit_expecting(
+        &self,
+        id: TerminalId,
+        text: &str,
+        quiet: Option<Duration>,
+        foreground: Option<&str>,
+    ) -> Result<(), HostError> {
+        if let Some(expected) = foreground {
+            let state = self.state.lock().unwrap();
+            let now = state
+                .terminals
+                .get(&id)
+                .and_then(|t| t.info.foreground.as_ref())
+                .map(|process| process.name.clone());
+            if now.as_deref() != Some(expected) {
+                return Err(HostError::ForegroundChanged);
+            }
+        }
+        match quiet {
+            Some(quiet) => self.submit_when_quiet(id, text, quiet),
+            None => self.submit(id, text),
+        }
+    }
+
     fn send_keys(
         &self,
         id: TerminalId,

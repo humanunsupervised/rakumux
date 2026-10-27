@@ -111,6 +111,34 @@ fn spawn_submit_read_sees_the_output() {
 }
 
 #[test]
+fn a_submit_expecting_another_program_in_the_foreground_writes_nothing() {
+    let home = TestHome::new();
+    let host = home.host();
+    let info = host.spawn(home.bash_spec(80, 24, b"")).unwrap();
+    wait_for_prompt(&*host, info.id);
+    // The shell is in the foreground, as after its agent exited: text meant
+    // for an agent is refused and never typed.
+    assert!(matches!(
+        host.submit_expecting(info.id, "echo AGENT_$((40+2))", None, Some("claude")),
+        Err(HostError::ForegroundChanged)
+    ));
+    // The program that is there takes it.
+    let mut shell = None;
+    assert!(wait_until(TIMEOUT, || {
+        shell = host
+            .info(info.id)
+            .and_then(|info| info.foreground)
+            .map(|p| p.name);
+        shell.is_some()
+    }));
+    host.submit_expecting(info.id, "echo SHELL_$((40+2))", None, shell.as_deref())
+        .unwrap();
+    let screen = wait_for_screen(&*host, info.id, "SHELL_42");
+    assert!(!screen.contains("AGENT_"), "{screen}");
+    host.shutdown();
+}
+
+#[test]
 fn startup_input_is_typed_once_the_shell_is_up() {
     let home = TestHome::new();
     let host = home.host();

@@ -51,7 +51,13 @@ pub struct CloudAIConfig {
     feed_reply_status: Url,
     feed_sessions: Url,
     feed_attachments: Url,
+    /// This machine's own id, sent with every feed request
+    /// (`X-Rakumux-Machine-Id`), so two machines with one name are told apart.
+    machine_id: Option<HeaderValue>,
 }
+
+/// The header naming the requesting machine by its id.
+const MACHINE_ID_HEADER: &str = "x-rakumux-machine-id";
 
 /// The account's feature switches, as the destination reports them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,7 +195,23 @@ impl CloudAIConfig {
             feed_reply_status,
             feed_sessions,
             feed_attachments,
+            machine_id: None,
         })
+    }
+
+    /// Name this machine by `id` (a ULID) in every feed request; an id that
+    /// isn't one is refused.
+    pub fn with_machine_id(mut self, id: &str) -> Result<Self, CloudAIError> {
+        if !crate::feed::is_entry_id(id) {
+            return Err(CloudAIError::InvalidConfiguration(
+                "expected a ULID machine id",
+            ));
+        }
+        self.machine_id = Some(
+            HeaderValue::from_str(id)
+                .map_err(|_| CloudAIError::InvalidConfiguration("expected a ULID machine id"))?,
+        );
+        Ok(self)
     }
 }
 
@@ -414,6 +436,9 @@ impl CloudAIClient {
             header::ACCEPT_ENCODING,
             HeaderValue::from_static("identity"),
         );
+        if let Some(id) = &self.config.machine_id {
+            headers.insert(MACHINE_ID_HEADER, id.clone());
+        }
         cancel.check()?;
         let result = self.transport.send(outgoing);
         cancel.check()?;
@@ -462,6 +487,9 @@ impl CloudAIClient {
             header::ACCEPT_ENCODING,
             HeaderValue::from_static("identity"),
         );
+        if let Some(id) = &self.config.machine_id {
+            headers.insert(MACHINE_ID_HEADER, id.clone());
+        }
         cancel.check()?;
         let result = self.transport.send(outgoing);
         cancel.check()?;

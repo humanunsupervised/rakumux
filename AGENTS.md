@@ -197,7 +197,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    feed: `OwnerRequest::FeedReply {entry, text}` → `POST /api/v1/feed/replies`, ≤ 8 KiB, no
    controls). Under the same switch the service reads the account's replies as they change
    (`GET /api/v1/feed/replies?after=SEQ&machine=NAME`, as soon as the answer's `poll_ms` says:
-   every second while a reply waits for this machine or the user has the website open, and for
+   every second while a reply this machine hasn't read yet waits for it or the user has the
+   website open, and for
    30 s after the account's last reply activity (a reply or session message written anywhere, or
    one reported delivered or failed), then 2, 4 and 8 s as the quiet time doubles, up to 15 s
    after 4 minutes; within 1–60 s; every 5 s from a rakumux.com that doesn't say) and types each
@@ -206,14 +207,24 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    Enter; the same for Claude Code, Codex and OpenCode, which have no API for a running
    interactive session), only while it's live, not private, shows the entry's conversation
    (`agent_turn.conversation_id`) and its agent waits (`idle`/`done`; `working`, `blocked` or an
-   unknown chat waits, the cloud expires a reply after an hour), and not while someone typed
+   unknown chat waits, the cloud expires a reply after an hour), not while someone typed
    in that session in the last 10 s (`session_submit`'s `quiet_ms`, so it isn't added to what
-   they're writing; tried again 2 s later). A session takes its replies and session messages
+   they're writing; tried again 2 s later), and only while the program its view showed in the
+   foreground still is (`expect_foreground`, read again by the daemon; refused when its agent
+   just exited to the shell, and looked at again 2 s later). A session takes its replies and session messages
    one at a time, in rakumux.com's order (`seq`; a later one waits behind an earlier one that
    waits): each is `delivered` once its agent is seen to take it (`working`/`blocked`, or a new
    `agent_turn` in its chat; a view still showing it waiting proves nothing, as the lifecycle
    lags), else after 30 s all the same; the next goes in once the agent waits again (after
    being seen busy, or 5 s on). Typed in but its session ended or chat changed first, it fails.
+   What's typed in survives a restart of the service (`feed/replies/kept.rs`,
+   `sensagent/status/replies.json`, 0600): the ids it typed in or decided (marked before the
+   daemon is asked, so a reply goes in at most once), those handed to the daemon and not yet
+   reported (reported `delivered` on the next start), and the reports rakumux.com hasn't taken
+   (kept while the switch is off too). The agent's answer to a reply is its reply that
+   finished after the reply was typed in, and by the end of that reply's turn: so replies
+   typed in one after another each get theirs, and one whose turn ended without an answer
+   (interrupted, an API error) never takes a later one.
    It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
    `private`, `not_accepted`, `refused`, `attachment_unavailable`;
    `POST /api/v1/feed/replies/status`). **Files attached** on rakumux.com (`attachments`, at
@@ -231,7 +242,17 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `capabilities: ["reply_attachments"]`. A reply written
    on rakumux.com or another machine is typed only when this machine's
    `sessions.remote_replies` is on (Settings → Replies from rakumux.com, local, off by default,
-   read every 10 s); one written in this machine's TUI always is. A **session message** (written
+   read every 10 s); one written in this machine's TUI always is: one whose id this machine
+   made (`ReplySync::wrote`, kept in `replies.json`), never one that only names it in `from`,
+   which any machine of the account can say. **This machine** goes by a name and an id it keeps
+   (`feed/machine.rs`, `sensagent/machine.json`, 0600): the hostname when the file was made
+   (a hostname that changes later leaves it), and a ULID sent with every feed request
+   (`X-Rakumux-Machine-Id`). The first of the account's machines to send its session list under
+   a name holds it; rakumux.com refuses another id using it (`machine_taken`), and that machine
+   takes the name with a few characters of its id after it (`studio-6m8b`), at most every 20 s.
+   Replies are read only once rakumux.com took a session list under the name
+   (`SessionSync::confirmed`), and TUIs take the name from the service (`FeedPage.machine`).
+   A **session message** (written
    on rakumux.com, or in a TUI on a prompt still waiting for its answer in a new chat, to a
    session with no answer to reply to: `OwnerRequest::SessionMessage {machine, session, text}`
    → `POST /api/v1/feed/replies` with `session` in place of `entry`; a reply without `entry` or
@@ -449,11 +470,17 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   advertise the additions. `session_turn {id}` (user only, capability `session.turn`) returns a
   live agent's current turn: `TurnContent {id, prompt?, messages, total}`, the newest 100
   messages, each one line of at most 600 characters, for AI titles. `session_submit {id, text,
-  quiet_ms?}` (paste, then Enter in a write of its own 500 ms later, nothing written between
-  them: Claude Code drops an Enter that comes with a paste ending in `.png`/`.jpg`/`.gif`/
+  quiet_ms?, expect_foreground?}` (paste, then Enter in a write of its own 500 ms later, nothing
+  written between them: Claude Code drops an Enter that comes with a paste ending in `.png`/`.jpg`/`.gif`/
   `.webp` while it checks for an image, leaving the text unsent): with `quiet_ms` (capability
   `session.submit.quiet`) it's refused with `session_in_use`, unaudited, while the session's
-  controller typed within that time; a daemon without it submits anyway.
+  controller typed within that time; with `expect_foreground` (a process name, capability
+  `session.submit.expect`) it's refused with `foreground_changed`, unaudited, unless that
+  program is in the foreground as the daemon reads it again then; a daemon without them submits
+  anyway. With `expect_foreground` the Enter is never written once another process group took
+  the foreground after the text (`pty_io::write_inputs`): text meant for an agent that just
+  exited stays unrun at its shell's prompt (without it, the text is type-ahead, as typing is).
+  The daemon asks the terminal without its state lock.
 - `session_import {source}` (user only, capability `session.import`) restores an archive directory
   containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.
   The daemon preserves ids and metadata, refuses existing ids or names, stages files privately,
@@ -566,7 +593,9 @@ accidents; they don't stop a hostile process running as the same user.
   sensagent/                     the account service (`rakumux status-service`): credentials/
                                  (the sign-in, 0600), status/ (descriptions and sharing consent,
                                  SQLite; titles.json: the title it last gave each session;
-                                 chats.json), its registration and private socket
+                                 chats.json; replies.json: replies written, typed in or
+                                 decided here and reports not yet taken), machine.json (this
+                                 machine's feed name and id), its registration and private socket
   uploads/<reply id>/            0700: files attached to feed replies (0600), fetched by the
                                  account service and typed to the agent as paths; kept 7 days
 ~/.rakumux/run/                ($RAKUMUX_HOME/run), 0700: the same from every login

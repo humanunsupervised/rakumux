@@ -55,6 +55,9 @@ pub enum FeedFailure {
     Unavailable(Option<Duration>),
     /// The request or the answer broke the contract.
     Invalid,
+    /// Another machine of the account holds this machine's name: it takes
+    /// another (`machine_taken`).
+    MachineTaken,
 }
 
 /// One request to the feed, ready to send.
@@ -1137,6 +1140,7 @@ fn failure(reply: &FeedHttpReply) -> FeedFailure {
     match (reply.status, code) {
         (401, Some("unauthenticated")) => FeedFailure::Unauthorized,
         (403, Some("forbidden")) => FeedFailure::Off,
+        (409, Some("machine_taken")) => FeedFailure::MachineTaken,
         (429, Some("rate_limited")) => FeedFailure::RateLimited(delay),
         (503, Some("unavailable")) => FeedFailure::Unavailable(delay),
         (500..=599, _) => FeedFailure::Unavailable(None),

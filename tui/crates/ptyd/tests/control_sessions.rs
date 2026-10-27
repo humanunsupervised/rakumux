@@ -656,6 +656,38 @@ fn revive_replaces_an_agent_launch_command_with_its_resume_command() {
 }
 
 #[test]
+fn a_submit_expecting_its_agent_is_refused_once_the_shell_has_the_foreground_unaudited() {
+    let h = Harness::new();
+    let session = h.create(Some("agent"));
+    let terminal = h.host.terminal_of(&session.id);
+    let process = |name: &str| ptyd::host::ProcessInfo {
+        pid: 4242,
+        name: name.into(),
+        cmdline: vec![name.into()],
+    };
+    let expecting = |text: &str| Request::SessionSubmit {
+        id: session.id.clone(),
+        text: text.into(),
+        quiet_ms: Some(10_000),
+        expect_foreground: Some("claude".into()),
+    };
+    // The agent exited to its shell: refused, nothing typed, nothing audited.
+    h.host.set_foreground(&session.id, process("bash"));
+    let audited = h.audit().len();
+    match h.handle(&h.user, expecting("run the tests")) {
+        Response::Error { error } => assert_eq!(error.code, ErrorCode::ForegroundChanged),
+        other => panic!("expected foreground_changed, got {other:?}"),
+    }
+    assert!(h.host.terminal(terminal).submits.is_empty());
+    assert_eq!(h.audit().len(), audited);
+
+    // The agent back in the foreground takes it.
+    h.host.set_foreground(&session.id, process("claude"));
+    assert_eq!(h.handle(&h.user, expecting("run the tests")), Response::Ok);
+    assert_eq!(h.host.terminal(terminal).submits, ["run the tests"]);
+}
+
+#[test]
 fn a_quiet_submit_waits_while_someone_types_without_filling_the_audit_log() {
     let h = Harness::new();
     let session = h.create(Some("agent"));
@@ -666,6 +698,7 @@ fn a_quiet_submit_waits_while_someone_types_without_filling_the_audit_log() {
         id: session.id.clone(),
         text: text.into(),
         quiet_ms: Some(10_000),
+        expect_foreground: None,
     };
     match h.handle(&h.user, quiet("from the web")) {
         Response::Error { error } => assert_eq!(error.code, ErrorCode::SessionInUse),
@@ -683,6 +716,7 @@ fn a_quiet_submit_waits_while_someone_types_without_filling_the_audit_log() {
         id: session.id.clone(),
         text: "now".into(),
         quiet_ms: None,
+        expect_foreground: None,
     };
     assert_eq!(h.handle(&h.user, plain), Response::Ok);
     h.host.set_typing(&session.id, false);

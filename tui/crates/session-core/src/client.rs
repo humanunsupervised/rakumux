@@ -60,6 +60,21 @@ pub trait SessionApi: Send + Sync {
         let _ = quiet;
         self.submit(id, text)
     }
+    /// [`submit_when_quiet`](Self::submit_when_quiet), also refused with
+    /// `foreground_changed` unless `foreground` (a process name, as
+    /// `TerminalView::foreground_process` says) is in the session's
+    /// foreground as the text is queued (capability `session.submit.expect`;
+    /// a daemon without it submits anyway).
+    fn submit_expecting(
+        &self,
+        id: &SessionId,
+        text: &str,
+        quiet: Duration,
+        foreground: Option<&str>,
+    ) -> Result<()> {
+        let _ = foreground;
+        self.submit_when_quiet(id, text, quiet)
+    }
     fn touch(&self, id: &SessionId) -> Result<()>;
     fn status(&self) -> Result<DaemonStatusInfo>;
     fn shutdown(&self) -> Result<()>;
@@ -537,14 +552,26 @@ impl SessionApi for Client {
             id: id.clone(),
             text: text.to_owned(),
             quiet_ms: None,
+            expect_foreground: None,
         })
     }
 
     fn submit_when_quiet(&self, id: &SessionId, text: &str, quiet: Duration) -> Result<()> {
+        self.submit_expecting(id, text, quiet, None)
+    }
+
+    fn submit_expecting(
+        &self,
+        id: &SessionId,
+        text: &str,
+        quiet: Duration,
+        foreground: Option<&str>,
+    ) -> Result<()> {
         self.expect_ok(&Request::SessionSubmit {
             id: id.clone(),
             text: text.to_owned(),
             quiet_ms: Some(u64::try_from(quiet.as_millis()).unwrap_or(u64::MAX)),
+            expect_foreground: foreground.map(str::to_owned),
         })
     }
 
@@ -2130,6 +2157,7 @@ mod tests {
                     id: s1.clone(),
                     text: "echo hi".into(),
                     quiet_ms: None,
+                    expect_foreground: None,
                 },
                 Request::SessionTouch { id: s1.clone() },
                 Request::DaemonStatus,

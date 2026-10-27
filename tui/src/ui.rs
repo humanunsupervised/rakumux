@@ -2294,6 +2294,7 @@ mod tests {
             replies: Vec::new(),
             more: false,
             open: None,
+            machine: None,
         }
     }
 

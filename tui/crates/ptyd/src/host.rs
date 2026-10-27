@@ -182,6 +182,9 @@ pub enum HostError {
     NotController,
     /// Someone typed in the terminal too recently (`submit_when_quiet`).
     Typing,
+    /// Another program than the one expected is in the foreground
+    /// (`submit_expecting`).
+    ForegroundChanged,
     InvalidKey(String),
     Spawn(String),
     Io(String),
@@ -194,6 +197,9 @@ impl std::fmt::Display for HostError {
             HostError::NotRunning => write!(f, "terminal is not running"),
             HostError::NotController => write!(f, "only the controller can do that"),
             HostError::Typing => write!(f, "someone is typing in this terminal"),
+            HostError::ForegroundChanged => {
+                write!(f, "another program is in this terminal's foreground")
+            }
             HostError::InvalidKey(k) => write!(f, "unknown key {k:?}"),
             HostError::Spawn(m) => write!(f, "spawn failed: {m}"),
             HostError::Io(m) => write!(f, "I/O error: {m}"),
@@ -298,6 +304,26 @@ pub trait TerminalHost: Send + Sync + 'static {
     ) -> Result<(), HostError> {
         let _ = quiet;
         self.submit(id, text)
+    }
+    /// [`submit_when_quiet`](Self::submit_when_quiet) (plain
+    /// [`submit`](Self::submit) without `quiet`), and only while the program
+    /// in the foreground is `foreground` (a process name, as
+    /// `TerminalView::foreground_process` says), read again now: else
+    /// [`HostError::ForegroundChanged`] and nothing is written. Its Enter
+    /// then goes only while the process group that had the foreground at
+    /// the paste still has it.
+    fn submit_expecting(
+        &self,
+        id: TerminalId,
+        text: &str,
+        quiet: Option<std::time::Duration>,
+        foreground: Option<&str>,
+    ) -> Result<(), HostError> {
+        let _ = foreground;
+        match quiet {
+            Some(quiet) => self.submit_when_quiet(id, text, quiet),
+            None => self.submit(id, text),
+        }
     }
     /// Named keys (`enter`, `esc`, `tab`, `backspace`, `up`/`down`/`left`/
     /// `right`, `home`, `end`, `pageup`, `pagedown`, `ctrl+<c>`, `alt+<c>`)

@@ -316,7 +316,18 @@ impl FeedSync {
                 self.next_read = self.next_read.min(now);
             }
         }
-        self.cache.page(self.status(), after, generation)
+        FeedPage {
+            machine: Some(self.machine.clone()),
+            ..self.cache.page(self.status(), after, generation)
+        }
+    }
+
+    /// Another machine held this one's name: it goes by `machine` now, and
+    /// uploads what waits at once.
+    pub fn rename(&mut self, machine: String, now: Duration) {
+        self.machine = machine;
+        self.retry = RETRY_MIN;
+        self.retry_at = now;
     }
 
     pub fn status(&self) -> FeedStatus {

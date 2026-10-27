@@ -33,6 +33,9 @@ use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore
 
 /// How often the owner rechecks jobs and plans refreshes.
 const TICK: Duration = Duration::from_secs(1);
+/// Requests already out under a name another machine holds are refused too:
+/// the name changes at most this often, so they don't change it again.
+const RENAME_EVERY: Duration = Duration::from_secs(20);
 /// How often stream readers check for a stop.
 const POLL: Duration = Duration::from_millis(100);
 /// First and longest wait before resubscribing to the daemon.
@@ -146,8 +149,9 @@ enum Work<A, C> {
     ReplyRequest(FeedJob<A, C>),
     /// Upload this machine's session list.
     SessionsUpload(FeedJob<A, C>),
-    /// Type a reply into its session.
-    Submit(String, SessionId, String),
+    /// Type a reply (its id) into a session while the program seen in its
+    /// foreground is still there.
+    Submit(String, SessionId, String, Option<String>),
     /// Fetch one of a reply's files and save it.
     Fetch(FeedJob<A, C>, Fetch, Uploads),
     /// Remove a reply's saved files.
@@ -473,10 +477,16 @@ fn own<S, A, C>(
         state: SignInState::Idle,
     };
     let mut renewal = Renewal::default();
-    let machine = crate::feed::machine_name();
+    let mut identity = refresher.take_machine();
+    let mut machine = identity.name();
+    let mut renamed_at: Option<Duration> = None;
     let mut feed = FeedSync::new(machine.clone());
     let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
-    let mut replies = ReplySync::new(machine.clone(), refresher.accept_remote());
+    let mut replies = ReplySync::new(
+        machine.clone(),
+        refresher.accept_remote(),
+        refresher.reply_state(),
+    );
     let uploads = refresher.uploads().map(Uploads::new);
     let mut sessions = SessionSync::new(machine.clone(), uploads.is_some());
     let uploads = uploads.as_ref();
@@ -500,7 +510,14 @@ fn own<S, A, C>(
             }
             follow_feed(&refresher, &mut feed, work, now);
             follow_chats(&refresher, &mut chats, replies.watched(), work, now);
-            follow_replies(&refresher, &mut replies, uploads, work, now);
+            follow_replies(
+                &refresher,
+                &mut replies,
+                sessions.confirmed(),
+                uploads,
+                work,
+                now,
+            );
             follow_sessions(&refresher, &mut sessions, work, now);
             next_tick = now.saturating_add(TICK);
         }
@@ -542,34 +559,90 @@ fn own<S, A, C>(
                 }
                 let _ = refresher.apply_event(&event, now);
                 follow_chats(&refresher, &mut chats, replies.watched(), work, now);
-                follow_replies(&refresher, &mut replies, uploads, work, now);
+                follow_replies(
+                    &refresher,
+                    &mut replies,
+                    sessions.confirmed(),
+                    uploads,
+                    work,
+                    now,
+                );
                 follow_sessions(&refresher, &mut sessions, work, now);
             }
             Message::SessionsDone(completion) => {
                 let current = refresher.is_current(completion.revision);
+                let taken = current && machine_taken(&completion.outcome);
                 let outcome = completion.outcome.and_then(|result| match result {
                     FeedResult::SessionsStored(stored) => Ok(stored),
                     _ => Err(FeedFailure::Invalid),
                 });
                 sessions.done(current, outcome, now);
+                if taken && renamed_at.is_none_or(|at| now.saturating_sub(at) >= RENAME_EVERY) {
+                    renamed_at = Some(now);
+                    machine = identity.rename();
+                    rename(
+                        &machine,
+                        &mut feed,
+                        &mut chats,
+                        &mut replies,
+                        &mut sessions,
+                        now,
+                    );
+                }
             }
             Message::ReplyDone(completion) => {
                 let current = refresher.is_current(completion.revision);
+                let taken = current && machine_taken(&completion.outcome);
                 feed.merge_replies(replies.request_done(current, completion.outcome, now));
-                follow_replies(&refresher, &mut replies, uploads, work, now);
+                if taken && renamed_at.is_none_or(|at| now.saturating_sub(at) >= RENAME_EVERY) {
+                    renamed_at = Some(now);
+                    machine = identity.rename();
+                    rename(
+                        &machine,
+                        &mut feed,
+                        &mut chats,
+                        &mut replies,
+                        &mut sessions,
+                        now,
+                    );
+                }
+                follow_replies(
+                    &refresher,
+                    &mut replies,
+                    sessions.confirmed(),
+                    uploads,
+                    work,
+                    now,
+                );
             }
             Message::Fetched(revision, reply, fetched) => {
                 let current = refresher.is_current(revision);
                 replies.fetched(current, reply, fetched, now);
-                follow_replies(&refresher, &mut replies, uploads, work, now);
+                follow_replies(
+                    &refresher,
+                    &mut replies,
+                    sessions.confirmed(),
+                    uploads,
+                    work,
+                    now,
+                );
             }
             Message::ReplySubmitted(reply, result) => {
                 match result {
                     // Someone is typing in that session: wait for them to pause.
                     Err(ErrorCode::SessionInUse) => replies.typing(reply, now),
-                    result => replies.submitted(reply, result, wall_ms()),
+                    // Its agent left the foreground: look again shortly.
+                    Err(ErrorCode::ForegroundChanged) => replies.foreground_changed(reply, now),
+                    result => replies.submitted(reply, result, now, wall_ms()),
                 }
-                follow_replies(&refresher, &mut replies, uploads, work, now);
+                follow_replies(
+                    &refresher,
+                    &mut replies,
+                    sessions.confirmed(),
+                    uploads,
+                    work,
+                    now,
+                );
             }
             Message::ReplyWritten(outcome, answer) => {
                 if let Ok(reply) = &outcome {
@@ -577,14 +650,28 @@ fn own<S, A, C>(
                     feed.merge_replies(vec![reply.clone()]);
                 }
                 let _ = answer.send(outcome);
-                follow_replies(&refresher, &mut replies, uploads, work, now);
+                follow_replies(
+                    &refresher,
+                    &mut replies,
+                    sessions.confirmed(),
+                    uploads,
+                    work,
+                    now,
+                );
             }
             Message::MessageWritten(outcome, answer) => {
                 if let Ok(message) = &outcome {
                     replies.written_message(message);
                 }
                 let _ = answer.send(outcome.map(|_| ()));
-                follow_replies(&refresher, &mut replies, uploads, work, now);
+                follow_replies(
+                    &refresher,
+                    &mut replies,
+                    sessions.confirmed(),
+                    uploads,
+                    work,
+                    now,
+                );
             }
             Message::Transcript(session, result) => {
                 chats.read_done(session, result, now);
@@ -592,13 +679,39 @@ fn own<S, A, C>(
             }
             Message::ChatDone(completion) => {
                 let current = refresher.is_current(completion.revision);
+                let taken = current && machine_taken(&completion.outcome);
                 let outcome = completion.outcome.map(|_| ());
                 chats.upload_done(current, outcome, now);
+                if taken && renamed_at.is_none_or(|at| now.saturating_sub(at) >= RENAME_EVERY) {
+                    renamed_at = Some(now);
+                    machine = identity.rename();
+                    rename(
+                        &machine,
+                        &mut feed,
+                        &mut chats,
+                        &mut replies,
+                        &mut sessions,
+                        now,
+                    );
+                }
                 follow_chats(&refresher, &mut chats, replies.watched(), work, now);
             }
             Message::FeedDone(completion) => {
                 let current = refresher.is_current(completion.revision);
+                let taken = current && machine_taken(&completion.outcome);
                 feed.completed(current, completion.outcome, now);
+                if taken && renamed_at.is_none_or(|at| now.saturating_sub(at) >= RENAME_EVERY) {
+                    renamed_at = Some(now);
+                    machine = identity.rename();
+                    rename(
+                        &machine,
+                        &mut feed,
+                        &mut chats,
+                        &mut replies,
+                        &mut sessions,
+                        now,
+                    );
+                }
             }
             Message::CaptureSet(enabled) => feed.capture_changed(enabled),
             Message::Replies(captured) => {
@@ -655,6 +768,8 @@ fn own<S, A, C>(
             }
             Message::Command(Command::FeedReply(entry, text, answer)) => {
                 let id = session_core::ids::ReplyId::generate();
+                // Read back, it counts as written here: this machine made its id.
+                replies.wrote(id.as_str());
                 let upload = crate::feed::is_entry_id(&entry)
                     .then(|| crate::feed::reply_upload(id.as_str(), &entry, &text, &machine))
                     .flatten();
@@ -672,6 +787,7 @@ fn own<S, A, C>(
             }
             Message::Command(Command::SessionMessage(target, session, text, answer)) => {
                 let id = session_core::ids::ReplyId::generate();
+                replies.wrote(id.as_str());
                 let upload = crate::feed::session_message_upload(
                     id.as_str(),
                     &target,
@@ -839,6 +955,30 @@ fn follow_feed<S, A, C>(
     }
 }
 
+/// Whether rakumux.com refused a request because another machine of the
+/// account holds this one's name.
+fn machine_taken<T>(outcome: &Result<T, FeedFailure>) -> bool {
+    matches!(outcome, Err(FeedFailure::MachineTaken))
+}
+
+/// This machine goes by `machine` in the feed from now on.
+fn rename(
+    machine: &str,
+    feed: &mut FeedSync,
+    chats: &mut ChatSync,
+    replies: &mut ReplySync,
+    sessions: &mut SessionSync,
+    now: Duration,
+) {
+    eprintln!(
+        "rakumux-status: another machine of the account uses this name; this one takes another"
+    );
+    feed.rename(machine.to_owned(), now);
+    chats.rename(machine.to_owned(), now);
+    replies.rename(machine.to_owned(), now);
+    sessions.rename(machine.to_owned(), now);
+}
+
 /// Start the next chat read or upload, when one is due: only while signed in
 /// with the account's Feed switch on.
 fn follow_chats<S, A, C>(
@@ -871,10 +1011,12 @@ fn follow_chats<S, A, C>(
 
 /// Start what replies need next: reports, fetching files and typing pending
 /// ones into their sessions, reads. Only while signed in with the account's
-/// Feed switch on, but for removing files no longer needed.
+/// Feed switch on and rakumux.com `confirmed` this machine's name (it took a
+/// session list under it), but for removing files no longer needed.
 fn follow_replies<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
     replies: &mut ReplySync,
+    confirmed: bool,
     uploads: Option<&Uploads>,
     work: &Sender<Work<A, C>>,
     now: Duration,
@@ -883,7 +1025,8 @@ fn follow_replies<S, A, C>(
     A: CredentialStore + 'static,
     C: WallClock + 'static,
 {
-    let enabled = refresher.account().is_some() && refresher.feed_switch() == Some(true);
+    let enabled =
+        refresher.account().is_some() && refresher.feed_switch() == Some(true) && confirmed;
     replies.set_enabled(enabled, now);
     // Typing is local and needn't wait; requests go one at a time.
     for _ in 0..16 {
@@ -901,8 +1044,9 @@ fn follow_replies<S, A, C>(
                 reply,
                 session,
                 text,
+                foreground,
             }) => {
-                let _ = work.send(Work::Submit(reply, session, text));
+                let _ = work.send(Work::Submit(reply, session, text, foreground));
             }
             Some(ReplyWork::Fetch(fetch)) => {
                 // Nowhere to save files: a reply never goes in without them.
@@ -1068,9 +1212,14 @@ where
                     }),
                 }
             }
-            Ok(Work::Submit(reply, session, text)) => {
+            Ok(Work::Submit(reply, session, text, foreground)) => {
                 let result = api
-                    .submit_when_quiet(&session, &text, crate::feed::TYPING_QUIET)
+                    .submit_expecting(
+                        &session,
+                        &text,
+                        crate::feed::TYPING_QUIET,
+                        foreground.as_deref(),
+                    )
                     .map_err(|error| error.code);
                 Message::ReplySubmitted(reply, result)
             }

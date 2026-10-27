@@ -164,8 +164,12 @@ pub fn serve(
         OwnerError::AlreadyRunning => ServiceError::AlreadyRunning,
         _ => ServiceError::Setup,
     })?;
+    // This machine's id and name for the feed, kept beside its other files.
+    let machine = crate::feed::MachineIdentity::load(Some(layout.root().join("machine.json")));
     let cloud = CloudAIClient::new(
-        CloudAIConfig::new(&config.cloud_origin).map_err(|_| ServiceError::Configuration)?,
+        CloudAIConfig::new(&config.cloud_origin)
+            .and_then(|cloud| cloud.with_machine_id(machine.id()))
+            .map_err(|_| ServiceError::Configuration)?,
     )
     .map_err(|_| ServiceError::Configuration)?;
     let website = AccountWebsite::new(&config.cloud_origin).ok();
@@ -189,8 +193,10 @@ pub fn serve(
     let mut refresher = StatusRefresher::new(service)
         .following_account_switch()
         .with_chat_cursors(layout.status_dir().join("chats.json"))
+        .with_reply_state(layout.status_dir().join("replies.json"))
         .with_titles(layout.status_dir().join("titles.json"))
-        .with_uploads(uploads);
+        .with_uploads(uploads)
+        .with_machine(machine);
     if let Some(TurnSettingsSource(read)) = config.turn_settings {
         refresher = refresher.with_turn_settings(move || read());
     }

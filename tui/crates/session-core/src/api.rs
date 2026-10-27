@@ -154,6 +154,15 @@ pub enum Request {
         /// `session.submit.quiet`). A daemon without it submits anyway.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         quiet_ms: Option<u64>,
+        /// Refuse with `foreground_changed` unless the program in the
+        /// session's foreground is this one now (its process name, as
+        /// `TerminalView::foreground_process` says), read again as the text
+        /// is queued; its Enter then goes only while that process group still
+        /// has the foreground, so text meant for an agent is never run by the
+        /// shell it exited to (capability `session.submit.expect`). A daemon
+        /// without it submits anyway.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expect_foreground: Option<String>,
     },
     /// Mark a session as just used (list ordering, `done` → `idle`).
     SessionTouch {
@@ -552,6 +561,11 @@ pub const CAPABILITY_PLACES: &str = "session.places";
 /// `session_submit`'s `quiet_ms`: refused while someone typed in the session.
 pub const CAPABILITY_SUBMIT_QUIET: &str = "session.submit.quiet";
 
+/// `session_submit`'s `expect_foreground`: refused unless that program is in
+/// the session's foreground; and then its Enter is never written once another
+/// process group took the foreground after the text.
+pub const CAPABILITY_SUBMIT_EXPECT: &str = "session.submit.expect";
+
 /// How much of an agent's log `session_transcript` reads by default, in bytes.
 pub const TRANSCRIPT_BYTES: u32 = 512 * 1024;
 /// The most it reads at once.
@@ -806,6 +820,9 @@ pub enum ErrorCode {
     SessionBlocked,
     /// A human holds controller focus on the target.
     SessionInUse,
+    /// Another program than the one expected is in the session's foreground
+    /// (`session_submit`'s `expect_foreground`).
+    ForegroundChanged,
     SessionNotLive,
     PromptStalled,
     Timeout,

@@ -102,6 +102,10 @@ pub(crate) enum ActorMsg {
         offset: u64,
         reply: Sender<Option<Vec<u8>>>,
     },
+    /// The foreground process's name now, read afresh.
+    Foreground {
+        reply: Sender<Option<String>>,
+    },
     Terminate {
         reply: Sender<Result<(), HostError>>,
     },
@@ -445,6 +449,13 @@ impl Actor {
             }
             ActorMsg::ReplaySince { offset, reply } => {
                 let _ = reply.send(self.ring.since(offset));
+            }
+            ActorMsg::Foreground { reply } => {
+                let leader = self.master.process_group_leader().map(|pid| pid as u32);
+                let name = leader
+                    .and_then(crate::procinfo::process_info)
+                    .map(|process| process.name);
+                let _ = reply.send(name);
             }
             ActorMsg::Terminate { reply } => {
                 let result = if self.running() {

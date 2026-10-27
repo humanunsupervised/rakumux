@@ -240,6 +240,10 @@ pub(crate) struct SessionSync {
     enabled: bool,
     /// The cloud's last answer said it takes places.
     places: bool,
+    /// rakumux.com answered a list under this name with anything but
+    /// `machine_taken` (or a failure for now) since the switch was turned on:
+    /// the name is this machine's, and its replies may be read.
+    confirmed: bool,
     sessions: BTreeMap<SessionId, SessionState>,
     /// What rakumux.com was last sent; `None` until it was, since the switch
     /// was turned on.
@@ -266,6 +270,7 @@ impl SessionSync {
             capabilities,
             enabled: false,
             places: false,
+            confirmed: false,
             sessions: BTreeMap::new(),
             sent: None,
             sending: None,
@@ -284,6 +289,25 @@ impl SessionSync {
         }
         self.enabled = enabled;
         self.places = false;
+        self.confirmed = false;
+        self.sent = None;
+        self.retry = RETRY_MIN;
+        self.retry_at = now;
+        self.next_send = now;
+    }
+
+    /// Whether rakumux.com took a list under this machine's name (see
+    /// `confirmed`): until then its replies aren't read, so a machine sharing
+    /// another's name never takes (and fails) that one's replies.
+    pub fn confirmed(&self) -> bool {
+        self.confirmed
+    }
+
+    /// Another machine held this one's name: it goes by `machine` now, and
+    /// sends its list at once.
+    pub fn rename(&mut self, machine: String, now: Duration) {
+        self.machine = machine;
+        self.confirmed = false;
         self.sent = None;
         self.retry = RETRY_MIN;
         self.retry_at = now;
@@ -363,6 +387,15 @@ impl SessionSync {
         if !current || !self.enabled {
             return;
         }
+        // Any answer but these says the name is this machine's.
+        self.confirmed |= !matches!(
+            outcome,
+            Err(FeedFailure::MachineTaken
+                | FeedFailure::Unauthorized
+                | FeedFailure::Off
+                | FeedFailure::RateLimited(_)
+                | FeedFailure::Unavailable(_))
+        );
         match outcome {
             Ok(stored) => {
                 self.places = stored.places;

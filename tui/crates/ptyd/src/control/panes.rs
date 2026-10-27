@@ -85,6 +85,7 @@ fn host_error(error: HostError) -> ApiError {
         HostError::NotFound | HostError::NotRunning => ErrorCode::NotFound,
         HostError::NotController => ErrorCode::PermissionDenied,
         HostError::Typing => ErrorCode::SessionInUse,
+        HostError::ForegroundChanged => ErrorCode::ForegroundChanged,
         HostError::InvalidKey(_) => ErrorCode::InvalidArgument,
         HostError::Spawn(_) | HostError::Io(_) => ErrorCode::Internal,
     };

@@ -14,7 +14,7 @@
       "properties": {
         "code": {
           "type": "string",
-          "enum": ["invalid_request", "unauthenticated", "forbidden", "rate_limited", "unavailable"]
+          "enum": ["invalid_request", "unauthenticated", "forbidden", "machine_taken", "rate_limited", "unavailable"]
         },
         "message": {
           "type": "string",
@@ -52,6 +52,12 @@
           "properties": {
             "code": { "const": "forbidden" },
             "message": { "const": "The feed is off for this account." }
+          }
+        },
+        {
+          "properties": {
+            "code": { "const": "machine_taken" },
+            "message": { "const": "Another machine uses this name." }
           }
         },
         {

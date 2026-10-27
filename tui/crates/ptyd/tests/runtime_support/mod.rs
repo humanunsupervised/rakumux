@@ -494,6 +494,7 @@ impl TestClient {
             id: id.clone(),
             text: text.into(),
             quiet_ms: None,
+            expect_foreground: None,
         });
         assert_eq!(response, Response::Ok, "submit {text:?}");
     }
