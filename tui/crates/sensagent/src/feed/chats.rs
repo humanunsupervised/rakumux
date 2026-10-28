@@ -197,9 +197,9 @@ impl ChatSync {
             Followed {
                 name: view.name.clone(),
                 folder: super::sync::folder_of(view),
-                private: view.private,
+                private: crate::shared_elsewhere(view),
                 live,
-                due: live && !view.private,
+                due: live && !crate::shared_elsewhere(view),
                 next,
             },
         );

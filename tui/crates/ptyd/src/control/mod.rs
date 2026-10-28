@@ -21,6 +21,7 @@ mod events;
 mod git_context;
 mod host_events;
 mod import;
+mod keep_awake;
 mod lifecycle;
 mod names;
 mod panes;
@@ -139,6 +140,7 @@ impl ControlService {
         let inner = Arc::new(service::Inner::new(config, host, registry, detector));
         inner.adopt_host_terminals(handed);
         host_events::start(&inner, host_events)?;
+        keep_awake::start(&inner);
         Ok(Self { inner, machines })
     }
 

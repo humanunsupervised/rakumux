@@ -286,7 +286,7 @@ impl Seen {
     fn of(view: &SessionView) -> Self {
         Self {
             live: view.status == SessionStatus::Live,
-            private: view.private,
+            private: crate::shared_elsewhere(view),
             lifecycle: view.lifecycle,
             conversation: view
                 .agent_turn

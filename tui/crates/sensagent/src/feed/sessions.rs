@@ -111,7 +111,7 @@ impl SessionState {
     /// `view` as listed, or `None` when it isn't: private, dead, or of an
     /// unknown status.
     fn of(view: &SessionView) -> Option<Self> {
-        if view.private {
+        if crate::shared_elsewhere(view) {
             return None;
         }
         let status = match view.status {

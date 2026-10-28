@@ -91,6 +91,22 @@ fn the_list_says_what_the_tuis_status_and_folders_tabs_group_by() {
 }
 
 #[test]
+fn another_machines_sessions_are_left_to_that_machine() {
+    let mine = agent(view("01K89ZQ4D2F6H8J0K2M4N6P8R0"));
+    let mut elsewhere = agent(view("01K89ZQ4D2F6H8J0K2M4N6P8R1"));
+    elsewhere.machine = Some(session_core::model::MachineRef {
+        id: session_core::ids::MachineId::from_string("m"),
+        name: "my-sprite".into(),
+        scope: "/home/sprite/rakumux".into(),
+    });
+    let mut sessions = on(&[mine, elsewhere]);
+    let upload = body(sessions.next_request(NOW, WALL));
+    let listed = upload["sessions"].as_array().unwrap();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0]["id"], "01K89ZQ4D2F6H8J0K2M4N6P8R0");
+}
+
+#[test]
 fn a_changed_list_goes_once_settled_and_an_unchanged_one_every_minute() {
     let mut sessions = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0")]);
     assert!(sessions.next_request(NOW, WALL).is_some());

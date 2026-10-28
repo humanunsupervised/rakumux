@@ -43,7 +43,7 @@ impl SessionMeta {
             name: view.name.clone(),
             folder: folder_name(&view.scope),
             branch: branch_of(view),
-            private: view.private,
+            private: crate::shared_elsewhere(view),
         }
     }
 }

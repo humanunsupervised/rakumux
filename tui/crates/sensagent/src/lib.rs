@@ -14,3 +14,10 @@ pub mod refresh;
 pub mod service;
 pub mod source;
 pub mod status;
+
+/// Whether this machine's account service keeps a session to itself: a
+/// private one, or one that runs on another machine (`SessionView::machine`),
+/// which that machine's own service shares as its own.
+pub(crate) fn shared_elsewhere(view: &session_core::model::SessionView) -> bool {
+    view.private || view.machine.is_some()
+}

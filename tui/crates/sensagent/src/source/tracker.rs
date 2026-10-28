@@ -136,7 +136,7 @@ impl Facts {
                 .as_ref()
                 .and_then(|terminal| terminal.pid)
                 .filter(|_| live),
-            private: view.private,
+            private: crate::shared_elsewhere(view),
             lifecycle: view.lifecycle,
             reported: view.reported.clone(),
             turn: view.agent_turn.clone().filter(|_| live),

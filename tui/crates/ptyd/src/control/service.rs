@@ -652,6 +652,21 @@ impl Inner {
         }))
     }
 
+    /// Sessions whose agent is working and whose terminal wrote output in
+    /// the last `within_ms` (`keep_awake`).
+    pub(super) fn busy_agents(&self, within_ms: i64) -> usize {
+        let state = self.lock();
+        let now = now_ms();
+        state
+            .live
+            .values()
+            .filter(|live| {
+                live.tracker.current() == Lifecycle::Working
+                    && now.saturating_sub(live.last_activity_ms) <= within_ms
+            })
+            .count()
+    }
+
     pub(super) fn session_count(&self) -> u32 {
         let state = self.lock();
         match registry(&state.registry).and_then(|r| r.count().map_err(ApiError::from)) {
