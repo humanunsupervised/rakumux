@@ -122,13 +122,16 @@ fn a_submit_expecting_another_program_in_the_foreground_writes_nothing() {
         host.submit_expecting(info.id, "echo AGENT_$((40+2))", None, Some("claude")),
         Err(HostError::ForegroundChanged)
     ));
-    // The program that is there takes it.
+    // The program that is there takes it, once the last poll saw the shell:
+    // `info` holds the poll's reading while the submit reads afresh, and a
+    // poll made as the shell started can still name what ran before it.
     let mut shell = None;
     assert!(wait_until(TIMEOUT, || {
         shell = host
             .info(info.id)
             .and_then(|info| info.foreground)
-            .map(|p| p.name);
+            .map(|p| p.name)
+            .filter(|name| name == "bash");
         shell.is_some()
     }));
     host.submit_expecting(info.id, "echo SHELL_$((40+2))", None, shell.as_deref())
