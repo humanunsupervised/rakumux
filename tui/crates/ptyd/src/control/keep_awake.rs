@@ -130,14 +130,30 @@ mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
 
-    /// Answer one request with `status`, returning what was asked.
+    /// Answer one request with `status`, returning what was asked: its head
+    /// and its `Content-Length` of body, however many reads they take.
     fn serve_once(listener: UnixListener, status: u16) -> std::thread::JoinHandle<String> {
         std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            let mut asked = Vec::new();
             let mut buf = [0u8; 1024];
-            let n = stream.read(&mut buf).unwrap();
+            loop {
+                let text = String::from_utf8_lossy(&asked).into_owned();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let length = head
+                        .lines()
+                        .find_map(|line| line.strip_prefix("Content-Length: "))
+                        .map_or(0, |n| n.parse::<usize>().unwrap());
+                    if body.len() >= length {
+                        break;
+                    }
+                }
+                let n = stream.read(&mut buf).unwrap();
+                assert!(n > 0, "the request ended early: {text:?}");
+                asked.extend_from_slice(&buf[..n]);
+            }
             write!(stream, "HTTP/1.1 {status} X\r\nContent-Length: 0\r\n\r\n").unwrap();
-            String::from_utf8_lossy(&buf[..n]).into_owned()
+            String::from_utf8_lossy(&asked).into_owned()
         })
     }
 
