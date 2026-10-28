@@ -696,3 +696,79 @@ fn paste_is_bracketed_when_requested() {
         b"\x1b[200~a\rb\x1b[201~"
     );
 }
+
+fn press(view: &mut TerminalView, pane: Rect, (column, row): (u16, u16)) -> bool {
+    let event = mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+        KeyModifiers::NONE,
+    );
+    view.start_selection(&event, pane)
+}
+
+fn drag(view: &mut TerminalView, pane: Rect, (column, row): (u16, u16)) {
+    let event = mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        column,
+        row,
+        KeyModifiers::NONE,
+    );
+    view.extend_selection(&event, pane);
+}
+
+#[test]
+fn a_drag_selects_text_in_reading_order_within_the_pane() {
+    // The pane sits right of a 10-column list, as in Master detail.
+    let pane = Rect::new(10, 0, 12, 4);
+    let mut view = view_with(4, 12, b"first line\r\nsecond   \r\nthird");
+    assert!(press(&mut view, pane, (16, 0)));
+    drag(&mut view, pane, (12, 2));
+    let mut buf = Buffer::empty(Rect::new(0, 0, 22, 4));
+    view.render(pane, &mut buf, false, TERMINAL);
+    // From the press to the end of its row, every row between, and the
+    // last row up to the pointer; nothing in the list beside it.
+    let reversed = |x: u16, y: u16| buf.get(x, y).modifier.contains(Modifier::REVERSED);
+    assert!(!reversed(15, 0) && reversed(16, 0) && reversed(21, 0));
+    assert!(reversed(10, 1) && reversed(21, 1));
+    assert!(reversed(12, 2) && !reversed(13, 2));
+    assert!((0..10).all(|x| (0..4).all(|y| !reversed(x, y))));
+    // Trailing blanks are left out.
+    assert_eq!(view.take_selection().as_deref(), Some("line\nsecond\nthi"));
+    assert!(!view.selecting());
+
+    // Dragged backwards, and out over the list and below the pane: the
+    // nearest cells inside it.
+    assert!(press(&mut view, pane, (14, 1)));
+    drag(&mut view, pane, (2, 0));
+    assert_eq!(view.take_selection().as_deref(), Some("first line\nsecon"));
+    assert!(press(&mut view, pane, (10, 2)));
+    drag(&mut view, pane, (40, 9));
+    assert_eq!(view.take_selection().as_deref(), Some("third"));
+}
+
+#[test]
+fn a_click_selects_nothing_and_wrapped_rows_stay_one_line() {
+    let pane = Rect::new(0, 0, 6, 3);
+    let mut view = view_with(3, 6, b"abcdefghij\r\nnext");
+    assert!(press(&mut view, pane, (2, 0)));
+    assert_eq!(view.take_selection(), None);
+    assert!(press(&mut view, pane, (0, 0)));
+    drag(&mut view, pane, (5, 2));
+    assert_eq!(view.take_selection().as_deref(), Some("abcdefghij\nnext"));
+}
+
+#[test]
+fn a_selection_while_scrolled_back_takes_the_history_shown() {
+    let pane = Rect::new(0, 0, 12, 3);
+    let mut view = TerminalView::with_scrollback(3, 12, 100);
+    view.feed(&lines(8));
+    view.scroll(3);
+    assert!(press(&mut view, pane, (0, 0)));
+    drag(&mut view, pane, (4, 1));
+    assert_eq!(view.take_selection().as_deref(), Some("line2\nline3"));
+    // Scrolling or a new screen drops a selection under way.
+    assert!(press(&mut view, pane, (0, 0)));
+    view.scroll(-1);
+    assert!(!view.selecting());
+}

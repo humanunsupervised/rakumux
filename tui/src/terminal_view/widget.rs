@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use vt::vt100;
 
+use super::selection::Selection;
 use super::DefaultColors;
 
 /// The terminal cell shown at a pane's top-left corner.
@@ -134,6 +135,30 @@ pub(super) fn draw(
             let fits = !cell.is_wide() || (x + 1 < area.width && col + 1 < cols);
             if fits && cell.has_contents() {
                 out.set_symbol(cell.contents());
+            }
+        }
+    }
+}
+
+/// Show the selected cells of the window drawn at `view` in reverse video,
+/// within `area` and the terminal's edge.
+pub(super) fn draw_selection(
+    screen: &vt100::Screen,
+    area: Rect,
+    buf: &mut Buffer,
+    view: Viewport,
+    selection: &Selection,
+) {
+    let (rows, cols) = screen.size();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let (Some(row), Some(col)) = (view.row.checked_add(y), view.col.checked_add(x)) else {
+                continue;
+            };
+            if row < rows && col < cols && selection.contains((row, col)) {
+                buf.get_mut(area.x + x, area.y + y)
+                    .modifier
+                    .toggle(Modifier::REVERSED);
             }
         }
     }

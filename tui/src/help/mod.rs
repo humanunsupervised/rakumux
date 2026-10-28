@@ -1819,7 +1819,12 @@ fn mouse(doc: &mut Doc) {
         "Wheel: scrolls the session's history, or goes to the program when it uses the mouse \
          itself. In Settings it moves the selection; in Help it scrolls.",
     );
-    doc.bullet("Hold Shift while dragging to select and copy text with your terminal.");
+    doc.bullet(
+        "Drag over a session's text, in it, its preview or the terminal panel, to select it \
+         without leaving its pane; letting go copies it. A program that uses the mouse, like \
+         Claude Code, gets the drag in the session: drag over its preview in Rakumux mode \
+         instead. Shift-drag is your terminal's own selection, across the whole window.",
+    );
     doc.bullet("Tabs layout: click a tab to show that session; click ‹ or › for hidden tabs.");
 }
 

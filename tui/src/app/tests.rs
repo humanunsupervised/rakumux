@@ -2496,11 +2496,7 @@ async fn a_click_without_moving_still_selects_and_goes_in() {
     assert!(!h.home.path().join("config.json").exists());
     // A click on the session works in it.
     let pane = h.app.screen().terminal.unwrap();
-    h.app.handle_mouse(mouse(
-        MouseEventKind::Down(MouseButton::Left),
-        pane.x + 2,
-        pane.y + 2,
-    ));
+    drag(&mut h, (pane.x + 2, pane.y + 2), &[]);
     h.app.process_pending();
     assert_eq!(h.app.focus, Focus::Session);
     assert_eq!(h.last_attach().1.id, id("A"));
@@ -2509,6 +2505,69 @@ async fn a_click_without_moving_still_selects_and_goes_in() {
     drag(&mut h, (divider.x, divider.y + 3), &[(70, divider.y + 3)]);
     assert_eq!(h.app.screen().list.unwrap().width, 70);
     assert_eq!(visible_ids(&h), ["A", "B"]);
+}
+
+#[tokio::test]
+async fn a_drag_over_a_session_copies_its_text_and_a_click_goes_in() {
+    use base64::Engine;
+    let copied = |text: &str| {
+        let data = base64::engine::general_purpose::STANDARD.encode(text);
+        format!("\x1b]52;c;{data}\x07")
+    };
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    // The fake's checkpoint ends at offset 100.
+    let screen = b"\x1b[H\x1b[2Jcopy me\r\nand me";
+    h.attach_event(
+        index,
+        AttachEvent::Output {
+            offset: 100,
+            bytes: screen.to_vec(),
+        },
+    );
+    draw(&mut h);
+    let pane = h.app.screen().terminal.unwrap();
+    h.app.take_terminal_output();
+    // In Rakumux mode, over the preview and out across the list: the
+    // selection stays in the pane, and nothing goes in.
+    drag(
+        &mut h,
+        (pane.x, pane.y),
+        &[(0, pane.y + 1), (pane.x + 2, pane.y + 1)],
+    );
+    assert_eq!(
+        String::from_utf8(h.app.take_terminal_output()).unwrap(),
+        copied("copy me\nand")
+    );
+    assert_eq!(h.app.status(), Some("Copied 11 characters"));
+    assert_eq!(h.app.focus, Focus::List);
+    // A click goes in.
+    drag(&mut h, (pane.x + 2, pane.y + 2), &[]);
+    h.app.process_pending();
+    assert_eq!(h.app.focus, Focus::Session);
+    // In the session, a program that doesn't take the mouse: selected.
+    h.fake.outgoing(index);
+    drag(&mut h, (pane.x + 5, pane.y), &[(pane.x + 3, pane.y + 1)]);
+    assert_eq!(
+        String::from_utf8(h.app.take_terminal_output()).unwrap(),
+        copied("me\nand")
+    );
+    let typed = |out: Vec<AttachOutgoing>| {
+        out.into_iter()
+            .any(|message| matches!(message, AttachOutgoing::Input(_)))
+    };
+    assert!(!typed(h.fake.outgoing(index)));
+    // One that does gets the drag.
+    h.attach_event(
+        index,
+        AttachEvent::Output {
+            offset: 100 + screen.len() as u64,
+            bytes: b"\x1b[?1002h\x1b[?1006h".to_vec(),
+        },
+    );
+    drag(&mut h, (pane.x + 5, pane.y), &[(pane.x + 3, pane.y + 1)]);
+    assert!(h.app.take_terminal_output().is_empty());
+    assert!(typed(h.fake.outgoing(index)));
 }
 
 #[tokio::test]

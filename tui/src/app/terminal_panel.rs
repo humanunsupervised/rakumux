@@ -518,6 +518,10 @@ impl App {
             match event.kind {
                 MouseEventKind::ScrollUp => terminal.scroll(3),
                 MouseEventKind::ScrollDown => terminal.scroll(-3),
+                // A program that doesn't take the mouse: a drag selects its text.
+                MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                    terminal.start_selection(&event, pane);
+                }
                 _ => {}
             }
         }

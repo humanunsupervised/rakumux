@@ -1186,6 +1186,9 @@ impl App {
                 return;
             }
         }
+        if self.drag_selection(event) {
+            return;
+        }
         // The session row under the pointer shows its pin toggle, and the
         // place under it its copy mark.
         self.hovered_row = self.hits.iter().find_map(|(area, hit)| match hit {
@@ -1646,6 +1649,60 @@ impl App {
         }
     }
 
+    /// Carry on a drag selecting text in the session's view or the terminal
+    /// panel's, wherever the pointer goes: letting go copies what it
+    /// selected, and a click on the preview goes into its session. Returns
+    /// whether one was going on.
+    fn drag_selection(&mut self, event: MouseEvent) -> bool {
+        let screen = self.screen();
+        let panel = self
+            .terminal_panel
+            .terminal
+            .as_ref()
+            .is_some_and(TerminalView::selecting);
+        let (terminal, pane) = if panel {
+            (
+                self.terminal_panel.terminal.as_mut(),
+                screen
+                    .terminal_panel
+                    .map(super::terminal_panel::panel_output),
+            )
+        } else {
+            (self.detail.terminal.as_mut(), screen.terminal)
+        };
+        let Some(terminal) = terminal.filter(|terminal| terminal.selecting()) else {
+            return false;
+        };
+        let pane = pane.unwrap_or_default();
+        match event.kind {
+            MouseEventKind::Drag(MouseButton::Left) => terminal.extend_selection(&event, pane),
+            MouseEventKind::Up(_) => match terminal.take_selection() {
+                Some(text) => self.copy_selection(&text),
+                None if !panel && self.focus != Focus::Session => self.click_preview(),
+                None => {}
+            },
+            // The release went unseen: this press starts afresh.
+            MouseEventKind::Down(_) => {
+                terminal.take_selection();
+                return false;
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// `text`, selected in a terminal view, on the clipboard of the terminal
+    /// this window runs in (OSC 52, also over SSH where the terminal allows
+    /// it).
+    fn copy_selection(&mut self, text: &str) {
+        let data = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+        self.terminal_output
+            .extend_from_slice(format!("\x1b]52;c;{data}\x07").as_bytes());
+        let count = text.chars().count();
+        let plural = if count == 1 { "" } else { "s" };
+        self.set_status(format!("Copied {count} character{plural}"));
+    }
+
     fn terminal_mouse(&mut self, event: MouseEvent, pane: Rect) {
         let wheel = match event.kind {
             MouseEventKind::ScrollUp => Some(WHEEL_ROWS),
@@ -1654,7 +1711,18 @@ impl App {
         };
         if self.focus != Focus::Session {
             match (event.kind, wheel) {
-                (MouseEventKind::Down(MouseButton::Left), _) => self.click_preview(),
+                // A drag selects its text; a click (let go where it began)
+                // goes in (`drag_selection`).
+                (MouseEventKind::Down(MouseButton::Left), _) => {
+                    let selecting = self
+                        .detail
+                        .terminal
+                        .as_mut()
+                        .is_some_and(|terminal| terminal.start_selection(&event, pane));
+                    if !selecting {
+                        self.click_preview();
+                    }
+                }
                 (_, Some(rows)) => {
                     if let Some(terminal) = self.detail.terminal.as_mut() {
                         terminal.scroll(rows);
@@ -1673,11 +1741,18 @@ impl App {
         if attachment.role != Role::Controller {
             if let Some(rows) = wheel {
                 terminal.scroll(rows);
+            } else if event.kind == MouseEventKind::Down(MouseButton::Left) {
+                terminal.start_selection(&event, pane);
             }
             return;
         }
         if let Some(bytes) = terminal.mouse_bytes(&event, pane) {
             let _ = attachment.input(bytes);
+            return;
+        }
+        // A program that doesn't take the mouse: a drag selects its text.
+        if event.kind == MouseEventKind::Down(MouseButton::Left) {
+            terminal.start_selection(&event, pane);
             return;
         }
         let Some(rows) = wheel else { return };

@@ -1237,6 +1237,14 @@ and tabs. Settings and the account dialog keep two columns of padding inside the
 row above and below (`components::dialogs::padding`: no columns on a phone, no rows under 20
 rows). Dialogs stay above the one-row footer so the mode bar remains visible on short screens.
 
+A drag over the session's terminal (the preview in Rakumux mode; in session mode while its
+program doesn't take the mouse, or as observer) or the focused terminal panel selects its text
+(`terminal_view/selection.rs`): in reading order, drawn reversed and kept to that pane (past its
+edge, the nearest cell), from the history shown while scrolled back; letting go copies it over
+OSC 52 (`Copied N characters`), and a click on the preview without moving goes in on release. A
+program that tracks the mouse (Claude Code) gets the drag in session mode. Shift-drag is the
+outer terminal's own selection, across the whole window.
+
 Embedded terminals (the detail, Grid cards, the terminal panel) draw a program's default colours
 in the outer terminal's own (`terminal_view::DefaultColors::NATIVE`), not the Rakumux theme;
 colours a program sets itself are kept. The daemon still answers OSC 10/11 colour queries with

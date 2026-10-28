@@ -1,8 +1,10 @@
 //! Live terminal pane: a passive `vt::Emulator` mirroring a session's
 //! terminal, rendered into a ratatui buffer, plus translation of crossterm
-//! key/mouse/paste events into the bytes the program expects.
+//! key/mouse/paste events into the bytes the program expects, and text
+//! selected with the mouse inside the pane.
 
 mod input;
+mod selection;
 mod widget;
 
 #[cfg(test)]
@@ -35,6 +37,8 @@ pub struct TerminalView {
     scrollback: usize,
     /// Set while scrolled back.
     frozen: Option<Frozen>,
+    /// Set from the press of a drag selecting text until it's let go.
+    selection: Option<selection::Selection>,
 }
 
 /// What a program's default colours (SGR 39/49, and cells it never
@@ -78,6 +82,7 @@ impl TerminalView {
             scroll_offset: 0,
             scrollback,
             frozen: None,
+            selection: None,
         }
     }
 
@@ -103,6 +108,7 @@ impl TerminalView {
         self.emulator = vt::Emulator::passive(rows, cols, history);
         self.emulator.feed(checkpoint);
         self.scroll_to_bottom();
+        self.selection = None;
     }
 
     /// Start over showing `text` at `rows`×`cols`: newline-separated rows as
@@ -153,6 +159,7 @@ impl TerminalView {
     /// `SessionApi::read` and shown with `reset`; this only scrolls rows the
     /// emulator holds.
     pub fn scroll(&mut self, delta: i32) {
+        self.selection = None;
         let max = self.history_len();
         let target = (self.scroll_offset as i64 + i64::from(delta)).clamp(0, max as i64) as usize;
         if target == 0 {
@@ -196,6 +203,9 @@ impl TerminalView {
             Some(frozen) => {
                 let view = widget::viewport(&frozen.screen, area, true);
                 widget::draw(&frozen.screen, area, buf, view, colors);
+                if let Some(selection) = &self.selection {
+                    widget::draw_selection(&frozen.screen, area, buf, view, selection);
+                }
                 widget::draw_scroll_marker(
                     &frozen.screen,
                     area,
@@ -210,6 +220,9 @@ impl TerminalView {
                 let screen = self.emulator.screen();
                 let view = widget::viewport(screen, area, false);
                 widget::draw(screen, area, buf, view, colors);
+                if let Some(selection) = &self.selection {
+                    widget::draw_selection(screen, area, buf, view, selection);
+                }
                 if focused {
                     widget::cursor(screen, area, view)
                 } else {
@@ -237,6 +250,67 @@ impl TerminalView {
             return None;
         }
         input::encode_mouse_at(event, col, row, &self.modes())
+    }
+
+    /// Start selecting text at the cell under `event` in `pane` (the `area`
+    /// passed to [`render`](Self::render)). Returns whether it started.
+    pub fn start_selection(&mut self, event: &MouseEvent, pane: Rect) -> bool {
+        let Some(cell) = self.cell_near(event, pane) else {
+            return false;
+        };
+        self.selection = Some(selection::Selection::at(cell));
+        true
+    }
+
+    /// Extend the selection to the cell under `event`; past the pane's or
+    /// the terminal's edge, to the nearest cell inside them.
+    pub fn extend_selection(&mut self, event: &MouseEvent, pane: Rect) {
+        let cell = self.cell_near(event, pane);
+        if let (Some(selection), Some(cell)) = (self.selection.as_mut(), cell) {
+            selection.extend_to(cell);
+        }
+    }
+
+    /// A drag selecting text is going on.
+    pub fn selecting(&self) -> bool {
+        self.selection.is_some()
+    }
+
+    /// End the selection: its text, unless the drag never left the cell it
+    /// began at (a click).
+    pub fn take_selection(&mut self) -> Option<String> {
+        let selection = self.selection.take()?;
+        if selection.is_empty() {
+            return None;
+        }
+        let (screen, _) = self.shown();
+        Some(selection.text(screen)).filter(|text| !text.is_empty())
+    }
+
+    /// The screen drawn: the frozen one while scrolled back.
+    fn shown(&self) -> (&vt::vt100::Screen, bool) {
+        match &self.frozen {
+            Some(frozen) => (&frozen.screen, true),
+            None => (self.emulator.screen(), false),
+        }
+    }
+
+    /// The terminal cell drawn under `event` in `pane`, through the same
+    /// panning as `render`; outside the pane or past the terminal's edge,
+    /// the nearest one. `None` for an empty pane.
+    fn cell_near(&self, event: &MouseEvent, pane: Rect) -> Option<selection::Cell> {
+        if pane.is_empty() {
+            return None;
+        }
+        let (screen, scrolled_back) = self.shown();
+        let view = widget::viewport(screen, pane, scrolled_back);
+        let x = event.column.clamp(pane.x, pane.right() - 1) - pane.x;
+        let y = event.row.clamp(pane.y, pane.bottom() - 1) - pane.y;
+        let (rows, cols) = screen.size();
+        Some((
+            view.row.saturating_add(y).min(rows - 1),
+            view.col.saturating_add(x).min(cols - 1),
+        ))
     }
 }
 
