@@ -448,6 +448,7 @@ mod tests {
             live_terminals: 2,
             clients: 1,
             rss_bytes: Some(5 * 1024 * 1024),
+            home: None,
         };
         let text = describe(&info, Path::new("/h/logs/ptyd.log"));
         assert!(text.starts_with("rakumux-ptyd 0.6.0 (protocol 1)\n"));

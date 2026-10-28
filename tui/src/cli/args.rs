@@ -20,6 +20,8 @@ pub const SUBCOMMANDS: &[&str] = &[
     "projects",
     "daemon",
     "remote",
+    "machine",
+    "sprite",
     "account",
     "status-service",
     "session",
@@ -108,6 +110,23 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Other machines running Rakumux, whose sessions are listed and used here
+    ///
+    /// A machine is reached through its rakumux-api remote listener: its URL
+    /// and its remote token (`rakumux remote token` there).
+    Machine {
+        #[command(subcommand)]
+        command: MachineCommand,
+    },
+    /// Your own Fly.io Sprite for sessions: set it up and connect to it
+    ///
+    /// Uses your Sprites token (sprites.dev/account), kept on this computer
+    /// only. The Sprite runs Rakumux behind its public URL, reached with a
+    /// Rakumux token of its own.
+    Sprite {
+        #[command(subcommand)]
+        command: SpriteCommand,
+    },
     /// Manage the rakumux-ptyd daemon
     Daemon {
         #[command(subcommand)]
@@ -165,6 +184,48 @@ pub struct LsArgs {
 }
 
 #[derive(Subcommand, Debug, PartialEq)]
+pub enum SpriteCommand {
+    /// Set up your Sprite (created when missing) and connect to it
+    Connect {
+        /// Your Sprites token; `-` reads it from stdin. Default: one found on
+        /// this computer (SPRITES_TOKEN, a saved one, the sprite CLI's)
+        #[arg(long)]
+        token: Option<String>,
+        /// The Sprite's name (default: rakumux)
+        #[arg(long)]
+        sprite: Option<String>,
+    },
+    /// Which Sprite sessions go to, and whether it's reachable
+    Status,
+    /// Forget the Sprite and the Sprites token here (the Sprite stays)
+    Disconnect,
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+pub enum MachineCommand {
+    /// Add a machine: its name here, its rakumux-api URL and remote token
+    Add {
+        name: String,
+        /// e.g. https://box.example or http://100.64.0.2:7337
+        url: String,
+        /// Its remote token; `-` reads it from stdin
+        #[arg(long)]
+        token: String,
+    },
+    /// List the machines added
+    Ls {
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Forget a machine and the sessions listed from it (nothing there changes)
+    Rm {
+        /// Machine name or id
+        target: String,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
 pub enum FoldersCommand {
     /// Add a folder: it is listed even before it has sessions
     Add {
@@ -194,6 +255,13 @@ pub struct NewArgs {
     /// Create the session without attaching
     #[arg(long)]
     pub detach: bool,
+    /// Run it on another machine (`rakumux machine ls`), in a folder named
+    /// like this one in its home folder
+    #[arg(long, value_name = "NAME|ID", conflicts_with = "cwd")]
+    pub machine: Option<String>,
+    /// Run it on your Sprite (`rakumux sprite connect` sets it up)
+    #[arg(long, conflicts_with_all = ["cwd", "machine"])]
+    pub sprite: bool,
     /// Program to run instead of the login shell
     #[arg(last = true, value_name = "ARGV")]
     pub argv: Vec<String>,
@@ -661,6 +729,8 @@ mod tests {
                 cmds: vec!["npm".into(), "ls".into()],
                 detach: true,
                 argv: vec!["bash".into(), "-l".into()],
+                machine: None,
+                sprite: false,
             })
         );
         assert_eq!(parse("new").command, Command::New(NewArgs::default()));

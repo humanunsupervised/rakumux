@@ -2,14 +2,14 @@
 //! `unpin`, `kill`, `rm`. The JSON group lives in `session`, folders in
 //! `folders`.
 
-use super::args::{Command, LsArgs, NewArgs};
+use super::args::{Command, LsArgs, MachineCommand, NewArgs};
 use super::attach::{self, AttachContext};
 use super::table::{self, ago, git_text, Column};
 use super::{folders, output_error, resolve_target, session, CliError, Invocation};
 use serde_json::json;
 use session_core::api::{CallerInfo, CreateSession};
 use session_core::client::SessionApi;
-use session_core::model::{Lifecycle, ScopeRoot, SessionStatus, SessionView};
+use session_core::model::{Lifecycle, MachineView, ScopeRoot, SessionStatus, SessionView};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -36,6 +36,8 @@ pub(crate) fn run(
         Command::Rm { target } => rm(api, invocation, &target, out),
         Command::Folders { command, json } => folders::run(api, invocation, command, json, out),
         Command::Session { command } => session::run(api, invocation, command, out),
+        Command::Machine { command } => machine(api, command, out),
+        Command::Sprite { .. } => Err(CliError::internal("sprite commands are run apart")),
         Command::Daemon { .. } => Err(CliError::internal("daemon commands need no session")),
         Command::Remote { .. } => Err(CliError::internal("remote commands need no session")),
         Command::Account { .. } | Command::StatusService => {
@@ -64,6 +66,17 @@ fn new(
     }
     let cwd = args.cwd.map(|cwd| invocation.absolute(&cwd));
     let scope = new_session_folder(api, invocation, cwd.as_deref())?;
+    let machine = match &args.machine {
+        Some(target) => Some(find_machine(api, target)?.id),
+        None if args.sprite => {
+            let layout = super::layout()?;
+            let machine = super::sprite::connected(api, &layout)?.ok_or_else(|| {
+                CliError::invalid("no Sprite yet: `rakumux sprite connect` sets one up")
+            })?;
+            Some(machine.id)
+        }
+        None => None,
+    };
     let (cols, rows) = attach::terminal_size();
     let request = CreateSession {
         scope: scope.clone(),
@@ -74,7 +87,7 @@ fn new(
         env: invocation.env.clone(),
         cols,
         rows,
-        machine: None,
+        machine,
         prefill: None,
     };
     let session = api.create(request)?;
@@ -83,6 +96,76 @@ fn new(
         return Ok(0);
     }
     attach::run(api, &AttachContext::new(invocation, scope), &session, out)
+}
+
+/// `rakumux machine add | ls | rm`.
+fn machine(
+    api: &dyn SessionApi,
+    command: MachineCommand,
+    out: &mut dyn Write,
+) -> Result<i32, CliError> {
+    match command {
+        MachineCommand::Add { name, url, token } => {
+            let token = if token == "-" {
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .map_err(|e| CliError::invalid(format!("reading the token: {e}")))?;
+                line.trim().to_string()
+            } else {
+                token
+            };
+            let machine = api.add_machine(&name, &url, &token)?;
+            writeln!(
+                out,
+                "Added {} ({}), {}",
+                machine.name, machine.id, machine.url
+            )
+            .map_err(output_error)?;
+        }
+        MachineCommand::Ls { json } => {
+            let machines = api.machines()?;
+            if json {
+                let text =
+                    serde_json::to_string_pretty(&serde_json::json!({ "machines": machines }))
+                        .map_err(|e| CliError::internal(e.to_string()))?;
+                writeln!(out, "{text}").map_err(output_error)?;
+            } else if machines.is_empty() {
+                writeln!(out, "No machines; add one with `rakumux machine add`.")
+                    .map_err(output_error)?;
+            } else {
+                for m in machines {
+                    let state = serde_json::to_value(m.state)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_owned))
+                        .unwrap_or_default();
+                    let version = m.version.as_deref().unwrap_or("-");
+                    writeln!(out, "{}  {}  {state}  {version}  {}", m.name, m.url, m.id)
+                        .map_err(output_error)?;
+                    if let Some(error) = m.error {
+                        writeln!(out, "    {error}").map_err(output_error)?;
+                    }
+                }
+            }
+        }
+        MachineCommand::Rm { target } => {
+            let machine = find_machine(api, &target)?;
+            api.remove_machine(&machine.id)?;
+            writeln!(out, "Forgot {}", machine.name).map_err(output_error)?;
+        }
+    }
+    Ok(0)
+}
+
+/// A machine by name or id.
+fn find_machine(api: &dyn SessionApi, target: &str) -> Result<MachineView, CliError> {
+    let machines = api.machines()?;
+    machines
+        .iter()
+        .find(|m| m.id.as_str() == target)
+        .or_else(|| machines.iter().find(|m| m.name == target))
+        .cloned()
+        .ok_or_else(|| CliError::invalid(format!("no machine {target}; see `rakumux machine ls`")))
 }
 
 /// The folder a new session goes in: the current one, unless `--cwd` (from
@@ -420,6 +503,8 @@ mod tests {
             cmds: vec!["npm i".into()],
             detach: true,
             argv: vec!["bash".into(), "-l".into()],
+            machine: None,
+            sprite: false,
         };
         let (code, text) = output(|out| new(&api, &inv, args, out));
         assert_eq!(code, 0);

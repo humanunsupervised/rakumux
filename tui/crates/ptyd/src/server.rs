@@ -70,6 +70,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_RESOURCES,
     session_core::api::CAPABILITY_PREFILL,
     session_core::api::CAPABILITY_PROJECTS_CREATE,
+    session_core::api::CAPABILITY_MACHINES,
     "attach",
     "subscribe",
     "list",
@@ -685,6 +686,7 @@ impl ServerState {
             live_terminals,
             clients: self.clients.load(Ordering::SeqCst),
             rss_bytes: crate::procinfo::self_rss_bytes(),
+            home: std::env::var_os("HOME").map(std::path::PathBuf::from),
         }
     }
 
@@ -1258,6 +1260,15 @@ fn attach_stream(
     request: AttachRequest,
     id: u64,
 ) -> io::Result<bool> {
+    if let Some(remote) = state.control.remote_attach(caller, &request) {
+        return match remote {
+            Ok(remote) => relay_remote_attach(stream, remote, request, id),
+            Err(error) => {
+                reply_error(stream, error)?;
+                Ok(false)
+            }
+        };
+    }
     let (terminal, session) = match state.control.prepare_attach(caller, &request) {
         Ok(found) => found,
         Err(error) => {
@@ -1427,6 +1438,83 @@ fn run_attachment(
     let _ = writer.join();
     log_debug!("connection {id}: detached from terminal");
     Ok(())
+}
+
+/// Attach to another machine's session: forward the attach there, answer
+/// with its `attached` (the session as listed here), then relay the stream
+/// both ways until either side ends. `Ok(false)` when the machine refused.
+fn relay_remote_attach(
+    stream: &mut UnixStream,
+    remote: crate::machines::RemoteAttach,
+    request: AttachRequest,
+    id: u64,
+) -> io::Result<bool> {
+    let crate::machines::RemoteAttach {
+        pipe,
+        guard,
+        machine,
+        machines,
+    } = remote;
+    let crate::machines::pipe::Pipe {
+        mut reader,
+        mut writer,
+        ..
+    } = pipe;
+    let first = frame::write_control(&mut writer, &Request::Attach(request)).and_then(|()| {
+        match frame::read_frame(&mut reader)? {
+            Some(Frame::Control(payload)) => frame::parse_control::<Response>(&payload),
+            _ => Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "the machine closed the connection",
+            )),
+        }
+    });
+    match first {
+        Ok(Response::Attached(mut attached)) => {
+            attached.session = machines.stamp(&machine, attached.session);
+            reply(stream, &Response::Attached(attached))?;
+        }
+        Ok(Response::Error { error }) => {
+            reply_error(stream, error)?;
+            return Ok(false);
+        }
+        Ok(other) => {
+            reply_error(
+                stream,
+                ApiError::new(
+                    ErrorCode::Internal,
+                    format!("the machine answered the attach with {other:?}"),
+                ),
+            )?;
+            return Ok(false);
+        }
+        Err(error) => {
+            reply_error(
+                stream,
+                ApiError::new(
+                    ErrorCode::DaemonUnavailable,
+                    format!("the machine: {error}"),
+                ),
+            )?;
+            return Ok(false);
+        }
+    }
+    log_debug!("connection {id}: relaying an attach to machine {machine}");
+    let mut out = stream.try_clone()?;
+    let copier = std::thread::Builder::new()
+        .name("ptyd-machine-attach".into())
+        .spawn(move || {
+            let _ = io::copy(&mut reader, &mut out);
+            let _ = out.shutdown(Shutdown::Both);
+        })?;
+    let _ = io::copy(stream, &mut writer);
+    // The last writer: closes the machine's connection.
+    drop(writer);
+    let _ = stream.shutdown(Shutdown::Both);
+    let _ = copier.join();
+    drop(guard);
+    log_debug!("connection {id}: relayed attach ended");
+    Ok(true)
 }
 
 /// Run an event stream. `Ok(false)` when the subscription was refused.

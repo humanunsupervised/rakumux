@@ -25,6 +25,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 base64 = "0.21"
 libc = "0.2"
+# Other machines (`machines`): their `rakumux-api` over a WebSocket.
+rustls = "0.21"
+webpki-roots = "0.25"
+tungstenite = { version = "=0.24.0", default-features = false, features = ["handshake"] }
 
 [dev-dependencies]
 tempfile = "3.8"

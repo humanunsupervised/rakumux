@@ -284,6 +284,7 @@ impl SessionApi for FakeApi {
             live_terminals: 2,
             clients: 1,
             rss_bytes: Some(5 * 1024 * 1024),
+            home: None,
         })
     }
 

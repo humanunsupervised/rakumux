@@ -291,6 +291,15 @@ impl Client {
         &self.config
     }
 
+    /// A connection of its own to the daemon, authenticated as `config` says
+    /// and past its `hello` (spawning the daemon as [`Client::connect`]
+    /// does): for relaying the daemon's protocol to a client elsewhere, as
+    /// `rakumux-api`'s `/v1/daemon` does. The caller owns it from here.
+    pub fn open_raw(config: &ClientConfig) -> Result<(UnixStream, HelloOk)> {
+        let identity = resolve_identity(&config.auth, &|name| std::env::var(name).ok());
+        open_connection(config, &identity)
+    }
+
     /// Optional features the daemon announced in its hello.
     pub fn capabilities(&self) -> &[String] {
         &self.capabilities
@@ -1810,6 +1819,7 @@ mod tests {
                     live_terminals: 1,
                     clients: 1,
                     rss_bytes: None,
+                    home: None,
                 }),
                 Request::SessionPin { .. }
                 | Request::ResourceUsage

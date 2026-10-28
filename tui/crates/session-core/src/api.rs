@@ -858,6 +858,10 @@ pub struct DaemonStatusInfo {
     pub clients: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rss_bytes: Option<u64>,
+    /// The user's home directory on the daemon's machine, where another
+    /// machine makes folders for the sessions it creates here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<PathBuf>,
 }
 
 /// What the machine and Rakumux's processes use at one moment

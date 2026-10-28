@@ -11,6 +11,7 @@ mod naming;
 mod qr;
 mod remote_access;
 mod restart;
+mod sprites;
 mod terminal_view;
 mod theme;
 mod ui;

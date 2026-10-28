@@ -70,6 +70,8 @@ enum Route {
     Attach(String),
     /// WebSocket: session events.
     Events,
+    /// WebSocket: the daemon's own protocol (the remote listener only).
+    Daemon,
 }
 
 impl Route {
@@ -81,6 +83,7 @@ impl Route {
             ["health"] => Some(Route::Health),
             ["folders"] | ["projects"] => Some(Route::Folders),
             ["events"] => Some(Route::Events),
+            ["daemon"] => Some(Route::Daemon),
             ["sessions"] => Some(Route::Sessions),
             ["sessions", session] => id(session).map(Route::Session),
             ["sessions", session, "content"] => id(session).map(Route::Content),
@@ -94,7 +97,7 @@ impl Route {
     fn methods(&self) -> &'static [Method] {
         match self {
             Route::Health | Route::Folders | Route::Content(_) => &[Method::GET],
-            Route::Attach(_) | Route::Events => &[Method::GET],
+            Route::Attach(_) | Route::Events | Route::Daemon => &[Method::GET],
             Route::Revive(_) | Route::Kill(_) => &[Method::POST],
             Route::Sessions => &[Method::GET, Method::POST],
             Route::Session(_) => &[Method::GET, Method::PATCH, Method::DELETE],
@@ -256,6 +259,14 @@ async fn route(
         (Route::Events, _) => {
             query::parse_none(query.as_deref())?;
             streams::events(state, identity, &mut request).await
+        }
+        // Local clients use the daemon's socket.
+        (Route::Daemon, _) if listener != Listener::Remote => Err(HttpError::not_found(
+            "/v1/daemon is served on the remote listener only",
+        )),
+        (Route::Daemon, _) => {
+            query::parse_none(query.as_deref())?;
+            streams::daemon(state, &mut request).await
         }
         (Route::Health, _) => Err(HttpError::internal(
             "health is answered before authentication",

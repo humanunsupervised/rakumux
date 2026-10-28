@@ -25,6 +25,7 @@ pub mod git;
 pub mod handoff;
 pub mod host;
 pub mod log;
+pub mod machines;
 pub mod persist;
 pub mod procinfo;
 pub mod registration;

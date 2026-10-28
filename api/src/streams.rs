@@ -28,10 +28,14 @@ use hyper::header::{
 };
 use hyper::upgrade::Upgraded;
 use hyper::{Body, Request, Response, StatusCode};
-use session_core::api::{AttachRequest, CallerInfo, SubscribeRequest, CAPABILITY_SESSIONS_ALL};
+use session_core::api::{
+    AttachRequest, CallerInfo, HelloOk, SubscribeRequest, CAPABILITY_SESSIONS_ALL,
+};
 use session_core::client::{AttachEvent, AttachStream, EventStream, SessionApi};
 use session_core::ids::SessionId;
 use std::borrow::Cow;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -78,6 +82,30 @@ pub async fn attach(
         state,
         "attach",
         move |socket, shutdown| run_attach(socket, stream, shutdown),
+        upgrade,
+    );
+    Ok(switching_protocols(&accept))
+}
+
+/// `GET /v1/daemon` (the remote listener only): the daemon's own protocol,
+/// for another machine's daemon. The server first sends a text message, the
+/// daemon's `hello_ok` as JSON (it said hello as the user); then binary
+/// messages carry the protocol's bytes both ways (`session_core::frame`),
+/// as on the daemon's socket. Closing the socket closes the connection.
+pub async fn daemon(
+    state: &Arc<AppState>,
+    request: &mut Request<Body>,
+) -> Result<Response<Body>, HttpError> {
+    let accept = handshake(request.headers())?;
+    let owner = state.clone();
+    let (connection, hello) = tokio::task::spawn_blocking(move || owner.pool.user_tunnel())
+        .await
+        .map_err(|e| HttpError::internal(format!("the daemon connection failed: {e}")))??;
+    let upgrade = hyper::upgrade::on(request);
+    spawn_stream(
+        state,
+        "daemon",
+        move |socket, shutdown| run_tunnel(socket, connection, hello, shutdown),
         upgrade,
     );
     Ok(switching_protocols(&accept))
@@ -282,6 +310,106 @@ async fn finish(mut sink: Sink, ending: Ending) {
         let _ = sink.send(Message::Close(Some(frame))).await;
     }
     let _ = sink.close().await;
+}
+
+// ---------------------------------------------------------------- daemon
+
+/// Relays bytes between the WebSocket and the daemon connection until either
+/// side ends. Two threads do the blocking socket I/O.
+async fn run_tunnel(
+    socket: Socket,
+    connection: UnixStream,
+    hello: HelloOk,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    let (mut sink, mut source) = socket.split();
+    if let Err(ending) = send_json(&mut sink, &hello).await {
+        return finish(sink, ending).await;
+    }
+    let (reader, writer) = match connection.try_clone() {
+        Ok(reader) => (reader, connection),
+        Err(error) => {
+            let reason = format!("cannot share the daemon connection: {error}");
+            return finish(sink, close_frame(CloseCode::Error, &reason)).await;
+        }
+    };
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(QUEUE);
+    let (input, inputs) = std::sync::mpsc::channel::<Vec<u8>>();
+    let threads = std::thread::Builder::new()
+        .name("api-tunnel-rx".into())
+        .spawn(move || read_daemon(reader, tx))
+        .and_then(|_| {
+            std::thread::Builder::new()
+                .name("api-tunnel-tx".into())
+                .spawn(move || write_daemon(writer, inputs))
+        });
+    if let Err(error) = threads {
+        let reason = format!("cannot start a thread: {error}");
+        return finish(sink, close_frame(CloseCode::Error, &reason)).await;
+    }
+    let mut heartbeat = Heartbeat::default();
+    let mut pings = ping_timer();
+    let ending: Ending = loop {
+        tokio::select! {
+            bytes = rx.recv() => match bytes {
+                Some(bytes) => {
+                    if sink.send(Message::Binary(bytes)).await.is_err() {
+                        break None;
+                    }
+                }
+                None => break close_frame(CloseCode::Normal, "the daemon closed the connection"),
+            },
+            message = source.next() => match message {
+                Some(Ok(Message::Binary(bytes))) => {
+                    if input.send(bytes).is_err() {
+                        break close_frame(CloseCode::Normal, "the daemon closed the connection");
+                    }
+                }
+                Some(Ok(Message::Pong(_))) => heartbeat.pong(),
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break None,
+                Some(Ok(_)) => {}
+            },
+            _ = pings.tick() => match heartbeat.tick() {
+                Ok(ping) => {
+                    if sink.send(ping).await.is_err() {
+                        break None;
+                    }
+                }
+                Err(ending) => break ending,
+            },
+            _ = shutdown.changed() => {
+                break close_frame(CloseCode::Away, "rakumux-api is stopping");
+            }
+        }
+    };
+    // Dropping `input` ends the writer, which shuts the connection down and
+    // so ends the reader.
+    drop(input);
+    drop(rx);
+    finish(sink, ending).await;
+}
+
+fn read_daemon(mut reader: UnixStream, tx: mpsc::Sender<Vec<u8>>) {
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => {
+                if tx.blocking_send(buf[..n].to_vec()).is_err() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn write_daemon(mut writer: UnixStream, inputs: std::sync::mpsc::Receiver<Vec<u8>>) {
+    for bytes in inputs {
+        if writer.write_all(&bytes).is_err() {
+            break;
+        }
+    }
+    let _ = writer.shutdown(std::net::Shutdown::Both);
 }
 
 // ---------------------------------------------------------------- attach

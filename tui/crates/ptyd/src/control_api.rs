@@ -35,6 +35,17 @@ impl Caller {
 
 /// Session control. Implemented by `control::ControlService`.
 pub trait Control: Send + Sync + 'static {
+    /// Attach to a session that runs on another machine (capability
+    /// `machines`, user callers): `None` when it's this machine's.
+    fn remote_attach(
+        &self,
+        caller: &Caller,
+        request: &AttachRequest,
+    ) -> Option<Result<crate::machines::RemoteAttach, ApiError>> {
+        let _ = (caller, request);
+        None
+    }
+
     /// User-only standalone shell, with no registry or recovery record.
     fn open_terminal(
         &self,

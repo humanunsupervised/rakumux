@@ -10,11 +10,12 @@
 //! next request starts fresh.
 
 use crate::dto::DaemonHealth;
-use session_core::api::{ApiError, ErrorCode};
+use session_core::api::{ApiError, ErrorCode, HelloOk};
 use session_core::client::{AuthMode, Client, ClientConfig};
 use session_core::ids::SessionId;
 use session_core::paths::Layout;
 use std::collections::HashMap;
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -81,6 +82,12 @@ impl DaemonPool {
 
     /// The client for `identity`, connecting (and, for the user, spawning
     /// the daemon) when needed. Blocking.
+    /// A raw connection to the daemon as the user, past its `hello`, for
+    /// `/v1/daemon` (blocking; spawns the daemon when none runs).
+    pub fn user_tunnel(&self) -> Result<(UnixStream, HelloOk), ApiError> {
+        Client::open_raw(&self.client_config(AuthMode::User, true))
+    }
+
     pub fn client(&self, identity: &Identity) -> Result<Arc<Client>, ApiError> {
         match identity {
             Identity::User => {

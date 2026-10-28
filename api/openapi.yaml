@@ -435,6 +435,26 @@ paths:
         "409": { $ref: "#/components/responses/NotLive" }
         "426": { $ref: "#/components/responses/UpgradeRequired" }
         "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/daemon:
+    get:
+      tags: [streams]
+      operationId: daemonTunnel
+      summary: The daemon's own protocol, for another machine's daemon (WebSocket).
+      description: |
+        Served on the remote listener only, to the remote token; the caller is
+        the user. Another machine's `rakumux-ptyd` uses it to list and use this
+        machine's sessions (`machine_add`). The server first sends a text
+        message, the daemon's `hello_ok` as JSON (it said hello as the user);
+        then binary messages carry the daemon protocol's bytes both ways
+        (`[u32 length][u8 kind][payload]` frames, as on its Unix socket).
+        Closing the socket closes the daemon connection.
+      responses:
+        "101":
+          description: Switching to the WebSocket protocol.
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
   /v1/sessions/{id}/content:
     parameters:
       - $ref: "#/components/parameters/SessionId"

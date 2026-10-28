@@ -1328,9 +1328,12 @@ dependencies = [
  "rakumux-session-core",
  "rakumux-vt",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
+ "tungstenite",
+ "webpki-roots",
 ]
 
 [[package]]

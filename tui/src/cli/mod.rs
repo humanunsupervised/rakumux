@@ -21,6 +21,7 @@ mod folders;
 mod hooks;
 mod remote;
 mod session;
+mod sprite;
 mod table;
 
 use args::{CliArgs, Command};
@@ -94,6 +95,10 @@ fn execute(cli: CliArgs) -> Result<i32, CliError> {
         } => hooks::configuration(agent, &mut out),
         Command::Daemon { command } => daemon::run(&globals, command, &mut out),
         Command::Remote { command } => remote::run(&globals, command, &mut out),
+        Command::Sprite { command } => {
+            let client = globals.connect(true)?;
+            sprite::run(&client, &layout()?, command, &mut out)
+        }
         Command::Account { command } => {
             // The account service follows the daemon's sessions: start it first.
             let client = globals.connect(true)?;

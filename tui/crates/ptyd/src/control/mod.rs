@@ -37,11 +37,12 @@ use crate::control_api::{Caller, Control};
 use crate::detect::{DetectInput, Detection};
 use crate::handoff::ControlHandoff;
 use crate::host::TerminalHost;
+use crate::log_warn;
 use session_core::api::{
     ApiError, AttachRequest, EventEnvelope, Hello, Request, Response, SubscribeRequest,
 };
-use session_core::ids::{TerminalId, Token};
-use session_core::model::SessionView;
+use session_core::ids::{SessionId, TerminalId, Token};
+use session_core::model::{ScopeRoot, SessionView};
 use session_core::paths::Layout;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -93,6 +94,8 @@ pub type Detector = fn(&DetectInput<'_>) -> Detection;
 /// The daemon's control layer (`control_api::Control`).
 pub struct ControlService {
     inner: Arc<service::Inner>,
+    /// Sessions on other machines, listed and used through this daemon.
+    machines: crate::machines::Machines,
 }
 
 impl ControlService {
@@ -130,17 +133,151 @@ impl ControlService {
         handed: Option<ControlHandoff>,
     ) -> std::io::Result<Self> {
         let registry = registry::Registry::open(&config.layout.registry_db(), service::now_ms())?;
+        let machines = crate::machines::Machines::open(&config.layout.home);
         // Subscribe before adopting terminals so no event falls in between.
         let host_events = host.subscribe();
         let inner = Arc::new(service::Inner::new(config, host, registry, detector));
         inner.adopt_host_terminals(handed);
         host_events::start(&inner, host_events)?;
-        Ok(Self { inner })
+        Ok(Self { inner, machines })
     }
+
+    /// Requests about other machines and their sessions, user callers
+    /// only; `Err` gives back the ones for this machine.
+    fn route(&self, caller: &Caller, request: Request) -> Result<Response, Request> {
+        let answer = |result: Result<Response, ApiError>| {
+            result.unwrap_or_else(|error| Response::Error { error })
+        };
+        match request {
+            Request::MachineAdd { name, url, token } => Ok(answer(
+                user_only(caller)
+                    .and_then(|()| self.machines.add(&name, &url, &token))
+                    .map(|machine| Response::Machine { machine }),
+            )),
+            Request::MachineList => Ok(answer(user_only(caller).map(|()| Response::Machines {
+                machines: self.machines.list(),
+            }))),
+            Request::MachineRemove { id } => Ok(answer(
+                user_only(caller)
+                    .and_then(|()| self.machines.remove(&id))
+                    .map(|()| Response::Ok),
+            )),
+            Request::SessionCreate(create) => match create.machine.clone() {
+                Some(machine) => Ok(answer(
+                    user_only(caller)
+                        .and_then(|()| self.machines.create(&machine, create))
+                        .map(|session| Response::Session { session }),
+                )),
+                None => Err(Request::SessionCreate(create)),
+            },
+            Request::SessionList {
+                scope,
+                scopes,
+                include_dead,
+                all,
+            } if caller.is_user() => {
+                let wanted: Option<Vec<ScopeRoot>> =
+                    (!all).then(|| scope.iter().chain(scopes.iter()).cloned().collect());
+                let local = self.inner.handle(
+                    caller,
+                    Request::SessionList {
+                        scope,
+                        scopes,
+                        include_dead,
+                        all,
+                    },
+                );
+                Ok(match local {
+                    Response::Sessions { mut sessions } => {
+                        sessions.extend(self.machines.sessions(wanted.as_deref(), include_dead));
+                        Response::Sessions { sessions }
+                    }
+                    other => other,
+                })
+            }
+            request => {
+                let Some(id) = remote_target(&request).cloned() else {
+                    return Err(request);
+                };
+                // Other callers get this machine's answer: not found.
+                let Some(machine) = self.machines.owner(&id).filter(|_| caller.is_user()) else {
+                    return Err(request);
+                };
+                let deleting = matches!(request, Request::SessionDelete { .. });
+                let response = answer(self.machines.forward(&machine, &request));
+                if deleting && response == Response::Ok {
+                    self.machines.forget(&id);
+                }
+                Ok(response)
+            }
+        }
+    }
+}
+
+/// The session a request is about, for requests another machine can answer.
+fn remote_target(request: &Request) -> Option<&SessionId> {
+    match request {
+        Request::SessionGet { id }
+        | Request::SessionRename { id, .. }
+        | Request::SessionKill { id, .. }
+        | Request::SessionDelete { id }
+        | Request::SessionSubmit { id, .. }
+        | Request::SessionTouch { id }
+        | Request::SessionTurn { id }
+        | Request::SessionPin { id, .. }
+        | Request::SessionTranscript { id, .. } => Some(id),
+        Request::SessionRevive(revive) => Some(&revive.id),
+        Request::SessionRead(read) => Some(&read.id),
+        Request::SessionWait(wait) => Some(&wait.id),
+        Request::SessionSend(send) => Some(&send.id),
+        _ => None,
+    }
+}
+
+fn user_only(caller: &Caller) -> Result<(), ApiError> {
+    if caller.is_user() {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            session_core::api::ErrorCode::PermissionDenied,
+            "only the user reaches other machines",
+        ))
+    }
+}
+
+/// One stream of this machine's and other machines' events.
+fn merge(
+    local: Receiver<EventEnvelope>,
+    remote: Receiver<EventEnvelope>,
+) -> Receiver<EventEnvelope> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("ptyd-events-merge".into())
+        .spawn(move || loop {
+            match local.recv_timeout(std::time::Duration::from_millis(250)) {
+                Ok(envelope) => {
+                    if tx.send(envelope).is_err() {
+                        return;
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+            while let Ok(envelope) = remote.try_recv() {
+                if tx.send(envelope).is_err() {
+                    return;
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        log_warn!("cannot follow other machines' events: {error}");
+    }
+    rx
 }
 
 impl Drop for ControlService {
     fn drop(&mut self) {
+        self.machines.close();
         // Stops the event threads; they only hold weak references.
         self.inner.stop.store(true, Ordering::SeqCst);
     }
@@ -168,7 +305,31 @@ impl Control for ControlService {
     }
 
     fn handle(&self, caller: &Caller, request: Request) -> Response {
-        self.inner.handle(caller, request)
+        match self.route(caller, request) {
+            Ok(response) => response,
+            Err(request) => self.inner.handle(caller, request),
+        }
+    }
+
+    fn remote_attach(
+        &self,
+        caller: &Caller,
+        request: &AttachRequest,
+    ) -> Option<Result<crate::machines::RemoteAttach, ApiError>> {
+        let machine = self
+            .machines
+            .owner(&request.id)
+            .filter(|_| caller.is_user())?;
+        Some(
+            self.machines
+                .attach(&machine)
+                .map(|(pipe, guard)| crate::machines::RemoteAttach {
+                    pipe,
+                    guard,
+                    machine,
+                    machines: self.machines.clone(),
+                }),
+        )
     }
 
     fn prepare_attach(
@@ -184,7 +345,11 @@ impl Control for ControlService {
         caller: &Caller,
         request: &SubscribeRequest,
     ) -> Result<Receiver<EventEnvelope>, ApiError> {
-        self.inner.subscribe(caller, request)
+        let local = self.inner.subscribe(caller, request)?;
+        if !caller.is_user() {
+            return Ok(local);
+        }
+        Ok(merge(local, self.machines.subscribe(request)))
     }
 
     fn session_count(&self) -> u32 {
@@ -192,6 +357,7 @@ impl Control for ControlService {
     }
 
     fn shutdown(&self) {
+        self.machines.close();
         self.inner.shutdown()
     }
 
