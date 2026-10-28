@@ -118,29 +118,40 @@ fn create_refuses_a_prefill_that_would_run() {
 }
 
 #[test]
-fn create_on_another_machine_is_unsupported_here() {
+fn other_machines_must_be_added_first_and_only_by_the_user() {
     let h = Harness::new();
+    let unknown = session_core::ids::MachineId::from_string("m");
     let mut request = h.create_request();
-    request.machine = Some(session_core::ids::MachineId::from_string("m"));
+    request.machine = Some(unknown.clone());
     let response = h.handle(&h.user, Request::SessionCreate(request));
-    assert_eq!(error(response).code, ErrorCode::Unsupported);
-    assert!(h.host.spawns().is_empty());
-    for request in [
-        Request::MachineList,
-        Request::MachineRemove {
-            id: session_core::ids::MachineId::from_string("m"),
-        },
-        Request::MachineAdd {
+    assert_eq!(error(response).code, ErrorCode::NotFound);
+    assert!(h.host.spawns().is_empty(), "nothing starts here instead");
+
+    assert_eq!(
+        h.handle(&h.user, Request::MachineList),
+        Response::Machines { machines: vec![] }
+    );
+    let remove = Request::MachineRemove { id: unknown };
+    assert_eq!(error(h.handle(&h.user, remove)).code, ErrorCode::NotFound);
+    for url in ["box.example", "ftp://box", "https://box/v1/daemon"] {
+        let add = Request::MachineAdd {
             name: "box".into(),
-            url: "https://box.example".into(),
+            url: url.into(),
             token: "t".into(),
-        },
-    ] {
+        };
         assert_eq!(
-            error(h.handle(&h.user, request)).code,
-            ErrorCode::Unsupported
+            error(h.handle(&h.user, add)).code,
+            ErrorCode::InvalidArgument,
+            "{url}"
         );
     }
+
+    let session = h.create(None);
+    let caller = h.session_caller(&session.id);
+    assert_eq!(
+        error(h.handle(&caller, Request::MachineList)).code,
+        ErrorCode::PermissionDenied
+    );
 }
 
 #[test]

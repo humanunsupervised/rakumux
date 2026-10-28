@@ -45,6 +45,7 @@ use session_core::api::{
 use session_core::ids::{SessionId, TerminalId, Token};
 use session_core::model::{ScopeRoot, SessionView};
 use session_core::paths::Layout;
+use std::ops::ControlFlow::{self, Break, Continue};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
@@ -145,21 +146,22 @@ impl ControlService {
     }
 
     /// Requests about other machines and their sessions, user callers
-    /// only; `Err` gives back the ones for this machine.
-    fn route(&self, caller: &Caller, request: Request) -> Result<Response, Request> {
+    /// only, answered (`Break`); the ones for this machine come back
+    /// (`Continue`).
+    fn route(&self, caller: &Caller, request: Request) -> ControlFlow<Response, Request> {
         let answer = |result: Result<Response, ApiError>| {
             result.unwrap_or_else(|error| Response::Error { error })
         };
         match request {
-            Request::MachineAdd { name, url, token } => Ok(answer(
+            Request::MachineAdd { name, url, token } => Break(answer(
                 user_only(caller)
                     .and_then(|()| self.machines.add(&name, &url, &token))
                     .map(|machine| Response::Machine { machine }),
             )),
-            Request::MachineList => Ok(answer(user_only(caller).map(|()| Response::Machines {
+            Request::MachineList => Break(answer(user_only(caller).map(|()| Response::Machines {
                 machines: self.machines.list(),
             }))),
-            Request::MachineRemove { id } => Ok(answer(
+            Request::MachineRemove { id } => Break(answer(
                 user_only(caller)
                     .and_then(|()| self.machines.remove(&id))
                     .map(|()| Response::Ok),
@@ -181,9 +183,9 @@ impl ControlService {
                             },
                         );
                     }
-                    Ok(answer(created))
+                    Break(answer(created))
                 }
-                None => Err(Request::SessionCreate(create)),
+                None => Continue(Request::SessionCreate(create)),
             },
             Request::SessionList {
                 scope,
@@ -202,7 +204,7 @@ impl ControlService {
                         all,
                     },
                 );
-                Ok(match local {
+                Break(match local {
                     Response::Sessions { mut sessions } => {
                         sessions.extend(self.machines.sessions(wanted.as_deref(), include_dead));
                         Response::Sessions { sessions }
@@ -212,18 +214,18 @@ impl ControlService {
             }
             request => {
                 let Some(id) = remote_target(&request).cloned() else {
-                    return Err(request);
+                    return Continue(request);
                 };
                 // Other callers get this machine's answer: not found.
                 let Some(machine) = self.machines.owner(&id).filter(|_| caller.is_user()) else {
-                    return Err(request);
+                    return Continue(request);
                 };
                 let deleting = matches!(request, Request::SessionDelete { .. });
                 let response = answer(self.machines.forward(&machine, &request));
                 if deleting && response == Response::Ok {
                     self.machines.forget(&id);
                 }
-                Ok(response)
+                Break(response)
             }
         }
     }
@@ -321,8 +323,8 @@ impl Control for ControlService {
 
     fn handle(&self, caller: &Caller, request: Request) -> Response {
         match self.route(caller, request) {
-            Ok(response) => response,
-            Err(request) => self.inner.handle(caller, request),
+            Break(response) => response,
+            Continue(request) => self.inner.handle(caller, request),
         }
     }
 
