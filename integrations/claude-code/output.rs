@@ -103,9 +103,12 @@ pub(super) fn prompt(entry: &Value) -> Option<String> {
 
 /// What the user typed in an entry of the main conversation, as written:
 /// not a tool result, nor what Claude Code adds itself (summaries, notices,
-/// commands' output).
+/// commands' output). Typed while a turn ran, it's a [`queued`] prompt.
 pub(super) fn typed(entry: &Value) -> Option<String> {
     let flagged = |key: &str| entry.get(key).and_then(Value::as_bool) == Some(true);
+    if entry.get("type")?.as_str()? == "attachment" {
+        return queued(entry);
+    }
     if entry.get("type")?.as_str()? != "user"
         || flagged("isSidechain")
         || flagged("isMeta")
@@ -132,6 +135,37 @@ pub(super) fn typed(entry: &Value) -> Option<String> {
         return None;
     }
     Some(text)
+}
+
+/// What the user typed while a turn ran: Claude Code queues it and logs it,
+/// once it takes it into the turn, as a `queued_command` attachment, not a
+/// `user` entry. Not what else it queues (task notifications, other agents'
+/// messages).
+pub(super) fn queued(entry: &Value) -> Option<String> {
+    let attachment = entry.get("attachment")?;
+    let human = match attachment.get("origin") {
+        Some(origin) => origin.get("kind").and_then(Value::as_str) == Some("human"),
+        None => true,
+    };
+    let queued = attachment.get("type")?.as_str()? == "queued_command"
+        && attachment.get("commandMode")?.as_str()? == "prompt"
+        && human
+        && entry.get("isSidechain").and_then(Value::as_bool) != Some(true);
+    if !queued {
+        return None;
+    }
+    match attachment.get("prompt")? {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(blocks) => {
+            let texts: Vec<&str> = blocks
+                .iter()
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .collect();
+            (!texts.is_empty()).then(|| texts.join("\n"))
+        }
+        _ => None,
+    }
 }
 
 /// A block's message: thinking or a reply as written (cut at
@@ -179,6 +213,7 @@ pub(super) fn reply_step(entry: &Value) -> Step {
     }
     match entry.get("type").and_then(Value::as_str) {
         Some("user") => Step::Reset,
+        Some("attachment") if queued(entry).is_some() => Step::Reset,
         Some("assistant") => {
             let Some(blocks) = entry
                 .get("message")
@@ -324,6 +359,53 @@ mod tests {
             prompt(
                 &json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}})
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn what_the_user_typed_while_a_turn_ran_is_a_prompt_but_other_queued_input_is_not() {
+        let queued = |mode: &str, origin: Value, prompt_value: Value| {
+            json!({"type": "attachment", "uuid": "5110f9e2-c20b-4dbd-9606-b04ec4dc25b2",
+                "timestamp": "2026-10-28T11:10:14.035Z",
+                "attachment": {"type": "queued_command", "prompt": prompt_value,
+                    "commandMode": mode, "origin": origin, "humanTurn": true}})
+        };
+        let human = queued(
+            "prompt",
+            json!({"kind": "human"}),
+            json!("Also check the web app"),
+        );
+        assert_eq!(prompt(&human), Some("Also check the web app".into()));
+        assert_eq!(reply_step(&human), Step::Reset);
+        // An older Claude Code: no origin, the prompt in blocks.
+        let mut older = queued(
+            "prompt",
+            json!(null),
+            json!([{"type": "text", "text": "And this"}]),
+        );
+        older["attachment"]
+            .as_object_mut()
+            .unwrap()
+            .remove("origin");
+        assert_eq!(prompt(&older), Some("And this".into()));
+        // Queued, but not typed: a task's notification, another agent's message.
+        let notice = queued(
+            "task-notification",
+            json!({"kind": "task-notification"}),
+            json!("<task-notification>done</task-notification>"),
+        );
+        assert_eq!(super::typed(&notice), None);
+        assert_eq!(reply_step(&notice), Step::Keep);
+        let peer = queued(
+            "prompt",
+            json!({"kind": "peer"}),
+            json!("From the other agent"),
+        );
+        assert_eq!(super::typed(&peer), None);
+        // Other attachments.
+        assert_eq!(
+            super::typed(&json!({"type": "attachment", "attachment": {"type": "todo_reminder"}})),
             None
         );
     }

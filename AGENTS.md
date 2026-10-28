@@ -229,7 +229,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `delivered` once its chat shows it as a new prompt (a new `agent_turn` whose
    `user_prompt`'s letters and digits begin the reply's, or hold its first 32: typed after a
    draft on the same line; without a `user_prompt`, from an older daemon, any new turn in its
-   chat), or, for an agent whose turns the daemon doesn't follow, once seen `working`/`blocked`
+   chat; Claude Code logs what's typed while a turn runs as a `queued_command` attachment once
+   it takes it, which the daemon reads as a prompt too), or, for an agent whose turns the daemon doesn't follow, once seen `working`/`blocked`
    (a view still showing it waiting proves nothing, as the lifecycle lags); with no new prompt
    within 30 s, or another one, it fails `not_taken` (its Enter lost, it went into a menu, or a
    draft on a line of its own went first: it may still be in the input box); the next goes in
@@ -561,7 +562,8 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `text`, `reasoning`, `tool_call {call_id?, name, input}` and `tool_result {call_id?, output,
   error?}`, each cut at 64 KiB (`truncated`). Claude Code and Codex: one message per log line at
   its byte offset (the cursor is the next offset; prompts without the agents' insertions,
-  subagents' and meta entries left out). OpenCode: rows changed since a `(time_updated, id)`
+  subagents' and meta entries left out; Claude Code's human `queued_command` attachments, what
+  was typed while a turn ran, are prompts, its other queued input isn't). OpenCode: rows changed since a `(time_updated, id)`
   watermark, OpenCode 2 one message per reply block (`seq × 1024 + block`), 1.x one per piece.
   About 512 KiB of log is read per request (at most 2 MiB); `more` says ask again. A cursor of
   another conversation reads the current one from its start.

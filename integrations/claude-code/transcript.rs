@@ -2,7 +2,8 @@
 //! conversation is a message, at its byte offset. What the user typed is the
 //! `user` role's (Claude Code's own insertions taken out), tool results the
 //! `tool` role's, and the assistant's text, thinking and tool calls the
-//! `assistant` role's. Subagents' entries, meta entries and compaction
+//! `assistant` role's. What the user typed while a turn ran is logged as a
+//! queued prompt, also the `user` role's. Subagents' entries, meta entries and compaction
 //! summaries are left out, as Claude Code's own view does.
 use super::{assemble, call, compact, reasoning, result, text, timestamp};
 use serde_json::Value;
@@ -14,10 +15,17 @@ pub(super) fn message(entry: &Value, position: u64) -> Option<TranscriptMessage>
     if flagged("isSidechain") || flagged("isMeta") || flagged("isCompactSummary") {
         return None;
     }
-    let content = entry.get("message")?.get("content")?;
     let (role, parts) = match entry.get("type")?.as_str()? {
-        "user" => user(content),
-        "assistant" => (TranscriptRole::Assistant, assistant(content)),
+        // Typed while a turn ran.
+        "attachment" => {
+            let typed = super::super::claude::queued(entry)?;
+            (TranscriptRole::User, prompt(&typed).into_iter().collect())
+        }
+        "user" => user(entry.get("message")?.get("content")?),
+        "assistant" => (
+            TranscriptRole::Assistant,
+            assistant(entry.get("message")?.get("content")?),
+        ),
         _ => return None,
     };
     let at = entry
@@ -194,6 +202,22 @@ mod tests {
         let mut sidechain = entry("assistant", json!([{"type": "text", "text": "sub"}]));
         sidechain["isSidechain"] = json!(true);
         assert_eq!(message(&sidechain, 0), None);
+    }
+
+    #[test]
+    fn a_prompt_typed_while_a_turn_ran_is_the_users() {
+        let queued = |origin: &str, text: &str| {
+            json!({"type": "attachment", "uuid": "5110f9e2-c20b-4dbd-9606-b04ec4dc25b2",
+                "timestamp": "2026-10-23T10:00:00.000Z",
+                "attachment": {"type": "queued_command", "prompt": text,
+                    "commandMode": "prompt", "origin": {"kind": origin}}})
+        };
+        let typed = message(&queued("human", "Also the docs"), 90).unwrap();
+        assert_eq!(typed.role, TranscriptRole::User);
+        assert_eq!(typed.position, 90);
+        assert_eq!(typed.at, Some(1_792_749_600_000));
+        assert_eq!(texts(&typed), ["text: Also the docs"]);
+        assert_eq!(message(&queued("peer", "From another agent"), 0), None);
     }
 
     #[test]
