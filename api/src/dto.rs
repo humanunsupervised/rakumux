@@ -701,6 +701,7 @@ mod tests {
             private: false,
             created_at: 1_791_891_731,
             last_active_at: 1_791_891_731,
+            last_message_at: None,
             terminal: Some(TerminalView {
                 pid: Some(42),
                 foreground_process: Some("codex".into()),

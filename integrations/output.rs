@@ -150,6 +150,9 @@ pub struct Follower {
     prompt: Option<String>,
     turn: Turn,
     reply: Option<Reply>,
+    /// When the conversation last had a prompt or an agent message, by its
+    /// own clock (Unix milliseconds): the newest seen, never moving back.
+    last_at: Option<i64>,
 }
 
 impl Follower {
@@ -185,6 +188,7 @@ impl Follower {
             prompt: None,
             turn: Turn::default(),
             reply: None,
+            last_at: None,
         })
     }
 
@@ -272,6 +276,12 @@ impl Follower {
         &self.turn
     }
 
+    /// When the conversation last had a prompt or an agent message (Unix
+    /// milliseconds), once one was found.
+    pub fn last_at(&self) -> Option<i64> {
+        self.last_at
+    }
+
     /// Read what the conversation gained since the last time (a log from its
     /// tail the first time). `bound` is the OpenCode conversation bound to
     /// the session, if any. Returns whether either line changed.
@@ -305,7 +315,15 @@ impl Follower {
                         LogAgent::Claude => (claude::typed(entry), claude::messages(entry)),
                         LogAgent::Codex => (codex::typed(entry), codex::messages(entry)),
                     };
-                    if let Some(typed) = typed.filter(|typed| prompt_line(typed).is_some()) {
+                    let typed = typed.filter(|typed| prompt_line(typed).is_some());
+                    if typed.is_some() || !messages.is_empty() {
+                        let at = entry
+                            .get("timestamp")
+                            .and_then(Value::as_str)
+                            .and_then(transcript::timestamp);
+                        self.last_at = self.last_at.max(at);
+                    }
+                    if let Some(typed) = typed {
                         self.turn.begin(prompt_text(&typed));
                     }
                     for message in &messages {
@@ -343,6 +361,7 @@ impl Follower {
                 }
                 match conversation {
                     Some(id) => {
+                        self.last_at = self.last_at.max(opencode::last_at(database, &id));
                         self.reply =
                             opencode::reply(database, &id).map(|(key, text, position)| Reply {
                                 position: Some(position),
@@ -633,7 +652,61 @@ mod tests {
             prompt: None,
             turn: Turn::default(),
             reply: None,
+            last_at: None,
         }
+    }
+
+    #[test]
+    fn the_last_message_is_the_newest_prompt_or_agent_message() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("log.jsonl");
+        let mut file = File::create(&path).unwrap();
+        let event = |at: &str, payload: serde_json::Value| {
+            format!(
+                "{}\n",
+                serde_json::json!({"timestamp": at, "type": "event_msg", "payload": payload})
+            )
+        };
+        let mut follower = codex_log(path);
+        file.write_all(
+            event(
+                "2026-10-22T00:54:42.000Z",
+                serde_json::json!({"type": "user_message", "message": "go"}),
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        follower.follow(None);
+        assert_eq!(follower.last_at(), Some(1_792_630_482_000));
+        file.write_all(
+            event(
+                "2026-10-22T00:55:01.000Z",
+                serde_json::json!({"type": "agent_message", "message": "Done."}),
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        follower.follow(None);
+        assert_eq!(follower.last_at(), Some(1_792_630_501_000));
+        // Bookkeeping later on, or an entry that says it's older, isn't a message.
+        file.write_all(
+            event(
+                "2026-10-27T05:35:18.000Z",
+                serde_json::json!({"type": "token_count"}),
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        file.write_all(
+            event(
+                "2026-10-21T00:00:00.000Z",
+                serde_json::json!({"type": "agent_message", "message": "Old"}),
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        follower.follow(None);
+        assert_eq!(follower.last_at(), Some(1_792_630_501_000));
     }
 
     #[test]

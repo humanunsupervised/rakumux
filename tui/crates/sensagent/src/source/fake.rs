@@ -49,6 +49,7 @@ pub(crate) fn live_view(id: &SessionId, folder: &str, pid: u32) -> SessionView {
         private: false,
         created_at: 1,
         last_active_at: 2,
+        last_message_at: None,
         terminal: Some(TerminalView {
             pid: Some(pid),
             foreground_process: Some("synthetic-agent".into()),

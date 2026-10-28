@@ -63,6 +63,7 @@ pub fn view(id: &str, name: &str, last_active_at: i64) -> SessionView {
         resume: None,
         created_at: last_active_at,
         last_active_at,
+        last_message_at: None,
         terminal: Some(TerminalView {
             pid: Some(4242),
             foreground_process: Some("bash".into()),

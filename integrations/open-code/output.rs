@@ -267,6 +267,24 @@ pub(super) fn latest_prompt(database: &Path, conversation: &str) -> Option<Strin
         .map(|(_, line)| line)
 }
 
+/// When `conversation` last had a prompt or an agent message (Unix
+/// milliseconds), whichever layout holds it.
+pub(super) fn last_at(database: &Path, conversation: &str) -> Option<i64> {
+    let connection = crate::resume::open_read_only(database)?;
+    let newest = |query: &str| {
+        connection
+            .query_row(query, [conversation], |row| row.get::<_, Option<i64>>(0))
+            .ok()
+            .flatten()
+    };
+    let v2 = newest(
+        "SELECT MAX(time_updated) FROM session_message \
+         WHERE session_id = ?1 AND type IN ('user', 'assistant')",
+    );
+    let v1 = newest("SELECT MAX(time_updated) FROM message WHERE session_id = ?1");
+    v2.max(v1)
+}
+
 /// The first row of `query` (`data` JSON, `time_updated`) that makes a line.
 fn newest(
     connection: &rusqlite::Connection,

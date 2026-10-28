@@ -31,8 +31,9 @@ use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
 use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
 use super::format::{
-    activity_badge_at, branch_label, facts_line, place_label, read_period_style, relative_time,
-    repo_label, status_glyph, status_group_glyph, truncate, truncate_start, PIN_MARK,
+    activity_badge_at, branch_label, facts_line, last_activity, place_label, read_period_style,
+    relative_time, repo_label, status_glyph, status_group_glyph, truncate, truncate_start,
+    PIN_MARK,
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
@@ -465,7 +466,7 @@ fn session_content(
     let (glyph, glyph_style) = (" ", Style::default());
     let badge_width = badge.as_ref().map_or(0, |span| span.width() + 1);
     let age = truncate(
-        &relative_time(now, session.last_active_at),
+        &relative_time(now, last_activity(session)),
         width.saturating_sub(3 + badge_width),
     );
     let right_width = badge_width + str_width(&age);

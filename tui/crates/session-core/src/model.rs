@@ -219,7 +219,16 @@ pub struct SessionView {
     pub private: bool,
     /// Unix seconds.
     pub created_at: i64,
+    /// Unix seconds: when the session was last used (created, revived by
+    /// the user, or gone into: `SessionTouch`).
     pub last_active_at: i64,
+    /// Unix seconds: when the session's agent conversation last had a
+    /// message, the user's prompt or the agent's reasoning, reply or tool
+    /// call, by the conversation's own clock. Kept after the agent exits
+    /// and across daemon restarts; `None` until one was seen, and from an
+    /// older daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_message_at: Option<i64>,
     /// Live terminal details; absent unless `status == Live`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<TerminalView>,
@@ -366,6 +375,7 @@ mod tests {
             resume: None,
             created_at: 1,
             last_active_at: 2,
+            last_message_at: None,
             terminal: None,
             agent_output: None,
             user_prompt: None,

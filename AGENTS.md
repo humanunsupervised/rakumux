@@ -392,7 +392,11 @@ tui/
 `session_core::model::SessionView` is what every client sees: `id` (ULID, opaque), `name` (unique
 within the scope), `scope`, `is_self`, `cwd`, `status`, `exit_code`, `lifecycle`, `agent`,
 `reported`, `created_by`, `parent_id`, `depth`, `children`, `launch`, `resume`, `created_at`,
-`last_active_at`, `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree, repo}` of
+`last_active_at` (when it was last used: created, revived by the user, gone into with
+`session_touch`; the daemon's own revive after a crash isn't a use), `last_message_at` (when its
+agent conversation last had a prompt or an agent message, by the conversation's own clock: the
+newest the daemon's follower of `agent_output` saw, kept after the agent exits and in the
+registry; the session row's age shows it, else `last_active_at`), `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree, repo}` of
 the current cwd; `repo`: the `origin` remote URL's last path component without `.git`, from the
 common git dir's `config`, else the main working tree's folder name (a bare repository's own,
 `x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex or OpenCode session's latest reasoning,
@@ -449,7 +453,7 @@ What survives what (`ptyd/src/handoff.rs` and `integrations/recovery.rs`):
 | Event | Running programs | How sessions come back |
 |---|---|---|
 | Restart in place (`rakumux daemon restart`, `rakumux --new-server`, the TUI's restart offer, SIGUSR2) | keep running (same pids) | nothing to do: the new image adopts the PTYs, screens, history, tokens and bindings; clients reconnect, a TUI in session mode goes back in |
-| Crash, `kill -9`, reboot, SIGTERM | end | the next daemon start revives every session listed in `~/.rakumux/running.json`, with its resume command |
+| Crash, `kill -9`, reboot, SIGTERM | end | the next daemon start revives every session listed in `~/.rakumux/running.json`, with its resume command (not a use: `last_active_at` stays) |
 | `rakumux daemon stop` (`daemon_shutdown`) | end | not revived (the user ended them); Enter revives one |
 
 The resume command (`SessionView.resume`, `ResumeSpec`) is kept current while a session runs: every
@@ -646,7 +650,8 @@ accidents; they don't stop a hostile process running as the same user.
   `audit_log(id, ts, scope_root, caller, method, target_session_id, decision, detail)`, pruned to
   30 days; `projects(path, added_at, last_used_at)` and a `pinned` column on `sessions_v2`;
   `session_places(session_id, path, git_json, last_at, edited)`, created when missing (a session's
-  places, replaced together, deleted with it).
+  places, replaced together, deleted with it); `session_last_message(session_id, at)`, created
+  when missing (`last_message_at`, saved once it moved on a minute, deleted with its session).
   `PRAGMA user_version = 3` (schema 2 is migrated in place, `projects` backfilled from session
   scopes); the 0.5.x `sessions` table is dropped on first open. Live
   state (terminal ids, session tokens) is in daemon memory only.

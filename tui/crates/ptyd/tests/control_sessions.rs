@@ -35,6 +35,62 @@ fn wait_status(h: &Harness, id: &SessionId, status: SessionStatus) {
     });
 }
 
+fn last_active_ms(h: &Harness, id: &SessionId) -> i64 {
+    h.db()
+        .query_row(
+            "SELECT last_active_at FROM sessions_v2 WHERE id = ?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn reviving_after_the_daemon_ended_unexpectedly_is_not_a_use() {
+    let mut h = Harness::new();
+    let s = h.create(Some("docker"));
+    let used = last_active_ms(&h, &s.id);
+    h.restart();
+    std::fs::write(
+        h.layout.home.join("running.json"),
+        format!("{{\"sessions\": [\"{}\"]}}", s.id),
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(h.control.revive_interrupted(), 1);
+    assert_eq!(h.get(&s.id).status, SessionStatus::Live);
+    assert_eq!(last_active_ms(&h, &s.id), used);
+
+    // A revive the user asks for is a use.
+    h.host.exit(&s.id, None);
+    wait_status(&h, &s.id, SessionStatus::Exited);
+    session(revive(&h, &s.id, false));
+    assert!(last_active_ms(&h, &s.id) > used);
+}
+
+#[test]
+fn the_last_message_is_kept_across_restarts_and_goes_with_its_session() {
+    let mut h = Harness::new();
+    let s = h.create(Some("agent"));
+    assert_eq!(h.get(&s.id).last_message_at, None);
+    h.db()
+        .execute(
+            "INSERT INTO session_last_message (session_id, at) VALUES (?1, ?2)",
+            rusqlite::params![s.id.as_str(), 1_792_630_501_000_i64],
+        )
+        .unwrap();
+    h.restart();
+    assert_eq!(h.get(&s.id).last_message_at, Some(1_792_630_501));
+    h.handle(&h.user, Request::SessionDelete { id: s.id.clone() });
+    let left: i64 = h
+        .db()
+        .query_row("SELECT COUNT(*) FROM session_last_message", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(left, 0);
+}
+
 #[test]
 fn create_builds_argv_env_cwd_and_startup_input() {
     let h = Harness::new();

@@ -63,6 +63,9 @@ const PLACES_CHECK_MS: i64 = 1_000;
 /// How much of it is read at once: a long one is read from its start over
 /// several checks.
 const PLACES_BUDGET: usize = 512 * 1024;
+/// How far a session's last message moves on before it's saved again: the
+/// view has it to the second, the registry to the minute.
+const LAST_MESSAGE_SAVE_MS: i64 = 60_000;
 /// A shell must sit at its prompt this long before the resume command is
 /// forgotten (programs killed during a reboot leave the prompt for a
 /// moment).
@@ -172,6 +175,9 @@ struct State {
     /// Where each session has worked (`SessionView::places`), as the
     /// registry holds it.
     places: Places,
+    /// When each session's agent conversation last had a message
+    /// (`SessionView::last_message_at`).
+    last_messages: HashMap<SessionId, LastMessage>,
     /// When each session last created sessions, within the past minute
     /// (`Limits::max_creates_per_minute`).
     recent_creates: HashMap<SessionId, Vec<Instant>>,
@@ -188,6 +194,13 @@ struct Binding {
     agent: String,
     conversation: String,
     seq: u64,
+}
+
+/// When a session's agent conversation last had a message, and the time
+/// last saved to the registry (Unix milliseconds).
+struct LastMessage {
+    at: i64,
+    saved: i64,
 }
 
 impl State {
@@ -234,6 +247,15 @@ impl Inner {
             crate::log_warn!("control: reading places: {error}");
             Default::default()
         });
+        let last_messages = registry
+            .last_messages()
+            .unwrap_or_else(|error| {
+                crate::log_warn!("control: reading last messages: {error}");
+                Default::default()
+            })
+            .into_iter()
+            .map(|(id, at)| (id, LastMessage { at, saved: at }))
+            .collect();
         Self {
             places_excluded: places::Excluded::of_this_machine(),
             store: ScrollbackStore::new(config.layout.clone()),
@@ -253,6 +275,7 @@ impl Inner {
                 views: HashMap::new(),
                 git: GitContexts::default(),
                 places: Places::new(saved_places),
+                last_messages,
             }),
             changed: Condvar::new(),
             events: EventBus::default(),
@@ -1127,6 +1150,7 @@ impl Inner {
         state.views.remove(&record.id);
         state.git.remove(&record.id);
         state.places.remove(&record.id);
+        state.last_messages.remove(&record.id);
         self.save_running(state);
         if let Err(error) = self.store.remove(&record.id) {
             crate::log_warn!("control: delete {}: saved output: {error}", record.id);
@@ -1150,7 +1174,7 @@ impl Inner {
         let id = request.id.clone();
         let record = self.target(&state, caller, Op::Revive, &id)?;
         let detail = request.resume.then(|| "resume".to_string());
-        let result = self.revive_session(&mut state, caller, &record, request);
+        let result = self.revive_session(&mut state, caller, &record, request, true);
         self.audit_outcome(
             &state,
             caller,
@@ -1169,12 +1193,15 @@ impl Inner {
     /// launch spec. With `resume` and a stored `ResumeSpec`, the resume
     /// command replaces whichever of the launch command or a startup command
     /// starts the same program; other startup commands still run first.
+    /// `used`: someone asked for it, so the session was just used; the
+    /// daemon's own revive after it ended unexpectedly isn't a use.
     fn revive_session(
         &self,
         state: &mut State,
         caller: &Caller,
         record: &SessionRecord,
         request: ReviveSession,
+        used: bool,
     ) -> Result<(), ApiError> {
         if self.runtime(state, record).status == SessionStatus::Live {
             return Err(invalid(format!("session {} is already running", record.id)));
@@ -1224,7 +1251,7 @@ impl Inner {
             None => env::login_shell(&base_env),
         };
         self.start_terminal(state, record, argv, base_env, cols, rows, resume)?;
-        registry(&state.registry)?.mark_revived(&record.id, now_ms())?;
+        registry(&state.registry)?.mark_revived(&record.id, used.then(now_ms))?;
         self.refresh(state, &record.id);
         self.changed.notify_all();
         Ok(())
@@ -2089,6 +2116,7 @@ impl Inner {
             }
             _ => None,
         };
+        let last_at = follower.as_ref().and_then(|follower| follower.last_at());
         let mut state = self.lock();
         if let Some(live) = state
             .live
@@ -2107,7 +2135,36 @@ impl Inner {
                 .filter(|turn| turn.prompt.is_some() || turn.total > 0);
             live.output = follower;
         }
+        if let Some(at) = last_at.filter(|_| state.is_current(session_id, terminal)) {
+            self.note_last_message(&mut state, session_id, at);
+        }
         self.capture_reply(&mut state, session_id, now);
+    }
+
+    /// `id`'s agent conversation had a message at `at`: kept when it's the
+    /// newest, and saved once it moved on [`LAST_MESSAGE_SAVE_MS`] since it
+    /// last was (the caller refreshes the view).
+    fn note_last_message(&self, state: &mut State, id: &SessionId, at: i64) {
+        let last = state
+            .last_messages
+            .entry(id.clone())
+            .or_insert(LastMessage {
+                at: i64::MIN,
+                saved: i64::MIN,
+            });
+        if at <= last.at {
+            return;
+        }
+        last.at = at;
+        if at.saturating_sub(last.saved) < LAST_MESSAGE_SAVE_MS {
+            return;
+        }
+        last.saved = at;
+        let saved = registry(&state.registry)
+            .and_then(|registry| registry.set_last_message(id, at).map_err(ApiError::from));
+        if let Err(error) = saved {
+            crate::log_warn!("control: last message of {id}: {error}");
+        }
     }
 
     /// Read on in the running agent's conversation for where it works (a
@@ -2373,7 +2430,7 @@ impl Inner {
                 rows: 0,
                 resume: true,
             };
-            let result = self.revive_session(&mut state, &caller, &record, request);
+            let result = self.revive_session(&mut state, &caller, &record, request, false);
             self.audit_outcome(
                 &state,
                 &caller,
@@ -2696,6 +2753,10 @@ impl Inner {
             private: record.private,
             created_at: record.created_at_ms / 1000,
             last_active_at: record.last_active_at_ms / 1000,
+            last_message_at: state
+                .last_messages
+                .get(&record.id)
+                .map(|last| last.at / 1000),
             terminal: runtime.view,
         }
     }

@@ -290,6 +290,7 @@ mod tests {
             private: false,
             created_at: 0,
             last_active_at,
+            last_message_at: None,
             terminal: None,
             pinned: false,
             git: None,

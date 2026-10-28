@@ -224,6 +224,7 @@ impl FakeControl {
             resume: None,
             created_at: 0,
             last_active_at: 0,
+            last_message_at: None,
             terminal: info.map(|i| TerminalView {
                 pid: i.pid,
                 foreground_process: None,

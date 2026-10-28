@@ -57,6 +57,12 @@ pub fn relative_time(now: i64, then: i64) -> String {
     }
 }
 
+/// When a session last had activity (Unix seconds), for its row's age: its
+/// agent conversation's last prompt or message, else when it was last used.
+pub fn last_activity(session: &SessionView) -> i64 {
+    session.last_message_at.unwrap_or(session.last_active_at)
+}
+
 /// Busy spinner; static live/attention/ended markers otherwise.
 pub fn status_glyph(session: &SessionView) -> (&'static str, Style) {
     let p = theme::palette();
@@ -382,6 +388,17 @@ mod tests {
         assert_eq!(relative_time(1_000_000, 1_000_000 - 2 * 86_400), "2d");
         assert_eq!(relative_time(10_000_000, 10_000_000 - 5 * 604_800), "5w");
         assert_eq!(relative_time(0, 50), "now");
+    }
+
+    #[test]
+    fn a_sessions_activity_is_its_agents_last_message_else_its_last_use() {
+        let mut session = view("A", "docker", 1_000);
+        assert_eq!(last_activity(&session), 1_000);
+        // Gone into (or revived) after the agent's last message: still the message.
+        session.last_message_at = Some(400);
+        assert_eq!(last_activity(&session), 400);
+        session.last_message_at = Some(1_500);
+        assert_eq!(last_activity(&session), 1_500);
     }
 
     fn git(branch: Option<&str>, detached: Option<&str>, worktree: Option<&str>) -> GitInfo {

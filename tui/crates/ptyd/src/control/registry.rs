@@ -27,8 +27,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// `PRAGMA user_version` of the current schema: 2 introduced `sessions_v2`
-/// (0.6), 3 added projects and pinning. Tables added since (`session_places`)
-/// are created when missing, so older daemons still open the registry.
+/// (0.6), 3 added projects and pinning. Tables added since (`session_places`,
+/// `session_last_message`) are created when missing, so older daemons still
+/// open the registry.
 pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 /// Audit entries older than this are pruned when the registry opens.
@@ -93,6 +94,10 @@ CREATE TABLE IF NOT EXISTS session_places (
   last_at INTEGER NOT NULL,
   edited INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (session_id, path)
+);
+CREATE TABLE IF NOT EXISTS session_last_message (
+  session_id TEXT PRIMARY KEY,
+  at INTEGER NOT NULL
 );
 ";
 
@@ -544,15 +549,19 @@ impl Registry {
         Ok(())
     }
 
-    /// A new terminal started for the session: clear the ended state.
-    pub fn mark_revived(&self, id: &SessionId, now_ms: i64) -> Result<()> {
+    /// A new terminal started for the session: clear the ended state. A
+    /// revive someone asked for uses the session (and its project) at
+    /// `used_at_ms`; the daemon's own, after it ended unexpectedly, doesn't.
+    pub fn mark_revived(&self, id: &SessionId, used_at_ms: Option<i64>) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
-            "UPDATE sessions_v2 SET exit_code = NULL, ended_at = NULL, last_active_at = ?2 \
-             WHERE id = ?1",
-            params![id.as_str(), now_ms],
+            "UPDATE sessions_v2 SET exit_code = NULL, ended_at = NULL, \
+             last_active_at = COALESCE(?2, last_active_at) WHERE id = ?1",
+            params![id.as_str(), used_at_ms],
         )?;
-        use_project_of(&tx, id, now_ms)?;
+        if let Some(used_at_ms) = used_at_ms {
+            use_project_of(&tx, id, used_at_ms)?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -610,8 +619,38 @@ impl Registry {
             "DELETE FROM session_places WHERE session_id = ?1",
             [id.as_str()],
         )?;
+        tx.execute(
+            "DELETE FROM session_last_message WHERE session_id = ?1",
+            [id.as_str()],
+        )?;
         tx.commit()?;
         Ok(orphans)
+    }
+
+    /// When each session's agent conversation last had a message
+    /// (`SessionView::last_message_at`), in Unix milliseconds.
+    pub fn last_messages(&self) -> Result<HashMap<SessionId, i64>> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT session_id, at FROM session_last_message")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                SessionId::from_string(row.get::<_, String>(0)?),
+                row.get(1)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Session `id`'s agent conversation had a message at `at_ms`; an
+    /// earlier time than the one saved is ignored.
+    pub fn set_last_message(&self, id: &SessionId, at_ms: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO session_last_message (session_id, at) VALUES (?1, ?2) \
+             ON CONFLICT(session_id) DO UPDATE SET at = MAX(at, excluded.at)",
+            params![id.as_str(), at_ms],
+        )?;
+        Ok(())
     }
 
     /// Every session's places (`SessionView::places`), in no order. Rows
@@ -1141,6 +1180,41 @@ mod tests {
     }
 
     #[test]
+    fn a_revive_nobody_asked_for_is_not_a_use() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = open(&dir);
+        reg.insert(&record("A", "/s", "a", 10)).unwrap();
+        let id = SessionId::from_string("A");
+        reg.mark_exited(&id, Some(1), 20).unwrap();
+        reg.mark_revived(&id, None).unwrap();
+        let revived = reg.get(&id).unwrap().unwrap();
+        assert_eq!((revived.ended_at_ms, revived.exit_code), (None, None));
+        assert_eq!(revived.last_active_at_ms, 10);
+        let scope = ScopeRoot::from_canonical("/s".into());
+        assert_eq!(
+            reg.project(&scope).unwrap().unwrap().last_used_at_ms,
+            Some(10)
+        );
+        reg.mark_revived(&id, Some(40)).unwrap();
+        assert_eq!(reg.get(&id).unwrap().unwrap().last_active_at_ms, 40);
+    }
+
+    #[test]
+    fn the_last_message_only_moves_forward_and_goes_with_its_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = open(&dir);
+        reg.insert(&record("A", "/s", "a", 1)).unwrap();
+        let id = SessionId::from_string("A");
+        reg.set_last_message(&id, 50).unwrap();
+        reg.set_last_message(&id, 20).unwrap();
+        assert_eq!(reg.last_messages().unwrap()[&id], 50);
+        reg.set_last_message(&id, 70).unwrap();
+        assert_eq!(reg.last_messages().unwrap()[&id], 70);
+        reg.delete(&id).unwrap();
+        assert!(reg.last_messages().unwrap().is_empty());
+    }
+
+    #[test]
     fn renaming_clears_auto_named() {
         let dir = tempfile::tempdir().unwrap();
         let reg = open(&dir);
@@ -1312,7 +1386,8 @@ mod tests {
             })
         );
         reg.touch(&SessionId::from_string("A"), 30).unwrap();
-        reg.mark_revived(&SessionId::from_string("B"), 25).unwrap();
+        reg.mark_revived(&SessionId::from_string("B"), Some(25))
+            .unwrap();
         assert_eq!(reg.project(&s).unwrap().unwrap().last_used_at_ms, Some(30));
         assert_eq!(
             reg.projects()
