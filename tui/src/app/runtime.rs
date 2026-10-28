@@ -173,6 +173,11 @@ pub enum AppEvent {
         generation: u64,
         result: Result<rakumux_sensagent::feed::FeedPage, String>,
     },
+    /// A sample for Top (`generation`: the opening it was asked for).
+    Resources {
+        generation: u64,
+        result: Result<session_core::api::ResourceSample, ApiError>,
+    },
     /// A background job panicked or couldn't run.
     JobFailed(String),
 }

@@ -172,6 +172,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             leave(app);
             app.toggle_terminal_panel();
         }
+        KeyAction::Resources => app.open_top(),
         KeyAction::Reload => app.refresh(),
         KeyAction::Restart => app.request_restart(),
         KeyAction::RestartServer => app.request_server_restart(),
@@ -218,6 +219,7 @@ fn open_item(app: &mut App, item: SettingsItem) {
             app.mode = AppMode::Normal;
             app.show_terminal_panel();
         }
+        SettingsItem::Top => app.open_top(),
         SettingsItem::CycleInSessions => {
             let on = !app.settings.sessions.cycle_keys_in_session;
             app.settings.sessions.cycle_keys_in_session = on;

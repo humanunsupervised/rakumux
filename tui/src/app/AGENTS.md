@@ -140,6 +140,15 @@ new-session flow, and code boundaries.
   hidden (`App::toggle_list`: `b`, Settings, the list's `« Hide list` row, `Hit::HideList`;
   `PaneSizes::list_hidden`, this window's only): `Screen::rail` (`layout::RAIL_COLS`) replaces
   the list and divider, and a click on it (`Hit::ShowList`) shows the list again.
+- `top.rs`: Top (`AppMode::Top(TopView)`, `t` or Settings → Top; drawn by
+  `components/top.rs`). Asks `SessionApi::resources` off the UI thread (`AppEvent::Resources`,
+  checked against the opening's generation) on ticks about every second, the second sample half a
+  second after the first; keeps only the last two samples, for rates (`Usage`: % of one CPU,
+  memory, bytes a second), and forgets them on close. `TopView::rows` is pure: this window, the
+  server, other windows, other clients, then sessions sorted by `TopSort` with their process
+  trees (`tree_order`), folded per session; `top_rows` names sessions from the list (name, then
+  `AppKey` and folder). The selection is kept by `RowKey` as rows change; Enter `go_into`s the
+  row's session.
 - `grid.rs` and `grid/tests.rs`: Grid's visible-page observer previews, generation checks,
   cancellation and bounded output mailboxes. `layout/grid.rs` computes up to six cards; the
   folder/text filters and pinned/user order come from `SessionList::visible`. Only the visible

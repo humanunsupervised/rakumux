@@ -48,6 +48,7 @@ mod session_list;
 mod sessions;
 pub mod terminal_panel;
 mod text_input;
+pub mod top;
 pub mod types;
 mod upgrade;
 
@@ -292,6 +293,8 @@ pub struct App {
     /// The account was asked for and hasn't answered; when to ask again.
     account_checking: bool,
     account_check_at: Option<Instant>,
+    /// Each opening of Top: a sample asked for before it closed is dropped.
+    top_generation: u64,
     /// When to ask where a sign-in is up to; a question is outstanding.
     sign_in_poll_at: Option<Instant>,
     sign_in_polling: bool,
@@ -433,6 +436,7 @@ impl App {
             account: AccountStatus::Unknown,
             account_checking: false,
             account_check_at: None,
+            top_generation: 0,
             sign_in_poll_at: None,
             sign_in_polling: false,
             statuses_at: None,
@@ -924,6 +928,11 @@ impl App {
                     disabled: !signed_in,
                 };
             }
+            SettingsItem::Top => (
+                "Top",
+                "CPU, memory, network · t".into(),
+                "What this machine, this window, the Rakumux server and every running session's processes use now: CPU, memory and network traffic, about every second. Nothing is recorded.",
+            ),
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
                 if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
@@ -973,6 +982,7 @@ impl App {
                 AppMode::Upgrade(d) => d.checking || d.installing,
                 AppMode::Pairing(d) => d.busy(),
                 AppMode::Account(d) => d.busy(),
+                AppMode::Top(d) => d.waiting(),
                 _ => false,
             }
     }
@@ -1000,6 +1010,7 @@ impl App {
         }
         self.account_timers(now);
         self.feed_timers(now);
+        self.top_timers(now);
         changed
     }
 
@@ -1085,6 +1096,7 @@ impl App {
             AppEvent::PhonePairing(result) => self.on_phone_pairing(result),
             AppEvent::PhoneOff(result) => self.on_phone_off(result),
             AppEvent::AccountChecked(result) => self.on_account_checked(result),
+            AppEvent::Resources { generation, result } => self.on_resources(generation, result),
             AppEvent::SignIn(result) => self.on_sign_in(result),
             AppEvent::SignInCancelled(result) => {
                 if let Err(error) = result {
@@ -1444,7 +1456,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 11] = [
+const DAEMON_FEATURES: [(&str, &str); 12] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1477,6 +1489,7 @@ const DAEMON_FEATURES: [(&str, &str); 11] = [
         session_core::api::CAPABILITY_PLACES,
         "where each session has worked",
     ),
+    (session_core::api::CAPABILITY_RESOURCES, "Top"),
 ];
 
 /// The daemon restarts in place, keeping the sessions (`daemon.restart`).

@@ -1,5 +1,7 @@
 //! Process inspection for terminals: the PTY's foreground process and the
-//! working directory of a process. Linux uses /proc; macOS uses libproc.
+//! working directory of a process; and for `resource_usage`, the process
+//! table, the machine's counters and TCP traffic. Linux uses /proc (and
+//! socket diagnostics, `tcp`); macOS uses libproc and Mach.
 //!
 //! `ProcessInfo::name` is the executable name as the user would recognise it
 //! (`claude`, `node`, `bash`): `comm` on Linux, `argv[0]`'s basename on
@@ -8,12 +10,16 @@
 //! (`node …/codex`) is left to `detect`, which gets the full `cmdline`.
 
 use crate::host::ProcessInfo;
+use session_core::api::MachineUsage;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "linux")]
+mod tcp;
 
 #[cfg(target_os = "linux")]
 use linux as platform;
@@ -85,8 +91,183 @@ pub fn self_rss_bytes() -> Option<u64> {
     }
 }
 
+/// A process's line in the process table: its parent, and the CPU time and
+/// resident memory it uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcStat {
+    pub pid: u32,
+    pub ppid: u32,
+    /// User and system CPU time of all its threads so far, in ms.
+    pub cpu_ms: u64,
+    pub rss_bytes: u64,
+}
+
+/// Every process the platform lets this user inspect (on Linux every
+/// process; on macOS this user's own). Empty where the platform doesn't say.
+pub fn process_table() -> Vec<ProcStat> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        platform::process_table()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        Vec::new()
+    }
+}
+
+/// The machine's CPU, memory and network counters.
+pub fn machine_usage() -> MachineUsage {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        platform::machine_usage()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        MachineUsage {
+            cpus: logical_cpus(),
+            ..MachineUsage::default()
+        }
+    }
+}
+
+/// Bytes received and sent over the TCP connections each of `pids` holds
+/// open, to anywhere but loopback; a connection two of them hold counts for
+/// the first. Every pid has an entry, `(0, 0)` without connections. None
+/// where the platform doesn't say (only Linux does).
+pub fn tcp_traffic(pids: &[u32]) -> Option<HashMap<u32, (u64, u64)>> {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: geteuid has no preconditions.
+        let sockets = tcp::sockets(unsafe { libc::geteuid() })?;
+        let mut counted = std::collections::HashSet::new();
+        let mut traffic = HashMap::with_capacity(pids.len());
+        for pid in pids {
+            let entry: &mut (u64, u64) = traffic.entry(*pid).or_default();
+            for inode in linux::socket_inodes(*pid) {
+                let Some(socket) = sockets.get(&inode) else {
+                    continue;
+                };
+                if counted.insert(inode) {
+                    entry.0 = entry.0.saturating_add(socket.received);
+                    entry.1 = entry.1.saturating_add(socket.sent);
+                }
+            }
+        }
+        Some(traffic)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pids;
+        None
+    }
+}
+
+/// Logical CPUs, at least one.
+fn logical_cpus() -> u32 {
+    std::thread::available_parallelism()
+        .ok()
+        .and_then(|n| u32::try_from(n.get()).ok())
+        .unwrap_or(1)
+}
+
 // Parsing helpers shared by the platform modules. They are pure so both
 // platforms' formats are unit-tested on any host.
+
+/// Parse `/proc/<pid>/stat`: the parent is the 4th field, CPU time the
+/// 14th and 15th (in clock ticks), resident pages the 24th. The name (2nd)
+/// is in parentheses and may hold spaces and parentheses itself, so the
+/// fields after it are counted from its last `)`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_proc_stat(stat: &str, ticks_per_sec: u64, page_size: u64) -> Option<ProcStat> {
+    let (head, rest) = stat.rsplit_once(')')?;
+    let pid: u32 = head.split_once('(')?.0.trim().parse().ok()?;
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    // `fields[0]` is the 3rd field (state).
+    let field = |n: usize| -> Option<u64> { fields.get(n - 3)?.parse().ok() };
+    let ppid = u32::try_from(field(4)?).ok()?;
+    let ticks = field(14)?.saturating_add(field(15)?);
+    Some(ProcStat {
+        pid,
+        ppid,
+        cpu_ms: ticks.saturating_mul(1000) / ticks_per_sec.max(1),
+        rss_bytes: field(24)?.saturating_mul(page_size),
+    })
+}
+
+/// Busy and total CPU time in ms from `/proc/stat`'s first (`cpu`) line:
+/// user, nice, system, idle, iowait, irq, softirq and steal ticks (guest
+/// time is already in user and nice). Idle and iowait are not busy.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_cpu_times(stat: &str, ticks_per_sec: u64) -> Option<(u64, u64)> {
+    let line = stat.lines().next()?;
+    let mut words = line.split_whitespace();
+    if words.next()? != "cpu" {
+        return None;
+    }
+    let ticks: Vec<u64> = words
+        .take(8)
+        .map(|w| w.parse().ok())
+        .collect::<Option<_>>()?;
+    if ticks.len() < 4 {
+        return None;
+    }
+    let total: u64 = ticks.iter().sum();
+    let idle = ticks[3] + ticks.get(4).copied().unwrap_or(0);
+    let ms = |t: u64| t.saturating_mul(1000) / ticks_per_sec.max(1);
+    Some((ms(total.saturating_sub(idle)), ms(total)))
+}
+
+/// `MemTotal` and `MemAvailable` from `/proc/meminfo`, in bytes.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_meminfo(meminfo: &str) -> (Option<u64>, Option<u64>) {
+    let mut total = None;
+    let mut available = None;
+    for line in meminfo.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let slot = match key {
+            "MemTotal" => &mut total,
+            "MemAvailable" => &mut available,
+            _ => continue,
+        };
+        let mut words = value.split_whitespace();
+        let amount: Option<u64> = words.next().and_then(|n| n.parse().ok());
+        let unit = match words.next() {
+            Some("kB") => 1024,
+            _ => 1,
+        };
+        *slot = amount.map(|n| n.saturating_mul(unit));
+    }
+    (total, available)
+}
+
+/// Bytes received and sent on every interface but loopback, from
+/// `/proc/net/dev` (`name: rx_bytes … (8 receive fields) tx_bytes …`).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_net_dev(dev: &str) -> Option<(u64, u64)> {
+    let mut found = None;
+    for line in dev.lines() {
+        let Some((name, counters)) = line.split_once(':') else {
+            continue;
+        };
+        if name.trim() == "lo" {
+            continue;
+        }
+        let fields: Vec<u64> = counters
+            .split_whitespace()
+            .map(|w| w.parse().ok())
+            .collect::<Option<_>>()
+            .unwrap_or_default();
+        let (Some(rx), Some(tx)) = (fields.first(), fields.get(8)) else {
+            continue;
+        };
+        let (all_rx, all_tx) = found.get_or_insert((0u64, 0u64));
+        *all_rx = all_rx.saturating_add(*rx);
+        *all_tx = all_tx.saturating_add(*tx);
+    }
+    found
+}
 
 /// Split a NUL-separated argument block (`/proc/<pid>/cmdline`, the argv
 /// area of `KERN_PROCARGS2`). Trailing empty strings are padding left when
@@ -289,6 +470,58 @@ mod tests {
         let mut buf = 1i32.to_ne_bytes().to_vec();
         buf.extend_from_slice(b"/bin/x");
         assert_eq!(parse_procargs2(&buf), None);
+    }
+
+    #[test]
+    fn proc_stat_fields_are_counted_after_the_name() {
+        // A name with spaces and a parenthesis, as `comm` allows.
+        let stat = "4242 (node (x) y) S 4200 4242 4200 34816 4242 4194304 1000 0 0 0 \
+                    250 150 0 0 20 0 11 0 12345 1000000000 3000 18446744073709551615";
+        assert_eq!(
+            parse_proc_stat(stat, 100, 4096),
+            Some(ProcStat {
+                pid: 4242,
+                ppid: 4200,
+                cpu_ms: 4000,
+                rss_bytes: 3000 * 4096,
+            })
+        );
+        assert_eq!(parse_proc_stat("4242 (sh) S 1", 100, 4096), None);
+        assert_eq!(parse_proc_stat("garbage", 100, 4096), None);
+    }
+
+    #[test]
+    fn cpu_times_leave_idle_and_iowait_out_of_busy() {
+        let stat = "cpu  100 20 30 800 50 0 0 0 7 0\ncpu0 1 2 3 4 5 6 7 8 9 10\n";
+        // Total 1000 ticks, idle 850: busy 150 ticks.
+        assert_eq!(parse_cpu_times(stat, 100), Some((1500, 10000)));
+        assert_eq!(parse_cpu_times("cpu0 1 2 3 4\n", 100), None);
+        assert_eq!(parse_cpu_times("", 100), None);
+    }
+
+    #[test]
+    fn meminfo_reads_total_and_available() {
+        let meminfo =
+            "MemTotal:       32000000 kB\nMemFree:  100 kB\nMemAvailable:   16000000 kB\n";
+        assert_eq!(
+            parse_meminfo(meminfo),
+            (Some(32_000_000 * 1024), Some(16_000_000 * 1024))
+        );
+        assert_eq!(parse_meminfo("MemTotal: 5 kB\n"), (Some(5 * 1024), None));
+    }
+
+    #[test]
+    fn net_dev_sums_every_interface_but_loopback() {
+        let dev = "Inter-|   Receive                                                |  Transmit\n \
+                   face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets\n    \
+                   lo: 9999 10 0 0 0 0 0 0 9999 10 0 0 0 0 0 0\n  \
+                   eth0: 1000 10 0 0 0 0 0 0 200 5 0 0 0 0 0 0\n\
+                   wlan0: 30 1 0 0 0 0 0 0 4 1 0 0 0 0 0 0\n";
+        assert_eq!(parse_net_dev(dev), Some((1030, 204)));
+        assert_eq!(
+            parse_net_dev("    lo: 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0\n"),
+            None
+        );
     }
 
     #[test]

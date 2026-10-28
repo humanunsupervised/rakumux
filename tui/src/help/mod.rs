@@ -242,6 +242,9 @@ pub enum KeyAction {
     HideList,
     /// Reveal/focus the independent shell below the detail pane.
     TerminalPanel,
+    /// `t`: Top, what this machine, Rakumux and every session's processes
+    /// use now.
+    Resources,
     Help,
     Settings,
     /// Sign in to the Rakumux account, or see who's signed in.
@@ -262,7 +265,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 46] = [
+    pub const ALL: [KeyAction; 47] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -299,6 +302,7 @@ impl KeyAction {
         KeyAction::CycleLayout,
         KeyAction::HideList,
         KeyAction::TerminalPanel,
+        KeyAction::Resources,
         KeyAction::Help,
         KeyAction::Settings,
         KeyAction::Account,
@@ -349,7 +353,8 @@ impl KeyAction {
             | KeyAction::Filter
             | KeyAction::CycleLayout
             | KeyAction::HideList
-            | KeyAction::TerminalPanel => "Sessions and folders",
+            | KeyAction::TerminalPanel
+            | KeyAction::Resources => "Sessions and folders",
             KeyAction::Help
             | KeyAction::Settings
             | KeyAction::Account
@@ -401,6 +406,7 @@ impl KeyAction {
             KeyAction::CycleLayout => "Cycle layout (Master detail, Grid, Tabs)",
             KeyAction::HideList => "Hide or show the session list",
             KeyAction::TerminalPanel => "Terminal panel (show, focus or hide)",
+            KeyAction::Resources => "Top: CPU, memory and network",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
             KeyAction::Account => "Sign in, or your account",
@@ -462,6 +468,7 @@ impl KeyAction {
             KeyAction::CycleLayout => plain(&["v"]),
             KeyAction::HideList => plain(&["b"]),
             KeyAction::TerminalPanel => plain(&["T"]),
+            KeyAction::Resources => plain(&["t"]),
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
             KeyAction::Account => plain(&["a"]),
@@ -591,6 +598,13 @@ impl KeyAction {
                  sessions; drag the divider to resize the split."
                     .into()
             }
+            KeyAction::Resources => "This window, the Rakumux server, its other clients and \
+                 every running session, each session's processes under it: CPU (100% is one \
+                 CPU), memory and network, about every second. s sorts the sessions, ←/→ fold \
+                 a session's processes, Enter goes into it. Network counts each process's TCP \
+                 connections to other machines (Linux; the machine's total everywhere). Nothing \
+                 is recorded."
+                .into(),
             KeyAction::Account => "Signed out, it asks for a sign-in code to approve in any \
                  browser (the footer's Sign in does too); signed in, it shows the account and \
                  whether AI session titles are on."
@@ -1612,6 +1626,16 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
          or session-list entry is created. Exit closes the pane and releases its terminal; \
          closing or reloading this UI ends the temporary shell. A daemon restart in place \
          preserves it, reconnecting read-only until refocused.",
+    );
+    doc.heading("Top");
+    doc.text(
+        "t in Rakumux mode, or Settings, Top, shows what this machine and Rakumux use now: \
+         this window, the server, its other windows and clients, then every running session \
+         with its processes under it (the shell, the agent and what it started). CPU is a \
+         percentage of one CPU, memory is resident memory, network what each process's TCP \
+         connections carry to other machines (Linux; elsewhere only the machine's total). It \
+         updates about every second and records nothing. s sorts the sessions by memory, \
+         CPU, network or name; ←/→ fold a session's processes; Enter goes into it.",
     );
     doc.heading("Folders");
     doc.text(

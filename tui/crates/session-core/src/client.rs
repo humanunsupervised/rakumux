@@ -173,6 +173,11 @@ pub trait SessionApi: Send + Sync {
         let _ = after;
         Err(unsupported("reading agent replies"))
     }
+    /// What the machine, the daemon, its clients and every live session's
+    /// processes use now (user only, capability `resources`).
+    fn resources(&self) -> Result<crate::api::ResourceSample> {
+        Err(unsupported("reading resource use"))
+    }
 }
 
 fn unsupported(what: &str) -> ApiError {
@@ -582,6 +587,13 @@ impl SessionApi for Client {
     fn status(&self) -> Result<DaemonStatusInfo> {
         match self.request(&Request::DaemonStatus)? {
             Response::Status(info) => Ok(info),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn resources(&self) -> Result<crate::api::ResourceSample> {
+        match self.request(&Request::ResourceUsage)? {
+            Response::Resources { resources } => Ok(resources),
             other => Err(unexpected(&other)),
         }
     }
@@ -1073,6 +1085,7 @@ fn is_idempotent(request: &Request) -> bool {
             | Request::SessionTranscript { .. }
             | Request::SessionTouch { .. }
             | Request::DaemonStatus
+            | Request::ResourceUsage
     )
 }
 
@@ -1740,6 +1753,7 @@ mod tests {
                     rss_bytes: None,
                 }),
                 Request::SessionPin { .. }
+                | Request::ResourceUsage
                 | Request::TerminalOpen(_)
                 | Request::TerminalAttach(_)
                 | Request::SessionBind { .. }

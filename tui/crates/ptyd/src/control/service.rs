@@ -508,6 +508,7 @@ impl Inner {
             | Request::TerminalAttach(_)
             | Request::Subscribe(_)
             | Request::DaemonStatus
+            | Request::ResourceUsage
             | Request::DaemonShutdown
             | Request::DaemonRestart { .. } => Err(invalid(
                 "this request is handled by the connection, not the control layer",

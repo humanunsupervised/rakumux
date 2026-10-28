@@ -261,6 +261,11 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max_bytes: Option<u32>,
     },
+    /// User only (capability `resources`): what the machine, the daemon,
+    /// its clients' processes and every live session's processes use now.
+    /// Counters are cumulative, so rates come from two answers. Answered
+    /// with `Resources`.
+    ResourceUsage,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -566,6 +571,9 @@ pub const CAPABILITY_SUBMIT_QUIET: &str = "session.submit.quiet";
 /// process group took the foreground after the text.
 pub const CAPABILITY_SUBMIT_EXPECT: &str = "session.submit.expect";
 
+/// `resource_usage`: what the machine and Rakumux's processes use.
+pub const CAPABILITY_RESOURCES: &str = "resources";
+
 /// How much of an agent's log `session_transcript` reads by default, in bytes.
 pub const TRANSCRIPT_BYTES: u32 = 512 * 1024;
 /// The most it reads at once.
@@ -720,6 +728,10 @@ pub enum Response {
     /// First message of an event stream.
     Subscribed,
     Status(DaemonStatusInfo),
+    /// The answer to `resource_usage`.
+    Resources {
+        resources: ResourceSample,
+    },
     /// Answer to `reply_list`.
     Replies {
         replies: Vec<AgentReply>,
@@ -799,6 +811,103 @@ pub struct DaemonStatusInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rss_bytes: Option<u64>,
 }
+
+/// What the machine and Rakumux's processes use at one moment
+/// (`resource_usage`). Counters are cumulative since the process (or the
+/// machine) started: a client takes two samples and divides the
+/// differences by the time between them (`at_ms`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceSample {
+    /// Unix milliseconds when it was taken.
+    pub at_ms: i64,
+    pub machine: MachineUsage,
+    /// The daemon's own process.
+    pub daemon: ProcessUsage,
+    /// The daemon's connected clients, one per process however many
+    /// connections it holds (TUIs, `rakumux-api`, the account service, CLI
+    /// calls), oldest connection first. A client running inside a session
+    /// is listed under that session instead.
+    #[serde(default)]
+    pub clients: Vec<ClientUsage>,
+    /// Every live session's processes.
+    #[serde(default)]
+    pub sessions: Vec<SessionUsage>,
+}
+
+/// The whole machine's use. Fields are absent where the platform doesn't
+/// say.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineUsage {
+    /// Logical CPUs.
+    pub cpus: u32,
+    /// CPU time every CPU spent busy since boot, in ms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_busy_ms: Option<u64>,
+    /// CPU time every CPU spent at all (busy or idle) since boot, in ms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_total_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_total_bytes: Option<u64>,
+    /// Memory programs could still take without swapping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_available_bytes: Option<u64>,
+    /// Bytes received on every network interface but loopback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_rx_bytes: Option<u64>,
+    /// Bytes sent on every network interface but loopback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_tx_bytes: Option<u64>,
+}
+
+/// A client of the daemon in [`ResourceSample::clients`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientUsage {
+    /// The client name from its hello (`tui`, `api`, `cli`, …).
+    pub client: String,
+    /// Its open connections to the daemon.
+    pub connections: u32,
+    pub process: ProcessUsage,
+}
+
+/// A live session's processes in [`ResourceSample::sessions`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionUsage {
+    pub id: SessionId,
+    /// The program its terminal started, then each process's children
+    /// after it, depth first; each but the first names its `parent`.
+    #[serde(default)]
+    pub processes: Vec<ProcessUsage>,
+}
+
+/// One process's use so far.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessUsage {
+    pub pid: u32,
+    /// Its parent, when that is listed with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<u32>,
+    /// Executable name, as `TerminalView::foreground_process` gives it.
+    pub name: String,
+    /// Its command line, arguments joined by spaces and cut at
+    /// [`MAX_COMMAND_CHARS`] characters.
+    #[serde(default)]
+    pub command: String,
+    /// CPU time all its threads used (user and system), in ms.
+    pub cpu_ms: u64,
+    /// Resident memory.
+    pub rss_bytes: u64,
+    /// Bytes received over the TCP connections it holds open now, to
+    /// anywhere but loopback (Linux; absent where the platform doesn't say).
+    /// A connection two processes share counts for the first listed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_rx_bytes: Option<u64>,
+    /// Bytes sent likewise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_tx_bytes: Option<u64>,
+}
+
+/// The longest [`ProcessUsage::command`], in characters.
+pub const MAX_COMMAND_CHARS: usize = 200;
 
 // ---------------------------------------------------------------- errors
 

@@ -9,8 +9,8 @@
 //!    closed too.
 //! 3. Requests are answered in turn. `attach` and `subscribe` turn the
 //!    connection into a stream for the rest of its life. `daemon_status`,
-//!    `daemon_shutdown` and `daemon_restart` are handled here; everything
-//!    else goes to `Control::handle`.
+//!    `resource_usage`, `daemon_shutdown` and `daemon_restart` are handled
+//!    here; everything else goes to `Control::handle`.
 //!
 //! `daemon_restart` (and SIGUSR2, with the daemon's own executable)
 //! restarts in place: see `handoff`.
@@ -24,12 +24,13 @@ use crate::control_api::{Caller, Control};
 use crate::handoff::{self, HandoffState};
 use crate::host::{AttachControl, HostAttachment, HostError, TerminalHost, TerminalState};
 use crate::registration::{self, Claim, ClaimError};
+use crate::resources::{self, ClientProcess, SessionRoot};
 use crate::terminal::{Host, HostConfig};
 use crate::{log_debug, log_error, log_info, log_warn};
 use base64::Engine;
 use session_core::api::{
-    ApiError, AttachRequest, Attached, DaemonStatusInfo, ErrorCode, HelloOk, Request, Response,
-    StreamCommand, SubscribeRequest,
+    ApiError, AttachRequest, Attached, DaemonStatusInfo, ErrorCode, HelloOk, Request,
+    ResourceSample, Response, StreamCommand, SubscribeRequest,
 };
 use session_core::client::AttachEvent;
 use session_core::frame::{self, Frame};
@@ -66,6 +67,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_SUBMIT_QUIET,
     session_core::api::CAPABILITY_SUBMIT_EXPECT,
     session_core::api::CAPABILITY_PLACES,
+    session_core::api::CAPABILITY_RESOURCES,
     "attach",
     "subscribe",
     "list",
@@ -124,6 +126,7 @@ const KNOWN_OPS: &[&str] = &[
     "attach",
     "subscribe",
     "daemon_status",
+    "resource_usage",
     "daemon_shutdown",
     "daemon_restart",
     "reply_capture",
@@ -631,6 +634,9 @@ struct ServerState {
     next_connection: AtomicU64,
     /// Open connections, shut down when the server stops.
     connections: Mutex<HashMap<u64, UnixStream>>,
+    /// The client process of each connection that said hello, for
+    /// `resource_usage`.
+    peers: Mutex<HashMap<u64, ClientProcess>>,
     /// Set by a restart request: the binary to exec.
     restart: Mutex<Option<PathBuf>>,
 }
@@ -676,6 +682,31 @@ impl ServerState {
             rss_bytes: crate::procinfo::self_rss_bytes(),
         }
     }
+
+    fn resources(&self) -> ResourceSample {
+        let mut peers: Vec<(u64, ClientProcess)> = self
+            .peers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|(id, peer)| (*id, peer.clone()))
+            .collect();
+        peers.sort_by_key(|(id, _)| *id);
+        let clients: Vec<ClientProcess> = peers.into_iter().map(|(_, peer)| peer).collect();
+        let sessions: Vec<SessionRoot> = self
+            .host
+            .list()
+            .into_iter()
+            .filter(|t| t.state == TerminalState::Running)
+            .filter_map(|t| {
+                Some(SessionRoot {
+                    id: t.session_id,
+                    pid: t.pid?,
+                })
+            })
+            .collect();
+        resources::sample(std::process::id(), &clients, &sessions)
+    }
 }
 
 impl Server {
@@ -704,6 +735,7 @@ impl Server {
                 clients: AtomicU32::new(0),
                 next_connection: AtomicU64::new(1),
                 connections: Mutex::new(HashMap::new()),
+                peers: Mutex::new(HashMap::new()),
                 restart: Mutex::new(None),
             }),
         }
@@ -833,6 +865,53 @@ pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     }
 }
 
+/// Pid of the process on the other end of `stream` (as it connected).
+fn peer_pid(stream: &UnixStream) -> Option<u32> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        // SAFETY: getsockopt writes at most `len` bytes into `cred`.
+        unsafe {
+            let mut cred: libc::ucred = std::mem::zeroed();
+            let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+            let rc = libc::getsockopt(
+                stream.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&mut cred as *mut libc::ucred).cast(),
+                &mut len,
+            );
+            if rc != 0 {
+                return None;
+            }
+            u32::try_from(cred.pid).ok().filter(|pid| *pid > 0)
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut pid: libc::pid_t = 0;
+        let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+        // SAFETY: getsockopt writes at most `len` bytes into `pid`.
+        let rc = unsafe {
+            libc::getsockopt(
+                stream.as_raw_fd(),
+                libc::SOL_LOCAL,
+                libc::LOCAL_PEERPID,
+                (&mut pid as *mut libc::pid_t).cast(),
+                &mut len,
+            )
+        };
+        if rc != 0 {
+            return None;
+        }
+        u32::try_from(pid).ok().filter(|pid| *pid > 0)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
+    {
+        let _ = stream;
+        None
+    }
+}
+
 /// Counts a connection as a client while it lives.
 struct ConnectionGuard<'a> {
     state: &'a ServerState,
@@ -844,6 +923,11 @@ impl Drop for ConnectionGuard<'_> {
         self.state.clients.fetch_sub(1, Ordering::SeqCst);
         self.state
             .connections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.id);
+        self.state
+            .peers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&self.id);
@@ -883,6 +967,19 @@ fn handle_connection(state: Arc<ServerState>, mut stream: UnixStream, id: u64) {
         caller.client,
         caller.info
     );
+    if let Some(pid) = peer_pid(&stream) {
+        state
+            .peers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                id,
+                ClientProcess {
+                    client: caller.client.clone(),
+                    pid,
+                },
+            );
+    }
     if let Err(e) = serve_requests(&state, &mut stream, &caller, id) {
         log_debug!("connection {id}: ended: {e}");
     }
@@ -1059,6 +1156,20 @@ fn serve_requests(
                 }
             }
             Request::DaemonStatus => reply(stream, &Response::Status(state.status()))?,
+            Request::ResourceUsage => {
+                if !caller.is_user() {
+                    reply_error(
+                        stream,
+                        ApiError::new(
+                            ErrorCode::PermissionDenied,
+                            "only user clients can see every session's resource use",
+                        ),
+                    )?;
+                    continue;
+                }
+                let resources = state.resources();
+                reply(stream, &Response::Resources { resources })?
+            }
             Request::DaemonShutdown => {
                 if !caller.is_user() {
                     reply_error(
@@ -1627,6 +1738,95 @@ mod tests {
         handle.shutdown();
     }
 
+    /// Every hello is a session caller.
+    struct SessionCallers;
+
+    impl Control for SessionCallers {
+        fn authenticate(&self, hello: &Hello) -> Result<Caller, ApiError> {
+            Ok(Caller {
+                info: CallerInfo::Session {
+                    id: SessionId::generate(),
+                    scope: session_core::model::ScopeRoot::from_canonical("/p".into()),
+                },
+                client: hello.client.clone(),
+                max_blocking_ms: None,
+            })
+        }
+        fn handle(&self, caller: &Caller, request: Request) -> Response {
+            AcceptAll.handle(caller, request)
+        }
+        fn prepare_attach(
+            &self,
+            caller: &Caller,
+            request: &AttachRequest,
+        ) -> Result<(TerminalId, SessionView), ApiError> {
+            AcceptAll.prepare_attach(caller, request)
+        }
+        fn subscribe(
+            &self,
+            caller: &Caller,
+            request: &SubscribeRequest,
+        ) -> Result<Receiver<EventEnvelope>, ApiError> {
+            AcceptAll.subscribe(caller, request)
+        }
+        fn session_count(&self) -> u32 {
+            0
+        }
+        fn shutdown(&self) {}
+    }
+
+    #[test]
+    fn user_clients_see_resource_use_with_their_own_process() {
+        let (_home, handle, socket) = start(None);
+        let (mut stream, capabilities) = connect(&socket);
+        assert!(capabilities
+            .iter()
+            .any(|c| c == session_core::api::CAPABILITY_RESOURCES));
+        // A second connection from the same process counts once.
+        let (_second, _) = connect(&socket);
+        let resources = match roundtrip(&mut stream, br#"{"op":"resource_usage"}"#) {
+            Response::Resources { resources } => resources,
+            other => panic!("expected resources, got {other:?}"),
+        };
+        assert_eq!(resources.daemon.pid, std::process::id());
+        assert!(resources.sessions.is_empty());
+        let me: Vec<_> = resources
+            .clients
+            .iter()
+            .filter(|c| c.process.pid == std::process::id())
+            .collect();
+        // The daemon runs in this test process, so it's the daemon row,
+        // never a client of itself; both connections know their process.
+        assert!(me.is_empty(), "{:?}", resources.clients);
+        let peers: Vec<ClientProcess> = handle
+            .state
+            .peers
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
+        assert_eq!(
+            peers,
+            vec![
+                ClientProcess {
+                    client: "test".into(),
+                    pid: std::process::id(),
+                };
+                2
+            ]
+        );
+        assert!(resources.at_ms > 0);
+        assert!(resources.machine.cpus >= 1);
+        handle.shutdown();
+
+        let (_home, handle, socket) = start_with(Arc::new(SessionCallers), None);
+        let (mut stream, _) = connect(&socket);
+        let refused = roundtrip(&mut stream, br#"{"op":"resource_usage"}"#);
+        assert_eq!(error_code(refused), ErrorCode::PermissionDenied);
+        handle.shutdown();
+    }
+
     #[test]
     fn known_ops_cover_every_request_variant() {
         let id = SessionId::from_string("S");
@@ -1738,6 +1938,7 @@ mod tests {
             }),
             Request::Subscribe(SubscribeRequest::default()),
             Request::DaemonStatus,
+            Request::ResourceUsage,
             Request::DaemonShutdown,
             Request::DaemonRestart { binary: None },
             Request::ReplyCapture { enabled: true },
@@ -1776,6 +1977,7 @@ mod tests {
                 | Request::TerminalAttach(_)
                 | Request::Subscribe(_)
                 | Request::DaemonStatus
+                | Request::ResourceUsage
                 | Request::DaemonShutdown
                 | Request::DaemonRestart { .. }
                 | Request::ReplyCapture { .. }

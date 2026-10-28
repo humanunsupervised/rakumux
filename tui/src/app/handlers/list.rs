@@ -106,6 +106,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char(digit @ '1'..='9') => app.go_into_nth(digit as usize - '0' as usize),
         KeyCode::Char('n') => app.open_new_session(),
         KeyCode::Char('T') => app.toggle_terminal_panel(),
+        KeyCode::Char('t') => app.open_top(),
         KeyCode::Char('b') => app.toggle_list(),
         KeyCode::Char('f') => app.toggle_feed(),
         KeyCode::Char('v') => app.set_layout(app.next_layout()),

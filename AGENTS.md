@@ -357,7 +357,9 @@ tui/
       handoff.rs             # restart in place: HandoffState across exec, target check
                              # detection/resume modules are mounted from integrations/
       persist.rs             # ScrollbackStore: sessions/<id>/{scrollback.ansi, meta.json}
-      procinfo/              # foreground process, cwd, RSS (Linux /proc, macOS libproc)
+      procinfo/              # foreground process, cwd, RSS (Linux /proc, macOS libproc); the process
+                             # table, the machine's counters, TCP traffic per socket (tcp.rs, Linux)
+      resources.rs           # resource_usage: the daemon's, clients' and sessions' processes
       log.rs                 # ~/.rakumux/logs/ptyd.log
   src/
     main.rs                  # cli::dispatch, else the TUI event loop
@@ -559,6 +561,23 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   watermark, OpenCode 2 one message per reply block (`seq × 1024 + block`), 1.x one per piece.
   About 512 KiB of log is read per request (at most 2 MiB); `more` says ask again. A cursor of
   another conversation reads the current one from its start.
+- Resource use (user only, capability `resources`; `resources.rs`, `procinfo/`):
+  `resource_usage` answers a `ResourceSample {at_ms, machine, daemon, clients, sessions}` read
+  when asked, nothing kept between requests: the machine's counters (`MachineUsage`: CPUs, busy
+  and total CPU ms, memory total and available, bytes in and out on every interface but
+  loopback), the daemon's process, each connected client's process once however many connections
+  it holds (`ClientUsage {client, connections, process}`: the hello's client name and the peer's
+  pid, `SO_PEERCRED` / `LOCAL_PEERPID`; one running inside a session is listed under it instead),
+  and each live session's processes (`SessionUsage {id, processes}`: the program its terminal
+  started and all its descendants from the process table, depth first, each naming its `parent`,
+  at most 500). A `ProcessUsage` is `{pid, parent?, name, command (≤ 200 chars), cpu_ms,
+  rss_bytes, net_rx_bytes?, net_tx_bytes?}`, all cumulative: clients divide two samples'
+  differences by the time between them. Network per process is Linux only: the bytes each TCP
+  socket it holds received and had acknowledged (`tcp_info` over `NETLINK_SOCK_DIAG`, which needs
+  no privilege, `procinfo/tcp.rs`), sockets found through `/proc/<pid>/fd`, connections to
+  loopback left out, a socket two processes share counted for the first listed. macOS gives
+  CPU and memory per process (libproc, Mach time converted with the timebase) and the machine's
+  counters (`host_statistics`, `getifaddrs`' 32-bit counters).
 - **Compatibility**: new fields optional; enums carry an `Unknown` fallback; an op never changes
   meaning (add a new op); bump `PROTOCOL_VERSION` only for incompatible changes.
 
@@ -791,7 +810,7 @@ fallback. Legacy npm/Homebrew installs use their package manager. On a protocol 
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
 `session.working_directory`, `session.agent_output`, `session.user_prompt`, `session.turn`,
-`session.replies`, `session.transcript`, read with
+`session.replies`, `session.transcript`, `session.places`, `resources`, read with
 `SessionApi::daemon_capabilities`) it says what's missing
 and offers a restart: in place when the daemon has `daemon.restart` (sessions keep running;
 `y`/Enter), otherwise by stopping it (`y` only, since running sessions end).
@@ -869,6 +888,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   cards), or Tabs (`tabs`, tab bar on top). Not saved: every start opens Master detail. Phones
   offer Master detail (the list, then a session under tabs) and Tabs (the tab bar over the
   session), not Grid. The feed docks on the right in Master detail and Grid and is a tab in Tabs.
+- **Top**: what the machine, Rakumux's own processes and every running session's processes
+  use now (CPU, memory, network), from `resource_usage`; live only, never recorded.
 - **Contracts**: the crate types and traits that define the architecture.
 
 ## Using Rakumux
@@ -907,7 +928,7 @@ running session in view), `Tab` last session, `1`-`9` go into that session,
 `n` new, `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
 every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
 screen, `b` hide Master detail's list beside the session and show it again (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
-PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
+PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `t` Top (below), `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
 build; daemon and sessions stay up), `S` ask to restart the server (in place with this build when
 it can: `y`/Enter, sessions keep running; otherwise `y` only, since that ends them; also Settings →
@@ -1159,6 +1180,23 @@ mailboxes and checked generations; saved output is read with a cap. Browsing nev
 Promote, Resize, Fit, terminal input, Touch, clipboard, bell or terminal-query replies, even
 through the hidden detail path. Cards crop/pan rather than resizing terminals. Default config
 and wire spelling stays `sidebar`, now labelled Master detail; `grid` and `tabs` persist too.
+
+**Top.** `t` in Rakumux mode or Settings → Top (`app/top.rs`, `components/top.rs`,
+`AppMode::Top`) shows what this machine and Rakumux use now, read with `SessionApi::resources`
+off the UI thread about every second while it's open (the first two samples half a second apart),
+nothing recorded: a line for the machine (CPU of every CPU together, memory used of total, bytes
+in and out a second; the bars go, then the parts wrap, when narrow), then rows: this window, the
+server (`rakumux-ptyd`), the other windows, then the other clients (`rakumux-api`, the account
+service, CLI calls), a blank line, and each session (name, app and folder) with its processes as
+a tree under it when it runs more than one (each with its arguments, quieter), and their
+`Total` pinned at the bottom. Columns: pid, CPU (a percentage of one CPU, as `top`; orange from
+50%, pink from 100%), resident memory, and bytes received and sent a second over its TCP
+connections (`—` where unknown); narrower, the pid goes, then received and sent merge, then
+network goes. Rates are the last two samples' differences (a pid whose name changed gets none).
+`↑`/`↓` (`j`/`k`), PgUp/PgDn and Home/End select; `←`/`→` (`h`/`l`) and Space fold and unfold a
+session's processes; `s` sorts sessions by memory (the default), CPU, network or name; Enter
+goes into the selected row's session; Esc (`q`, `t`) closes. A daemon without `resources` gets
+"restart it (S)".
 
 **Terminal panel.** `T` in Rakumux mode or Settings → Terminal panel opens a
 temporary daemon-owned login shell under the main detail, without a session record or list entry.

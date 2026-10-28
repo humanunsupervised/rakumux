@@ -142,6 +142,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             crate::components::phone_access::draw_pairing(f, dialog, modal_area)
         }
         AppMode::Account(dialog) => crate::components::account::draw_account(f, dialog, modal_area),
+        AppMode::Top(view) => crate::components::top::draw_top(f, app, view, modal_area),
         AppMode::Auth(menu) => draw_auth_menu(f, menu, modal_area),
         AppMode::AuthEmail(dialog) => draw_auth_email_dialog(f, dialog, modal_area),
         AppMode::AuthCode(dialog) => draw_auth_code_dialog(f, dialog, modal_area),
@@ -2712,5 +2713,142 @@ mod tests {
         h.app.close_feed();
         render(&mut h.app, 160, 48);
         assert_eq!(h.app.screen().grid, Some(grid));
+    }
+
+    /// What the daemon would say: this window, an API, and session A
+    /// running claude under bash with an MCP server, B a lone shell.
+    fn resource_sample(at_ms: i64, scale: u64) -> session_core::api::ResourceSample {
+        use session_core::api::{ClientUsage, MachineUsage, ProcessUsage, SessionUsage};
+        let process =
+            |pid: u32, parent: Option<u32>, name: &str, cpu_ms: u64, mb: u64| ProcessUsage {
+                pid,
+                parent,
+                name: name.into(),
+                command: format!("{name} --resume"),
+                cpu_ms: cpu_ms * scale,
+                rss_bytes: mb << 20,
+                net_rx_bytes: Some(1000 * scale),
+                net_tx_bytes: Some(100 * scale),
+            };
+        session_core::api::ResourceSample {
+            at_ms,
+            machine: MachineUsage {
+                cpus: 8,
+                cpu_busy_ms: Some(1000 * scale),
+                cpu_total_ms: Some(8000 * scale),
+                memory_total_bytes: Some(16 << 30),
+                memory_available_bytes: Some(6 << 30),
+                net_rx_bytes: Some(5000 * scale),
+                net_tx_bytes: Some(500 * scale),
+            },
+            daemon: process(10, None, "rakumux-ptyd", 100, 30),
+            clients: vec![
+                ClientUsage {
+                    client: "tui".into(),
+                    connections: 3,
+                    process: process(std::process::id(), None, "tui", 200, 48),
+                },
+                ClientUsage {
+                    client: "api".into(),
+                    connections: 1,
+                    process: process(40, None, "rakumux-api", 0, 12),
+                },
+            ],
+            sessions: vec![
+                SessionUsage {
+                    id: session_core::ids::SessionId::from_string("A"),
+                    processes: vec![
+                        process(30, None, "bash", 0, 5),
+                        process(31, Some(30), "claude", 900, 800),
+                        process(32, Some(31), "node", 10, 60),
+                    ],
+                },
+                SessionUsage {
+                    id: session_core::ids::SessionId::from_string("B"),
+                    processes: vec![process(50, None, "zsh", 0, 4)],
+                },
+            ],
+        }
+    }
+
+    #[tokio::test]
+    async fn top_from_settings_shows_every_process_and_goes_into_a_session() {
+        let mut h = harness(vec![view("A", "fix-login", 20), view("B", "notes", 10)]);
+        h.fake.state.lock().unwrap().resources =
+            vec![resource_sample(1_000, 1), resource_sample(2_000, 2)];
+        h.press(KeyCode::Char(',')).await;
+        let AppMode::Modal { state, .. } = &mut h.app.mode else {
+            panic!("Settings didn't open");
+        };
+        state.selected = SettingsItem::Top.index();
+        h.press(KeyCode::Enter).await;
+        assert!(matches!(h.app.mode, AppMode::Top(_)));
+        // The second sample comes soon, with the first rates.
+        h.app
+            .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(1));
+        h.app.process_pending();
+        let calls = h.fake.calls().iter().filter(|c| *c == "resources").count();
+        assert_eq!(calls, 2);
+
+        let screen = render(&mut h.app, 160, 48);
+        for text in [
+            "this window",
+            "rakumux-ptyd",
+            "rakumux-api",
+            "fix-login",
+            "notes",
+            "claude",
+            "--resume",
+            "Total",
+            "of 16 GB",
+        ] {
+            assert!(screen.contains(text), "{text} missing:\n{screen}");
+        }
+        // 900 ms of CPU in a second: 90% of one CPU.
+        let claude = screen
+            .lines()
+            .find(|l| l.contains("claude  --resume"))
+            .unwrap();
+        assert!(
+            claude.contains("90%") && claude.contains("800 MB"),
+            "{claude}"
+        );
+        // Narrow screens keep the numbers that matter.
+        for (width, height) in [(80, 24), (44, 30)] {
+            let screen = render(&mut h.app, width, height);
+            assert!(screen.contains("fix-login"), "{width}:\n{screen}");
+            assert!(screen.contains("MEMORY"), "{width}:\n{screen}");
+        }
+
+        // Down to claude, fold its session from there, then go into it.
+        let rows = |h: &Harness| match &h.app.mode {
+            AppMode::Top(view) => h.app.top_rows(view),
+            _ => Vec::new(),
+        };
+        let claude_at = rows(&h).iter().position(|r| r.name == "claude").unwrap();
+        for _ in 0..claude_at {
+            h.press(KeyCode::Down).await;
+        }
+        h.press(KeyCode::Left).await;
+        assert!(rows(&h).iter().all(|r| r.name != "claude"));
+        h.press(KeyCode::Enter).await;
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        assert_eq!(h.selected().as_deref(), Some("A"));
+        assert_eq!(h.app.focus, Focus::Session);
+
+        // `t` opens it again; Esc closes it.
+        h.rakumux().await;
+        h.press(KeyCode::Char('t')).await;
+        assert!(matches!(h.app.mode, AppMode::Top(_)));
+        h.press(KeyCode::Esc).await;
+        assert!(matches!(h.app.mode, AppMode::Normal));
+    }
+
+    #[tokio::test]
+    async fn top_on_an_older_server_says_to_restart_it() {
+        let mut h = harness(vec![view("A", "a", 10)]);
+        h.press(KeyCode::Char('t')).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("restart it (S)"), "{screen}");
     }
 }

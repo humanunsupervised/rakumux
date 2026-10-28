@@ -152,6 +152,9 @@ pub struct FakeState {
     /// No `sessions.all`, like a daemon from before it: `list_all` and
     /// `subscribe { all }` fail.
     pub all_unsupported: bool,
+    /// What `resources` answers, in turn; the last again and again. None
+    /// answers `unsupported`.
+    pub resources: Vec<session_core::api::ResourceSample>,
 }
 
 impl FakeState {
@@ -443,6 +446,7 @@ impl SessionApi for FakeApi {
                 session_core::api::CAPABILITY_REPLIES,
                 session_core::api::CAPABILITY_TRANSCRIPT,
                 session_core::api::CAPABILITY_PLACES,
+                session_core::api::CAPABILITY_RESOURCES,
             ]);
         }
         if state.restarts_in_place {
@@ -606,6 +610,15 @@ impl SessionApi for FakeApi {
 
     fn status(&self) -> Result<DaemonStatusInfo> {
         Err(ApiError::new(ErrorCode::Unsupported, "fake"))
+    }
+
+    fn resources(&self) -> Result<session_core::api::ResourceSample> {
+        self.record("resources".into());
+        let mut state = self.state.lock().unwrap();
+        if state.resources.len() > 1 {
+            return Ok(state.resources.remove(0));
+        }
+        state.resources.first().cloned().ok_or_else(unsupported)
     }
 
     fn shutdown(&self) -> Result<()> {

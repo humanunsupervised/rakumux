@@ -28,6 +28,7 @@ pub mod log;
 pub mod persist;
 pub mod procinfo;
 pub mod registration;
+pub mod resources;
 #[path = "../../../../integrations/recovery.rs"]
 pub mod resume;
 pub mod server;

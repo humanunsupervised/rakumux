@@ -1,7 +1,11 @@
 //! Linux process inspection via `/proc`.
 
-use super::{parse_statm_rss, split_nul_args, untruncated_name};
+use super::{
+    logical_cpus, parse_cpu_times, parse_meminfo, parse_net_dev, parse_proc_stat, parse_statm_rss,
+    split_nul_args, untruncated_name, ProcStat,
+};
 use crate::host::ProcessInfo;
+use session_core::api::MachineUsage;
 use std::io;
 use std::path::PathBuf;
 
@@ -83,9 +87,71 @@ pub(super) fn open_files(pid: u32) -> Vec<PathBuf> {
 
 pub(super) fn self_rss_bytes() -> Option<u64> {
     let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    parse_statm_rss(&statm, page_size()?)
+}
+
+fn page_size() -> Option<u64> {
     // SAFETY: sysconf has no preconditions.
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-    parse_statm_rss(&statm, u64::try_from(page_size).ok().filter(|p| *p > 0)?)
+    u64::try_from(page_size).ok().filter(|p| *p > 0)
+}
+
+/// Clock ticks per second (`/proc`'s CPU time unit).
+fn ticks_per_sec() -> u64 {
+    // SAFETY: sysconf has no preconditions.
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    u64::try_from(ticks).ok().filter(|t| *t > 0).unwrap_or(100)
+}
+
+pub(super) fn process_table() -> Vec<ProcStat> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let (ticks, page) = (ticks_per_sec(), page_size().unwrap_or(4096));
+    entries
+        .filter_map(|entry| {
+            let name = entry.ok()?.file_name();
+            let pid: u32 = name.to_str()?.parse().ok()?;
+            // Gone between the listing and the read: left out.
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+            parse_proc_stat(&stat, ticks, page)
+        })
+        .collect()
+}
+
+pub(super) fn machine_usage() -> MachineUsage {
+    let read = |path: &str| std::fs::read_to_string(path).ok();
+    let cpu = read("/proc/stat").and_then(|stat| parse_cpu_times(&stat, ticks_per_sec()));
+    let (memory_total_bytes, memory_available_bytes) = read("/proc/meminfo")
+        .map(|meminfo| parse_meminfo(&meminfo))
+        .unwrap_or_default();
+    let net = read("/proc/net/dev").and_then(|dev| parse_net_dev(&dev));
+    MachineUsage {
+        cpus: logical_cpus(),
+        cpu_busy_ms: cpu.map(|(busy, _)| busy),
+        cpu_total_ms: cpu.map(|(_, total)| total),
+        memory_total_bytes,
+        memory_available_bytes,
+        net_rx_bytes: net.map(|(rx, _)| rx),
+        net_tx_bytes: net.map(|(_, tx)| tx),
+    }
+}
+
+/// Inodes of the sockets `pid` has open (`/proc/<pid>/fd/*` → `socket:[N]`).
+pub(super) fn socket_inodes(pid: u32) -> Vec<u64> {
+    let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
+        return Vec::new();
+    };
+    fds.filter_map(|fd| {
+        let target = std::fs::read_link(fd.ok()?.path()).ok()?;
+        let target = target.to_str()?;
+        target
+            .strip_prefix("socket:[")?
+            .strip_suffix(']')?
+            .parse()
+            .ok()
+    })
+    .collect()
 }
 
 #[cfg(test)]
