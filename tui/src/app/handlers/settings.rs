@@ -133,6 +133,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             });
         }
         KeyAction::NewSession => app.open_new_session(),
+        KeyAction::SpriteToggle => app.toggle_sprite(),
         // The list hides beside a session too: the mode stays.
         KeyAction::HideList => app.toggle_list(),
         KeyAction::FilterFolders => {

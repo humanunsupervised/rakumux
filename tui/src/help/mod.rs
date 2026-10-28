@@ -215,6 +215,8 @@ pub enum KeyAction {
     ScrollBack,
     ScrollForward,
     NewSession,
+    /// `N`: the current folder's new sessions on your Sprite, or here.
+    SpriteToggle,
     /// `P`: the Folders modal (the folder filter).
     FilterFolders,
     Rename,
@@ -265,7 +267,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 47] = [
+    pub const ALL: [KeyAction; 48] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -286,6 +288,7 @@ impl KeyAction {
         KeyAction::ScrollBack,
         KeyAction::ScrollForward,
         KeyAction::NewSession,
+        KeyAction::SpriteToggle,
         KeyAction::FilterFolders,
         KeyAction::Rename,
         KeyAction::Pin,
@@ -338,6 +341,7 @@ impl KeyAction {
             | KeyAction::ScrollBack
             | KeyAction::ScrollForward => "Moving around",
             KeyAction::NewSession
+            | KeyAction::SpriteToggle
             | KeyAction::FilterFolders
             | KeyAction::Rename
             | KeyAction::Pin
@@ -390,6 +394,7 @@ impl KeyAction {
             KeyAction::ScrollBack => "Scroll back (Grid: previous page)",
             KeyAction::ScrollForward => "Scroll forward (Grid: next page)",
             KeyAction::NewSession => "New session",
+            KeyAction::SpriteToggle => "New sessions here on your Sprite",
             KeyAction::FilterFolders => "Filter by folder",
             KeyAction::Rename => "Rename session",
             KeyAction::Pin => "Pin or unpin session",
@@ -452,6 +457,7 @@ impl KeyAction {
             KeyAction::ScrollBack => plain(&["Ctrl-y", "PgUp"]),
             KeyAction::ScrollForward => plain(&["Ctrl-e", "PgDn"]),
             KeyAction::NewSession => plain(&["n"]),
+            KeyAction::SpriteToggle => plain(&["N"]),
             KeyAction::FilterFolders => plain(&["P"]),
             KeyAction::Rename => plain(&["r"]),
             KeyAction::Pin => plain(&["p"]),
