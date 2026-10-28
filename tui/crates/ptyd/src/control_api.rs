@@ -25,6 +25,13 @@ impl Caller {
         matches!(self.info, CallerInfo::User)
     }
 
+    /// The user, reaching other machines' sessions through this daemon:
+    /// not another machine's daemon relayed here
+    /// ([`session_core::api::MACHINE_CLIENT`]), which sees this machine's own.
+    pub fn reaches_machines(&self) -> bool {
+        self.is_user() && self.client != session_core::api::MACHINE_CLIENT
+    }
+
     pub fn session_id(&self) -> Option<&SessionId> {
         match &self.info {
             CallerInfo::Session { id, .. } => Some(id),

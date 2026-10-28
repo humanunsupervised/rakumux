@@ -135,41 +135,50 @@ impl ControlService {
         handed: Option<ControlHandoff>,
     ) -> std::io::Result<Self> {
         let registry = registry::Registry::open(&config.layout.registry_db(), service::now_ms())?;
-        let machines = crate::machines::Machines::open(&config.layout.home);
+        let home = config.layout.home.clone();
         // Subscribe before adopting terminals so no event falls in between.
         let host_events = host.subscribe();
         let inner = Arc::new(service::Inner::new(config, host, registry, detector));
+        let local = Arc::downgrade(&inner);
+        let machines = crate::machines::Machines::open(
+            &home,
+            Arc::new(move |id: &SessionId| {
+                local.upgrade().is_none_or(|inner| inner.has_session(id))
+            }),
+        );
         inner.adopt_host_terminals(handed);
         host_events::start(&inner, host_events)?;
         keep_awake::start(&inner);
         Ok(Self { inner, machines })
     }
 
-    /// Requests about other machines and their sessions, user callers
-    /// only, answered (`Break`); the ones for this machine come back
-    /// (`Continue`).
+    /// Requests about other machines and their sessions, answered (`Break`)
+    /// for the user (not another machine relayed here); the ones for this
+    /// machine come back (`Continue`).
     fn route(&self, caller: &Caller, request: Request) -> ControlFlow<Response, Request> {
         let answer = |result: Result<Response, ApiError>| {
             result.unwrap_or_else(|error| Response::Error { error })
         };
         match request {
             Request::MachineAdd { name, url, token } => Break(answer(
-                user_only(caller)
+                reaches_machines(caller)
                     .and_then(|()| self.machines.add(&name, &url, &token))
                     .map(|machine| Response::Machine { machine }),
             )),
-            Request::MachineList => Break(answer(user_only(caller).map(|()| Response::Machines {
-                machines: self.machines.list(),
+            Request::MachineList => Break(answer(reaches_machines(caller).map(|()| {
+                Response::Machines {
+                    machines: self.machines.list(),
+                }
             }))),
             Request::MachineRemove { id } => Break(answer(
-                user_only(caller)
+                reaches_machines(caller)
                     .and_then(|()| self.machines.remove(&id))
                     .map(|()| Response::Ok),
             )),
             Request::SessionCreate(create) => match create.machine.clone() {
                 Some(machine) => {
                     let local = create.scope.clone();
-                    let created = user_only(caller)
+                    let created = reaches_machines(caller)
                         .and_then(|()| self.machines.create(&machine, create))
                         .map(|session| Response::Session { session });
                     // The local folder it's listed under is one of this
@@ -192,7 +201,7 @@ impl ControlService {
                 scopes,
                 include_dead,
                 all,
-            } if caller.is_user() => {
+            } if caller.reaches_machines() => {
                 let wanted: Option<Vec<ScopeRoot>> =
                     (!all).then(|| scope.iter().chain(scopes.iter()).cloned().collect());
                 let local = self.inner.handle(
@@ -217,7 +226,11 @@ impl ControlService {
                     return Continue(request);
                 };
                 // Other callers get this machine's answer: not found.
-                let Some(machine) = self.machines.owner(&id).filter(|_| caller.is_user()) else {
+                let Some(machine) = self
+                    .machines
+                    .owner(&id)
+                    .filter(|_| caller.reaches_machines())
+                else {
                     return Continue(request);
                 };
                 let deleting = matches!(request, Request::SessionDelete { .. });
@@ -251,9 +264,14 @@ fn remote_target(request: &Request) -> Option<&SessionId> {
     }
 }
 
-fn user_only(caller: &Caller) -> Result<(), ApiError> {
-    if caller.is_user() {
+fn reaches_machines(caller: &Caller) -> Result<(), ApiError> {
+    if caller.reaches_machines() {
         Ok(())
+    } else if caller.is_user() {
+        Err(ApiError::new(
+            session_core::api::ErrorCode::PermissionDenied,
+            "another machine reaches this machine's own sessions only",
+        ))
     } else {
         Err(ApiError::new(
             session_core::api::ErrorCode::PermissionDenied,
@@ -336,7 +354,7 @@ impl Control for ControlService {
         let machine = self
             .machines
             .owner(&request.id)
-            .filter(|_| caller.is_user())?;
+            .filter(|_| caller.reaches_machines())?;
         Some(
             self.machines
                 .attach(&machine)
@@ -363,7 +381,7 @@ impl Control for ControlService {
         request: &SubscribeRequest,
     ) -> Result<Receiver<EventEnvelope>, ApiError> {
         let local = self.inner.subscribe(caller, request)?;
-        if !caller.is_user() {
+        if !caller.reaches_machines() {
             return Ok(local);
         }
         Ok(merge(local, self.machines.subscribe(request)))

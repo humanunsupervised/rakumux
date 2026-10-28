@@ -1460,6 +1460,9 @@ fn relay_remote_attach(
         mut writer,
         ..
     } = pipe;
+    reader.set_deadline(Some(
+        std::time::Instant::now() + crate::machines::REQUEST_TIMEOUT,
+    ));
     let first = frame::write_control(&mut writer, &Request::Attach(request)).and_then(|()| {
         match frame::read_frame(&mut reader)? {
             Some(Frame::Control(payload)) => frame::parse_control::<Response>(&payload),
@@ -1469,13 +1472,20 @@ fn relay_remote_attach(
             )),
         }
     });
+    reader.set_deadline(None);
     match first {
-        Ok(Response::Attached(mut attached)) => {
-            attached.session = machines.stamp(&machine, attached.session);
-            reply(stream, &Response::Attached(attached))?;
-        }
+        Ok(Response::Attached(mut attached)) => match machines.stamp(&machine, attached.session) {
+            Ok(session) => {
+                attached.session = session;
+                reply(stream, &Response::Attached(attached))?;
+            }
+            Err(error) => {
+                reply_error(stream, error)?;
+                return Ok(false);
+            }
+        },
         Ok(Response::Error { error }) => {
-            reply_error(stream, error)?;
+            reply_error(stream, crate::machines::clean_error(error))?;
             return Ok(false);
         }
         Ok(other) => {

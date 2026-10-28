@@ -13,6 +13,12 @@
 //! running, so a connection is opened only when something needs the machine
 //! and closed again once nothing has for [`IDLE`], unless one of its
 //! sessions' agents is working or someone is attached.
+//!
+//! What a machine says is taken as data from elsewhere: a session it lists
+//! must be its own (never one of this machine's, another machine's, or one it
+//! lists from a machine of its own), at most [`MAX_SESSIONS`] of them, each
+//! view at most [`MAX_VIEW_BYTES`], with control characters removed from its
+//! text; and it gets [`REQUEST_TIMEOUT`] to answer a request.
 
 pub mod pipe;
 
@@ -41,6 +47,18 @@ pub const IDLE: Duration = Duration::from_secs(60);
 /// How often idle connections are closed and the file is saved.
 const HOUSEKEEPING: Duration = Duration::from_secs(5);
 const MAX_NAME: usize = 64;
+/// The most sessions listed from one machine.
+pub const MAX_SESSIONS: usize = 500;
+/// The largest session view kept from a machine, as JSON.
+pub const MAX_VIEW_BYTES: usize = 256 * 1024;
+/// How long a machine may take to answer a request.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Extra time on top of a forwarded wait's own `timeout_ms`.
+const WAIT_GRACE: Duration = Duration::from_secs(10);
+
+/// Whether this machine has a session with an id: another machine's never
+/// stands in for it.
+pub type IsLocal = Arc<dyn Fn(&SessionId) -> bool + Send + Sync>;
 
 /// The machines this daemon reaches, and the sessions it lists from them.
 #[derive(Clone)]
@@ -53,6 +71,7 @@ struct Shared {
     state: Mutex<State>,
     subscribers: Mutex<Vec<Subscriber>>,
     stop: AtomicBool,
+    is_local: IsLocal,
 }
 
 #[derive(Default)]
@@ -146,8 +165,8 @@ impl Drop for AttachGuard {
 
 impl Machines {
     /// Load `machines.json` from `home` (none yet: no machines) and start
-    /// the housekeeping thread.
-    pub fn open(home: &Path) -> Self {
+    /// the housekeeping thread. `is_local` tells this machine's sessions.
+    pub fn open(home: &Path, is_local: IsLocal) -> Self {
         let path = home.join("machines.json");
         let saved = match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice::<Saved>(&bytes).unwrap_or_else(|e| {
@@ -163,7 +182,10 @@ impl Machines {
             sessions: saved
                 .sessions
                 .into_iter()
-                .map(|remote| (remote.view.id.clone(), remote))
+                .filter_map(|remote| {
+                    let view = cleaned(&remote.view)?;
+                    Some((view.id.clone(), Remote { view, ..remote }))
+                })
                 .collect(),
             records: saved.machines,
             ..State::default()
@@ -173,6 +195,7 @@ impl Machines {
             state: Mutex::new(state),
             subscribers: Mutex::new(Vec::new()),
             stop: AtomicBool::new(false),
+            is_local,
         });
         let weak = Arc::downgrade(&shared);
         let _ = std::thread::Builder::new()
@@ -213,8 +236,8 @@ impl Machines {
             return Err(invalid(format!("{url} is already added")));
         }
         let mut requests = open_requests(&url, token).map_err(|e| unreachable(&url, &e))?;
-        let version = requests.1.clone();
-        let home = match exchange(&mut requests.0, &Request::DaemonStatus) {
+        let version = short_text(&requests.1);
+        let home = match exchange(&mut requests.0, &Request::DaemonStatus, REQUEST_TIMEOUT) {
             Ok(Response::Status(status)) => status.home,
             Ok(other) => return Err(unexpected(&other)),
             Err(e) => return Err(unreachable(&url, &e)),
@@ -303,10 +326,11 @@ impl Machines {
 
     /// The machine a session runs on, when it's another machine's.
     pub fn owner(&self, id: &SessionId) -> Option<MachineId> {
-        lock(&self.shared.state)
+        let machine = lock(&self.shared.state)
             .sessions
             .get(id)
-            .map(|remote| remote.machine.clone())
+            .map(|remote| remote.machine.clone())?;
+        (!(self.shared.is_local)(id)).then_some(machine)
     }
 
     /// Other machines' sessions listed under `scopes` (every one with
@@ -316,7 +340,7 @@ impl Machines {
         let (views, machines) = {
             let state = lock(&self.shared.state);
             let mut machines = Vec::new();
-            let views = state
+            let views: Vec<SessionView> = state
                 .sessions
                 .values()
                 .filter(|r| scopes.is_none_or(|scopes| scopes.contains(&r.local_scope)))
@@ -335,13 +359,24 @@ impl Machines {
             self.ensure_watch(&machine);
         }
         views
+            .into_iter()
+            .filter(|view| !(self.shared.is_local)(&view.id))
+            .collect()
     }
 
     /// Forward `request` to the machine `id` runs on and answer with what it
     /// said, its sessions as listed here.
     pub fn forward(&self, machine: &MachineId, request: &Request) -> Result<Response, ApiError> {
-        let response = self.exchange(machine, request)?;
-        Ok(self.take_response(machine, None, response))
+        let response = match request {
+            // A wait holds its connection for as long as it waits: not the
+            // one every other request to the machine takes turns on.
+            Request::SessionWait(wait) => {
+                let limit = Duration::from_millis(wait.timeout_ms).saturating_add(WAIT_GRACE);
+                self.exchange_alone(machine, request, limit)?
+            }
+            request => self.exchange(machine, request)?,
+        };
+        self.take_response(machine, None, response)
     }
 
     /// Create a session on `machine`, listed under `create.scope` here: in a
@@ -377,7 +412,6 @@ impl Machines {
             },
         )? {
             Response::Project { .. } => {}
-            Response::Error { error } => return Err(error),
             other => return Err(unexpected(&other)),
         }
         let request = Request::SessionCreate(CreateSession {
@@ -392,7 +426,7 @@ impl Machines {
         match self.exchange(machine, &request)? {
             Response::Session { session } => {
                 let response =
-                    self.take_response(machine, Some(&local_scope), Response::Session { session });
+                    self.take_response(machine, Some(&local_scope), Response::Session { session })?;
                 let Response::Session { session } = response else {
                     return Err(ApiError::new(ErrorCode::Internal, "lost the new session"));
                 };
@@ -406,7 +440,6 @@ impl Machines {
                 });
                 Ok(session)
             }
-            Response::Error { error } => Err(error),
             other => Err(unexpected(&other)),
         }
     }
@@ -435,25 +468,29 @@ impl Machines {
         ))
     }
 
-    /// A session view from `machine` as it's listed here.
-    pub fn stamp(&self, machine: &MachineId, view: SessionView) -> SessionView {
+    /// A session view from `machine` as it's listed here: refused unless
+    /// it's a session of that machine's own.
+    pub fn stamp(&self, machine: &MachineId, view: SessionView) -> Result<SessionView, ApiError> {
+        let view = self.admit(view).ok_or_else(not_its_own)?;
         let state = lock(&self.shared.state);
-        let local_scope = state
-            .sessions
-            .get(&view.id)
-            .map(|r| r.local_scope.clone())
-            .unwrap_or_else(|| view.scope.clone());
-        match state.records.iter().find(|r| r.id == *machine) {
-            Some(record) => stamped(
-                &Remote {
-                    machine: machine.clone(),
-                    local_scope,
-                    view,
-                },
-                record,
-            ),
-            None => view,
-        }
+        let local_scope = match state.sessions.get(&view.id) {
+            Some(known) if known.machine != *machine => return Err(not_its_own()),
+            Some(known) => known.local_scope.clone(),
+            None => view.scope.clone(),
+        };
+        let record = state
+            .records
+            .iter()
+            .find(|r| r.id == *machine)
+            .ok_or_else(|| not_found_machine(machine))?;
+        Ok(stamped(
+            &Remote {
+                machine: machine.clone(),
+                local_scope,
+                view,
+            },
+            record,
+        ))
     }
 
     /// Other machines' events for a user subscription.
@@ -535,7 +572,7 @@ impl Machines {
             let Some(requests) = connection.as_mut() else {
                 continue;
             };
-            match exchange(requests, request) {
+            match exchange(requests, request, REQUEST_TIMEOUT) {
                 Ok(response) => {
                     drop(connection);
                     self.ensure_watch(machine);
@@ -543,7 +580,9 @@ impl Machines {
                 }
                 Err(e) => {
                     *connection = None;
-                    if attempt == 1 {
+                    // A connection closed while it lay unused is opened
+                    // again; a request that wasn't answered isn't sent twice.
+                    if attempt == 1 || e.kind() == std::io::ErrorKind::TimedOut {
                         self.mark_unreachable(machine, &e);
                         return Err(unreachable(&url, &e));
                     }
@@ -556,41 +595,92 @@ impl Machines {
         ))
     }
 
-    /// Remember the sessions in a machine's answer and list them here.
+    /// One request on a connection of its own, closed after its answer, which
+    /// may take up to `limit`.
+    fn exchange_alone(
+        &self,
+        machine: &MachineId,
+        request: &Request,
+        limit: Duration,
+    ) -> Result<Response, ApiError> {
+        let (url, token) = self.address(machine)?;
+        if let Some(live) = lock(&self.shared.state).live.get_mut(machine) {
+            live.last_used = Some(Instant::now());
+        }
+        let (mut requests, version) = open_requests(&url, &token).map_err(|e| {
+            self.mark_unreachable(machine, &e);
+            unreachable(&url, &e)
+        })?;
+        self.mark_connected(machine, version);
+        exchange(&mut requests, request, limit).map_err(|e| unreachable(&url, &e))
+    }
+
+    /// Remember the sessions in a machine's answer and list them here. Only
+    /// its own: a list leaves the others out, and an answer about one of
+    /// them is refused.
     fn take_response(
         &self,
         machine: &MachineId,
         local_scope: Option<&ScopeRoot>,
         response: Response,
-    ) -> Response {
-        let mut keep = |view: SessionView| -> SessionView {
-            let mut state = lock(&self.shared.state);
-            let scope = local_scope
-                .cloned()
-                .or_else(|| state.sessions.get(&view.id).map(|r| r.local_scope.clone()))
-                .unwrap_or_else(|| view.scope.clone());
-            let remote = Remote {
-                machine: machine.clone(),
-                local_scope: scope,
-                view,
-            };
-            let out = match state.records.iter().find(|r| r.id == *machine) {
-                Some(record) => stamped(&remote, record),
-                None => remote.view.clone(),
-            };
-            state.sessions.insert(remote.view.id.clone(), remote);
-            state.dirty = true;
-            out
-        };
-        match response {
+    ) -> Result<Response, ApiError> {
+        Ok(match response {
             Response::Session { session } => Response::Session {
-                session: keep(session),
+                session: self
+                    .keep(machine, local_scope, session)
+                    .ok_or_else(not_its_own)?,
             },
             Response::Sessions { sessions } => Response::Sessions {
-                sessions: sessions.into_iter().map(&mut keep).collect(),
+                sessions: sessions
+                    .into_iter()
+                    .filter_map(|view| self.keep(machine, local_scope, view))
+                    .collect(),
+            },
+            Response::Error { error } => Response::Error {
+                error: clean_error(error),
             },
             other => other,
+        })
+    }
+
+    /// Keep a session `machine` sent when it's its own, and give it as
+    /// listed here.
+    fn keep(
+        &self,
+        machine: &MachineId,
+        local_scope: Option<&ScopeRoot>,
+        view: SessionView,
+    ) -> Option<SessionView> {
+        let view = self.admit(view)?;
+        let mut state = lock(&self.shared.state);
+        let record = state.records.iter().find(|r| r.id == *machine)?.clone();
+        let scope = match state.sessions.get(&view.id) {
+            Some(known) if known.machine != *machine => return None,
+            Some(known) => local_scope
+                .cloned()
+                .unwrap_or_else(|| known.local_scope.clone()),
+            None if count_of(&state, machine) >= MAX_SESSIONS => return None,
+            None => local_scope.cloned().unwrap_or_else(|| view.scope.clone()),
+        };
+        let remote = Remote {
+            machine: machine.clone(),
+            local_scope: scope,
+            view,
+        };
+        let out = stamped(&remote, &record);
+        state.sessions.insert(remote.view.id.clone(), remote);
+        state.dirty = true;
+        Some(out)
+    }
+
+    /// A view a machine sent, cleaned, unless it can't be a session of its
+    /// own: one of this machine's, one it lists from a machine of its own, or
+    /// one too large to keep.
+    fn admit(&self, view: SessionView) -> Option<SessionView> {
+        if view.machine.is_some() || (self.shared.is_local)(&view.id) {
+            return None;
         }
+        cleaned(&view)
     }
 
     /// Forget a session after the machine deleted it.
@@ -616,15 +706,16 @@ impl Machines {
         let live = state.live.entry(machine.clone()).or_default();
         live.state = Some(MachineState::Connected);
         live.error = None;
-        live.version = Some(version);
+        live.version = Some(short_text(&version));
     }
 
     fn mark_unreachable(&self, machine: &MachineId, error: &std::io::Error) {
+        let error = clean_text(&error.to_string());
         let mut state = lock(&self.shared.state);
         let live = state.live.entry(machine.clone()).or_default();
         live.state = Some(MachineState::Unreachable);
-        live.error = Some(error.to_string());
         log_warn!("machines: {machine} unreachable: {error}");
+        live.error = Some(error);
     }
 
     /// Watch the machine's events unless that's already happening.
@@ -673,10 +764,12 @@ impl Machines {
                     ..SubscribeRequest::default()
                 }),
             )?;
+            reader.set_deadline(Some(Instant::now() + REQUEST_TIMEOUT));
             match read_response(&mut reader)? {
                 Response::Subscribed => {}
                 other => return Err(std::io::Error::other(format!("subscribe: {other:?}"))),
             }
+            reader.set_deadline(None);
             if let Some(live) = lock(&self.shared.state).live.get_mut(machine) {
                 live.watch = Some(writer);
             }
@@ -711,7 +804,7 @@ impl Machines {
                 Err(error) => {
                     log_debug!("machines: {machine} events ended: {error}");
                     live.state = Some(MachineState::Unreachable);
-                    live.error = Some(error.to_string());
+                    live.error = Some(clean_text(&error.to_string()));
                 }
                 // Closed by the idle policy, or by the machine.
                 Ok(()) => live.state = Some(MachineState::Idle),
@@ -722,6 +815,10 @@ impl Machines {
     /// A machine's whole session list: replaces what was kept for it, and
     /// tells subscribers what changed.
     fn replace_sessions(&self, machine: &MachineId, sessions: Vec<SessionView>) {
+        let sessions: Vec<SessionView> = sessions
+            .into_iter()
+            .filter_map(|view| self.admit(view))
+            .collect();
         let mut events = Vec::new();
         {
             let mut state = lock(&self.shared.state);
@@ -744,8 +841,15 @@ impl Machines {
                     });
                 }
             }
+            let mut kept = count_of(&state, machine);
             for view in sessions {
                 let known = state.sessions.get(&view.id);
+                match known {
+                    Some(known) if known.machine != *machine => continue,
+                    None if kept >= MAX_SESSIONS => continue,
+                    None => kept += 1,
+                    Some(_) => {}
+                }
                 let local_scope = known
                     .map(|r| r.local_scope.clone())
                     .unwrap_or_else(|| view.scope.clone());
@@ -786,17 +890,30 @@ impl Machines {
             event,
             ..
         } = envelope;
+        // About a session of its own, its text cleaned.
+        if (self.shared.is_local)(&session_id) {
+            return;
+        }
+        let Some(event) = cleaned(&event) else {
+            return;
+        };
         let (scope, event) = {
             let mut state = lock(&self.shared.state);
             let Some(record) = state.records.iter().find(|r| r.id == *machine).cloned() else {
                 return;
             };
-            let known = state
-                .sessions
-                .get(&session_id)
-                .map(|r| r.local_scope.clone());
+            let known = match state.sessions.get(&session_id) {
+                Some(remote) if remote.machine != *machine => return,
+                known => known.map(|r| r.local_scope.clone()),
+            };
             match event {
                 SessionEvent::Created { session } | SessionEvent::Updated { session } => {
+                    if session.id != session_id || session.machine.is_some() {
+                        return;
+                    }
+                    if known.is_none() && count_of(&state, machine) >= MAX_SESSIONS {
+                        return;
+                    }
                     let created = known.is_none();
                     let local_scope = known.unwrap_or_else(|| session.scope.clone());
                     let remote = Remote {
@@ -939,9 +1056,17 @@ fn open_requests(url: &str, token: &str) -> std::io::Result<(Requests, String)> 
     Ok((Requests { reader, writer }, hello.version))
 }
 
-fn exchange(requests: &mut Requests, request: &Request) -> std::io::Result<Response> {
+/// Send `request` and read its answer, waiting at most `limit` for it.
+fn exchange(
+    requests: &mut Requests,
+    request: &Request,
+    limit: Duration,
+) -> std::io::Result<Response> {
     frame::write_control(&mut requests.writer, request)?;
-    read_response(&mut requests.reader)
+    requests.reader.set_deadline(Some(Instant::now() + limit));
+    let response = read_response(&mut requests.reader);
+    requests.reader.set_deadline(None);
+    response
 }
 
 fn read_response(reader: &mut PipeReader) -> std::io::Result<Response> {
@@ -986,6 +1111,67 @@ fn machine_view(record: &Record, live: Option<&Live>) -> MachineView {
     }
 }
 
+/// How many sessions are listed from `machine`.
+fn count_of(state: &State, machine: &MachineId) -> usize {
+    state
+        .sessions
+        .values()
+        .filter(|r| r.machine == *machine)
+        .count()
+}
+
+/// `value` with control characters removed from its text, unless it's
+/// larger than [`MAX_VIEW_BYTES`] as JSON.
+fn cleaned<T: serde::Serialize + serde::de::DeserializeOwned>(value: &T) -> Option<T> {
+    let bytes = serde_json::to_vec(value).ok()?;
+    if bytes.len() > MAX_VIEW_BYTES {
+        return None;
+    }
+    let mut json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    clean_value(&mut json);
+    serde_json::from_value(json).ok()
+}
+
+/// Remove control characters from every string in `value`, keys too.
+fn clean_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) => *text = clean_text(text),
+        serde_json::Value::Array(items) => items.iter_mut().for_each(clean_value),
+        serde_json::Value::Object(map) => {
+            *map = std::mem::take(map)
+                .into_iter()
+                .map(|(key, mut value)| {
+                    clean_value(&mut value);
+                    (clean_text(&key), value)
+                })
+                .collect();
+        }
+        _ => {}
+    }
+}
+
+/// `text` without the control characters a terminal would act on rather
+/// than show (newlines and tabs stay).
+pub fn clean_text(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .collect()
+}
+
+/// A short text from a machine (its version), cleaned and cut.
+fn short_text(text: &str) -> String {
+    clean_text(text).chars().take(MAX_NAME).collect()
+}
+
+/// A machine's error with its text cleaned.
+pub fn clean_error(mut error: ApiError) -> ApiError {
+    error.message = clean_text(&error.message);
+    if let Some(details) = error.details.as_mut() {
+        clean_value(details);
+    }
+    error
+}
+
 fn kind_of(event: &SessionEvent) -> Option<EventKind> {
     Some(match event {
         SessionEvent::Created { .. } => EventKind::Created,
@@ -1028,12 +1214,20 @@ fn unreachable(url: &str, error: &std::io::Error) -> ApiError {
     } else {
         ErrorCode::DaemonUnavailable
     };
-    ApiError::new(code, format!("{url}: {error}"))
+    ApiError::new(code, clean_text(&format!("{url}: {error}")))
+}
+
+/// The answer about a session that isn't the machine's own to give.
+fn not_its_own() -> ApiError {
+    ApiError::new(
+        ErrorCode::PermissionDenied,
+        "the machine answered about a session that isn't its own",
+    )
 }
 
 fn unexpected(response: &Response) -> ApiError {
     match response {
-        Response::Error { error } => error.clone(),
+        Response::Error { error } => clean_error(error.clone()),
         other => ApiError::new(
             ErrorCode::Internal,
             format!("the machine answered unexpectedly: {other:?}"),
@@ -1050,4 +1244,211 @@ fn now_ms() -> i64 {
 
 fn now_secs() -> i64 {
     now_ms() / 1000
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use session_core::model::{Creator, LaunchSpec};
+
+    const LOCAL: &str = "01J000000000000000000LOCAL";
+
+    fn machines(home: &Path) -> Machines {
+        let machines = Machines::open(home, Arc::new(|id: &SessionId| id.as_str() == LOCAL));
+        let mut state = lock(&machines.shared.state);
+        for (id, name) in [
+            ("01J00000000000000000000MA1", "a"),
+            ("01J00000000000000000000MA2", "b"),
+        ] {
+            state.records.push(Record {
+                id: MachineId::from_string(id),
+                name: name.into(),
+                url: format!("http://127.0.0.1:9/{name}"),
+                token: "t".into(),
+                added_at: 0,
+                home: None,
+            });
+        }
+        drop(state);
+        machines
+    }
+
+    fn a() -> MachineId {
+        MachineId::from_string("01J00000000000000000000MA1")
+    }
+
+    fn b() -> MachineId {
+        MachineId::from_string("01J00000000000000000000MA2")
+    }
+
+    fn view(id: &str, name: &str) -> SessionView {
+        SessionView {
+            pinned: false,
+            git: None,
+            auto_named: false,
+            description: None,
+            notes: None,
+            labels: Default::default(),
+            private: false,
+            id: SessionId::from_string(id),
+            name: name.into(),
+            scope: ScopeRoot::from_canonical("/home/sprite/web".into()),
+            is_self: false,
+            cwd: "/home/sprite/web".into(),
+            status: SessionStatus::Live,
+            exit_code: None,
+            lifecycle: Lifecycle::Idle,
+            agent: None,
+            reported: None,
+            activity: None,
+            created_by: Creator::User,
+            parent_id: None,
+            depth: 0,
+            children: vec![],
+            launch: LaunchSpec::default(),
+            resume: None,
+            created_at: 1,
+            last_active_at: 2,
+            last_message_at: None,
+            terminal: None,
+            agent_output: None,
+            user_prompt: None,
+            agent_turn: None,
+            places: vec![],
+            machine: None,
+        }
+    }
+
+    fn event(session: SessionView) -> EventEnvelope {
+        EventEnvelope {
+            scope: session.scope.clone(),
+            session_id: session.id.clone(),
+            at: 1,
+            event: SessionEvent::Updated { session },
+        }
+    }
+
+    fn listed(machines: &Machines) -> Vec<(String, String, MachineId)> {
+        lock(&machines.shared.state)
+            .sessions
+            .values()
+            .map(|r| {
+                (
+                    r.view.id.to_string(),
+                    r.view.name.clone(),
+                    r.machine.clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_machine_speaks_only_for_sessions_of_its_own() {
+        let home = tempfile::tempdir().unwrap();
+        let machines = machines(home.path());
+        machines.take_event(&a(), event(view("01J0000000000000000000000S", "web")));
+        // Another machine can't take it over, change it or remove it.
+        machines.take_event(&b(), event(view("01J0000000000000000000000S", "stolen")));
+        machines.take_event(
+            &b(),
+            EventEnvelope {
+                event: SessionEvent::Removed,
+                ..event(view("01J0000000000000000000000S", "web"))
+            },
+        );
+        // Nor one of this machine's, one it lists from a machine of its own,
+        // or one under another id than the event's.
+        machines.take_event(&b(), event(view(LOCAL, "shadow")));
+        let mut relayed = view("01J0000000000000000000000R", "relayed");
+        relayed.machine = Some(MachineRef {
+            id: a(),
+            name: "a".into(),
+            scope: "/x".into(),
+        });
+        machines.take_event(&b(), event(relayed));
+        machines.take_event(
+            &b(),
+            EventEnvelope {
+                session_id: SessionId::from_string("01J0000000000000000000000T"),
+                ..event(view("01J0000000000000000000000U", "other id"))
+            },
+        );
+        assert_eq!(
+            listed(&machines),
+            vec![("01J0000000000000000000000S".into(), "web".into(), a())]
+        );
+
+        // Lists too.
+        machines.replace_sessions(
+            &b(),
+            vec![
+                view("01J0000000000000000000000S", "stolen"),
+                view(LOCAL, "shadow"),
+                view("01J0000000000000000000000V", "its own"),
+            ],
+        );
+        let mut all = listed(&machines);
+        all.sort();
+        assert_eq!(
+            all,
+            vec![
+                ("01J0000000000000000000000S".into(), "web".into(), a()),
+                ("01J0000000000000000000000V".into(), "its own".into(), b()),
+            ]
+        );
+    }
+
+    #[test]
+    fn this_machines_sessions_are_never_another_machines() {
+        let home = tempfile::tempdir().unwrap();
+        let machines = machines(home.path());
+        // Kept from before this check, or when the id became local later.
+        let local = Remote {
+            machine: a(),
+            local_scope: ScopeRoot::from_canonical("/repo".into()),
+            view: view(LOCAL, "shadow"),
+        };
+        lock(&machines.shared.state)
+            .sessions
+            .insert(local.view.id.clone(), local);
+        assert_eq!(machines.owner(&SessionId::from_string(LOCAL)), None);
+        assert!(machines.stamp(&a(), view(LOCAL, "shadow")).is_err());
+        assert!(machines.sessions(None, true).is_empty());
+    }
+
+    #[test]
+    fn what_a_machine_says_is_cleaned_and_bounded() {
+        let home = tempfile::tempdir().unwrap();
+        let machines = machines(home.path());
+        let mut loud = view(
+            "01J0000000000000000000000S",
+            "web\x1b]52;c;aGk=\x07\u{9b}2J",
+        );
+        loud.cwd = "/home/sprite/\x1b[31mweb".into();
+        machines.take_event(&a(), event(loud));
+        let kept = machines
+            .stamp(&a(), view("01J0000000000000000000000S", "web"))
+            .unwrap();
+        assert_eq!(kept.machine.unwrap().name, "a");
+        let state = lock(&machines.shared.state);
+        let remote = state.sessions.values().next().unwrap();
+        assert_eq!(remote.view.name, "web]52;c;aGk=2J");
+        assert_eq!(remote.view.cwd, PathBuf::from("/home/sprite/[31mweb"));
+        drop(state);
+
+        let mut huge = view("01J0000000000000000000000H", "huge");
+        huge.agent_output = Some("x".repeat(MAX_VIEW_BYTES));
+        machines.take_event(&a(), event(huge));
+        assert_eq!(listed(&machines).len(), 1);
+
+        let many = (0..MAX_SESSIONS + 10)
+            .map(|n| view(&format!("01J000000000000000000{n:05}"), "s"))
+            .collect();
+        machines.replace_sessions(&b(), many);
+        assert_eq!(count_of(&lock(&machines.shared.state), &b()), MAX_SESSIONS);
+
+        assert_eq!(clean_text("a\tb\nc\x1b[2J\x07\u{85}d"), "a\tb\nc[2Jd");
+        let error = clean_error(ApiError::new(ErrorCode::NotFound, "no \x1b]0;x\x07such"));
+        assert_eq!(error.message, "no ]0;xsuch");
+    }
 }

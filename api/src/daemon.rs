@@ -10,7 +10,7 @@
 //! next request starts fresh.
 
 use crate::dto::DaemonHealth;
-use session_core::api::{ApiError, ErrorCode, HelloOk};
+use session_core::api::{ApiError, ErrorCode, HelloOk, MACHINE_CLIENT};
 use session_core::client::{AuthMode, Client, ClientConfig};
 use session_core::ids::SessionId;
 use session_core::paths::Layout;
@@ -80,14 +80,18 @@ impl DaemonPool {
         }
     }
 
-    /// The client for `identity`, connecting (and, for the user, spawning
-    /// the daemon) when needed. Blocking.
     /// A raw connection to the daemon as the user, past its `hello`, for
-    /// `/v1/daemon` (blocking; spawns the daemon when none runs).
+    /// `/v1/daemon` (blocking; spawns the daemon when none runs). It says
+    /// it's another machine's ([`MACHINE_CLIENT`]), so the daemon answers it
+    /// about this machine's own sessions.
     pub fn user_tunnel(&self) -> Result<(UnixStream, HelloOk), ApiError> {
-        Client::open_raw(&self.client_config(AuthMode::User, true))
+        let mut config = self.client_config(AuthMode::User, true);
+        config.client_name = MACHINE_CLIENT.into();
+        Client::open_raw(&config)
     }
 
+    /// The client for `identity`, connecting (and, for the user, spawning
+    /// the daemon) when needed. Blocking.
     pub fn client(&self, identity: &Identity) -> Result<Arc<Client>, ApiError> {
         match identity {
             Identity::User => {

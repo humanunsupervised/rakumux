@@ -7,12 +7,15 @@
 //! the rest of the daemon reads and writes it like a Unix socket.
 
 use session_core::api::HelloOk;
+use session_core::frame::MAX_FRAME;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tungstenite::client::IntoClientRequest;
+use tungstenite::protocol::WebSocketConfig;
 use tungstenite::Message;
 
 use crate::log_debug;
@@ -24,6 +27,15 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(10);
 /// A ping this often keeps proxies from closing a quiet connection.
 const PING_EVERY: Duration = Duration::from_secs(25);
+/// A connection that hasn't heard from the machine this long, not even the
+/// answer to a ping, is gone.
+const SILENT: Duration = Duration::from_secs(90);
+/// The largest message the machine may send: a whole frame of the protocol.
+const MAX_MESSAGE: usize = MAX_FRAME + 5;
+/// Bytes read from the machine and not yet taken: past this, the socket's
+/// thread stops reading until they are, so a machine that sends faster than
+/// they're used is slowed down rather than kept in memory.
+const MAX_QUEUED: usize = 16 * 1024 * 1024;
 
 /// An open connection to another machine's daemon, past its hello.
 pub struct Pipe {
@@ -37,6 +49,16 @@ pub struct PipeReader {
     rx: Receiver<Vec<u8>>,
     pending: Vec<u8>,
     at: usize,
+    queued: Arc<AtomicUsize>,
+    deadline: Option<Instant>,
+}
+
+impl PipeReader {
+    /// Reads past `deadline` fail with `TimedOut`; `None` waits as long as
+    /// the connection stays open.
+    pub fn set_deadline(&mut self, deadline: Option<Instant>) {
+        self.deadline = deadline;
+    }
 }
 
 /// Bytes to the other daemon. Clones share the connection; dropping every
@@ -49,12 +71,25 @@ pub struct PipeWriter {
 impl Read for PipeReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.at >= self.pending.len() {
-            match self.rx.recv() {
+            let received = match self.deadline {
+                Some(deadline) => self
+                    .rx
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now())),
+                None => self.rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+            };
+            match received {
                 Ok(bytes) => {
+                    self.queued.fetch_sub(bytes.len(), Ordering::SeqCst);
                     self.pending = bytes;
                     self.at = 0;
                 }
-                Err(_) => return Ok(0),
+                Err(RecvTimeoutError::Timeout) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "the machine didn't answer in time",
+                    ))
+                }
+                Err(RecvTimeoutError::Disconnected) => return Ok(0),
             }
         }
         let n = buf.len().min(self.pending.len() - self.at);
@@ -120,12 +155,18 @@ pub fn connect(url: &str, token: &str) -> io::Result<Pipe> {
     request
         .headers_mut()
         .insert(tungstenite::http::header::AUTHORIZATION, bearer);
-    let (mut socket, _) = tungstenite::client::client(request, stream).map_err(|e| match e {
-        tungstenite::HandshakeError::Failure(tungstenite::Error::Http(response)) => {
-            refused(response.status().as_u16())
-        }
-        other => io::Error::other(format!("WebSocket: {other}")),
-    })?;
+    let config = WebSocketConfig {
+        max_message_size: Some(MAX_MESSAGE),
+        max_frame_size: Some(MAX_MESSAGE),
+        ..WebSocketConfig::default()
+    };
+    let (mut socket, _) = tungstenite::client::client_with_config(request, stream, Some(config))
+        .map_err(|e| match e {
+            tungstenite::HandshakeError::Failure(tungstenite::Error::Http(response)) => {
+                refused(response.status().as_u16())
+            }
+            other => io::Error::other(format!("WebSocket: {other}")),
+        })?;
     let hello = loop {
         match socket.read().map_err(ws_error)? {
             Message::Text(text) => {
@@ -144,33 +185,44 @@ pub fn connect(url: &str, token: &str) -> io::Result<Pipe> {
     handle.set_read_timeout(Some(POLL))?;
     let (in_tx, in_rx) = mpsc::channel();
     let (out_tx, out_rx) = mpsc::channel();
+    let queued = Arc::new(AtomicUsize::new(0));
+    let input = Input {
+        tx: in_tx,
+        queued: queued.clone(),
+    };
     std::thread::Builder::new()
         .name("ptyd-machine-ws".into())
-        .spawn(move || pump(socket, in_tx, out_rx))?;
+        .spawn(move || pump(socket, input, out_rx))?;
     Ok(Pipe {
         hello,
         reader: PipeReader {
             rx: in_rx,
             pending: Vec::new(),
             at: 0,
+            queued,
+            deadline: None,
         },
         writer: PipeWriter { tx: out_tx },
     })
 }
 
+/// Where the socket's thread puts what it reads, counting the bytes the
+/// [`PipeReader`] hasn't taken yet.
+struct Input {
+    tx: Sender<Vec<u8>>,
+    queued: Arc<AtomicUsize>,
+}
+
 /// Move bytes between the socket and the halves until either side ends.
-fn pump(mut socket: Socket, input: Sender<Vec<u8>>, output: Receiver<Vec<u8>>) {
+fn pump(mut socket: Socket, input: Input, output: Receiver<Vec<u8>>) {
     let ended = pump_until_closed(&mut socket, &input, &output);
     log_debug!("machines: connection closed: {ended}");
 }
 
 /// Why [`pump`] stopped.
-fn pump_until_closed(
-    socket: &mut Socket,
-    input: &Sender<Vec<u8>>,
-    output: &Receiver<Vec<u8>>,
-) -> String {
+fn pump_until_closed(socket: &mut Socket, input: &Input, output: &Receiver<Vec<u8>>) -> String {
     let mut pinged = Instant::now();
+    let mut heard = Instant::now();
     // A write the socket's short read timeout interrupted: TLS may read
     // while it writes. The message is buffered; flushing finishes it.
     let mut unflushed = false;
@@ -205,16 +257,31 @@ fn pump_until_closed(
             }
             pinged = Instant::now();
         }
+        if heard.elapsed() >= SILENT {
+            return format!("nothing from the machine for {} s", SILENT.as_secs());
+        }
+        if input.queued.load(Ordering::SeqCst) >= MAX_QUEUED {
+            // Not reading isn't the machine's silence.
+            heard = Instant::now();
+            std::thread::sleep(POLL);
+            continue;
+        }
         match socket.read() {
-            Ok(Message::Binary(bytes)) => {
-                if input.send(bytes).is_err() {
-                    let _ = socket.close(None);
-                    let _ = socket.flush();
-                    return "closed here".into();
+            Ok(message) => {
+                heard = Instant::now();
+                match message {
+                    Message::Binary(bytes) => {
+                        input.queued.fetch_add(bytes.len(), Ordering::SeqCst);
+                        if input.tx.send(bytes).is_err() {
+                            let _ = socket.close(None);
+                            let _ = socket.flush();
+                            return "closed here".into();
+                        }
+                    }
+                    Message::Close(frame) => return format!("closed by the machine: {frame:?}"),
+                    _ => {}
                 }
             }
-            Ok(Message::Close(frame)) => return format!("closed by the machine: {frame:?}"),
-            Ok(_) => {}
             Err(e) if is_timeout(&e) => {}
             Err(e) => return format!("reading: {e}"),
         }

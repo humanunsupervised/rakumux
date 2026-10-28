@@ -442,9 +442,11 @@ paths:
       summary: The daemon's own protocol, for another machine's daemon (WebSocket).
       description: |
         Served on the remote listener only, to the remote token; the caller is
-        the user. Another machine's `rakumux-ptyd` uses it to list and use this
-        machine's sessions (`machine_add`). The server first sends a text
-        message, the daemon's `hello_ok` as JSON (it said hello as the user);
+        the user, reaching this machine's own sessions only (its hello names the
+        client `machine`, so the daemon never lists, forwards to or adds other
+        machines on it). Another machine's `rakumux-ptyd` uses it to list and
+        use this machine's sessions (`machine_add`). The server first sends a
+        text message, the daemon's `hello_ok` as JSON (it said hello as the user);
         then binary messages carry the daemon protocol's bytes both ways
         (`[u32 length][u8 kind][payload]` frames, as on its Unix socket).
         Closing the socket closes the daemon connection.

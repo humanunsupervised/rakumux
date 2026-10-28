@@ -124,7 +124,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    bearer is the remote token, `Host` isn't checked, `Origin` is allowed, identity headers are
    refused and the caller is the user. The remote listener also serves `GET /v1/daemon`: the
    daemon's own protocol over a WebSocket (a `hello_ok` text message, then frames as binary
-   messages), which another machine's daemon uses to reach this one (component 11). Runs in the foreground or with `--detach`; a user client of
+   messages), which another machine's daemon uses to reach this one (component 11); its hello
+   names the client `machine` (`MACHINE_CLIENT`), so the daemon answers it about this
+   machine's own sessions only. Runs in the foreground or with `--detach`; a user client of
    the daemon (spawns it on demand), one API per Rakumux home. See `api/README.md`.
 9. **`rakumux-mcp`** (`mcp/`): MCP server on stdio for coding agents, built on `rmcp` (exact
    pinned, confined to `mcp/src/server.rs`). Tools: `list_folders`, `list_sessions`,
@@ -306,7 +308,15 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    naming them, relays attaches, and merges the machine's events into user subscriptions
    (session callers never see them; the account service treats them as private). A connection
    opens when something needs the machine and closes a minute after its last use unless one of
-   its agents works or someone is attached, so a machine that pauses when idle can.
+   its agents works or someone is attached, so a machine that pauses when idle can. What a
+   machine sends is taken as data: only sessions of its own are kept (never one with the id of
+   a session here or another machine's, nor one it lists from machines of its own), at most 500,
+   each view at most 256 KiB as JSON, with control characters removed from its text; a request
+   gets 30 s to be answered (a wait its own timeout and 10 s, on a connection of its own), and a
+   connection silent for 90 s is closed. A connection from another machine (hello client
+   `machine`, which `/v1/daemon` gives) reaches this machine's own sessions only: no other
+   machines' sessions, events or `machine_*` requests, so machines that added each other (or a
+   machine added to itself) don't loop.
    `CreateSession::machine` creates there, in `<its home>/<local folder name>` (made by
    `project_add {create}`), with the machine's own environment and, for a new folder, the
    `prefill` (`git clone <origin> .`, typed, never run). **Your Sprite**: `rakumux sprite

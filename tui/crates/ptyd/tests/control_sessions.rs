@@ -155,6 +155,88 @@ fn other_machines_must_be_added_first_and_only_by_the_user() {
 }
 
 #[test]
+fn another_machine_relayed_here_reaches_this_machines_own_sessions_only() {
+    let mut h = Harness::new();
+    let here = h.create(Some("here"));
+    let mut there = here.clone();
+    there.id = SessionId::from_string("01J00000000000000000THERE0");
+    there.name = "there".into();
+    let mut shadow = here.clone();
+    shadow.name = "shadow".into();
+    // As a daemon saves them: a machine, a session listed from it, and one
+    // claiming the id of a session here.
+    let machine = "01J0000000000000000MACHINE";
+    let saved = serde_json::json!({
+        "machines": [{"id": machine, "name": "box", "url": "http://127.0.0.1:9",
+                      "token": "t", "added_at": 0}],
+        "sessions": [
+            {"machine": machine, "local_scope": h.scope, "view": there},
+            {"machine": machine, "local_scope": h.scope, "view": shadow},
+        ],
+    });
+    std::fs::create_dir_all(&h.layout.home).unwrap();
+    std::fs::write(h.layout.home.join("machines.json"), saved.to_string()).unwrap();
+    h.restart();
+    let list = |caller: &ptyd::control_api::Caller| match h.handle(
+        caller,
+        Request::SessionList {
+            scope: None,
+            scopes: Vec::new(),
+            include_dead: true,
+            all: true,
+        },
+    ) {
+        Response::Sessions { sessions } => {
+            let mut names: Vec<String> = sessions.into_iter().map(|s| s.name).collect();
+            names.sort();
+            names
+        }
+        other => panic!("expected sessions, got {other:?}"),
+    };
+
+    assert_eq!(
+        list(&h.user),
+        ["here", "there"],
+        "a session here stays here"
+    );
+    let got = session(h.handle(
+        &h.user,
+        Request::SessionGet {
+            id: here.id.clone(),
+        },
+    ));
+    assert_eq!((got.name.as_str(), got.machine), ("here", None));
+
+    let relayed = h
+        .control
+        .authenticate(&session_core::api::Hello {
+            client: session_core::api::MACHINE_CLIENT.into(),
+            ..hello(session_core::api::Auth::User {
+                token: h.user_token.as_str().into(),
+            })
+        })
+        .unwrap();
+    assert_eq!(list(&relayed), ["here"]);
+    let get = Request::SessionGet {
+        id: there.id.clone(),
+    };
+    assert_eq!(error(h.handle(&relayed, get)).code, ErrorCode::NotFound);
+    let mut create = h.create_request();
+    create.machine = Some(session_core::ids::MachineId::from_string(machine));
+    let add = Request::MachineAdd {
+        name: "loop".into(),
+        url: "http://127.0.0.1:9".into(),
+        token: "t".into(),
+    };
+    for request in [Request::MachineList, add, Request::SessionCreate(create)] {
+        assert_eq!(
+            error(h.handle(&relayed, request)).code,
+            ErrorCode::PermissionDenied
+        );
+    }
+}
+
+#[test]
 fn create_builds_argv_env_cwd_and_startup_input() {
     let h = Harness::new();
     let mut request = h.create_request();

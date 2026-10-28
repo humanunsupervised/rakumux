@@ -608,6 +608,13 @@ pub const CAPABILITY_RESOURCES: &str = "resources";
 /// and `CreateSession::machine`: sessions on other machines.
 pub const CAPABILITY_MACHINES: &str = "machines";
 
+/// `Hello::client` of a connection relaying another machine's daemon
+/// (`rakumux-api`'s `/v1/daemon`). The daemon answers it as the user about
+/// this machine alone: it never lists, forwards to or adds other machines on
+/// it, so two machines that added each other don't loop. Any client may say
+/// it; it only ever narrows what that client reaches.
+pub const MACHINE_CLIENT: &str = "machine";
+
 /// `CreateSession::prefill`: text typed into a new shell without Enter.
 pub const CAPABILITY_PREFILL: &str = "session.prefill";
 

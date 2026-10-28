@@ -667,6 +667,20 @@ impl Inner {
             .count()
     }
 
+    /// Whether this machine has a session `id`. One the registry can't be
+    /// asked about counts as this machine's: another machine's never stands
+    /// in for it.
+    pub(super) fn has_session(&self, id: &SessionId) -> bool {
+        let state = self.lock();
+        match registry(&state.registry).and_then(|r| r.get(id).map_err(ApiError::from)) {
+            Ok(found) => found.is_some(),
+            Err(error) => {
+                crate::log_warn!("control: looking up a session: {error}");
+                true
+            }
+        }
+    }
+
     pub(super) fn session_count(&self) -> u32 {
         let state = self.lock();
         match registry(&state.registry).and_then(|r| r.count().map_err(ApiError::from)) {
