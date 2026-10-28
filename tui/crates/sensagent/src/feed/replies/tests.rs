@@ -106,9 +106,27 @@ fn after_reading(replies: &mut ReplySync, pending: Vec<FeedReply>) -> Option<Rep
     replies.next_work(NOW)
 }
 
-/// Session S's agent is seen working: it took what was typed in.
+/// A turn id no view had yet.
+fn new_turn() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1_000);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Session S's view with a new prompt in its chat, `prompt` its first line.
+fn prompted(lifecycle: Lifecycle, conversation: Option<&str>, prompt: &str) -> SessionView {
+    let mut view = view("S", lifecycle, conversation);
+    view.agent_turn.as_mut().unwrap().id = new_turn();
+    view.user_prompt = Some(prompt.into());
+    view
+}
+
+/// Session S's agent is seen working on a new prompt, what was typed in:
+/// it took it.
 fn taken(replies: &mut ReplySync) {
-    replies.observe(&view("S", Lifecycle::Working, Some(CHAT)));
+    let sent = replies.deliveries[&SessionId::from_string("S")]
+        .sent
+        .clone();
+    replies.observe(&prompted(Lifecycle::Working, Some(CHAT), &sent));
 }
 
 fn answer(conversation: Option<&str>, finished_at: i64) -> AgentReply {
@@ -582,7 +600,11 @@ fn a_session_message_waits_for_an_agent_then_goes_into_whatever_chat_it_shows() 
         })
     );
     replies.submitted("01K8A2".into(), Ok(()), NOW, 2_000);
-    replies.observe(&view("S", Lifecycle::Working, Some("another")));
+    replies.observe(&prompted(
+        Lifecycle::Working,
+        Some("another"),
+        "Start on the parser.",
+    ));
     let body = report_of(replies.next_work(NOW));
     assert_eq!(body["id"], "01K8A2");
     assert_eq!(body["status"], "delivered");
@@ -1095,23 +1117,85 @@ fn a_new_prompt_in_its_chat_shows_a_reply_was_taken() {
 }
 
 #[test]
-fn a_reply_never_seen_taken_still_lets_its_session_move_on() {
+fn a_reply_its_chat_never_shows_as_a_prompt_fails_and_its_session_moves_on() {
     let mut replies = two_replies();
+    // Even shown working: its chat has no new prompt yet.
+    replies.observe(&view("S", Lifecycle::Working, Some(CHAT)));
     let before = NOW + TAKE_WITHIN - Duration::from_secs(1);
     assert_eq!(next_at(&mut replies, before), None);
-    // Typed in a while ago: delivered all the same, and the next goes in
-    // once its agent has been shown waiting a while longer.
+    // No new prompt in its chat a while after it was typed: its Enter was
+    // lost, or it went into a menu. Not taken, and its session moves on once
+    // its agent waits.
     let bound = NOW + TAKE_WITHIN;
+    let body = report_of(next_at(&mut replies, bound));
     assert_eq!(
-        report_of(next_at(&mut replies, bound))["status"],
-        "delivered"
+        (&body["id"], &body["status"], &body["failure"]),
+        (&"01K8A1".into(), &"failed".into(), &"not_taken".into())
     );
     replies.request_done(true, Ok(FeedResult::Reply(reply("01K8A1", 6, None))), bound);
-    assert_eq!(next_at(&mut replies, bound), None);
+    assert_eq!(next_at(&mut replies, bound), None, "its agent works");
+    replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
     assert_eq!(
-        submitted_reply(next_at(&mut replies, bound + SETTLE)).as_deref(),
+        submitted_reply(next_at(&mut replies, bound)).as_deref(),
         Some("01K8A2")
     );
+}
+
+#[test]
+fn a_new_prompt_is_the_replys_only_when_it_begins_it_or_holds_its_start() {
+    let typed_in = |text: &str| {
+        let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+        let mut pending = reply("01K8A1", 4, Some("studio"));
+        pending.text = text.into();
+        submitted_reply(after_reading(&mut replies, vec![pending]));
+        replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
+        replies
+    };
+    let long = "Now add a test for the parser's error path, then run the whole suite \
+        and tell me what fails. "
+        .repeat(4);
+    for (text, prompt, taken) in [
+        // As the daemon reads it: marks, spaces and case may differ.
+        ("Now add a **test**.", "now add a test.", true),
+        ("## Plan\n\nShip it", "Plan", true),
+        ("/review src", "/review src", true),
+        // A long reply's first line, cut at 240 characters.
+        (long.as_str(), &long[..240], true),
+        // Typed after a draft on the same line: it went in.
+        ("Run the tests", "also check theRun the tests", true),
+        // Another prompt: someone else's, or a draft on a line of its own.
+        ("Run the tests", "Fix the docs", false),
+        ("Run the tests", "also check the", false),
+    ] {
+        let mut replies = typed_in(text);
+        replies.observe(&prompted(Lifecycle::Working, Some(CHAT), prompt));
+        let body = report_of(replies.next_work(NOW));
+        if taken {
+            assert_eq!(body["status"], "delivered", "{text:?} / {prompt:?}");
+        } else {
+            assert_eq!(
+                (&body["status"], &body["failure"]),
+                (&"failed".into(), &"not_taken".into()),
+                "{text:?} / {prompt:?}"
+            );
+        }
+    }
+    // An agent whose turns the daemon doesn't follow takes a session message
+    // once seen busy, as before.
+    let remote: AcceptRemote = Arc::new(|| true);
+    let mut unfollowed = view("S", Lifecycle::Idle, None);
+    unfollowed.agent_turn = None;
+    let mut replies = on(Some(remote), &[unfollowed.clone()]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read_messages(vec![message("01K8A2", 6, None)]), NOW);
+    assert_eq!(
+        submitted_reply(replies.next_work(NOW)).as_deref(),
+        Some("01K8A2")
+    );
+    replies.submitted("01K8A2".into(), Ok(()), NOW, 2_000);
+    unfollowed.lifecycle = Lifecycle::Working;
+    replies.observe(&unfollowed);
+    assert_eq!(report_of(replies.next_work(NOW))["status"], "delivered");
 }
 
 #[test]

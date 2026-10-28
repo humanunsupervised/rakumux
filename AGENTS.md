@@ -194,8 +194,13 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    continues).
    **Replies and threads** (`feed/replies.rs`, `ReplySync`): the user
    writes back to any entry with a conversation id, on rakumux.com or in a TUI (`r` in the
-   feed: `OwnerRequest::FeedReply {entry, text}` → `POST /api/v1/feed/replies`, ≤ 8 KiB, no
-   controls). Under the same switch the service reads the account's replies as they change
+   feed: `OwnerRequest::FeedReply {entry, text, id}` → `POST /api/v1/feed/replies`, ≤ 8 KiB, no
+   controls; `id` is the reply's ULID, made by the TUI and sent again with the same text after a
+   failure, and rakumux.com answers a repeated id with the reply it stored, so one stored before
+   its answer was lost isn't stored, or typed in, twice). Replies being typed in and those
+   written in a TUI have a worker of their own (`rakumux-status-reply`), apart from the two that
+   fetch files, make AI titles and upload chats, so a TUI's write doesn't wait behind them past
+   the 30 s it waits for its answer. Under the same switch the service reads the account's replies as they change
    (`GET /api/v1/feed/replies?after=SEQ&machine=NAME`, as soon as the answer's `poll_ms` says:
    every second while a reply this machine hasn't read yet waits for it or the user has the
    website open, and for
@@ -219,10 +224,15 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    foreground still is (`expect_foreground`, read again by the daemon; refused when its agent
    just exited to the shell, and looked at again 2 s later). A session takes its replies and session messages
    one at a time, in rakumux.com's order (`seq`; a later one waits behind an earlier one that
-   waits): each is `delivered` once its agent is seen to take it (`working`/`blocked`, or a new
-   `agent_turn` in its chat; a view still showing it waiting proves nothing, as the lifecycle
-   lags), else after 30 s all the same; the next goes in once the agent waits again (after
-   being seen busy, or 5 s on). Typed in but its session ended or chat changed first, it fails.
+   waits): each is `delivered` once its chat shows it as a new prompt (a new `agent_turn` whose
+   `user_prompt`'s letters and digits begin the reply's, or hold its first 32: typed after a
+   draft on the same line; without a `user_prompt`, from an older daemon, any new turn in its
+   chat), or, for an agent whose turns the daemon doesn't follow, once seen `working`/`blocked`
+   (a view still showing it waiting proves nothing, as the lifecycle lags); with no new prompt
+   within 30 s, or another one, it fails `not_taken` (its Enter lost, it went into a menu, or a
+   draft on a line of its own went first: it may still be in the input box); the next goes in
+   once the agent waits again (after being seen busy, or 5 s on). Typed in but its session
+   ended or chat changed first, it fails.
    What's typed in survives a restart of the service (`feed/replies/kept.rs`,
    `sensagent/status/replies.json`, 0600): the ids it typed in or decided (marked before the
    daemon is asked, so a reply goes in at most once), those handed to the daemon and not yet
@@ -232,7 +242,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    typed in one after another each get theirs, and one whose turn ended without an answer
    (interrupted, an API error) never takes a later one.
    It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
-   `private`, `not_accepted`, `refused`, `attachment_unavailable`;
+   `private`, `not_accepted`, `refused`, `attachment_unavailable`, `not_taken`;
    `POST /api/v1/feed/replies/status`). **Files attached** on rakumux.com (`attachments`, at
    most 5 of 4 MiB each; `feed/uploads.rs`): once a reply could otherwise be typed in, the
    service fetches its files one at a time (`GET /api/v1/feed/replies/attachments/{id}`, the
@@ -260,7 +270,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    (`SessionSync::confirmed`), and TUIs take the name from the service (`FeedPage.machine`).
    A **session message** (written
    on rakumux.com, or in a TUI on a prompt still waiting for its answer in a new chat, to a
-   session with no answer to reply to: `OwnerRequest::SessionMessage {machine, session, text}`
+   session with no answer to reply to: `OwnerRequest::SessionMessage {machine, session, text, id}`
    → `POST /api/v1/feed/replies` with `session` in place of `entry`; a reply without `entry` or
    `thread`, read with `session_messages=1` so older machines never get one) is typed once an agent runs
    there and waits, whatever chat it shows, never into a session without an agent; it never

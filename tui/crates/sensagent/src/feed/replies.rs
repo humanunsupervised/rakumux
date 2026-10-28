@@ -86,11 +86,17 @@ const ANSWER_SLACK_MS: i64 = 1_000;
 pub(crate) const TYPING_QUIET: Duration = Duration::from_secs(10);
 /// After the daemon refused because someone was typing, try that session again this much later.
 pub(crate) const TYPING_HOLD: Duration = Duration::from_secs(2);
-/// A reply typed in is delivered once its agent is seen to take it (working,
-/// asking something, or a new prompt in its chat); this long after it was
-/// typed it counts as delivered all the same, so its session's next replies
-/// never wait on it for ever.
+/// A reply typed in is delivered once its agent's chat shows it as a new
+/// prompt; one whose chat shows no new prompt this long after it was typed
+/// failed (`not_taken`: its Enter was lost, or it went into a menu), so its
+/// session's next replies never wait on it for ever. An agent whose turns
+/// the daemon doesn't follow takes it once seen busy, or after this all the
+/// same.
 pub(crate) const TAKE_WITHIN: Duration = Duration::from_secs(30);
+/// A new prompt is a reply's when its letters and digits begin the reply's,
+/// or hold the reply's first this many (the reply typed after a draft on
+/// the same line).
+const PROMPT_HEAD: usize = 32;
 /// A reply taken without its agent being seen busy (its lifecycle can lag a
 /// new prompt) holds its session's next one this long before the agent's
 /// waiting is believed.
@@ -263,6 +269,8 @@ struct Seen {
     conversation: Option<String>,
     /// The agent's current turn (`agent_turn.id`): a new prompt makes a new one.
     turn: Option<u64>,
+    /// The first line of the user's last prompt to its agent (`user_prompt`).
+    prompt: Option<String>,
     /// The program in its foreground: a reply is typed only while it's still
     /// there (`session_submit`'s `expect_foreground`).
     foreground: Option<String>,
@@ -279,6 +287,7 @@ impl Seen {
                 .as_ref()
                 .and_then(|turn| turn.conversation_id.clone()),
             turn: view.agent_turn.as_ref().map(|turn| turn.id),
+            prompt: view.user_prompt.clone(),
             foreground: view
                 .terminal
                 .as_ref()
@@ -340,14 +349,18 @@ impl Pending {
 }
 
 /// A reply going into its session, and what its agent showed since: nothing
-/// else is typed there until the agent is seen to take it (it works or asks
-/// something, or its chat shows a new prompt) and then waits again. Seen
-/// taken, it's reported delivered; its session ended or its chat changed
-/// first, failed. The agent's lifecycle can lag what it does, so a view
-/// that still shows it waiting proves nothing.
+/// else is typed there until the agent is seen to take it and then waits
+/// again. Taken means its chat shows a new prompt that is this reply (its
+/// first line, [`Delivery::matches`]), or, for an agent whose turns the
+/// daemon doesn't follow, that it works or asks something. Taken, it's
+/// reported delivered; its session ended, its chat changed, another prompt
+/// went in or none within [`TAKE_WITHIN`], failed. The agent's lifecycle can
+/// lag what it does, so a view that still shows it waiting proves nothing.
 struct Delivery {
     reply: String,
     target: Target,
+    /// Its text as typed, letters and digits only ([`squash`]).
+    sent: String,
     /// When it was handed to the daemon.
     since: Duration,
     /// The daemon typed it in.
@@ -356,6 +369,8 @@ struct Delivery {
     turn: (Option<u64>, Option<String>),
     /// The agent was seen working or asking something since.
     busy: bool,
+    /// Its chat was seen with a new prompt that is this reply since.
+    took: bool,
     /// When it was seen taken (and reported delivered).
     taken: Option<Duration>,
 }
@@ -373,7 +388,8 @@ impl Delivery {
         let Some(seen) = seen.filter(|seen| seen.live) else {
             return Taking::Failed(ReplyFailure::SessionGone);
         };
-        if self.busy {
+        let prompted = self.prompted(seen);
+        if self.took || prompted == Some(true) {
             return Taking::Taken;
         }
         if let Target::Chat(wanted) = &self.target {
@@ -386,13 +402,54 @@ impl Delivery {
                 return Taking::Failed(ReplyFailure::ConversationChanged);
             }
         }
-        let new_prompt =
-            seen.turn.is_some() && (seen.turn, &seen.conversation) != (self.turn.0, &self.turn.1);
-        if new_prompt || now.saturating_sub(self.since) >= TAKE_WITHIN {
-            Taking::Taken
-        } else {
-            Taking::Waiting
+        if prompted == Some(false) {
+            // Another prompt went in: this one wasn't taken as typed.
+            return Taking::Failed(ReplyFailure::NotTaken);
         }
+        // Its chat's turns say whether the agent took it; without them, its
+        // being busy does.
+        let turns = seen.turn.is_some() || self.turn.0.is_some();
+        if !turns && self.busy {
+            return Taking::Taken;
+        }
+        if now.saturating_sub(self.since) < TAKE_WITHIN {
+            Taking::Waiting
+        } else if turns {
+            Taking::Failed(ReplyFailure::NotTaken)
+        } else {
+            Taking::Taken
+        }
+    }
+
+    /// Whether `seen` shows a new prompt in its session's chat since this
+    /// reply was typed, and whether it's this reply ([`Delivery::matches`]):
+    /// `None` for no new prompt. Without a prompt to compare (an older
+    /// daemon), a new turn in the same chat is this reply, and one in another
+    /// chat no sign either way.
+    fn prompted(&self, seen: &Seen) -> Option<bool> {
+        let new =
+            seen.turn.is_some() && (seen.turn, &seen.conversation) != (self.turn.0, &self.turn.1);
+        if !new {
+            return None;
+        }
+        match self.matches(seen.prompt.as_deref()) {
+            Some(mine) => Some(mine),
+            None => (self.turn.1.is_none() || seen.conversation == self.turn.1).then_some(true),
+        }
+    }
+
+    /// Whether `prompt`, a new prompt's first line as the daemon reads it
+    /// from the agent's chat (marks dropped, cut at 240 characters), is this
+    /// reply: its letters and digits begin the reply's, or hold the reply's
+    /// first [`PROMPT_HEAD`] (typed in after a draft on the same line, it
+    /// still went in). `None` when there's nothing to compare.
+    fn matches(&self, prompt: Option<&str>) -> Option<bool> {
+        let line = squash(prompt?);
+        if line.is_empty() || self.sent.is_empty() {
+            return None;
+        }
+        let head: String = self.sent.chars().take(PROMPT_HEAD).collect();
+        Some(self.sent.starts_with(&line) || line.contains(&head))
     }
 
     /// Taken: whether its session takes the next reply now.
@@ -405,6 +462,16 @@ impl Delivery {
             .is_some_and(|taken| now.saturating_sub(taken) >= SETTLE);
         seen.waits() && (self.busy || settled)
     }
+}
+
+/// `text`'s letters and digits, lower case: what a reply and the prompt an
+/// agent's chat shows for it have in common, whatever each did to spaces,
+/// marks and lines.
+fn squash(text: &str) -> String {
+    text.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// A reply's text as typed in: with files, a blank line, then each file's
@@ -591,6 +658,7 @@ impl ReplySync {
         let seen = Seen::of(view);
         if let Some(delivery) = self.deliveries.get_mut(&view.id) {
             delivery.busy |= seen.busy();
+            delivery.took |= delivery.prompted(&seen) == Some(true);
         }
         self.sessions.insert(view.id.clone(), seen);
     }
@@ -788,6 +856,7 @@ impl ReplySync {
                 let delivery = Delivery {
                     reply: id.clone(),
                     target,
+                    sent: squash(&text),
                     since: now,
                     typed: false,
                     turn: (
@@ -795,6 +864,7 @@ impl ReplySync {
                         seen.and_then(|seen| seen.conversation.clone()),
                     ),
                     busy: false,
+                    took: false,
                     taken: None,
                 };
                 self.deliveries.insert(session.clone(), delivery);

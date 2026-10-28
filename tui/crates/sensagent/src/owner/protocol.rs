@@ -123,19 +123,28 @@ pub enum OwnerRequest {
     /// Write `text` back to feed entry `entry` (its ULID): stored on
     /// rakumux.com for the entry's machine to type into its session, here at
     /// once when the session runs here. Answered with `FeedReply`; later
-    /// `Feed` pages carry it as it changes.
-    FeedReply { entry: String, text: String },
+    /// `Feed` pages carry it as it changes. `id`: the reply's id (a ULID),
+    /// made by the TUI and sent again with a retry, so the reply is stored
+    /// once however often it's sent (the service makes one without it).
+    FeedReply {
+        entry: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
     /// Write `text` to session `session` (its id) of machine `machine` itself,
     /// a session message: for a session with nothing to reply to in the chat
     /// it shows (a prompt still waiting for its answer in a new chat). Stored
     /// on rakumux.com for that machine to type into the session once an agent
     /// there waits for input, here at once when the session runs here; the
     /// agent's next reply answers it. Answered with `FeedReply`, never with a
-    /// reply: session messages don't reach TUIs.
+    /// reply: session messages don't reach TUIs. `id` as `FeedReply`'s.
     SessionMessage {
         machine: String,
         session: String,
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
     },
 }
 

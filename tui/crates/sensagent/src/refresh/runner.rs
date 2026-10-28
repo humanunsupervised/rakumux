@@ -1,7 +1,7 @@
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
@@ -84,9 +84,21 @@ enum Command {
     Summarize(SessionId, Sender<()>),
     SetFeatures(FeatureChange, Reply<()>),
     FeedTurn(String, Option<u64>, Sender<Result<TurnRead, FeedFailure>>),
-    FeedReply(String, String, Sender<Result<FeedReply, FeedFailure>>),
-    /// A session message: machine, session, text.
-    SessionMessage(String, String, String, Sender<Result<(), FeedFailure>>),
+    /// A reply: entry, text, and its id when the TUI made one.
+    FeedReply(
+        String,
+        String,
+        Option<String>,
+        Sender<Result<FeedReply, FeedFailure>>,
+    ),
+    /// A session message: machine, session, text, and its id likewise.
+    SessionMessage(
+        String,
+        String,
+        String,
+        Option<String>,
+        Sender<Result<(), FeedFailure>>,
+    ),
 }
 
 enum Message {
@@ -174,6 +186,27 @@ enum Work<A, C> {
     Replies(Option<ReplyId>),
 }
 
+/// Where the owner sends work. Replies being typed in and replies or session
+/// messages written in a TUI have a worker of their own, so they never wait
+/// behind the shared workers' file downloads (up to a minute each), AI
+/// descriptions and chat uploads: a TUI waits 30 s for its answer, and gives
+/// up on one the cloud then stores all the same.
+struct Workers<A, C> {
+    shared: Sender<Work<A, C>>,
+    replies: Sender<Work<A, C>>,
+}
+
+impl<A, C> Workers<A, C> {
+    fn send(&self, work: Work<A, C>) -> Result<(), SendError<Work<A, C>>> {
+        match work {
+            Work::Submit(..) | Work::WriteReply(..) | Work::WriteMessage(..) => {
+                self.replies.send(work)
+            }
+            work => self.shared.send(work),
+        }
+    }
+}
+
 /// The current device sign-in, held by the owner thread.
 struct SignIn {
     attempt: u64,
@@ -182,8 +215,9 @@ struct SignIn {
 }
 
 /// Runs a [`StatusRefresher`] for one Rakumux home: an owner thread holding the
-/// coordinator, a thread following the daemon's sessions, and two workers for
-/// captures and requests. Not an installed service or an IPC boundary: the embedding
+/// coordinator, a thread following the daemon's sessions, two workers for
+/// captures and requests, and one for replies being typed in and written in a
+/// TUI ([`Workers`]). Not an installed service or an IPC boundary: the embedding
 /// process owns it and must keep controls user-only. Dropping it stops the owner at
 /// once. The source thread and workers end on their own: a worker blocked in a request
 /// at the request's deadline, submitting nothing more.
@@ -231,8 +265,11 @@ impl RefreshRunner {
             return Err(RefreshError::NotPermitted);
         }
         let (messages, inbox) = mpsc::channel();
-        let (work, queue) = mpsc::channel::<Work<A, C>>();
+        let (shared, queue) = mpsc::channel::<Work<A, C>>();
         let queue = Arc::new(Mutex::new(queue));
+        let (replies, reply_queue) = mpsc::channel::<Work<A, C>>();
+        let reply_queue = Mutex::new(reply_queue);
+        let work = Workers { shared, replies };
         let stop = Arc::new(AtomicBool::new(false));
         let mut runner = Self {
             messages: messages.clone(),
@@ -245,6 +282,10 @@ impl RefreshRunner {
                 perform(&queue, &*api, &messages)
             })?;
         }
+        let (reply_api, reply_messages) = (api.clone(), messages.clone());
+        spawn("rakumux-status-reply", move || {
+            perform(&reply_queue, &*reply_api, &reply_messages)
+        })?;
         let owner_messages = messages.clone();
         runner.owner = Some(spawn("rakumux-status-owner", move || {
             own(refresher, &inbox, &work, &owner_messages, website.as_ref())
@@ -382,27 +423,32 @@ impl RefreshClient {
 
     /// Write `text` back to feed entry `entry`: stored on rakumux.com for the
     /// entry's machine to type into its session (here at once when it runs here).
+    /// `id`, a ULID, names the reply (one is made without it), so the same id
+    /// written again stores nothing more.
     pub fn feed_reply(
         &self,
         entry: String,
         text: String,
+        id: Option<String>,
     ) -> Result<Result<FeedReply, FeedFailure>, RefreshError> {
         let (reply, answer) = mpsc::channel();
-        self.send(Command::FeedReply(entry, text, reply))?;
+        self.send(Command::FeedReply(entry, text, id, reply))?;
         answer.recv().map_err(|_| RefreshError::Stopped)
     }
 
     /// Write `text` to session `session` of `machine` itself (a session
     /// message): stored on rakumux.com for that machine to type into the
     /// session once an agent there waits (here at once when it runs here).
+    /// `id` as [`RefreshClient::feed_reply`]'s.
     pub fn session_message(
         &self,
         machine: String,
         session: String,
         text: String,
+        id: Option<String>,
     ) -> Result<Result<(), FeedFailure>, RefreshError> {
         let (reply, answer) = mpsc::channel();
-        self.send(Command::SessionMessage(machine, session, text, reply))?;
+        self.send(Command::SessionMessage(machine, session, text, id, reply))?;
         answer.recv().map_err(|_| RefreshError::Stopped)
     }
 
@@ -467,7 +513,7 @@ fn spawn(name: &str, body: impl FnOnce() + Send + 'static) -> Result<JoinHandle<
 fn own<S, A, C>(
     mut refresher: StatusRefresher<S, A, C>,
     inbox: &Receiver<Message>,
-    work: &Sender<Work<A, C>>,
+    work: &Workers<A, C>,
     messages: &Sender<Message>,
     website: Option<&AccountWebsite>,
 ) where
@@ -824,8 +870,10 @@ fn own<S, A, C>(
                 let _ = reply.send(feed.page(after, generation, shown, now));
                 follow_feed(&refresher, &mut feed, work, now);
             }
-            Message::Command(Command::FeedReply(entry, text, answer)) => {
-                let id = session_core::ids::ReplyId::generate();
+            Message::Command(Command::FeedReply(entry, text, id, answer)) => {
+                // The TUI's id, sent again with a retry: rakumux.com answers
+                // a repeated id with the reply it stored, so it's typed once.
+                let id = id.map_or_else(ReplyId::generate, ReplyId::from_string);
                 // Read back, it counts as written here: this machine made its id.
                 replies.wrote(id.as_str());
                 let upload = crate::feed::is_entry_id(&entry)
@@ -843,8 +891,8 @@ fn own<S, A, C>(
                     }
                 }
             }
-            Message::Command(Command::SessionMessage(target, session, text, answer)) => {
-                let id = session_core::ids::ReplyId::generate();
+            Message::Command(Command::SessionMessage(target, session, text, id, answer)) => {
+                let id = id.map_or_else(ReplyId::generate, ReplyId::from_string);
                 replies.wrote(id.as_str());
                 let upload = crate::feed::session_message_upload(
                     id.as_str(),
@@ -989,7 +1037,7 @@ fn control<S, A, C>(
 fn follow_feed<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
     feed: &mut FeedSync,
-    work: &Sender<Work<A, C>>,
+    work: &Workers<A, C>,
     now: Duration,
 ) where
     S: StatusStore,
@@ -1023,7 +1071,7 @@ fn follow_pokes<S, A, C>(
     poke_stop: &mut Option<Arc<AtomicBool>>,
     replies: &mut ReplySync,
     confirmed: bool,
-    work: &Sender<Work<A, C>>,
+    work: &Workers<A, C>,
     now: Duration,
 ) where
     S: StatusStore,
@@ -1098,7 +1146,7 @@ fn follow_chats<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
     chats: &mut ChatSync,
     watched: bool,
-    work: &Sender<Work<A, C>>,
+    work: &Workers<A, C>,
     now: Duration,
 ) where
     S: StatusStore,
@@ -1131,7 +1179,7 @@ fn follow_replies<S, A, C>(
     replies: &mut ReplySync,
     confirmed: bool,
     uploads: Option<&Uploads>,
-    work: &Sender<Work<A, C>>,
+    work: &Workers<A, C>,
     now: Duration,
 ) where
     S: StatusStore,
@@ -1193,7 +1241,7 @@ fn follow_replies<S, A, C>(
 fn follow_sessions<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
     sessions: &mut SessionSync,
-    work: &Sender<Work<A, C>>,
+    work: &Workers<A, C>,
     now: Duration,
 ) where
     S: StatusStore,

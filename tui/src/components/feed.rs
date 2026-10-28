@@ -918,6 +918,9 @@ fn reply_state(reply: &FeedReply) -> &'static str {
         (ReplyStatus::Failed, Some(ReplyFailure::AttachmentUnavailable)) => {
             "not sent: its files couldn't be fetched"
         }
+        (ReplyStatus::Failed, Some(ReplyFailure::NotTaken)) => {
+            "not taken: it may still be in the session's input box"
+        }
         (ReplyStatus::Failed, _) => "not sent",
         (ReplyStatus::Expired, _) => "not sent: its agent didn't wait for an hour",
         (ReplyStatus::Unknown, _) => "",
@@ -1150,6 +1153,11 @@ mod tests {
         assert_eq!(
             reply_state(&reply),
             "not sent: its files couldn't be fetched"
+        );
+        reply.failure = Some(ReplyFailure::NotTaken);
+        assert_eq!(
+            reply_state(&reply),
+            "not taken: it may still be in the session's input box"
         );
         // A reason this build doesn't know is a failure without one.
         reply.failure = Some(ReplyFailure::Unknown);

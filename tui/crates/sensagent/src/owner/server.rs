@@ -390,23 +390,33 @@ fn handle(
             })
             .map_err(|error| OwnerErrorCode::from(&error)),
         OwnerRequest::FeedTurn { .. } => Err(OwnerErrorCode::InvalidRequest),
-        OwnerRequest::FeedReply { entry, text } if crate::feed::is_entry_id(&entry) => client
-            .feed_reply(entry, text)
-            .map(|outcome| OwnerResponse::FeedReply {
-                reply: ReplyWrite::of(outcome),
-            })
-            .map_err(|error| OwnerErrorCode::from(&error)),
+        OwnerRequest::FeedReply { entry, text, id }
+            if crate::feed::is_entry_id(&entry)
+                && id.as_deref().is_none_or(crate::feed::is_entry_id) =>
+        {
+            client
+                .feed_reply(entry, text, id)
+                .map(|outcome| OwnerResponse::FeedReply {
+                    reply: ReplyWrite::of(outcome),
+                })
+                .map_err(|error| OwnerErrorCode::from(&error))
+        }
         OwnerRequest::FeedReply { .. } => Err(OwnerErrorCode::InvalidRequest),
         OwnerRequest::SessionMessage {
             machine,
             session,
             text,
-        } if crate::feed::is_entry_id(&session) => client
-            .session_message(machine, session, text)
-            .map(|outcome| OwnerResponse::FeedReply {
-                reply: ReplyWrite::of_message(outcome),
-            })
-            .map_err(|error| OwnerErrorCode::from(&error)),
+            id,
+        } if crate::feed::is_entry_id(&session)
+            && id.as_deref().is_none_or(crate::feed::is_entry_id) =>
+        {
+            client
+                .session_message(machine, session, text, id)
+                .map(|outcome| OwnerResponse::FeedReply {
+                    reply: ReplyWrite::of_message(outcome),
+                })
+                .map_err(|error| OwnerErrorCode::from(&error))
+        }
         OwnerRequest::SessionMessage { .. } => Err(OwnerErrorCode::InvalidRequest),
         OwnerRequest::Feed {
             after,

@@ -173,6 +173,10 @@ pub enum ReplyFailure {
     Refused,
     /// A file attached to it couldn't be fetched, or wasn't what the reply said.
     AttachmentUnavailable,
+    /// Typed in, but its agent didn't take it as a prompt (its Enter was
+    /// lost, or it went into a menu or after a draft on another line): it
+    /// may still be in the session's input box.
+    NotTaken,
     #[serde(other)]
     Unknown,
 }

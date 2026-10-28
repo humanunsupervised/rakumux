@@ -63,7 +63,8 @@ enable login prompts, gate core features, create provider accounts or deploy ser
 - [Scheduled refreshing](src/refresh/README.md): a pure scheduler (one capture per
   session per minute, two jobs, 12 starts a minute, error backoff, rate-limit pause,
   unauthorized halt, coalesced output), a synchronous engine over the coordinator and
-  an in-process runner with a daemon subscription, reconnects and two workers. It is
+  an in-process runner with a daemon subscription, reconnects, two workers and one for
+  replies being typed in and written in a TUI. It is
   started only by an embedding process; nothing is installed or wired to the TUI.
 - [Per-home owner](src/owner/README.md): a proposed `$RAKUMUX_HOME/sensagent/` layout,
   a single-instance claim, and a versioned local socket protocol (state, status lines,

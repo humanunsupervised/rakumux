@@ -1121,6 +1121,48 @@ async fn a_reply_that_isnt_stored_keeps_its_box_open_and_says_why() {
 }
 
 #[tokio::test]
+async fn a_reply_sent_again_keeps_its_id_until_its_text_changes() {
+    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Tabs);
+    account.queue_feed(page(1, 1, vec![conversing("A")], false));
+    show_feed(&mut h).await;
+    tick(&mut h, Duration::from_secs(3));
+    // rakumux.com couldn't be reached twice (the second time, it may have
+    // stored the reply before the answer was lost), then it takes it.
+    for status in [ReplyWriteStatus::Unavailable, ReplyWriteStatus::Unavailable] {
+        account.reply_answers.lock().unwrap().push_back(ReplyWrite {
+            status,
+            reply: None,
+        });
+    }
+    h.press(KeyCode::Char('r')).await;
+    h.type_text("Run it").await;
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    // Changed, it's another reply.
+    h.type_text(" again").await;
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    let ids = account.reply_ids.lock().unwrap().clone();
+    assert_eq!(ids.len(), 3);
+    assert_eq!(ids[0], ids[1], "the same text keeps its id");
+    assert_ne!(ids[1], ids[2], "a changed text gets a new one");
+    assert!(ids
+        .iter()
+        .all(|id| rakumux_sensagent::feed::is_entry_id(id)));
+    // A new reply box makes a new id.
+    account.queue_feed(page(2, 1, vec![conversing("A")], false));
+    h.press(KeyCode::Char('r')).await;
+    h.type_text("Run it").await;
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    let ids = account.reply_ids.lock().unwrap().clone();
+    assert!(!ids[..3].contains(&ids[3]));
+}
+
+#[tokio::test]
 async fn replies_show_their_markdown_drawn_not_its_markers() {
     let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Tabs);
     let mut done = conversing("A");

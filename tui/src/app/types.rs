@@ -60,6 +60,10 @@ pub struct FeedReplyDialog {
     pub error_message: Option<String>,
     /// The reply is being stored.
     pub busy: bool,
+    /// The id and text of the last send: sending the same text again (after
+    /// a time-out, say, when rakumux.com may have stored it all the same)
+    /// reuses the id, so it's stored and typed in once.
+    pub sent: Option<(String, String)>,
 }
 
 /// Actions that need a yes/no confirmation.

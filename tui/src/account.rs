@@ -95,16 +95,19 @@ pub trait AccountAccess: Send + Sync {
     /// output, in order, as rakumux.com keeps it.
     fn feed_turn(&self, entry: &str, after: Option<u64>) -> Result<FeedTurn, String>;
     /// Write `text` back to feed entry `entry`, for its machine to type into
-    /// the entry's session (this machine at once, when it runs here).
-    fn feed_reply(&self, entry: &str, text: &str) -> Result<ReplyWrite, String>;
+    /// the entry's session (this machine at once, when it runs here), as
+    /// reply `id` (a ULID): sent again with the same id, it's stored once.
+    fn feed_reply(&self, entry: &str, text: &str, id: &str) -> Result<ReplyWrite, String>;
     /// Write `text` to session `session` of `machine` itself (a session
     /// message: a session with nothing to reply to in the chat it shows),
-    /// for that machine to type in once an agent there waits for input.
+    /// for that machine to type in once an agent there waits for input; `id`
+    /// as `feed_reply`'s.
     fn session_message(
         &self,
         machine: &str,
         session: &str,
         text: &str,
+        id: &str,
     ) -> Result<ReplyWrite, String>;
 }
 
@@ -250,8 +253,8 @@ impl AccountAccess for LocalAccount {
             .ok_or_else(|| "the account service isn't running".into())
     }
 
-    fn feed_reply(&self, entry: &str, text: &str) -> Result<ReplyWrite, String> {
-        self.with(false, |client| client.feed_reply(entry, text))?
+    fn feed_reply(&self, entry: &str, text: &str, id: &str) -> Result<ReplyWrite, String> {
+        self.with(false, |client| client.feed_reply(entry, text, id))?
             .ok_or_else(|| "the account service isn't running".into())
     }
 
@@ -260,9 +263,10 @@ impl AccountAccess for LocalAccount {
         machine: &str,
         session: &str,
         text: &str,
+        id: &str,
     ) -> Result<ReplyWrite, String> {
         self.with(false, |client| {
-            client.session_message(machine, session, text)
+            client.session_message(machine, session, text, id)
         })?
         .ok_or_else(|| "the account service isn't running".into())
     }

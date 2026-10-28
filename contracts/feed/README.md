@@ -35,7 +35,9 @@ conformance tests, not an HTTP server, database or local runtime.
   the cloud may clamp it to its own receipt time.
 - **Accepted:** every uploaded id with its `seq`, in upload order.
 - **Page:** `{version:1, entries, latest_seq, more}`. `seq` is the account's arrival order, the
-  only cursor: `after` syncs what arrived since, `before` pages back. `limit` is 1–200
+  only cursor: `after` syncs what arrived since, `before` pages back. The account's seqs are
+  given in the order their uploads commit, so a reader that continues past the greatest seq it
+  read (and past `latest_seq` once `more` is false) never misses one. `limit` is 1–200
   (default 50); the cloud may return fewer to keep the response small, with `more` true.
   `after` and `before` together are invalid. Each entry adds `seq`, `machine` and
   `received_at` to what was uploaded.
@@ -67,8 +69,10 @@ conformance tests, not an HTTP server, database or local runtime.
   account's seqs are given in the order their changes commit, so a reader that continues past
   the greatest seq it read (and past `latest_seq` once `more` is false) never misses one. It
   types each pending one into its session when the session still shows
-  that conversation and the agent waits for input, and reports `delivered` or `failed` with a
-  `failure` code (`reply-status`; only the reply's own machine, only a pending reply). The
+  that conversation and the agent waits for input, and reports `delivered` once the agent took
+  it as a prompt or `failed` with a `failure` code (`reply-status`; only the reply's own machine,
+  only a pending reply): `not_taken` when it was typed in but the agent's chat showed no new
+  prompt within 30 seconds, or another one (its Enter lost, the text in a menu). The
   agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as
   the reply's `response`; page entries carry `reply_to` and `thread`. Machines take replies
   written elsewhere only when the user turned that on there (`not_accepted` otherwise). `from`
@@ -160,7 +164,8 @@ conformance tests, not an HTTP server, database or local runtime.
   only a session's newest message can be answered. A session message to a session its machine
   doesn't list is `invalid_request` with 404, and to one that runs no agent or has ended
   `invalid_request` with 409. A repeated upload of a stored reply still
-  answers with the stored reply. An attachment download whose file is gone is `invalid_request`
+  answers with the stored reply, whatever its entry or session says now: a writer that sends a
+  reply again with the same `id` (its answer lost) stores it once. An attachment download whose file is gone is `invalid_request`
   with 404 (above).
 
 Every object rejects additional properties. Authorization is the terminal's Clerk OAuth

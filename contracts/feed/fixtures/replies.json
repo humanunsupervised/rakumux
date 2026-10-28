@@ -25,7 +25,8 @@
     "valid": [
       { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "delivered" },
       { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed", "failure": "conversation_changed" },
-      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed", "failure": "attachment_unavailable" }
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed", "failure": "attachment_unavailable" },
+      { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed", "failure": "not_taken" }
     ],
     "invalid": [
       { "version": 1, "id": "01K8A1B2C3D4E5F6G7H8J9K0MN", "machine": "studio", "status": "failed" },

@@ -835,6 +835,8 @@ pub struct FakeAccount {
     /// The session messages `session_message` was given: machine, session
     /// and text (answered from `reply_answers` too).
     pub messages_written: Mutex<Vec<(String, String, String)>>,
+    /// The ids both were given, in order.
+    pub reply_ids: Mutex<Vec<String>>,
     pub calls: Mutex<Vec<&'static str>>,
 }
 
@@ -978,8 +980,10 @@ impl crate::account::AccountAccess for FakeAccount {
         &self,
         entry: &str,
         text: &str,
+        id: &str,
     ) -> std::result::Result<rakumux_sensagent::feed::ReplyWrite, String> {
         self.call("feed_reply");
+        self.reply_ids.lock().unwrap().push(id.to_owned());
         self.replies_written
             .lock()
             .unwrap()
@@ -997,8 +1001,10 @@ impl crate::account::AccountAccess for FakeAccount {
         machine: &str,
         session: &str,
         text: &str,
+        id: &str,
     ) -> std::result::Result<rakumux_sensagent::feed::ReplyWrite, String> {
         self.call("session_message");
+        self.reply_ids.lock().unwrap().push(id.to_owned());
         self.messages_written.lock().unwrap().push((
             machine.to_owned(),
             session.to_owned(),

@@ -261,12 +261,20 @@ fn a_feed_reply_is_asked_and_answered_by_name() {
     let request = OwnerRequest::FeedReply {
         entry: "01K8A0RZ0V3X5Q2N9T7W4Y6M8B".into(),
         text: "Now add a test.".into(),
+        id: Some("01K8A0S2C4E6G8J0K2M4N6P8Q0".into()),
     };
+    let json = serde_json::json!({"op": "feed_reply", "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
+        "text": "Now add a test.", "id": "01K8A0S2C4E6G8J0K2M4N6P8Q0"});
+    assert_eq!(serde_json::to_value(&request).unwrap(), json);
     assert_eq!(
-        serde_json::to_value(&request).unwrap(),
-        serde_json::json!({"op": "feed_reply", "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B",
-            "text": "Now add a test."})
+        serde_json::from_value::<OwnerRequest>(json).unwrap(),
+        request
     );
+    // From a TUI that makes no id, the service makes one.
+    let older: OwnerRequest = serde_json::from_value(serde_json::json!({"op": "feed_reply",
+        "entry": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "text": "Now add a test."}))
+    .unwrap();
+    assert!(matches!(older, OwnerRequest::FeedReply { id: None, .. }));
     let response: OwnerResponse =
         serde_json::from_str(r#"{"type":"feed_reply","reply":{"status":"off"}}"#).unwrap();
     assert_eq!(
@@ -286,9 +294,11 @@ fn a_session_message_is_asked_by_name_and_answered_as_a_feed_reply() {
         machine: "studio".into(),
         session: "01K8A0RZ0V3X5Q2N9T7W4Y6M8B".into(),
         text: "Now the docs.".into(),
+        id: Some("01K8A0S2C4E6G8J0K2M4N6P8Q0".into()),
     };
     let json = serde_json::json!({"op": "session_message", "machine": "studio",
-        "session": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "text": "Now the docs."});
+        "session": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "text": "Now the docs.",
+        "id": "01K8A0S2C4E6G8J0K2M4N6P8Q0"});
     assert_eq!(serde_json::to_value(&request).unwrap(), json);
     assert_eq!(
         serde_json::from_value::<OwnerRequest>(json).unwrap(),

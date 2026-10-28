@@ -6,9 +6,12 @@
 //! it, and the detail shows them as a thread. A prompt still waiting for its
 //! answer replies to the session's newest entry in its chat, or with none
 //! writes to the session itself (`AccountAccess::session_message`), typed in
-//! the same way.
+//! the same way. Each reply has an id made here, sent again with the same
+//! text after a failure, so one rakumux.com stored before the answer was lost
+//! (a time-out) isn't stored, and typed in, twice.
 
 use rakumux_sensagent::feed::{ReplyWrite, ReplyWriteStatus};
+use session_core::ids::ReplyId;
 
 use super::{Card, ReplyTo};
 use crate::app::runtime::AppEvent;
@@ -63,6 +66,7 @@ impl App {
             input: TextInput::new(""),
             error_message: None,
             busy: false,
+            sent: None,
         });
     }
 
@@ -84,15 +88,20 @@ impl App {
         }
         dialog.busy = true;
         dialog.error_message = None;
+        let id = match &dialog.sent {
+            Some((id, sent)) if *sent == text => id.clone(),
+            _ => ReplyId::generate().as_str().to_owned(),
+        };
+        dialog.sent = Some((id.clone(), text.clone()));
         let to = dialog.to.clone();
         let generation = self.feed.request_generation;
         let access = self.account_access.clone();
         self.exec.job(move || AppEvent::FeedReplied {
             generation,
             result: match &to {
-                ReplyTo::Entry(entry) => access.feed_reply(entry, &text),
+                ReplyTo::Entry(entry) => access.feed_reply(entry, &text, &id),
                 ReplyTo::Session { machine, session } => {
-                    access.session_message(machine, session, &text)
+                    access.session_message(machine, session, &text, &id)
                 }
             },
         });

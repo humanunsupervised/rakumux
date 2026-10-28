@@ -274,9 +274,9 @@
       "enum": ["pending", "delivered", "failed", "expired"]
     },
     "replyFailure": {
-      "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`), the session refused the text (`refused`), or a file attached to it couldn't be fetched or wasn't what the reply said (`attachment_unavailable`). Readers take a value they don't know as a failure without a reason.",
+      "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`), the session refused the text (`refused`), a file attached to it couldn't be fetched or wasn't what the reply said (`attachment_unavailable`), or it was typed in but its agent didn't take it as a prompt (`not_taken`: its chat showed no new prompt within 30 seconds, or another one; it may still be in the session's input box). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
-      "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused", "attachment_unavailable"]
+      "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused", "attachment_unavailable", "not_taken"]
     },
     "reply": {
       "description": "What the user wrote back to a feed entry, for its machine to type into the entry's session, and where it is up to; or, without `entry` and `thread`, a session message: what the user wrote to a session itself, which has no answer to reply to yet. The agent's next reply there names it as `reply_to`.",

@@ -212,11 +212,13 @@ impl OwnerClient {
         }
     }
 
-    /// Write `text` back to feed entry `entry`.
-    pub fn feed_reply(&self, entry: &str, text: &str) -> Result<ReplyWrite, OwnerError> {
+    /// Write `text` back to feed entry `entry`, as reply `id` (a ULID): the
+    /// same id sent again stores nothing more.
+    pub fn feed_reply(&self, entry: &str, text: &str, id: &str) -> Result<ReplyWrite, OwnerError> {
         match self.request(&OwnerRequest::FeedReply {
             entry: entry.to_owned(),
             text: text.to_owned(),
+            id: Some(id.to_owned()),
         })? {
             OwnerResponse::FeedReply { reply } => Ok(reply),
             _ => Err(OwnerError::Protocol),
@@ -224,17 +226,20 @@ impl OwnerClient {
     }
 
     /// Write `text` to session `session` of `machine` itself (a session
-    /// message, for a session with nothing to reply to in the chat it shows).
+    /// message, for a session with nothing to reply to in the chat it shows),
+    /// as `id`, like [`OwnerClient::feed_reply`].
     pub fn session_message(
         &self,
         machine: &str,
         session: &str,
         text: &str,
+        id: &str,
     ) -> Result<ReplyWrite, OwnerError> {
         match self.request(&OwnerRequest::SessionMessage {
             machine: machine.to_owned(),
             session: session.to_owned(),
             text: text.to_owned(),
+            id: Some(id.to_owned()),
         })? {
             OwnerResponse::FeedReply { reply } => Ok(reply),
             _ => Err(OwnerError::Protocol),
