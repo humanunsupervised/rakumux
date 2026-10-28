@@ -106,6 +106,33 @@ impl fmt::Display for ReplyId {
     }
 }
 
+/// A remote machine the daemon reaches (`machine_add`): a ULID, kept in the
+/// registry.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct MachineId(String);
+
+impl MachineId {
+    pub fn generate() -> Self {
+        Self(SessionId::generate().0)
+    }
+
+    /// Wrap an id received from the wire or the registry.
+    pub fn from_string(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for MachineId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Daemon-assigned terminal (PTY) id. Not stable across daemon restarts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]

@@ -89,11 +89,42 @@ fn relocation_is_user_only_and_cannot_replace_a_different_existing_folder() {
     assert_eq!(h.get(&session.id).terminal, session.terminal);
 }
 
+#[test]
+fn project_add_makes_the_folder_only_when_asked() {
+    let h = Harness::new();
+    let missing = h.scope.path().join("new/deeper");
+    assert_eq!(
+        error(add_project(&h, &missing)).code,
+        ErrorCode::InvalidArgument
+    );
+    assert!(!missing.exists());
+
+    let made = project(h.handle(
+        &h.user,
+        Request::ProjectAdd {
+            path: missing.clone(),
+            create: true,
+        },
+    ));
+    assert!(missing.is_dir());
+    assert_eq!(made.path.path(), std::fs::canonicalize(&missing).unwrap());
+
+    let relative = h.handle(
+        &h.user,
+        Request::ProjectAdd {
+            path: "relative/dir".into(),
+            create: true,
+        },
+    );
+    assert_eq!(error(relative).code, ErrorCode::InvalidArgument);
+}
+
 fn add_project(h: &Harness, path: &Path) -> Response {
     h.handle(
         &h.user,
         Request::ProjectAdd {
             path: path.to_path_buf(),
+            create: false,
         },
     )
 }
@@ -368,6 +399,7 @@ fn session_callers_stay_in_their_own_project() {
     let denied = [
         Request::ProjectAdd {
             path: extra.clone(),
+            create: false,
         },
         Request::ProjectRemove {
             path: h.other_scope(),

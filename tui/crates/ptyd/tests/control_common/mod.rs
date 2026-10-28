@@ -512,6 +512,8 @@ impl Harness {
             ],
             cols: 80,
             rows: 24,
+            machine: None,
+            prefill: None,
         }
     }
 

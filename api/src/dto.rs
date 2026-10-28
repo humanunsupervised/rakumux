@@ -719,6 +719,7 @@ mod tests {
                 worktree: None,
                 repo: Some("rakumux".into()),
             }),
+            machine: None,
         }
     }
 

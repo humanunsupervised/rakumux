@@ -92,6 +92,58 @@ fn the_last_message_is_kept_across_restarts_and_goes_with_its_session() {
 }
 
 #[test]
+fn create_types_its_prefill_last_without_enter() {
+    let h = Harness::new();
+    let mut request = h.create_request();
+    request.startup_cmds = vec!["cd app".into()];
+    request.prefill = Some("git clone https://example.com/app.git .".into());
+    let view = session(h.handle(&h.user, Request::SessionCreate(request)));
+
+    assert_eq!(
+        h.host.spec_of(&view.id).startup_input,
+        b"cd app\rgit clone https://example.com/app.git .".to_vec()
+    );
+}
+
+#[test]
+fn create_refuses_a_prefill_that_would_run() {
+    let h = Harness::new();
+    for text in ["ls\r", "ls\nrm -rf x", "\x1b[A"] {
+        let mut request = h.create_request();
+        request.prefill = Some(text.into());
+        let response = h.handle(&h.user, Request::SessionCreate(request));
+        assert_eq!(error(response).code, ErrorCode::InvalidArgument, "{text:?}");
+    }
+    assert!(h.host.spawns().is_empty(), "nothing started");
+}
+
+#[test]
+fn create_on_another_machine_is_unsupported_here() {
+    let h = Harness::new();
+    let mut request = h.create_request();
+    request.machine = Some(session_core::ids::MachineId::from_string("m"));
+    let response = h.handle(&h.user, Request::SessionCreate(request));
+    assert_eq!(error(response).code, ErrorCode::Unsupported);
+    assert!(h.host.spawns().is_empty());
+    for request in [
+        Request::MachineList,
+        Request::MachineRemove {
+            id: session_core::ids::MachineId::from_string("m"),
+        },
+        Request::MachineAdd {
+            name: "box".into(),
+            url: "https://box.example".into(),
+            token: "t".into(),
+        },
+    ] {
+        assert_eq!(
+            error(h.handle(&h.user, request)).code,
+            ErrorCode::Unsupported
+        );
+    }
+}
+
+#[test]
 fn create_builds_argv_env_cwd_and_startup_input() {
     let h = Harness::new();
     let mut request = h.create_request();

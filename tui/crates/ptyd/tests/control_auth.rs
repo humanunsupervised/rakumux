@@ -308,6 +308,7 @@ fn session_caller_permission_matrix() {
         },
         Request::ProjectAdd {
             path: h.root().join("other"),
+            create: false,
         },
         Request::ProjectRemove {
             path: h.scope.clone(),

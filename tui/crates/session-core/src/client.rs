@@ -14,8 +14,8 @@ use crate::api::{
     WaitRequest, WaitResult,
 };
 use crate::frame::{self, Frame};
-use crate::ids::{ReplyId, SessionId};
-use crate::model::{ProjectView, ScopeRoot, SessionView};
+use crate::ids::{MachineId, ReplyId, SessionId};
+use crate::model::{MachineView, ProjectView, ScopeRoot, SessionView};
 use crate::paths::{Layout, Registration};
 use std::io;
 use std::net::Shutdown;
@@ -177,6 +177,28 @@ pub trait SessionApi: Send + Sync {
     /// processes use now (user only, capability `resources`).
     fn resources(&self) -> Result<crate::api::ResourceSample> {
         Err(unsupported("reading resource use"))
+    }
+    /// [`add_project`](Self::add_project), making the directory first when
+    /// it doesn't exist (user callers, capability `projects.create`).
+    fn create_project(&self, path: &Path) -> Result<ProjectView> {
+        let _ = path;
+        Err(unsupported("creating a folder"))
+    }
+    /// Reach another machine running Rakumux through its `rakumux-api`
+    /// remote listener (user only, capability `machines`).
+    fn add_machine(&self, name: &str, url: &str, token: &str) -> Result<MachineView> {
+        let _ = (name, url, token);
+        Err(unsupported("other machines"))
+    }
+    /// The machines added (user only, capability `machines`).
+    fn machines(&self) -> Result<Vec<MachineView>> {
+        Err(unsupported("other machines"))
+    }
+    /// Forget a machine and the sessions listed from it (user only,
+    /// capability `machines`).
+    fn remove_machine(&self, id: &MachineId) -> Result<()> {
+        let _ = id;
+        Err(unsupported("other machines"))
     }
 }
 
@@ -423,11 +445,46 @@ impl SessionApi for Client {
     fn add_project(&self, path: &Path) -> Result<ProjectView> {
         let request = Request::ProjectAdd {
             path: path.to_path_buf(),
+            create: false,
         };
         match self.request(&request)? {
             Response::Project { project } => Ok(project),
             other => Err(unexpected(&other)),
         }
+    }
+
+    fn create_project(&self, path: &Path) -> Result<ProjectView> {
+        let request = Request::ProjectAdd {
+            path: path.to_path_buf(),
+            create: true,
+        };
+        match self.request(&request)? {
+            Response::Project { project } => Ok(project),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn add_machine(&self, name: &str, url: &str, token: &str) -> Result<MachineView> {
+        let request = Request::MachineAdd {
+            name: name.to_string(),
+            url: url.to_string(),
+            token: token.to_string(),
+        };
+        match self.request(&request)? {
+            Response::Machine { machine } => Ok(machine),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn machines(&self) -> Result<Vec<MachineView>> {
+        match self.request(&Request::MachineList)? {
+            Response::Machines { machines } => Ok(machines),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn remove_machine(&self, id: &MachineId) -> Result<()> {
+        self.expect_ok(&Request::MachineRemove { id: id.clone() })
     }
 
     fn remove_project(&self, path: &ScopeRoot) -> Result<()> {
@@ -1439,6 +1496,7 @@ mod tests {
             last_active_at: 0,
             last_message_at: None,
             terminal: None,
+            machine: None,
         }
     }
 
@@ -1763,7 +1821,10 @@ mod tests {
                 | Request::ProjectRemove { .. }
                 | Request::ReplyCapture { .. }
                 | Request::ReplyList { .. }
-                | Request::DaemonRestart { .. } => Response::Error {
+                | Request::DaemonRestart { .. }
+                | Request::MachineAdd { .. }
+                | Request::MachineList
+                | Request::MachineRemove { .. } => Response::Error {
                     error: ApiError::new(ErrorCode::Unsupported, "not in the fake daemon"),
                 },
                 Request::DaemonShutdown => {
@@ -2069,6 +2130,8 @@ mod tests {
             env: vec![("A".into(), "1".into())],
             cols: 100,
             rows: 30,
+            machine: None,
+            prefill: None,
         };
         assert_eq!(client.create(create.clone()).unwrap().name, "web");
         assert_eq!(client.rename(&s1, "renamed").unwrap().name, "renamed");
@@ -2214,6 +2277,8 @@ mod tests {
             env: vec![],
             cols: 80,
             rows: 24,
+            machine: None,
+            prefill: None,
         };
         assert_eq!(client.create(create).unwrap().name, "again");
         assert_eq!(daemon.hello_count(), 2);

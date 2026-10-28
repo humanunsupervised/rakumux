@@ -68,6 +68,8 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_SUBMIT_EXPECT,
     session_core::api::CAPABILITY_PLACES,
     session_core::api::CAPABILITY_RESOURCES,
+    session_core::api::CAPABILITY_PREFILL,
+    session_core::api::CAPABILITY_PROJECTS_CREATE,
     "attach",
     "subscribe",
     "list",
@@ -131,6 +133,9 @@ const KNOWN_OPS: &[&str] = &[
     "daemon_restart",
     "reply_capture",
     "reply_list",
+    "machine_add",
+    "machine_list",
+    "machine_remove",
 ];
 
 /// `kind` tags of `api::Auth`.
@@ -1852,6 +1857,8 @@ mod tests {
                 env: vec![],
                 cols: 80,
                 rows: 24,
+                machine: None,
+                prefill: None,
             }),
             Request::SessionRename {
                 id: id.clone(),
@@ -1909,7 +1916,10 @@ mod tests {
                 conversations: vec!["ses_1".into()],
             },
             Request::ProjectList,
-            Request::ProjectAdd { path: "/p".into() },
+            Request::ProjectAdd {
+                path: "/p".into(),
+                create: false,
+            },
             Request::ProjectRemove {
                 path: session_core::model::ScopeRoot::from_canonical("/p".into()),
             },
@@ -1943,6 +1953,15 @@ mod tests {
             Request::DaemonRestart { binary: None },
             Request::ReplyCapture { enabled: true },
             Request::ReplyList { after: None },
+            Request::MachineAdd {
+                name: "box".into(),
+                url: "https://box.example".into(),
+                token: "t".into(),
+            },
+            Request::MachineList,
+            Request::MachineRemove {
+                id: session_core::ids::MachineId::from_string("m"),
+            },
         ];
         assert_eq!(requests.len(), KNOWN_OPS.len());
         // A new variant breaks this match: list it above and in KNOWN_OPS.
@@ -1981,7 +2000,10 @@ mod tests {
                 | Request::DaemonShutdown
                 | Request::DaemonRestart { .. }
                 | Request::ReplyCapture { .. }
-                | Request::ReplyList { .. } => {}
+                | Request::ReplyList { .. }
+                | Request::MachineAdd { .. }
+                | Request::MachineList
+                | Request::MachineRemove { .. } => {}
             }
         }
         // Every `Auth` kind is known too.

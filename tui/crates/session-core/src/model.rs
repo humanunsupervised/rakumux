@@ -4,7 +4,7 @@
 //! it runs, a live terminal. Sessions are grouped by scope: the canonical
 //! folder Rakumux was launched from. Sessions have no git knowledge.
 
-use crate::ids::SessionId;
+use crate::ids::{MachineId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -247,6 +247,60 @@ pub struct SessionView {
     /// only worked in (`edited` false).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub places: Vec<SessionPlace>,
+    /// The machine the session runs on, when it isn't this one (capability
+    /// `machines`): the daemon lists it from a remote machine it reaches, and
+    /// `scope` is then the local folder it's listed under. Absent: this
+    /// machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<MachineRef>,
+}
+
+/// Where a session from another machine runs (`SessionView::machine`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineRef {
+    pub id: MachineId,
+    pub name: String,
+    /// The session's folder on that machine.
+    pub scope: PathBuf,
+}
+
+/// A remote machine the daemon reaches (`machine_add`, `machine_list`): one
+/// running Rakumux, through its `rakumux-api` remote listener. Never carries
+/// the machine's token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineView {
+    pub id: MachineId,
+    pub name: String,
+    /// Base URL of the machine's `rakumux-api` remote listener.
+    pub url: String,
+    #[serde(default)]
+    pub state: MachineState,
+    /// The machine's Rakumux version, as its daemon last said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Why the last connection failed, while `Unreachable`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Unix seconds.
+    pub added_at: i64,
+}
+
+/// The daemon's connection to a remote machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MachineState {
+    /// Connected: its sessions are live.
+    Connected,
+    /// Being connected to.
+    Connecting,
+    /// Not connected now; connects when something needs it. Its sessions
+    /// show as last seen.
+    Idle,
+    /// The last connection failed (`MachineView::error`).
+    Unreachable,
+    #[default]
+    #[serde(other)]
+    Unknown,
 }
 
 /// The most places a session lists: the most recently worked in.
@@ -381,13 +435,50 @@ mod tests {
             user_prompt: None,
             agent_turn: None,
             places: vec![],
+            machine: None,
         };
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("exit_code"));
         assert!(!json.contains("activity"));
         assert!(!json.contains("places"));
+        assert!(
+            !json.contains("machine"),
+            "this machine's sessions say nothing"
+        );
         assert!(json.contains(r#""created_by":{"kind":"user"}"#));
         let back: SessionView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, view);
+
+        let remote = SessionView {
+            machine: Some(MachineRef {
+                id: MachineId::from_string("01J0000000000000000000000M"),
+                name: "Sprite".into(),
+                scope: "/home/sprite/web".into(),
+            }),
+            ..view
+        };
+        let json = serde_json::to_string(&remote).unwrap();
+        assert!(json.contains(
+            r#""machine":{"id":"01J0000000000000000000000M","name":"Sprite","scope":"/home/sprite/web"}"#
+        ));
+        assert_eq!(serde_json::from_str::<SessionView>(&json).unwrap(), remote);
+    }
+
+    #[test]
+    fn machine_views_read_unknown_states_and_never_hold_a_token() {
+        let view: MachineView = serde_json::from_str(
+            r#"{"id":"m","name":"Sprite","url":"https://s.example","state":"asleep","added_at":5}"#,
+        )
+        .unwrap();
+        assert_eq!(view.state, MachineState::Unknown);
+        assert_eq!(view.version, None);
+        let view = MachineView {
+            state: MachineState::Idle,
+            ..view
+        };
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(json.contains(r#""state":"idle""#));
+        assert!(!json.contains("token"));
+        assert!(!json.contains("error"));
     }
 }

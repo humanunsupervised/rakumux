@@ -285,6 +285,7 @@ fn every_stream_message_is_documented() {
         terminal: None,
         pinned: false,
         git: None,
+        machine: None,
     };
     let reported = ModelReported {
         state: Some(Lifecycle::Done),

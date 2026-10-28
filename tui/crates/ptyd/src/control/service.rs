@@ -520,11 +520,14 @@ impl Inner {
                 conversations,
             } => self.bind(caller, &agent, conversations),
             Request::ProjectList => self.projects(caller),
-            Request::ProjectAdd { path } => self.add_project(caller, &path),
+            Request::ProjectAdd { path, create } => self.add_project(caller, &path, create),
             Request::ProjectRemove { path } => self.remove_project(caller, &path),
             Request::ProjectRelocate { from, to } => self.relocate_project(caller, &from, &to),
             Request::ReplyCapture { enabled } => self.reply_capture(caller, enabled),
             Request::ReplyList { after } => self.reply_list(caller, after.as_ref()),
+            Request::MachineAdd { .. } | Request::MachineList | Request::MachineRemove { .. } => {
+                Err(no_machines())
+            }
             Request::Hello(_)
             | Request::Attach(_)
             | Request::TerminalOpen(_)
@@ -842,7 +845,15 @@ impl Inner {
             env: request_env,
             cols,
             rows,
+            machine,
+            prefill,
         } = request;
+        if machine.is_some() {
+            return Err(no_machines());
+        }
+        if let Some(text) = &prefill {
+            validate_prefill(text)?;
+        }
         let scope = match &caller.info {
             CallerInfo::User => validate_scope(scope)?,
             // A session creates sessions in its own project only.
@@ -927,7 +938,11 @@ impl Inner {
         // settles name races.
         registry.insert(&record)?;
         let argv = argv.unwrap_or_else(|| env::login_shell(&base_env));
-        if let Err(error) = self.start_terminal(state, &record, argv, base_env, cols, rows, None) {
+        let start = Start {
+            resume: None,
+            prefill: prefill.as_deref(),
+        };
+        if let Err(error) = self.start_terminal(state, &record, argv, base_env, cols, rows, start) {
             if let Err(e) = registry_of(state).and_then(|r| r.delete(&id).map_err(Into::into)) {
                 crate::log_error!("control: removing record of failed session {id}: {e}");
             }
@@ -1250,7 +1265,11 @@ impl Inner {
             Some(argv) => argv.clone(),
             None => env::login_shell(&base_env),
         };
-        self.start_terminal(state, record, argv, base_env, cols, rows, resume)?;
+        let start = Start {
+            resume,
+            prefill: None,
+        };
+        self.start_terminal(state, record, argv, base_env, cols, rows, start)?;
         registry(&state.registry)?.mark_revived(&record.id, used.then(now_ms))?;
         self.refresh(state, &record.id);
         self.changed.notify_all();
@@ -1814,7 +1833,12 @@ impl Inner {
         Ok(Response::Projects { projects })
     }
 
-    fn add_project(&self, caller: &Caller, path: &Path) -> Result<Response, ApiError> {
+    fn add_project(
+        &self,
+        caller: &Caller,
+        path: &Path,
+        create: bool,
+    ) -> Result<Response, ApiError> {
         let mut project = {
             let state = self.lock();
             let detail = Some(audit::clip(&path.display().to_string()));
@@ -1830,7 +1854,8 @@ impl Inner {
                 );
                 return Err(error);
             }
-            let result = project_dir(path).and_then(|dir| {
+            let made = if create { make_dir(path) } else { Ok(()) };
+            let result = made.and_then(|()| project_dir(path)).and_then(|dir| {
                 let registry = registry(&state.registry)?;
                 registry.add_project(&dir, now_ms())?;
                 registry
@@ -2514,8 +2539,9 @@ impl Inner {
         base_env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
-        resume: Option<&ResumeSpec>,
+        start: Start<'_>,
     ) -> Result<(), ApiError> {
+        let Start { resume, prefill } = start;
         let token = state.tokens.issue(&record.id);
         let child_env = env::child_env(
             &base_env,
@@ -2533,10 +2559,15 @@ impl Inner {
             env: child_env.clone(),
             cols,
             rows,
-            startup_input: env::startup_input(
-                &record.launch.startup_cmds,
-                resume.map(|spec| (spec.argv.as_slice(), spec.source.runs())),
-            ),
+            startup_input: {
+                let mut input = env::startup_input(
+                    &record.launch.startup_cmds,
+                    resume.map(|spec| (spec.argv.as_slice(), spec.source.runs())),
+                );
+                // Typed last and without Enter: the user runs it or not.
+                input.extend_from_slice(prefill.unwrap_or_default().as_bytes());
+                input
+            },
         };
         match self.host.spawn(spec) {
             Ok(info) => {
@@ -2758,6 +2789,7 @@ impl Inner {
                 .get(&record.id)
                 .map(|last| last.at / 1000),
             terminal: runtime.view,
+            machine: None,
         }
     }
 
@@ -3152,6 +3184,41 @@ fn validate_scope(scope: Option<ScopeRoot>) -> Result<ScopeRoot, ApiError> {
 }
 
 /// A directory named by `ProjectAdd`: absolute, existing, canonicalized.
+/// What a new terminal types once its program starts, besides its startup
+/// commands: a revived session's resume command, or a new one's prefill.
+struct Start<'a> {
+    resume: Option<&'a ResumeSpec>,
+    prefill: Option<&'a str>,
+}
+
+/// Sessions on other machines (capability `machines`) aren't served yet.
+fn no_machines() -> ApiError {
+    ApiError::new(
+        ErrorCode::Unsupported,
+        "this daemon doesn't reach other machines",
+    )
+}
+
+/// `project_add`'s `create`: make an absolute folder and its parents.
+fn make_dir(path: &Path) -> Result<(), ApiError> {
+    if !path.is_absolute() {
+        return Err(invalid(format!(
+            "folder path {} must be absolute",
+            path.display()
+        )));
+    }
+    std::fs::create_dir_all(path).map_err(|e| invalid(format!("folder {}: {e}", path.display())))
+}
+
+/// `CreateSession::prefill` is typed but never run, so it may hold no
+/// control characters (a newline or `\r` would run it).
+fn validate_prefill(text: &str) -> Result<(), ApiError> {
+    if text.chars().any(char::is_control) {
+        return Err(invalid("prefill may not contain control characters"));
+    }
+    Ok(())
+}
+
 fn project_dir(path: &Path) -> Result<ScopeRoot, ApiError> {
     if !path.is_absolute() {
         return Err(invalid(format!(

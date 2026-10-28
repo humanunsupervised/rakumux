@@ -334,6 +334,8 @@ fn create(
         env: home.env(),
         cols: 80,
         rows: 24,
+        machine: None,
+        prefill: None,
     }));
     match response {
         Response::Session { session } => session,
@@ -472,6 +474,7 @@ fn projects_pins_and_git_context_through_the_real_daemon() {
 
     match client.request(&Request::ProjectAdd {
         path: other.clone(),
+        create: false,
     }) {
         Response::Project { project } => {
             assert_eq!(project.path, other_scope);
@@ -817,6 +820,8 @@ fn sessions_come_back_after_a_crash_but_not_after_a_stop() {
             env,
             cols: 100,
             rows: 24,
+            machine: None,
+            prefill: None,
         })) {
             Response::Session { session } => session,
             other => panic!("create failed: {other:?}"),

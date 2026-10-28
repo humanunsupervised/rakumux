@@ -74,6 +74,8 @@ fn new(
         env: invocation.env.clone(),
         cols,
         rows,
+        machine: None,
+        prefill: None,
     };
     let session = api.create(request)?;
     if args.detach {

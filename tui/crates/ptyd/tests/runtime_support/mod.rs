@@ -234,6 +234,7 @@ impl FakeControl {
                 controlled: i.controlled,
                 alternate_screen: i.alternate_screen,
             }),
+            machine: None,
         }
     }
 
@@ -483,6 +484,8 @@ impl TestClient {
             env: vec![],
             cols,
             rows,
+            machine: None,
+            prefill: None,
         }));
         match response {
             Response::Session { session } => session,

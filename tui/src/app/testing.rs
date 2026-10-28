@@ -73,6 +73,7 @@ pub fn view(id: &str, name: &str, last_active_at: i64) -> SessionView {
             controlled: false,
             alternate_screen: false,
         }),
+        machine: None,
     }
 }
 

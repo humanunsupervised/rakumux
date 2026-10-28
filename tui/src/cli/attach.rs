@@ -548,6 +548,8 @@ impl<'a, W: Write, S: FnMut() -> (u16, u16)> AttachLoop<'a, W, S> {
             env: self.ctx.env.clone(),
             cols,
             rows,
+            machine: None,
+            prefill: None,
         };
         match self.api.create(request) {
             Ok(session) => {

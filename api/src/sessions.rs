@@ -172,6 +172,8 @@ pub fn create(api: &dyn SessionApi, body: CreateSessionBody) -> Result<Session, 
         env: Vec::new(),
         cols: body.cols.unwrap_or(0),
         rows: body.rows.unwrap_or(0),
+        machine: None,
+        prefill: None,
     };
     Ok(api.create(request)?.into())
 }
@@ -294,6 +296,7 @@ mod tests {
             terminal: None,
             pinned: false,
             git: None,
+            machine: None,
         }
     }
 

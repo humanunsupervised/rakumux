@@ -50,6 +50,7 @@ pub fn session(id: &str, name: &str) -> SessionView {
         last_active_at: 0,
         last_message_at: None,
         terminal: None,
+        machine: None,
     }
 }
 

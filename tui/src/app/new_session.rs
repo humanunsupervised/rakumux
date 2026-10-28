@@ -23,6 +23,8 @@ pub fn request(
         env,
         cols,
         rows,
+        machine: None,
+        prefill: None,
     }
 }
 

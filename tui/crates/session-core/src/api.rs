@@ -11,10 +11,10 @@
 //! Compatibility: new fields are optional; enums have an `Unknown` fallback;
 //! an op never changes meaning (add a new op instead).
 
-use crate::ids::{PaneId, ReplyId, SessionId};
+use crate::ids::{MachineId, PaneId, ReplyId, SessionId};
 use crate::model::{
-    AgentInfo, Lifecycle, ProjectView, ReportResult, Reported, ScopeRoot, SessionStatus,
-    SessionView,
+    AgentInfo, Lifecycle, MachineView, ProjectView, ReportResult, Reported, ScopeRoot,
+    SessionStatus, SessionView,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -196,6 +196,10 @@ pub enum Request {
     /// exist and be a directory). Adding a known project is not an error.
     ProjectAdd {
         path: PathBuf,
+        /// Make the directory (and its parents) when it doesn't exist
+        /// (capability `projects.create`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        create: bool,
     },
     /// User only: forget a project. Fails while it still has sessions.
     ProjectRemove {
@@ -206,6 +210,24 @@ pub enum Request {
     ProjectRelocate {
         from: ScopeRoot,
         to: ScopeRoot,
+    },
+
+    /// User only (capability `machines`): reach another machine running
+    /// Rakumux through its `rakumux-api` remote listener at `url`, with that
+    /// listener's `token`, and list its sessions with this machine's.
+    /// Answered with `Machine`.
+    MachineAdd {
+        name: String,
+        url: String,
+        token: String,
+    },
+    /// User only (capability `machines`): the machines added. Answered with
+    /// `Machines`.
+    MachineList,
+    /// User only (capability `machines`): forget a machine and the sessions
+    /// listed from it. Nothing on the machine changes.
+    MachineRemove {
+        id: MachineId,
     },
 
     /// Stream the terminal. Turns the connection into an attach stream.
@@ -291,6 +313,14 @@ pub struct CreateSession {
     pub env: Vec<(String, String)>,
     pub cols: u16,
     pub rows: u16,
+    /// Create it on this machine (capability `machines`): `scope` and `cwd`
+    /// are then that machine's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<MachineId>,
+    /// Typed into the new shell without Enter, for the user to run or not
+    /// (capability `session.prefill`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -574,6 +604,16 @@ pub const CAPABILITY_SUBMIT_EXPECT: &str = "session.submit.expect";
 /// `resource_usage`: what the machine and Rakumux's processes use.
 pub const CAPABILITY_RESOURCES: &str = "resources";
 
+/// `machine_add`, `machine_list`, `machine_remove`, `SessionView::machine`
+/// and `CreateSession::machine`: sessions on other machines.
+pub const CAPABILITY_MACHINES: &str = "machines";
+
+/// `CreateSession::prefill`: text typed into a new shell without Enter.
+pub const CAPABILITY_PREFILL: &str = "session.prefill";
+
+/// `project_add`'s `create`: make the folder when it doesn't exist.
+pub const CAPABILITY_PROJECTS_CREATE: &str = "projects.create";
+
 /// How much of an agent's log `session_transcript` reads by default, in bytes.
 pub const TRANSCRIPT_BYTES: u32 = 512 * 1024;
 /// The most it reads at once.
@@ -709,6 +749,14 @@ pub enum Response {
     },
     Project {
         project: ProjectView,
+    },
+    /// The answer to `machine_add`.
+    Machine {
+        machine: MachineView,
+    },
+    /// The answer to `machine_list`.
+    Machines {
+        machines: Vec<MachineView>,
     },
     Read(ReadResult),
     /// The answer to `session_turn`.
@@ -1088,6 +1136,50 @@ pub enum SessionEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn machine_fields_are_left_out_unless_used() {
+        let create = CreateSession {
+            scope: None,
+            name: None,
+            cwd: None,
+            argv: None,
+            startup_cmds: vec![],
+            env: vec![],
+            cols: 80,
+            rows: 24,
+            machine: None,
+            prefill: None,
+        };
+        let json = serde_json::to_string(&Request::SessionCreate(create.clone())).unwrap();
+        assert!(
+            !json.contains("machine") && !json.contains("prefill"),
+            "{json}"
+        );
+        let older: CreateSession =
+            serde_json::from_str(r#"{"env":[],"cols":80,"rows":24}"#).unwrap();
+        assert_eq!(older, create);
+
+        let add = Request::ProjectAdd {
+            path: "/p".into(),
+            create: false,
+        };
+        assert_eq!(
+            serde_json::to_string(&add).unwrap(),
+            r#"{"op":"project_add","path":"/p"}"#
+        );
+        let back: Request = serde_json::from_str(r#"{"op":"project_add","path":"/p"}"#).unwrap();
+        assert_eq!(back, add);
+
+        let machine = Request::MachineAdd {
+            name: "Sprite".into(),
+            url: "https://s.example".into(),
+            token: "t".into(),
+        };
+        let json = serde_json::to_string(&machine).unwrap();
+        assert!(json.starts_with(r#"{"op":"machine_add""#), "{json}");
+        assert_eq!(serde_json::from_str::<Request>(&json).unwrap(), machine);
+    }
 
     #[test]
     fn terminal_pane_contract_round_trips_without_session_metadata() {
