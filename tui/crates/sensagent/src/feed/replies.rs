@@ -14,7 +14,9 @@
 //! whatever chat it shows; never into a session without an agent, which is
 //! waited for. Session messages never reach TUIs. A reply written on rakumux.com or another machine is
 //! typed only when this machine's user turned that on in Settings; one
-//! written in this machine's TUI always is. The agent's next reply in that
+//! written in this machine's TUI always is, once a read reaches it (5 s at
+//! most), so one written before it elsewhere, to the same session and not
+//! read here yet, goes in first. The agent's next reply in that
 //! session is uploaded as the reply's answer (`reply_to`).
 //!
 //! A reply counts as written here only when this machine made its id (`from`
@@ -101,6 +103,10 @@ const PROMPT_HEAD: usize = 32;
 /// new prompt) holds its session's next one this long before the agent's
 /// waiting is believed.
 pub(crate) const SETTLE: Duration = Duration::from_secs(5);
+/// A reply written in this machine's TUI waits for a read that reaches it
+/// (one normally back within a second) at most this long, then goes in all
+/// the same: reads failing, or slow behind other work, don't hold it back.
+const ORDER_WAIT: Duration = Duration::from_secs(5);
 
 /// Whether this machine takes replies written on rakumux.com or other machines.
 pub type AcceptRemote = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -324,6 +330,9 @@ struct Pending {
     target: Target,
     text: String,
     attachments: Vec<ReplyAttachment>,
+    /// When this machine's TUI wrote it, on the owner's clock, until a read
+    /// brings it.
+    written: Option<Duration>,
 }
 
 impl Pending {
@@ -334,6 +343,7 @@ impl Pending {
             target: Target::Chat(reply.conversation_id.clone()),
             text: reply.text.clone(),
             attachments: reply.attachments.clone(),
+            written: None,
         }
     }
 
@@ -344,7 +354,16 @@ impl Pending {
             target: Target::Session,
             text: message.text.clone(),
             attachments: message.attachments.clone(),
+            written: None,
         }
+    }
+
+    /// Written in this machine's TUI, and no read has reached it yet (reads
+    /// are past `cursor`): a reply written before it elsewhere, to the same
+    /// session, may still be unread here. Waited for at most [`ORDER_WAIT`].
+    fn unread(&self, cursor: u64, now: Duration) -> bool {
+        self.written
+            .is_some_and(|at| self.seq > cursor && now.saturating_sub(at) < ORDER_WAIT)
     }
 }
 
@@ -636,9 +655,14 @@ impl ReplySync {
         self.pushed = pushed;
     }
 
-    /// rakumux.com poked: read now, or again once the read out is back (it
-    /// may have been answered before the change).
+    /// rakumux.com poked: read now.
     pub fn poked(&mut self, now: Duration) {
+        self.read_now(now);
+    }
+
+    /// Read now, or again once the read out is back (it may have been
+    /// answered before the change).
+    fn read_now(&mut self, now: Duration) {
         if self.out == Some(Out::Read) {
             self.reread = true;
         } else {
@@ -686,15 +710,26 @@ impl ReplySync {
         self.kept.wrote(id);
     }
 
-    /// A reply written in this machine's TUI was stored: typed here at once
-    /// when its session runs here.
-    pub fn written(&mut self, reply: &FeedReply) {
+    /// A reply written in this machine's TUI was stored: typed here when its
+    /// session runs here, once a read reaches it (its `seq`), which goes at
+    /// once, so a reply written before it on rakumux.com to the same session,
+    /// not read here yet, goes in first (see [`Pending::unread`]).
+    pub fn written(&mut self, reply: &FeedReply, now: Duration) {
         self.take(reply);
+        self.wait_for_read(&reply.id, now);
     }
 
     /// The same for a session message written in this machine's TUI.
-    pub fn written_message(&mut self, message: &SessionMessage) {
+    pub fn written_message(&mut self, message: &SessionMessage, now: Duration) {
         self.take_message(message);
+        self.wait_for_read(&message.id, now);
+    }
+
+    fn wait_for_read(&mut self, id: &str, now: Duration) {
+        if let Some(pending) = self.pending.get_mut(id) {
+            pending.written = Some(now);
+            self.read_now(now);
+        }
     }
 
     /// The next thing to do, if anything is due: remove files no longer
@@ -764,6 +799,7 @@ impl ReplySync {
                 !self.kept.handled(id)
                     && !being_typed.contains(reply.session_id.as_str())
                     && !self.held.contains_key(&reply.session_id)
+                    && !reply.unread(self.cursor, now)
             })
             .map(|(id, reply)| (reply.seq, id))
             .collect();

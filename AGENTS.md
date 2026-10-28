@@ -224,7 +224,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    foreground still is (`expect_foreground`, read again by the daemon; refused when its agent
    just exited to the shell, and looked at again 2 s later). A session takes its replies and session messages
    one at a time, in rakumux.com's order (`seq`; a later one waits behind an earlier one that
-   waits): each is `delivered` once its chat shows it as a new prompt (a new `agent_turn` whose
+   waits; one written in this machine's TUI waits for a read that reaches it, made at once, at
+   most 5 s, so one written before it on rakumux.com and not read here yet goes first): each is
+   `delivered` once its chat shows it as a new prompt (a new `agent_turn` whose
    `user_prompt`'s letters and digits begin the reply's, or hold its first 32: typed after a
    draft on the same line; without a `user_prompt`, from an older daemon, any new turn in its
    chat), or, for an agent whose turns the daemon doesn't follow, once seen `working`/`blocked`

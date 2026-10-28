@@ -347,10 +347,12 @@ fn only_this_machines_pending_replies_are_typed_and_never_twice() {
     assert_eq!(shown.len(), 2);
     assert_eq!(replies.next_work(NOW), None);
 
-    // Typed, then read again still pending before the report landed.
+    // Typed once read, then read again still pending before the report landed.
     let pending = reply("01K8A3", 6, Some("studio"));
     replies.wrote("01K8A3");
-    replies.written(&pending);
+    replies.written(&pending, NOW);
+    assert_eq!(read_after(replies.next_work(NOW)), 5);
+    replies.request_done(true, read(vec![pending.clone()]), NOW);
     assert!(matches!(
         replies.next_work(NOW),
         Some(ReplyWork::Submit { .. })
@@ -366,7 +368,7 @@ fn only_this_machines_pending_replies_are_typed_and_never_twice() {
     let mut stored = pending.clone();
     stored.status = ReplyStatus::Delivered;
     replies.request_done(true, Ok(FeedResult::Reply(stored)), later);
-    assert_eq!(read_after(replies.next_work(later)), 5);
+    assert_eq!(read_after(replies.next_work(later)), 6);
     replies.request_done(true, read(vec![pending]), later);
     assert_eq!(replies.next_work(later), None);
 }
@@ -412,10 +414,13 @@ fn reports_and_reads_wait_out_their_own_failures() {
     replies.request_done(true, Err(FeedFailure::RateLimited(Some(hour))), NOW);
     assert_eq!(replies.next_work(NOW + READ_EVERY), None);
 
-    // A reply typed in meanwhile is reported at once.
+    // A reply written here meanwhile waits for a read only so long, and,
+    // typed in, is reported at once.
     let later = NOW + Duration::from_secs(30);
     replies.wrote("01K8A1");
-    replies.written(&reply("01K8A1", 4, Some("studio")));
+    replies.written(&reply("01K8A1", 4, Some("studio")), later);
+    assert_eq!(replies.next_work(later), None);
+    let later = later + ORDER_WAIT;
     assert!(matches!(
         replies.next_work(later),
         Some(ReplyWork::Submit { .. })
@@ -438,7 +443,13 @@ fn reports_and_reads_wait_out_their_own_failures() {
     // Reports rate-limited in turn don't hold back reads.
     replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
     replies.wrote("01K8A2");
-    replies.written(&reply("01K8A2", 6, Some("studio")));
+    replies.written(&reply("01K8A2", 6, Some("studio")), read_at);
+    assert_eq!(read_after(replies.next_work(read_at)), 0);
+    replies.request_done(
+        true,
+        read(vec![reply("01K8A2", 6, Some("studio"))]),
+        read_at,
+    );
     assert!(matches!(
         replies.next_work(read_at),
         Some(ReplyWork::Submit { .. })
@@ -449,7 +460,7 @@ fn reports_and_reads_wait_out_their_own_failures() {
     replies.request_done(true, Err(FeedFailure::RateLimited(Some(hour))), read_at);
     assert_eq!(
         read_after(replies.next_work(read_at + READ_EVERY)),
-        0,
+        6,
         "reads go on"
     );
     replies.request_done(true, read(vec![]), read_at + READ_EVERY);
@@ -622,14 +633,16 @@ fn a_session_message_waits_for_an_agent_then_goes_into_whatever_chat_it_shows() 
 }
 
 #[test]
-fn a_session_message_written_here_is_typed_at_once_when_its_agent_waits() {
+fn a_session_message_written_here_is_typed_once_read_when_its_agent_waits() {
     // This machine takes nothing written elsewhere, but its own TUI's message
-    // goes in without waiting for a read.
+    // goes in, once a read reaches it.
     let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
     let mut written = message("01K8A4", 9, Some(CHAT));
     written.from = Some("studio".into());
     replies.wrote("01K8A4");
-    replies.written_message(&written);
+    replies.written_message(&written, NOW);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read_messages(vec![written.clone()]), NOW);
     assert_eq!(
         replies.next_work(NOW),
         Some(ReplyWork::Submit {
@@ -1291,6 +1304,37 @@ fn a_sessions_replies_and_messages_go_in_in_the_order_they_were_written() {
     assert_eq!(
         submitted_reply(replies.next_work(NOW)).as_deref(),
         Some("01K8A1")
+    );
+}
+
+#[test]
+fn a_reply_written_here_goes_in_behind_one_written_before_it_elsewhere_not_read_yet() {
+    let remote: AcceptRemote = Arc::new(|| true);
+    let mut replies = on(Some(remote), &[view("S", Lifecycle::Done, Some(CHAT))]);
+    // A read goes out; meanwhile a reply is written on rakumux.com, then one
+    // in this machine's TUI, and the read comes back without either.
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    let earlier = reply("01K8A1", 7, None);
+    let mine = reply("01K8A2", 8, Some("studio"));
+    replies.wrote("01K8A2");
+    replies.written(&mine, NOW);
+    assert_eq!(replies.next_work(NOW), None, "not before a read reaches it");
+    replies.request_done(true, read(vec![]), NOW);
+    // Read again at once: the one written first goes in first.
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read(vec![earlier, mine]), NOW);
+    assert_eq!(
+        submitted_reply(replies.next_work(NOW)).as_deref(),
+        Some("01K8A1")
+    );
+    replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
+    taken(&mut replies);
+    report_of(replies.next_work(NOW));
+    replies.request_done(true, Ok(FeedResult::Reply(reply("01K8A1", 9, None))), NOW);
+    replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
+    assert_eq!(
+        submitted_reply(replies.next_work(NOW)).as_deref(),
+        Some("01K8A2")
     );
 }
 

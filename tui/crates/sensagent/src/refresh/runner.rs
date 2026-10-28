@@ -750,7 +750,7 @@ fn own<S, A, C>(
             }
             Message::ReplyWritten(outcome, answer) => {
                 if let Ok(reply) = &outcome {
-                    replies.written(reply);
+                    replies.written(reply, now);
                     feed.merge_replies(vec![reply.clone()]);
                 }
                 let _ = answer.send(outcome);
@@ -765,7 +765,7 @@ fn own<S, A, C>(
             }
             Message::MessageWritten(outcome, answer) => {
                 if let Ok(message) = &outcome {
-                    replies.written_message(message);
+                    replies.written_message(message, now);
                 }
                 let _ = answer.send(outcome.map(|_| ()));
                 follow_replies(
