@@ -138,6 +138,10 @@ pub struct SessionsConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub feed_width: Option<u16>,
+    /// Folders whose new sessions run on your Sprite (the `☁ Sprite` toggle
+    /// on `+ New session`, `N`); left out when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sprite_folders: Vec<std::path::PathBuf>,
     /// The order of each folder's sessions in the list, as the user set it
     /// by dragging or with `J`/`K`. Sessions not listed go after the listed
     /// ones, oldest first. Anything but a map of folders to lists of ids
@@ -175,6 +179,7 @@ impl Default for SessionsConfig {
             sidebar_width: None,
             stacked_list_percent: None,
             feed_width: None,
+            sprite_folders: Vec::new(),
             session_order: SessionOrder::new(),
             section_order: SectionOrder::new(),
             other: serde_json::Map::new(),

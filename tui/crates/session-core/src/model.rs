@@ -349,6 +349,11 @@ pub struct GitInfo {
     /// files can't be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
+    /// The `origin` remote's URL, without any user or password in it, for
+    /// cloning the repository elsewhere. `None` without one, or from an
+    /// older daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// A project: a directory sessions belong to (the wire calls it `scope`).

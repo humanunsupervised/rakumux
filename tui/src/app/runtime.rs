@@ -24,6 +24,15 @@ const PUMP_POLL: Duration = Duration::from_millis(100);
 
 /// Everything that happens outside the UI thread.
 pub enum AppEvent {
+    /// A new session should run on the Sprite, but none is set up yet: a
+    /// Sprites token found on this computer, and where, if any.
+    SpriteNeeded {
+        found: Option<(String, &'static str)>,
+    },
+    /// The Sprite's setup reached a step.
+    SpriteStep(crate::sprites::Step),
+    /// The Sprite's setup finished.
+    SpriteSetUp(Result<(), String>),
     PanelAttached {
         generation: u64,
         result: Result<session_core::client::TerminalStream, ApiError>,
@@ -243,6 +252,11 @@ impl Exec {
             },
             rx,
         )
+    }
+
+    /// Where a job may send events of its own while it runs (progress).
+    pub fn events(&self) -> tokio::sync::mpsc::UnboundedSender<AppEvent> {
+        self.tx.clone()
     }
 
     /// Run a blocking job; its result arrives as an event.

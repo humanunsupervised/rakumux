@@ -121,6 +121,7 @@ mod tests {
             detached_at: None,
             worktree: None,
             repo: None,
+            origin: None,
         })
     }
 

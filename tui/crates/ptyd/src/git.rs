@@ -59,13 +59,37 @@ pub fn detect(dir: &Path) -> Option<GitInfo> {
         Head::Unknown => (None, None),
     };
     let repo = repo_name(root, &git_dir, worktree.is_some());
+    let origin = read_config(&common_dir(&git_dir).join("config"))
+        .and_then(|config| origin_url(&config))
+        .and_then(|url| without_credentials(&url));
     Some(GitInfo {
         repo_root: root.to_path_buf(),
         branch,
         detached_at,
         worktree,
         repo,
+        origin,
     })
+}
+
+/// `url` without a user and password (`https://user:token@host/…`); `None`
+/// when it isn't one line of printable text. scp-like `git@host:path` URLs
+/// keep their user, which names no secret.
+fn without_credentials(url: &str) -> Option<String> {
+    let url = url.trim();
+    if url.is_empty() || url.chars().any(char::is_control) {
+        return None;
+    }
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+            let host = authority
+                .rsplit_once('@')
+                .map_or(authority, |(_, host)| host);
+            Some(format!("{scheme}://{host}{path}"))
+        }
+        None => Some(url.to_string()),
+    }
 }
 
 /// The name of the repository whose working tree is `root` (its git dir
@@ -307,6 +331,23 @@ fn normalize(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn origin_urls_lose_their_credentials() {
+        assert_eq!(
+            without_credentials("https://x-access-token:ghp_123@github.com/o/r.git").as_deref(),
+            Some("https://github.com/o/r.git")
+        );
+        assert_eq!(
+            without_credentials("git@github.com:o/r.git").as_deref(),
+            Some("git@github.com:o/r.git")
+        );
+        assert_eq!(
+            without_credentials("ssh://git@host:22/o/r").as_deref(),
+            Some("ssh://host:22/o/r")
+        );
+        assert_eq!(without_credentials("bad\nurl"), None);
+    }
     use std::fs;
 
     const SHA: &str = "1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c";
@@ -336,6 +377,7 @@ mod tests {
             worktree: None,
             // No remote: the folder's name.
             repo: Some("repo".into()),
+            origin: None,
         };
         assert_eq!(detect(&repo_root), Some(expected.clone()));
         assert_eq!(detect(&repo_root.join("src/deep")), Some(expected));
@@ -375,6 +417,7 @@ mod tests {
                 worktree: Some("fix-login".into()),
                 // The main working tree's name, not the checkout's.
                 repo: Some("main".into()),
+                origin: None,
             })
         );
         // The main worktree is unaffected.
@@ -421,6 +464,7 @@ mod tests {
                 detached_at: Some("1f2e3d4".into()),
                 worktree: None,
                 repo: Some("lib".into()),
+                origin: None,
             })
         );
         // Outside the submodule, the superproject.

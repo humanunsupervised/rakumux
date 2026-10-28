@@ -408,6 +408,7 @@ mod tests {
             detached_at: detached.map(Into::into),
             worktree: worktree.map(Into::into),
             repo: None,
+            origin: None,
         }
     }
 

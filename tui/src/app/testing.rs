@@ -111,6 +111,7 @@ pub fn on_branch(branch: &str) -> Option<GitInfo> {
         worktree: None,
         // No remote: the folder's own name, which places don't repeat.
         repo: Some("repo".into()),
+        origin: None,
     })
 }
 
@@ -148,6 +149,8 @@ pub struct FakeState {
     pub now: i64,
     /// The folder registry: path, added at, git context.
     pub folders: Vec<(ScopeRoot, i64, Option<GitInfo>)>,
+    /// Other machines (`machine_list`).
+    pub machines: Vec<session_core::model::MachineView>,
     /// Answer `unsupported` to folders, lists of several folders and pins,
     /// like a daemon from before them.
     pub folders_unsupported: bool,
@@ -473,6 +476,10 @@ impl SessionApi for FakeApi {
     fn get(&self, id: &SessionId) -> Result<SessionView> {
         self.record(format!("get {id}"));
         self.find(id)
+    }
+
+    fn machines(&self) -> Result<Vec<session_core::model::MachineView>> {
+        Ok(self.state.lock().unwrap().machines.clone())
     }
 
     fn create(&self, request: CreateSession) -> Result<SessionView> {

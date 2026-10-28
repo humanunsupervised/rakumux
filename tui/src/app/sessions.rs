@@ -1089,6 +1089,9 @@ impl App {
             AppMode::FeedReply(dialog) => dialog.input.insert_str(&text.replace(['\r', '\n'], " ")),
             AppMode::AuthEmail(dialog) => dialog.input.insert_str(text),
             AppMode::AuthCode(dialog) => dialog.input.insert_str(text),
+            AppMode::Sprite(super::types::SpriteDialog {
+                state: super::types::SpriteState::Paste { input, .. },
+            }) => input.insert_str(text.trim()),
             AppMode::Normal if self.focus == Focus::Terminal => self.paste_terminal_panel(text),
             AppMode::Normal if self.focus == Focus::Session => {
                 if let (Some(terminal), Some(attachment)) = (
@@ -1256,6 +1259,10 @@ impl App {
                 return;
             }
             match hit {
+                Some(Hit::SpriteToggle) => {
+                    self.toggle_sprite();
+                    return;
+                }
                 Some(Hit::TerminalPanelHide) => {
                     self.hide_terminal_panel();
                     return;
@@ -1784,8 +1791,12 @@ impl App {
             self.set_status("Not connected to the daemon.");
             return;
         };
+        let folder = self.current_folder();
+        if self.runs_on_sprite(&folder) {
+            return self.open_new_sprite_session(folder, api);
+        }
         let request = super::new_session::request(
-            self.current_folder(),
+            folder,
             self.list.new_session_cwd().map(Path::to_path_buf),
             env_snapshot(),
             self.terminal_size(),

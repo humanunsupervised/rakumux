@@ -35,6 +35,33 @@ pub enum Focus {
     Terminal,
 }
 
+/// The Sprite dialog (`AppMode::Sprite`).
+#[derive(Debug, Clone)]
+pub struct SpriteDialog {
+    pub state: SpriteState,
+}
+
+#[derive(Debug, Clone)]
+pub enum SpriteState {
+    /// A Sprites token was found on this computer: use it?
+    Found {
+        token: String,
+        source: &'static str,
+    },
+    /// No token: where to get one, and the field to paste it in.
+    Paste {
+        input: TextInput,
+        error: Option<String>,
+    },
+    /// Setting up; the step it's at.
+    Working {
+        step: crate::sprites::Step,
+    },
+    Failed {
+        message: String,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct RenameDialog {
     pub session_id: SessionId,
@@ -562,6 +589,8 @@ pub struct WelcomeState {
 #[derive(Debug, Clone)]
 pub enum AppMode {
     Normal,
+    /// Setting up your Sprite for a new session.
+    Sprite(SpriteDialog),
     /// The Folders modal: the folder filter.
     Folders(FolderPicker),
     /// The App or Status modal: that tab's filter.

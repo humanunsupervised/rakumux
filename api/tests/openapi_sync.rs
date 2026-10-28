@@ -41,6 +41,7 @@ fn git() -> GitInfo {
         detached_at: Some("abc1234".into()),
         worktree: Some("wt".into()),
         repo: Some("r".into()),
+        origin: None,
     }
 }
 

@@ -2,7 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::types::{AccountDialogState, AppMode, AppResult, PairingState};
+use crate::app::types::{AccountDialogState, AppMode, AppResult, PairingState, SpriteState};
 use crate::app::App;
 
 pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
@@ -28,6 +28,7 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
         }
         AppMode::Welcome(_) => handle_welcome_key(app, key),
         AppMode::PhoneOffer => handle_phone_offer_key(app, key),
+        AppMode::Sprite(_) => handle_sprite_key(app, key),
         AppMode::Pairing(_) => handle_pairing_key(app, key),
         AppMode::Account(_) => handle_account_key(app, key),
         AppMode::Top(_) => handle_top_key(app, key),
@@ -36,6 +37,50 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
         }
     }
     AppResult::Continue
+}
+
+/// The Sprite dialog: a found token is used (`y`/Enter) or another pasted
+/// (`n`); the token field takes typing and pastes, Enter sets up, Ctrl-o
+/// copies where tokens are made; a failure is tried again with `r`.
+fn handle_sprite_key(app: &mut App, key: KeyEvent) {
+    let AppMode::Sprite(dialog) = &mut app.mode else {
+        return;
+    };
+    match &mut dialog.state {
+        SpriteState::Found { token, .. } => match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => {
+                let token = token.clone();
+                app.start_sprite_setup(token);
+            }
+            KeyCode::Char('n') => app.sprite_paste_token(),
+            KeyCode::Esc | KeyCode::Char('q') => app.mode = AppMode::Normal,
+            _ => {}
+        },
+        SpriteState::Paste { input, error } => match key.code {
+            KeyCode::Esc => app.mode = AppMode::Normal,
+            KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.copy_sprite_link()
+            }
+            KeyCode::Enter if input.value().trim().is_empty() => {
+                *error = Some("Paste your Sprites token first.".into());
+            }
+            KeyCode::Enter => {
+                let token = input.value().trim().to_string();
+                app.start_sprite_setup(token);
+            }
+            _ => {
+                if input.handle_key(&key) {
+                    *error = None;
+                }
+            }
+        },
+        SpriteState::Working { .. } => {}
+        SpriteState::Failed { .. } => match key.code {
+            KeyCode::Char('r') | KeyCode::Enter => app.sprite_paste_token(),
+            KeyCode::Esc | KeyCode::Char('q') => app.mode = AppMode::Normal,
+            _ => {}
+        },
+    }
 }
 
 /// The welcome tour: `←`/`→` (`h`/`l`, Tab) move, Enter goes on and
@@ -70,6 +115,7 @@ fn dialog_busy(mode: &AppMode) -> bool {
         AppMode::FeedReply(d) => d.busy,
         AppMode::DaemonRestart(d) => d.restarting,
         AppMode::Upgrade(d) => d.installing,
+        AppMode::Sprite(d) => matches!(d.state, SpriteState::Working { .. }),
         _ => false,
     }
 }

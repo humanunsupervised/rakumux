@@ -275,7 +275,15 @@ fn session_label(session: &SessionView, room: usize, focus: Focus) -> Vec<Span<'
     } else {
         mark_style
     };
-    let name = session.name.as_str();
+    let name = match &session.machine {
+        Some(_) => format!(
+            "{} {}",
+            crate::components::session_list::MACHINE_MARK,
+            session.name
+        ),
+        None => session.name.clone(),
+    };
+    let name = name.as_str();
     let mark_width = str_width(mark) + 1;
     let (label, strong) = if focus == Focus::List {
         (

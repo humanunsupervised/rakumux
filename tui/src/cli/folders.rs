@@ -160,6 +160,7 @@ mod tests {
             detached_at: None,
             worktree: None,
             repo: None,
+            origin: None,
         });
         let api = FakeApi::user(vec![]);
         *api.projects.lock().unwrap() = vec![web, folder(Path::new("/srv/api"))];

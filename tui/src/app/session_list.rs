@@ -2145,6 +2145,7 @@ mod tests {
             detached_at: None,
             worktree: Some(name),
             repo: None,
+            origin: None,
         });
         session
     }

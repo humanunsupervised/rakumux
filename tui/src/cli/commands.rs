@@ -660,6 +660,7 @@ mod tests {
             detached_at: None,
             worktree: Some("fix-login".into()),
             repo: None,
+            origin: None,
         });
         let api = FakeApi::user(vec![older, pinned]);
         let (_, text) = output(|out| ls(&api, &invocation(&root), ls_args(false, false), out));

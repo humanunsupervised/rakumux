@@ -213,6 +213,7 @@ fn branch(name: &str, repo_root: &Path, worktree: Option<&str>, repo: &str) -> O
         detached_at: None,
         worktree: worktree.map(str::to_string),
         repo: Some(repo.into()),
+        origin: None,
     })
 }
 

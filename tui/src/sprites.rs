@@ -7,7 +7,10 @@
 //! daemon is given.
 
 use serde_json::{json, Value};
-use session_core::paths::Layout;
+use session_core::api::ApiError;
+use session_core::client::SessionApi;
+use session_core::ids::MachineId;
+use session_core::model::MachineView;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -31,42 +34,47 @@ pub struct Saved {
     pub machine: Option<String>,
 }
 
-fn saved_path(layout: &Layout) -> PathBuf {
-    layout.home.join("sprites.json")
+fn saved_path(home: &Path) -> PathBuf {
+    home.join("sprites.json")
 }
 
-pub fn load(layout: &Layout) -> Saved {
-    std::fs::read(saved_path(layout))
+/// What `sprites.json` in the Rakumux home `home` holds.
+pub fn load(home: &Path) -> Saved {
+    std::fs::read(saved_path(home))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
 
-pub fn save(layout: &Layout, saved: &Saved) -> Result<(), String> {
+pub fn save(home: &Path, saved: &Saved) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(saved).map_err(|e| e.to_string())?;
-    write_private(&saved_path(layout), &bytes).map_err(|e| format!("saving the Sprites token: {e}"))
+    write_private(&saved_path(home), &bytes).map_err(|e| format!("saving the Sprites token: {e}"))
+}
+
+/// The `sprite` CLI's folder, `~/.sprites`.
+pub fn cli_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".sprites"))
 }
 
 /// A Sprites token found on this computer, and where: `SPRITES_TOKEN`,
-/// the one Rakumux saved, or the `sprite` CLI's (when it keeps tokens in
-/// files: computers without a system keyring).
-pub fn found_token(layout: &Layout) -> Option<(String, &'static str)> {
+/// the one Rakumux saved in `home`, or the `sprite` CLI's in `cli` (when it
+/// keeps tokens in files: computers without a system keyring).
+pub fn found_token(home: &Path, cli: Option<&Path>) -> Option<(String, &'static str)> {
     if let Some(token) = std::env::var("SPRITES_TOKEN")
         .ok()
         .filter(|t| !t.trim().is_empty())
     {
         return Some((token.trim().to_string(), "SPRITES_TOKEN"));
     }
-    if let Some(token) = load(layout).token {
+    if let Some(token) = load(home).token {
         return Some((token, "Rakumux"));
     }
-    cli_token().map(|token| (token, "the sprite CLI"))
+    cli_token(cli?).map(|token| (token, "the sprite CLI"))
 }
 
 /// The `sprite` CLI's token for its current organization, from
-/// `~/.sprites/keyring/sprites-cli-*/sprites-org-https-/api.sprites.dev-<org>`.
-fn cli_token() -> Option<String> {
-    let home = PathBuf::from(std::env::var_os("HOME")?).join(".sprites");
+/// `<cli>/keyring/sprites-cli-*/sprites-org-https-/api.sprites.dev-<org>`.
+fn cli_token(home: &Path) -> Option<String> {
     let current = std::fs::read(home.join("sprites.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
@@ -369,6 +377,48 @@ pub fn set_up(
     })
 }
 
+/// Set the Sprite up with `token` and have the daemon reach it, saving
+/// both: `sprite` names it (else the one used before, else `rakumux`).
+/// `progress` hears each step.
+pub fn connect(
+    api: &dyn SessionApi,
+    home: &Path,
+    token: &str,
+    sprite: Option<&str>,
+    progress: &mut dyn FnMut(Step),
+) -> Result<MachineView, String> {
+    let client = Sprites::new(token)?;
+    client.check()?;
+    let mut saved = load(home);
+    saved.token = Some(token.trim().to_string());
+    save(home, &saved)?;
+    let name = sprite
+        .map(str::to_owned)
+        .or_else(|| saved.sprite.clone())
+        .unwrap_or_else(|| DEFAULT_SPRITE.to_string());
+    let ready = set_up(&client, &name, progress)?;
+    let known = api.machines().map_err(|e| e.message)?;
+    let machine = match known.into_iter().find(|m| m.url == ready.url) {
+        Some(machine) => machine,
+        None => api
+            .add_machine(&ready.sprite, &ready.url, &ready.token)
+            .map_err(|e| e.message)?,
+    };
+    saved.sprite = Some(ready.sprite);
+    saved.machine = Some(machine.id.to_string());
+    save(home, &saved)?;
+    Ok(machine)
+}
+
+/// The machine of the Sprite set up here, while the daemon still has it.
+pub fn connected(api: &dyn SessionApi, home: &Path) -> Result<Option<MachineView>, ApiError> {
+    let Some(id) = load(home).machine else {
+        return Ok(None);
+    };
+    let id = MachineId::from_string(id);
+    Ok(api.machines()?.into_iter().find(|m| m.id == id))
+}
+
 /// A development build: put its own daemon and API on the Sprite (they need
 /// to match this one), next to the release `install.sh` put there.
 fn upload_own_binaries(sprites: &Sprites, name: &str, libexec: &str) -> Result<(), String> {
@@ -541,19 +591,16 @@ mod tests {
     #[test]
     fn tokens_are_saved_privately() {
         let dir = tempfile::tempdir().unwrap();
-        let layout = Layout {
-            home: dir.path().to_path_buf(),
-            run_dir: dir.path().join("run"),
-        };
+        let home = dir.path();
         let saved = Saved {
             token: Some("org/1/abc".into()),
             sprite: Some("rakumux".into()),
             machine: None,
         };
-        save(&layout, &saved).unwrap();
-        assert_eq!(load(&layout), saved);
+        save(home, &saved).unwrap();
+        assert_eq!(load(home), saved);
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(saved_path(&layout))
+        let mode = std::fs::metadata(saved_path(home))
             .unwrap()
             .permissions()
             .mode();

@@ -138,6 +138,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             crate::components::welcome::draw_welcome(f, app, *state, modal_area)
         }
         AppMode::PhoneOffer => crate::components::phone_access::draw_phone_offer(f, modal_area),
+        AppMode::Sprite(dialog) => crate::components::sprite::draw_sprite(f, modal_area, dialog),
         AppMode::Pairing(dialog) => {
             crate::components::phone_access::draw_pairing(f, dialog, modal_area)
         }
@@ -1072,6 +1073,7 @@ mod tests {
             detached_at: Some("1a2b3c4".into()),
             worktree: None,
             repo: None,
+            origin: None,
         });
         if let Some(terminal) = server.terminal.as_mut() {
             terminal.foreground_process = Some("cargo".into());
@@ -1448,6 +1450,7 @@ mod tests {
             detached_at: None,
             worktree: Some("feature".into()),
             repo: None,
+            origin: None,
         });
         let mut h = harness(vec![view("A", "main-work", 10), feature]).on_folders_tab();
         let wide = render(&mut h.app, 160, 48);

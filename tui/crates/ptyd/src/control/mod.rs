@@ -165,11 +165,24 @@ impl ControlService {
                     .map(|()| Response::Ok),
             )),
             Request::SessionCreate(create) => match create.machine.clone() {
-                Some(machine) => Ok(answer(
-                    user_only(caller)
+                Some(machine) => {
+                    let local = create.scope.clone();
+                    let created = user_only(caller)
                         .and_then(|()| self.machines.create(&machine, create))
-                        .map(|session| Response::Session { session }),
-                )),
+                        .map(|session| Response::Session { session });
+                    // The local folder it's listed under is one of this
+                    // machine's folders too.
+                    if let (Ok(_), Some(local)) = (&created, local) {
+                        let _ = self.inner.handle(
+                            caller,
+                            Request::ProjectAdd {
+                                path: local.path().to_path_buf(),
+                                create: false,
+                            },
+                        );
+                    }
+                    Ok(answer(created))
+                }
                 None => Err(Request::SessionCreate(create)),
             },
             Request::SessionList {

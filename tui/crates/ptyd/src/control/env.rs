@@ -147,7 +147,8 @@ pub(crate) fn terminal_env(
 }
 
 /// `[$SHELL, "-l"]`: `SHELL` from the inherited environment, else the
-/// daemon's, else `/bin/sh`.
+/// daemon's, else the user's login shell (its password entry: a daemon run
+/// by a service manager may have no `SHELL`), else `/bin/sh`.
 pub(crate) fn login_shell(base: &[(String, String)]) -> Vec<String> {
     let from_request = base
         .iter()
@@ -156,8 +157,34 @@ pub(crate) fn login_shell(base: &[(String, String)]) -> Vec<String> {
         .map(|(_, value)| value.clone());
     let shell = from_request
         .or_else(|| std::env::var("SHELL").ok().filter(|s| !s.is_empty()))
+        .or_else(passwd_shell)
         .unwrap_or_else(|| FALLBACK_SHELL.to_string());
     vec![shell, "-l".to_string()]
+}
+
+/// The login shell in the daemon user's password entry.
+fn passwd_shell() -> Option<String> {
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut buf = vec![0 as libc::c_char; 4096];
+    let mut found: *mut libc::passwd = std::ptr::null_mut();
+    // SAFETY: getpwuid_r writes only into `entry` and `buf` (its size given)
+    // and sets `found` to `&entry` or null; geteuid has no preconditions.
+    let rc = unsafe {
+        libc::getpwuid_r(
+            libc::geteuid(),
+            &mut entry,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut found,
+        )
+    };
+    if rc != 0 || found.is_null() || entry.pw_shell.is_null() {
+        return None;
+    }
+    // SAFETY: on success `pw_shell` points at a NUL-terminated string in `buf`.
+    let shell = unsafe { std::ffi::CStr::from_ptr(entry.pw_shell) };
+    let shell = shell.to_str().ok()?.trim();
+    (shell.starts_with('/') && std::path::Path::new(shell).exists()).then(|| shell.to_string())
 }
 
 /// Bytes typed into the terminal after the program starts: each startup
@@ -291,6 +318,12 @@ mod tests {
             ["/usr/bin/zsh", "-l"]
         );
         assert_eq!(login_shell(&[]).len(), 2);
+    }
+
+    #[test]
+    fn the_password_entry_names_a_login_shell() {
+        let shell = passwd_shell().expect("this user has a login shell");
+        assert!(shell.starts_with('/'), "{shell}");
     }
 
     #[test]

@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::Message;
 
+use crate::log_debug;
+
 /// Connecting, TLS and the WebSocket handshake, and the `hello_ok` after it.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// How long the socket's thread waits for input before it looks for output
@@ -158,26 +160,48 @@ pub fn connect(url: &str, token: &str) -> io::Result<Pipe> {
 
 /// Move bytes between the socket and the halves until either side ends.
 fn pump(mut socket: Socket, input: Sender<Vec<u8>>, output: Receiver<Vec<u8>>) {
+    let ended = pump_until_closed(&mut socket, &input, &output);
+    log_debug!("machines: connection closed: {ended}");
+}
+
+/// Why [`pump`] stopped.
+fn pump_until_closed(
+    socket: &mut Socket,
+    input: &Sender<Vec<u8>>,
+    output: &Receiver<Vec<u8>>,
+) -> String {
     let mut pinged = Instant::now();
+    // A write the socket's short read timeout interrupted: TLS may read
+    // while it writes. The message is buffered; flushing finishes it.
+    let mut unflushed = false;
     loop {
+        if unflushed {
+            match socket.flush() {
+                Ok(()) => unflushed = false,
+                Err(e) if is_timeout(&e) => {}
+                Err(e) => return format!("flushing: {e}"),
+            }
+        }
         loop {
             match output.try_recv() {
-                Ok(bytes) => {
-                    if socket.send(Message::Binary(bytes)).is_err() {
-                        return;
-                    }
-                }
+                Ok(bytes) => match socket.send(Message::Binary(bytes)) {
+                    Ok(()) => {}
+                    Err(e) if is_timeout(&e) => unflushed = true,
+                    Err(e) => return format!("sending: {e}"),
+                },
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     let _ = socket.close(None);
                     let _ = socket.flush();
-                    return;
+                    return "closed here".into();
                 }
             }
         }
         if pinged.elapsed() >= PING_EVERY {
-            if socket.send(Message::Ping(Vec::new())).is_err() {
-                return;
+            match socket.send(Message::Ping(Vec::new())) {
+                Ok(()) => {}
+                Err(e) if is_timeout(&e) => unflushed = true,
+                Err(e) => return format!("pinging: {e}"),
             }
             pinged = Instant::now();
         }
@@ -186,19 +210,21 @@ fn pump(mut socket: Socket, input: Sender<Vec<u8>>, output: Receiver<Vec<u8>>) {
                 if input.send(bytes).is_err() {
                     let _ = socket.close(None);
                     let _ = socket.flush();
-                    return;
+                    return "closed here".into();
                 }
             }
-            Ok(Message::Close(_)) => return,
+            Ok(Message::Close(frame)) => return format!("closed by the machine: {frame:?}"),
             Ok(_) => {}
-            Err(tungstenite::Error::Io(e))
-                if matches!(
-                    e.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                ) => {}
-            Err(_) => return,
+            Err(e) if is_timeout(&e) => {}
+            Err(e) => return format!("reading: {e}"),
         }
     }
+}
+
+/// The socket's short read timeout, not a failure.
+fn is_timeout(error: &tungstenite::Error) -> bool {
+    matches!(error, tungstenite::Error::Io(e)
+        if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut))
 }
 
 /// `(tls, host, port)` of an `http(s)://host[:port][/]` base URL.

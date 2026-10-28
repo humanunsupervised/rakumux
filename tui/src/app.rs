@@ -46,6 +46,7 @@ mod runtime;
 pub mod screen;
 mod session_list;
 mod sessions;
+pub mod sprite;
 pub mod terminal_panel;
 mod text_input;
 pub mod top;
@@ -154,6 +155,8 @@ pub enum Hit {
     TerminalPanelDivider,
     /// Session list row (0 = the tabs; headers count).
     ListRow(usize),
+    /// The `☁ Sprite` toggle on `+ New session`.
+    SpriteToggle,
     /// The pin left of a hovered session row's name (that list row):
     /// pins or unpins its session.
     PinToggle(usize),
@@ -1066,6 +1069,9 @@ impl App {
             AppEvent::FolderAdded { result } => self.on_folder_added(result),
             AppEvent::Pinned { id, pinned, result } => self.on_pinned(id, pinned, result),
             AppEvent::Created { result } => self.on_created(result),
+            AppEvent::SpriteNeeded { found } => self.on_sprite_needed(found),
+            AppEvent::SpriteStep(step) => self.on_sprite_step(step),
+            AppEvent::SpriteSetUp(result) => self.on_sprite_set_up(result),
             AppEvent::Renamed {
                 id,
                 result,

@@ -122,7 +122,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    listed by `tailscale status`; the ranges alone also catch ISP carrier-grade NAT and other VPNs) at
    `remote.json`'s port (7337), or on `listen` / `--remote-listen ADDR:PORT` instead; there the
    bearer is the remote token, `Host` isn't checked, `Origin` is allowed, identity headers are
-   refused and the caller is the user. Runs in the foreground or with `--detach`; a user client of
+   refused and the caller is the user. The remote listener also serves `GET /v1/daemon`: the
+   daemon's own protocol over a WebSocket (a `hello_ok` text message, then frames as binary
+   messages), which another machine's daemon uses to reach this one (component 11). Runs in the foreground or with `--detach`; a user client of
    the daemon (spawns it on demand), one API per Rakumux home. See `api/README.md`.
 9. **`rakumux-mcp`** (`mcp/`): MCP server on stdio for coding agents, built on `rmcp` (exact
    pinned, confined to `mcp/src/server.rs`). Tools: `list_folders`, `list_sessions`,
@@ -293,6 +295,31 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    the folder itself, else its last component; branch, worktree, `edited`, `last_at`), and
    only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`); a
    list that would pass the contract's 256 KiB goes without them.
+
+11. **Other machines and Sprites** (`ptyd/src/machines/`, `tui/src/sprites.rs`): the daemon
+   reaches other machines running Rakumux (`machine_add {name, url, token}`, `machine_list`,
+   `machine_remove`; capability `machines`) through their `rakumux-api` `/v1/daemon`, a
+   WebSocket (`machines/pipe.rs`: rustls, tungstenite). A machine's sessions exist there only:
+   this daemon keeps a pointer to each (its id, machine and the local folder it's listed under)
+   and its last view in `machines.json` (0600, with the machines' tokens), lists them to user
+   callers with `SessionView::machine` set and `scope` the local folder, forwards requests
+   naming them, relays attaches, and merges the machine's events into user subscriptions
+   (session callers never see them; the account service treats them as private). A connection
+   opens when something needs the machine and closes a minute after its last use unless one of
+   its agents works or someone is attached, so a machine that pauses when idle can.
+   `CreateSession::machine` creates there, in `<its home>/<local folder name>` (made by
+   `project_add {create}`), with the machine's own environment and, for a new folder, the
+   `prefill` (`git clone <origin> .`, typed, never run). **Your Sprite**: `rakumux sprite
+   connect` (or the TUI's `☁ Sprite` toggle on `+ New session`, `N`, per folder:
+   `sessions.sprite_folders`) sets up a Fly.io Sprite with the user's own Sprites token
+   (`SPRITES_TOKEN`, `~/.rakumux/sprites.json` (0600), or the `sprite` CLI's keyring files; it
+   never leaves this computer): created when missing, Rakumux installed with `install.sh`
+   (a development build then uploads its own `rakumux-ptyd` and `rakumux-api` and restarts the
+   daemon in place), `rakumux-ptyd serve` and `rakumux-api` as Sprite services behind its public
+   URL on port 8080, a remote token of its own in its `remote.json`, then `machine_add`. Inside a
+   Sprite (`/.sprite/api.sock`) the daemon holds a Fly task (`control/keep_awake.rs`) while an
+   agent works and wrote output in the last 10 minutes, since a Sprite pauses ~30 s after its last
+   connection closes and freezes what runs.
 
 ## File structure
 
@@ -627,6 +654,9 @@ accidents; they don't stop a hostile process running as the same user.
   remote.json                    RemoteConfig {enabled, port (7337), token (26 chars a-z2-7),
                                  listen: ["ADDR:PORT"]}, 0600: remote access, written by
                                  `rakumux remote`, read by rakumux-api at start
+  machines.json                  other machines (url, token, home) and the sessions listed from
+                                 them (machine, local folder, last view), daemon only, 0600
+  sprites.json                   your Sprite: the Sprites token, its name and machine id, 0600
   config.json                    Config (below)
   config.json.lock               serializes private configuration writes
   running.json                   {"sessions": [ids]}: sessions running now, revived by the next start
@@ -869,6 +899,10 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   7337) for the phone app, paired by scanning a QR code of the `rakumux://connect` link;
   opt-in with `rakumux remote on` or the TUI's one-time offer (`remote.json`), admitted by the
   remote token, always the user.
+- **Machine**: another computer running Rakumux whose sessions this daemon lists and uses
+  (`machine_add`); a session there shows `☁` before its name.
+- **Sprite**: a Fly.io VM that pauses when idle; with your own Sprites token, Rakumux sets one
+  up as a machine (`rakumux sprite connect`, the `☁ Sprite` toggle).
 - **MCP server**: `rakumux-mcp`, the tools coding agents call; a client of the external API.
 - **User caller / session caller**: a client authenticated with the daemon's user token, or with a
   session's own id + token (from inside that session).
@@ -916,6 +950,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
 | `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in, whether AI session titles are on (rakumux.com/features) and each live session's AI description (`--json`: `ai_session_titles`, and `ai_session_summaries` as before) |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
+| `rakumux machine add NAME URL --token T \| ls [--json] \| rm NAME` | Other machines whose sessions are listed and used here (their `rakumux-api` URL and remote token) |
+| `rakumux sprite connect [--token T] [--sprite NAME] \| status \| disconnect` | Your own Fly.io Sprite for sessions; `rakumux new --sprite` (or `--machine NAME`) runs a session there |
 | `rakumux-api [--port N] [--detach] [--remote-listen ADDR:PORT]...` | External HTTP API on 127.0.0.1, plus the remote listener when remote access is on (`api/README.md`) |
 | `rakumux-mcp` | MCP server for agents, e.g. `claude mcp add --scope user rakumux -- rakumux-mcp` (`mcp/README.md`) |
 
@@ -932,7 +968,7 @@ that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and A
 folder header, a new session there), `Esc` (after cancelling a pending key or the filter) or
 `Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
 running session in view), `Tab` last session, `1`-`9` go into that session,
-`n` new, `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
+`n` new, `N` new sessions in this folder on your Sprite or here (the `☁ Sprite` toggle), `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
 every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
 screen, `b` hide Master detail's list beside the session and show it again (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `t` Top (below), `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`

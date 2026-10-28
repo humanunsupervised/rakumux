@@ -718,6 +718,7 @@ mod tests {
                 detached_at: None,
                 worktree: None,
                 repo: Some("rakumux".into()),
+                origin: None,
             }),
             machine: None,
         }

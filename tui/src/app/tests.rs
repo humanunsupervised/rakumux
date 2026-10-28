@@ -5931,7 +5931,7 @@ async fn places_name_their_repository_before_the_branch() {
             "   claude",
             "   focal-md  ⎇ main",
             "",
-            " + New session",
+            " + New session                                     ☁ Sprite",
         ]
     );
     // Short of room, the path is cut at its start, then the repository's
@@ -5962,7 +5962,7 @@ async fn places_name_their_repository_before_the_branch() {
             "   claude",
             "   focal-md  ⎇ main",
             "",
-            " + New session",
+            " + New session                 ☁ Sprite",
         ]
     );
 }
@@ -6038,7 +6038,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   codex",
             " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
             "",
-            " + New session",
+            " + New session                                     ☁ Sprite",
         ]
     );
     // Short of room, a path is cut at its start, then the branch at its
@@ -6065,7 +6065,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   codex",
             " ▸ …ocal-md-citations  ⎇ fix/citation-…",
             "",
-            " + New session",
+            " + New session                 ☁ Sprite",
         ]
     );
     // The copy mark of the place the keys are on is the accent.
@@ -6123,7 +6123,81 @@ async fn session_rows_line_up_with_their_headers_text() {
             "      /work/focal-md-citations",
             "      focal-md ⎇ fix/citation-format                    11d",
             "",
-            " + New session",
+            " + New session                                     ☁ Sprite",
         ]
     );
+}
+
+#[tokio::test]
+async fn new_sessions_go_to_the_sprite_once_its_folder_is_toggled() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    h.press(KeyCode::Char('N')).await;
+    assert!(h.app.runs_on_sprite(&scope()));
+    assert_eq!(
+        h.app.settings.sessions.sprite_folders,
+        vec![scope().path().to_path_buf()]
+    );
+
+    // No Sprite set up yet: the dialog asks for a token, nothing is created.
+    h.press(KeyCode::Char('n')).await;
+    assert!(matches!(
+        h.app.mode,
+        AppMode::Sprite(crate::app::types::SpriteDialog {
+            state: crate::app::types::SpriteState::Paste { .. }
+        })
+    ));
+    assert!(h.fake.creates().is_empty());
+    h.press(KeyCode::Enter).await;
+    assert!(
+        matches!(
+            &h.app.mode,
+            AppMode::Sprite(crate::app::types::SpriteDialog {
+                state: crate::app::types::SpriteState::Paste { error: Some(_), .. }
+            })
+        ),
+        "an empty token is refused"
+    );
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+
+    // Set up: the session runs there, in the machine's own environment.
+    let home = h
+        .app
+        .config_path
+        .as_ref()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let machine = session_core::ids::MachineId::from_string("M1");
+    crate::sprites::save(
+        &home,
+        &crate::sprites::Saved {
+            token: Some("org/1/secret".into()),
+            sprite: Some("rakumux".into()),
+            machine: Some(machine.to_string()),
+        },
+    )
+    .unwrap();
+    h.fake.state.lock().unwrap().machines = vec![session_core::model::MachineView {
+        id: machine.clone(),
+        name: "rakumux".into(),
+        url: "https://rakumux-x.sprites.app".into(),
+        state: session_core::model::MachineState::Connected,
+        version: None,
+        error: None,
+        added_at: 1,
+    }];
+    h.press(KeyCode::Char('n')).await;
+    let create = h.fake.creates().pop().expect("created on the Sprite");
+    assert_eq!(create.machine, Some(machine));
+    assert_eq!(create.scope, Some(scope()));
+    assert!(create.env.is_empty(), "the Sprite's own environment");
+
+    // Toggled off (from the list): back to this machine.
+    h.app.focus = Focus::List;
+    h.press(KeyCode::Char('N')).await;
+    assert!(!h.app.runs_on_sprite(&scope()));
+    h.press(KeyCode::Char('n')).await;
+    assert_eq!(h.fake.creates().pop().unwrap().machine, None);
 }

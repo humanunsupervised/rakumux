@@ -187,6 +187,13 @@ fn cell_lines(content: Vec<Vec<Span<'_>>>, height: u16, indent: usize) -> Vec<Li
     lines
 }
 
+/// At the right of `+ New session`: the current folder's new sessions run
+/// on your Sprite while it's lit (`N`).
+pub const SPRITE_CHIP: &str = "☁ Sprite";
+
+/// Before the name of a session that runs on another machine.
+pub const MACHINE_MARK: &str = "☁";
+
 /// Shown in the gutter of a hovered unpinned session's first line: a tap
 /// pins it.
 const PIN_TOGGLE: &str = "☆";
@@ -470,7 +477,10 @@ fn session_content(
         width.saturating_sub(3 + badge_width),
     );
     let right_width = badge_width + str_width(&age);
-    let mut name = session.name.clone();
+    let mut name = match &session.machine {
+        Some(_) => format!("{MACHINE_MARK} {}", session.name),
+        None => session.name.clone(),
+    };
     if app.is_self_session(&session.id) {
         name.push_str(" (this)");
     }
@@ -1231,8 +1241,12 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
             ListRow::Folders => Vec::new(),
             ListRow::NewSession => {
                 // The `+` in the gutter, its words where the sessions' names
-                // start.
-                let content = vec![vec![
+                // start; at the right the current folder's `☁ Sprite`
+                // toggle, lit while its new sessions run on the Sprite.
+                let room = width_of(0).saturating_sub(GUTTER);
+                let label = truncate("New session", room);
+                let on = app.runs_on_sprite(&app.current_folder());
+                let mut spans = vec![
                     Span::styled(
                         format!("{:<GUTTER$}", "+"),
                         Style::default()
@@ -1240,7 +1254,7 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        truncate("New session", width_of(0).saturating_sub(GUTTER)),
+                        label.clone(),
                         Style::default()
                             .fg(if is_selected {
                                 p.text_bright
@@ -1249,8 +1263,35 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                             })
                             .add_modifier(Modifier::BOLD),
                     ),
-                ]];
-                cell_lines(content, height, row_indent(0))
+                ];
+                let chip_width = str_width(SPRITE_CHIP);
+                let gap = room.saturating_sub(str_width(&label) + chip_width);
+                if gap >= 2 {
+                    spans.push(Span::raw(" ".repeat(gap)));
+                    spans.push(Span::styled(
+                        SPRITE_CHIP,
+                        if on {
+                            Style::default()
+                                .fg(p.accent_primary)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(p.text_muted)
+                        },
+                    ));
+                    let x = row_area.x as usize + row_indent(0) + GUTTER + str_width(&label) + gap;
+                    if let Ok(x) = u16::try_from(x) {
+                        row_hits.push((
+                            Rect {
+                                x,
+                                y: row_area.y + height.saturating_sub(1),
+                                width: u16::try_from(chip_width).unwrap_or(0),
+                                height: 1,
+                            },
+                            Hit::SpriteToggle,
+                        ));
+                    }
+                }
+                cell_lines(vec![spans], height, row_indent(0))
             }
             ListRow::FolderHeader(folder) => {
                 let mut lines = vec![Line::default(); height as usize - 1];

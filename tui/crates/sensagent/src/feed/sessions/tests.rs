@@ -252,6 +252,7 @@ fn worked(mut view: SessionView, extra: usize) -> SessionView {
                 detached_at: branch.is_none().then(|| "1a2b3c4".into()),
                 worktree: worktree.map(String::from),
                 repo: Some("rakumux".into()),
+                origin: None,
             }),
             last_at: at,
             edited: true,

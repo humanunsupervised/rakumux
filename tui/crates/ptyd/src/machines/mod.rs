@@ -361,6 +361,14 @@ impl Machines {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("work"));
         let remote_folder = home.join(folder);
+        // The clone the prefill types is for a folder that's new there.
+        let known = match self.exchange(machine, &Request::ProjectList)? {
+            Response::Projects { projects } => {
+                projects.iter().any(|p| p.path.path() == remote_folder)
+            }
+            _ => false,
+        };
+        let prefill = if known { None } else { create.prefill.clone() };
         match self.exchange(
             machine,
             &Request::ProjectAdd {
@@ -378,6 +386,7 @@ impl Machines {
             // The machine's own environment, not this one's.
             env: Vec::new(),
             machine: None,
+            prefill,
             ..create
         });
         match self.exchange(machine, &request)? {

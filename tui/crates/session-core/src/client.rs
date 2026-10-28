@@ -297,7 +297,10 @@ impl Client {
     /// `rakumux-api`'s `/v1/daemon` does. The caller owns it from here.
     pub fn open_raw(config: &ClientConfig) -> Result<(UnixStream, HelloOk)> {
         let identity = resolve_identity(&config.auth, &|name| std::env::var(name).ok());
-        open_connection(config, &identity)
+        let (stream, hello) = open_connection(config, &identity)?;
+        // The hello's timeout would end a quiet stream relayed on it.
+        set_read_timeout(&stream, None).map_err(unavailable_io)?;
+        Ok((stream, hello))
     }
 
     /// Optional features the daemon announced in its hello.
@@ -2008,6 +2011,15 @@ mod tests {
                 },
             }]
         );
+    }
+
+    #[test]
+    fn raw_connections_keep_no_hello_timeout() {
+        let daemon = FakeDaemon::start();
+        let (stream, hello) = Client::open_raw(&daemon.config(AuthMode::User)).unwrap();
+        assert_eq!(hello.caller, CallerInfo::User);
+        // A stream relayed on it may stay quiet for longer than a hello.
+        assert_eq!(stream.read_timeout().unwrap(), None);
     }
 
     #[test]
