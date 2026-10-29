@@ -51,7 +51,7 @@ static PATTERNS: LazyLock<Result<Patterns, regex::Error>> = LazyLock::new(|| {
             r#"(?i)(?:authorization[ \t]*:[ \t]*bearer[ \t]+[^\s"'<>]+|["']?\b(?:[a-z0-9]+_)*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?token|client[_-]?secret|secret[_-]?key|password|passwd|secret|token)["']?[ \t]*[:=][ \t]*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+))"#,
         )?,
         token: Regex::new(
-            r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b",
+            r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b|\brkm_[A-Za-z0-9_-]{43}|\brkma\.v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
         )?,
         unix_path: Regex::new(r#"(?m)(?P<before>^|[ \t\r\n"'=(])/(?:[^\s"'<>|]+)"#)?,
         windows_path: Regex::new(r#"(?im)(?P<before>^|[ \t\r\n"'=(])[a-z]:\\[^\s"'<>|]+"#)?,

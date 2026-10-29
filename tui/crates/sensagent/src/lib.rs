@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod cloud;
 pub mod dispatch;
+pub mod enrolment;
 pub mod feed;
 pub mod owner;
 pub mod refresh;

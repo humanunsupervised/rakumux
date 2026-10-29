@@ -5,9 +5,8 @@ use thiserror::Error;
 use super::credentials::unix_seconds;
 use super::model::ProviderIdentity;
 use super::{
-    AccountIdentity, ApplyResult, AuthError, ClerkDeviceClient, CredentialRevision,
-    CredentialStore, CredentialStoreError, DeviceAuthConfig, SavedCredentials,
-    VerifiedAuthorization,
+    AccountIdentity, ApplyResult, AuthError, CredentialRevision, CredentialStore,
+    CredentialStoreError, DeviceAuthConfig, SavedCredentials, TokenProvider, VerifiedAuthorization,
 };
 
 mod access;
@@ -198,7 +197,7 @@ impl<S: CredentialStore, C: WallClock> AccountService<S, C> {
     /// An access token that expired meanwhile is renewed with its refresh token.
     pub fn restore(
         &self,
-        client: &ClerkDeviceClient,
+        client: &dyn TokenProvider,
     ) -> Result<Option<AccountSession>, AccountError> {
         let snapshot = self.store.load()?;
         let Some(mut credentials) = snapshot.credentials else {
@@ -227,7 +226,7 @@ impl<S: CredentialStore, C: WallClock> AccountService<S, C> {
     pub fn renew(
         &self,
         session: &AccountSession,
-        client: &ClerkDeviceClient,
+        client: &dyn TokenProvider,
     ) -> Result<Option<AccountSession>, AccountError> {
         if !Arc::ptr_eq(&self.owner, &session.owner) {
             return Err(AccountError::OwnerMismatch);
@@ -249,7 +248,7 @@ impl<S: CredentialStore, C: WallClock> AccountService<S, C> {
         &self,
         revision: CredentialRevision,
         credentials: SavedCredentials,
-        client: &ClerkDeviceClient,
+        client: &dyn TokenProvider,
     ) -> Result<AccountSession, AccountError> {
         if !credentials.matches_config(&self.config) {
             return Err(AccountError::ProviderMismatch);

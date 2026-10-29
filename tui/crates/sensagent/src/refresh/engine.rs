@@ -175,6 +175,8 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     machine: Option<crate::feed::MachineIdentity>,
     /// The name this service last gave each session (its AI title).
     titles: Titles,
+    /// An enrolled machine's tokens: they sign it in and renew it, never Clerk.
+    machine_tokens: Option<std::sync::Arc<crate::enrolment::MachineTokens>>,
 }
 
 impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> {
@@ -205,6 +207,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             reply_state: None,
             machine: None,
             titles: Titles::default(),
+            machine_tokens: None,
         }
     }
 
@@ -280,6 +283,21 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where files attached to replies are saved, if anywhere.
     pub(crate) fn uploads(&self) -> Option<std::path::PathBuf> {
         self.uploads.clone()
+    }
+
+    /// This is an enrolled machine (the user's Sprite): `tokens` sign it in
+    /// and renew it in place of Clerk, and it reads no feed (no TUI runs there).
+    pub fn with_machine_tokens(
+        mut self,
+        tokens: std::sync::Arc<crate::enrolment::MachineTokens>,
+    ) -> Self {
+        self.machine_tokens = Some(tokens);
+        self
+    }
+
+    /// The enrolled machine's tokens, when this is one.
+    pub(crate) fn machine_tokens(&self) -> Option<std::sync::Arc<crate::enrolment::MachineTokens>> {
+        self.machine_tokens.clone()
     }
 
     /// Read the turn settings from `read` now and every [`SETTINGS_INTERVAL`].

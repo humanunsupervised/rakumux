@@ -16,6 +16,7 @@ mod error;
 mod file_store;
 mod identity;
 mod model;
+mod provider;
 mod service;
 
 pub use account::{
@@ -35,6 +36,8 @@ pub use identity::{AccountIdentity, VerifiedAuthorization};
 pub use model::{
     AuthorizationGrant, DeviceAuthorization, PollOutcome, SecretValue, VerificationPrompt,
 };
+pub(crate) use model::{ProviderIdentity, TokenReceipt};
+pub use provider::TokenProvider;
 pub use service::{
     ApplyResult, AttemptId, AuthService, AuthStatus, PollCompletion, PollId, PollRequest,
 };

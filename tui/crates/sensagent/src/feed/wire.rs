@@ -83,6 +83,10 @@ pub(crate) enum FeedRequest {
     Attachment { id: String, size: u64 },
     /// Ask where to connect to be poked, and a token for it.
     Realtime,
+    /// Enrol another machine of the account (`enrolment`), as `body`.
+    MachineEnrol { body: Vec<u8> },
+    /// Revoke an enrolled machine's credential.
+    MachineRevoke { machine: String },
 }
 
 impl FeedRequest {
@@ -1210,7 +1214,8 @@ pub(crate) fn page(reply: &FeedHttpReply) -> Result<PageRead, FeedFailure> {
     })
 }
 
-fn failure(reply: &FeedHttpReply) -> FeedFailure {
+/// What a refusal says, from its status and error code.
+pub(crate) fn failure(reply: &FeedHttpReply) -> FeedFailure {
     // The code must agree with the status; anything else is a broken answer.
     let error = serde_json::from_slice::<ErrorBody>(&reply.body)
         .ok()

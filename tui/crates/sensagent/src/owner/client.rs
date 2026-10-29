@@ -10,8 +10,8 @@ use crate::feed::{FeedPage, FeedTurn, ReplyWrite};
 
 use super::layout::{current_uid, peer_uid};
 use super::protocol::{
-    read_message, write_message, ConsentView, FolderChoice, Hello, OfferView, OwnerRequest,
-    OwnerResponse, OwnerState, SignInView, StatusLine, MAX_SESSIONS, PROTOCOL,
+    read_message, write_message, ConsentView, EnrolledCredential, FolderChoice, Hello, OfferView,
+    OwnerRequest, OwnerResponse, OwnerState, SignInView, StatusLine, MAX_SESSIONS, PROTOCOL,
 };
 use super::{OwnerError, OwnerLayout, OwnerRegistration};
 
@@ -242,6 +242,35 @@ impl OwnerClient {
             id: Some(id.to_owned()),
         })? {
             OwnerResponse::FeedReply { reply } => Ok(reply),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Enrol machine `machine_id` (a ULID) of the signed-in account as `name`,
+    /// woken at `wake_url`: the contents of its credential file, holding its
+    /// secret. Signed out, `Refused(SignedOut)`.
+    pub fn machine_enrol(
+        &self,
+        machine_id: &str,
+        name: &str,
+        wake_url: Option<&str>,
+    ) -> Result<EnrolledCredential, OwnerError> {
+        match self.request(&OwnerRequest::MachineEnrol {
+            machine_id: machine_id.to_owned(),
+            name: name.to_owned(),
+            wake_url: wake_url.map(str::to_owned),
+        })? {
+            OwnerResponse::MachineEnrolled { credential } => Ok(credential),
+            _ => Err(OwnerError::Protocol),
+        }
+    }
+
+    /// Revoke enrolled machine `machine_id`'s credential.
+    pub fn machine_revoke(&self, machine_id: &str) -> Result<(), OwnerError> {
+        match self.request(&OwnerRequest::MachineRevoke {
+            machine_id: machine_id.to_owned(),
+        })? {
+            OwnerResponse::Done => Ok(()),
             _ => Err(OwnerError::Protocol),
         }
     }

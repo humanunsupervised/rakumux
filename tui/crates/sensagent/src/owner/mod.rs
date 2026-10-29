@@ -16,7 +16,7 @@ use thiserror::Error;
 pub use claim::{OwnerClaim, OwnerRegistration};
 pub use client::OwnerClient;
 pub use layout::OwnerLayout;
-pub use protocol::OwnerErrorCode;
+pub use protocol::{EnrolledCredential, OwnerErrorCode};
 pub use server::OwnerServer;
 
 /// Static owner failures; never paths, tokens or account text.

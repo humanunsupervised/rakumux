@@ -386,3 +386,35 @@ fn a_failed_request_closes_the_client_so_late_answers_are_never_misread() {
     assert_eq!(client.sign_out().unwrap_err(), OwnerError::Connection);
     assert_eq!(client.state().unwrap_err(), OwnerError::Connection);
 }
+
+#[test]
+fn enrolling_a_machine_is_asked_by_name_and_its_credential_never_shows() {
+    let request = OwnerRequest::MachineEnrol {
+        machine_id: "01M6161MQTFHYKYSMGSPK6VW17".into(),
+        name: "my-first-sprite".into(),
+        wake_url: Some("https://my-first-sprite-b5jcz.sprites.app".into()),
+    };
+    let json = serde_json::json!({"op": "machine_enrol",
+        "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "my-first-sprite",
+        "wake_url": "https://my-first-sprite-b5jcz.sprites.app"});
+    assert_eq!(serde_json::to_value(&request).unwrap(), json);
+    assert_eq!(
+        serde_json::from_value::<OwnerRequest>(json).unwrap(),
+        request
+    );
+    let revoke =
+        serde_json::json!({"op": "machine_revoke", "machine_id": "01M6161MQTFHYKYSMGSPK6VW17"});
+    assert!(matches!(
+        serde_json::from_value::<OwnerRequest>(revoke).unwrap(),
+        OwnerRequest::MachineRevoke { .. }
+    ));
+    let response: OwnerResponse = serde_json::from_str(
+        r#"{"type":"machine_enrolled","credential":"{\"secret\":\"rkm_x\"}"}"#,
+    )
+    .unwrap();
+    let OwnerResponse::MachineEnrolled { credential } = &response else {
+        panic!("expected a credential");
+    };
+    assert_eq!(credential.0, r#"{"secret":"rkm_x"}"#);
+    assert!(!format!("{response:?}").contains("rkm_x"));
+}

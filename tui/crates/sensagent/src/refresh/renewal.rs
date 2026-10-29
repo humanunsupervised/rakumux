@@ -6,6 +6,7 @@ use crate::auth::{
     AccountError, AccountService, AccountSession, ClerkDeviceClient, CredentialRevision,
     CredentialStore, WallClock,
 };
+use crate::enrolment::MachineTokens;
 
 /// Renew no later than this before the access token expires.
 const MIN_LEAD: Duration = Duration::from_secs(60);
@@ -85,10 +86,12 @@ fn due(expires_at: u64, now: SystemTime) -> SystemTime {
 }
 
 /// Renew `session` on its own thread: discovery and the refresh grant can take as
-/// long as their timeouts, so they never occupy a refresh worker.
+/// long as their timeouts, so they never occupy a refresh worker. An enrolled
+/// machine renews with its `tokens`, never Clerk.
 pub(super) fn spawn<A, C>(
     account: Arc<AccountService<A, C>>,
     session: AccountSession,
+    tokens: Option<Arc<MachineTokens>>,
     report: impl FnOnce(RenewalEvent) + Send + 'static,
 ) -> std::io::Result<()>
 where
@@ -98,9 +101,12 @@ where
     thread::Builder::new()
         .name("rakumux-status-renewal".into())
         .spawn(move || {
-            let renewed = ClerkDeviceClient::discover(account.config().clone())
-                .map_err(AccountError::from)
-                .and_then(|client| account.renew(&session, &client));
+            let renewed = match tokens {
+                Some(tokens) => account.renew(&session, tokens.as_ref()),
+                None => ClerkDeviceClient::discover(account.config().clone())
+                    .map_err(AccountError::from)
+                    .and_then(|client| account.renew(&session, &client)),
+            };
             report(match renewed {
                 Ok(session) => RenewalEvent::Renewed(session),
                 Err(error) => RenewalEvent::Failed(error),

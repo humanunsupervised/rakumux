@@ -12,9 +12,9 @@ use session_core::ids::{SessionId, Token};
 
 use super::layout::{current_uid, peer_uid};
 use super::protocol::{
-    read_payload, write_message, AccountView, ConsentView, Hello, OfferView, OwnerErrorCode,
-    OwnerRequest, OwnerResponse, OwnerState, SignInView, StatusLine, MAX_CLIENT_NAME, MAX_MESSAGE,
-    MAX_SESSIONS, PROTOCOL,
+    read_payload, write_message, AccountView, ConsentView, EnrolledCredential, Hello, OfferView,
+    OwnerErrorCode, OwnerRequest, OwnerResponse, OwnerState, SignInView, StatusLine,
+    MAX_CLIENT_NAME, MAX_MESSAGE, MAX_SESSIONS, PROTOCOL,
 };
 use super::{OwnerClaim, OwnerError};
 use crate::cloud::FeatureChange;
@@ -418,6 +418,28 @@ fn handle(
                 .map_err(|error| OwnerErrorCode::from(&error))
         }
         OwnerRequest::SessionMessage { .. } => Err(OwnerErrorCode::InvalidRequest),
+        OwnerRequest::MachineEnrol {
+            machine_id,
+            name,
+            wake_url,
+        } => client
+            .machine_enrol(machine_id, name, wake_url)
+            .map_err(|error| OwnerErrorCode::from(&error))
+            .and_then(|outcome| {
+                outcome
+                    .map(|credential| OwnerResponse::MachineEnrolled {
+                        credential: EnrolledCredential(credential),
+                    })
+                    .map_err(|failure| enrol_refused(&failure))
+            }),
+        OwnerRequest::MachineRevoke { machine_id } => client
+            .machine_revoke(machine_id)
+            .map_err(|error| OwnerErrorCode::from(&error))
+            .and_then(|outcome| {
+                outcome
+                    .map(|()| OwnerResponse::Done)
+                    .map_err(|failure| enrol_refused(&failure))
+            }),
         OwnerRequest::Feed {
             after,
             generation,
@@ -428,6 +450,18 @@ fn handle(
             .map_err(|error| OwnerErrorCode::from(&error)),
     };
     result.unwrap_or_else(refuse)
+}
+
+/// Why enrolling or revoking a machine failed, as the owner says it.
+fn enrol_refused(failure: &crate::feed::FeedFailure) -> OwnerErrorCode {
+    use crate::feed::FeedFailure;
+    match failure {
+        FeedFailure::Unauthorized => OwnerErrorCode::SignedOut,
+        FeedFailure::Invalid => OwnerErrorCode::InvalidRequest,
+        FeedFailure::RateLimited(_) => OwnerErrorCode::Busy,
+        FeedFailure::MachineTaken => OwnerErrorCode::Conflict,
+        FeedFailure::Off | FeedFailure::Unavailable(_) => OwnerErrorCode::Unavailable,
+    }
 }
 
 fn refuse(code: OwnerErrorCode) -> OwnerResponse {

@@ -178,10 +178,18 @@ pub fn serve(
         config.auth.clone(),
         FileCredentialStore::new(layout.credentials_dir()),
     ));
+    // An enrolled machine (the user's Sprite) signs in with its credential, never
+    // Clerk: a new access token at once, else the saved one while it lasts.
+    let tokens = enrolled_tokens(&layout, &config, machine.id())?;
+    let session = match &tokens {
+        Some(tokens) => crate::enrolment::sign_in(&account, tokens)
+            .ok()
+            .or_else(|| account.restore(tokens.as_ref()).ok().flatten()),
+        None => ClerkDeviceClient::discover(config.auth.clone())
+            .ok()
+            .and_then(|client| account.restore(&client).ok().flatten()),
+    };
     let mut service = StatusDispatchService::new(account.clone(), store, cloud);
-    let session = ClerkDeviceClient::discover(config.auth)
-        .ok()
-        .and_then(|client| account.restore(&client).ok().flatten());
     service
         .set_account_session(session)
         .map_err(|_| ServiceError::Setup)?;
@@ -197,6 +205,9 @@ pub fn serve(
         .with_titles(layout.status_dir().join("titles.json"))
         .with_uploads(uploads)
         .with_machine(machine);
+    if let Some(tokens) = tokens {
+        refresher = refresher.with_machine_tokens(tokens);
+    }
     if let Some(TurnSettingsSource(read)) = config.turn_settings {
         refresher = refresher.with_turn_settings(move || read());
     }
@@ -214,6 +225,37 @@ pub fn serve(
     runner.stop();
     drop(claim);
     Ok(())
+}
+
+/// The enrolled machine's tokens when this home has its credential
+/// ([`crate::enrolment::CREDENTIAL_FILE`]); an unsafe or broken one stops the
+/// service rather than leaving it signed out without saying why. Its requests
+/// name the credential's machine id, the one it was enrolled with.
+fn enrolled_tokens(
+    layout: &OwnerLayout,
+    config: &ServiceConfig,
+    machine: &str,
+) -> Result<Option<Arc<crate::enrolment::MachineTokens>>, ServiceError> {
+    let path = layout.root().join(crate::enrolment::CREDENTIAL_FILE);
+    let Some(credential) = crate::enrolment::MachineCredential::load(&path)
+        .map_err(|_| ServiceError::Configuration)?
+    else {
+        return Ok(None);
+    };
+    if credential.machine_id() != machine {
+        eprintln!("rakumux-status: this machine's credential is for another machine id");
+    }
+    let cloud = CloudAIClient::new(
+        CloudAIConfig::new(&config.cloud_origin)
+            .and_then(|cloud| cloud.with_machine_id(credential.machine_id()))
+            .map_err(|_| ServiceError::Configuration)?,
+    )
+    .map_err(|_| ServiceError::Configuration)?;
+    Ok(Some(Arc::new(crate::enrolment::MachineTokens::new(
+        cloud,
+        config.auth.clone(),
+        credential,
+    ))))
 }
 
 /// The session daemon, waiting briefly for one that is still starting (a client

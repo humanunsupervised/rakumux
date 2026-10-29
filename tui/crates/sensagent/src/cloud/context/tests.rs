@@ -338,6 +338,9 @@ fn environment_assignments_bearers_and_known_token_formats_are_masked() {
         concat!("sk_live_", "abcdefghijklmnopqrstuvwxyz"),
         concat!("ghp_", "abcdefghijklmnopqrstuvwxyz1234"),
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.syntheticSignature",
+        // An enrolled machine's secret (ending in a `-`) and access token.
+        concat!("rkm_", "3q2-7wF6m0ZxQh9b1y4Ku8LpN5sTvR2cJdE0aBfGhI-"),
+        concat!("rkma.v1.", "eyJzdWIiOiJ1c2VyXzEyMyJ9.c2lnbmF0dXJlLXNpZ25hdHVyZQ"),
     ] {
         let input = format!("Checking synthetic updates\n{secret_line}");
         let request = build(false, Some(&input), None).unwrap();

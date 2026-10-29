@@ -21,7 +21,10 @@ use super::schedule::MAX_RUNNING;
 use super::sign_in::{self, SignInEvent, SignInFailure, SignInState};
 use super::titles::{Retitle, Retitled};
 use super::StatusRefresher;
-use crate::auth::{AccountSession, AccountWebsite, CredentialRevision, CredentialStore, WallClock};
+use crate::auth::{
+    AccountError, AccountIdentity, AccountSession, AccountWebsite, AuthError, CredentialRevision,
+    CredentialStore, WallClock,
+};
 use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
@@ -99,6 +102,16 @@ enum Command {
         Option<String>,
         Sender<Result<(), FeedFailure>>,
     ),
+    /// Enrol another machine: its id, name and wake URL; answered with its
+    /// credential file's contents.
+    MachineEnrol(
+        String,
+        String,
+        Option<String>,
+        Sender<Result<String, FeedFailure>>,
+    ),
+    /// Revoke an enrolled machine's credential (its machine id).
+    MachineRevoke(String, Sender<Result<(), FeedFailure>>),
 }
 
 enum Message {
@@ -144,6 +157,8 @@ enum Message {
     Replies(Vec<AgentReply>),
     SignIn(u64, SignInEvent),
     Renewed(RenewalEvent),
+    /// An enrolled machine's sign-in with its credential finished.
+    EnrolledSignIn(Result<AccountSession, AccountError>),
     Command(Command),
     Stop,
 }
@@ -180,6 +195,15 @@ enum Work<A, C> {
     WriteReply(FeedJob<A, C>, Sender<Result<FeedReply, FeedFailure>>),
     /// Store a session message written in a TUI, then answer it.
     WriteMessage(FeedJob<A, C>, Sender<Result<(), FeedFailure>>),
+    /// Enrol machine (its id) of this account, answering with its credential.
+    Enrol(
+        FeedJob<A, C>,
+        String,
+        AccountIdentity,
+        Sender<Result<String, FeedFailure>>,
+    ),
+    /// Revoke an enrolled machine's credential, then answer.
+    Revoke(FeedJob<A, C>, Sender<Result<(), FeedFailure>>),
     /// Turn the daemon's reply capture on or off.
     ReplyCapture(bool),
     /// Read the replies the daemon kept after this one (all of them for `None`).
@@ -199,9 +223,11 @@ struct Workers<A, C> {
 impl<A, C> Workers<A, C> {
     fn send(&self, work: Work<A, C>) -> Result<(), SendError<Work<A, C>>> {
         match work {
-            Work::Submit(..) | Work::WriteReply(..) | Work::WriteMessage(..) => {
-                self.replies.send(work)
-            }
+            Work::Submit(..)
+            | Work::WriteReply(..)
+            | Work::WriteMessage(..)
+            | Work::Enrol(..)
+            | Work::Revoke(..) => self.replies.send(work),
             work => self.shared.send(work),
         }
     }
@@ -452,6 +478,30 @@ impl RefreshClient {
         answer.recv().map_err(|_| RefreshError::Stopped)
     }
 
+    /// Enrol machine `machine_id` of this account as `name`, woken at
+    /// `wake_url`: the contents of its credential file
+    /// ([`crate::enrolment::CREDENTIAL_FILE`]), holding its secret.
+    pub fn machine_enrol(
+        &self,
+        machine_id: String,
+        name: String,
+        wake_url: Option<String>,
+    ) -> Result<Result<String, FeedFailure>, RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::MachineEnrol(machine_id, name, wake_url, reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
+    /// Revoke enrolled machine `machine_id`'s credential.
+    pub fn machine_revoke(
+        &self,
+        machine_id: String,
+    ) -> Result<Result<(), FeedFailure>, RefreshError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Command::MachineRevoke(machine_id, reply))?;
+        answer.recv().map_err(|_| RefreshError::Stopped)
+    }
+
     /// The turn feed entry `entry` finished, from rakumux.com, past `after`
     /// when given.
     pub fn feed_turn(
@@ -533,6 +583,10 @@ fn own<S, A, C>(
     let mut machine = identity.name();
     let mut renamed_at: Option<Duration> = None;
     let mut feed = FeedSync::new(machine.clone());
+    if refresher.machine_tokens().is_some() {
+        feed = feed.without_reads();
+    }
+    let mut enrolled = EnrolledSignIn::default();
     let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
     let mut replies = ReplySync::new(
         machine.clone(),
@@ -550,6 +604,7 @@ fn own<S, A, C>(
         let now = origin.elapsed();
         if now >= next_tick {
             renew(&refresher, &mut renewal, messages);
+            sign_in_enrolled(&refresher, &mut enrolled, messages, now);
             if now >= next_clean {
                 if let Some(uploads) = uploads {
                     let _ = work.send(Work::CleanUploads(uploads.clone()));
@@ -851,6 +906,21 @@ fn own<S, A, C>(
                 };
             }
             Message::SignIn(..) => {}
+            Message::EnrolledSignIn(outcome) => {
+                let signed_in = match outcome {
+                    Ok(session) => refresher.set_account_session(Some(session)).is_ok(),
+                    Err(error) => {
+                        enrolled.revoked =
+                            matches!(error, AccountError::Provider(AuthError::InvalidGrant));
+                        // Static codes only (see `AccountError`).
+                        eprintln!(
+                            "rakumux-status: signing in with this machine's credential failed: {error:?}"
+                        );
+                        false
+                    }
+                };
+                enrolled.finished(signed_in, now);
+            }
             Message::Renewed(event) => {
                 let succeeded = match event {
                     RenewalEvent::Renewed(Some(session)) => {
@@ -910,6 +980,42 @@ fn own<S, A, C>(
                     }
                     None => {
                         let _ = answer.send(Err(FeedFailure::Invalid));
+                    }
+                }
+            }
+            Message::Command(Command::MachineEnrol(machine_id, name, wake_url, answer)) => {
+                let account = refresher.account().map(|session| session.account().clone());
+                let body = crate::enrolment::enrol_body(&machine_id, &name, wake_url.as_deref());
+                match (account, body) {
+                    (Some(account), Some(body)) => {
+                        match refresher.feed_job(FeedRequest::MachineEnrol { body }) {
+                            Some(job) => {
+                                let _ = work.send(Work::Enrol(job, machine_id, account, answer));
+                            }
+                            None => {
+                                let _ = answer.send(Err(FeedFailure::Unauthorized));
+                            }
+                        }
+                    }
+                    (None, _) => {
+                        let _ = answer.send(Err(FeedFailure::Unauthorized));
+                    }
+                    (Some(_), None) => {
+                        let _ = answer.send(Err(FeedFailure::Invalid));
+                    }
+                }
+            }
+            Message::Command(Command::MachineRevoke(machine, answer)) => {
+                if !crate::feed::is_entry_id(&machine) {
+                    let _ = answer.send(Err(FeedFailure::Invalid));
+                } else {
+                    match refresher.feed_job(FeedRequest::MachineRevoke { machine }) {
+                        Some(job) => {
+                            let _ = work.send(Work::Revoke(job, answer));
+                        }
+                        None => {
+                            let _ = answer.send(Err(FeedFailure::Unauthorized));
+                        }
                     }
                 }
             }
@@ -1011,7 +1117,9 @@ fn control<S, A, C>(
         Command::Feed(..)
         | Command::FeedTurn(..)
         | Command::FeedReply(..)
-        | Command::SessionMessage(..) => {}
+        | Command::SessionMessage(..)
+        | Command::MachineEnrol(..)
+        | Command::MachineRevoke(..) => {}
         Command::Summarize(session, reply) => {
             refresher.request(&session);
             let _ = reply.send(());
@@ -1290,11 +1398,78 @@ fn renew<S, A, C>(
         return;
     }
     let owner = messages.clone();
-    let started = renewal::spawn(refresher.account_service(), session, move |event| {
-        let _ = owner.send(Message::Renewed(event));
-    });
+    let started = renewal::spawn(
+        refresher.account_service(),
+        session,
+        refresher.machine_tokens(),
+        move |event| {
+            let _ = owner.send(Message::Renewed(event));
+        },
+    );
     if started.is_err() {
         renewal.finished(false, now);
+    }
+}
+
+/// An enrolled machine signing in with its credential while it isn't signed
+/// in: at the start when rakumux.com couldn't be reached, again with a
+/// growing delay; never once its secret was refused (revoked: enrolling it
+/// again restarts the service).
+#[derive(Default)]
+struct EnrolledSignIn {
+    running: bool,
+    due: Duration,
+    failures: u32,
+    revoked: bool,
+}
+
+impl EnrolledSignIn {
+    const FIRST_RETRY: Duration = Duration::from_secs(10);
+    const MAX_RETRY: Duration = Duration::from_secs(10 * 60);
+
+    fn finished(&mut self, signed_in: bool, now: Duration) {
+        self.running = false;
+        if signed_in {
+            self.failures = 0;
+            return;
+        }
+        let delay = Self::FIRST_RETRY
+            .saturating_mul(2u32.saturating_pow(self.failures))
+            .min(Self::MAX_RETRY);
+        self.failures = self.failures.saturating_add(1);
+        self.due = now + delay;
+    }
+}
+
+/// Sign an enrolled machine in with its credential when it isn't (see
+/// [`EnrolledSignIn`]).
+fn sign_in_enrolled<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    state: &mut EnrolledSignIn,
+    messages: &Sender<Message>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let Some(tokens) = refresher.machine_tokens() else {
+        return;
+    };
+    if state.running || state.revoked || refresher.account().is_some() || now < state.due {
+        return;
+    }
+    state.running = true;
+    let account = refresher.account_service();
+    let owner = messages.clone();
+    let started = thread::Builder::new()
+        .name("rakumux-status-enrolled".into())
+        .spawn(move || {
+            let outcome = crate::enrolment::sign_in(&account, &tokens);
+            let _ = owner.send(Message::EnrolledSignIn(outcome));
+        });
+    if started.is_err() {
+        state.finished(false, now);
     }
 }
 
@@ -1433,6 +1608,34 @@ where
                     Err(_) => Err(FeedFailure::Unavailable(None)),
                 };
                 Message::MessageWritten(outcome, answer)
+            }
+            Ok(Work::Enrol(job, machine, account, answer)) => {
+                let outcome = match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => match completion.outcome {
+                        Ok(FeedResult::Enrolled(secret)) => {
+                            crate::enrolment::MachineCredential::new(&machine, &secret, &account)
+                                .map(|credential| credential.to_json())
+                                .map_err(|_| FeedFailure::Invalid)
+                        }
+                        Ok(_) => Err(FeedFailure::Invalid),
+                        Err(failure) => Err(failure),
+                    },
+                    Err(_) => Err(FeedFailure::Unavailable(None)),
+                };
+                let _ = answer.send(outcome);
+                continue;
+            }
+            Ok(Work::Revoke(job, answer)) => {
+                let outcome = match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => match completion.outcome {
+                        Ok(FeedResult::Revoked) => Ok(()),
+                        Ok(_) => Err(FeedFailure::Invalid),
+                        Err(failure) => Err(failure),
+                    },
+                    Err(_) => Err(FeedFailure::Unavailable(None)),
+                };
+                let _ = answer.send(outcome);
+                continue;
             }
             Ok(Work::Turn(job, reply)) => {
                 let outcome = match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {

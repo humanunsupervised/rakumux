@@ -99,6 +99,9 @@ pub(crate) struct FeedSync {
     retry: Duration,
     watched_until: Option<Duration>,
     failure: Option<FeedFailure>,
+    /// Whether the account's feed is read back, for TUIs: not on an enrolled
+    /// machine, where none runs.
+    reads: bool,
 }
 
 impl FeedSync {
@@ -120,7 +123,14 @@ impl FeedSync {
             retry: RETRY_MIN,
             watched_until: None,
             failure: None,
+            reads: true,
         }
+    }
+
+    /// Upload only: never read the account's feed back.
+    pub fn without_reads(mut self) -> Self {
+        self.reads = false;
+        self
     }
 
     /// Follow the account: signed in, and its Feed switch (`None` until read).
@@ -237,6 +247,7 @@ impl FeedSync {
         }
         let request = match wire::upload(&self.machine, &self.cache.pending()) {
             Some(upload) => upload,
+            None if !self.reads => return None,
             None if !self.read => FeedRequest::Read { after: None },
             None if now >= self.next_read => FeedRequest::Read {
                 after: Some(self.cache.latest_seq()),
@@ -285,7 +296,7 @@ impl FeedSync {
                     now + self.read_interval(now)
                 };
             }
-            // Chats' and replies' requests, not the feed's.
+            // Chats', replies' and enrolled machines' requests, not the feed's.
             Ok(
                 FeedResult::Stored
                 | FeedResult::Turn(_)
@@ -294,7 +305,9 @@ impl FeedSync {
                 | FeedResult::Replies(_)
                 | FeedResult::SessionsStored(_)
                 | FeedResult::Download(_)
-                | FeedResult::Realtime(_),
+                | FeedResult::Realtime(_)
+                | FeedResult::Enrolled(_)
+                | FeedResult::Revoked,
             ) => {}
             Err(failure) => self.fail(failure, now),
         }
@@ -509,6 +522,24 @@ mod tests {
             feed.next_request(NOW),
             Some(FeedRequest::Read { after: None })
         );
+    }
+
+    #[test]
+    fn an_enrolled_machine_uploads_but_never_reads_the_feed() {
+        let mut feed = FeedSync::new("my-first-sprite".into()).without_reads();
+        feed.set_account(true, Some(true), NOW);
+        feed.connected(&[view("S", false)]);
+        assert_eq!(feed.next_request(NOW), None, "no first read");
+        feed.reply(reply("S", "Done."), None);
+        let Some(FeedRequest::Upload { ids, .. }) = feed.next_request(NOW) else {
+            panic!("expected an upload");
+        };
+        feed.completed(
+            true,
+            Ok(FeedResult::Accepted(vec![(ids[0].clone(), 7)])),
+            NOW,
+        );
+        assert_eq!(feed.next_request(NOW + Duration::from_secs(600)), None);
     }
 
     #[test]

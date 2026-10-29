@@ -43,6 +43,10 @@ pub(crate) enum FeedResult {
     Realtime(wire::RealtimeToken),
     /// A file attached to a reply, or that it's gone.
     Download(Download),
+    /// The enrolled machine's secret, given once.
+    Enrolled(String),
+    /// The enrolled machine's credential is gone.
+    Revoked,
 }
 
 /// A finished feed request, tagged with the account revision it was made for.
@@ -65,7 +69,9 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::ReplyStatus { .. }
             | FeedRequest::Sessions { .. }
             | FeedRequest::Attachment { .. }
-            | FeedRequest::Realtime => String::new(),
+            | FeedRequest::Realtime
+            | FeedRequest::MachineEnrol { .. }
+            | FeedRequest::MachineRevoke { .. } => String::new(),
         };
         let http = match &self.request {
             FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
@@ -78,6 +84,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::Sessions { body } => FeedHttp::Sessions(body),
             FeedRequest::Attachment { id, size } => FeedHttp::Attachment { id, size: *size },
             FeedRequest::Realtime => FeedHttp::Realtime,
+            FeedRequest::MachineEnrol { body } => FeedHttp::MachineEnrol(body),
+            FeedRequest::MachineRevoke { machine } => FeedHttp::MachineRevoke(machine),
         };
         let outcome = self
             .account
@@ -105,6 +113,12 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                         wire::download(reply, *size).map(FeedResult::Download)
                     }
                     FeedRequest::Realtime => wire::realtime(&reply).map(FeedResult::Realtime),
+                    FeedRequest::MachineEnrol { .. } => {
+                        crate::enrolment::enrolled(&reply).map(FeedResult::Enrolled)
+                    }
+                    FeedRequest::MachineRevoke { .. } => {
+                        crate::enrolment::revoked(&reply).map(|()| FeedResult::Revoked)
+                    }
                 },
                 Some(Err(error)) => Err(transport(error)),
                 // The sign-in changed meanwhile; the owner fences this completion.

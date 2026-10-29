@@ -29,6 +29,10 @@ const FEED_SESSIONS_PATH: &str = "/api/v1/feed/sessions";
 const FEED_REALTIME_PATH: &str = "/api/v1/feed/realtime";
 /// Followed by `/{id}`, a ULID.
 const FEED_ATTACHMENTS_PATH: &str = "/api/v1/feed/replies/attachments";
+/// Enrolling another machine of the account; `/{machine id}` revokes it.
+const MACHINE_CREDENTIALS_PATH: &str = "/api/v1/machines/credentials";
+/// An enrolled machine's access token, for its secret.
+const MACHINE_TOKEN_PATH: &str = "/api/v1/machines/token";
 /// The largest feed page read (`contracts/feed/page.schema.json`), and the
 /// largest attached file (4 MiB, read up to its declared size).
 pub(crate) const MAX_FEED_BODY_BYTES: usize = 4 * 1024 * 1024;
@@ -53,6 +57,8 @@ pub struct CloudAIConfig {
     feed_sessions: Url,
     feed_attachments: Url,
     feed_realtime: Url,
+    machine_credentials: Url,
+    machine_token: Url,
     /// This machine's own id, sent with every feed request
     /// (`X-Rakumux-Machine-Id`), so two machines with one name are told apart.
     machine_id: Option<HeaderValue>,
@@ -126,6 +132,13 @@ pub(crate) enum FeedHttp<'a> {
     Attachment { id: &'a str, size: u64 },
     /// `GET /api/v1/feed/realtime`: where to connect to be poked.
     Realtime,
+    /// `POST /api/v1/machines/credentials`: enrol another machine (`machine-enrol`).
+    MachineEnrol(&'a [u8]),
+    /// `DELETE /api/v1/machines/credentials/{machine id}`: revoke it.
+    MachineRevoke(&'a str),
+    /// `POST /api/v1/machines/token`: an access token, the bearer being the
+    /// machine secret.
+    MachineToken,
 }
 
 /// A feed reply as received: the feed module decodes it against its contract.
@@ -187,6 +200,8 @@ impl CloudAIConfig {
         let feed_sessions = path(FEED_SESSIONS_PATH);
         let feed_realtime = path(FEED_REALTIME_PATH);
         let feed_attachments = path(FEED_ATTACHMENTS_PATH);
+        let (machine_credentials, machine_token) =
+            (path(MACHINE_CREDENTIALS_PATH), path(MACHINE_TOKEN_PATH));
         endpoint.set_path(STATUS_PATH);
         endpoint.set_query(Some(STATUS_QUERY));
         Ok(Self {
@@ -201,6 +216,8 @@ impl CloudAIConfig {
             feed_sessions,
             feed_attachments,
             feed_realtime,
+            machine_credentials,
+            machine_token,
             machine_id: None,
         })
     }
@@ -433,6 +450,34 @@ impl CloudAIClient {
                 Request::new(Method::GET, url)
             }
             FeedHttp::Realtime => Request::new(Method::GET, self.config.feed_realtime.clone()),
+            FeedHttp::MachineEnrol(body) => {
+                let mut outgoing =
+                    Request::new(Method::POST, self.config.machine_credentials.clone());
+                let headers = outgoing.headers_mut();
+                headers.insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                );
+                let length = body.len() as u64;
+                headers.insert(header::CONTENT_LENGTH, HeaderValue::from(length));
+                *outgoing.body_mut() = Some(Body::sized(Cursor::new(body.to_vec()), length));
+                outgoing
+            }
+            FeedHttp::MachineRevoke(machine) => {
+                if !crate::feed::is_entry_id(machine) {
+                    return Err(CloudAIError::InvalidRequest);
+                }
+                let mut url = self.config.machine_credentials.clone();
+                url.set_path(&format!("{MACHINE_CREDENTIALS_PATH}/{machine}"));
+                Request::new(Method::DELETE, url)
+            }
+            FeedHttp::MachineToken => {
+                let mut outgoing = Request::new(Method::POST, self.config.machine_token.clone());
+                outgoing
+                    .headers_mut()
+                    .insert(header::CONTENT_LENGTH, HeaderValue::from(0u64));
+                outgoing
+            }
             FeedHttp::Attachment { .. } => return Err(CloudAIError::InvalidRequest),
         };
         *outgoing.timeout_mut() = Some(TOTAL_TIMEOUT);
@@ -452,6 +497,14 @@ impl CloudAIClient {
         let reply = result?;
         if (300..=399).contains(&reply.status) {
             return Err(CloudAIError::HttpStatus(reply.status));
+        }
+        // A revoke answers 204, without a body.
+        if reply.status == 204 && matches!(request, FeedHttp::MachineRevoke(_)) {
+            return Ok(FeedHttpReply {
+                status: reply.status,
+                retry_after: None,
+                body: Vec::new(),
+            });
         }
         require_json_headers(&reply.headers)?;
         let retry_after = retry_after(&reply.headers);
@@ -776,6 +829,58 @@ fn network_error(error: reqwest::Error) -> CloudAIError {
         NetworkFailure::Request
     };
     CloudAIError::Network(failure)
+}
+
+/// What a scripted client was asked: method, URL and headers.
+#[cfg(test)]
+pub(crate) type Asked = Arc<std::sync::Mutex<Vec<(Method, Url, HeaderMap)>>>;
+
+#[cfg(test)]
+impl CloudAIClient {
+    /// A client that answers `replies` (status and JSON body) in order, for
+    /// other modules' tests; no network.
+    pub(crate) fn scripted(config: CloudAIConfig, replies: Vec<(u16, &str)>) -> (Self, Asked) {
+        struct Scripted {
+            asked: Asked,
+            replies: std::sync::Mutex<std::collections::VecDeque<(u16, Vec<u8>)>>,
+        }
+        impl HttpTransport for Scripted {
+            fn send(&self, request: Request) -> Result<HttpReply, CloudAIError> {
+                self.asked.lock().unwrap().push((
+                    request.method().clone(),
+                    request.url().clone(),
+                    request.headers().clone(),
+                ));
+                let (status, body) = self
+                    .replies
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .expect("unexpected extra HTTP request");
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                );
+                Ok(HttpReply {
+                    status,
+                    headers,
+                    body: Box::new(Cursor::new(body)),
+                })
+            }
+        }
+        let asked = Asked::default();
+        let transport = Scripted {
+            asked: asked.clone(),
+            replies: std::sync::Mutex::new(
+                replies
+                    .into_iter()
+                    .map(|(status, body)| (status, body.as_bytes().to_vec()))
+                    .collect(),
+            ),
+        };
+        (Self::with_transport(config, Box::new(transport)), asked)
+    }
 }
 
 #[cfg(test)]

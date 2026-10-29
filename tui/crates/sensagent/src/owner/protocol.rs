@@ -146,6 +146,18 @@ pub enum OwnerRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<String>,
     },
+    /// Enrol machine `machine_id` (a ULID) of the signed-in account, a machine
+    /// with no sign-in of its own (the user's Sprite), as `name`, woken at
+    /// `wake_url` (a Sprite's URL) when a reply is written to it. Answered with
+    /// `MachineEnrolled`; signed out, `SignedOut`.
+    MachineEnrol {
+        machine_id: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wake_url: Option<String>,
+    },
+    /// Revoke enrolled machine `machine_id`'s credential. Answered with `Done`.
+    MachineRevoke { machine_id: String },
 }
 
 /// The owner's answers.
@@ -180,12 +192,27 @@ pub enum OwnerResponse {
     FeedReply {
         reply: ReplyWrite,
     },
+    MachineEnrolled {
+        credential: EnrolledCredential,
+    },
     Done,
     Error {
         code: OwnerErrorCode,
     },
     #[serde(other)]
     Unknown,
+}
+
+/// An enrolled machine's credential file, holding its secret: written to
+/// that machine, never shown or logged.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct EnrolledCredential(pub String);
+
+impl std::fmt::Debug for EnrolledCredential {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("EnrolledCredential([REDACTED])")
+    }
 }
 
 /// Account, consent and refreshing.
