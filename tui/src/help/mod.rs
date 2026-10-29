@@ -419,7 +419,9 @@ impl KeyAction {
             KeyAction::CheckForUpdate => "Update Rakumux (sessions keep running)",
             KeyAction::Reload => "Reconnect or reload the list",
             KeyAction::Restart => "Restart Rakumux (sessions keep running)",
-            KeyAction::RestartServer => "Restart the server (sessions keep running)",
+            KeyAction::RestartServer => {
+                "Restart the server and its services (sessions keep running)"
+            }
             KeyAction::QuitAndCd => "Quit and cd to the session's folder",
             KeyAction::Quit => "Quit Rakumux (sessions keep running)",
             KeyAction::SendRakumuxKey => "Send the Rakumux key to the session",

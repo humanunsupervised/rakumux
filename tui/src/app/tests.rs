@@ -330,7 +330,7 @@ async fn an_older_server_that_restarts_in_place_is_restarted_with_enter() {
     assert!(h.app.connection.is_connected());
     assert_eq!(
         h.app.status(),
-        Some("Restarted the Rakumux server; your sessions kept running.")
+        Some("Restarted the Rakumux server and its services; your sessions kept running.")
     );
 }
 
@@ -339,7 +339,11 @@ async fn s_and_settings_restart_the_server_in_place_after_asking() {
     let fake = FakeApi::new(vec![view("A", "a", 10)]);
     fake.state.lock().unwrap().restarts_in_place = true;
     let dir = tempfile::tempdir().unwrap();
-    let options = options(&fake, scope(), &dir);
+    let mut options = options(&fake, scope(), &dir);
+    let account = Arc::new(testing::FakeAccount::signed_in());
+    let phone = Arc::new(testing::FakePhone::default());
+    options.account = account.clone();
+    options.phone = phone.clone();
     let mut h = start(options, fake, dir);
     assert!(matches!(h.app.mode, AppMode::Normal));
     // `S` asks first; `n` (or `q`, which doesn't quit here) keeps it.
@@ -370,10 +374,22 @@ async fn s_and_settings_restart_the_server_in_place_after_asking() {
         .calls()
         .iter()
         .any(|c| c.starts_with("restart_daemon")));
-    // Enter restarts it in place; the sessions keep running.
+    assert!(!account.calls().contains(&"restart"));
+    // Enter restarts it in place, then the account service and the local API on this build;
+    // the sessions keep running.
     h.press(KeyCode::Char('S')).await;
     h.press(KeyCode::Enter).await;
     h.app.process_pending();
+    assert!(
+        account.calls().contains(&"restart"),
+        "{:?}",
+        account.calls()
+    );
+    assert!(
+        phone.calls().contains(&"restart_api"),
+        "{:?}",
+        phone.calls()
+    );
     assert!(
         h.fake
             .calls()
@@ -385,7 +401,7 @@ async fn s_and_settings_restart_the_server_in_place_after_asking() {
     assert!(h.app.connection.is_connected());
     assert_eq!(
         h.app.status(),
-        Some("Restarted the Rakumux server; your sessions kept running.")
+        Some("Restarted the Rakumux server and its services; your sessions kept running.")
     );
     // Settings has both restarts, the server's with its version.
     h.app.server_version = Some("0.1.8-dev".into());

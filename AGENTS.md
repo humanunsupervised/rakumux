@@ -983,9 +983,12 @@ every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the ses
 screen, `b` hide Master detail's list beside the session and show it again (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `t` Top (below), `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
-build; daemon and sessions stay up), `S` ask to restart the server (in place with this build when
-it can: `y`/Enter, sessions keep running; otherwise `y` only, since that ends them; also Settings →
-Restart server, which shows the running server's version), `q`
+build; daemon and sessions stay up), `S` ask to restart the server and its services (the server in
+place with this build when it can: `y`/Enter, sessions keep running; otherwise `y` only, since that
+ends them; once it answers, the account service and the local API too, each when it runs, on this
+build: `AccountAccess::restart` asks the service to stop and starts this binary's, `remote_access::
+restart_api` SIGTERMs `rakumux-api` and runs `--detach`; also Settings → Restart server, which shows
+the running server's version), `q`
 quit. There is no header: the panes start at the top row, and the list's first row (Sidebar) is
 its tabs, `◔ Status ▾  ▤ Folders    ◇ App` (Status is active at every start; every tab keeps
 room for the active one's `▾`, and Folders shows its branch active or not, so switching tabs

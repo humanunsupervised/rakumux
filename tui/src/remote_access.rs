@@ -218,6 +218,16 @@ pub(crate) fn stop_api(layout: &Layout) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Restart a running `rakumux-api` with this build (the server's restart in the TUI,
+/// `S`): [`stop_api`], then `rakumux-api --detach`. None running starts none. Returns
+/// whether one was restarted.
+pub fn restart_api(layout: &Layout, ptyd_path: Option<&Path>) -> Result<bool, String> {
+    if !stop_api(layout)? {
+        return Ok(false);
+    }
+    start_api(layout, ptyd_path).map(|_| true)
+}
+
 /// `rakumux-api --detach`: start the API (it returns once the API
 /// answers) and read the `api.json` it wrote.
 pub(crate) fn start_api(layout: &Layout, ptyd_path: Option<&Path>) -> Result<RunningApi, String> {
@@ -369,6 +379,8 @@ pub trait PhoneAccess: Send + Sync {
     fn enable(&self) -> Result<Pairing, String>;
     /// See [`disable`].
     fn disable(&self) -> Result<(), String>;
+    /// See [`restart_api`].
+    fn restart_api(&self) -> Result<bool, String>;
 }
 
 /// Remote access of this machine's Rakumux home.
@@ -392,6 +404,10 @@ impl PhoneAccess for LocalPhoneAccess {
 
     fn disable(&self) -> Result<(), String> {
         disable(&self.layout, self.ptyd_path.as_deref()).map(|_| ())
+    }
+
+    fn restart_api(&self) -> Result<bool, String> {
+        restart_api(&self.layout, self.ptyd_path.as_deref())
     }
 }
 

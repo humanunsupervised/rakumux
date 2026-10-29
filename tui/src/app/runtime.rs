@@ -45,6 +45,12 @@ pub enum AppEvent {
     ConnectFailed(ApiError),
     /// The old daemon was stopped after a protocol mismatch.
     DaemonRestarted(Result<super::types::ServerRestart, String>),
+    /// The account service and the local API restarted after the server (`S`): why
+    /// those that failed did.
+    ServicesRestarted {
+        restart: super::types::ServerRestart,
+        failed: Vec<String>,
+    },
     /// Folders loaded, subscription opened and the list loaded (subscribe
     /// first, so no change is missed).
     Synced {

@@ -271,10 +271,38 @@ pub fn connect_or_start(
         Err(OwnerError::NotRunning) => {}
         Err(_) => return Err(ServiceError::Start),
     }
+    start_and_connect(home, &layout, program, client_name)
+}
+
+/// Replace this home's running service with `program status-service`, whatever its
+/// version (the server's restart in the TUI, `S`, so it runs that build): asked to stop,
+/// waited for, and started as [`connect_or_start`] starts it. Without a running service
+/// nothing starts. Returns whether one was replaced.
+pub fn restart(home: &Layout, program: &Path, client_name: &str) -> Result<bool, ServiceError> {
+    let layout = OwnerLayout::new(home);
+    match OwnerClient::connect(&layout, client_name) {
+        Ok(client) => {
+            client.shutdown().map_err(|_| ServiceError::Start)?;
+            drop(client);
+            wait_until_stopped(&layout, client_name)?;
+        }
+        Err(OwnerError::NotRunning) => return Ok(false),
+        Err(_) => return Err(ServiceError::Start),
+    }
+    start_and_connect(home, &layout, program, client_name).map(|_| true)
+}
+
+/// Start `program status-service` detached and wait for it to answer.
+fn start_and_connect(
+    home: &Layout,
+    layout: &OwnerLayout,
+    program: &Path,
+    client_name: &str,
+) -> Result<OwnerClient, ServiceError> {
     start_detached(home, program).map_err(|_| ServiceError::Start)?;
     let deadline = Instant::now() + START_WAIT;
     loop {
-        match OwnerClient::connect(&layout, client_name) {
+        match OwnerClient::connect(layout, client_name) {
             Ok(client) => return Ok(client),
             Err(OwnerError::NotRunning) if Instant::now() < deadline => thread::sleep(START_POLL),
             Err(_) => return Err(ServiceError::Start),

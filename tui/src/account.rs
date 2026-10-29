@@ -4,7 +4,7 @@
 //! the TUI and `rakumux account` are its clients. It starts on demand: when
 //! someone signs in, or when this home has a saved account.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
@@ -90,6 +90,9 @@ pub trait AccountAccess: Send + Sync {
     /// rakumux.com/features. The service applies it at once and saves it
     /// next; [`Account::features_unsaved`] says when that failed.
     fn set_features(&self, titles: Option<bool>, feed: Option<bool>) -> Result<(), String>;
+    /// Replace the running service with this build's (the server's restart, `S`); none
+    /// running starts none. Whether one was replaced.
+    fn restart(&self) -> Result<bool, String>;
     /// The whole turn feed entry `entry` finished, past `after` when given:
     /// the prompt, the agent's text, reasoning and tool calls, and the tools'
     /// output, in order, as rakumux.com keeps it.
@@ -170,8 +173,13 @@ impl LocalAccount {
             }
         }
         let client = if start {
-            service::connect_or_start(&self.layout, &self.program, self.client_name, self.version)
-                .map_err(|error| error.to_string())?
+            service::connect_or_start(
+                &self.layout,
+                &on_disk(&self.program),
+                self.client_name,
+                self.version,
+            )
+            .map_err(|error| error.to_string())?
         } else {
             match OwnerClient::connect(&OwnerLayout::new(&self.layout), self.client_name) {
                 Ok(client) => client,
@@ -186,6 +194,18 @@ impl LocalAccount {
 
     fn has_saved_account(&self) -> bool {
         service::has_saved_account(&self.layout)
+    }
+}
+
+/// `program` as it is on disk now: Linux names a running binary that a build has since
+/// replaced `<path> (deleted)`, and the file at `<path>` is then the new build.
+fn on_disk(program: &Path) -> PathBuf {
+    match program
+        .to_str()
+        .and_then(|text| text.strip_suffix(" (deleted)"))
+    {
+        Some(path) if !program.exists() => PathBuf::from(path),
+        _ => program.to_path_buf(),
     }
 }
 
@@ -246,6 +266,17 @@ impl AccountAccess for LocalAccount {
             client.set_features(titles, feed)
         })?
         .ok_or_else(|| "the account service isn't running".into())
+    }
+
+    fn restart(&self) -> Result<bool, String> {
+        // Held throughout, so this window's other requests wait rather than start one meanwhile.
+        let mut cached = self
+            .client
+            .lock()
+            .map_err(|_| "the account connection is unusable".to_string())?;
+        *cached = None;
+        service::restart(&self.layout, &on_disk(&self.program), self.client_name)
+            .map_err(|error| error.to_string())
     }
 
     fn feed_turn(&self, entry: &str, after: Option<u64>) -> Result<FeedTurn, String> {
@@ -359,6 +390,20 @@ fn turn_settings(path: &std::path::Path) -> TurnSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_program_a_build_replaced_is_started_from_its_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("tui");
+        std::fs::write(&program, b"").unwrap();
+        let replaced = PathBuf::from(format!("{} (deleted)", program.display()));
+        assert_eq!(on_disk(&replaced), program);
+        assert_eq!(on_disk(&program), program);
+        // A file really named so stays as it is.
+        let named = dir.path().join("tui (deleted)");
+        std::fs::write(&named, b"").unwrap();
+        assert_eq!(on_disk(&named), named);
+    }
 
     fn waiting(connect: Option<&str>, complete: Option<&str>) -> SignInView {
         SignInView::Waiting {

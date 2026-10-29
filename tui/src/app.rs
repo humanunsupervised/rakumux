@@ -1030,6 +1030,9 @@ impl App {
             AppEvent::Connected(api) => self.on_connected(api),
             AppEvent::ConnectFailed(error) => self.on_connect_failed(error),
             AppEvent::DaemonRestarted(result) => self.on_daemon_restarted(result),
+            AppEvent::ServicesRestarted { restart, failed } => {
+                self.on_services_restarted(restart, failed)
+            }
             AppEvent::Synced { generation, result } => self.on_synced(generation, result),
             AppEvent::SessionEvent { generation, event } => {
                 if generation == self.sync_generation {
@@ -1279,6 +1282,7 @@ impl App {
                      brings one back."
                 }
             });
+            self.restart_services(restart);
         } else if self.was_connected {
             self.set_status("Reconnected to the daemon");
         }
@@ -1402,6 +1406,42 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Once the restarted server answers, the other background services too, so they run
+    /// this build: the account service and the local API, each only when it runs.
+    fn restart_services(&mut self, restart: ServerRestart) {
+        let account = self.account_access.clone();
+        let phone = self.phone.clone();
+        self.exec.job(move || {
+            let mut failed = Vec::new();
+            if let Err(error) = account.restart() {
+                failed.push(format!("the account service didn't restart ({error})"));
+            }
+            if let Err(error) = phone.restart_api() {
+                failed.push(format!("the local API didn't restart ({error})"));
+            }
+            AppEvent::ServicesRestarted { restart, failed }
+        });
+    }
+
+    fn on_services_restarted(&mut self, restart: ServerRestart, failed: Vec<String>) {
+        if !failed.is_empty() {
+            self.set_status(format!(
+                "Restarted the Rakumux server, but {}.",
+                failed.join(" and ")
+            ));
+            return;
+        }
+        self.set_status(match restart {
+            ServerRestart::InPlace => {
+                "Restarted the Rakumux server and its services; your sessions kept running."
+            }
+            ServerRestart::Replaced => {
+                "Restarted the Rakumux server and its services. Sessions that were running \
+                 ended; Enter brings one back."
+            }
+        });
     }
 
     /// Restart the daemon (after consent in the dialog): in place when it

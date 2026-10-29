@@ -320,7 +320,7 @@ pub fn draw_daemon_restart_dialog(f: &mut Frame, dialog: &DaemonRestartDialog, a
         };
         vec![
             Line::from(format!(
-                "Restart the Rakumux server{version} with this build ({})?",
+                "Restart the Rakumux server{version} and its services with this build ({})?",
                 crate::app::app_version()
             )),
             Line::from(""),

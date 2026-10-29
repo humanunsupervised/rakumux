@@ -824,6 +824,11 @@ impl crate::remote_access::PhoneAccess for FakePhone {
         *self.enabled.lock().unwrap() = false;
         Ok(())
     }
+
+    fn restart_api(&self) -> std::result::Result<bool, String> {
+        self.call("restart_api");
+        Ok(true)
+    }
 }
 
 /// The Rakumux account in tests: signed out unless set. `sign_in` waits for
@@ -1073,6 +1078,11 @@ impl crate::account::AccountAccess for FakeAccount {
         account.titles = titles.or(account.titles);
         account.feed = feed.or(account.feed);
         Ok(())
+    }
+
+    fn restart(&self) -> std::result::Result<bool, String> {
+        self.call("restart");
+        Ok(true)
     }
 
     fn feed(
