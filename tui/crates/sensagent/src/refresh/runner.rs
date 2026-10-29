@@ -15,6 +15,7 @@ use session_core::ids::{ReplyId, SessionId};
 use session_core::model::SessionView;
 use thiserror::Error;
 
+use super::awake::Awake;
 use super::engine::{AIStatus, CaptureWork, Captured, Completed, Dispatch, RefreshState};
 use super::renewal::{self, Renewal, RenewalEvent};
 use super::schedule::MAX_RUNNING;
@@ -587,6 +588,8 @@ fn own<S, A, C>(
         feed = feed.without_reads();
     }
     let mut enrolled = EnrolledSignIn::default();
+    let mut awake = Awake::new();
+    let mut last_tick = origin.elapsed();
     let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
     let mut replies = ReplySync::new(
         machine.clone(),
@@ -603,6 +606,19 @@ fn own<S, A, C>(
     loop {
         let now = origin.elapsed();
         if now >= next_tick {
+            // Paused (a Sprite woken by a request to its URL) or asleep: stay up
+            // a while, read replies at once and connect to be poked again.
+            if Awake::woke(last_tick, now) {
+                awake.hold(now);
+                replies.poked(now);
+                if let Some(stop) = poke_stop.take() {
+                    stop.store(true, Ordering::SeqCst);
+                    pokes.closed(now);
+                    replies.set_pushed(false, now);
+                }
+            }
+            last_tick = now;
+            awake.tick(now);
             renew(&refresher, &mut renewal, messages);
             sign_in_enrolled(&refresher, &mut enrolled, messages, now);
             if now >= next_clean {
@@ -792,7 +808,14 @@ fn own<S, A, C>(
                     Err(ErrorCode::SessionInUse) => replies.typing(reply, now),
                     // Its agent left the foreground: look again shortly.
                     Err(ErrorCode::ForegroundChanged) => replies.foreground_changed(reply, now),
-                    result => replies.submitted(reply, result, now, wall_ms()),
+                    result => {
+                        // Typed in: stay up until the daemon holds the Sprite for
+                        // the agent's turn.
+                        if result.is_ok() {
+                            awake.hold(now);
+                        }
+                        replies.submitted(reply, result, now, wall_ms())
+                    }
                 }
                 follow_replies(
                     &refresher,

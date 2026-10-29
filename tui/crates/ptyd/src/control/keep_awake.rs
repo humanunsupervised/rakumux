@@ -7,15 +7,11 @@
 
 use super::service::Inner;
 use crate::{log_debug, log_info, log_warn};
-use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-/// The Sprite's own API, inside every Sprite.
-const SOCKET: &str = "/.sprite/api.sock";
 const TASK: &str = "rakumux-agents";
 /// How often the agents are looked at.
 const EVERY: Duration = Duration::from_secs(15);
@@ -32,7 +28,7 @@ pub(super) const QUIET_MS: i64 = 10 * 60 * 1000;
 const AFTER: Duration = Duration::from_secs(60);
 
 pub(super) fn start(inner: &Arc<Inner>) {
-    let socket = PathBuf::from(SOCKET);
+    let socket = PathBuf::from(session_core::sprite::SOCKET);
     if !socket.exists() {
         return;
     }
@@ -91,56 +87,17 @@ fn holds(busy: usize, busy_at: Option<Instant>) -> bool {
 }
 
 fn hold(socket: &Path) -> std::io::Result<()> {
-    let body = format!(r#"{{"expire":"{EXPIRE}"}}"#);
-    expect_ok(request(socket, "PUT", &format!("/v1/tasks/{TASK}"), &body)?)
+    session_core::sprite::hold(socket, TASK, EXPIRE)
 }
 
 fn release(socket: &Path) -> std::io::Result<()> {
-    match request(socket, "DELETE", &format!("/v1/tasks/{TASK}"), "")? {
-        404 => Ok(()),
-        status => expect_ok(status),
-    }
-}
-
-fn expect_ok(status: u16) -> std::io::Result<()> {
-    if (200..300).contains(&status) {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "the Sprite's API answered {status}"
-        )))
-    }
-}
-
-/// One HTTP/1.1 request on the Sprite's socket; its status code.
-fn request(socket: &Path, method: &str, path: &str, body: &str) -> std::io::Result<u16> {
-    let mut stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
-    write!(
-        stream,
-        "{method} {path} HTTP/1.1\r\nHost: sprite\r\nContent-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    )?;
-    let mut head = Vec::new();
-    let mut byte = [0u8; 1];
-    while !head.ends_with(b"\r\n") && head.len() < 256 {
-        if stream.read(&mut byte)? == 0 {
-            break;
-        }
-        head.push(byte[0]);
-    }
-    let line = String::from_utf8_lossy(&head);
-    line.split_whitespace()
-        .nth(1)
-        .and_then(|code| code.parse().ok())
-        .ok_or_else(|| std::io::Error::other(format!("the Sprite's API answered {line:?}")))
+    session_core::sprite::release(socket, TASK)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
 
     #[test]

@@ -18,6 +18,7 @@ pub mod ids;
 pub mod model;
 pub mod paths;
 pub mod remote;
+pub mod sprite;
 pub mod tailscale;
 
 /// Wire protocol version. Bump only for incompatible changes; additive

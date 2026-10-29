@@ -5,6 +5,7 @@
 //! owner thread, a daemon subscription and two workers. Nothing here chooses a
 //! Rakumux home, opens a store, holds a per-home lock or accepts connections.
 
+mod awake;
 mod engine;
 mod renewal;
 mod runner;

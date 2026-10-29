@@ -346,10 +346,14 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    and its name) into the Sprite's `~/.rakumux/sensagent` (0700) and runs `rakumux
    status-service` as the Sprite service `rakumux-status`, so the Sprite's agents' replies reach
    the feed and yours reach them, laptop open or not; `rakumux sprite disconnect` revokes it.
-   rakumux.com wakes a paused Sprite at its URL when a reply is written to it. Inside a
-   Sprite (`/.sprite/api.sock`) the daemon holds a Fly task (`control/keep_awake.rs`) while an
-   agent works and wrote output in the last 10 minutes, and a minute after (its last reply
-   leaves), since a Sprite pauses ~30 s after its last connection closes and freezes what runs.
+   rakumux.com wakes a paused Sprite at its URL when a reply is written to it; a request runs a
+   paused Sprite only while it lasts, so the account service, finding its tick late (paused or
+   asleep), holds the Sprite up 20 s with a Fly task of its own (`refresh/awake.rs`,
+   `rakumux-replies`), again after each reply it types in, reads its replies at once and
+   reconnects to be poked. Inside a Sprite (`/.sprite/api.sock`, `session_core::sprite`) the
+   daemon holds a Fly task (`control/keep_awake.rs`) while an agent works and wrote output in
+   the last 10 minutes, and a minute after (its last reply leaves), since a Sprite pauses soon
+   after its last connection closes and freezes what runs.
 
 ## File structure
 
@@ -396,6 +400,7 @@ tui/
       frame.rs               # [u32 len][u8 kind][payload] codec
       paths.rs               # Layout (~/.rakumux, run dir, socket), Registration, find_ptyd_binary
       remote.rs              # RemoteConfig (remote.json), pairing token, is_tailscale (the ranges)
+      sprite.rs              # the Fly Sprite this runs on: tasks that hold it running
       tailscale.rs           # this machine's Tailscale addresses (ranges + Tailscale's interface, or
                              # `tailscale status`), MagicDNS name
       client.rs              # SessionApi trait, Client, AttachStream, EventStream
