@@ -6,6 +6,7 @@
 //! The Sprite gets a Rakumux remote token of its own, which is all the
 //! daemon is given.
 
+use crate::account::AccountAccess;
 use serde_json::{json, Value};
 use session_core::api::ApiError;
 use session_core::client::SessionApi;
@@ -119,6 +120,8 @@ pub enum Step {
     Install,
     Start,
     Connect,
+    /// Enrol it for the feed: its own sign-in, made by this machine's.
+    Feed,
 }
 
 impl Step {
@@ -128,6 +131,7 @@ impl Step {
             Step::Install => "Install Rakumux",
             Step::Start => "Start it",
             Step::Connect => "Connect",
+            Step::Feed => "Connect the feed",
         }
     }
 }
@@ -138,6 +142,36 @@ pub struct Ready {
     pub sprite: String,
     pub url: String,
     pub token: String,
+    /// Its home directory, and where Rakumux is installed there.
+    pub home: String,
+    pub libexec: String,
+}
+
+/// The feed from the Sprite: the Rakumux account here enrols it, so its
+/// agents' replies reach the account's feed; `replies`: whether replies
+/// written on rakumux.com or another machine are typed into its agents
+/// (its `sessions.remote_replies`).
+pub struct Feed<'a> {
+    pub account: &'a dyn AccountAccess,
+    pub replies: bool,
+}
+
+/// A connected Sprite, and what became of its feed.
+#[derive(Debug, Clone)]
+pub struct Connected {
+    pub machine: MachineView,
+    pub feed: FeedSetUp,
+}
+
+/// What connecting did for the Sprite's feed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedSetUp {
+    /// Enrolled: its account service runs there with a credential of its own.
+    On,
+    /// Signed out here: nothing to enrol it with.
+    SignedOut,
+    /// Not asked for.
+    Skipped,
 }
 
 impl Sprites {
@@ -374,19 +408,102 @@ pub fn set_up(
         sprite: name.to_string(),
         url: sprite.url,
         token,
+        home,
+        libexec,
     })
+}
+
+/// Enrol the Sprite for the feed with the account here and start its own
+/// account service: its credential (0600, in a 0700 directory, as the service
+/// requires) and `machine.json` (the daemon's machine id for it, so the feed
+/// and this daemon know it by one id, and its name), whether it types replies
+/// from elsewhere, and a `rakumux-status` service (restarted, so a new
+/// credential is taken). Enrolling again revokes the earlier credential.
+fn connect_feed(
+    sprites: &Sprites,
+    ready: &Ready,
+    machine: &MachineView,
+    feed: &Feed<'_>,
+) -> Result<FeedSetUp, String> {
+    let name = &ready.sprite;
+    let id = machine.id.to_string();
+    let wake = ready.url.trim_end_matches('/');
+    let Some(credential) = feed.account.enrol_machine(&id, name, wake)? else {
+        return Ok(FeedSetUp::SignedOut);
+    };
+    let dir = format!("{}/.rakumux/sensagent", ready.home);
+    let (code, output) = sprites.exec(
+        name,
+        &format!("set -e; mkdir -p '{dir}'; chmod 700 '{dir}'"),
+    )?;
+    if code != 0 {
+        return Err(format!("preparing the feed there: {}", first_line(&output)));
+    }
+    sprites.write_file(
+        name,
+        &format!("{dir}/machine-credential.json"),
+        credential.into_bytes(),
+        "0600",
+    )?;
+    let identity = json!({"version": 1, "id": id, "base": name});
+    sprites.write_file(
+        name,
+        &format!("{dir}/machine.json"),
+        identity.to_string().into_bytes(),
+        "0600",
+    )?;
+    set_remote_replies(sprites, name, &ready.home, feed.replies)?;
+    sprites.put_service(
+        name,
+        "rakumux-status",
+        json!({"cmd": format!("{}/rakumux", ready.libexec), "args": ["status-service"],
+               "needs": ["rakumux-ptyd"], "dir": ready.home}),
+    )?;
+    sprites.restart_service(name, "rakumux-status")?;
+    Ok(FeedSetUp::On)
+}
+
+/// Set the Sprite's `sessions.remote_replies` in its `config.json`, keeping
+/// everything else there; a file that isn't a JSON object is left alone.
+fn set_remote_replies(sprites: &Sprites, name: &str, home: &str, on: bool) -> Result<(), String> {
+    let path = format!("{home}/.rakumux/config.json");
+    let mut config = match sprites.read_file(name, &path)? {
+        Some(bytes) => serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .filter(Value::is_object)
+            .ok_or("the Sprite's Rakumux settings aren't readable")?,
+        None => json!({}),
+    };
+    with_remote_replies(&mut config, on);
+    sprites.write_file(name, &path, config.to_string().into_bytes(), "0600")
+}
+
+/// `config` (a JSON object) with `sessions.remote_replies` set to `on`.
+fn with_remote_replies(config: &mut Value, on: bool) {
+    let Some(object) = config.as_object_mut() else {
+        return;
+    };
+    let sessions = object.entry("sessions").or_insert_with(|| json!({}));
+    if !sessions.is_object() {
+        *sessions = json!({});
+    }
+    if let Some(sessions) = sessions.as_object_mut() {
+        sessions.insert("remote_replies".into(), Value::Bool(on));
+    }
 }
 
 /// Set the Sprite up with `token` and have the daemon reach it, saving
 /// both: `sprite` names it (else the one used before, else `rakumux`).
-/// `progress` hears each step.
+/// With `feed`, the account here enrols it for the feed. `progress` hears
+/// each step.
 pub fn connect(
     api: &dyn SessionApi,
     home: &Path,
     token: &str,
     sprite: Option<&str>,
+    feed: Option<Feed<'_>>,
     progress: &mut dyn FnMut(Step),
-) -> Result<MachineView, String> {
+) -> Result<Connected, String> {
     let client = Sprites::new(token)?;
     client.check()?;
     let mut saved = load(home);
@@ -404,10 +521,39 @@ pub fn connect(
             .add_machine(&ready.sprite, &ready.url, &ready.token)
             .map_err(|e| e.message)?,
     };
-    saved.sprite = Some(ready.sprite);
+    saved.sprite = Some(ready.sprite.clone());
     saved.machine = Some(machine.id.to_string());
     save(home, &saved)?;
-    Ok(machine)
+    let feed = match feed {
+        Some(feed) => {
+            progress(Step::Feed);
+            connect_feed(&client, &ready, &machine, &feed)?
+        }
+        None => FeedSetUp::Skipped,
+    };
+    Ok(Connected { machine, feed })
+}
+
+/// Forget the Sprite here: its credential for the feed revoked (when the
+/// account here can), the daemon no longer reaching it, and `sprites.json`
+/// emptied. The Sprite and its files stay on Fly.io. Whether a credential was
+/// revoked.
+pub fn disconnect(
+    api: &dyn SessionApi,
+    home: &Path,
+    account: Option<&dyn AccountAccess>,
+) -> Result<bool, String> {
+    let saved = load(home);
+    let mut revoked = false;
+    if let (Some(account), Some(machine)) = (account, saved.machine.as_deref()) {
+        account.revoke_machine(machine)?;
+        revoked = true;
+    }
+    if let Some(machine) = connected(api, home).map_err(|e| e.message)? {
+        api.remove_machine(&machine.id).map_err(|e| e.message)?;
+    }
+    save(home, &Saved::default())?;
+    Ok(revoked)
 }
 
 /// The machine of the Sprite set up here, while the daemon still has it.
@@ -431,14 +577,20 @@ fn upload_own_binaries(sprites: &Sprites, name: &str, libexec: &str) -> Result<(
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = exe.parent().unwrap_or(Path::new("."));
-    for binary in ["rakumux-ptyd", "rakumux-api"] {
+    // The TUI binary is `rakumux` there, as a release names it; it runs the
+    // account service.
+    for (binary, installed) in [
+        ("rakumux-ptyd", "rakumux-ptyd"),
+        ("rakumux-api", "rakumux-api"),
+        ("tui", "rakumux"),
+    ] {
         let path = dir.join(binary);
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         // Beside the running one, then renamed over it.
-        let staged = format!("{libexec}/.{binary}.new");
+        let staged = format!("{libexec}/.{installed}.new");
         sprites.write_file(name, &staged, bytes, "0755")?;
         let (code, output) =
-            sprites.exec(name, &format!("mv -f '{staged}' '{libexec}/{binary}'"))?;
+            sprites.exec(name, &format!("mv -f '{staged}' '{libexec}/{installed}'"))?;
         if code != 0 {
             return Err(format!("installing {binary}: {}", first_line(&output)));
         }
@@ -586,6 +738,24 @@ mod tests {
             (0, "HOME=/home/sprite\n".into())
         );
         assert_eq!(parse_exec(b""), (-1, String::new()));
+    }
+
+    #[test]
+    fn replies_from_elsewhere_are_set_without_touching_other_settings() {
+        let mut config = json!({"sessions": {"icons": "nerd"}, "openai_model": "x"});
+        with_remote_replies(&mut config, true);
+        assert_eq!(
+            config,
+            json!({"sessions": {"icons": "nerd", "remote_replies": true}, "openai_model": "x"})
+        );
+        with_remote_replies(&mut config, false);
+        assert_eq!(config["sessions"]["remote_replies"], json!(false));
+        let mut empty = json!({});
+        with_remote_replies(&mut empty, true);
+        assert_eq!(empty, json!({"sessions": {"remote_replies": true}}));
+        let mut odd = json!({"sessions": 3});
+        with_remote_replies(&mut odd, true);
+        assert_eq!(odd, json!({"sessions": {"remote_replies": true}}));
     }
 
     #[test]

@@ -194,10 +194,19 @@ pub enum SpriteCommand {
         /// The Sprite's name (default: rakumux)
         #[arg(long)]
         sprite: Option<String>,
+        /// Type replies written on rakumux.com or your other machines into
+        /// the Sprite's agents, without asking (signed in, its agents'
+        /// replies reach your feed)
+        #[arg(long, conflicts_with = "no_replies")]
+        replies: bool,
+        /// Don't type replies from rakumux.com into the Sprite's agents
+        #[arg(long)]
+        no_replies: bool,
     },
     /// Which Sprite sessions go to, and whether it's reachable
     Status,
-    /// Forget the Sprite and the Sprites token here (the Sprite stays)
+    /// Forget the Sprite and the Sprites token here, revoking its feed
+    /// credential (the Sprite stays)
     Disconnect,
 }
 

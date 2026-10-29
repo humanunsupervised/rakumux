@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use rakumux_sensagent::feed::{FeedPage, FeedStatus, FeedTurn, ReplyWrite};
 use rakumux_sensagent::owner::protocol::{OwnerState, SignInReason, SignInView, StatusLine};
-use rakumux_sensagent::owner::{OwnerClient, OwnerError, OwnerLayout};
+use rakumux_sensagent::owner::{OwnerClient, OwnerError, OwnerErrorCode, OwnerLayout};
 use rakumux_sensagent::service::{self, ServiceConfig, ServiceError};
 use rakumux_sensagent::source::TurnSettings;
 use session_core::ids::SessionId;
@@ -112,6 +112,24 @@ pub trait AccountAccess: Send + Sync {
         text: &str,
         id: &str,
     ) -> Result<ReplyWrite, String>;
+    /// Enrol machine `machine_id` of the signed-in account (your Sprite) for
+    /// the feed, as `name`, woken at `wake_url`: the contents of its
+    /// credential file, holding its secret; `None` signed out. Starts the
+    /// service only when this home has a saved account.
+    fn enrol_machine(
+        &self,
+        machine_id: &str,
+        name: &str,
+        wake_url: &str,
+    ) -> Result<Option<String>, String> {
+        let _ = (machine_id, name, wake_url);
+        Ok(None)
+    }
+    /// Revoke enrolled machine `machine_id`'s credential; signed out, nothing.
+    fn revoke_machine(&self, machine_id: &str) -> Result<(), String> {
+        let _ = machine_id;
+        Ok(())
+    }
 }
 
 /// The feed of a home whose service isn't running: signed out.
@@ -300,6 +318,32 @@ impl AccountAccess for LocalAccount {
             client.session_message(machine, session, text, id)
         })?
         .ok_or_else(|| "the account service isn't running".into())
+    }
+
+    fn enrol_machine(
+        &self,
+        machine_id: &str,
+        name: &str,
+        wake_url: &str,
+    ) -> Result<Option<String>, String> {
+        let enrolled = self.with(self.has_saved_account(), |client| {
+            match client.machine_enrol(machine_id, name, Some(wake_url)) {
+                Ok(credential) => Ok(Some(credential.0)),
+                Err(OwnerError::Refused(OwnerErrorCode::SignedOut)) => Ok(None),
+                Err(error) => Err(error),
+            }
+        })?;
+        Ok(enrolled.flatten())
+    }
+
+    fn revoke_machine(&self, machine_id: &str) -> Result<(), String> {
+        self.with(self.has_saved_account(), |client| {
+            match client.machine_revoke(machine_id) {
+                Err(OwnerError::Refused(OwnerErrorCode::SignedOut)) => Ok(()),
+                result => result,
+            }
+        })
+        .map(|_| ())
     }
 }
 

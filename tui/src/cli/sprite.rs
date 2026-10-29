@@ -2,7 +2,8 @@
 //! for sessions (`crate::sprites`).
 
 use super::args::SpriteCommand;
-use super::{output_error, CliError};
+use super::{output_error, version, CliError};
+use crate::account::{AccountAccess, LocalAccount};
 use crate::sprites;
 use session_core::client::SessionApi;
 use session_core::model::MachineView;
@@ -16,7 +17,12 @@ pub(crate) fn run(
     out: &mut dyn Write,
 ) -> Result<i32, CliError> {
     match command {
-        SpriteCommand::Connect { token, sprite } => {
+        SpriteCommand::Connect {
+            token,
+            sprite,
+            replies,
+            no_replies,
+        } => {
             let token = match token.as_deref() {
                 Some("-") => {
                     let mut line = String::new();
@@ -40,15 +46,41 @@ pub(crate) fn run(
                     }
                 }
             };
-            let machine = connect(api, layout, &token, sprite.as_deref(), &mut |label| {
+            let account = local_account(layout)?;
+            let signed_in = matches!(account.account(), Ok(Some(_)));
+            let replies = if replies || no_replies || !signed_in {
+                !no_replies
+            } else {
+                ask_replies(out)?
+            };
+            let feed = signed_in.then_some(sprites::Feed {
+                account: &account,
+                replies,
+            });
+            let connected = connect(api, layout, &token, sprite.as_deref(), feed, &mut |label| {
                 let _ = writeln!(out, "{label}…");
             })?;
+            let machine = &connected.machine;
             writeln!(
                 out,
                 "Ready: `rakumux new --sprite` runs a session on {} ({}).",
                 machine.name, machine.url
             )
             .map_err(output_error)?;
+            let feed = match connected.feed {
+                sprites::FeedSetUp::On if replies => Some(
+                    "Its agents' replies reach your feed, and replies from rakumux.com are typed into them.",
+                ),
+                sprites::FeedSetUp::On => Some(
+                    "Its agents' replies reach your feed; replies from rakumux.com aren't typed into them.",
+                ),
+                sprites::FeedSetUp::SignedOut | sprites::FeedSetUp::Skipped => Some(
+                    "Sign in (`rakumux account login`) and connect again for its replies in your feed.",
+                ),
+            };
+            if let Some(feed) = feed {
+                writeln!(out, "{feed}").map_err(output_error)?;
+            }
             Ok(0)
         }
         SpriteCommand::Status => {
@@ -83,10 +115,8 @@ pub(crate) fn run(
             Ok(0)
         }
         SpriteCommand::Disconnect => {
-            if let Some(machine) = connected(api, layout)? {
-                api.remove_machine(&machine.id)?;
-            }
-            sprites::save(&layout.home, &sprites::Saved::default()).map_err(CliError::invalid)?;
+            let account = local_account(layout)?;
+            sprites::disconnect(api, &layout.home, Some(&account)).map_err(CliError::invalid)?;
             writeln!(
                 out,
                 "Disconnected; the Sprite and its files stay on Fly.io."
@@ -103,12 +133,39 @@ pub(crate) fn connect(
     layout: &Layout,
     token: &str,
     sprite: Option<&str>,
+    feed: Option<sprites::Feed<'_>>,
     progress: &mut dyn FnMut(&str),
-) -> Result<MachineView, CliError> {
-    sprites::connect(api, &layout.home, token, sprite, &mut |step| {
+) -> Result<sprites::Connected, CliError> {
+    sprites::connect(api, &layout.home, token, sprite, feed, &mut |step| {
         progress(step.label())
     })
     .map_err(CliError::invalid)
+}
+
+/// The Rakumux account here, which enrols the Sprite for the feed.
+fn local_account(layout: &Layout) -> Result<LocalAccount, CliError> {
+    let program = std::env::current_exe()
+        .map_err(|error| CliError::internal(format!("can't find this program: {error}")))?;
+    Ok(LocalAccount::new(layout.clone(), program, "cli", version()))
+}
+
+/// Ask once whether replies from rakumux.com are typed into the Sprite's
+/// agents: yes unless the answer starts with `n`; yes without a terminal.
+fn ask_replies(out: &mut dyn Write) -> Result<bool, CliError> {
+    if !atty::is(atty::Stream::Stdin) {
+        return Ok(true);
+    }
+    write!(
+        out,
+        "Type replies you write on rakumux.com into the Sprite's agents? [Y/n] "
+    )
+    .map_err(output_error)?;
+    out.flush().map_err(output_error)?;
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|e| CliError::invalid(format!("reading the answer: {e}")))?;
+    Ok(!answer.trim().to_ascii_lowercase().starts_with('n'))
 }
 
 /// [`sprites::connected`], for the CLI.

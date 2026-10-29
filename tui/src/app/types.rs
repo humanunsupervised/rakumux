@@ -53,6 +53,10 @@ pub enum SpriteState {
         input: TextInput,
         error: Option<String>,
     },
+    /// Signed in: are replies from rakumux.com typed into its agents?
+    Replies {
+        token: String,
+    },
     /// Setting up; the step it's at.
     Working {
         step: crate::sprites::Step,

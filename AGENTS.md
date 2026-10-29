@@ -297,6 +297,19 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    the folder itself, else its last component; branch, worktree, `edited`, `last_at`), and
    only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`); a
    list that would pass the contract's 256 KiB goes without them.
+   **Enrolled machines** (`rakumux_sensagent::enrolment`, contract `contracts/feed/`, "Enrolled
+   machines"): a machine with no sign-in of its own (your Sprite) gets one from a signed-in
+   machine of the account: `OwnerRequest::MachineEnrol {machine_id, name, wake_url}` →
+   `POST /api/v1/machines/credentials` with its Clerk token gives the machine's secret (`rkm_…`,
+   once; rakumux.com keeps its hash, one per machine, enrolling again revokes the earlier one),
+   answered as the contents of its credential file; `MachineRevoke` → `DELETE`. A home with
+   `sensagent/machine-credential.json` (0600, a file of this user) is that machine: its service
+   never signs in with Clerk but trades the secret (`POST /api/v1/machines/token`) for
+   rakumux.com's access tokens (`rkma.v1.…`, 15 minutes), kept and renewed as a Clerk sign-in's
+   are (`TokenProvider`; at the start, else again from 10 s doubling to 10 minutes while
+   rakumux.com can't be reached, never once the secret was refused: connect it again), and
+   reads no feed back (no TUI runs there). Those tokens reach what a machine does (its uploads,
+   its own replies, the features read, AI titles) and nothing else; the feed masks both kinds.
 
 11. **Other machines and Sprites** (`ptyd/src/machines/`, `tui/src/sprites.rs`): the daemon
    reaches other machines running Rakumux (`machine_add {name, url, token}`, `machine_list`,
@@ -326,10 +339,17 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    never leaves this computer): created when missing, Rakumux installed with `install.sh`
    (a development build then uploads its own `rakumux-ptyd` and `rakumux-api` and restarts the
    daemon in place), `rakumux-ptyd serve` and `rakumux-api` as Sprite services behind its public
-   URL on port 8080, a remote token of its own in its `remote.json`, then `machine_add`. Inside a
+   URL on port 8080, a remote token of its own in its `remote.json`, then `machine_add`. Signed
+   in, it then enrols the Sprite for the feed (component 10): asked once whether replies from
+   rakumux.com are typed into its agents (its `sessions.remote_replies`; `--replies`,
+   `--no-replies`), it writes the credential and `machine.json` (the daemon's machine id for it,
+   and its name) into the Sprite's `~/.rakumux/sensagent` (0700) and runs `rakumux
+   status-service` as the Sprite service `rakumux-status`, so the Sprite's agents' replies reach
+   the feed and yours reach them, laptop open or not; `rakumux sprite disconnect` revokes it.
+   rakumux.com wakes a paused Sprite at its URL when a reply is written to it. Inside a
    Sprite (`/.sprite/api.sock`) the daemon holds a Fly task (`control/keep_awake.rs`) while an
-   agent works and wrote output in the last 10 minutes, since a Sprite pauses ~30 s after its last
-   connection closes and freezes what runs.
+   agent works and wrote output in the last 10 minutes, and a minute after (its last reply
+   leaves), since a Sprite pauses ~30 s after its last connection closes and freezes what runs.
 
 ## File structure
 
@@ -667,6 +687,8 @@ accidents; they don't stop a hostile process running as the same user.
   machines.json                  other machines (url, token, home) and the sessions listed from
                                  them (machine, local folder, last view), daemon only, 0600
   sprites.json                   your Sprite: the Sprites token, its name and machine id, 0600
+  sensagent/machine-credential.json  an enrolled machine's (your Sprite's) secret, its machine id and
+                                 account, 0600: written by the machine that enrolled it
   config.json                    Config (below)
   config.json.lock               serializes private configuration writes
   running.json                   {"sessions": [ids]}: sessions running now, revived by the next start
@@ -961,7 +983,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in, whether AI session titles are on (rakumux.com/features) and each live session's AI description (`--json`: `ai_session_titles`, and `ai_session_summaries` as before) |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux machine add NAME URL --token T \| ls [--json] \| rm NAME` | Other machines whose sessions are listed and used here (their `rakumux-api` URL and remote token) |
-| `rakumux sprite connect [--token T] [--sprite NAME] \| status \| disconnect` | Your own Fly.io Sprite for sessions; `rakumux new --sprite` (or `--machine NAME`) runs a session there |
+| `rakumux sprite connect [--token T] [--sprite NAME] [--replies \| --no-replies] \| status \| disconnect` | Your own Fly.io Sprite for sessions (signed in, its replies in your feed); `rakumux new --sprite` (or `--machine NAME`) runs a session there; `disconnect` revokes its feed credential |
 | `rakumux-api [--port N] [--detach] [--remote-listen ADDR:PORT]...` | External HTTP API on 127.0.0.1, plus the remote listener when remote access is on (`api/README.md`) |
 | `rakumux-mcp` | MCP server for agents, e.g. `claude mcp add --scope user rakumux -- rakumux-mcp` (`mcp/README.md`) |
 

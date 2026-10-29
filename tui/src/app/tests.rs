@@ -6217,3 +6217,24 @@ async fn new_sessions_go_to_the_sprite_once_its_folder_is_toggled() {
     h.press(KeyCode::Char('n')).await;
     assert_eq!(h.fake.creates().pop().unwrap().machine, None);
 }
+
+#[tokio::test]
+async fn signed_in_a_new_sprite_asks_once_whether_replies_are_typed_into_its_agents() {
+    let (mut h, _account) = account_harness(testing::FakeAccount::signed_in());
+    account_tick(&mut h);
+    assert!(matches!(
+        h.app.account,
+        super::types::AccountStatus::SignedIn(_)
+    ));
+    h.app
+        .on_sprite_needed(Some(("org/1/secret".into(), "the sprite CLI")));
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(
+        &h.app.mode,
+        AppMode::Sprite(crate::app::types::SpriteDialog {
+            state: crate::app::types::SpriteState::Replies { token }
+        }) if token == "org/1/secret"
+    ));
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+}
