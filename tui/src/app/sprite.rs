@@ -141,7 +141,10 @@ impl App {
             let result = sprites::connect(api.as_ref(), &home, &token, None, feed, &mut |step| {
                 let _ = events.send(AppEvent::SpriteStep(step));
             })
-            .map(|_| ());
+            .map(|connected| match connected.feed {
+                sprites::FeedSetUp::Failed(error) => Some(error),
+                _ => None,
+            });
             AppEvent::SpriteSetUp(result)
         });
     }
@@ -155,14 +158,19 @@ impl App {
         }
     }
 
-    pub(super) fn on_sprite_set_up(&mut self, result: Result<(), String>) {
+    pub(super) fn on_sprite_set_up(&mut self, result: Result<Option<String>, String>) {
         if !matches!(self.mode, AppMode::Sprite(_)) {
             return;
         }
         match result {
-            Ok(()) => {
+            Ok(feed_failed) => {
                 self.mode = AppMode::Normal;
-                self.set_status("Your Sprite is ready.");
+                self.set_status(match feed_failed {
+                    None => "Your Sprite is ready.".to_owned(),
+                    Some(error) => {
+                        format!("Your Sprite is ready; its feed couldn't be connected: {error}")
+                    }
+                });
                 self.open_new_session();
             }
             Err(message) => {

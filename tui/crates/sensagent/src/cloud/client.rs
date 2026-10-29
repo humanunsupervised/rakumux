@@ -59,8 +59,9 @@ pub struct CloudAIConfig {
     feed_realtime: Url,
     machine_credentials: Url,
     machine_token: Url,
-    /// This machine's own id, sent with every feed request
-    /// (`X-Rakumux-Machine-Id`), so two machines with one name are told apart.
+    /// This machine's own id, sent with every request (`X-Rakumux-Machine-Id`),
+    /// so two machines with one name are told apart, and an enrolled
+    /// machine's access token is taken only from the machine it was made for.
     machine_id: Option<HeaderValue>,
 }
 
@@ -342,6 +343,9 @@ impl CloudAIClient {
             header::ACCEPT_ENCODING,
             HeaderValue::from_static("identity"),
         );
+        if let Some(id) = &self.config.machine_id {
+            headers.insert(MACHINE_ID_HEADER, id.clone());
+        }
         let body_length = request.body().len() as u64;
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body_length));
         // Vec::into() creates a reusable body that reqwest may replay on H2
@@ -386,6 +390,9 @@ impl CloudAIClient {
             header::ACCEPT_ENCODING,
             HeaderValue::from_static("identity"),
         );
+        if let Some(id) = &self.config.machine_id {
+            headers.insert(MACHINE_ID_HEADER, id.clone());
+        }
         let result = self.transport.send(outgoing);
         cancel.check()?;
         let reply = result?;
@@ -614,6 +621,9 @@ impl CloudAIClient {
             header::ACCEPT_ENCODING,
             HeaderValue::from_static("identity"),
         );
+        if let Some(id) = &self.config.machine_id {
+            headers.insert(MACHINE_ID_HEADER, id.clone());
+        }
         let length = body.len() as u64;
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(length));
         // A sized reader is never replayed (see `generate`).

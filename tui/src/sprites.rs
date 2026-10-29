@@ -164,7 +164,7 @@ pub struct Connected {
 }
 
 /// What connecting did for the Sprite's feed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeedSetUp {
     /// Enrolled: its account service runs there with a credential of its own.
     On,
@@ -172,6 +172,9 @@ pub enum FeedSetUp {
     SignedOut,
     /// Not asked for.
     Skipped,
+    /// Enrolling it failed (sessions there work all the same); connecting
+    /// again tries again.
+    Failed(String),
 }
 
 impl Sprites {
@@ -527,7 +530,7 @@ pub fn connect(
     let feed = match feed {
         Some(feed) => {
             progress(Step::Feed);
-            connect_feed(&client, &ready, &machine, &feed)?
+            connect_feed(&client, &ready, &machine, &feed).unwrap_or_else(FeedSetUp::Failed)
         }
         None => FeedSetUp::Skipped,
     };

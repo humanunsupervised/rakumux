@@ -253,3 +253,21 @@ fn an_enrol_answer_gives_the_secret_and_a_revoke_is_done_when_none_is_left() {
         Err(FeedFailure::Unavailable(None))
     );
 }
+
+#[test]
+fn every_request_names_the_machine_its_token_was_made_for() {
+    let config = CloudAIConfig::new("https://reviewed.example/")
+        .unwrap()
+        .with_machine_id(MACHINE)
+        .unwrap();
+    let (cloud, asked) = CloudAIClient::scripted(
+        config,
+        vec![(
+            200,
+            r#"{"version":1,"features":{"ai_session_summaries":true,"feed":true}}"#,
+        )],
+    );
+    let token = SecretValue::try_from(ACCESS.to_owned()).unwrap();
+    cloud.features(&token, &Cancellation::new()).unwrap();
+    assert_eq!(asked.lock().unwrap()[0].2["x-rakumux-machine-id"], MACHINE);
+}

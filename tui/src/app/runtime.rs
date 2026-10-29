@@ -32,7 +32,8 @@ pub enum AppEvent {
     /// The Sprite's setup reached a step.
     SpriteStep(crate::sprites::Step),
     /// The Sprite's setup finished.
-    SpriteSetUp(Result<(), String>),
+    /// Set up, with why its feed couldn't be connected if it couldn't.
+    SpriteSetUp(Result<Option<String>, String>),
     PanelAttached {
         generation: u64,
         result: Result<session_core::client::TerminalStream, ApiError>,
