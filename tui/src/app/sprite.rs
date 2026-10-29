@@ -214,9 +214,8 @@ impl App {
         self.set_status("Copied the link.");
     }
 
-    /// `git clone <origin> .` for the folder's repository, typed into the
-    /// Sprite session's new shell for the user to run (Rakumux never runs
-    /// git).
+    /// The clone of the folder's repository, typed into the Sprite session's
+    /// new shell for the user to run (Rakumux never runs git).
     fn clone_command(&self, folder: &ScopeRoot) -> Option<String> {
         let origin = self
             .folders
@@ -225,15 +224,34 @@ impl App {
             .find(|project| project.path == *folder)
             .and_then(|project| project.git.as_ref())
             .and_then(|git| git.origin.clone())?;
-        let safe = origin
+        Some(clone_into_home(&origin, folder.path()))
+    }
+}
+
+/// `git clone <origin> ~/<name> && cd ~/<name>`, `<name>` the local folder's,
+/// as the daemon names the folder there: run in the Sprite's home, where a
+/// session starts until the folder is there, or in the empty folder an
+/// earlier Rakumux made.
+fn clone_into_home(origin: &str, folder: &std::path::Path) -> String {
+    let name = folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "work".into());
+    let target = format!("~/{}", quoted(&name));
+    format!("git clone {} {target} && cd {target}", quoted(origin))
+}
+
+/// `text` as one shell word.
+fn quoted(text: &str) -> String {
+    if !text.is_empty()
+        && text
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "@:/._-~+%".contains(c));
-        let origin = if safe {
-            origin
-        } else {
-            format!("'{}'", origin.replace('\'', r"'\''"))
-        };
-        Some(format!("git clone {origin} ."))
+            .all(|c| c.is_ascii_alphanumeric() || "@:/._-~+%".contains(c))
+        && !text.starts_with('~')
+    {
+        text.to_string()
+    } else {
+        format!("'{}'", text.replace('\'', r"'\''"))
     }
 }
 
@@ -243,4 +261,29 @@ fn folder_name(folder: &ScopeRoot) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| folder.path().display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn the_clone_goes_into_the_folder_of_its_name_in_the_sprites_home() {
+        assert_eq!(
+            clone_into_home(
+                "git@github.com:me/focal-md.git",
+                Path::new("/home/me/repos/focal-md")
+            ),
+            "git clone git@github.com:me/focal-md.git ~/focal-md && cd ~/focal-md"
+        );
+        assert_eq!(
+            clone_into_home("https://x/it's.git", Path::new("/w/my app")),
+            r"git clone 'https://x/it'\''s.git' ~/'my app' && cd ~/'my app'"
+        );
+        assert_eq!(
+            clone_into_home("https://x/r.git", Path::new("/")),
+            "git clone https://x/r.git ~/work && cd ~/work"
+        );
+    }
 }

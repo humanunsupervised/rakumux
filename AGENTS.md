@@ -330,13 +330,15 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `machine`, which `/v1/daemon` gives) reaches this machine's own sessions only: no other
    machines' sessions, events or `machine_*` requests, so machines that added each other (or a
    machine added to itself) don't loop.
-   `CreateSession::machine` creates there, in `<its home>/<local folder name>` (made by
-   `project_add {create}`), with the machine's own environment and, for a new folder, the
-   `prefill` (`git clone <origin> .`, typed, never run). **Your Sprite**: `rakumux sprite
+   `CreateSession::machine` creates there, in `<its home>/<local folder name>` once that's
+   there (a checkout, or any folder when there's nothing to clone), else in its home itself,
+   nothing made, with the machine's own environment and the `prefill` (`git clone <origin>
+   ~/<name> && cd ~/<name>`, typed, never run). **Your Sprite**: `rakumux sprite
    connect` (or the TUI's `☁ Sprite` toggle on `+ New session`, `N`, per folder:
    `sessions.sprite_folders`) sets up a Fly.io Sprite with the user's own Sprites token
-   (`SPRITES_TOKEN`, `~/.rakumux/sprites.json` (0600), or the `sprite` CLI's keyring files; it
-   never leaves this computer): created when missing, Rakumux installed with `install.sh`
+   (`SPRITES_TOKEN`, `~/.rakumux/sprites.json` (0600), or the `sprite` CLI's: macOS's
+   keychain, read with `/usr/bin/security` as the CLI writes it, else its keyring files; it
+   never leaves this computer): created when missing (`my-sprite`), Rakumux installed with `install.sh`
    (a development build then uploads its own `rakumux-ptyd` and `rakumux-api` and restarts the
    daemon in place), `rakumux-ptyd serve` and `rakumux-api` as Sprite services behind its public
    URL on port 8080, a remote token of its own in its `remote.json`, then `machine_add`. Signed

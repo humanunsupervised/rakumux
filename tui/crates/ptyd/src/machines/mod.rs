@@ -379,8 +379,9 @@ impl Machines {
         self.take_response(machine, None, response)
     }
 
-    /// Create a session on `machine`, listed under `create.scope` here: in a
-    /// folder of that name in the machine's home folder, made when missing.
+    /// Create a session on `machine`, listed under `create.scope` here: in the
+    /// folder of that name in the machine's home once it's there, else in the
+    /// home itself (nothing made there), where `create.prefill` is typed.
     pub fn create(
         &self,
         machine: &MachineId,
@@ -395,27 +396,28 @@ impl Machines {
             .file_name()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("work"));
-        let remote_folder = home.join(folder);
-        // The clone the prefill types is for a folder that's new there.
-        let known = match self.exchange(machine, &Request::ProjectList)? {
-            Response::Projects { projects } => {
-                projects.iter().any(|p| p.path.path() == remote_folder)
-            }
-            _ => false,
-        };
-        let prefill = if known { None } else { create.prefill.clone() };
-        match self.exchange(
+        let found = self.exchange(
             machine,
             &Request::ProjectAdd {
-                path: remote_folder.clone(),
-                create: true,
+                path: home.join(folder),
+                create: false,
             },
-        )? {
-            Response::Project { .. } => {}
-            other => return Err(unexpected(&other)),
-        }
+        )?;
+        let (scope, prefill) = match start_folder(found, create.prefill.is_some())? {
+            Some(folder) => (folder, None),
+            None => match self.exchange(
+                machine,
+                &Request::ProjectAdd {
+                    path: home,
+                    create: false,
+                },
+            )? {
+                Response::Project { project } => (project.path, create.prefill.clone()),
+                other => return Err(unexpected(&other)),
+            },
+        };
         let request = Request::SessionCreate(CreateSession {
-            scope: Some(ScopeRoot::from_canonical(remote_folder)),
+            scope: Some(scope),
             cwd: None,
             // The machine's own environment, not this one's.
             env: Vec::new(),
@@ -1225,6 +1227,20 @@ fn not_its_own() -> ApiError {
     )
 }
 
+/// The folder a session starts in on another machine, from what its
+/// `project_add` (never making it) answered for the folder of the local
+/// folder's name: that folder once it's there, a checkout when there's a
+/// clone to type (an empty one an earlier Rakumux made takes the clone), and
+/// `None`, the machine's home, while it isn't.
+fn start_folder(found: Response, clone: bool) -> Result<Option<ScopeRoot>, ApiError> {
+    match found {
+        Response::Project { project } if project.git.is_some() || !clone => Ok(Some(project.path)),
+        Response::Project { .. } => Ok(None),
+        Response::Error { error } if error.code == ErrorCode::InvalidArgument => Ok(None),
+        other => Err(unexpected(&other)),
+    }
+}
+
 fn unexpected(response: &Response) -> ApiError {
     match response {
         Response::Error { error } => clean_error(error.clone()),
@@ -1249,9 +1265,65 @@ fn now_secs() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use session_core::model::{Creator, LaunchSpec};
+    use session_core::model::{Creator, GitInfo, LaunchSpec};
 
     const LOCAL: &str = "01J000000000000000000LOCAL";
+
+    #[test]
+    fn a_session_starts_in_the_machines_home_until_its_folder_is_there() {
+        let folder = |git: Option<GitInfo>| Response::Project {
+            project: session_core::model::ProjectView {
+                path: ScopeRoot::from_canonical(PathBuf::from("/home/sprite/web")),
+                name: "web".into(),
+                sessions: 0,
+                live: 0,
+                last_active_at: None,
+                added_at: 0,
+                git,
+            },
+        };
+        let checkout = Some(GitInfo {
+            repo_root: PathBuf::from("/home/sprite/web"),
+            ..GitInfo::default()
+        });
+        let missing = Response::Error {
+            error: ApiError::new(
+                ErrorCode::InvalidArgument,
+                "folder /home/sprite/web: missing",
+            ),
+        };
+        let start = |found, clone| {
+            start_folder(found, clone)
+                .unwrap()
+                .map(|s| s.path().to_owned())
+        };
+        let web = Some(PathBuf::from("/home/sprite/web"));
+
+        assert_eq!(
+            start(missing.clone(), true),
+            None,
+            "the clone is typed in home"
+        );
+        assert_eq!(start(missing, false), None);
+        assert_eq!(start(folder(checkout.clone()), true), web, "cloned there");
+        assert_eq!(
+            start(folder(None), true),
+            None,
+            "an empty folder takes the clone"
+        );
+        assert_eq!(
+            start(folder(None), false),
+            web,
+            "nothing to clone: the folder"
+        );
+        let gone = Response::Error {
+            error: ApiError::new(ErrorCode::DaemonUnavailable, "away"),
+        };
+        assert_eq!(
+            start_folder(gone, true).unwrap_err().code,
+            ErrorCode::DaemonUnavailable
+        );
+    }
 
     fn machines(home: &Path) -> Machines {
         let machines = Machines::open(home, Arc::new(|id: &SessionId| id.as_str() == LOCAL));

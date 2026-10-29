@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 
 const API: &str = "https://api.sprites.dev";
 /// The Sprite Rakumux makes when none is named.
-pub const DEFAULT_SPRITE: &str = "rakumux";
+pub const DEFAULT_SPRITE: &str = "my-sprite";
+/// What the `sprite` CLI keeps its tokens with on macOS.
+const SECURITY: &str = "/usr/bin/security";
 /// Where the Sprite's `rakumux-api` serves, behind its URL.
 const PORT: u16 = 8080;
 const TIMEOUT: Duration = Duration::from_secs(120);
@@ -58,8 +60,9 @@ pub fn cli_dir() -> Option<PathBuf> {
 }
 
 /// A Sprites token found on this computer, and where: `SPRITES_TOKEN`,
-/// the one Rakumux saved in `home`, or the `sprite` CLI's in `cli` (when it
-/// keeps tokens in files: computers without a system keyring).
+/// the one Rakumux saved in `home`, or the `sprite` CLI's in `cli` (in the
+/// keychain on macOS, else when it keeps tokens in files: computers without
+/// a system keyring).
 pub fn found_token(home: &Path, cli: Option<&Path>) -> Option<(String, &'static str)> {
     if let Some(token) = std::env::var("SPRITES_TOKEN")
         .ok()
@@ -73,9 +76,85 @@ pub fn found_token(home: &Path, cli: Option<&Path>) -> Option<(String, &'static 
     cli_token(cli?).map(|token| (token, "the sprite CLI"))
 }
 
+/// The `sprite` CLI's token for its current organization: from the
+/// keychain on macOS, else its files.
+fn cli_token(home: &Path) -> Option<String> {
+    if cfg!(target_os = "macos") {
+        if let Some(token) = keychain_token(home, Path::new(SECURITY)) {
+            return Some(token);
+        }
+    }
+    file_token(home)
+}
+
+/// The `sprite` CLI's token for its current organization in the macOS
+/// keychain, where it keeps them with `security` (zalando/go-keyring): the
+/// generic password of service `sprites-cli:<user>` and account the
+/// organization's `keyring_key` in that user's config. Read with the same
+/// `security`, which the item lets in without asking.
+fn keychain_token(home: &Path, security: &Path) -> Option<String> {
+    let config = read_json(&home.join("sprites.json"))?;
+    let user = config["current_user"].as_str()?;
+    let url = config["current_selection"]["url"].as_str()?;
+    let org = config["current_selection"]["org"].as_str()?;
+    let key = config["users"]
+        .as_array()
+        .and_then(|users| users.iter().find(|u| u["id"].as_str() == Some(user)))
+        .and_then(|u| u["config_path"].as_str())
+        .and_then(|path| read_json(Path::new(path)))
+        .and_then(|c| {
+            c["urls"][url]["orgs"][org]["keyring_key"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| format!("sprites:org:{url}:{org}"));
+    let output = std::process::Command::new(security)
+        .args([
+            "find-generic-password",
+            "-s",
+            &format!("sprites-cli:{user}"),
+        ])
+        .args(["-a", &key, "-w"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    keychain_password(String::from_utf8(output.stdout).ok()?.trim())
+}
+
+/// A password as go-keyring stores it: base64 (or, from older versions,
+/// hex) after its prefix.
+fn keychain_password(text: &str) -> Option<String> {
+    use base64::Engine;
+    let bytes = if let Some(rest) = text.strip_prefix("go-keyring-base64:") {
+        base64::engine::general_purpose::STANDARD
+            .decode(rest)
+            .ok()?
+    } else if let Some(rest) = text.strip_prefix("go-keyring-encoded:") {
+        (0..rest.len())
+            .step_by(2)
+            .map(|i| {
+                rest.get(i..i + 2)
+                    .and_then(|b| u8::from_str_radix(b, 16).ok())
+            })
+            .collect::<Option<Vec<u8>>>()?
+    } else {
+        text.as_bytes().to_vec()
+    };
+    let token = String::from_utf8(bytes).ok()?.trim().to_string();
+    Some(token).filter(|t| !t.is_empty())
+}
+
+fn read_json(path: &Path) -> Option<Value> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
 /// The `sprite` CLI's token for its current organization, from
 /// `<cli>/keyring/sprites-cli-*/sprites-org-https-/api.sprites.dev-<org>`.
-fn cli_token(home: &Path) -> Option<String> {
+fn file_token(home: &Path) -> Option<String> {
     let current = std::fs::read(home.join("sprites.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
@@ -759,6 +838,68 @@ mod tests {
         let mut odd = json!({"sessions": 3});
         with_remote_replies(&mut odd, true);
         assert_eq!(odd, json!({"sessions": {"remote_replies": true}}));
+    }
+
+    #[test]
+    fn the_sprite_clis_token_is_read_from_the_macos_keychain() {
+        use base64::Engine;
+        let dir = tempfile::tempdir().unwrap();
+        let cli = dir.path().join(".sprites");
+        std::fs::create_dir_all(cli.join("users")).unwrap();
+        let user_config = cli.join("users/u1-abc.json");
+        let config = json!({
+            "current_user": "u1",
+            "current_selection": {"url": "https://api.sprites.dev", "org": "me"},
+            "users": [{"id": "u1", "config_path": user_config}],
+        });
+        std::fs::write(cli.join("sprites.json"), config.to_string()).unwrap();
+        let key = "sprites:org:https://api.sprites.dev:me";
+        let orgs =
+            json!({"urls": {"https://api.sprites.dev": {"orgs": {"me": {"keyring_key": key}}}}});
+        std::fs::write(&user_config, orgs.to_string()).unwrap();
+        let asked = dir.path().join("asked");
+        let security = dir.path().join("security");
+        let stored = base64::engine::general_purpose::STANDARD.encode("me/1/k/secret");
+        std::fs::write(
+            &security,
+            format!(
+                "#!/bin/bash\nprintf '%s\\n' \"$@\" > '{}'\necho go-keyring-base64:{stored}\n",
+                asked.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &security,
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+
+        assert_eq!(
+            keychain_token(&cli, &security).as_deref(),
+            Some("me/1/k/secret")
+        );
+        assert_eq!(
+            std::fs::read_to_string(&asked)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            [
+                "find-generic-password",
+                "-s",
+                "sprites-cli:u1",
+                "-a",
+                key,
+                "-w"
+            ]
+        );
+        std::fs::write(&security, "#!/bin/bash\nexit 44\n").unwrap();
+        assert_eq!(keychain_token(&cli, &security), None, "not in the keychain");
+        assert_eq!(
+            keychain_password("go-keyring-encoded:6d652f31").as_deref(),
+            Some("me/1")
+        );
+        assert_eq!(keychain_password("plain").as_deref(), Some("plain"));
+        assert_eq!(keychain_password("go-keyring-encoded:6d6"), None);
     }
 
     #[test]
