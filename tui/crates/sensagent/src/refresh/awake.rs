@@ -111,18 +111,31 @@ mod tests {
             let mut asked = Vec::new();
             for _ in 0..2 {
                 let (mut stream, _) = listener.accept().unwrap();
-                // The whole head, however many reads it takes.
-                let mut head = Vec::new();
+                // The whole request, its head and `Content-Length` of body, however
+                // many reads it takes: closing with some unread resets the
+                // connection on macOS before the client reads the answer.
+                let mut request = Vec::new();
                 let mut buf = [0u8; 512];
-                while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                loop {
+                    let text = String::from_utf8_lossy(&request).into_owned();
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let length = text
+                            .lines()
+                            .find_map(|line| line.strip_prefix("Content-Length: "))
+                            .and_then(|n| n.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        if request.len() >= end + 4 + length {
+                            break;
+                        }
+                    }
                     let n = stream.read(&mut buf).unwrap();
                     if n == 0 {
                         break;
                     }
-                    head.extend_from_slice(&buf[..n]);
+                    request.extend_from_slice(&buf[..n]);
                 }
-                let head = String::from_utf8_lossy(&head).into_owned();
-                asked.push(head.lines().next().unwrap_or_default().to_owned());
+                let request = String::from_utf8_lossy(&request).into_owned();
+                asked.push(request.lines().next().unwrap_or_default().to_owned());
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").unwrap();
             }
             asked
