@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:machine-token",
+  "title": "POST /api/v1/machines/token success",
+  "description": "An access token for an enrolled machine, made from its secret: the bearer of its other requests until `expires_at`, as this account and the machine id it asked with, for what a machine does (the feed's uploads, its own replies, the features read, AI session titles).",
+  "x-maxBodyBytes": 4096,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "access_token", "expires_at"],
+  "properties": {
+    "version": { "const": 1 },
+    "access_token": {
+      "description": "Opaque to the machine.",
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^rkma\\.v1\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}$"
+    },
+    "expires_at": { "$ref": "urn:rakumux:feed:v1:common#/$defs/timestampMs" }
+  }
+}

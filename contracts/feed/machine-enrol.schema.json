@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:machine-enrol",
+  "title": "POST /api/v1/machines/credentials request",
+  "description": "A signed-in machine asks for another machine's credential: a machine of the account with no sign-in of its own, such as the user's Sprite. Enrolling a machine again replaces its earlier credential.",
+  "x-maxBodyBytes": 4096,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "machine_id", "name"],
+  "properties": {
+    "version": { "const": 1 },
+    "machine_id": {
+      "description": "The id the enrolled machine will send as `X-Rakumux-Machine-Id`.",
+      "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid"
+    },
+    "name": {
+      "description": "The name it will go by in the feed, shown in the account's list of machines.",
+      "$ref": "urn:rakumux:feed:v1:common#/$defs/machine"
+    },
+    "wake_url": {
+      "description": "Where a request wakes the machine when a reply is written to it: a Fly Sprite's public URL, nothing else.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^https://[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\\.sprites\\.app$"
+    }
+  }
+}

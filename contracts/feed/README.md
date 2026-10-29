@@ -22,6 +22,10 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
 | `GET /api/v1/feed/realtime` | header only | [realtime](realtime.schema.json) |
 | WebSocket at the realtime `url` | bearer `token` | [poke](poke.schema.json) messages |
+| `POST /api/v1/machines/credentials` | [machine-enrol](machine-enrol.schema.json) | [machine-credential](machine-credential.schema.json) |
+| `GET /api/v1/machines/credentials` | header only | [machine-credentials](machine-credentials.schema.json) |
+| `DELETE /api/v1/machines/credentials/{machine_id}` | path only | 204, no body |
+| `POST /api/v1/machines/token` | no body; bearer: the machine secret | [machine-token](machine-token.schema.json) |
 
 - **Upload:** `{version:1, machine, entries}` with 1–50 entries. Each entry is
   `{id, session:{id, name, folder?, branch?}, agent, conversation_id?, text, truncated,
@@ -152,6 +156,23 @@ conformance tests, not an HTTP server, database or local runtime.
   in an upload, a reply status or the replies read) is `machine_taken` (409) and changes nothing;
   that machine then takes another name. A request without the header (an older machine) is never
   checked, and an id that isn't a ULID is `invalid_request`.
+- **Enrolled machines:** a machine with no sign-in of its own (the user's Fly Sprite) gets one
+  from a signed-in machine of the account. That machine enrols it (`machine-enrol`: the id and
+  name it will use, and optionally a `wake_url`) with its Clerk token and gets its **machine
+  secret** (`rkm_…`) once; the cloud keeps only its hash, one live secret per machine (enrolling
+  it again revokes the earlier one), and `DELETE` revokes it. The enrolled machine trades the
+  secret (`POST /api/v1/machines/token`, the secret as bearer, its id as
+  `X-Rakumux-Machine-Id`) for an **access token** (`rkma.v1.…`) good for 15 minutes, and sends
+  that on its other requests, with its id, which must be the one it was enrolled with. A
+  revoked or unknown secret, or another id, is `unauthenticated`; at most 60 exchanges an hour
+  per secret (`rate_limited`). An access token reaches what a machine does and nothing else:
+  the features read, AI session titles, the uploads (entries, messages, sessions) as its own
+  machine, and its own replies (the replies read with `machine` set to the name it holds, their
+  status and attachments) and the realtime token; the feed and turn reads, writing replies,
+  changing features and the credential routes are `forbidden`. When a reply or session message
+  is written to an enrolled machine with a `wake_url`, the cloud sends `GET <wake_url>/v1/health`
+  (no credential, at most every 10 s) to wake it: a paused Sprite reads nothing until something
+  connects to it.
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
   message per code: `invalid_request` (400, or 413 for an oversized body), `unauthenticated`
   (401), `forbidden` (403: the account's Feed switch is off), `machine_taken` (409: another
@@ -169,8 +190,9 @@ conformance tests, not an HTTP server, database or local runtime.
   with 404 (above).
 
 Every object rejects additional properties. Authorization is the terminal's Clerk OAuth
-access token in the `Authorization` header, never the body; browser cookies and `Origin`
-requests are refused. The user is the verified token's subject, never a body field.
+access token, or an enrolled machine's access token (above), in the `Authorization` header,
+never the body; browser cookies and `Origin` requests are refused. The user is the verified
+token's subject, never a body field.
 
 ## Validation boundaries
 

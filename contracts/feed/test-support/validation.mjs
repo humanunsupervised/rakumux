@@ -5,7 +5,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 /** Canonical schema documents, loaded locally without resolving network references. */
 export const schemas = Object.freeze(
   Object.fromEntries(
-    ["common", "upload", "accepted", "page", "error", "chat-upload", "chat-accepted", "turn", "reply-upload", "reply-status", "reply", "replies", "sessions-upload", "sessions-stored", "realtime", "poke"].map((name) => [
+    ["common", "upload", "accepted", "page", "error", "chat-upload", "chat-accepted", "turn", "reply-upload", "reply-status", "reply", "replies", "sessions-upload", "sessions-stored", "realtime", "poke", "machine-enrol", "machine-credential", "machine-credentials", "machine-token"].map((name) => [
       name,
       JSON.parse(readFileSync(new URL(`../${name}.schema.json`, import.meta.url), "utf8")),
     ]),
@@ -58,4 +58,8 @@ export const validators = Object.freeze({
   sessionsStored: ajv.compile(schemas["sessions-stored"]),
   realtime: ajv.compile(schemas.realtime),
   poke: ajv.compile(schemas.poke),
+  machineEnrol: ajv.compile(schemas["machine-enrol"]),
+  machineCredential: ajv.compile(schemas["machine-credential"]),
+  machineCredentials: ajv.compile(schemas["machine-credentials"]),
+  machineToken: ajv.compile(schemas["machine-token"]),
 });

@@ -1,0 +1,52 @@
+{
+  "enrol": {
+    "valid": [
+      { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "my-first-sprite", "wake_url": "https://my-first-sprite-b5jcz.sprites.app" },
+      { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "studio" }
+    ],
+    "invalid": [
+      { "note": "no machine id", "value": { "version": 1, "name": "my-first-sprite" } },
+      { "note": "a machine id that isn't a ULID", "value": { "version": 1, "machine_id": "sprite-1", "name": "my-first-sprite" } },
+      { "note": "a name on two lines", "value": { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "my\nsprite" } },
+      { "note": "a wake URL elsewhere", "value": { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "s", "wake_url": "https://169.254.169.254" } },
+      { "note": "a wake URL with a path", "value": { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "s", "wake_url": "https://s-1.sprites.app/admin" } },
+      { "note": "a wake URL on another host ending the same", "value": { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "s", "wake_url": "https://evil.com/.sprites.app" } },
+      { "note": "a wake URL without TLS", "value": { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "s", "wake_url": "http://s-1.sprites.app" } },
+      { "note": "a user id in the body", "value": { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "s", "user": "user_123" } }
+    ]
+  },
+  "credential": {
+    "valid": [
+      { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "secret": "rkm_3q2-7wF6m0ZxQh9b1y4Ku8LpN5sTvR2cJdE0aBfGhIk", "created_at": 1761700000000 }
+    ],
+    "invalid": [
+      { "note": "a secret of another kind", "value": { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "secret": "rkx_3q2-7wF6m0ZxQh9b1y4Ku8LpN5sTvR2cJdE0aBfGhIk", "created_at": 1761700000000 } },
+      { "note": "a short secret", "value": { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "secret": "rkm_short", "created_at": 1761700000000 } },
+      { "note": "no secret", "value": { "version": 1, "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "created_at": 1761700000000 } }
+    ]
+  },
+  "credentials": {
+    "valid": [
+      { "version": 1, "machines": [] },
+      { "version": 1, "machines": [
+        { "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "my-first-sprite", "created_at": 1761700000000, "last_exchanged_at": 1761700900000 },
+        { "machine_id": "01M6161MQTFHYKYSMGSPK6VW18", "name": "build-box", "created_at": 1761600000000, "last_exchanged_at": null }
+      ] }
+    ],
+    "invalid": [
+      { "note": "a secret in the list", "value": { "version": 1, "machines": [{ "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "s", "created_at": 1761700000000, "last_exchanged_at": null, "secret": "rkm_3q2-7wF6m0ZxQh9b1y4Ku8LpN5sTvR2cJdE0aBfGhIk" }] } },
+      { "note": "no last exchange", "value": { "version": 1, "machines": [{ "machine_id": "01M6161MQTFHYKYSMGSPK6VW17", "name": "s", "created_at": 1761700000000 }] } }
+    ]
+  },
+  "token": {
+    "valid": [
+      { "version": 1, "access_token": "rkma.v1.eyJzdWIiOiJ1c2VyXzEyMyJ9.c2lnbmF0dXJlLXNpZ25hdHVyZQ", "expires_at": 1761700900000 }
+    ],
+    "invalid": [
+      { "note": "a realtime token", "value": { "version": 1, "access_token": "v1.eyJzdWIiOiJ1c2VyXzEyMyJ9.c2lnbmF0dXJlLXNpZ25hdHVyZQ", "expires_at": 1761700900000 } },
+      { "note": "a token a header can't carry", "value": { "version": 1, "access_token": "rkma.v1.eyJzdWIiOiJ1c2VyXzEyMyJ9 c2lnbmF0dXJlLXNpZ25hdHVyZQ", "expires_at": 1761700900000 } },
+      { "note": "no expiry", "value": { "version": 1, "access_token": "rkma.v1.eyJzdWIiOiJ1c2VyXzEyMyJ9.c2lnbmF0dXJlLXNpZ25hdHVyZQ" } },
+      { "note": "the secret back", "value": { "version": 1, "access_token": "rkma.v1.eyJzdWIiOiJ1c2VyXzEyMyJ9.c2lnbmF0dXJlLXNpZ25hdHVyZQ", "expires_at": 1761700900000, "secret": "rkm_3q2-7wF6m0ZxQh9b1y4Ku8LpN5sTvR2cJdE0aBfGhIk" } }
+    ]
+  }
+}
