@@ -43,7 +43,8 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
 /// (`n`); the token field takes typing and pastes, Enter sets up, Ctrl-o
 /// copies where tokens are made; signed in, `y`/Enter or `n` says whether
 /// replies from rakumux.com are typed into its agents; a failure is tried
-/// again with `r`.
+/// again with `r`; Enter on the ready card opens the session; `y`/Enter or
+/// `n` says whether a folder's `.env` files are copied.
 fn handle_sprite_key(app: &mut App, key: KeyEvent) {
     let AppMode::Sprite(dialog) = &mut app.mode else {
         return;
@@ -91,6 +92,17 @@ fn handle_sprite_key(app: &mut App, key: KeyEvent) {
         SpriteState::Working { .. } => {}
         SpriteState::Failed { .. } => match key.code {
             KeyCode::Char('r') | KeyCode::Enter => app.sprite_paste_token(),
+            KeyCode::Esc | KeyCode::Char('q') => app.mode = AppMode::Normal,
+            _ => {}
+        },
+        SpriteState::Ready { .. } => match key.code {
+            KeyCode::Enter => app.sprite_ready_done(),
+            KeyCode::Esc | KeyCode::Char('q') => app.mode = AppMode::Normal,
+            _ => {}
+        },
+        SpriteState::Env { .. } => match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => app.sprite_env_chosen(true),
+            KeyCode::Char('n') => app.sprite_env_chosen(false),
             KeyCode::Esc | KeyCode::Char('q') => app.mode = AppMode::Normal,
             _ => {}
         },

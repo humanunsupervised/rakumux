@@ -77,6 +77,18 @@ fn new(
         }
         None => None,
     };
+    // On the Sprite, the clone of the folder's repository is typed for the
+    // user to run, as the TUI does (without its `.env` files).
+    let prefill = match (&scope, args.sprite) {
+        (Some(folder), true) => api
+            .projects()?
+            .into_iter()
+            .find(|project| project.path == *folder)
+            .and_then(|project| project.git)
+            .and_then(|git| git.origin)
+            .map(|origin| crate::sprites::clone_command(&origin, folder.path(), false)),
+        _ => None,
+    };
     let (cols, rows) = attach::terminal_size();
     let request = CreateSession {
         scope: scope.clone(),
@@ -88,7 +100,7 @@ fn new(
         cols,
         rows,
         machine,
-        prefill: None,
+        prefill,
     };
     let session = api.create(request)?;
     if args.detach {

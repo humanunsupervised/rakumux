@@ -82,6 +82,16 @@ pub(crate) fn run(
                 }
             };
             writeln!(out, "{feed}").map_err(output_error)?;
+            if !connected.tools.is_empty() {
+                writeln!(out, "Installed there: {}.", connected.tools.join(", "))
+                    .map_err(output_error)?;
+            }
+            writeln!(
+                out,
+                "A folder's first session there starts in its home with the clone typed: \
+                 Enter signs in to GitHub and clones it."
+            )
+            .map_err(output_error)?;
             Ok(0)
         }
         SpriteCommand::Status => {

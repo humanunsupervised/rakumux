@@ -64,6 +64,19 @@ pub enum SpriteState {
     Failed {
         message: String,
     },
+    /// Set up: what's there and what's left to do in its first session.
+    Ready {
+        sprite: String,
+        /// The programs the card names that it has.
+        tools: Vec<String>,
+        feed: crate::sprites::FeedSetUp,
+    },
+    /// Copy this folder's `.env` files to the Sprite? Asked once per folder.
+    Env {
+        folder: ScopeRoot,
+        /// The files, as paths in the folder.
+        files: Vec<std::path::PathBuf>,
+    },
 }
 
 #[derive(Debug, Clone)]

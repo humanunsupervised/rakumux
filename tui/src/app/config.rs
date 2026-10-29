@@ -142,6 +142,10 @@ pub struct SessionsConfig {
     /// on `+ New session`, `N`); left out when none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sprite_folders: Vec<std::path::PathBuf>,
+    /// Whether each folder's `.env` files are copied to your Sprite for its
+    /// first session there (asked once per folder); left out when none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sprite_env_copy: BTreeMap<std::path::PathBuf, bool>,
     /// The order of each folder's sessions in the list, as the user set it
     /// by dragging or with `J`/`K`. Sessions not listed go after the listed
     /// ones, oldest first. Anything but a map of folders to lists of ids
@@ -180,6 +184,7 @@ impl Default for SessionsConfig {
             stacked_list_percent: None,
             feed_width: None,
             sprite_folders: Vec::new(),
+            sprite_env_copy: BTreeMap::new(),
             session_order: SessionOrder::new(),
             section_order: SectionOrder::new(),
             other: serde_json::Map::new(),

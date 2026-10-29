@@ -32,8 +32,14 @@ pub enum AppEvent {
     /// The Sprite's setup reached a step.
     SpriteStep(crate::sprites::Step),
     /// The Sprite's setup finished.
-    /// Set up, with why its feed couldn't be connected if it couldn't.
-    SpriteSetUp(Result<Option<String>, String>),
+    SpriteSetUp(Result<crate::sprites::Connected, String>),
+    /// A folder's first session on the Sprite: copy its `.env` files?
+    SpriteEnvAsk {
+        folder: session_core::model::ScopeRoot,
+        files: Vec<std::path::PathBuf>,
+    },
+    /// Its `.env` files couldn't be copied; the session is made without.
+    SpriteEnvFailed(String),
     PanelAttached {
         generation: u64,
         result: Result<session_core::client::TerminalStream, ApiError>,

@@ -1075,6 +1075,8 @@ impl App {
             AppEvent::SpriteNeeded { found } => self.on_sprite_needed(found),
             AppEvent::SpriteStep(step) => self.on_sprite_step(step),
             AppEvent::SpriteSetUp(result) => self.on_sprite_set_up(result),
+            AppEvent::SpriteEnvAsk { folder, files } => self.on_sprite_env_ask(folder, files),
+            AppEvent::SpriteEnvFailed(error) => self.on_sprite_env_failed(error),
             AppEvent::Renamed {
                 id,
                 result,

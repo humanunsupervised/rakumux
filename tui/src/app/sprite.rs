@@ -58,8 +58,17 @@ impl App {
 
     /// Create a session on the Sprite for `folder`, or open the dialog that
     /// sets the Sprite up first.
+    /// Signed off once, a folder with `.env` files has them copied (they
+    /// go after the clone the session types), or is asked about first.
     pub(super) fn open_new_sprite_session(&mut self, folder: ScopeRoot, api: Arc<dyn SessionApi>) {
-        let prefill = self.clone_command(&folder);
+        let origin = self.folder_origin(&folder);
+        let copy_env = self
+            .settings
+            .sessions
+            .sprite_env_copy
+            .get(folder.path())
+            .copied();
+        let events = self.exec.events();
         let (cols, rows) = self.terminal_size();
         let Some(home) = self.rakumux_home() else {
             self.set_status("No Rakumux home to keep the Sprite's settings in.");
@@ -72,20 +81,46 @@ impl App {
         self.set_status("Creating a session on your Sprite...");
         self.exec
             .job(move || match sprites::connected(api.as_ref(), &home) {
-                Ok(Some(machine)) => AppEvent::Created {
-                    result: api.create(CreateSession {
-                        scope: Some(folder),
-                        name: None,
-                        cwd: None,
-                        argv: None,
-                        startup_cmds: Vec::new(),
-                        env: Vec::new(),
-                        cols,
-                        rows,
-                        machine: Some(machine.id),
-                        prefill,
-                    }),
-                },
+                Ok(Some(machine)) => {
+                    let copied = match (&origin, copy_env) {
+                        (None, _) | (_, Some(false)) => Ok(false),
+                        (Some(_), decided) => {
+                            let files = sprites::env_files(folder.path());
+                            if files.is_empty() {
+                                Ok(false)
+                            } else if decided.is_none() {
+                                return AppEvent::SpriteEnvAsk { folder, files };
+                            } else {
+                                copy_env_files(&home, &folder, &files).map(|()| true)
+                            }
+                        }
+                    };
+                    let env = copied.as_ref().is_ok_and(|copied| *copied);
+                    let prefill =
+                        origin.map(|origin| sprites::clone_command(&origin, folder.path(), env));
+                    let created = AppEvent::Created {
+                        result: api.create(CreateSession {
+                            scope: Some(folder),
+                            name: None,
+                            cwd: None,
+                            argv: None,
+                            startup_cmds: Vec::new(),
+                            env: Vec::new(),
+                            cols,
+                            rows,
+                            machine: Some(machine.id),
+                            prefill,
+                        }),
+                    };
+                    // Said after the session's "Created".
+                    match copied {
+                        Err(error) => {
+                            let _ = events.send(created);
+                            AppEvent::SpriteEnvFailed(error)
+                        }
+                        Ok(_) => created,
+                    }
+                }
                 Ok(None) => AppEvent::SpriteNeeded {
                     found: sprites::found_token(&home, cli.as_deref()),
                 },
@@ -140,10 +175,6 @@ impl App {
             });
             let result = sprites::connect(api.as_ref(), &home, &token, None, feed, &mut |step| {
                 let _ = events.send(AppEvent::SpriteStep(step));
-            })
-            .map(|connected| match connected.feed {
-                sprites::FeedSetUp::Failed(error) => Some(error),
-                _ => None,
             });
             AppEvent::SpriteSetUp(result)
         });
@@ -158,20 +189,19 @@ impl App {
         }
     }
 
-    pub(super) fn on_sprite_set_up(&mut self, result: Result<Option<String>, String>) {
+    pub(super) fn on_sprite_set_up(&mut self, result: Result<sprites::Connected, String>) {
         if !matches!(self.mode, AppMode::Sprite(_)) {
             return;
         }
         match result {
-            Ok(feed_failed) => {
-                self.mode = AppMode::Normal;
-                self.set_status(match feed_failed {
-                    None => "Your Sprite is ready.".to_owned(),
-                    Some(error) => {
-                        format!("Your Sprite is ready; its feed couldn't be connected: {error}")
-                    }
+            Ok(connected) => {
+                self.mode = AppMode::Sprite(SpriteDialog {
+                    state: SpriteState::Ready {
+                        sprite: connected.machine.name,
+                        tools: connected.tools,
+                        feed: connected.feed,
+                    },
                 });
-                self.open_new_session();
             }
             Err(message) => {
                 self.mode = AppMode::Sprite(SpriteDialog {
@@ -179,6 +209,53 @@ impl App {
                 })
             }
         }
+    }
+
+    /// Set up and shown what's there: Enter goes on to the session it was set
+    /// up for.
+    pub fn sprite_ready_done(&mut self) {
+        self.mode = AppMode::Normal;
+        self.open_new_session();
+    }
+
+    /// A folder with `.env` files gets its first session on the Sprite: ask
+    /// whether they're copied.
+    pub(super) fn on_sprite_env_ask(&mut self, folder: ScopeRoot, files: Vec<PathBuf>) {
+        self.creating_session = false;
+        self.set_status("");
+        self.mode = AppMode::Sprite(SpriteDialog {
+            state: SpriteState::Env { folder, files },
+        });
+    }
+
+    /// Whether the asked folder's `.env` files are copied, saved for it;
+    /// then its session.
+    pub fn sprite_env_chosen(&mut self, copy: bool) {
+        let AppMode::Sprite(SpriteDialog {
+            state: SpriteState::Env { folder, .. },
+        }) = &self.mode
+        else {
+            return;
+        };
+        let folder = folder.clone();
+        self.mode = AppMode::Normal;
+        self.settings
+            .sessions
+            .sprite_env_copy
+            .insert(folder.path().to_path_buf(), copy);
+        if let Err(error) = self.save_settings() {
+            self.set_status(format!("Couldn't save the setting: {error}"));
+            return;
+        }
+        let Some(api) = self.connection.api() else {
+            self.set_status("Not connected to the daemon.");
+            return;
+        };
+        self.open_new_sprite_session(folder, api);
+    }
+
+    pub(super) fn on_sprite_env_failed(&mut self, error: String) {
+        self.set_status(format!("The .env files weren't copied: {error}"));
     }
 
     /// Back to the token field after a failure, or to paste another one.
@@ -214,45 +291,28 @@ impl App {
         self.set_status("Copied the link.");
     }
 
-    /// The clone of the folder's repository, typed into the Sprite session's
-    /// new shell for the user to run (Rakumux never runs git).
-    fn clone_command(&self, folder: &ScopeRoot) -> Option<String> {
-        let origin = self
-            .folders
+    /// The folder's repository's `origin`, which the Sprite session's new
+    /// shell has the clone of typed for the user to run (Rakumux never runs
+    /// git).
+    fn folder_origin(&self, folder: &ScopeRoot) -> Option<String> {
+        self.folders
             .known
             .iter()
             .find(|project| project.path == *folder)
             .and_then(|project| project.git.as_ref())
-            .and_then(|git| git.origin.clone())?;
-        Some(clone_into_home(&origin, folder.path()))
+            .and_then(|git| git.origin.clone())
     }
 }
 
-/// `git clone <origin> ~/<name> && cd ~/<name>`, `<name>` the local folder's,
-/// as the daemon names the folder there: run in the Sprite's home, where a
-/// session starts until the folder is there, or in the empty folder an
-/// earlier Rakumux made.
-fn clone_into_home(origin: &str, folder: &std::path::Path) -> String {
-    let name = folder
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "work".into());
-    let target = format!("~/{}", quoted(&name));
-    format!("git clone {} {target} && cd {target}", quoted(origin))
-}
-
-/// `text` as one shell word.
-fn quoted(text: &str) -> String {
-    if !text.is_empty()
-        && text
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "@:/._-~+%".contains(c))
-        && !text.starts_with('~')
-    {
-        text.to_string()
-    } else {
-        format!("'{}'", text.replace('\'', r"'\''"))
-    }
+/// Put the folder's `.env` files on the Sprite for its first session's
+/// command to unpack.
+fn copy_env_files(
+    home: &std::path::Path,
+    folder: &ScopeRoot,
+    files: &[PathBuf],
+) -> Result<(), String> {
+    let archive = sprites::env_archive(folder.path(), files)?;
+    sprites::stage_env(home, &sprites::folder_name(folder.path()), archive)
 }
 
 fn folder_name(folder: &ScopeRoot) -> String {
@@ -261,29 +321,4 @@ fn folder_name(folder: &ScopeRoot) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| folder.path().display().to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::Path;
-
-    #[test]
-    fn the_clone_goes_into_the_folder_of_its_name_in_the_sprites_home() {
-        assert_eq!(
-            clone_into_home(
-                "git@github.com:me/focal-md.git",
-                Path::new("/home/me/repos/focal-md")
-            ),
-            "git clone git@github.com:me/focal-md.git ~/focal-md && cd ~/focal-md"
-        );
-        assert_eq!(
-            clone_into_home("https://x/it's.git", Path::new("/w/my app")),
-            r"git clone 'https://x/it'\''s.git' ~/'my app' && cd ~/'my app'"
-        );
-        assert_eq!(
-            clone_into_home("https://x/r.git", Path::new("/")),
-            "git clone https://x/r.git ~/work && cd ~/work"
-        );
-    }
 }

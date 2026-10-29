@@ -6192,6 +6192,7 @@ async fn new_sessions_go_to_the_sprite_once_its_folder_is_toggled() {
             token: Some("org/1/secret".into()),
             sprite: Some("rakumux".into()),
             machine: Some(machine.to_string()),
+            home: None,
         },
     )
     .unwrap();
@@ -6216,6 +6217,119 @@ async fn new_sessions_go_to_the_sprite_once_its_folder_is_toggled() {
     assert!(!h.app.runs_on_sprite(&scope()));
     h.press(KeyCode::Char('n')).await;
     assert_eq!(h.fake.creates().pop().unwrap().machine, None);
+}
+
+#[tokio::test]
+async fn a_sprite_session_types_the_clone_and_asks_once_about_env_files() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = std::fs::canonicalize(dir.path()).unwrap().join("focal-md");
+    std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(path.join(".env"), "KEY=1").unwrap();
+    let folder = ScopeRoot::from_canonical(path);
+    let origin = "git@github.com:me/focal-md.git";
+    h.app.folders.known.push(session_core::model::ProjectView {
+        path: folder.clone(),
+        name: "focal-md".into(),
+        sessions: 0,
+        live: 0,
+        last_active_at: None,
+        added_at: 0,
+        git: Some(session_core::model::GitInfo {
+            origin: Some(origin.into()),
+            ..Default::default()
+        }),
+    });
+    let home = h
+        .app
+        .config_path
+        .as_ref()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let machine = session_core::ids::MachineId::from_string("M1");
+    crate::sprites::save(
+        &home,
+        &crate::sprites::Saved {
+            token: Some("org/1/secret".into()),
+            sprite: Some("my-sprite".into()),
+            machine: Some(machine.to_string()),
+            home: Some("/home/sprite".into()),
+        },
+    )
+    .unwrap();
+    h.fake.state.lock().unwrap().machines = vec![session_core::model::MachineView {
+        id: machine.clone(),
+        name: "my-sprite".into(),
+        url: "https://my-sprite-x.sprites.app".into(),
+        state: session_core::model::MachineState::Connected,
+        version: None,
+        error: None,
+        added_at: 1,
+    }];
+    let api = h.app.connection.api().unwrap();
+
+    h.app.open_new_sprite_session(folder.clone(), api.clone());
+    h.app.process_pending();
+    assert!(matches!(
+        &h.app.mode,
+        AppMode::Sprite(crate::app::types::SpriteDialog {
+            state: crate::app::types::SpriteState::Env { files, .. }
+        }) if *files == [std::path::PathBuf::from(".env")]
+    ));
+    assert!(h.fake.creates().is_empty(), "asked first");
+
+    h.press(KeyCode::Char('n')).await;
+    let create = h.fake.creates().pop().expect("created on the Sprite");
+    assert_eq!(create.machine, Some(machine));
+    assert_eq!(
+        create.prefill,
+        Some(crate::sprites::clone_command(origin, folder.path(), false)),
+        "the clone, without the .env files"
+    );
+    assert_eq!(
+        h.app.settings.sessions.sprite_env_copy.get(folder.path()),
+        Some(&false)
+    );
+
+    h.app.open_new_sprite_session(folder.clone(), api);
+    h.app.process_pending();
+    assert!(matches!(h.app.mode, AppMode::Normal), "asked once");
+    assert_eq!(h.fake.creates().len(), 2);
+}
+
+#[tokio::test]
+async fn a_sprite_set_up_shows_whats_there_then_enter_opens_the_session() {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    h.app.mode = AppMode::Sprite(crate::app::types::SpriteDialog {
+        state: crate::app::types::SpriteState::Working {
+            step: crate::sprites::Step::Feed,
+        },
+    });
+    h.app.on_sprite_set_up(Ok(crate::sprites::Connected {
+        machine: session_core::model::MachineView {
+            id: session_core::ids::MachineId::from_string("M1"),
+            name: "my-sprite".into(),
+            url: "https://my-sprite-x.sprites.app".into(),
+            state: session_core::model::MachineState::Connected,
+            version: None,
+            error: None,
+            added_at: 1,
+        },
+        feed: crate::sprites::FeedSetUp::On,
+        tools: vec!["claude".into(), "gh".into()],
+    }));
+    assert!(matches!(
+        &h.app.mode,
+        AppMode::Sprite(crate::app::types::SpriteDialog {
+            state: crate::app::types::SpriteState::Ready { sprite, tools, .. }
+        }) if sprite == "my-sprite" && *tools == ["claude", "gh"]
+    ));
+    assert!(h.fake.creates().is_empty(), "the card waits");
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(h.fake.creates().len(), 1, "then the session");
 }
 
 #[tokio::test]

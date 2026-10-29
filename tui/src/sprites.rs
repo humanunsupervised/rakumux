@@ -20,6 +20,16 @@ const API: &str = "https://api.sprites.dev";
 pub const DEFAULT_SPRITE: &str = "my-sprite";
 /// What the `sprite` CLI keeps its tokens with on macOS.
 const SECURITY: &str = "/usr/bin/security";
+/// Programs the ready card names when the Sprite has them.
+const TOOLS: [&str; 3] = ["claude", "codex", "gh"];
+/// How far below a folder its `.env` files are looked for, how many go, and
+/// how big each (and all) may be.
+const ENV_DEPTH: usize = 4;
+const ENV_FILES: usize = 64;
+const ENV_FILE_BYTES: u64 = 256 * 1024;
+const ENV_BYTES: u64 = 4 * 1024 * 1024;
+/// Directory entries read looking for them, at most.
+const ENV_ENTRIES: usize = 20_000;
 /// Where the Sprite's `rakumux-api` serves, behind its URL.
 const PORT: u16 = 8080;
 const TIMEOUT: Duration = Duration::from_secs(120);
@@ -35,6 +45,9 @@ pub struct Saved {
     /// Its machine id in the daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// Its home folder (the Sprite's user's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<String>,
 }
 
 fn saved_path(home: &Path) -> PathBuf {
@@ -224,6 +237,8 @@ pub struct Ready {
     /// Its home directory, and where Rakumux is installed there.
     pub home: String,
     pub libexec: String,
+    /// Which of `TOOLS` it has.
+    pub tools: Vec<String>,
 }
 
 /// The feed from the Sprite: the Rakumux account here enrols it, so its
@@ -240,6 +255,8 @@ pub struct Feed<'a> {
 pub struct Connected {
     pub machine: MachineView,
     pub feed: FeedSetUp,
+    /// Which of the programs the ready card names the Sprite has.
+    pub tools: Vec<String>,
 }
 
 /// What connecting did for the Sprite's feed.
@@ -440,7 +457,9 @@ pub fn set_up(
         name,
         &format!(
             "set -e; curl -fsSL https://rakumux.com/install.sh | {pin}PREFIX=\"$HOME/.local\" bash >/dev/null 2>&1; \
-             pkill -x rakumux-api >/dev/null 2>&1 || true; echo \"HOME=$HOME\""
+             pkill -x rakumux-api >/dev/null 2>&1 || true; echo \"HOME=$HOME\"; \
+             for p in {}; do if command -v \"$p\" >/dev/null 2>&1; then echo \"HAS=$p\"; fi; done",
+            TOOLS.join(" ")
         ),
     )?;
     let home = output
@@ -455,6 +474,12 @@ pub fn set_up(
             )
         })?
         .to_string();
+    let tools = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("HAS="))
+        .map(|tool| tool.trim().to_string())
+        .filter(|tool| TOOLS.contains(&tool.as_str()))
+        .collect();
     let libexec = format!("{home}/.local/libexec/rakumux");
     if version.is_none() {
         upload_own_binaries(sprites, name, &libexec)?;
@@ -492,6 +517,7 @@ pub fn set_up(
         token,
         home,
         libexec,
+        tools,
     })
 }
 
@@ -605,6 +631,7 @@ pub fn connect(
     };
     saved.sprite = Some(ready.sprite.clone());
     saved.machine = Some(machine.id.to_string());
+    saved.home = Some(ready.home.clone());
     save(home, &saved)?;
     let feed = match feed {
         Some(feed) => {
@@ -613,7 +640,181 @@ pub fn connect(
         }
         None => FeedSetUp::Skipped,
     };
-    Ok(Connected { machine, feed })
+    Ok(Connected {
+        machine,
+        feed,
+        tools: ready.tools,
+    })
+}
+
+/// The local folder's name, which its folder on the Sprite takes (as the
+/// daemon names it there).
+pub fn folder_name(folder: &Path) -> String {
+    folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "work".into())
+}
+
+/// The command typed into a Sprite session's new shell for the user to run
+/// (Rakumux never runs git): run in the Sprite's home, where a session for
+/// the folder starts until it's there (or in the empty folder an earlier
+/// Rakumux made), it clones `origin` into `~/<name>` (a GitHub repository
+/// with `gh`, signing in first when it isn't: a new Sprite has no SSH key),
+/// unpacks the folder's `.env` archive there when `env` (never over a file
+/// the clone has) and goes in.
+pub fn clone_command(origin: &str, folder: &Path, env: bool) -> String {
+    let name = folder_name(folder);
+    let target = format!("~/{}", quoted(&name));
+    let mut command = match github_repo(origin) {
+        Some(repo) => format!(
+            "gh auth status >/dev/null 2>&1 || gh auth login && gh repo clone {repo} {target}"
+        ),
+        None => format!("git clone {} {target}", quoted(origin)),
+    };
+    if env {
+        let archive = format!("~/{}", quoted(&env_archive_path(&name)));
+        command.push_str(&format!(
+            " && tar -xf {archive} --skip-old-files -C {target}"
+        ));
+    }
+    command.push_str(&format!(" && cd {target}"));
+    command
+}
+
+/// `owner/repo` of a GitHub `origin` (SSH, HTTPS or git), without any user
+/// or credentials it names.
+fn github_repo(origin: &str) -> Option<String> {
+    let rest = origin.split_once("://").map_or(origin, |(_, rest)| rest);
+    let rest = rest.rsplit_once('@').map_or(rest, |(_, host)| host);
+    let path = rest
+        .strip_prefix("github.com:")
+        .or_else(|| rest.strip_prefix("github.com/"))?
+        .trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let (owner, repo) = path.split_once('/')?;
+    let part = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+    };
+    (part(owner) && part(repo)).then(|| format!("{owner}/{repo}"))
+}
+
+/// `text` as one shell word.
+fn quoted(text: &str) -> String {
+    if !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "@:/._-~+%".contains(c))
+        && !text.starts_with('~')
+    {
+        text.to_string()
+    } else {
+        format!("'{}'", text.replace('\'', r"'\''"))
+    }
+}
+
+/// A folder's `.env` files (`.env`, `.env.*`), as paths in it: in it and
+/// its folders up to `ENV_DEPTH` down, never in a hidden folder,
+/// `node_modules`, `target` or a checkout of its own (a worktree, a
+/// submodule), nor through a link; at most `ENV_FILES` of up to
+/// `ENV_FILE_BYTES`. Sorted.
+pub fn env_files(folder: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut entries = 0;
+    let mut pending = vec![(PathBuf::new(), 0)];
+    while let Some((dir, depth)) = pending.pop() {
+        let Ok(read) = std::fs::read_dir(folder.join(&dir)) else {
+            continue;
+        };
+        for entry in read.flatten() {
+            entries += 1;
+            if entries > ENV_ENTRIES || found.len() >= ENV_FILES {
+                found.sort();
+                return found;
+            }
+            let name = entry.file_name();
+            let text = name.to_string_lossy();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = dir.join(&name);
+            if kind.is_file() {
+                let small = entry.metadata().is_ok_and(|m| m.len() <= ENV_FILE_BYTES);
+                if (text == ".env" || text.starts_with(".env.")) && small {
+                    found.push(path);
+                }
+            } else if kind.is_dir()
+                && depth < ENV_DEPTH
+                && !text.starts_with('.')
+                && text != "node_modules"
+                && text != "target"
+                && !folder.join(&path).join(".git").exists()
+            {
+                pending.push((path, depth + 1));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// `files` of `folder` as a tar archive, each 0600, at most `ENV_BYTES`.
+pub fn env_archive(folder: &Path, files: &[PathBuf]) -> Result<Vec<u8>, String> {
+    let mut archive = tar::Builder::new(Vec::new());
+    let mut total = 0;
+    for file in files {
+        let bytes = std::fs::read(folder.join(file))
+            .map_err(|e| format!("reading {}: {e}", file.display()))?;
+        total += bytes.len() as u64;
+        if total > ENV_BYTES {
+            return Err("the .env files are too big to copy".into());
+        }
+        let mut header = tar::Header::new_gnu();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o600);
+        header.set_cksum();
+        archive
+            .append_data(&mut header, file, bytes.as_slice())
+            .map_err(|e| format!("packing {}: {e}", file.display()))?;
+    }
+    archive.into_inner().map_err(|e| e.to_string())
+}
+
+/// Put a folder's `.env` archive on the Sprite, at
+/// `~/.rakumux/env/<name>.tar` (0600), where the command typed into its
+/// first session there unpacks it after the clone.
+pub fn stage_env(home: &Path, name: &str, archive: Vec<u8>) -> Result<(), String> {
+    let mut saved = load(home);
+    let (Some(token), Some(sprite)) = (saved.token.clone(), saved.sprite.clone()) else {
+        return Err("no Sprite is set up".into());
+    };
+    let client = Sprites::new(&token)?;
+    let sprite_home = match saved.home.clone() {
+        Some(sprite_home) => sprite_home,
+        // Set up by an earlier Rakumux, which didn't keep it.
+        None => {
+            let (_, output) = client.exec(&sprite, "echo \"HOME=$HOME\"")?;
+            let sprite_home = output
+                .lines()
+                .find_map(|line| line.strip_prefix("HOME="))
+                .map(str::trim)
+                .filter(|h| h.starts_with('/'))
+                .ok_or("the Sprite didn't say where its home is")?
+                .to_string();
+            saved.home = Some(sprite_home.clone());
+            save(home, &saved)?;
+            sprite_home
+        }
+    };
+    let path = format!("{sprite_home}/{}", env_archive_path(name));
+    client.write_file(&sprite, &path, archive, "0600")
+}
+
+/// Where a folder's `.env` archive goes on the Sprite, in its home.
+pub fn env_archive_path(name: &str) -> String {
+    format!(".rakumux/env/{name}.tar")
 }
 
 /// Forget the Sprite here: its credential for the feed revoked (when the
@@ -903,6 +1104,97 @@ mod tests {
     }
 
     #[test]
+    fn the_clone_goes_into_the_folder_of_its_name_in_the_sprites_home() {
+        let focal = Path::new("/home/me/repos/focal-md");
+        let gh = "gh auth status >/dev/null 2>&1 || gh auth login && gh repo clone me/focal-md";
+        for origin in [
+            "git@github.com:me/focal-md.git",
+            "https://github.com/me/focal-md",
+            "https://x-access-token:secret@github.com/me/focal-md.git/",
+            "ssh://git@github.com/me/focal-md.git",
+        ] {
+            assert_eq!(
+                clone_command(origin, focal, false),
+                format!("{gh} ~/focal-md && cd ~/focal-md"),
+                "{origin}"
+            );
+        }
+        assert_eq!(
+            clone_command("git@github.com:me/focal-md.git", focal, true),
+            format!(
+                "{gh} ~/focal-md && tar -xf ~/.rakumux/env/focal-md.tar --skip-old-files \
+                 -C ~/focal-md && cd ~/focal-md"
+            )
+        );
+        assert_eq!(
+            clone_command("https://x/it's.git", Path::new("/w/my app"), true),
+            r"git clone 'https://x/it'\''s.git' ~/'my app' && tar -xf ~/'.rakumux/env/my app.tar' --skip-old-files -C ~/'my app' && cd ~/'my app'"
+        );
+        assert_eq!(
+            clone_command("git@gitlab.com:me/r.git", Path::new("/"), false),
+            "git clone git@gitlab.com:me/r.git ~/work && cd ~/work"
+        );
+        assert_eq!(github_repo("ssh://git@github.com:22/me/r"), None);
+    }
+
+    #[test]
+    fn a_folders_env_files_are_found_below_it_but_not_in_other_checkouts() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for file in [
+            ".env",
+            ".env.local",
+            "web/.env.production",
+            "a/b/c/d/.env",
+            "a/b/c/d/e/.env",
+            ".hidden/.env",
+            "node_modules/x/.env",
+            "worktrees/feature/.env",
+            "environment.txt",
+            ".envrc",
+        ] {
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "KEY=1").unwrap();
+        }
+        std::fs::write(root.join("worktrees/feature/.git"), "gitdir: x").unwrap();
+        std::fs::write(root.join("web/.env.big"), vec![b'x'; 300 * 1024]).unwrap();
+        std::os::unix::fs::symlink(root.join("web"), root.join("linked")).unwrap();
+        assert_eq!(
+            env_files(root),
+            [".env", ".env.local", "a/b/c/d/.env", "web/.env.production"].map(PathBuf::from)
+        );
+    }
+
+    #[test]
+    fn env_files_are_packed_private() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("web")).unwrap();
+        std::fs::write(dir.path().join("web/.env"), "KEY=secret").unwrap();
+        let bytes = env_archive(dir.path(), &[PathBuf::from("web/.env")]).unwrap();
+        let mut archive = tar::Archive::new(bytes.as_slice());
+        let entries: Vec<(PathBuf, u32, String)> = archive
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                let mut entry = entry.unwrap();
+                let mut text = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut text).unwrap();
+                (
+                    entry.path().unwrap().into_owned(),
+                    entry.header().mode().unwrap(),
+                    text,
+                )
+            })
+            .collect();
+        assert_eq!(
+            entries,
+            [(PathBuf::from("web/.env"), 0o600, "KEY=secret".into())]
+        );
+        assert_eq!(env_archive_path("web"), ".rakumux/env/web.tar");
+    }
+
+    #[test]
     fn tokens_are_saved_privately() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path();
@@ -910,6 +1202,7 @@ mod tests {
             token: Some("org/1/abc".into()),
             sprite: Some("rakumux".into()),
             machine: None,
+            home: Some("/home/sprite".into()),
         };
         save(home, &saved).unwrap();
         assert_eq!(load(home), saved);

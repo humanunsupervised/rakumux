@@ -37,7 +37,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 2. **No git operations.** No worktree creation, git status, merge helpers or env-copy, and no
    `rakumux-cli`; the product never runs `git`. The one exception is read-only **git context**:
    the daemon reads `.git` files to show a session's branch, linked worktree and repository
-   name (`ptyd/src/git.rs`). Users run git inside a session like any other program.
+   name (`ptyd/src/git.rs`). Users run git inside a session like any other program. The one
+   env-copy is your Sprite's: a folder's `.env` files go to it only when the user says so,
+   once per folder (component 11), and the clone that takes them is typed for the user to run.
 3. **Sessions belong to folders.** A folder is a directory (canonical path; the wire calls it a
    scope, `ScopeRoot`, and keeps `project_*` requests and `ProjectView`). Every session belongs to
    the folder it was started in, and its cwd must be inside it when created. The TUI shows the
@@ -332,8 +334,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    machine added to itself) don't loop.
    `CreateSession::machine` creates there, in `<its home>/<local folder name>` once that's
    there (a checkout, or any folder when there's nothing to clone), else in its home itself,
-   nothing made, with the machine's own environment and the `prefill` (`git clone <origin>
-   ~/<name> && cd ~/<name>`, typed, never run). **Your Sprite**: `rakumux sprite
+   nothing made, with the machine's own environment and the `prefill` (the clone, typed,
+   never run). **Your Sprite**: `rakumux sprite
    connect` (or the TUI's `☁ Sprite` toggle on `+ New session`, `N`, per folder:
    `sessions.sprite_folders`) sets up a Fly.io Sprite with the user's own Sprites token
    (`SPRITES_TOKEN`, `~/.rakumux/sprites.json` (0600), or the `sprite` CLI's: macOS's
@@ -348,6 +350,17 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    and its name) into the Sprite's `~/.rakumux/sensagent` (0700) and runs `rakumux
    status-service` as the Sprite service `rakumux-status`, so the Sprite's agents' replies reach
    the feed and yours reach them, laptop open or not; `rakumux sprite disconnect` revokes it.
+   When it's set up, the dialog shows what's there (`SpriteState::Ready`: Rakumux, the feed,
+   which of claude, codex and gh it has) and what's left in a folder's first session; Enter
+   opens it. That session starts in the Sprite's home with `sprites::clone_command` typed: for
+   a GitHub `origin` `gh auth status … || gh auth login && gh repo clone owner/repo ~/<name>`
+   (a new Sprite has no SSH key), else `git clone <origin> ~/<name>`, then `&& cd ~/<name>`
+   (`rakumux new --sprite` types it too). A folder with `.env` files (`.env`, `.env.*`, up to
+   4 folders down, never in hidden ones, `node_modules`, `target` or a checkout of its own)
+   is asked about once (`SpriteState::Env`, `sessions.sprite_env_copy`); copied, they go to
+   the Sprite as one archive (`~/.rakumux/env/<name>.tar`, 0600, through the Sprites API)
+   before each of its sessions there, and the clone's command unpacks it into the clone
+   (`tar --skip-old-files`: never over a file the clone has).
    rakumux.com wakes a paused Sprite at its URL when a reply is written to it; a request runs a
    paused Sprite only while it lasts, so the account service, finding its tick late (paused or
    asleep), holds the Sprite up 20 s with a Fly task of its own (`refresh/awake.rs`,
@@ -693,7 +706,8 @@ accidents; they don't stop a hostile process running as the same user.
                                  `rakumux remote`, read by rakumux-api at start
   machines.json                  other machines (url, token, home) and the sessions listed from
                                  them (machine, local folder, last view), daemon only, 0600
-  sprites.json                   your Sprite: the Sprites token, its name and machine id, 0600
+  sprites.json                   your Sprite: the Sprites token, its name, machine id and home
+                                 folder, 0600
   sensagent/machine-credential.json  an enrolled machine's (your Sprite's) secret, its machine id and
                                  account, 0600: written by the machine that enrolled it
   config.json                    Config (below)
@@ -737,7 +751,9 @@ accidents; they don't stop a hostile process running as the same user.
   into this machine's sessions; Settings → Replies from rakumux.com),
   sidebar_width (dragged divider),
   feed_width (the docked feed pane's width, set by dragging the line left of it; left out until
-  dragged), stacked_list_percent (the list's share of the height on narrow screens, set by dragging the
+  dragged), sprite_folders (folders whose new sessions run on your Sprite), sprite_env_copy
+  ({folder path: bool}: whether its `.env` files are copied to your Sprite; asked once),
+  stacked_list_percent (the list's share of the height on narrow screens, set by dragging the
   divider under it, so the split follows a phone keyboard coming and going;
   left out until dragged), session_order ({folder path: [session ids]}: the list order set by
   dragging or `J`/`K`; left out when empty), section_order ({"app:<name>" | "status:<status>":
