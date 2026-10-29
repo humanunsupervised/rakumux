@@ -26,6 +26,10 @@ const RENEW: Duration = Duration::from_secs(60);
 /// A working agent that wrote nothing for this long no longer holds the
 /// Sprite: a hung one mustn't keep it billing.
 pub(super) const QUIET_MS: i64 = 10 * 60 * 1000;
+/// Held this long after the last agent stopped working, so what it said
+/// last (read within 10 s, then uploaded to the feed) leaves before the
+/// Sprite pauses.
+const AFTER: Duration = Duration::from_secs(60);
 
 pub(super) fn start(inner: &Arc<Inner>) {
     let socket = PathBuf::from(SOCKET);
@@ -44,6 +48,7 @@ pub(super) fn start(inner: &Arc<Inner>) {
 
 fn run(inner: Weak<Inner>, socket: &Path) {
     let mut held: Option<Instant> = None;
+    let mut busy_at: Option<Instant> = None;
     loop {
         std::thread::sleep(EVERY);
         let Some(inner) = inner.upgrade() else {
@@ -57,6 +62,9 @@ fn run(inner: Weak<Inner>, socket: &Path) {
         let busy = inner.busy_agents(QUIET_MS);
         drop(inner);
         if busy > 0 {
+            busy_at = Some(Instant::now());
+        }
+        if holds(busy, busy_at) {
             if held.is_none_or(|at| at.elapsed() >= RENEW) {
                 match hold(socket) {
                     Ok(()) => {
@@ -75,6 +83,11 @@ fn run(inner: Weak<Inner>, socket: &Path) {
             }
         }
     }
+}
+
+/// Whether the Sprite is held: an agent works, or one stopped within [`AFTER`].
+fn holds(busy: usize, busy_at: Option<Instant>) -> bool {
+    busy > 0 || busy_at.is_some_and(|at| at.elapsed() < AFTER)
 }
 
 fn hold(socket: &Path) -> std::io::Result<()> {
@@ -129,6 +142,18 @@ fn request(socket: &Path, method: &str, path: &str, body: &str) -> std::io::Resu
 mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
+
+    #[test]
+    fn the_sprite_is_held_while_agents_work_and_a_minute_after() {
+        assert!(!holds(0, None));
+        assert!(holds(2, None));
+        assert!(holds(0, Some(Instant::now())));
+        let long_ago = Instant::now().checked_sub(AFTER + Duration::from_secs(1));
+        if let Some(long_ago) = long_ago {
+            assert!(!holds(0, Some(long_ago)));
+            assert!(holds(1, Some(long_ago)));
+        }
+    }
 
     /// Answer one request with `status`, returning what was asked: its head
     /// and its `Content-Length` of body, however many reads they take.
