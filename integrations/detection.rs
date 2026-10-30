@@ -517,15 +517,6 @@ fn profile_for_process(process: &ProcessInfo) -> ProcessMatch {
             return ProcessMatch::Agent(profile);
         }
     }
-    // Its install path, when it renamed itself or runs as a shared name.
-    if let Some(profile) = process
-        .exe
-        .as_deref()
-        .and_then(|exe| exe.to_str())
-        .and_then(profile_for_token)
-    {
-        return ProcessMatch::Agent(profile);
-    }
     let runtime = [process.name.as_str(), argv0_word]
         .into_iter()
         .map(normalized_basename)
@@ -539,6 +530,18 @@ fn profile_for_process(process: &ProcessInfo) -> ProcessMatch {
             return ProcessMatch::Other;
         }
         return ProcessMatch::Opaque;
+    }
+    // Neither its name nor a runtime's target: the file it runs, for an agent
+    // that renamed itself or runs under a shared name (never a runtime's own
+    // file, which may be an agent's bundled Node or Python running something
+    // else).
+    if let Some(profile) = process
+        .exe
+        .as_deref()
+        .and_then(|exe| exe.to_str())
+        .and_then(profile_for_token)
+    {
+        return ProcessMatch::Agent(profile);
     }
     let name = normalized_basename(&process.name);
     if OPAQUE_WRAPPERS.contains(&name.as_str()) {
@@ -885,6 +888,15 @@ mod tests {
                 "/usr/bin/node"
             ),
             Some("codex")
+        );
+        // A runtime is named by what it runs, never by its own file.
+        assert_eq!(
+            agent_running(
+                "python3",
+                &["python3", "report.py"],
+                "/home/me/.local/pipx/venvs/aider-chat/bin/python3"
+            ),
+            None
         );
     }
 
