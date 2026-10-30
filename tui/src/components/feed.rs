@@ -974,42 +974,76 @@ pub fn turn_lines(messages: &[TranscriptMessage], width: usize) -> Vec<Line<'sta
     lines
 }
 
-/// What a tool call works on, in a few words: the field of its input that
-/// says (a description, a command, a path, a pattern…), else the input's
-/// first line.
+/// The fields of a tool call's JSON input that say what it works on, in
+/// order: a description first (Claude Code's and Kimi Code's Bash, Grok's
+/// shell, Droid's `Execute` `summary`), then a command, a file or folder (Grok's
+/// and Cursor's `target_*`, Droid's `directory_path`), a pattern (Droid's
+/// `patterns`, Cursor's `glob_pattern`, Amp's `filePattern`), a URL or query,
+/// and last a patch (Amp's `patchText`, Droid's `input`). rakumux.com's chats
+/// (`toolSubject`) read them in this order too, but for `summary`,
+/// `target_notebook`, `target_directory`, `glob_pattern`, `filePattern`,
+/// `search_term` and `task`.
+const SUBJECT_FIELDS: [&str; 22] = [
+    "description",
+    "summary",
+    "command",
+    "cmd",
+    "file_path",
+    "filePath",
+    "path",
+    "pattern",
+    "url",
+    "query",
+    "prompt",
+    "target_file",
+    "target_notebook",
+    "target_directory",
+    "directory_path",
+    "patterns",
+    "glob_pattern",
+    "filePattern",
+    "search_term",
+    "task",
+    "patchText",
+    "input",
+];
+
+/// What a tool call works on, in a few words: the first of its input's
+/// [`SUBJECT_FIELDS`] that says something (a string, or strings joined),
+/// else the input itself; its first line, or for a patch (`*** Begin Patch`)
+/// the first file it changes.
 fn tool_subject(input: &str) -> String {
-    const FIELDS: [&str; 10] = [
-        "description",
-        "command",
-        "cmd",
-        "file_path",
-        "filePath",
-        "path",
-        "pattern",
-        "url",
-        "query",
-        "prompt",
-    ];
     let value: Option<serde_json::Value> = serde_json::from_str(input).ok();
     let field = value.as_ref().and_then(|value| {
-        FIELDS.iter().find_map(|key| match value.get(key)? {
-            serde_json::Value::String(text) => Some(text.clone()),
-            serde_json::Value::Array(parts) => Some(
-                parts
+        SUBJECT_FIELDS.iter().find_map(|key| {
+            let text = match value.get(key)? {
+                serde_json::Value::String(text) => text.clone(),
+                serde_json::Value::Array(parts) => parts
                     .iter()
                     .filter_map(serde_json::Value::as_str)
                     .collect::<Vec<_>>()
                     .join(" "),
-            ),
-            _ => None,
+                _ => return None,
+            };
+            (!text.trim().is_empty()).then_some(text)
         })
     });
     let text = plain(&field.unwrap_or_else(|| input.to_owned()));
-    text.lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or_default()
-        .to_owned()
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let first = lines.next().unwrap_or_default();
+    if first == "*** Begin Patch" {
+        let file = lines.find_map(|line| {
+            ["*** Add File:", "*** Update File:", "*** Delete File:"]
+                .iter()
+                .find_map(|mark| line.strip_prefix(mark))
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+        });
+        if let Some(file) = file {
+            return file.to_owned();
+        }
+    }
+    first.to_owned()
 }
 
 /// `text` word-wrapped to `width` columns: its own line breaks kept, words
@@ -1050,8 +1084,81 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{reply_state, wrap};
+    use super::{reply_state, tool_subject, wrap};
     use rakumux_sensagent::feed::{FeedReply, ReplyFailure, ReplyStatus};
+
+    #[test]
+    fn a_tool_call_shows_what_it_works_on_whichever_agent_made_it() {
+        let cases = [
+            // Claude Code: its own description before the command.
+            (
+                r#"{"command":"cargo test","description":"Run the tests"}"#,
+                "Run the tests",
+            ),
+            (
+                r#"{"file_path":"/repo/src/lib.rs","old_string":"a"}"#,
+                "/repo/src/lib.rs",
+            ),
+            // Droid: Execute's summary, else its command (an empty one says nothing).
+            (
+                r#"{"command":"npm test","summary":"Run the login tests"}"#,
+                "Run the login tests",
+            ),
+            (r#"{"command":"cargo test","summary":""}"#, "cargo test"),
+            (r#"{"directory_path":"/repo/src"}"#, "/repo/src"),
+            (r#"{"patterns":["src/*.rs","*.toml"]}"#, "src/*.rs *.toml"),
+            (
+                r#"{"input":"*** Begin Patch\n*** Update File: /repo/src/lib.rs\n@@\n-a\n+b\n*** End Patch"}"#,
+                "/repo/src/lib.rs",
+            ),
+            // GitHub Copilot: view, create and edit name a path; bash a command.
+            (
+                r#"{"path":"/repo/README.md","view_range":[1,20]}"#,
+                "/repo/README.md",
+            ),
+            (
+                r#"{"path":"/repo/new.rs","file_text":"fn main() {}"}"#,
+                "/repo/new.rs",
+            ),
+            (r#"{"command":"ls -la","description":""}"#, "ls -la"),
+            // Cursor: a path, a file or folder to read, a glob, a search.
+            (r#"{"path":"src/app.rs","contents":"…"}"#, "src/app.rs"),
+            (r#"{"target_file":"src/main.rs"}"#, "src/main.rs"),
+            (r#"{"target_directory":"src"}"#, "src"),
+            (r#"{"glob_pattern":"**/*.ts"}"#, "**/*.ts"),
+            (r#"{"search_term":"parser bug"}"#, "parser bug"),
+            // Grok: read_file's target_file.
+            (
+                r#"{"target_file":"/repo/Cargo.toml","offset":1}"#,
+                "/repo/Cargo.toml",
+            ),
+            // Amp: Bash's cmd, glob's filePattern, a patch's first file, the oracle's task.
+            (r#"{"cmd":"make check","cwd":"/repo"}"#, "make check"),
+            (r#"{"filePattern":"**/*.go"}"#, "**/*.go"),
+            (
+                r#"{"patchText":"*** Begin Patch\n*** Add File: docs/new.md\n+hello\n*** End Patch"}"#,
+                "docs/new.md",
+            ),
+            (
+                r#"{"task":"Review the parser","files":["a.rs"]}"#,
+                "Review the parser",
+            ),
+            // Pi and Kimi Code: a command, a path, a pattern.
+            (r#"{"path":"@src/lib.rs"}"#, "@src/lib.rs"),
+            (r#"{"pattern":"TODO"}"#, "TODO"),
+            // A patch given whole (Codex), and input that isn't JSON.
+            (
+                "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch",
+                "old.txt",
+            ),
+            ("\n  ls -la\nmore", "ls -la"),
+            // Strings only: a list without any says nothing.
+            (r#"{"patterns":[1,2],"query":"rust"}"#, "rust"),
+        ];
+        for (input, subject) in cases {
+            assert_eq!(tool_subject(input), subject, "{input}");
+        }
+    }
 
     #[test]
     fn replies_wrap_at_words_and_keep_their_line_breaks() {
