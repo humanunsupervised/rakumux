@@ -1,0 +1,21 @@
+# Kimi Code 2.4.0 while the model streams a reply. Captured (80x24).
+agent: kimi
+expect: working
+process: kimi
+cmdline: kimi
+exe: /home/me/.kimi-code/bin/kimi
+title: slow please
+ms_since_output: 100
+---
+ ❯ slow please
+
+ ● Taking my time.
+
+ ● This reply streams slowly
+
+  ⠸ Working… · Tip: /web: use the Web UI for a better experience
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                          │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+ mock thinking  ~/src/project
+                                                           context: 0% (0/256k)

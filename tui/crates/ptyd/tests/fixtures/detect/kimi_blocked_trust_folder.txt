@@ -1,0 +1,23 @@
+# Kimi Code 2.4.0's first start in a folder. Captured (80x24).
+agent: kimi
+expect: blocked
+process: kimi
+cmdline: kimi
+exe: /home/me/.kimi-code/bin/kimi
+ms_since_output: 3000
+---
+me@box:~/src/project$ kimi
+ ──────────────────────────────────────────────────────────────────────────────
+  Trust this folder?
+  ↑↓ navigate · Enter select · Esc exit
+
+  /home/me/src/project
+
+  No project integrations or instructions to activate.
+
+  Trust is remembered for this folder, including future project config changes.
+  Tool approvals follow your permission settings.
+
+   ❯ Trust and continue
+     Exit
+ ──────────────────────────────────────────────────────────────────────────────

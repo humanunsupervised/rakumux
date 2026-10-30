@@ -1,0 +1,21 @@
+# Kimi Code 2.4.0 while an approved command runs: a moon frame and a tip.
+# Captured (80x24).
+agent: kimi
+expect: working
+process: kimi-code
+cmdline: kimi-code
+exe: /home/me/.kimi-code/bin/kimi
+ms_since_output: 100
+---
+ ❯ sleep now
+
+ ● Running a command · $ sleep 6 && echo slept
+
+   Approved: Running: sleep 6 && echo slept
+
+  🌕 · Tip: ctrl-s to add guidance without waiting for the turn to finish
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                          │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+ mock thinking  ~/src/project                         /init: generate AGENTS.md
+                                                         context: 1% (120/256k)

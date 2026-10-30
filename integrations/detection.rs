@@ -42,6 +42,8 @@ mod copilot;
 mod cursor;
 #[path = "grok/detection.rs"]
 mod grok;
+#[path = "kimi/detection.rs"]
+mod kimi;
 #[path = "open-code/detection.rs"]
 mod opencode;
 #[path = "pi/detection.rs"]
@@ -55,6 +57,9 @@ use copilot::PROFILE as COPILOT;
 use cursor::is_cursor_activity_line;
 use cursor::PROFILE as CURSOR_AGENT;
 use grok::PROFILE as GROK;
+use kimi::PROFILE as KIMI;
+#[cfg(test)]
+use kimi::{has_kimi_context_usage, is_kimi_activity_line};
 #[cfg(test)]
 use opencode::has_opencode_progress_bar;
 use opencode::PROFILE as OPENCODE;
@@ -178,10 +183,10 @@ static PROFILES: &[Profile] = &[
     CURSOR_AGENT,
     COPILOT,
     GROK,
+    KIMI,
     generic("amp", &["amp"], &[&["@sourcegraph", "amp"]]),
     generic("droid", &["droid"], &[]),
     generic("crush", &["crush"], &[&["@charmland", "crush"]]),
-    generic("kimi", &["kimi"], &[]),
     generic("kiro", &["kiro-cli"], &[]),
     generic("cline", &["cline"], &[]),
     generic("auggie", &["auggie"], &[&["@augmentcode", "auggie"]]),
@@ -792,8 +797,13 @@ mod tests {
                 "{name}"
             );
         }
-        // Kimi Code's native binary renames itself and wipes its arguments.
-        assert_eq!(agent_of("kimi-code", &["kimi-code"]), None);
+        // Kimi Code's native binary renames itself and wipes its arguments,
+        // cut to fit (`kimi-co`): its file still says which agent it is.
+        assert_eq!(agent_of("kimi-co", &["kimi-co"]), None);
+        assert_eq!(
+            agent_running("kimi-co", &["kimi-co"], "/home/me/.kimi-code/bin/kimi"),
+            Some("kimi")
+        );
         assert_eq!(
             agent_running("kimi-code", &["kimi-code"], "/home/me/.kimi-code/bin/kimi"),
             Some("kimi")
@@ -830,6 +840,69 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn kimi_code_is_named_whatever_its_title_was_cut_to() {
+        let exe = "/home/me/.kimi-code/bin/kimi";
+        // `process.title = "kimi-code"` fits the room its arguments had:
+        // bare `kimi` stays `kimi`, `kimi -c` shows as `kimi-co`.
+        for name in ["kimi", "kimi-c", "kimi-co", "kimi-cod", "kimi-code"] {
+            assert_eq!(agent_running(name, &[name], exe), Some("kimi"), "{name}");
+        }
+        assert_eq!(agent_of("kimi", &["kimi"]), Some("kimi"));
+        assert_eq!(agent_of("kimi-code", &["kimi-code"]), Some("kimi"));
+        // An npm install: before the title, and after it (it wipes argv).
+        assert_eq!(
+            agent_of(
+                "node",
+                &[
+                    "node",
+                    "/usr/lib/node_modules/@moonshot-ai/kimi-code/dist/main.mjs"
+                ]
+            ),
+            Some("kimi")
+        );
+        assert_eq!(
+            agent_running("kimi-code", &["kimi-code"], "/usr/bin/node"),
+            Some("kimi")
+        );
+        // The archived Python CLI: its title, its renamed shim, a module.
+        assert_eq!(agent_of("Kimi Code", &["Kimi Code"]), Some("kimi"));
+        assert_eq!(agent_of("kimi-legacy", &["kimi-legacy"]), Some("kimi"));
+        assert_eq!(
+            agent_of("python3", &["python3", "-m", "kimi_cli"]),
+            Some("kimi")
+        );
+        // Kimi Code 2.x titles the terminal with the chat's title.
+        assert_eq!(identify(None, "Kimi Code").map(|p| p.label), Some("kimi"));
+        assert_eq!(identify(None, "fix the parser").map(|p| p.label), None);
+    }
+
+    #[test]
+    fn kimi_activity_and_context_lines() {
+        for line in [
+            "⠸ Working… · Tip: /web: use the Web UI for a better experience",
+            "⠋ Working…",
+            "⠙ Compacting…",
+            "🌕 · Tip: ctrl-s to add guidance without waiting for the turn to finish",
+            "🌑",
+        ] {
+            assert!(is_kimi_activity_line(line), "{line}");
+        }
+        for line in [
+            "● Working… on it",
+            "⠸ done",
+            "🌕 full moon tonight",
+            "Working…",
+            "",
+        ] {
+            assert!(!is_kimi_activity_line(line), "{line}");
+        }
+        assert!(has_kimi_context_usage("context: 0% (0/256k)"));
+        assert!(has_kimi_context_usage("context: 12.5% (32k/256k)"));
+        assert!(!has_kimi_context_usage("context: high"));
+        assert!(!has_kimi_context_usage("the context: 5% (x)"));
     }
 
     #[test]
@@ -1354,6 +1427,7 @@ mod tests {
             ("cursor-agent", &[Working, Blocked, Idle]),
             ("copilot", &[Working, Blocked, Idle]),
             ("grok", &[Working, Blocked, Idle]),
+            ("kimi", &[Working, Blocked, Idle]),
         ];
         for (agent, states) in required {
             for state in *states {

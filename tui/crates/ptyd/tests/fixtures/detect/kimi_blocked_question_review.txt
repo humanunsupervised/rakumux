@@ -1,0 +1,25 @@
+# Kimi Code 2.4.0 reviewing a question's answer before it's sent. Captured
+# (80x24).
+agent: kimi
+expect: blocked
+process: kimi-code
+cmdline: kimi-code
+exe: /home/me/.kimi-code/bin/kimi
+ms_since_output: 3000
+---
+ ❯ ask me
+ ──────────────────────────────────────────────────────────────────────────────
+  Review your answer before submit
+
+   Q  Which colour?
+   →  Red
+
+  Ready to submit your answers?
+
+   → [1] Submit
+     [2] Cancel
+
+   ↑↓ select  1/2 choose  ↵ confirm  ←/→/tab switch  esc cancel
+ ──────────────────────────────────────────────────────────────────────────────
+ mock thinking  ~/src/project
+                                                         context: 1% (120/256k)

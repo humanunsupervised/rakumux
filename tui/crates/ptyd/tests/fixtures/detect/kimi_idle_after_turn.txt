@@ -1,0 +1,21 @@
+# Kimi Code 2.4.0 after a finished turn; resumed (`kimi -r …`), so its
+# title fit: `kimi-code`, arguments wiped. Captured (80x24).
+agent: kimi
+expect: idle
+process: kimi-code
+cmdline: kimi-code
+exe: /home/me/.kimi-code/bin/kimi
+title: slow please
+ms_since_output: 2000
+---
+ ❯ slow please
+
+ ● Taking my time.
+
+ ● This reply streams slowly so the turn stays busy for a while longer.
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                          │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+ mock thinking  ~/src/project
+                                                         context: 1% (120/256k)

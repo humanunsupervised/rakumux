@@ -1,0 +1,28 @@
+# Kimi Code 2.4.0 asking to run a command (Always Ask mode): the panel
+# replaces the input box between two rules. Captured (80x24).
+agent: kimi
+expect: blocked
+process: kimi-code
+cmdline: kimi-code
+exe: /home/me/.kimi-code/bin/kimi
+ms_since_output: 3000
+---
+ ❯ sleep now
+
+ ● Running a command · $ sleep 6 && echo slept
+ ──────────────────────────────────────────────────────────────────────────────
+   ▶ Run this command?
+
+   cwd: /home/me/src/project
+   $ sleep 6 && echo slept
+     Wait a bit
+
+   ▶ 1. Approve once
+     2. Approve for this session
+     3. Reject
+     4. Reject with feedback
+
+   ↑/↓ select · 1/2/3/4 choose · ↵ confirm
+ ──────────────────────────────────────────────────────────────────────────────
+ mock thinking  ~/src/project                                     ctrl+o expand
+                                                         context: 1% (120/256k)

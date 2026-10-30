@@ -1,0 +1,20 @@
+# A reply that quotes Kimi's approval and question hints above the input
+# box: no panel is open, so it waits for the user to type.
+agent: kimi
+expect: idle
+process: kimi-code
+cmdline: kimi-code
+exe: /home/me/.kimi-code/bin/kimi
+ms_since_output: 2000
+---
+ ❯ how do approvals look?
+
+ ● They list choices such as "1. Approve once" and "4. Reject with feedback",
+   with "↑/↓ select · 1/2/3/4 choose · ↵ confirm" under them; questions say
+   "↵ choose". Run this command? Trust this folder?
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                          │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+ mock thinking  ~/src/project
+                                                         context: 1% (120/256k)

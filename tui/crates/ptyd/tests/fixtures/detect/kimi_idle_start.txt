@@ -1,0 +1,29 @@
+# Kimi Code 2.4.0 after start, folder trusted, nothing sent yet. Captured
+# (80x24) from the native binary started as `kimi`, whose title stays `kimi`.
+agent: kimi
+expect: idle
+process: kimi
+cmdline: kimi
+exe: /home/me/.kimi-code/bin/kimi
+ms_since_output: 3000
+---
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │                                                                            │
+ │  ▐█▛█▛█▌  Welcome to Kimi Code!                                            │
+ │  ▐█████▌  Send /help for help information.                                 │
+ │                                                                            │
+ │  Directory: /home/me/src/project                                           │
+ │  Session:                                                                  │
+ │  Model:     mock                                                           │
+ │  Version:   2.4.0                                                          │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+
+   No session yet — one will be created on your first message.
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                          │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+ mock thinking  ~/src/project
+                                                           context: 0% (0/256k)

@@ -1,0 +1,26 @@
+# Kimi Code 2.4.0 asking a question (AskUserQuestion). Captured (80x24).
+agent: kimi
+expect: blocked
+process: kimi-code
+cmdline: kimi-code
+exe: /home/me/.kimi-code/bin/kimi
+ms_since_output: 3000
+---
+ ❯ ask me
+ ──────────────────────────────────────────────────────────────────────────────
+  question
+
+   Colour    Submit
+
+  ? Which colour?
+
+   → [1] Red
+         red
+     [2] Blue
+         blue
+     [3] Other
+
+   ↑↓ select  1-3 / ↵ choose  ←/→/tab switch  esc cancel
+ ──────────────────────────────────────────────────────────────────────────────
+ mock thinking  ~/src/project
+                                                         context: 1% (120/256k)
