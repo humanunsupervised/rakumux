@@ -7,7 +7,8 @@
 //! Plugins run as `amp …/plugin-runtime.ts` children in the same process
 //! group, so the foreground stays `amp`.
 //!
-//! Approval dialogs carry `Allow Once`, `Always Allow for Me`, `Always Allow
+//! Signed out, it asks whether to log in before drawing anything. Approval
+//! dialogs carry `Allow Once`, `Always Allow for Me`, `Always Allow
 //! for Workspace`, `Reject` and `Reject with feedback`, under `Waiting for
 //! approval` (Amp's own strings). Its TUI animates while idle, so recent
 //! output says nothing; a braille spinner in the title is the only busy
@@ -22,6 +23,11 @@ pub(super) const PROFILE: Profile = Profile {
     title_hint: |_| false,
     blocked: &[
         marker(Region::Bottom(20), Test::Any(&["waiting for approval"])),
+        // Signed out, before its TUI: `Would you like to log in to Amp? [(y)es, (n)o]:`.
+        marker(
+            Region::Bottom(3),
+            Test::Any(&["would you like to log in to amp?"]),
+        ),
         marker(
             Region::Bottom(20),
             Test::And(

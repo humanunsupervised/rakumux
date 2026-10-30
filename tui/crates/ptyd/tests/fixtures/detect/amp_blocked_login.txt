@@ -1,0 +1,13 @@
+# Amp signed out: it asks before its TUI starts. Captured from Amp
+# 0.0.1793318446 with an empty home.
+agent: amp
+expect: blocked
+process: amp
+cmdline: amp
+exe: /home/me/.amp/bin/amp
+alternate_screen: false
+ms_since_output: 5000
+---
+$ amp
+No API key found. Starting login flow...
+Would you like to log in to Amp? [(y)es, (n)o]:
