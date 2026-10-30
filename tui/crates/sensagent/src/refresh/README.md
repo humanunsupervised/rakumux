@@ -51,15 +51,21 @@ instead of sent.
   visible. It is refreshed once output pauses for `QUIET_PERIOD` (5 s), or after a whole
   interval of continuous output, and never inside the interval. The stamp is advanced
   only when the refresh starts.
-- **Followed turns.** A session whose agent turn the daemon follows is refreshed at once
-  at each of the turn's trigger points (see the source tracker), never for terminal
-  output; backoff, the budget and the two slots still apply. The turn settings are read
-  again every minute (`with_turn_settings`).
+- **Followed turns.** A session whose agent turn the daemon follows is summarised once
+  per chat (at its agent's `every` (5) messages or its final reply, whichever comes
+  first) and when asked, never for terminal output; backoff, the budget and the two
+  slots still apply. A summary is of the latest prompt and what the agent wrote about
+  it, and stays the prompt's while the agent goes on, so its title still names the
+  session when it arrives. The turn settings are read again every minute
+  (`with_turn_settings`).
+- **Asked for.** A summary asked for (`request`) whose attempt was interrupted (a new
+  prompt or another change of the session meanwhile, a rate limit) stays asked for and
+  is tried again after `INTERRUPTED_RETRY` (5 s), of what the session shows then.
 - **Order.** Sessions whose stamp changed at once (lifecycle such as blocked/done, the
   session's report, a new terminal, privacy or folder) come first, then sessions with
   pending output; within each, the one refreshed longest ago, new sessions first.
-  Lifecycle changes hide old text at once; the new request still waits for the
-  session's interval and the budget.
+  Lifecycle changes (for a followed turn, its next prompt) hide old text at once; the
+  new request still waits for the session's interval and the budget.
 - **Backfill** after consent or startup is bounded by the budget and the two slots: 12
   sessions a minute at most.
 - Consent and account controls (`enable`, `disable`, `set_account_session`,

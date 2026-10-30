@@ -22,11 +22,14 @@ Each change is applied to the policy at once and cancels affected jobs.
 - **Immediate revision** when liveness, folder (`project_relocate`), privacy, native
   lifecycle or the session's own report changes. Older cached text is hidden at once.
 - **Followed turns.** While the daemon follows a session's agent turn
-  (`SessionView::agent_turn`), its lifecycle and messages count only through the turn's
-  trigger point (`TurnSettings`): a new prompt, every `every` (5) messages while working,
-  blocked, and the final reply (lifecycle done or idle; then every message, so a reply read
-  after the lifecycle changed counts). Each is an immediate revision; output and activity
-  phases mark nothing dirty.
+  (`SessionView::agent_turn`), what its summary and title are made from is the turn: its
+  prompt and what the agent writes about it. A new prompt (another turn, or the same
+  number in another chat) is an immediate revision; the agent's messages and its
+  lifecycle (working, blocked, its final reply) are not, so a summary started or asked
+  for during the turn still applies, title included, when it arrives, and its text stays
+  until the next prompt. Output and activity phases mark nothing dirty. The scheduler
+  reads the turn's messages and lifecycle from `candidates` (a chat's automatic summary at
+  `every` (5) messages or its final reply).
 - **Coalesced revision** for output (`activity` events, throttled by the daemon) and
   activity-phase changes. They only mark the session dirty (`is_dirty`); the owner
   calls `advance` when its refresh budget allows another generation. Cached text stays
@@ -62,10 +65,14 @@ requires explicit consent confirmation, and confirming consent clears the cache.
    client (a session caller is refused before any request). It reads the session with
    `get`, requires the expected folder, liveness, pid, privacy, lifecycle and report,
    reads `RecentUnwrapped` text (200 rows) only for report-and-output jobs, and reads
-   the session again. For a followed turn it reads `session_turn` instead: the prompt and
-   the newest `recent` (10) messages while working, every message that fits once finished,
-   within 6 KiB so the builder's tail selection keeps the prompt. Any difference, including a saved-scrollback fallback after the
-   terminal ended, is `Changed`. Cancellation is checked around every request.
+   the session again. For a followed turn it reads `session_turn` instead: the latest
+   prompt, then the newest `recent` (10) of the agent's messages since it while working,
+   every message that fits once finished, within 6 KiB so the builder's tail selection
+   keeps the prompt; a prompt not answered yet goes alone. Never the screen, and never
+   a message from before the prompt. The turn's messages and lifecycle may move on
+   between the reads; another prompt can't. Any other difference, including a
+   saved-scrollback fallback after the terminal ended, is `Changed`. Cancellation is
+   checked around every request.
 3. Back on the owner thread, pass the capture to `build_capture` with the same job. A
    capture carries its job's local correlation, so another job's capture is refused.
    The coordinator rechecks the job, so a fencing event applied during capture still

@@ -249,6 +249,31 @@ fn an_interrupted_summary_is_tried_again_shortly() {
 }
 
 #[test]
+fn an_interrupted_summary_asked_for_is_still_asked_for() {
+    let mut scheduler = RefreshScheduler::new();
+    scheduler.summarized(&session(1), "c1".into());
+    scheduler.request(&session(1));
+    let due = plan(
+        &mut scheduler,
+        secs(0),
+        vec![candidate(1, turn("c1", 9), false)],
+    );
+    scheduler.started(&due[0], secs(0));
+    assert!(scheduler.asked(&session(1)));
+    // The next prompt came meanwhile, say: its summary is the one asked for.
+    scheduler.finished(&session(1), Outcome::Interrupted, secs(1));
+    assert!(scheduler.requested(&session(1)) && !scheduler.asked(&session(1)));
+    let next = || vec![candidate(1, turn("c1", 0), false)];
+    assert!(plan(&mut scheduler, secs(5), next()).is_empty());
+    let due = plan(&mut scheduler, secs(6), next());
+    assert_eq!(due.len(), 1);
+    scheduler.started(&due[0], secs(6));
+    scheduler.finished(&session(1), Outcome::Done, secs(7));
+    assert!(!scheduler.requested(&session(1)));
+    assert!(plan(&mut scheduler, secs(60), next()).is_empty());
+}
+
+#[test]
 fn a_rate_limit_pauses_everything_and_a_refusal_stops_until_reset() {
     let mut scheduler = RefreshScheduler::new();
     scheduler.request(&session(1));

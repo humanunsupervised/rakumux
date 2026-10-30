@@ -590,7 +590,7 @@ fn candidate(tracker: &SourceTracker, number: u32) -> Candidate {
 }
 
 #[test]
-fn a_followed_turn_advances_at_its_prompt_every_fifth_message_and_its_reply() {
+fn a_followed_turn_is_one_source_from_its_prompt_to_the_next() {
     let mut tracker = SourceTracker::new();
     assert_eq!(
         observed(tracker.apply_view(&turn_view(1, 7, 0, Lifecycle::Working))).stamp,
@@ -598,12 +598,28 @@ fn a_followed_turn_advances_at_its_prompt_every_fifth_message_and_its_reply() {
     );
     let first = candidate(&tracker, 1);
     assert!(first.follows_turn && !first.finished);
-    for messages in 1..5 {
+    // Its messages, waiting for the user and working again, and its final
+    // reply (read before or after the lifecycle changed) are all the prompt's:
+    // a summary or title made from it on the way still applies.
+    for messages in 1..12 {
         unchanged(tracker.apply_view(&turn_view(1, 7, messages, Lifecycle::Working)));
     }
+    unchanged(tracker.apply_view(&turn_view(1, 7, 12, Lifecycle::Blocked)));
+    unchanged(tracker.apply_view(&turn_view(1, 7, 13, Lifecycle::Working)));
+    let done = SessionEvent::Lifecycle {
+        lifecycle: Lifecycle::Done,
+    };
+    unchanged(tracker.apply_event(&envelope(1, done)));
+    assert!(candidate(&tracker, 1).finished);
+    unchanged(tracker.apply_view(&turn_view(1, 7, 14, Lifecycle::Done)));
+    unchanged(tracker.apply_view(&turn_view(1, 7, 14, Lifecycle::Idle)));
+    assert_eq!(
+        candidate(&tracker, 1).turn.map(|turn| turn.messages),
+        Some(14)
+    );
     // Terminal output and activity phases don't count while a turn is followed.
     unchanged(tracker.apply_event(&envelope(1, SessionEvent::Activity)));
-    let mut busy = turn_view(1, 7, 4, Lifecycle::Working);
+    let mut busy = turn_view(1, 7, 14, Lifecycle::Idle);
     busy.activity = Some(AgentActivity {
         phase: ActivityPhase::RunningTool,
         active_subagents: 0,
@@ -612,57 +628,38 @@ fn a_followed_turn_advances_at_its_prompt_every_fifth_message_and_its_reply() {
     unchanged(tracker.apply_view(&busy));
     assert!(!tracker.is_dirty(&id(1)));
 
-    let fifth = observed(tracker.apply_view(&turn_view(1, 7, 5, Lifecycle::Working)));
-    assert_eq!(fifth.stamp, stamp(1, 2));
-    assert!(fifth.context.recent_output);
-    unchanged(tracker.apply_view(&turn_view(1, 7, 9, Lifecycle::Working)));
-    assert_eq!(
-        observed(tracker.apply_view(&turn_view(1, 7, 10, Lifecycle::Working))).stamp,
-        stamp(1, 3)
-    );
-    // Waiting for the user, and working again.
-    assert_eq!(
-        observed(tracker.apply_view(&turn_view(1, 7, 10, Lifecycle::Blocked))).stamp,
-        stamp(1, 4)
-    );
-    assert_eq!(
-        observed(tracker.apply_view(&turn_view(1, 7, 11, Lifecycle::Working))).stamp,
-        stamp(1, 5)
-    );
-    // The final reply, and one the daemon read after the lifecycle changed.
-    let done = SessionEvent::Lifecycle {
-        lifecycle: Lifecycle::Done,
-    };
-    assert_eq!(
-        observed(tracker.apply_event(&envelope(1, done))).stamp,
-        stamp(1, 6)
-    );
-    assert!(candidate(&tracker, 1).finished);
-    assert_eq!(
-        observed(tracker.apply_view(&turn_view(1, 7, 12, Lifecycle::Done))).stamp,
-        stamp(1, 7)
-    );
-    // Looked at: still the same reply.
-    unchanged(tracker.apply_view(&turn_view(1, 7, 12, Lifecycle::Idle)));
-    // The next prompt.
-    assert_eq!(
-        observed(tracker.apply_view(&turn_view(1, 8, 0, Lifecycle::Working))).stamp,
-        stamp(1, 8)
-    );
+    // The next prompt, and the same turn number in another chat.
+    let next = observed(tracker.apply_view(&turn_view(1, 8, 0, Lifecycle::Idle)));
+    assert_eq!(next.stamp, stamp(1, 2));
+    assert!(next.context.recent_output);
+    let mut other_chat = turn_view(1, 8, 0, Lifecycle::Idle);
+    if let Some(turn) = other_chat.agent_turn.as_mut() {
+        turn.conversation_id = Some("synthetic-other-chat".into());
+    }
+    assert_eq!(observed(tracker.apply_view(&other_chat)).stamp, stamp(1, 3));
+    // The agent exits: its lifecycle is the session's again.
+    assert_eq!(observed(tracker.apply_view(&view(1))).stamp, stamp(1, 4));
 }
 
 #[test]
-fn a_no_context_turn_is_read_again_once_it_moves_on() {
+fn a_no_context_turn_is_read_again_when_asked_or_at_its_next_prompt() {
     let mut tracker = SourceTracker::new();
     observed(tracker.apply_view(&turn_view(1, 7, 0, Lifecycle::Working)));
     let source = observed(tracker.no_context(&read(1, stamp(1, 1), false, true)));
     assert!(!source.context.recent_output);
-    let source = observed(tracker.apply_view(&turn_view(1, 7, 5, Lifecycle::Working)));
+    unchanged(tracker.apply_view(&turn_view(1, 7, 5, Lifecycle::Working)));
+    // Due (its chat's fifth message, or asked for): read afresh.
+    tracker.freshen(&id(1));
+    let source = observed(tracker.advance(&id(1)));
+    assert!(source.context.recent_output);
+    let source = observed(tracker.no_context(&read(1, source.stamp, false, true)));
+    assert!(!source.context.recent_output);
+    let source = observed(tracker.apply_view(&turn_view(1, 8, 0, Lifecycle::Working)));
     assert!(source.context.recent_output);
 }
 
 #[test]
-fn turn_settings_choose_the_trigger_points() {
+fn turn_settings_are_bounded_and_unfollowed_output_still_counts() {
     let mut tracker = SourceTracker::new();
     tracker.set_turn_settings(TurnSettings {
         every: 2,
@@ -676,10 +673,9 @@ fn turn_settings_choose_the_trigger_points() {
         }
     );
     observed(tracker.apply_view(&turn_view(1, 7, 1, Lifecycle::Working)));
-    assert_eq!(
-        observed(tracker.apply_view(&turn_view(1, 7, 2, Lifecycle::Working))).stamp,
-        stamp(1, 2)
-    );
+    // The chat's automatic summary is due at `every` (the scheduler's); the
+    // turn stays one source.
+    unchanged(tracker.apply_view(&turn_view(1, 7, 2, Lifecycle::Working)));
     // Without a followed turn (an older daemon), output counts as before.
     observed(tracker.apply_view(&view(2)));
     let _ = tracker

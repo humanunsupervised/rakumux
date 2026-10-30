@@ -48,7 +48,7 @@ pub(crate) struct Candidate {
     /// The agent just finished a turn (native lifecycle `Done`).
     pub(crate) finished: bool,
     /// The daemon follows the agent's turn: its stamps advance only at the turn's
-    /// trigger points (see [`TurnSettings`]).
+    /// next prompt (see [`Facts::same`]).
     pub(crate) follows_turn: bool,
     /// The followed turn: its chat and how many messages the agent wrote.
     pub(crate) turn: Option<AgentTurn>,
@@ -86,8 +86,9 @@ impl TurnSettings {
 }
 
 /// Daemon facts that supersede a source revision at once: incarnation, liveness,
-/// folder, privacy, progress (native lifecycle, or the followed turn's trigger
-/// point) and the session's own report. Compare them with [`Facts::same`].
+/// folder, privacy, the session's own report, and what its text is about: the
+/// followed turn (its prompt), else the native lifecycle. Compare them with
+/// [`Facts::same`].
 #[derive(Clone)]
 pub(super) struct Facts {
     pub(super) scope: ScopeRoot,
@@ -105,15 +106,18 @@ pub(super) struct Facts {
 pub(super) enum Progress {
     /// No followed turn: the native lifecycle.
     Lifecycle(Lifecycle),
-    /// A followed turn's trigger point.
-    Turn {
-        id: u64,
-        state: TurnState,
-        /// Working or blocked: how many times the agent wrote `every` messages.
-        /// Finished: every message, so a reply read after the lifecycle changed
-        /// is summarized too.
-        mark: u32,
-    },
+    /// A followed turn, and how far its agent got.
+    Turn { id: u64, state: TurnState },
+}
+
+/// What a summary and its title are made from, so what makes them out of date:
+/// a followed turn, its prompt, whatever its agent writes about it and however
+/// its lifecycle moves meanwhile, until the next prompt (or chat); without one,
+/// the native lifecycle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Subject<'a> {
+    Lifecycle(Lifecycle),
+    Turn { id: u64, chat: Option<&'a str> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,7 +151,7 @@ impl Facts {
         self.turn.is_some()
     }
 
-    pub(super) fn progress(&self, every: u32) -> Progress {
+    pub(super) fn progress(&self) -> Progress {
         let Some(turn) = &self.turn else {
             return Progress::Lifecycle(self.lifecycle);
         };
@@ -156,26 +160,30 @@ impl Facts {
             Lifecycle::Blocked => TurnState::Blocked,
             _ => TurnState::Working,
         };
-        let mark = match state {
-            TurnState::Finished => turn.messages,
-            _ => turn.messages / every.max(1),
-        };
-        Progress::Turn {
-            id: turn.id,
-            state,
-            mark,
+        Progress::Turn { id: turn.id, state }
+    }
+
+    fn subject(&self) -> Subject<'_> {
+        match &self.turn {
+            Some(turn) => Subject::Turn {
+                id: turn.id,
+                chat: turn.conversation_id.as_deref(),
+            },
+            None => Subject::Lifecycle(self.lifecycle),
         }
     }
 
-    /// Whether `other` describes the same source: a followed turn's lifecycle and
-    /// messages count only through its trigger point.
-    pub(super) fn same(&self, other: &Facts, every: u32) -> bool {
+    /// Whether `other` describes the same source. A followed turn is one source
+    /// from its prompt to the next: its messages and lifecycle don't change what
+    /// a title made from it says, so a title asked for or made on the way still
+    /// names the session when it arrives.
+    pub(super) fn same(&self, other: &Facts) -> bool {
         self.scope == other.scope
             && self.live == other.live
             && self.pid == other.pid
             && self.private == other.private
             && self.reported == other.reported
-            && self.progress(every) == other.progress(every)
+            && self.subject() == other.subject()
     }
 }
 
@@ -350,7 +358,7 @@ impl SourceTracker {
                 stamp: tracked.stamp,
                 dirty: tracked.dirty,
                 finished: matches!(
-                    tracked.facts.progress(self.turns.every),
+                    tracked.facts.progress(),
                     Progress::Lifecycle(Lifecycle::Done)
                         | Progress::Turn {
                             state: TurnState::Finished,
@@ -495,7 +503,7 @@ impl SourceTracker {
             tracked.reports = has_report(&facts);
             tracked.output = true;
             tracked.dirty = false;
-        } else if !facts.same(&tracked.facts, self.turns.every) {
+        } else if !facts.same(&tracked.facts) {
             revise(tracked)?;
             if facts.reported != tracked.facts.reported {
                 tracked.reports = has_report(&facts);
@@ -504,16 +512,15 @@ impl SourceTracker {
                 tracked.incarnation = facts.pid;
             }
             // The new revision is captured afresh, so it covers pending output too;
-            // a followed turn that moved on has new messages.
-            let progressed = facts.follows_turn()
-                && facts.progress(self.turns.every) != tracked.facts.progress(self.turns.every);
+            // a new followed turn has a new prompt.
+            let progressed = facts.follows_turn() && facts.subject() != tracked.facts.subject();
             tracked.output |= tracked.dirty || progressed;
             tracked.dirty = false;
         } else {
             if phase != tracked.phase {
                 tracked.dirty |= output_counts(&facts);
             }
-            // Messages and lifecycle changes between a turn's trigger points.
+            // A followed turn's messages and lifecycle changes.
             tracked.facts = facts;
             tracked.phase = phase;
             return Ok(SourceUpdate::Unchanged);
@@ -559,7 +566,7 @@ fn revise(tracked: &mut Tracked) -> Result<(), SourceError> {
 }
 
 /// Whether new terminal output or activity calls for a new summary: not while the
-/// daemon follows the agent's turn, whose own trigger points decide.
+/// daemon follows the agent's turn, whose prompt and messages decide.
 fn output_counts(facts: &Facts) -> bool {
     facts.live && !facts.follows_turn()
 }

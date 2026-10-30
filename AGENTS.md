@@ -151,9 +151,15 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    it consents for the folders of live sessions (never private ones), and off it stops. **One
    title per chat**: an agent conversation the daemon follows (`session_turn`) is titled once,
    when its agent has written 5 messages (`sessions.ai_summary.every_messages`) or its turn
-   finishes sooner, from the prompt and its messages (never the screen); after that only when
-   asked: `OwnerRequest::Summarize` (the ↻ after a hovered session's name, or `s`), from the
-   latest prompt and the newest messages, or the screen for other programs. Nothing refreshes on
+   finishes sooner; after that only when asked: `OwnerRequest::Summarize` (the ↻ after a
+   hovered session's name, or `s`). **A title is made from the latest prompt** and what the
+   agent wrote since (the newest 10 messages while it works, as many as fit once it finished),
+   or the prompt alone while it has written nothing yet; never from an earlier turn's messages,
+   never the screen (only for other programs, whose turns the daemon doesn't follow). A
+   followed turn is one source from its prompt to the next (`source/tracker.rs`, `Facts::same`):
+   its messages and lifecycle moving on while a title is made don't discard it; a new prompt
+   (or chat) does, and one asked for is then made again of the new prompt
+   (`RefreshScheduler::finished`). Nothing refreshes on
    a timer. **The title names the session** (`refresh/titles.rs`): a worker renames it through
    the daemon (`session_rename`, as the user) only while its name is the generated one
    (`auto_named`) or exactly the title the service last gave it (kept per session in

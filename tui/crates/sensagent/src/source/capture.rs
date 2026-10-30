@@ -199,8 +199,8 @@ impl CaptureExpectation {
             if job.is_canceled() {
                 return Err(CaptureError::Canceled);
             }
-            match self.facts.progress(self.turns.every) {
-                Progress::Turn { id, state, .. } => {
+            match self.facts.progress() {
+                Progress::Turn { id, state } => {
                     let turn = api.turn(&self.session).map_err(failure)?;
                     if turn.id != id {
                         return Err(CaptureError::Changed);
@@ -251,7 +251,7 @@ impl CaptureExpectation {
             return Err(CaptureError::Canceled);
         }
         let view = api.get(&self.session).map_err(failure)?;
-        if view.id != self.session || !Facts::of(&view).same(&self.facts, self.turns.every) {
+        if view.id != self.session || !Facts::of(&view).same(&self.facts) {
             return Err(CaptureError::Changed);
         }
         if job.is_canceled() {

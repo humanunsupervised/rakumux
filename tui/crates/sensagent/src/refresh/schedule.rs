@@ -227,7 +227,7 @@ impl RefreshScheduler {
             return;
         };
         let auto = timing.auto.take();
-        timing.asked = false;
+        let asked = std::mem::take(&mut timing.asked);
         match outcome {
             Outcome::Done => {
                 timing.failure = None;
@@ -236,6 +236,9 @@ impl RefreshScheduler {
             }
             Outcome::Interrupted => {
                 timing.retry_at = Some(now.saturating_add(INTERRUPTED_RETRY));
+                // Asked for and not made (the user typed the next prompt
+                // meanwhile, say): still asked for, of what the session shows then.
+                timing.requested |= asked;
             }
             Outcome::Failed(RefreshFailure::Rejected) => {
                 // Can't be sent: not tried again unless asked.

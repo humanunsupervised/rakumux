@@ -605,32 +605,90 @@ fn an_unauthorized_account_stops_refreshing_until_consent_is_confirmed_again() {
     assert!(ready(&harness.status(3)));
 }
 
+/// A program whose turns the daemon doesn't follow: its lifecycle is what its
+/// summary is about.
+fn unfollowed(number: u8, lifecycle: Lifecycle) -> SessionView {
+    let mut view = plain_view(number);
+    view.lifecycle = lifecycle;
+    view
+}
+
 #[test]
 fn a_session_changed_during_capture_is_corrected_from_the_daemon() {
-    let api = api(&[blocked(2)]);
+    let api = api(&[unfollowed(2, Lifecycle::Blocked)]);
     let mut harness = Harness::enabled(ReplyMode::Success);
     harness
         .refresher
-        .resync(&[tracked_view(2)], secs(0))
+        .resync(&[unfollowed(2, Lifecycle::Working)], secs(0))
         .unwrap();
     let working = harness.refresher.source_stamp(&session(2)).unwrap();
+    harness.refresher.request(&session(2));
     assert_eq!(harness.round(&api, 0), 1);
     assert_eq!(harness.calls(), 0);
     assert!(api.reads().is_empty());
-    // The fresh view was applied: a new revision, and no failure to show.
+    // The fresh view was applied: a new revision, and no failure to show. It's
+    // still asked for: tried again shortly, with the corrected view.
     assert!(harness.refresher.source_stamp(&session(2)).unwrap() > working);
     assert_eq!(
         harness.status(2),
         AIStatus {
             view: StatusView::Missing,
             failure: None,
-            refreshing: false,
+            refreshing: true,
         }
     );
-
-    // Tried again shortly, with the corrected view.
     assert_eq!(harness.round(&api, 4), 0);
     assert_eq!(harness.round(&api, 5), 1);
+    assert!(ready(&harness.status(2)));
+    assert_eq!(sent_lifecycles(&harness), ["blocked"]);
+}
+
+#[test]
+fn a_turn_changed_during_capture_is_read_again_at_its_prompt() {
+    let mut next = tracked_view(2);
+    next.agent_turn = Some(AgentTurn {
+        id: 2,
+        messages: 5,
+        conversation_id: Some("synthetic-conversation-2".into()),
+    });
+    let api = api(&[next]);
+    api.set_turn(prompted(
+        2,
+        "Write the release notes",
+        &["Reading the log"; 5],
+    ));
+    let mut harness = Harness::enabled(ReplyMode::Success);
+    harness
+        .refresher
+        .resync(&[tracked_view(2)], secs(0))
+        .unwrap();
+    // Planned for the first prompt; the daemon is on the next one.
+    assert_eq!(harness.round(&api, 0), 1);
+    assert_eq!(harness.calls(), 0);
+    assert_eq!(harness.round(&api, 5), 1);
+    assert!(ready(&harness.status(2)));
+    assert!(
+        sent_outputs(&harness)[0].starts_with("The user's last prompt:\nWrite the release notes\n")
+    );
+}
+
+#[test]
+fn a_followed_turn_moving_on_during_capture_is_still_summarised() {
+    // The capture finds the agent waiting for the user and more messages
+    // than planned for: the same prompt, so the same summary and title.
+    let mut waiting = blocked(2);
+    waiting.agent_turn = Some(AgentTurn {
+        id: 1,
+        messages: 7,
+        conversation_id: Some("synthetic-conversation-2".into()),
+    });
+    let api = api(&[waiting]);
+    let mut harness = Harness::enabled(ReplyMode::Success);
+    harness
+        .refresher
+        .resync(&[tracked_view(2)], secs(0))
+        .unwrap();
+    assert_eq!(harness.round(&api, 0), 1);
     assert!(ready(&harness.status(2)));
     assert_eq!(sent_lifecycles(&harness), ["blocked"]);
 }
@@ -653,12 +711,13 @@ fn a_refusal_stops_the_other_capture_in_flight() {
 
 #[test]
 fn a_correction_older_than_newer_events_is_not_applied() {
-    let api = api(&[blocked(2)]);
+    let api = api(&[unfollowed(2, Lifecycle::Blocked)]);
     let mut harness = Harness::enabled(ReplyMode::Success);
     harness
         .refresher
-        .resync(&[tracked_view(2)], secs(0))
+        .resync(&[unfollowed(2, Lifecycle::Working)], secs(0))
         .unwrap();
+    harness.refresher.request(&session(2));
     let work = harness.refresher.tick(secs(0));
     let captured = work.into_iter().next().unwrap().capture(&api);
     // The capture read "blocked"; meanwhile the session finished its turn.
@@ -672,9 +731,7 @@ fn a_correction_older_than_newer_events_is_not_applied() {
         1,
     );
     assert!(harness.refresher.captured(captured, secs(1)).is_none());
-    let mut done = tracked_view(2);
-    done.lifecycle = Lifecycle::Done;
-    api.set_listed(vec![done]);
+    api.set_listed(vec![unfollowed(2, Lifecycle::Done)]);
     assert_eq!(harness.round(&api, 60), 1);
     assert_eq!(sent_lifecycles(&harness), ["done"]);
 }
@@ -890,6 +947,127 @@ fn a_name_the_user_gave_stays_until_a_title_is_asked_for() {
     next_chat(&mut harness, &api, 2, 3, 3);
     assert_eq!(harness.round(&api, 3), 1);
     assert_eq!(name(&api, 2), "Ship the release");
+}
+
+/// The session `api` holds now, its agent on turn `turn` of the same chat
+/// with `messages` written and `lifecycle`, listed and followed by `harness`
+/// from `now`.
+fn on_turn(
+    harness: &mut Harness,
+    api: &FakeSessionApi,
+    number: u8,
+    (turn, messages, lifecycle): (u64, u32, Lifecycle),
+    now: u64,
+) {
+    let mut view = api.get(&session(number)).unwrap();
+    view.lifecycle = lifecycle;
+    view.agent_turn = Some(AgentTurn {
+        id: turn,
+        messages,
+        conversation_id: Some(format!("synthetic-conversation-{number}")),
+    });
+    api.set_listed(vec![view.clone()]);
+    harness.event(event(number, SessionEvent::Updated { session: view }), now);
+}
+
+/// The daemon's turn `id`: the user's `prompt` and the agent's `messages`.
+fn prompted(id: u64, prompt: &str, messages: &[&str]) -> TurnContent {
+    TurnContent {
+        id,
+        prompt: Some(prompt.into()),
+        messages: messages.iter().map(|message| (*message).into()).collect(),
+        total: messages.len() as u32,
+    }
+}
+
+fn sent_outputs(harness: &Harness) -> Vec<String> {
+    harness
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|request| {
+            let value: Value = serde_json::from_slice(&request.body).unwrap();
+            value["context"]["recent_output"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn a_title_asked_for_a_prompt_without_an_answer_is_the_prompts_once_the_agent_starts() {
+    let api = api(&[generated(2)]);
+    let mut harness = Harness::enabled(ReplyMode::Success);
+    harness.send_title(Some("Fix the CSV parser"));
+    harness.resync(&api, vec![generated(2)], 0);
+    assert_eq!(harness.round(&api, 0), 1);
+
+    // A new prompt in the same chat, not answered yet (the daemon still sees
+    // the agent idle), and the user asks for a title.
+    api.set_turn(prompted(2, "Write the release notes", &[]));
+    on_turn(&mut harness, &api, 2, (2, 0, Lifecycle::Idle), 1);
+    harness.send_title(Some("Write the release notes"));
+    harness.refresher.request(&session(2));
+    let work = harness.refresher.tick(secs(1));
+    assert_eq!(work.len(), 1);
+    let captured = work.into_iter().next().unwrap().capture(&api);
+    let dispatch = harness.refresher.captured(captured, secs(1)).unwrap();
+    // The agent starts on it while the title is being made.
+    on_turn(&mut harness, &api, 2, (2, 6, Lifecycle::Working), 2);
+    let retitle = harness
+        .refresher
+        .completed(dispatch.run(), secs(2))
+        .expect("the prompt's title");
+    harness.refresher.retitled(retitle.apply(&api));
+
+    assert_eq!(name(&api, 2), "Write the release notes");
+    assert_eq!(
+        sent_outputs(&harness)[1],
+        "The user's last prompt:\nWrite the release notes\n\n\
+         The agent hasn't written anything since."
+    );
+    assert!(!harness.status(2).refreshing);
+    assert_eq!(harness.round(&api, 60), 0);
+}
+
+#[test]
+fn a_title_asked_for_follows_a_prompt_typed_while_it_was_made() {
+    let api = api(&[generated(2)]);
+    let mut harness = Harness::enabled(ReplyMode::Success);
+    harness.send_title(Some("Fix the CSV parser"));
+    harness.resync(&api, vec![generated(2)], 0);
+    assert_eq!(harness.round(&api, 0), 1);
+
+    harness.send_title(Some("Quoted comma tests"));
+    harness.refresher.request(&session(2));
+    let work = harness.refresher.tick(secs(3));
+    let captured = work.into_iter().next().unwrap().capture(&api);
+    let dispatch = harness.refresher.captured(captured, secs(3)).unwrap();
+    // The user types the next prompt meanwhile: the title made from the turn
+    // before it doesn't name the session, and it's asked for again.
+    api.set_turn(prompted(2, "Write the release notes", &[]));
+    on_turn(&mut harness, &api, 2, (2, 0, Lifecycle::Working), 3);
+    assert!(harness
+        .refresher
+        .completed(dispatch.run(), secs(3))
+        .is_none());
+    assert_eq!(name(&api, 2), "Fix the CSV parser");
+    assert!(harness.status(2).refreshing);
+
+    harness.send_title(Some("Write the release notes"));
+    assert_eq!(harness.round(&api, 8), 1);
+    assert_eq!(name(&api, 2), "Write the release notes");
+    let sent = sent_outputs(&harness);
+    assert_eq!(
+        sent.last().map(String::as_str),
+        Some(
+            "The user's last prompt:\nWrite the release notes\n\n\
+             The agent hasn't written anything since."
+        )
+    );
+    assert!(!harness.status(2).refreshing);
 }
 
 #[test]
