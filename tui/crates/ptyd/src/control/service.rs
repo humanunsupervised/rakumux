@@ -99,6 +99,9 @@ struct LiveSession {
     scope: ScopeRoot,
     tracker: LifecycleTracker,
     last_activity_ms: i64,
+    /// When the terminal last showed output: what the checks that run at most
+    /// so often (resume, log, places) skipped is looked at once they're due.
+    output_ms: i64,
     /// When the foreground was last looked at for the resume command, and
     /// which process it was.
     resume_checked_ms: i64,
@@ -138,6 +141,7 @@ impl LiveSession {
             scope,
             tracker: LifecycleTracker::default(),
             last_activity_ms: 0,
+            output_ms: 0,
             resume_checked_ms: 0,
             resume_checked_pid: None,
             recorded_resume: None,
@@ -2093,6 +2097,28 @@ impl Inner {
             .filter(|(_, live)| live.reply_due.is_some())
             .map(|(id, live)| (id.clone(), live.terminal))
             .collect();
+        // Output a check skipped for coming too soon after the last one, then
+        // nothing more: a quiet screen (Pi's, once started or done) is still
+        // read once.
+        let settled: Vec<(SessionId, TerminalId)> = state
+            .live
+            .iter()
+            .filter(|(_, live)| {
+                let skipped = |checked: i64, interval: i64| {
+                    live.output_ms > checked && now.saturating_sub(checked) >= interval
+                };
+                let agent = live.tracker.detected_agent().is_some();
+                let places = live
+                    .output
+                    .as_ref()
+                    .is_some_and(|follower| follower.transcript_source().is_some());
+                (agent && skipped(live.resume_checked_ms, RESUME_CHECK_MS))
+                    || ((agent || live.output.is_some())
+                        && skipped(live.output_checked_ms, OUTPUT_CHECK_MS))
+                    || (places && skipped(live.places_checked_ms, PLACES_CHECK_MS))
+            })
+            .map(|(id, live)| (id.clone(), live.terminal))
+            .collect();
         // Long conversations are read on while their agent is quiet.
         let behind: Vec<(SessionId, TerminalId)> = state
             .live
@@ -2109,6 +2135,17 @@ impl Inner {
         drop(state);
         if let Some(targets) = due {
             self.poll_git(targets);
+        }
+        for (id, terminal) in settled {
+            let process = self.host.info(terminal).and_then(|info| info.foreground);
+            let plan = self.resume_plan(terminal, &id, now);
+            self.follow_output(terminal, &id, process.as_ref(), now);
+            self.scan_places(terminal, &id, now);
+            let mut state = self.lock();
+            if let Some(plan) = plan {
+                self.record_resume(&mut state, &id, terminal, plan, now);
+            }
+            self.refresh(&mut state, &id);
         }
         for (id, terminal) in behind {
             self.scan_places(terminal, &id, now);
@@ -2151,6 +2188,7 @@ impl Inner {
         else {
             return;
         };
+        live.output_ms = now;
         if let Some(detection) = detection {
             let changed_agent = live.working_directory.as_ref().is_some_and(|context| {
                 detection.agent.as_deref() != Some(context.agent.as_str())

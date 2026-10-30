@@ -495,6 +495,51 @@ fn any_agents_conversation_named_by_its_hooks_or_a_binding_reaches_its_resume_co
 }
 
 #[test]
+fn a_screen_gone_quiet_is_still_looked_at_once_the_checks_it_skipped_are_due() {
+    use session_core::model::ResumeSource;
+    // An agent whose conversation is known only after it showed up (Pi
+    // writes its file at the first prompt), whose screen changes again too
+    // soon to look again (at most every 5 s) and then stays still.
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    let caller = harness.session_caller(&session.id);
+    harness.host.set_foreground(
+        &session.id,
+        ptyd::host::ProcessInfo {
+            // No such process: nothing on this machine is read for it.
+            pid: u32::MAX,
+            name: "opencode2".into(),
+            cmdline: vec!["opencode2".into()],
+            exe: None,
+        },
+    );
+    harness.host.show(&session.id, "■■■■⬝⬝⬝⬝  esc interrupt");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    harness.handle(
+        &caller,
+        Request::SessionBind {
+            agent: "opencode".into(),
+            conversations: vec!["late".into()],
+        },
+    );
+    harness.host.show(&session.id, "■■■■■⬝⬝⬝  esc interrupt");
+    assert_eq!(harness.get(&session.id).resume, None);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let resume = loop {
+        if let Some(resume) = harness.get(&session.id).resume {
+            break resume;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the resume command was never looked for again"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    assert_eq!(resume.source, ResumeSource::KnownAgent);
+    assert_eq!(resume.argv, ["opencode2", "-s", "late"]);
+}
+
+#[test]
 fn a_subagents_own_hooks_keep_it_counted_without_taking_the_session_over() {
     let harness = Harness::new();
     let session = harness.create(Some("agent"));
