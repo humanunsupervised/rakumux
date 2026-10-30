@@ -1,0 +1,49 @@
+# Grok Build 1.0.70 asking to start a subagent ("Yes, send once"). Captured from a synthetic session.
+agent: grok
+expect: blocked
+process: grok
+cmdline: grok
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: ⚠ Action Required - ⠼ - Waiting for response… - Hello from the fake model. The answer is… - grok
+alternate_screen: true
+ms_since_output: 2600
+---
+
+  main ~/proj                                                                                  20 / 256K │ [Dashboard]
+
+
+     ❯ SPAWN a helper                                                                                        5:32 AM
+
+
+     ◆ Thought for 0.0s
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+
+    ◆ Waiting for response… 5.9s                                                                       6.0s ⇣20 [stop]
+
+  ┃
+  ┃  ›  Allow Helper?
+  ┃
+  ┃  1 (○) Yes, and don't ask again for anything (always-approve mode)
+  ┃  2 (●) Yes, send once
+  ┃  3 (○) No, reject (type to add feedback)
+  ┃
+
+  1/3:select  │  Tab:next option  │  Ctrl+o:always-approve  │  Ctrl+c:cancel  │  Esc:scrollback

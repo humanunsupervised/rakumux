@@ -24,6 +24,8 @@
 //!   (`fileEdits`).
 //! - **Cursor**: its tool calls' file paths, search roots, and Shell calls'
 //!   directories and commands, relative to the workspace.
+//! - **Grok Build**: its finished edits' files, its reads and searches, its
+//!   shell calls' folders and commands, and its finished subagents' own logs.
 
 use super::transcript::{scan, TranscriptSource};
 use super::LogAgent;
@@ -39,6 +41,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/places.rs"]
 mod cursor;
+#[path = "grok/places.rs"]
+mod grok;
 #[path = "open-code/places.rs"]
 mod opencode;
 #[path = "pi/places.rs"]
@@ -130,17 +134,14 @@ impl PlaceScan {
                     _ => None,
                 };
                 let read = scan(*agent, path, from, budget, |entry, _| {
-                    let at = entry
-                        .get("timestamp")
-                        .and_then(Value::as_str)
-                        .and_then(super::transcript::timestamp)
-                        .or(written);
+                    let at = super::entry_time(*agent, entry).or(written);
                     match agent {
                         LogAgent::Claude => claude::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Codex => codex::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Pi => pi::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Copilot => copilot::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Cursor => cursor::entry(entry, cwd, home, at, &mut touches),
+                        LogAgent::Grok => grok::entry(entry, cwd, home, at, &mut touches),
                     }
                 });
                 let Some((offset, more)) = read else {
@@ -190,6 +191,8 @@ pub fn agent_data_dirs() -> Vec<PathBuf> {
         crate::resume::pi_agent_dir(),
         crate::resume::cursor_config_dir(),
         crate::resume::cursor_data_dir(),
+        // Grok's worktrees there are the user's working trees.
+        crate::resume::grok_home(),
     ]
     .into_iter()
     .flatten()

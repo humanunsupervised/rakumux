@@ -1,0 +1,49 @@
+# Grok Build 1.0.70's question tool waiting for an answer; its title still shows a spinner. Captured from a synthetic session.
+agent: grok
+expect: blocked
+process: grok
+cmdline: grok
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: ⠴ - Running: Ask: Which colour do you want? - Hello from the fake model. The answer is… - grok
+alternate_screen: true
+ms_since_output: 2600
+---
+
+  main ~/proj                                                                                  20 / 256K │ [Dashboard]
+
+
+     ❯ ASK me                                                                                                5:33 AM
+
+
+     ◆ Thought for 0.0s
+     ◆ Ask Which colour do you want?
+
+
+
+
+
+
+
+
+
+
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+
+    ◆ Waiting on answers for Which colour do you want?                                                 0.1s ⇣20 [stop]
+
+  ┃
+  ┃  Which colour do you want?
+  ┃
+  ┃
+  ┃  1 (○) Red   red                                                                                                 █
+  ┃  2 (○) Blue  blue                                                                                                █
+  ┃  z (○) Type your answer here
+  ┃
+  ┃  ↑/↓ navigate · y copy                                                                            Enter:submit
+  ┃
+
+  Tab:next answer  │  Esc:scrollback  │  Shift+x:dismiss

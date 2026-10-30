@@ -39,6 +39,9 @@
 //!   newest in `<config>/chats/<md5 of the folder>/`: `cursor-agent <flags>
 //!   --resume <id>`. Its commands that aren't chats (`agent login`) are typed
 //!   back, not run.
+//! - **Grok Build** lists the sessions each process holds in
+//!   `$GROK_HOME/active_sessions.json`: the one its hooks named, else the one
+//!   whose log changed last: `grok <flags> --resume <id>`.
 //!
 //! Any agent's bound conversation reaches its resume plan
 //! ([`Context::bound_conversation`]): the newest the session bound for that
@@ -63,6 +66,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/recovery.rs"]
 mod cursor;
+#[path = "grok/recovery.rs"]
+mod grok;
 #[path = "open-code/recovery.rs"]
 mod opencode;
 #[path = "pi/recovery.rs"]
@@ -80,6 +85,8 @@ pub(crate) use copilot::{
 };
 use cursor::cursor_plan;
 pub(crate) use cursor::{cursor_chat, cursor_config_dir, cursor_data_dir};
+use grok::grok_resume;
+pub(crate) use grok::{grok_conversation, grok_home, grok_log};
 use opencode::opencode_resume;
 pub(crate) use opencode::{opencode_database, opencode_recent_session};
 use pi::pi_resume;
@@ -120,6 +127,9 @@ pub fn plan(ctx: &Context<'_>) -> Plan {
         Some("pi") => Some(pi_resume(ctx.cwd, ctx.bound_conversation)),
         Some("copilot") => Some(copilot_resume(process, ctx.bound_conversation)),
         Some("cursor-agent") => return cursor_plan(process, ctx.cwd, ctx.bound_conversation),
+        Some("grok") => {
+            Some(grok_home().and_then(|home| grok_resume(process, &home, ctx.bound_conversation)))
+        }
         _ => None,
     };
     match resumed {

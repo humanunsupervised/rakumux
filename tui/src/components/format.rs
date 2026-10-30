@@ -512,6 +512,7 @@ mod tests {
             ("codex", p.label_steel_blue),
             ("opencode", p.label_slate_blue),
             ("copilot", p.label_slate_blue),
+            ("grok", p.label_steel_blue),
             ("pi", p.label_blue),
             ("gemini", p.label_blue),
             ("cargo", p.label_blue),

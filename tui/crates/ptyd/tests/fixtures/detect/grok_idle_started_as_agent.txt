@@ -1,0 +1,49 @@
+# Grok Build 1.0.70 started as `agent` (the name Cursor's CLI has too): only the file it runs says it's Grok. Screen captured from a synthetic session; the process as such a start shows it.
+agent: grok
+expect: idle
+process: agent
+cmdline: agent
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: grok
+alternate_screen: true
+ms_since_output: 5000
+---
+
+  main ~/proj                                                                                1.3K / 256K │ [Dashboard]
+
+     Session 01a18b4d-4043-74e1-920c-7f824c6b0d82, use /dashboard to switch between sessions
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                                                │
+  ╰───────────────────────────────────────────────────────────────────────────────────────────────────── fake-model ─╯
+
+  Shift+Tab:mode  │  Ctrl+x:shortcuts

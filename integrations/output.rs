@@ -19,6 +19,9 @@
 //! - **Cursor**: its chat's transcript
 //!   (`<data>/projects/<folder>/agent-transcripts/<chat>/<chat>.jsonl`), for
 //!   the chat whose store the process has open, else the one its hooks name.
+//! - **Grok Build**: `$GROK_HOME/sessions/<folder>/<session>/updates.jsonl`,
+//!   for the session the process shows (`active_sessions.json`; the one its
+//!   hooks named, else the one written last).
 //!
 //! For the agent feed, the follower also keeps the current turn's reply
 //! whole ([`Reply`]): what the agent said after its last tool call, or the
@@ -43,6 +46,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/output.rs"]
 mod cursor;
+#[path = "grok/output.rs"]
+mod grok;
 #[path = "open-code/output.rs"]
 mod opencode;
 #[path = "pi/output.rs"]
@@ -134,6 +139,7 @@ pub enum LogAgent {
     Pi,
     Copilot,
     Cursor,
+    Grok,
 }
 
 /// Where an agent's output is read from.
@@ -142,10 +148,11 @@ enum Source {
     /// An append-only log, read from where it was last read.
     Log {
         agent: LogAgent,
-        /// Claude Code's conversation, checked on every read: the process
-        /// can clear it, resume another or park it in a background job. Pi's,
-        /// found again whenever the conversation bound to the session changes
-        /// (or, unbound, its folder's newest does); none until its file exists.
+        /// Claude Code's or Grok's conversation, checked on every read: the
+        /// process can clear it, resume another or park it in a background
+        /// job (Claude Code), or hold several (Grok). Pi's, found again
+        /// whenever the conversation bound to the session changes (or,
+        /// unbound, its folder's newest does); none until its file exists.
         conversation: Option<String>,
         path: PathBuf,
         /// How far the log has been read.
@@ -182,8 +189,8 @@ pub struct Follower {
 
 impl Follower {
     /// Where `process`'s output can be read, when it runs `agent` (as
-    /// detected, `claude`, `codex`, `opencode` or `copilot`, or as its hooks
-    /// name it).
+    /// detected, `claude`, `codex`, `opencode`, `copilot` or `grok`, or as
+    /// its hooks name it).
     pub fn locate(process: &ProcessInfo, agent: &str) -> Option<Self> {
         let mut foreground = None;
         let log = |agent, conversation, path| Source::Log {
@@ -205,6 +212,10 @@ impl Follower {
             "pi" => log(LogAgent::Pi, None, PathBuf::new()),
             // Its chat is found on each read (`cursor::switch`).
             "cursor-agent" => log(LogAgent::Cursor, None, PathBuf::new()),
+            "grok" => {
+                let (id, path) = grok::current(process.pid, None)?;
+                log(LogAgent::Grok, Some(id), path)
+            }
             "opencode" | "opencode2" => Source::OpenCode {
                 database: crate::resume::opencode_database()?,
                 cwd: crate::procinfo::cwd_of(process.pid),
@@ -230,7 +241,7 @@ impl Follower {
     }
 
     /// The agent as replies and turns name it: `claude-code`, `codex`,
-    /// `opencode`, `pi`, `copilot` or `cursor-agent`.
+    /// `opencode`, `pi`, `copilot`, `cursor-agent` or `grok`.
     pub fn agent(&self) -> &'static str {
         match &self.source {
             Source::Log {
@@ -253,6 +264,10 @@ impl Follower {
                 agent: LogAgent::Cursor,
                 ..
             } => "cursor-agent",
+            Source::Log {
+                agent: LogAgent::Grok,
+                ..
+            } => "grok",
             Source::OpenCode { .. } => "opencode",
         }
     }
@@ -274,6 +289,11 @@ impl Follower {
                 let stem = path.file_stem()?.to_str()?;
                 stem.get(stem.len().checked_sub(36)?..)?.to_owned()
             }
+            Source::Log {
+                agent: LogAgent::Grok,
+                conversation,
+                ..
+            } => conversation.clone()?,
             Source::OpenCode { conversation, .. } => conversation.clone()?,
         };
         let valid = !id.is_empty()
@@ -372,6 +392,9 @@ impl Follower {
                         cursor::switch(self.pid, bound, conversation, path, offset, partial)
                             || cursor::realign(path, offset, partial)
                     }
+                    LogAgent::Grok => {
+                        grok::switch(self.pid, bound, conversation, path, offset, partial)
+                    }
                     LogAgent::Codex => false,
                 };
                 if switched {
@@ -386,6 +409,7 @@ impl Follower {
                         LogAgent::Pi => pi::may_be_typed(line),
                         LogAgent::Copilot => copilot::may_be_typed(line),
                         LogAgent::Cursor => cursor::may_be_typed(line),
+                        LogAgent::Grok => grok::may_be_typed(line),
                     };
                     candidate
                         && serde_json::from_slice::<Value>(line)
@@ -396,6 +420,7 @@ impl Follower {
                                 LogAgent::Pi => pi::typed(&entry),
                                 LogAgent::Copilot => copilot::typed(&entry),
                                 LogAgent::Cursor => cursor::typed(&entry),
+                                LogAgent::Grok => grok::typed(&entry),
                             })
                             .is_some_and(|typed| prompt_line(&typed).is_some())
                 };
@@ -423,14 +448,11 @@ impl Follower {
                         LogAgent::Pi => (pi::typed(entry), pi::messages(entry)),
                         LogAgent::Copilot => (copilot::typed(entry), copilot::messages(entry)),
                         LogAgent::Cursor => (cursor::typed(entry), cursor::messages(entry)),
+                        LogAgent::Grok => (grok::typed(entry), grok::messages(entry)),
                     };
                     let typed = typed.filter(|typed| prompt_line(typed).is_some());
                     if typed.is_some() || !messages.is_empty() {
-                        let at = entry
-                            .get("timestamp")
-                            .and_then(Value::as_str)
-                            .and_then(transcript::timestamp)
-                            .or(written);
+                        let at = entry_time(agent, entry).or(written);
                         self.last_at = self.last_at.max(at);
                     }
                     if let Some(typed) = typed {
@@ -447,6 +469,7 @@ impl Follower {
                         LogAgent::Cursor => {
                             cursor::reply_step(entry, *position, conversation.as_deref())
                         }
+                        LogAgent::Grok => grok::reply_step(entry),
                     };
                     self.reply = next_reply(self.reply.take(), step, *position);
                 }
@@ -459,6 +482,7 @@ impl Follower {
                     LogAgent::Pi => (newest(pi::line), newest(pi::prompt)),
                     LogAgent::Copilot => (newest(copilot::line), newest(copilot::prompt)),
                     LogAgent::Cursor => (newest(cursor::line), newest(cursor::prompt)),
+                    LogAgent::Grok => (newest(grok::line), newest(grok::prompt)),
                 }
             }
             Source::OpenCode {
@@ -517,6 +541,19 @@ impl Follower {
             }
         }
         changed
+    }
+}
+
+/// When a log entry was written (Unix milliseconds), as its agent records it:
+/// most in an RFC 3339 `timestamp`. Cursor's have no time (the file's stands
+/// in, where it's read).
+fn entry_time(agent: LogAgent, entry: &Value) -> Option<i64> {
+    match agent {
+        LogAgent::Grok => grok::timestamp(entry),
+        _ => entry
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(transcript::timestamp),
     }
 }
 

@@ -7,6 +7,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/environment.rs"]
 mod cursor;
+#[path = "grok/environment.rs"]
+mod grok;
 #[path = "pi/environment.rs"]
 mod pi;
 
@@ -23,6 +25,7 @@ pub(crate) fn inherited_marker(name: &str) -> bool {
         || pi::VARIABLES.contains(&name)
         || copilot::VARIABLES.contains(&name)
         || cursor::VARIABLES.contains(&name)
+        || grok::VARIABLES.contains(&name)
         || HOOK_HOSTS.contains(&name)
 }
 

@@ -40,6 +40,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/detection.rs"]
 mod cursor;
+#[path = "grok/detection.rs"]
+mod grok;
 #[path = "open-code/detection.rs"]
 mod opencode;
 #[path = "pi/detection.rs"]
@@ -52,6 +54,7 @@ use copilot::PROFILE as COPILOT;
 #[cfg(test)]
 use cursor::is_cursor_activity_line;
 use cursor::PROFILE as CURSOR_AGENT;
+use grok::PROFILE as GROK;
 #[cfg(test)]
 use opencode::has_opencode_progress_bar;
 use opencode::PROFILE as OPENCODE;
@@ -174,6 +177,7 @@ static PROFILES: &[Profile] = &[
     AIDER,
     CURSOR_AGENT,
     COPILOT,
+    GROK,
     generic("amp", &["amp"], &[&["@sourcegraph", "amp"]]),
     generic("droid", &["droid"], &[]),
     generic("crush", &["crush"], &[&["@charmland", "crush"]]),
@@ -1349,6 +1353,7 @@ mod tests {
             ("aider", &[Working, Blocked, Idle]),
             ("cursor-agent", &[Working, Blocked, Idle]),
             ("copilot", &[Working, Blocked, Idle]),
+            ("grok", &[Working, Blocked, Idle]),
         ];
         for (agent, states) in required {
             for state in *states {

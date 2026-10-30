@@ -17,6 +17,8 @@
 //!   names the file it read (`key`), and another file is read from its start.
 //! - **Cursor**: one message per transcript line, at its byte offset: what
 //!   the user typed, the agent's text and tool calls (it writes no output).
+//! - **Grok Build**: one message per `updates.jsonl` line, at its byte
+//!   offset; a tool's result is its update with a `status`.
 //!
 //! Text is cut at [`MAX_PART_BYTES`] per part and otherwise left as the
 //! agent wrote it: the caller cleans it before it leaves the machine.
@@ -39,6 +41,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/transcript.rs"]
 mod cursor;
+#[path = "grok/transcript.rs"]
+mod grok;
 #[path = "open-code/transcript.rs"]
 mod opencode;
 #[path = "pi/transcript.rs"]
@@ -67,7 +71,8 @@ pub enum TranscriptSource {
 }
 
 impl TranscriptSource {
-    /// `claude-code`, `codex`, `opencode`, `pi`, `copilot` or `cursor-agent`.
+    /// `claude-code`, `codex`, `opencode`, `pi`, `copilot`, `cursor-agent` or
+    /// `grok`.
     pub fn agent(&self) -> &'static str {
         match self {
             TranscriptSource::Log {
@@ -90,6 +95,10 @@ impl TranscriptSource {
                 agent: LogAgent::Cursor,
                 ..
             } => "cursor-agent",
+            TranscriptSource::Log {
+                agent: LogAgent::Grok,
+                ..
+            } => "grok",
             TranscriptSource::OpenCode { .. } => "opencode",
         }
     }
@@ -169,6 +178,7 @@ fn read_log(
             LogAgent::Pi => pi::message(entry, start),
             LogAgent::Copilot => copilot_reading.message(entry, start),
             LogAgent::Cursor => cursor::message(entry, start),
+            LogAgent::Grok => grok::message(entry, start),
         };
         messages.extend(message);
     })?;

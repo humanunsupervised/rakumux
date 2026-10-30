@@ -283,6 +283,8 @@ mod tests {
             ("CODEX_THREAD_ID", "t"),
             ("COPILOT_CLI", "1"),
             ("GROK_HOOK_EVENT", "pre_tool_use"),
+            ("GROK_SESSION_ID", "01a18b49-8533-7252-8d65-46555f07d0c5"),
+            ("GROK_AGENT", "1"),
             ("OMPCODE", "1"),
             ("RAKUMUX_SESSION_ID", "PARENT"),
             ("RAKUMUX_SESSION_TOKEN", "parent-token"),

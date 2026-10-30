@@ -1,0 +1,49 @@
+# Grok Build 1.0.70 asking to write a file ("Yes", no "Yes, proceed"). Captured from a synthetic session.
+agent: grok
+expect: blocked
+process: grok
+cmdline: grok
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: ⚠ Action Required - ⠦ - Running: Write `/home/me/proj/src/new.txt - Hello from the fake model. The answer is… - grok
+alternate_screen: true
+ms_since_output: 2600
+---
+
+  main ~/proj                                                                                  20 / 256K │ [Dashboard]
+
+
+     ❯ WRITE /home/me/proj/src/new.txt                                                61ced4436/             5:32 AM
+       scratchpad/agents/grok/repo/src/new.txt
+
+
+     ◆ Thought for 0.0s
+
+     Writing it now.                                                                                         5:32 AM
+
+     ◆ Creating src/new.txt
+
+       1  hello from the fake model
+
+
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+
+    ◆ Running Write `/home/me/proj/src/new.txt                                                … 2.7s   3.1s ⇣20 [stop]
+
+  ┃
+  ┃  ›  Allow Edit to /home/me/proj/src/new.txt                                                61ced4436/s…/new.txt?
+  ┃
+  ┃  1 (○) Yes, and don't ask again for anything (always-approve mode)
+  ┃  2 (○) Yes, allow all edits during this session
+  ┃  3 (●) Yes
+  ┃  4 (○) No, reject (type to add feedback)
+  ┃
+
+  1/4:select  │  Tab:next option  │  Ctrl+o:always-approve  │  Ctrl+c:cancel  │  Esc:scrollback

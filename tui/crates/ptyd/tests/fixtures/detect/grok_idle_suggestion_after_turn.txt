@@ -1,0 +1,49 @@
+# Grok Build 1.0.70 after a turn, a suggested next prompt in the input box (ghost text). Captured from a synthetic session.
+agent: grok
+expect: idle
+process: grok
+cmdline: grok
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: Say hello - grok
+alternate_screen: true
+ms_since_output: 5000
+---
+
+  main ~/proj                                                                                  20 / 256K │ [Dashboard]
+
+
+     ❯ Say hello                                                                                             5:30 AM
+
+
+     ◆ Thought for 0.0s
+
+     Hello from the fake model. The answer is 42.                                                            5:30 AM
+
+     Worked for 0.1s
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯ Hello from the fake model. The answer is 42.                                                                   │
+  ╰───────────────────────────────────────────────────────────────────────────────────────────────────── fake-model ─╯
+
+  Tab/→:accept suggestion  │  Shift+Tab:mode  │  Ctrl+x:shortcuts

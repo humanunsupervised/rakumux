@@ -1,0 +1,49 @@
+# Grok Build 1.0.70 asking to run a shell command. Captured from a synthetic session.
+agent: grok
+expect: blocked
+process: grok
+cmdline: grok
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: ⚠ Action Required - ⠸ - Run the requested command… - Hello from the fake model. The answer is… - grok
+alternate_screen: true
+ms_since_output: 2600
+---
+
+  main ~/proj                                                                                  20 / 256K │ [Dashboard]
+
+
+     ❯ SHELL cd sub 2>/dev/null; echo done > out.txt                                                         5:31 AM
+
+
+     ◆ Thought for 0.0s
+     ◆ Running the requested command
+
+
+
+
+
+
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+
+    ◆ Run the requested command… 2.9s                                                               3.2s ⇣20 [↓][stop]
+
+  ┃
+  ┃  ›  Run the requested command
+  ┃  │ cd sub 2>/dev/null; echo done > out.txt
+  ┃  ← → narrow scope
+  ┃
+  ┃  1 (○) Yes, and don't ask again for anything (always-approve mode)
+  ┃  2 (●) Yes, proceed
+  ┃  3 (○) No, reject (type to add feedback)
+  ┃  4 (○) Never allow: echo
+  ┃
+
+  1/4:select  │  Tab:next option  │  ←/→:scope  │  Ctrl+o:always-approve  │  Ctrl+c:cancel  │  Esc:scrollback

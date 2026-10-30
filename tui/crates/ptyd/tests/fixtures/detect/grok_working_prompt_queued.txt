@@ -1,0 +1,49 @@
+# Grok Build 1.0.70 waiting for its model with a prompt queued behind the turn. Captured from a synthetic session.
+agent: grok
+expect: working
+process: grok
+cmdline: grok
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: ⠋ - Waiting for response… - Say hello - grok
+alternate_screen: true
+ms_since_output: 300
+---
+
+  main ~/proj                                                                                  20 / 256K │ [Dashboard]
+
+
+     ❯ SLOW tell me something                                                                                5:31 AM
+
+
+
+
+
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+
+    #1 queued two
+
+    ⠧ Waiting for response… 4.0s                                                                       4.0s ⇣20 [stop]
+
+   Queued · Enter to send now
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                                                │
+  ╰───────────────────────────────────────────────────────────────────────────────────────────────────── fake-model ─╯
+
+  Enter:send now  │  Shift+Tab:mode  │  Ctrl+c:cancel  │  Ctrl+;:queue  │  Ctrl+x:shortcuts
