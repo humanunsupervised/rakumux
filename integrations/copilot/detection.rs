@@ -1,7 +1,10 @@
-//! GitHub Copilot CLI's screen (captured 1.0.105): an input box between two
-//! rules with a footer under it, approval and trust dialogs in a box, and
-//! `ask_user` questions between the rules. Its hooks report approvals
-//! (`notification`), so they keep winning over the screen.
+//! GitHub Copilot CLI's screen (captured 1.0.105): an input box with a
+//! footer under it, approval and trust dialogs in a box, and `ask_user`
+//! questions above the footer. The input box is drawn between two rules
+//! (`───`), or, in a terminal that answers its colour queries (Rakumux's),
+//! between half-block bars (`╻▄▄▄`, `┃ input`, `╹▀▀▀`); the footer is the
+//! last line either way. Its hooks report approvals (`notification`), so
+//! they keep winning over the screen.
 use super::*;
 
 /// `│ ❯ 1. Yes`, `│   2. Yes, and don't ask again …`: a yes option of a boxed
@@ -35,6 +38,11 @@ pub(super) fn is_copilot_activity_line(line: &str) -> bool {
     })
 }
 
+/// The bar-drawn input box's top and bottom.
+fn is_input_bar(line: &str) -> bool {
+    line.starts_with("╻▄") || line.starts_with("╹▀")
+}
+
 pub(super) const PROFILE: Profile = Profile {
     label: "copilot",
     names: &["copilot"],
@@ -57,9 +65,10 @@ pub(super) const PROFILE: Profile = Profile {
             Test::Any(&["copilot needs information", "enter accept · ctrl+d decline"]),
         ),
     ],
+    // The footer, under the input box.
     working: &[
         marker(
-            Region::AfterLastRule,
+            Region::Bottom(3),
             Test::Any(&[
                 "esc esc interrupt",
                 "esc esc stop agents",
@@ -71,14 +80,15 @@ pub(super) const PROFILE: Profile = Profile {
                 "esc again to edit prompt",
             ]),
         ),
-        marker(Region::AfterLastRule, Test::Line(is_copilot_activity_line)),
+        marker(Region::Bottom(3), Test::Line(is_copilot_activity_line)),
     ],
     idle: &[
         marker(Region::PromptBox, Test::Line(|line| line.starts_with('❯'))),
+        marker(Region::Bottom(4), Test::Line(is_input_bar)),
         // The footer while idle, typing, or with the sessions sidebar open
         // (whose pane border hides the rules).
         marker(
-            Region::AfterLastRule,
+            Region::Bottom(3),
             Test::Any(&["/ commands", "@ files", "→ close sidebar"]),
         ),
     ],

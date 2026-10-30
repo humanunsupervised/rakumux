@@ -6,6 +6,7 @@ integrations/
   claude-code/   # Native command hooks, detection, recovery
   codex/         # Native command hooks, detection, recovery
   pi/            # Extension and installer, detection, recovery, end-to-end test
+  copilot/       # GitHub Copilot CLI: command hooks (a file of its own), detection, recovery
   detection.rs   # Shared process/screen engine and retained older profiles
   recovery.rs    # Shared resume dispatch and safe argument/file helpers
   hooks.rs       # Adapter dispatch and metadata-only normalization
@@ -26,6 +27,7 @@ Older detection profiles remain supported; new hooks start with these three agen
 - [Claude Code](claude-code/README.md)
 - [Codex](codex/README.md)
 - [Pi](pi/README.md)
+- [GitHub Copilot](copilot/README.md)
 
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
@@ -40,8 +42,9 @@ session's folder permissions, terminal cwd or another session.
 
 - OpenCode uses the displayed session's `location.directory` and `subpath`, not the plugin's
   original launch location. A worktree switch is sent even if its activity stays idle.
-- Claude Code and Codex use the root hook input's `cwd`, never tool arguments or background
-  subagent directories. Claude's `CwdChanged` hook updates context without changing activity.
+- Claude Code, Codex and GitHub Copilot use the root hook input's `cwd`, never tool arguments or
+  background subagent directories. Claude's `CwdChanged` hook updates context without changing
+  activity; Copilot's `/cd` fires no hook and shows at its next one.
 - Without an active agent, git context follows the terminal cwd. The daemon polls quiet
   foreground processes and releases stale OSC 7 authority after a process/directory change.
 
@@ -120,6 +123,9 @@ idle since after the latest hook, for 5 seconds, is dropped with its subagents: 
 ended without a hook (Claude Code's Esc fires no Stop). Waiting-for-input, waiting-for-agents
 and finished phases, and subagents still running after their parent's turn, are never
 second-guessed: the parent's screen waits for input while they work.
+One GitHub Copilot process can hold several conversations open (its sessions sidebar); only the
+one on screen (its process log says which, `output.rs`) is the session's. Hooks from one it holds
+open but doesn't show are left out, activity and working directory alike.
 An agent whose hooks report no approval prompts (Cursor: `preToolUse` fires before the prompt
 it may draw, and nothing after) sets `approvals_on_screen` in its detection profile: while its
 screen shows a prompt (`Blocked`), that wins over its hooks' busy state. Claude Code, Codex and
@@ -150,7 +156,7 @@ answered the query never asked, and reports nothing until it's restarted.
 
 ## Latest output and prompt
 
-`output.rs` gives each live Claude Code, Codex, OpenCode or Pi session two lines: what its agent
+`output.rs` gives each live Claude Code, Codex, OpenCode, Pi or GitHub Copilot session two lines: what its agent
 last said or did (`SessionView.agent_output`) and what the user last typed to it
 (`SessionView.user_prompt`). The session list shows neither.
 - **Where it comes from:** the daemon reads it from the agent's own conversation on this
@@ -169,6 +175,9 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
     Rakumux extension bound to the session (else the folder's newest file, as Pi's
     `--continue` picks). Without the extension, two Pis in one folder show the same
     conversation's line, and a new Pi its folder's previous one until its first prompt.
+  - GitHub Copilot: `<COPILOT_HOME>/session-state/<id>/events.jsonl`, for the conversation its
+    process log last put in the foreground (`/clear`, its sidebar and resuming switch it); read
+    again from its start when Copilot rewrites it (a turn taken back).
 - **What's taken:** the last entry the main conversation's assistant wrote (its reasoning, a
   tool call as `Tool: description` or a short path, or its reply), and the user's last typed
   message (a slash command as `/name args`; the agents' own insertions such as reminders,
@@ -197,7 +206,8 @@ The same follower keeps the current turn's **reply** whole (`Reply`, at most 32 
 Claude Code, the main conversation's text after its last tool call (a prompt or a tool call
 starts it over; one text block per log entry, keyed by the entry's `uuid`); for Codex, the
 `task_complete` event's `last_agent_message` (keyed by its `turn_id`; a `user_message` or
-`task_started` starts it over). The control layer takes it only while reply capture is on (the
+`task_started` starts it over); for GitHub Copilot, the main agent's message text after its last
+tool call (keyed by its `messageId`; a typed prompt or a message with tool calls starts it over). The control layer takes it only while reply capture is on (the
 status service turns it on for an account whose feed is on), when the session turns
 `Done` after it was seen working, from a read of the log made after that; a key already
 captured is never captured again. See the protocol section of `AGENTS.md` (`reply_capture`,
@@ -221,6 +231,11 @@ reasoning, its tool calls with their input, and the tools' output (the `tool` ro
   `user_message` events; replies, reasoning summaries (encrypted reasoning is left out), tool
   calls and their output from response items. A shell call's output is its `output`, failed
   when its exit code isn't 0.
+- **GitHub Copilot:** one message per event of the main agent, at its byte offset, with the
+  event's id: typed prompts, assistant messages (reasoning, text, tool calls by `toolCallId`),
+  reasoning events (counted once with their message's copy) and tools' results. Copilot rewrites
+  its log when a turn is taken back, so a cursor names the file it read and another is read from
+  its start.
 - **OpenCode:** the conversation's rows changed since a watermark: each OpenCode 2 prompt, and
   each block of a reply (`seq × 1024 + block`; a tool block holds its call and, once it ran, its
   result), or each 1.x piece (`time_created × 1024 + its place`). Bookkeeping pieces (steps,
@@ -238,10 +253,10 @@ as written: the status service cleans it before it leaves the machine.
 A reply the user writes back to a feed entry goes into the agent the same way for every
 integration: the status service types it into the session with `session_submit` (a bracketed
 paste, then Enter), as if the user typed it. None of them has a supported way in from
-outside: Claude Code and Codex take prompts only from their terminal (their headless modes
-would run a second process on the same conversation), and OpenCode's server port belongs to
-its own TUI; Pi's RPC mode is a process of its own. So nothing here is agent-specific beyond
-what's already read: the conversation id
+outside: Claude Code, Codex and GitHub Copilot take prompts only from their terminal (their
+headless modes would run a second process on the same conversation), and OpenCode's server port
+belongs to its own TUI; Pi's RPC mode is a process of its own. So nothing here is agent-specific
+beyond what's already read: the conversation id
 (`agent_turn.conversation_id`) the reply must still match, and the lifecycle that says the
 agent waits for input, or works for one that takes what's typed during a turn and logs it as a
 prompt once it does (`QUEUES_INPUT` in `tui/crates/sensagent/src/feed/replies.rs`, by the
@@ -281,6 +296,10 @@ cargo test -p rakumux-ptyd --test control_activity --locked
 cargo test -p rakumux-ptyd detect:: --locked
 cargo test -p rakumux-ptyd resume:: --locked
 cargo test -p tui hook --locked
+cargo test -p rakumux-ptyd copilot --locked
+cargo test -p rakumux-ptyd --test control_copilot --locked
+# The real GitHub Copilot CLI, offline against a scripted model (needs `copilot` and the workspace built)
+cargo test -p rakumux-ptyd --test runtime_copilot --locked -- --ignored
 cargo test -p rakumux-mcp --test opencode_plugin --locked
 node --test '../integrations/open-code/activity.test.mjs'
 cargo test -p rakumux-ptyd --lib pi:: --locked

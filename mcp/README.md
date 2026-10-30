@@ -78,7 +78,8 @@ inside a session whose agent didn't pass both.
 
 Whether the variables reach the MCP server depends on the agent: Claude
 Code passes its environment to the servers it spawns (expected, not verified); Codex forwards only
-variables listed in `env_vars`, so list both; agents that remove variables named like `*TOKEN*`
+variables listed in `env_vars`, so list both; GitHub Copilot CLI passes its environment, both
+variables included (verified with 1.0.105); agents that remove variables named like `*TOKEN*`
 from MCP servers' environment (Gemini CLI) need both mapped explicitly in the server's `env`;
 OpenCode 1.x starts MCP servers inside each TUI, so they do; Pi starts its stdio servers in its
 own process with its environment, so they do; OpenCode 2.x runs MCP servers in a
@@ -140,6 +141,20 @@ tool_timeout_sec = 60
 
 **Unverified**: taken from the Codex documentation; the
 Codex CLI could not be run while this was written, so `env_vars` forwarding is untested.
+
+### GitHub Copilot CLI
+
+```bash
+copilot mcp add rakumux -- rakumux-mcp   # absolute path recommended
+```
+
+This writes `~/.copilot/mcp-config.json` (`$COPILOT_HOME`):
+`{"mcpServers": {"rakumux": {"type": "local", "command": "rakumux-mcp", "args": [], "tools": ["*"]}}}`.
+Copilot starts local servers with its own environment, so `RAKUMUX_SESSION_ID` and
+`RAKUMUX_SESSION_TOKEN` both reach it (and `COPILOT_AGENT_SESSION_ID`, the conversation); it
+removes neither (tried with Copilot CLI 1.0.105: a probe server it started saw both). A
+repository's `.mcp.json` or `.github/mcp.json`, or `--additional-mcp-config` for one run, work
+the same way. See [GitHub Copilot integration](../integrations/copilot/README.md).
 
 ### OpenCode
 

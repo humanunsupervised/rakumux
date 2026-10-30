@@ -1,0 +1,50 @@
+# GitHub Copilot CLI 1.0.105 folder trust, as a Rakumux session shows it.
+# Captured offline (120x40) in a Rakumux session against a local mock model; paths sanitised.
+agent: copilot
+expect: blocked
+process: node
+cmdline: node /home/me/.nvm/versions/node/v22.20.0/bin/copilot --no-auto-update
+title: GitHub Copilot
+alternate_screen: true
+ms_since_output: 1500
+---
+  Current   Sessions   Issues   Pull requests   Gists
+
+  ╭─╮╭─╮
+  ╰─╯╰─╯  Copilot v1.0.105 uses AI.
+  █ ▘▝ █  Check for mistakes.
+   ▔▔▔▔
+
+ ● Create notes.txt +1
+
+ ● Done: the tool ran.
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ❯ a reply written back from the feed                                                                         05:56
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ● Mock reply: a reply written back from the
+
+ ● Tip: /memory
+   └ Show memory status, or enable/disable memory across sessions
+
+
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Confirm folder trust                                                                                                 │
+│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│ ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ │
+│ │ /home/me/project                                                                                                 │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │
+│                                                                                                                      │
+│ Copilot can read files in this folder and, with your permission, edit them or run code and shell commands. It will   │
+│ remember your permissions for the rest of this session.                                                              │
+│                                                                                                                      │
+│ Do you trust the files in this folder?                                                                               │
+│                                                                                                                      │
+│ ❯ 1. Yes                                                                                                             │
+│   2. Yes, and remember this folder for future sessions                                                               │
+│   3. No (Esc)                                                                                                        │
+│                                                                                                                      │
+│ ↑/↓ to navigate · enter to select · esc to cancel                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

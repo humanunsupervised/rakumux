@@ -72,11 +72,13 @@ fn the_conversation_on_screen_is_followed_and_hidden_ones_are_left_out() {
     };
     write(
         &copilot.join(format!("session-state/{SHOWN}/events.jsonl")),
-        &(event("user.message", serde_json::json!({"content": "Write the docs"}))
-            + &event(
-                "assistant.message",
-                serde_json::json!({"messageId": "m1", "content": "Writing them.", "toolRequests": []}),
-            )),
+        &(event(
+            "user.message",
+            serde_json::json!({"content": "Write the docs"}),
+        ) + &event(
+            "assistant.message",
+            serde_json::json!({"messageId": "m1", "content": "Writing them.", "toolRequests": []}),
+        )),
     );
 
     let harness = Harness::new();
@@ -126,10 +128,7 @@ fn the_conversation_on_screen_is_followed_and_hidden_ones_are_left_out() {
     harness.handle(&caller, hook(SHOWN, ActivityPhase::RunningTool, &cwd));
     let view = harness.get(&session.id);
     assert_eq!(view.activity.unwrap().phase, ActivityPhase::RunningTool);
-    assert_eq!(
-        view.agent.unwrap().agent_session_id.as_deref(),
-        Some(SHOWN)
-    );
+    assert_eq!(view.agent.unwrap().agent_session_id.as_deref(), Some(SHOWN));
     harness.handle(&caller, hook(HIDDEN, ActivityPhase::Done, &cwd));
     assert_eq!(
         harness.get(&session.id).activity.unwrap().phase,

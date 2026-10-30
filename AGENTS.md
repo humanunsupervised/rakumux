@@ -241,8 +241,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    is asked again in half an hour), and a `poke` makes `ReplySync` read at once) and types each
    pending one addressed to
    this machine into the entry's session with `session_submit` (a bracketed paste, then
-   Enter; the same for Claude Code, Codex, OpenCode and Pi, which have no API for a running
-   interactive session), only while it's live, not private, shows the entry's conversation
+   Enter; the same for Claude Code, Codex, OpenCode, Pi and GitHub Copilot, which have no API for
+   a running interactive session), only while it's live, not private, shows the entry's conversation
    (`agent_turn.conversation_id`) and its agent waits (`idle`/`done`; `working`, `blocked` or an
    unknown chat waits, the cloud expires a reply after an hour; `working` doesn't for an agent
    that takes what's typed during a turn: **mid-turn**, below), not while someone typed
@@ -446,7 +446,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 ## File structure
 
 Agent-specific hooks, detection profiles, resume code, the OpenCode plugin and the Pi extension
-(each with its installer) live under `integrations/{open-code,claude-code,codex,pi}/`. Shared engines live in `integrations/`.
+(each with its installer) live under `integrations/{open-code,claude-code,codex,pi,copilot}/`. Shared engines live in `integrations/`.
 See [integration boundaries and protocol](integrations/README.md). New integrations go there,
 not in UI handlers, API/MCP transport or control policy. Optional version-1 `Report.activity`
 is self-only (`session.activity` capability). The daemon validates, timestamps and expires
@@ -554,7 +554,7 @@ newest the daemon's follower of `agent_output` saw, kept after the agent exits a
 registry; the session row's age shows it, else `last_active_at`), `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree, repo}` of
 the current cwd; `repo`: the `origin` remote URL's last path component without `.git`, from the
 common git dir's `config`, else the main working tree's folder name (a bare repository's own,
-`x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex, OpenCode or Pi session's latest reasoning,
+`x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex, OpenCode, Pi or GitHub Copilot session's latest reasoning,
 tool call or reply as one line, from its conversation log or database: `integrations/output.rs`),
 `user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
 messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
@@ -569,8 +569,9 @@ last_active_at, added_at, git}` on the wire.
   worktree (`path` = its `repo_root`, `git` its branch, or a detached HEAD's commit, linked
   worktree and repository name when last worked in; one kept before names gets it when touched), where its agent changed files (`edited`, always true): written
   or edited with its file tools (Claude Code's `Write`, `Edit`, `MultiEdit`, `NotebookEdit`;
-  OpenCode's `write`, `edit`, `multiedit`; Pi's `write`, `edit`, from a codemode script too) or patched (`apply_patch` however Codex calls it,
-  OpenCode's `patch`). Working trees it only worked in (started in, `cd`'d into, searched, read
+  OpenCode's `write`, `edit`, `multiedit`; Pi's `write`, `edit`, from a codemode script too;
+  what GitHub Copilot's file tools wrote, its `fileEdits`) or patched (`apply_patch` however
+  Codex calls it, OpenCode's `patch`). Working trees it only worked in (started in, `cd`'d into, searched, read
   from) are kept in memory and the registry, never listed, so one becomes a place, at its latest
   touch's time, once files there change: a session started in a main checkout that made a
   worktree and changed files only there lists that worktree alone. A known limit: other shell
@@ -581,12 +582,13 @@ last_active_at, added_at, git}` on the wire.
   `cwd` and its tools' file paths, search roots, `EnterWorktree` and Bash `cd`/`git -C`; Codex's
   turns' `cwd`, shell calls' `workdir` and commands, and `apply_patch`'s files; OpenCode's tools'
   paths and commands; Pi's conversation's `cwd`, its tools' paths and `bash` commands, and the
-  calls its codemode scripts made (`nestedCalls`). Its agent's working-directory reports and its terminal's directories count
+  calls its codemode scripts made (`nestedCalls`); GitHub Copilot's directory as it starts,
+  resumes and `/cd`s, its tools' paths and shell commands, and its `fileEdits`. Its agent's working-directory reports and its terminal's directories count
   as worked in. Times are the conversation's own, so reading it again changes nothing, and a
   working tree's moves on a minute at a time; each session keeps 32 of each kind (changed, only
   worked in). Working trees in the agents' own data directories
-  (`~/.claude`, `~/.codex`, OpenCode's but its worktrees, Claude Code's `/tmp/claude-<uid>`, Pi's
-  `~/.pi/agent`) and
+  (`~/.claude`, `~/.codex`, `~/.copilot`, OpenCode's but its worktrees, Claude Code's
+  `/tmp/claude-<uid>`, Pi's `~/.pi/agent`) and
   in `/proc`, `/sys`, `/dev` are never places. Kept in the registry, so ended sessions keep
   theirs; only paths are read. They stay on this machine (not in `rakumux-api`), except their
   names in the feed's session list (below).
@@ -625,7 +627,9 @@ PTY's foreground process. A known agent gives `KnownAgent` (run on revive): Clau
 process has open, else the newest `cli` thread of the folder in `~/.codex/state_<n>.sqlite` →
 `codex resume <flags> <id>`) and OpenCode (the conversation its plugin bound, else the newest
 top-level session of the folder in `opencode.db` → `opencode <flags> -s <id>`, or `opencode2 …`
-when V2 was started under that name); each keeps the
+when V2 was started under that name) and GitHub Copilot (the session its process log last put in
+the foreground, `~/.copilot/logs/process-<ms>-<pid>.log`, else the one it holds open, its hooks'
+or its `--resume` → `copilot <flags> --resume=<id>`); each keeps the
 flags that shape an interactive session (permissions, model, …). Pi (the conversation its
 extension bound, else the folder's newest file under `~/.pi/agent/sessions/` → `pi --session
 <file>`) hides its arguments, so only what its conversation keeps (model, thinking level) comes
@@ -708,11 +712,11 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `removed`, `exited`, `lifecycle`, `reported`, `activity`, and `reply` (below).
 - Agent replies (user only, capability `session.replies`; `control/replies.rs`,
   `integrations/output.rs`): `reply_capture {enabled}` turns capture on or off (off at every
-  daemon start and restart; off forgets what was kept). While it's on, a live Claude Code or
-  Codex session whose lifecycle turns `Done` after it was seen working has its reply read from
-  the conversation log the daemon already follows for `agent_output` (Claude Code: the main
-  conversation's text after its last tool call; Codex: `task_complete`'s
-  `last_agent_message`), within 10 s, never twice and never for a private session:
+  daemon start and restart; off forgets what was kept). While it's on, a live Claude Code, Codex
+  or GitHub Copilot session whose lifecycle turns `Done` after it was seen working has its reply
+  read from the conversation log the daemon already follows for `agent_output` (Claude Code and
+  GitHub Copilot: the main conversation's text after its last tool call; Codex:
+  `task_complete`'s `last_agent_message`), within 10 s, never twice and never for a private session:
   `AgentReply {id, session_id, agent, conversation_id?, text (≤ 32 KiB), truncated,
   finished_at}`. Replies are kept in daemon memory only (the last 200, 2 MiB of text, an
   hour), listed by `reply_list {after?}` and delivered as `reply` events only to
@@ -730,7 +734,10 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   error?}`, each cut at 64 KiB (`truncated`). Claude Code and Codex: one message per log line at
   its byte offset (the cursor is the next offset; prompts without the agents' insertions,
   subagents' and meta entries left out; Claude Code's human `queued_command` attachments, what
-  was typed while a turn ran, are prompts, its other queued input isn't). OpenCode: rows changed since a `(time_updated, id)`
+  was typed while a turn ran, are prompts, its other queued input isn't). GitHub Copilot: one
+  message per event of its main agent at its byte offset, with the event's id; it rewrites its
+  log when a turn is taken back, so the cursor names the file read (`key`) and another file is
+  read from its start. OpenCode: rows changed since a `(time_updated, id)`
   watermark, OpenCode 2 one message per reply block (`seq × 1024 + block`), 1.x one per piece.
   Pi: one message per entry of its conversation file at its byte offset (a `!` command the user
   ran is theirs: a `bash` call and its output; Pi's system prompt, extensions' context and
@@ -866,8 +873,11 @@ accidents; they don't stop a hostile process running as the same user.
   `RAKUMUX_PTYD_LOG` (log level), `RAKUMUX_API_BIN` (the `rakumux-api` binary
   `rakumux-mcp`, `rakumux remote` and the TUI start), `RAKUMUX_API_LOG`, `GW_TUI_BIN` / `GW_PTYD_BIN` (launcher overrides),
   `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (AI naming fallbacks), `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
-  `XDG_DATA_HOME` (where the daemon looks for agents' conversations, `resume.rs`). Sessions the daemon
-  revives by itself get the daemon's environment (the one the client that started it had).
+  `COPILOT_HOME`, `XDG_DATA_HOME` (where the daemon looks for agents' conversations, `resume.rs`).
+  Sessions the daemon revives by itself get the daemon's environment (the one the client that
+  started it had). Agents' markers never reach a new session (`integrations/environment.rs`), nor
+  GitHub Copilot's git settings (`GIT_EDITOR`, `GIT_CONFIG_*`, no prompts) from an environment it
+  made (`COPILOT_CLI=1`).
 
 ## Call stacks
 
@@ -1113,7 +1123,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
 | `rakumux daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
-| `rakumux session hook --agent A [--event NAME]` / `hook-config --agent A` | An agent's hook (JSON on stdin, always `{}` and exit 0; `--event` for input that doesn't name its event) / print its hook configuration (`integrations/README.md`) |
+| `rakumux session hook --agent A [--event NAME]` / `hook-config --agent A [--install]` | An agent's hook (JSON on stdin, always `{}` and exit 0; `--event` for input that doesn't name its event) / print its hook configuration, or write it as a file of Rakumux's own the agent loads (`--install`: GitHub Copilot's `~/.copilot/hooks/rakumux.json`) (`integrations/README.md`) |
 | `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in and each live session's AI description (`--json` still carries `ai_session_titles`, `ai_session_summaries` and `feed` for scripts) |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux machine add NAME URL --token T \| ls [--json] \| rm NAME` | Other machines whose sessions are listed and used here (their `rakumux-api` URL and remote token) |

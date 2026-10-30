@@ -178,6 +178,33 @@ fn a_reply_written_here_is_typed_reported_and_answered() {
 }
 
 #[test]
+fn a_reply_to_github_copilot_is_typed_while_it_runs_and_confirmed_by_its_prompt() {
+    // Copilot runs as `node` (npm's loader) or its native binary (`MainThread`
+    // on Linux, `copilot` on macOS).
+    for foreground in ["node", "MainThread", "copilot"] {
+        let mut shown = view("S", Lifecycle::Done, Some(CHAT));
+        shown.terminal.as_mut().unwrap().foreground_process = Some(foreground.into());
+        let mut replies = on(&[shown]);
+        let mut pending = reply("01K8A1", 4, Some("studio"));
+        pending.agent = "copilot".into();
+        assert_eq!(
+            after_reading(&mut replies, vec![pending]),
+            Some(ReplyWork::Submit {
+                reply: "01K8A1".into(),
+                session: SessionId::from_string("S"),
+                text: "Now add a test.".into(),
+                foreground: Some(foreground.into()),
+            })
+        );
+        replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
+        // Copilot logs the paste as the next turn's prompt.
+        replies.observe(&prompted(Lifecycle::Working, Some(CHAT), "Now add a test."));
+        let body = report_of(replies.next_work(NOW));
+        assert_eq!(body["status"], "delivered", "{foreground}");
+    }
+}
+
+#[test]
 fn a_busy_or_blocked_agent_is_waited_for() {
     for lifecycle in [Lifecycle::Working, Lifecycle::Blocked, Lifecycle::Unknown] {
         let mut replies = on(&[view("S", lifecycle, Some(CHAT))]);

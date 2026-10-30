@@ -188,6 +188,7 @@ subagents and the worktree it's working in.
 ```bash
 rakumux session hook-config --agent claude  # merge the printed hooks into ~/.claude/settings.json
 rakumux session hook-config --agent codex   # merge into ~/.codex/hooks.json, then trust them in /hooks
+rakumux session hook-config --agent copilot --install  # writes ~/.copilot/hooks/rakumux.json for GitHub Copilot
 rakumux-mcp opencode-plugin --install       # OpenCode
 ```
 
@@ -201,7 +202,7 @@ The MCP server lets an agent list, create, read and rename sessions in its own f
 claude mcp add --scope user rakumux -- rakumux-mcp
 ```
 
-For Codex, OpenCode and session identity, see the [MCP guide](mcp/README.md).
+For Codex, OpenCode, GitHub Copilot and session identity, see the [MCP guide](mcp/README.md).
 
 ## Rakumux account (optional)
 
