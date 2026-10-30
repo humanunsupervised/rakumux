@@ -81,6 +81,8 @@ Code passes its environment to the servers it spawns (expected, not verified); C
 variables listed in `env_vars`, so list both; GitHub Copilot CLI passes its environment, both
 variables included (verified with 1.0.105); agents that remove variables named like `*TOKEN*`
 from MCP servers' environment (Gemini CLI) need both mapped explicitly in the server's `env`;
+Cursor gives a server only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER` of its own
+environment, so both go in its `env` too;
 OpenCode 1.x starts MCP servers inside each TUI, so they do; Pi starts its stdio servers in its
 own process with its environment, so they do; OpenCode 2.x runs MCP servers in a
 background service shared by every conversation, so they don't.
@@ -155,6 +157,33 @@ Copilot starts local servers with its own environment, so `RAKUMUX_SESSION_ID` a
 removes neither (tried with Copilot CLI 1.0.105: a probe server it started saw both). A
 repository's `.mcp.json` or `.github/mcp.json`, or `--additional-mcp-config` for one run, work
 the same way. See [GitHub Copilot integration](../integrations/copilot/README.md).
+
+### Cursor
+
+`~/.cursor/mcp.json` (or a repository's `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "rakumux": {
+      "command": "rakumux-mcp",
+      "env": {
+        "RAKUMUX_SESSION_ID": "${env:RAKUMUX_SESSION_ID}",
+        "RAKUMUX_SESSION_TOKEN": "${env:RAKUMUX_SESSION_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Cursor's agent CLI starts a stdio server with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`
+and `USER` from its environment plus the server's `env` (read in the 2026.10.22 CLI's code), so
+both identity variables are mapped with Cursor's `${env:NAME}` interpolation; outside a session
+they're empty, which `rakumux-mcp` treats as unset. Map `RAKUMUX_HOME` the same way if you use
+one. Cursor has no `mcp add`; `agent mcp list` shows the server, and its tool calls ask for
+approval unless `~/.cursor/cli-config.json`'s `permissions.allow` holds `"Mcp(rakumux:*)"`.
+**Unverified**: the interpolation and approval were taken from Cursor's documentation
+(<https://cursor.com/docs/mcp>) and code; they weren't tried signed in.
 
 ### OpenCode
 

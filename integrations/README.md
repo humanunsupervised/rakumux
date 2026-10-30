@@ -7,6 +7,7 @@ integrations/
   codex/         # Native command hooks, detection, recovery
   pi/            # Extension and installer, detection, recovery, end-to-end test
   copilot/       # GitHub Copilot CLI: command hooks (a file of its own), detection, recovery
+  cursor-agent/  # Cursor's agent CLI: command hooks, its chat transcript, recovery
   detection.rs   # Shared process/screen engine and retained older profiles
   recovery.rs    # Shared resume dispatch and safe argument/file helpers
   hooks.rs       # Adapter dispatch and metadata-only normalization
@@ -28,6 +29,7 @@ Older detection profiles remain supported; new hooks start with these three agen
 - [Codex](codex/README.md)
 - [Pi](pi/README.md)
 - [GitHub Copilot](copilot/README.md)
+- [Cursor](cursor-agent/README.md)
 
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
@@ -45,6 +47,8 @@ session's folder permissions, terminal cwd or another session.
 - Claude Code, Codex and GitHub Copilot use the root hook input's `cwd`, never tool arguments or
   background subagent directories. Claude's `CwdChanged` hook updates context without changing
   activity; Copilot's `/cd` fires no hook and shows at its next one.
+- Cursor uses its hook input's single `workspace_roots` entry (a `-w` worktree's own), never a
+  tool's `cwd` or a subagent's.
 - Without an active agent, git context follows the terminal cwd. The daemon polls quiet
   foreground processes and releases stale OSC 7 authority after a process/directory change.
 
@@ -158,7 +162,7 @@ answered the query never asked, and reports nothing until it's restarted.
 
 ## Latest output and prompt
 
-`output.rs` gives each live Claude Code, Codex, OpenCode, Pi or GitHub Copilot session two lines: what its agent
+`output.rs` gives each live Claude Code, Codex, OpenCode, Pi, GitHub Copilot or Cursor session two lines: what its agent
 last said or did (`SessionView.agent_output`) and what the user last typed to it
 (`SessionView.user_prompt`). The session list shows neither.
 - **Where it comes from:** the daemon reads it from the agent's own conversation on this
@@ -180,6 +184,11 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
   - GitHub Copilot: `<COPILOT_HOME>/session-state/<id>/events.jsonl`, for the conversation its
     process log last put in the foreground (`/clear`, its sidebar and resuming switch it); read
     again from its start when Copilot rewrites it (a turn taken back).
+  - Cursor: its chat's transcript, `<data>/projects/<folder>/agent-transcripts/<chat>/<chat>.jsonl`,
+    for the chat whose `store.db` the process has open, else the one its hooks name (where open
+    files can't be read, the folder's newest). Cursor writes the file whole now and then: the
+    follower never reads past a final `turn_ended` line and starts over when the file no longer
+    ends a line where it stopped. Its lines have no times: a message's is the file's.
 - **What's taken:** the last entry the main conversation's assistant wrote (its reasoning, a
   tool call as `Tool: description` or a short path, or its reply), and the user's last typed
   message (a slash command as `/name args`; the agents' own insertions such as reminders,
@@ -216,7 +225,9 @@ captured is never captured again. See the protocol section of `AGENTS.md` (`repl
 `reply_list`, `replies` subscriptions). The hook adapters still forward metadata only.
 For OpenCode, the reply is the last text block the agent wrote since the newest prompt. For Pi,
 its turn's final response: an assistant entry that stopped (`stop`, or cut at `length`) with no
-tool to call, keyed by the entry's `id`; one that failed or was aborted is none. Each
+tool to call, keyed by the entry's `id`; one that failed or was aborted is none. For Cursor, the
+text after its last tool call (keyed by the chat and the line's offset); Cursor writes a
+message's reasoning after its text, so a reply can end with it. Each
 reply also says where its turn ends in the conversation (`position`, as below).
 
 ## Whole conversations
@@ -246,6 +257,9 @@ reasoning, its tool calls with their input, and the tools' output (the `tool` ro
   `id`. A skill is shown as typed (`/skill:name args`); a `!` command the user ran is theirs, a
   `bash` call and its output. Pi's system prompt, extensions' context and summaries are left
   out; branches left with `/tree` stay, in the order they were written.
+- **Cursor:** one message per transcript line, at its byte offset: what the user typed (inside
+  its `<user_query>`), the agent's text (with the reasoning Cursor joins to it) and tool calls.
+  Cursor writes no tool output, call ids, ids or times.
 
 A log line longer than 8 MiB is passed over. Text is cut at 64 KiB per part and otherwise left
 as written: the status service cleans it before it leaves the machine.
@@ -256,9 +270,10 @@ A reply the user writes back to a feed entry goes into the agent the same way fo
 integration: the status service types it into the session with `session_submit` (a bracketed
 paste, then Enter), as if the user typed it. None of them has a supported way in from
 outside: Claude Code, Codex and GitHub Copilot take prompts only from their terminal (their
-headless modes would run a second process on the same conversation), and OpenCode's server port
-belongs to its own TUI; Pi's RPC mode is a process of its own. So nothing here is agent-specific
-beyond what's already read: the conversation id
+headless modes would run a second process on the same conversation), OpenCode's server port
+belongs to its own TUI, Pi's RPC mode is a process of its own, and Cursor's takes a bracketed
+paste in its input box like typing (its `--print` mode is a second process). So nothing here is
+agent-specific beyond what's already read: the conversation id
 (`agent_turn.conversation_id`) the reply must still match, and the lifecycle that says the
 agent waits for input, or works for one that takes what's typed during a turn and logs it as a
 prompt once it does (`QUEUES_INPUT` in `tui/crates/sensagent/src/feed/replies.rs`, by the
@@ -303,6 +318,7 @@ cargo test -p rakumux-ptyd --test control_copilot --locked
 # The real GitHub Copilot CLI, offline against a scripted model (needs `copilot` and the workspace built)
 cargo test -p rakumux-ptyd --test runtime_copilot --locked -- --ignored
 cargo test -p rakumux-mcp --test opencode_plugin --locked
+cargo test -p rakumux-ptyd --test control_cursor_agent --test cursor_agent_e2e --locked
 node --test '../integrations/open-code/activity.test.mjs'
 cargo test -p rakumux-ptyd --lib pi:: --locked
 cargo test -p rakumux-mcp --test pi_extension --locked
