@@ -1614,3 +1614,364 @@ fn a_closed_connection_brings_back_rakumux_coms_pace() {
         0
     );
 }
+
+// Mid-turn: replies typed while an agent that takes input during a turn works.
+
+use session_core::model::AgentInfo;
+
+/// Session S running `agent` (as the daemon names it), `lifecycle`, in CHAT.
+fn running(agent: &str, lifecycle: Lifecycle) -> SessionView {
+    let mut view = view("S", lifecycle, Some(CHAT));
+    view.agent = Some(AgentInfo {
+        kind: agent.into(),
+        ..AgentInfo::default()
+    });
+    view
+}
+
+/// S running `agent`, `lifecycle`, with a new prompt in its chat.
+fn running_prompted(agent: &str, lifecycle: Lifecycle, prompt: &str) -> SessionView {
+    let mut view = running(agent, lifecycle);
+    view.agent_turn.as_mut().unwrap().id = new_turn();
+    view.user_prompt = Some(prompt.into());
+    view
+}
+
+/// `at` on the wall clock, the reply typed at [`NOW`] being 2 s in.
+fn wall(at: Duration) -> i64 {
+    2_000 + i64::try_from(at.saturating_sub(NOW).as_millis()).unwrap()
+}
+
+/// Rakumux.com took the report of `id`.
+fn report_taken(replies: &mut ReplySync, id: &str, at: Duration) {
+    let mut delivered = reply(id, 9, Some("studio"));
+    delivered.status = ReplyStatus::Delivered;
+    replies.request_done(true, Ok(FeedResult::Reply(delivered)), at);
+}
+
+#[test]
+fn a_reply_goes_into_claude_code_codex_or_opencode_while_it_works() {
+    for agent in ["claude", "codex", "opencode"] {
+        let mut replies = on(&[running(agent, Lifecycle::Working)]);
+        let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+        assert_eq!(
+            work,
+            Some(ReplyWork::Submit {
+                reply: "01K8A1".into(),
+                session: SessionId::from_string("S"),
+                text: "Now add a test.".into(),
+                foreground: Some("synthetic-agent".into()),
+            }),
+            "{agent}"
+        );
+        replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
+        // Still at work on the same turn: nothing to say yet.
+        replies.observe(&running(agent, Lifecycle::Working));
+        assert_eq!(replies.next_work(NOW), None, "{agent}");
+        // It takes the reply at its next step: its chat shows it as a prompt
+        // (Claude Code's `queued_command`, Codex's `user_message`).
+        replies.observe(&running_prompted(
+            agent,
+            Lifecycle::Working,
+            "Now add a test.",
+        ));
+        let body = report_of(replies.next_work(NOW));
+        assert_eq!(
+            (&body["id"], &body["status"]),
+            (&"01K8A1".into(), &"delivered".into()),
+            "{agent}"
+        );
+    }
+}
+
+#[test]
+fn a_blocked_agent_or_one_that_doesnt_take_input_mid_turn_is_waited_for() {
+    let held = [
+        // Asking something: the text would answer it.
+        running("claude", Lifecycle::Blocked),
+        running("codex", Lifecycle::Blocked),
+        // What it does isn't known.
+        running("claude", Lifecycle::Unknown),
+        // Agents not known to take what's typed during a turn.
+        running("gemini", Lifecycle::Working),
+        running("fakeagent", Lifecycle::Working),
+        view("S", Lifecycle::Working, Some(CHAT)),
+    ];
+    for shown in held {
+        let mut replies = on(std::slice::from_ref(&shown));
+        let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+        assert_eq!(work, None, "{:?} {:?}", shown.agent, shown.lifecycle);
+        // It goes in once the agent waits.
+        let mut waiting = shown.clone();
+        waiting.lifecycle = Lifecycle::Done;
+        replies.observe(&waiting);
+        assert_eq!(
+            submitted_reply(replies.next_work(NOW)).as_deref(),
+            Some("01K8A1")
+        );
+    }
+    // Without its turns followed (an older daemon), a session message isn't
+    // typed into Claude Code at work: its taking it couldn't be seen.
+    let mut unfollowed = running("claude", Lifecycle::Working);
+    unfollowed.agent_turn = None;
+    let mut replies = on(&[unfollowed]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read_messages(vec![message("01K8A2", 6, None)]), NOW);
+    assert_eq!(replies.next_work(NOW), None);
+}
+
+#[test]
+fn a_reply_typed_mid_turn_is_delivered_when_its_prompt_shows_minutes_later() {
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
+    // A long tool call: the reply waits in Claude Code's queue, with no new
+    // prompt long past the 30 s a reply typed to a waiting agent gets.
+    let later = NOW + Duration::from_secs(600);
+    replies.observe(&running("claude", Lifecycle::Working));
+    assert_eq!(next_at(&mut replies, NOW + TAKE_WITHIN), None);
+    assert_eq!(next_at(&mut replies, later), None);
+    // It asks for a permission meanwhile: still waiting.
+    replies.observe(&running("claude", Lifecycle::Blocked));
+    assert_eq!(next_at(&mut replies, later), None);
+    // The tool call ends and Claude Code takes the queued reply.
+    replies.observe(&running_prompted(
+        "claude",
+        Lifecycle::Working,
+        "Now add a test.",
+    ));
+    let body = report_of(next_at(&mut replies, later));
+    assert_eq!(
+        (&body["id"], &body["status"]),
+        (&"01K8A1".into(), &"delivered".into())
+    );
+}
+
+#[test]
+fn a_reply_typed_mid_turn_fails_only_once_its_turn_ended_without_it() {
+    let mut replies = on(&[running("codex", Lifecycle::Working)]);
+    after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
+    assert_eq!(next_at(&mut replies, NOW + 2 * TAKE_WITHIN), None);
+    // The turn ends; the agent may take what was queued as its next prompt.
+    let ended = NOW + Duration::from_secs(300);
+    replies.observe(&running("codex", Lifecycle::Done));
+    assert_eq!(next_at(&mut replies, ended), None);
+    // It works again without that prompt (the screen lagged): the turn
+    // wasn't over after all.
+    let again = ended + Duration::from_secs(20);
+    replies.observe(&running("codex", Lifecycle::Working));
+    assert_eq!(next_at(&mut replies, again), None);
+    let over = again + Duration::from_secs(5);
+    replies.observe(&running("codex", Lifecycle::Idle));
+    assert_eq!(next_at(&mut replies, over), None);
+    assert_eq!(
+        next_at(&mut replies, over + TAKE_WITHIN - Duration::from_secs(1)),
+        None
+    );
+    // Waiting a while since, and no new prompt: its Enter was lost, or an
+    // interrupt put it back in the input box.
+    let body = report_of(next_at(&mut replies, over + TAKE_WITHIN));
+    assert_eq!(
+        (&body["id"], &body["status"], &body["failure"]),
+        (&"01K8A1".into(), &"failed".into(), &"not_taken".into())
+    );
+    // The agent leaving counts as the turn ending too.
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    let mut message = message("01K8A2", 6, None);
+    message.text = "Now add a test.".into();
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read_messages(vec![message]), NOW);
+    assert_eq!(
+        submitted_reply(replies.next_work(NOW)).as_deref(),
+        Some("01K8A2")
+    );
+    replies.submitted("01K8A2".into(), Ok(()), NOW, wall(NOW));
+    let mut shell = view("S", Lifecycle::None, None);
+    shell.agent_turn = None;
+    replies.observe(&shell);
+    assert_eq!(next_at(&mut replies, ended), None);
+    let body = report_of(next_at(&mut replies, ended + TAKE_WITHIN));
+    assert_eq!(
+        (&body["id"], &body["failure"]),
+        (&"01K8A2".into(), &"not_taken".into())
+    );
+}
+
+#[test]
+fn a_reply_typed_mid_turn_is_answered_by_the_turn_that_took_it() {
+    // Taken at the agent's next step: the run's last reply answers it.
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
+    let took = NOW + Duration::from_secs(60);
+    let mut shown = running_prompted("claude", Lifecycle::Working, "Now add a test.");
+    replies.observe(&shown);
+    report_of(next_at(&mut replies, took));
+    report_taken(&mut replies, "01K8A1", took);
+    let ended = took + Duration::from_secs(60);
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    assert_eq!(next_at(&mut replies, ended), None);
+    // The daemon noted the turn's end just before this service heard of it.
+    let finished = wall(ended) - 100;
+    assert_eq!(replies.answered(&answer(Some("other"), finished)), None);
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), finished)),
+        Some("01K8A1".into())
+    );
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), finished + 5_000)),
+        None
+    );
+
+    // The turn it was typed into ends before the agent takes it (it was
+    // writing its last message): that turn's reply isn't its answer, before
+    // or after the agent takes it; the turn it starts is.
+    let mut replies = on(&[running("codex", Lifecycle::Working)]);
+    after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
+    let old_end = NOW + Duration::from_secs(10);
+    replies.observe(&running("codex", Lifecycle::Done));
+    assert_eq!(next_at(&mut replies, old_end), None);
+    let old_answer = answer(Some(CHAT), wall(old_end) - 100);
+    assert_eq!(replies.answered(&old_answer), None);
+    let took = old_end + Duration::from_secs(1);
+    let mut shown = running_prompted("codex", Lifecycle::Working, "Now add a test.");
+    replies.observe(&shown);
+    report_of(next_at(&mut replies, took));
+    report_taken(&mut replies, "01K8A1", took);
+    assert_eq!(replies.answered(&old_answer), None);
+    let ended = took + Duration::from_secs(30);
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    next_at(&mut replies, ended);
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), wall(ended) - 100)),
+        Some("01K8A1".into())
+    );
+
+    // Taken as the next prompt once the turn ended, its view still showing
+    // the agent waiting (the lifecycle lags): its turn is the one it started.
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
+    replies.observe(&running("claude", Lifecycle::Working));
+    let old_end = NOW + Duration::from_secs(10);
+    replies.observe(&running("claude", Lifecycle::Done));
+    assert_eq!(next_at(&mut replies, old_end), None);
+    let mut shown = running_prompted("claude", Lifecycle::Done, "Now add a test.");
+    replies.observe(&shown);
+    report_of(next_at(&mut replies, old_end));
+    report_taken(&mut replies, "01K8A1", old_end);
+    shown.lifecycle = Lifecycle::Working;
+    replies.observe(&shown);
+    next_at(&mut replies, old_end + Duration::from_secs(1));
+    let ended = old_end + Duration::from_secs(40);
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    next_at(&mut replies, ended);
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), wall(ended) - 100)),
+        Some("01K8A1".into())
+    );
+
+    // Taken, then interrupted: no answer, and a later one isn't its.
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
+    let mut shown = running_prompted("claude", Lifecycle::Working, "Now add a test.");
+    replies.observe(&shown);
+    report_of(next_at(&mut replies, NOW));
+    report_taken(&mut replies, "01K8A1", NOW);
+    let interrupted = NOW + Duration::from_secs(5);
+    shown.lifecycle = Lifecycle::Idle;
+    replies.observe(&shown);
+    next_at(&mut replies, interrupted);
+    let later = interrupted + Duration::from_secs(60);
+    assert_eq!(replies.answered(&answer(Some(CHAT), wall(later))), None);
+}
+
+#[test]
+fn replies_written_one_after_another_mid_turn_each_get_their_turns_answer() {
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    let work = after_reading(
+        &mut replies,
+        vec![
+            reply("01K8A1", 4, Some("studio")),
+            reply("01K8A2", 5, Some("studio")),
+        ],
+    );
+    assert_eq!(submitted_reply(work).as_deref(), Some("01K8A1"));
+    replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
+    // Claude Code takes the first at its next step; the second waits for the
+    // turn to end, so the two don't share that turn's one answer.
+    let took = NOW + Duration::from_secs(30);
+    let mut shown = running_prompted("claude", Lifecycle::Working, "Now add a test.");
+    replies.observe(&shown);
+    assert_eq!(report_of(next_at(&mut replies, took))["id"], "01K8A1");
+    report_taken(&mut replies, "01K8A1", took);
+    assert_eq!(next_at(&mut replies, took + Duration::from_secs(60)), None);
+    // The turn ends: the second goes in to the waiting agent.
+    let ended = NOW + Duration::from_secs(120);
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    assert_eq!(
+        submitted_reply(next_at(&mut replies, ended)).as_deref(),
+        Some("01K8A2")
+    );
+    replies.submitted("01K8A2".into(), Ok(()), ended, wall(ended));
+    let mut shown = running_prompted("claude", Lifecycle::Working, "Now add a test.");
+    replies.observe(&shown);
+    assert_eq!(report_of(next_at(&mut replies, ended))["id"], "01K8A2");
+    report_taken(&mut replies, "01K8A2", ended);
+    // The first turn's answer, captured after the second went in, is the
+    // first's; the second's turn's is the second's.
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), wall(ended) - 100)),
+        Some("01K8A1".into())
+    );
+    let second = ended + Duration::from_secs(40);
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    next_at(&mut replies, second);
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), wall(second) - 100)),
+        Some("01K8A2".into())
+    );
+}
+
+#[test]
+fn a_session_message_goes_into_an_agent_at_work_in_whatever_chat_it_shows() {
+    let mut at_work = running("claude", Lifecycle::Working);
+    at_work.agent_turn.as_mut().unwrap().conversation_id = Some("another".into());
+    let mut replies = on(&[at_work]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(
+        true,
+        read_messages(vec![message("01K8A2", 6, Some(CHAT))]),
+        NOW,
+    );
+    assert_eq!(
+        submitted_reply(replies.next_work(NOW)).as_deref(),
+        Some("01K8A2")
+    );
+    replies.submitted("01K8A2".into(), Ok(()), NOW, wall(NOW));
+    let mut shown = running_prompted("claude", Lifecycle::Working, "Start on the parser.");
+    shown.agent_turn.as_mut().unwrap().conversation_id = Some("another".into());
+    replies.observe(&shown);
+    let body = report_of(next_at(&mut replies, NOW + Duration::from_secs(90)));
+    assert_eq!(
+        (&body["id"], &body["status"]),
+        (&"01K8A2".into(), &"delivered".into())
+    );
+    let ended = NOW + Duration::from_secs(120);
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    replies.request_done(true, read(vec![]), ended);
+    next_at(&mut replies, ended);
+    assert_eq!(
+        replies.answered(&answer(Some("another"), wall(ended) - 100)),
+        Some("01K8A2".into())
+    );
+}

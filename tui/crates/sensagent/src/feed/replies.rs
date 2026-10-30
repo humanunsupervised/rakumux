@@ -5,19 +5,22 @@
 //! (`session_submit`: a paste, then Enter, the same for every agent), then
 //! says so. It delivers only to the entry's own session, while it runs, isn't
 //! private, still shows the entry's conversation and its agent waits for
-//! input; a busy or blocked agent is waited for (the cloud expires a reply
-//! after an hour). A session's replies go in one at a time, oldest first, and
-//! each is reported delivered only once its agent is seen to take it (see
-//! `Delivery`); the next waits for the agent to wait again. A session message
-//! (written on rakumux.com to a session with no answer to reply to) goes in
-//! the same queue: it is typed once an agent runs there and waits,
-//! whatever chat it shows; never into a session without an agent, which is
-//! waited for. Session messages never reach TUIs. A reply written on
-//! rakumux.com, another machine or this machine's TUI is typed alike; one
-//! written in this machine's TUI waits for a read that reaches it (5 s at
-//! most), so one written before it elsewhere, to the same session and not
-//! read here yet, goes in first. The agent's next reply in that
-//! session is uploaded as the reply's answer (`reply_to`).
+//! input, or works when it's one that takes what's typed during a turn
+//! ([`QUEUES_INPUT`]: typed **mid-turn**); a blocked agent (asking
+//! something), or one of the others that works, is waited for (the cloud
+//! expires a reply after an hour). A session's replies go in one at a time,
+//! oldest first, and each is reported delivered only once its agent is seen
+//! to take it (see `Delivery`); the next waits for the agent to wait again,
+//! so replies typed one after another each get their own turn's answer. A
+//! session message (written on rakumux.com to a session with no answer to
+//! reply to) goes in the same queue: it is typed once an agent runs there
+//! and takes input, whatever chat it shows; never into a session without an
+//! agent, which is waited for. Session messages never reach TUIs. A reply
+//! written on rakumux.com, another machine or this machine's TUI is typed
+//! alike; one written in this machine's TUI waits for a read that reaches it
+//! (5 s at most), so one written before it elsewhere, to the same session and
+//! not read here yet, goes in first. The agent's next reply in that session
+//! is uploaded as the reply's answer (`reply_to`).
 //!
 //! Which replies were typed in or decided, and the reports not yet taken, are
 //! kept across a restart (`kept`), so a reply is typed at most once whatever
@@ -86,9 +89,11 @@ pub(crate) const TYPING_HOLD: Duration = Duration::from_secs(2);
 /// A reply typed in is delivered once its agent's chat shows it as a new
 /// prompt; one whose chat shows no new prompt this long after it was typed
 /// failed (`not_taken`: its Enter was lost, or it went into a menu), so its
-/// session's next replies never wait on it for ever. An agent whose turns
-/// the daemon doesn't follow takes it once seen busy, or after this all the
-/// same.
+/// session's next replies never wait on it for ever. One typed mid-turn is
+/// taken at the agent's next step, minutes on maybe, or once the turn ends:
+/// it fails only once its agent has waited this long without taking it. An
+/// agent whose turns the daemon doesn't follow takes it once seen busy, or
+/// after this all the same.
 pub(crate) const TAKE_WITHIN: Duration = Duration::from_secs(30);
 /// A new prompt is a reply's when its letters and digits begin the reply's,
 /// or hold the reply's first this many (the reply typed after a draft on
@@ -102,6 +107,23 @@ pub(crate) const SETTLE: Duration = Duration::from_secs(5);
 /// (one normally back within a second) at most this long, then goes in all
 /// the same: reads failing, or slow behind other work, don't hold it back.
 const ORDER_WAIT: Duration = Duration::from_secs(5);
+
+/// The agents a reply is typed into while they work (`working`, never
+/// `blocked`), by the daemon's names for them (`SessionView::agent`'s
+/// `kind`): their input box stays open during a turn, Enter there queues
+/// the text (or steers it in) for the agent's next step, or the next turn
+/// when this one ends first, and their chat shows it as a new prompt once
+/// the agent takes it, which is how its delivery is seen (see `Delivery`).
+/// Claude Code logs it as a `queued_command` attachment, Codex as a
+/// `user_message`, and OpenCode as a user message (1.x shows it `QUEUED`;
+/// 2.x steers it in, or parks it with the turn's other queued prompts).
+/// Every other agent gets replies only while it waits.
+///
+/// An agent goes here once its integration reads what's typed during a
+/// turn as a prompt of its chat. Grok Build and Kimi Code queue it (Kimi
+/// writes it to its log only when the turn ends); GitHub Copilot, Droid,
+/// Amp and Pi queue or steer it too.
+const QUEUES_INPUT: &[&str] = &["claude", "claude-code", "codex", "opencode", "opencode2"];
 
 /// What became of a reply a TUI wrote.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -272,11 +294,17 @@ struct Seen {
     /// The program in its foreground: a reply is typed only while it's still
     /// there (`session_submit`'s `expect_foreground`).
     foreground: Option<String>,
+    /// Its agent takes what's typed while it works ([`QUEUES_INPUT`]).
+    queues: bool,
 }
 
 impl Seen {
     fn of(view: &SessionView) -> Self {
         Self {
+            queues: view
+                .agent
+                .as_ref()
+                .is_some_and(|agent| QUEUES_INPUT.contains(&agent.kind.as_str())),
             live: view.status == SessionStatus::Live,
             private: crate::shared_elsewhere(view),
             lifecycle: view.lifecycle,
@@ -296,6 +324,21 @@ impl Seen {
     /// Its agent waits for input.
     fn waits(&self) -> bool {
         matches!(self.lifecycle, Lifecycle::Idle | Lifecycle::Done)
+    }
+
+    /// Its agent works on a turn and takes what's typed meanwhile: one of
+    /// [`QUEUES_INPUT`], whose turns the daemon follows, so its chat shows
+    /// the reply as a prompt once it takes it. Never while it asks something
+    /// (`blocked`: a permission prompt, a question or a menu would take the
+    /// text as its answer), nor while what it does isn't known.
+    fn works_taking_input(&self) -> bool {
+        self.queues && self.lifecycle == Lifecycle::Working && self.turn.is_some()
+    }
+
+    /// A reply can be typed in now: its agent waits for input, or works and
+    /// takes what's typed meanwhile.
+    fn takes_input(&self) -> bool {
+        self.waits() || self.works_taking_input()
     }
 
     /// Its agent works, or asks something.
@@ -367,6 +410,10 @@ impl Pending {
 /// reported delivered; its session ended, its chat changed, another prompt
 /// went in or none within [`TAKE_WITHIN`], failed. The agent's lifecycle can
 /// lag what it does, so a view that still shows it waiting proves nothing.
+/// Typed mid-turn, its agent was busy already: only its chat's new prompt
+/// says it took it, and only being busy after that counts; it's not taken
+/// once its agent has waited [`TAKE_WITHIN`] without taking it (the turn
+/// ended, and what was queued didn't go in).
 struct Delivery {
     reply: String,
     target: Target,
@@ -378,12 +425,18 @@ struct Delivery {
     typed: bool,
     /// The agent's turn and chat just before: another turn after is a new prompt.
     turn: (Option<u64>, Option<String>),
-    /// The agent was seen working or asking something since.
+    /// The agent was seen working or asking something since (typed mid-turn:
+    /// since it took it).
     busy: bool,
     /// Its chat was seen with a new prompt that is this reply since.
     took: bool,
     /// When it was seen taken (and reported delivered).
     taken: Option<Duration>,
+    /// Typed while its agent worked ([`Seen::works_taking_input`]).
+    mid_turn: bool,
+    /// Typed mid-turn and not taken yet: since when its agent has been seen
+    /// waiting (or gone), its turn over; seen busy again, `None`.
+    waited: Option<Duration>,
 }
 
 /// What a typed-in reply's agent has shown of it.
@@ -423,12 +476,35 @@ impl Delivery {
         if !turns && self.busy {
             return Taking::Taken;
         }
-        if now.saturating_sub(self.since) < TAKE_WITHIN {
+        // Typed mid-turn, it's taken at the agent's next step or once the
+        // turn ends: given up on only once the agent has waited a while.
+        let from = if self.mid_turn {
+            self.waited
+        } else {
+            Some(self.since)
+        };
+        if from.is_none_or(|from| now.saturating_sub(from) < TAKE_WITHIN) {
             Taking::Waiting
         } else if turns {
             Taking::Failed(ReplyFailure::NotTaken)
         } else {
             Taking::Taken
+        }
+    }
+
+    /// Typed mid-turn and not taken yet: note whether its agent's turn is
+    /// over (it waits, or left) at `now`, as `seen` shows.
+    fn follow_turn(&mut self, seen: Option<&Seen>, now: Duration) {
+        if !self.mid_turn {
+            return;
+        }
+        let Some(seen) = seen else {
+            return;
+        };
+        if seen.busy() {
+            self.waited = None;
+        } else if seen.waits() || seen.lifecycle == Lifecycle::None {
+            self.waited.get_or_insert(now);
         }
     }
 
@@ -503,26 +579,46 @@ fn typed(text: &str, files: &[PathBuf]) -> String {
 /// the session's chats when it's `None`). Its answer is the agent's reply that
 /// finished after it was typed and, once its turn was seen to end, by then: so
 /// a reply typed in behind it never takes its answer, and one whose turn ended
-/// without an answer (interrupted, an error) never takes a later one.
+/// without an answer (interrupted, an error) never takes a later one. One
+/// typed mid-turn is answered only once its agent took it, by a reply that
+/// finished after that: the turn it was typed into may end before the agent
+/// takes it (it was writing its last message, or it takes queued text only
+/// then), and that turn's reply isn't its answer.
 struct Awaiting {
     reply: String,
     conversation: Option<String>,
-    /// When it was typed in, on the wall clock (as answers' `finished_at`)
-    /// and the owner thread's.
+    /// When it was typed in (typed mid-turn: when its agent took it), on the
+    /// wall clock (as answers' `finished_at`) and the owner thread's.
     since_ms: i64,
     since: Duration,
+    /// Typed mid-turn, and its agent hasn't taken it yet: nothing answers it.
+    untaken: bool,
     /// When its turn was seen to end (its agent took it and waits again),
     /// on both clocks.
     ended: Option<(i64, Duration)>,
 }
 
 impl Awaiting {
+    /// `now` on the owner's clock, on the wall clock.
+    fn wall_ms(&self, now: Duration) -> i64 {
+        let since = i64::try_from(now.saturating_sub(self.since).as_millis()).unwrap_or(i64::MAX);
+        self.since_ms.saturating_add(since)
+    }
+
+    /// Typed mid-turn, its agent was seen to take it at `now` on the
+    /// owner's clock: answers count from then.
+    fn taken(&mut self, now: Duration) {
+        if self.untaken {
+            self.since_ms = self.wall_ms(now);
+            self.since = now;
+            self.untaken = false;
+        }
+    }
+
     /// Its turn was seen to end at `now` on the owner's clock.
     fn end(&mut self, now: Duration) {
         if self.ended.is_none() {
-            let since =
-                i64::try_from(now.saturating_sub(self.since).as_millis()).unwrap_or(i64::MAX);
-            self.ended = Some((self.since_ms.saturating_add(since), now));
+            self.ended = Some((self.wall_ms(now), now));
         }
     }
 }
@@ -662,8 +758,11 @@ impl ReplySync {
     pub fn observe(&mut self, view: &SessionView) {
         let seen = Seen::of(view);
         if let Some(delivery) = self.deliveries.get_mut(&view.id) {
-            delivery.busy |= seen.busy();
             delivery.took |= delivery.prompted(&seen) == Some(true);
+            // Typed mid-turn, its agent was busy already: busy counts once it took it.
+            if delivery.took || !delivery.mid_turn {
+                delivery.busy |= seen.busy();
+            }
         }
         self.sessions.insert(view.id.clone(), seen);
     }
@@ -789,7 +888,7 @@ impl ReplySync {
                 continue;
             }
             let session = SessionId::from_string(reply.session_id.clone());
-            let waits = Seen::waits;
+            let takes = Seen::takes_input;
             let outcome = match self.sessions.get(&session) {
                 None => Err(ReplyFailure::SessionGone),
                 Some(seen) if !seen.live => Err(ReplyFailure::SessionGone),
@@ -803,14 +902,15 @@ impl ReplySync {
                         Some(conversation) if conversation != wanted => {
                             Err(ReplyFailure::ConversationChanged)
                         }
-                        // Its agent waits for input: type it.
-                        Some(_) if waits(seen) => Ok(true),
+                        // Its agent waits for input, or works and takes what's
+                        // typed meanwhile: type it.
+                        Some(_) if takes(seen) => Ok(true),
                         // Busy, blocked on a question, or its chat not known yet: wait.
                         _ => Ok(false),
                     },
-                    // Typed only to an agent that waits for input; a session
+                    // Typed only to an agent that takes input; a session
                     // without one (a shell) is waited for, never typed into.
-                    Target::Session => Ok(waits(seen)),
+                    Target::Session => Ok(takes(seen)),
                 },
             };
             match outcome {
@@ -871,6 +971,8 @@ impl ReplySync {
                     busy: false,
                     took: false,
                     taken: None,
+                    mid_turn: seen.is_some_and(Seen::works_taking_input),
+                    waited: None,
                 };
                 self.deliveries.insert(session.clone(), delivery);
                 Some(ReplyWork::Submit {
@@ -894,8 +996,10 @@ impl ReplySync {
     /// the next.
     fn follow_deliveries(&mut self, now: Duration) {
         let mut settled = Vec::new();
-        // Replies whose turn ended (taken, and their agent waits again), and
-        // those that failed after all, by session.
+        // Replies typed mid-turn that their agent took now, those whose turn
+        // ended (taken, and their agent waits again), and those that failed
+        // after all, by session.
+        let mut took = Vec::new();
         let mut ended = Vec::new();
         let mut gone = Vec::new();
         let sessions = &self.sessions;
@@ -906,11 +1010,15 @@ impl ReplySync {
                 return true;
             }
             if delivery.taken.is_none() {
+                delivery.follow_turn(seen, now);
                 match delivery.taking(seen, now) {
                     Taking::Waiting => return true,
                     Taking::Taken => {
                         delivery.taken = Some(now);
                         settled.push((delivery.reply.clone(), None));
+                        if delivery.mid_turn {
+                            took.push((session.clone(), delivery.reply.clone()));
+                        }
                     }
                     Taking::Failed(failure) => {
                         settled.push((delivery.reply.clone(), Some(failure)));
@@ -927,6 +1035,13 @@ impl ReplySync {
         });
         for (reply, failure) in settled {
             self.settle(&reply, failure, true);
+        }
+        for (session, reply) in took {
+            if let Some(awaiting) = self.awaiting.get_mut(&session) {
+                for entry in awaiting.iter_mut().filter(|entry| entry.reply == reply) {
+                    entry.taken(now);
+                }
+            }
         }
         for (session, reply) in ended {
             if let Some(awaiting) = self.awaiting.get_mut(&session) {
@@ -1023,6 +1138,7 @@ impl ReplySync {
                     return;
                 };
                 delivery.typed = true;
+                let untaken = delivery.mid_turn;
                 // A reply is answered in its chat; a session message in the
                 // chat the session shows now, or any when it doesn't say.
                 let conversation = match &delivery.target {
@@ -1044,6 +1160,7 @@ impl ReplySync {
                     conversation,
                     since_ms: now_ms,
                     since: now,
+                    untaken,
                     ended: None,
                 });
             }
@@ -1096,9 +1213,9 @@ impl ReplySync {
     }
 
     /// The reply `answer` answers: of those typed into its session in its
-    /// conversation, the latest typed in before its turn finished, unless
-    /// that one's turn had been seen to end before (see [`Awaiting`]). The
-    /// replies typed in before it lost their answers.
+    /// conversation, the latest typed in (typed mid-turn: taken) before its
+    /// turn finished, unless that one's turn had been seen to end before (see
+    /// [`Awaiting`]). The replies typed in before it lost their answers.
     pub fn answered(&mut self, answer: &AgentReply) -> Option<String> {
         let awaiting = self.awaiting.get_mut(&answer.session_id)?;
         let at = awaiting.iter().rposition(|entry| {
@@ -1106,7 +1223,7 @@ impl ReplySync {
                 .conversation
                 .as_deref()
                 .is_none_or(|conversation| answer.conversation_id.as_deref() == Some(conversation));
-            same_chat && entry.since_ms <= answer.finished_at
+            same_chat && !entry.untaken && entry.since_ms <= answer.finished_at
         })?;
         let entry = &awaiting[at];
         if entry

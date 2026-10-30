@@ -1,8 +1,9 @@
 //! Writing back from the feed (`r`): only a session's newest card takes a
 //! reply (`FeedStore::reply_to`). The account service stores it on
 //! rakumux.com (`AccountAccess::feed_reply`), and the entry's machine types
-//! it into the entry's session once its agent waits for input; this machine
-//! at once, when the session runs here. The agent's next reply there answers
+//! it into the entry's session once its agent waits for input, or while it
+//! works when it takes what's typed during a turn; this machine at once, when
+//! the session runs here. The agent's next reply there answers
 //! it, and the detail shows them as a thread. A prompt still waiting for its
 //! answer replies to the session's newest entry in its chat, or with none
 //! writes to the session itself (`AccountAccess::session_message`), typed in
@@ -140,12 +141,9 @@ impl App {
             return;
         }
         let place = match &dialog.machine {
-            None => format!(
-                "Sent: it goes into {} when its agent waits for you.",
-                dialog.session_name
-            ),
+            None => format!("Sent: it goes into {}.", dialog.session_name),
             Some(machine) => format!(
-                "Sent to {machine}: it goes into {} there when its agent waits.",
+                "Sent to {machine}: it goes into {} there.",
                 dialog.session_name
             ),
         };

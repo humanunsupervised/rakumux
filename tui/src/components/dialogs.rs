@@ -247,10 +247,7 @@ pub fn draw_feed_reply_dialog(f: &mut Frame, dialog: &FeedReplyDialog, area: Rec
     let room = rows[0].width.saturating_sub(1) as usize;
     let muted = Style::default().fg(palette().text_muted);
     let target = match &dialog.machine {
-        None => format!(
-            " Typed into {} when its agent waits for you",
-            dialog.session_name
-        ),
+        None => format!(" Typed into {}", dialog.session_name),
         Some(machine) => format!(" Typed into {} on {machine}", dialog.session_name),
     };
     f.render_widget(

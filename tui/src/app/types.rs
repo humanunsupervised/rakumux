@@ -87,7 +87,7 @@ pub struct RenameDialog {
 
 /// Writing back to a feed entry, or to the session of a prompt still waiting
 /// for its answer (`r` in the Feed): typed into the session on its machine
-/// once its agent waits.
+/// once its agent can take it.
 #[derive(Debug, Clone)]
 pub struct FeedReplyDialog {
     pub to: super::feed::ReplyTo,
