@@ -8,6 +8,7 @@ integrations/
   pi/            # Extension and installer, detection, recovery, end-to-end test
   copilot/       # GitHub Copilot CLI: command hooks (a file of its own), detection, recovery
   cursor-agent/  # Cursor's agent CLI: command hooks, its chat transcript, recovery
+  grok/          # Grok Build: native command hooks, detection, recovery, output, places
   detection.rs   # Shared process/screen engine and retained older profiles
   recovery.rs    # Shared resume dispatch and safe argument/file helpers
   hooks.rs       # Adapter dispatch and metadata-only normalization
@@ -30,6 +31,7 @@ Older detection profiles remain supported; new hooks start with these three agen
 - [Pi](pi/README.md)
 - [GitHub Copilot](copilot/README.md)
 - [Cursor](cursor-agent/README.md)
+- [Grok Build](grok/README.md)
 
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
@@ -44,9 +46,10 @@ session's folder permissions, terminal cwd or another session.
 
 - OpenCode uses the displayed session's `location.directory` and `subpath`, not the plugin's
   original launch location. A worktree switch is sent even if its activity stays idle.
-- Claude Code, Codex and GitHub Copilot use the root hook input's `cwd`, never tool arguments or
-  background subagent directories. Claude's `CwdChanged` hook updates context without changing
-  activity; Copilot's `/cd` fires no hook and shows at its next one.
+- Claude Code, Codex, GitHub Copilot and Grok Build use the root hook input's `cwd`, never tool
+  arguments or background subagent directories (a Grok subagent's own session included).
+  Claude's `CwdChanged` hook updates context without changing activity; Copilot's `/cd` fires
+  no hook and shows at its next one.
 - Cursor uses its hook input's single `workspace_roots` entry (a `-w` worktree's own), never a
   tool's `cwd` or a subagent's.
 - Without an active agent, git context follows the terminal cwd. The daemon polls quiet
@@ -147,7 +150,7 @@ prompts, tool arguments, output or transcripts.
 
 The daemon's terminal answers the Program Status Protocol's support query (`OSC 7501;?`,
 <https://www.superlogical.com/rex/docs/build/program-status>) with the same body, so programs that
-speak it (Pi from 1.1, Kimi Code 2.x) report what they do, with nothing installed:
+speak it (Pi from 1.1, Kimi Code 2.x, Grok Build 1.0.70) report what they do, with nothing installed:
 `state=idle|working|blocked|done|error|clear`, `kind` for `blocked`, `id` for a child record (Kimi
 Code's subagents). The daemon keeps each session's records in memory (`control/program_status.rs`)
 and never their texts (`msg`, `title`). Without fresh hook activity, and while detection names an
@@ -162,7 +165,7 @@ answered the query never asked, and reports nothing until it's restarted.
 
 ## Latest output and prompt
 
-`output.rs` gives each live Claude Code, Codex, OpenCode, Pi, GitHub Copilot or Cursor session two lines: what its agent
+`output.rs` gives each live Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor or Grok Build session two lines: what its agent
 last said or did (`SessionView.agent_output`) and what the user last typed to it
 (`SessionView.user_prompt`). The session list shows neither.
 - **Where it comes from:** the daemon reads it from the agent's own conversation on this
@@ -189,6 +192,9 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
     files can't be read, the folder's newest). Cursor writes the file whole now and then: the
     follower never reads past a final `turn_ended` line and starts over when the file no longer
     ends a line where it stopped. Its lines have no times: a message's is the file's.
+  - Grok Build: `$GROK_HOME/sessions/<folder>/<session>/updates.jsonl`, for the session the
+    process shows: of those `active_sessions.json` lists for it, the one its hooks named,
+    else the one written last (`/new` and the Agent Dashboard keep several in one process).
 - **What's taken:** the last entry the main conversation's assistant wrote (its reasoning, a
   tool call as `Tool: description` or a short path, or its reply), and the user's last typed
   message (a slash command as `/name args`; the agents' own insertions such as reminders,
@@ -227,7 +233,8 @@ For OpenCode, the reply is the last text block the agent wrote since the newest 
 its turn's final response: an assistant entry that stopped (`stop`, or cut at `length`) with no
 tool to call, keyed by the entry's `id`; one that failed or was aborted is none. For Cursor, the
 text after its last tool call (keyed by the chat and the line's offset); Cursor writes a
-message's reasoning after its text, so a reply can end with it. Each
+message's reasoning after its text, so a reply can end with it. For Grok Build, its text blocks
+since the last prompt or tool call, keyed by the turn's `promptId`. Each
 reply also says where its turn ends in the conversation (`position`, as below).
 
 ## Whole conversations
@@ -249,6 +256,10 @@ reasoning, its tool calls with their input, and the tools' output (the `tool` ro
   reasoning events (counted once with their message's copy) and tools' results. Copilot rewrites
   its log when a turn is taken back, so a cursor names the file it read and another is read from
   its start.
+- **Grok Build:** one message per `updates.jsonl` line, at its byte offset, with its
+  `eventId`. A tool's result is its update with a `status` (`failed` an error), as its model
+  read it. Prompts Grok wakes itself with and bookkeeping (hooks, turn ends, rewind markers)
+  are left out; a subagent's work is in its own session's log.
 - **OpenCode:** the conversation's rows changed since a watermark: each OpenCode 2 prompt, and
   each block of a reply (`seq × 1024 + block`; a tool block holds its call and, once it ran, its
   result), or each 1.x piece (`time_created × 1024 + its place`). Bookkeeping pieces (steps,
@@ -272,7 +283,9 @@ paste, then Enter), as if the user typed it. None of them has a supported way in
 outside: Claude Code, Codex and GitHub Copilot take prompts only from their terminal (their
 headless modes would run a second process on the same conversation), OpenCode's server port
 belongs to its own TUI, Pi's RPC mode is a process of its own, and Cursor's takes a bracketed
-paste in its input box like typing (its `--print` mode is a second process). So nothing here is
+paste in its input box like typing (its `--print` mode is a second process). Grok Build is the
+same: its headless and agent modes are processes of their own, and it takes a bracketed paste
+and Enter as one prompt. So nothing here is
 agent-specific beyond what's already read: the conversation id
 (`agent_turn.conversation_id`) the reply must still match, and the lifecycle that says the
 agent waits for input, or works for one that takes what's typed during a turn and logs it as a
@@ -312,6 +325,7 @@ cd tui
 cargo test -p rakumux-ptyd --test control_activity --locked
 cargo test -p rakumux-ptyd detect:: --locked
 cargo test -p rakumux-ptyd resume:: --locked
+cargo test -p rakumux-ptyd --test grok_follower --locked
 cargo test -p tui hook --locked
 cargo test -p rakumux-ptyd copilot --locked
 cargo test -p rakumux-ptyd --test control_copilot --locked

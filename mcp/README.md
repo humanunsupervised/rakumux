@@ -84,7 +84,8 @@ from MCP servers' environment (Gemini CLI) need both mapped explicitly in the se
 Cursor gives a server only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER` of its own
 environment, so both go in its `env` too;
 OpenCode 1.x starts MCP servers inside each TUI, so they do; Pi starts its stdio servers in its
-own process with its environment, so they do; OpenCode 2.x runs MCP servers in a
+own process with its environment, so they do; Grok Build starts them with its own environment,
+so both reach them (checked with 1.0.70); OpenCode 2.x runs MCP servers in a
 background service shared by every conversation, so they don't.
 
 **OpenCode 2.x** tags every tool call with its conversation (`_meta["ai.opencode/sessionID"]`). The
@@ -184,6 +185,19 @@ one. Cursor has no `mcp add`; `agent mcp list` shows the server, and its tool ca
 approval unless `~/.cursor/cli-config.json`'s `permissions.allow` holds `"Mcp(rakumux:*)"`.
 **Unverified**: the interpolation and approval were taken from Cursor's documentation
 (<https://cursor.com/docs/mcp>) and code; they weren't tried signed in.
+
+### Grok Build
+
+```bash
+grok mcp add rakumux -- rakumux-mcp
+```
+
+It writes `[mcp_servers.rakumux]` to `~/.grok/config.toml` (`--scope project`: the repository's
+`.grok/config.toml`). Grok passes its environment to the server, `RAKUMUX_SESSION_ID` and
+`RAKUMUX_SESSION_TOKEN` included, so nothing needs listing (checked with Grok Build 1.0.70). It
+also loads the servers Claude Code has (`~/.claude.json`, `.mcp.json`), so one added there
+reaches Grok too. `grok mcp list` and `/mcps` show it. See
+[Grok Build integration](../integrations/grok/README.md).
 
 ### OpenCode
 

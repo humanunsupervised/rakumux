@@ -154,7 +154,7 @@ or a phone.
 
 - **Restart:** `rakumux daemon restart` swaps in a new version without stopping your programs.
 - **Recovery:** after a crash or a reboot, the sessions that were running come back by
-  themselves. Claude Code, Codex and OpenCode return in the same conversation. Other programs
+  themselves. Claude Code, Codex, OpenCode and Grok Build return in the same conversation. Other programs
   have their command typed at the prompt.
 
 ## Command line
@@ -190,6 +190,7 @@ rakumux session hook-config --agent claude  # merge the printed hooks into ~/.cl
 rakumux session hook-config --agent codex   # merge into ~/.codex/hooks.json, then trust them in /hooks
 rakumux session hook-config --agent copilot --install  # writes ~/.copilot/hooks/rakumux.json for GitHub Copilot
 rakumux-mcp opencode-plugin --install       # OpenCode
+rakumux session hook-config --agent grok --install  # Grok Build: writes ~/.grok/hooks/rakumux.json
 ```
 
 For details, see the [agent integrations guide](integrations/README.md).
@@ -202,7 +203,7 @@ The MCP server lets an agent list, create, read and rename sessions in its own f
 claude mcp add --scope user rakumux -- rakumux-mcp
 ```
 
-For Codex, OpenCode, GitHub Copilot and session identity, see the [MCP guide](mcp/README.md).
+For Codex, OpenCode, GitHub Copilot, Grok Build and session identity, see the [MCP guide](mcp/README.md).
 
 ## Rakumux account (optional)
 
