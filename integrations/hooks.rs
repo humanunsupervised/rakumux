@@ -71,6 +71,58 @@ pub fn report(agent: &str, input: &Value) -> Result<Option<Report>, String> {
     }))
 }
 
+/// What `rakumux session hook` received, reduced to a report: the input of a
+/// hook fired by `agent` (`--agent`) or by an agent that runs its hooks (see
+/// [`host`]), with `event` (`--event`) as its `hookEventName` when given,
+/// for agents whose input doesn't name its event (GitHub Copilot's). `var`
+/// reads the hook's environment.
+pub fn receive(
+    agent: &str,
+    event: Option<&str>,
+    mut input: Value,
+    var: impl Fn(&str) -> Option<String>,
+) -> Result<Option<Report>, String> {
+    let agent = host(agent, &input, var);
+    if let Some(event) = event {
+        let valid = !event.is_empty()
+            && event.len() <= 64
+            && event
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':'));
+        if !valid {
+            return Err("invalid hook event name".into());
+        }
+        let Some(object) = input.as_object_mut() else {
+            return Err("hook input is not a JSON object".into());
+        };
+        object.insert(EVENT.into(), Value::String(event.into()));
+    }
+    report(agent, &input)
+}
+
+/// Where `--event` puts the event's name in the input.
+pub const EVENT: &str = "hookEventName";
+
+/// The agent whose hook this is. Cursor, GitHub Copilot and Grok also run
+/// Claude Code's hooks (the user's or the repository's `.claude/settings.json`);
+/// fired there, `--agent claude` hooks report as that agent, recognised by what
+/// it adds: Cursor's input has `cursor_version`; Grok's has its own
+/// `hookEventName` next to Claude's `hook_event_name` (or `GROK_HOOK_EVENT` is
+/// set); GitHub Copilot sets `COPILOT_CLI=1`. Other agents' hooks are theirs.
+pub fn host<'a>(agent: &'a str, input: &Value, var: impl Fn(&str) -> Option<String>) -> &'a str {
+    if agent != "claude" {
+        agent
+    } else if input.get("cursor_version").is_some() {
+        "cursor-agent"
+    } else if input.get(EVENT).is_some() || var("GROK_HOOK_EVENT").is_some() {
+        "grok"
+    } else if var("COPILOT_CLI").as_deref() == Some("1") {
+        "copilot"
+    } else {
+        agent
+    }
+}
+
 pub fn config(agent: &str) -> Option<&'static str> {
     match agent {
         "claude" => Some(include_str!("claude-code/hooks.json")),
@@ -239,6 +291,60 @@ mod tests {
                 assert_eq!(event_of(agent, input), None, "{agent} {name}");
             }
         }
+    }
+
+    fn no_vars(_: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn claude_code_hooks_run_by_another_agent_report_as_that_agent() {
+        let claude = json!({"hook_event_name":"PreToolUse", "session_id":"root", "cwd":"/repo"});
+        assert_eq!(host("claude", &claude, no_vars), "claude");
+        let mut cursor = claude.clone();
+        cursor["cursor_version"] = json!("2026.10.22");
+        assert_eq!(host("claude", &cursor, no_vars), "cursor-agent");
+        let mut grok = claude.clone();
+        grok["hookEventName"] = json!("pre_tool_use");
+        assert_eq!(host("claude", &grok, no_vars), "grok");
+        let env = |set: &'static str, value: &'static str| {
+            move |name: &str| (name == set).then(|| value.to_owned())
+        };
+        assert_eq!(
+            host("claude", &claude, env("GROK_HOOK_EVENT", "pre_tool_use")),
+            "grok"
+        );
+        assert_eq!(host("claude", &claude, env("COPILOT_CLI", "1")), "copilot");
+        assert_eq!(host("claude", &claude, env("COPILOT_CLI", "0")), "claude");
+        // GROK_AGENT is also Grok's own setting, and its tools' children inherit it.
+        assert_eq!(host("claude", &claude, env("GROK_AGENT", "1")), "claude");
+        // Only Claude Code's hooks are run elsewhere; other adapters stay theirs.
+        assert_eq!(host("codex", &cursor, env("COPILOT_CLI", "1")), "codex");
+        // Reported as that agent: an adapter of its own, never Claude Code's.
+        assert!(receive("claude", None, cursor, no_vars).is_err());
+        let report = receive("claude", None, claude, no_vars).unwrap().unwrap();
+        assert_eq!(report.activity.unwrap().agent, "claude");
+    }
+
+    #[test]
+    fn an_event_named_on_the_command_line_reaches_the_adapter() {
+        let input = json!({"sessionId":"root", "cwd":"/repo"});
+        assert!(receive("claude", Some("bad event"), input.clone(), no_vars).is_err());
+        assert!(receive("claude", Some(""), input.clone(), no_vars).is_err());
+        assert!(receive("claude", Some("agentStop"), json!([1]), no_vars).is_err());
+        // An adapter reads it as `hookEventName`; Claude Code's ignores it.
+        let named = receive(
+            "claude",
+            Some("Stop"),
+            json!({"hook_event_name":"Stop", "session_id":"root"}),
+            no_vars,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(named.activity.unwrap().event, phase(ActivityPhase::Done));
+        assert!(receive("claude", Some("agentStop"), input, no_vars)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

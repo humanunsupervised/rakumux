@@ -26,9 +26,10 @@ pub(super) fn configuration(agent: HookAgent, out: &mut dyn Write) -> Result<i32
 pub(super) fn run(
     globals: &Globals,
     agent: HookAgent,
+    event: Option<&str>,
     out: &mut dyn Write,
 ) -> Result<i32, CliError> {
-    let result = receive(globals, agent);
+    let result = receive(globals, agent, event);
     if let Err(error) = result {
         // Do not include raw hook JSON: it may contain credentials or prompts.
         eprintln!("rakumux activity unavailable: {error}");
@@ -39,7 +40,7 @@ pub(super) fn run(
     Ok(0)
 }
 
-fn receive(globals: &Globals, agent: HookAgent) -> Result<(), String> {
+fn receive(globals: &Globals, agent: HookAgent, event: Option<&str>) -> Result<(), String> {
     if std::env::var_os(session_core::env::SESSION_ID).is_none()
         || std::env::var_os(session_core::env::SESSION_TOKEN).is_none()
     {
@@ -54,7 +55,8 @@ fn receive(globals: &Globals, agent: HookAgent) -> Result<(), String> {
         return Err("hook input exceeds 1 MiB".into());
     }
     let input = serde_json::from_slice(&bytes).map_err(|_| "invalid hook JSON")?;
-    let Some(report) = adapters::report(agent.name(), &input)? else {
+    let var = |name: &str| std::env::var(name).ok();
+    let Some(report) = adapters::receive(agent.name(), event, input, var)? else {
         return Ok(());
     };
     // Never create a daemon from a hook. Hooks are optional, not session launchers.

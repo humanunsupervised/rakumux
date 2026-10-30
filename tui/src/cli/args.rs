@@ -360,6 +360,9 @@ pub enum SessionCommand {
     Hook {
         #[arg(long, value_enum)]
         agent: HookAgent,
+        /// The hook's event, for agents whose input doesn't name it
+        #[arg(long, value_name = "NAME")]
+        event: Option<String>,
     },
     /// Print hook configuration to merge into the agent's settings.
     HookConfig {
@@ -626,6 +629,40 @@ mod tests {
         );
         // Global options are accepted after the subcommand too.
         assert!(parse("ls --all -d").debug);
+    }
+
+    #[test]
+    fn hooks_name_their_agent_and_optionally_the_event() {
+        assert_eq!(
+            parse("session hook --agent copilot --event agentStop").command,
+            Command::Session {
+                command: SessionCommand::Hook {
+                    agent: HookAgent::Copilot,
+                    event: Some("agentStop".into()),
+                }
+            }
+        );
+        for name in [
+            "claude",
+            "codex",
+            "opencode",
+            "copilot",
+            "cursor-agent",
+            "pi",
+            "grok",
+            "kimi",
+            "droid",
+            "amp",
+        ] {
+            let Command::Session {
+                command: SessionCommand::Hook { agent, event },
+            } = parse(&format!("session hook --agent {name}")).command
+            else {
+                panic!("{name}");
+            };
+            assert_eq!((agent.name(), event), (name, None));
+        }
+        assert!(CliArgs::try_parse_from(argv("session hook --agent gemini")).is_err());
     }
 
     #[test]

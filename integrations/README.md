@@ -49,6 +49,20 @@ and trusted in `/hooks`. No adapter creates or switches a git worktree, runs `gi
 prompt/transcript text to guess a directory. Without agent metadata, the terminal cwd is the
 fallback; Rakumux does not guess from another conversation's most-recent directory.
 
+## Hook transport
+
+`rakumux session hook --agent <agent> [--event <name>]` reads one hook's JSON on stdin and
+always answers `{}` with exit 0. Agents: `claude`, `codex`, `opencode`, `copilot`,
+`cursor-agent`, `pi`, `grok`, `kimi`, `droid`, `amp`; one without an adapter yet reports
+nothing. `--event` names the hook's event for agents whose input doesn't (GitHub Copilot's
+camelCase hooks); adapters read it as `hookEventName`.
+
+Cursor, GitHub Copilot and Grok also run Claude Code's hooks (the user's or the repository's
+`.claude/settings.json`). Fired there, `--agent claude` hooks report as that agent, never as
+Claude Code: Cursor's input carries `cursor_version`, Grok's its own `hookEventName` next to
+Claude's `hook_event_name` (or `GROK_HOOK_EVENT` is set), and GitHub Copilot sets
+`COPILOT_CLI=1`.
+
 ## Common activity protocol, version 1
 
 Integrations use the existing self-only `session_report` request's optional `activity` field:

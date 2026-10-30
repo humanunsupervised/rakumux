@@ -88,8 +88,8 @@ fn execute(cli: CliArgs) -> Result<i32, CliError> {
     let mut out = io::stdout();
     match cli.command {
         Command::Session {
-            command: args::SessionCommand::Hook { agent },
-        } => hooks::run(&globals, agent, &mut out),
+            command: args::SessionCommand::Hook { agent, event },
+        } => hooks::run(&globals, agent, event.as_deref(), &mut out),
         Command::Session {
             command: args::SessionCommand::HookConfig { agent },
         } => hooks::configuration(agent, &mut out),
