@@ -1662,8 +1662,8 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         SessionLayout::Sidebar => doc.bullet(format!(
             "Session list, on the left: the tabs on top (Status, {} Folders, App), then the \
              sessions in the order you keep them (a new one goes at the bottom), each with a \
-             status mark, a bold title, and its app name in muted blue before the git branch; \
-             the selected title is white, the others a softer foreground colour. With \
+             status mark, a bold title, and its app name in its agent's colour before the git \
+             branch; the selected title is white, the others a softer foreground colour. With \
              several folders, each has a header row; pinned sessions lead their folder.",
             ctx.icons.folder()
         )),

@@ -256,8 +256,9 @@ pub fn facts_line(
     }
 }
 
-/// Quiet blue app labels, independent of lifecycle and its status colours
-/// (rows, and the App tab's headers and modal).
+/// App labels in their agent's own colour (a quiet blue for other apps),
+/// independent of lifecycle and its status colours (rows, and the App tab's
+/// headers and modal).
 pub fn program_color(program: &str) -> Color {
     let p = theme::palette();
     agents::color(&program.to_ascii_lowercase()).unwrap_or(p.label_blue)
@@ -501,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn app_names_use_muted_blues_without_colouring_the_branch_or_state() {
+    fn app_names_use_their_agents_colours_without_colouring_the_branch_or_state() {
         let p = theme::palette();
         let detail_style = Style::default().fg(p.text_muted);
         let mut session = view("A", "a", 0);
@@ -511,9 +512,13 @@ mod tests {
             ("claude", p.label_blue),
             ("codex", p.label_steel_blue),
             ("opencode", p.label_slate_blue),
-            ("copilot", p.label_slate_blue),
-            ("grok", p.label_steel_blue),
-            ("pi", p.label_blue),
+            ("copilot", p.label_violet),
+            ("cursor-agent", p.label_stone),
+            ("pi", p.label_teal),
+            ("grok", p.label_graphite),
+            ("kimi", p.label_azure),
+            ("droid", p.label_cyan),
+            ("amp", p.label_orchid),
             ("gemini", p.label_blue),
             ("cargo", p.label_blue),
             ("OpenCode", p.label_slate_blue),

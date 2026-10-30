@@ -23,10 +23,26 @@ pub struct Palette {
     pub text_muted: Color,
     pub text_subtle: Color,
     pub neutral_gray: Color,
-    /// Muted blue shades for secondary app-name labels.
+    /// App-name labels, one per coding agent (`integrations/<agent>/presentation.rs`):
+    /// quiet blues for Claude Code (and apps without one of their own), Codex
+    /// and OpenCode.
     pub label_blue: Color,
     pub label_steel_blue: Color,
     pub label_slate_blue: Color,
+    /// Kimi Code's brand blue.
+    pub label_azure: Color,
+    /// Pi.
+    pub label_teal: Color,
+    /// Droid.
+    pub label_cyan: Color,
+    /// GitHub Copilot.
+    pub label_violet: Color,
+    /// Amp.
+    pub label_orchid: Color,
+    /// Grok Build.
+    pub label_graphite: Color,
+    /// Cursor.
+    pub label_stone: Color,
     pub accent_primary: Color,
     pub accent_green: Color,
     pub accent_orange: Color,
@@ -287,6 +303,13 @@ impl Theme {
                 label_blue: Color::Rgb(119, 142, 205),
                 label_steel_blue: Color::Rgb(113, 146, 179),
                 label_slate_blue: Color::Rgb(125, 134, 176),
+                label_azure: Color::Rgb(0x4f, 0xa8, 0xff),
+                label_teal: Color::Rgb(80, 170, 150),
+                label_cyan: Color::Rgb(100, 182, 204),
+                label_violet: Color::Rgb(160, 120, 235),
+                label_orchid: Color::Rgb(206, 116, 196),
+                label_graphite: Color::Rgb(140, 150, 150),
+                label_stone: Color::Rgb(176, 162, 148),
                 accent_primary: Color::Rgb(122, 162, 247),
                 accent_green: Color::Rgb(158, 206, 106),
                 accent_orange: Color::Rgb(255, 158, 100),
@@ -320,6 +343,13 @@ impl Theme {
                 label_blue: Color::Indexed(68),        // #5f87d7
                 label_steel_blue: Color::Indexed(67),  // #5f87af
                 label_slate_blue: Color::Indexed(103), // #8787af
+                label_azure: Color::Indexed(75),       // #5fafff
+                label_teal: Color::Indexed(73),        // #5fafaf
+                label_cyan: Color::Indexed(38),        // #00afd7
+                label_violet: Color::Indexed(135),     // #af5fff
+                label_orchid: Color::Indexed(176),     // #d787d7
+                label_graphite: Color::Indexed(245),   // #8a8a8a
+                label_stone: Color::Indexed(249),      // #b2b2b2
                 accent_primary: Color::Indexed(111),   // ≈ blue
                 accent_green: Color::Indexed(149),     // #afd75f ≈ green
                 accent_orange: Color::Indexed(215),    // #ffaf5f ≈ orange
@@ -343,6 +373,13 @@ impl Theme {
                 label_blue: Color::Blue,
                 label_steel_blue: Color::Cyan,
                 label_slate_blue: Color::Blue,
+                label_azure: Color::LightBlue,
+                label_teal: Color::LightCyan,
+                label_cyan: Color::Cyan,
+                label_violet: Color::Magenta,
+                label_orchid: Color::LightMagenta,
+                label_graphite: Color::Gray,
+                label_stone: Color::White,
                 accent_primary: Color::LightBlue,
                 accent_green: Color::LightGreen,
                 accent_orange: Color::Yellow,
@@ -487,20 +524,80 @@ mod tests {
         assert!(b >= r && b >= g, "text {:?}", (r, g, b));
     }
 
+    /// WCAG relative luminance.
+    fn luminance(color: Color) -> f64 {
+        let (r, g, b) = rgb(color).unwrap();
+        let linear = |channel: u8| {
+            let channel = f64::from(channel) / 255.0;
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+    }
+
+    /// Each agent's app label, as its `presentation.rs` picks it.
+    fn agent_labels(p: &Palette) -> [(&'static str, Color); 10] {
+        [
+            ("claude", p.label_blue),
+            ("codex", p.label_steel_blue),
+            ("opencode", p.label_slate_blue),
+            ("kimi", p.label_azure),
+            ("pi", p.label_teal),
+            ("droid", p.label_cyan),
+            ("copilot", p.label_violet),
+            ("amp", p.label_orchid),
+            ("grok", p.label_graphite),
+            ("cursor-agent", p.label_stone),
+        ]
+    }
+
+    #[test]
+    fn every_agent_has_a_label_of_its_own_readable_on_the_list() {
+        let tokyo = Theme::tokyo_night().palette;
+        let indexed = Theme::basic(ColorSupport::Ansi256).palette;
+        for p in [tokyo, indexed] {
+            let labels = agent_labels(&p);
+            for (i, (agent, label)) in labels.iter().enumerate() {
+                // Apart from the others (the three blues were chosen
+                // before; they stay as they are) and from the status marks.
+                for (other, color) in &labels[i + 1..] {
+                    let (a, b) = (rgb(*label).unwrap(), rgb(*color).unwrap());
+                    let distance = [(a.0, b.0), (a.1, b.1), (a.2, b.2)]
+                        .iter()
+                        .map(|(x, y)| (f64::from(*x) - f64::from(*y)).powi(2))
+                        .sum::<f64>()
+                        .sqrt();
+                    assert!(distance >= 30.0 || i < 3, "{agent} and {other}: {distance}");
+                    assert_ne!(label, color, "{agent} and {other}");
+                }
+                for status in [
+                    p.accent_green,
+                    p.accent_orange,
+                    p.accent_pink,
+                    p.accent_gold,
+                ] {
+                    assert_ne!(*label, status, "{agent}");
+                }
+                assert!(matches!(label, Color::Rgb(..) | Color::Indexed(16..)));
+            }
+        }
+        for (agent, label) in agent_labels(&tokyo) {
+            let contrast = (luminance(label) + 0.05) / (luminance(tokyo.panel) + 0.05);
+            assert!(contrast >= 4.5, "{agent}: {contrast}");
+            assert!(luminance(label) < luminance(tokyo.text_primary), "{agent}");
+        }
+        assert_eq!(
+            tokyo.label_azure,
+            Color::Rgb(0x4f, 0xa8, 0xff),
+            "Kimi's brand blue"
+        );
+    }
+
     #[test]
     fn app_label_blues_are_readable_and_quieter_than_titles() {
-        fn luminance(color: Color) -> f64 {
-            let (r, g, b) = rgb(color).unwrap();
-            let linear = |channel: u8| {
-                let channel = f64::from(channel) / 255.0;
-                if channel <= 0.04045 {
-                    channel / 12.92
-                } else {
-                    ((channel + 0.055) / 1.055).powf(2.4)
-                }
-            };
-            0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
-        }
         let p = Theme::tokyo_night().palette;
         for label in [p.label_blue, p.label_steel_blue, p.label_slate_blue] {
             let (r, g, b) = rgb(label).unwrap();

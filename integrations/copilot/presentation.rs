@@ -1,3 +1,3 @@
 pub(super) fn color() -> ratatui::style::Color {
-    crate::theme::palette().label_slate_blue
+    crate::theme::palette().label_violet
 }
