@@ -170,8 +170,9 @@ pub trait SessionApi: Send + Sync {
         let _ = (id, after, max_bytes);
         Err(unsupported("reading an agent's conversation"))
     }
-    /// The optional features the daemon announced in its hello; `None` when
-    /// the implementation can't tell (adapters, fakes).
+    /// The optional features the daemon announced in its hello (the latest
+    /// one's: a daemon restarted since, in place or replaced, may announce
+    /// more); `None` when the implementation can't tell (adapters, fakes).
     fn daemon_capabilities(&self) -> Option<Vec<String>> {
         None
     }
@@ -281,6 +282,9 @@ pub struct Client {
     caller: CallerInfo,
     identity: Identity,
     capabilities: Vec<String>,
+    /// The capabilities in the hello of the connection opened last: after
+    /// the daemon restarted (in place, or replaced), the running one's.
+    current_capabilities: Mutex<Vec<String>>,
     daemon_version: String,
     connection: Mutex<Option<UnixStream>>,
 }
@@ -293,6 +297,7 @@ impl Client {
         let (stream, hello) = open_connection(&config, &identity)?;
         Ok(Self {
             caller: hello.caller,
+            current_capabilities: Mutex::new(hello.capabilities.clone()),
             capabilities: hello.capabilities,
             daemon_version: hello.version,
             identity,
@@ -317,7 +322,9 @@ impl Client {
         Ok((stream, hello))
     }
 
-    /// Optional features the daemon announced in its hello.
+    /// Optional features the daemon announced in its hello when this client
+    /// connected. A daemon restarted since may announce more:
+    /// [`SessionApi::daemon_capabilities`] says what the running one did.
     pub fn capabilities(&self) -> &[String] {
         &self.capabilities
     }
@@ -328,7 +335,13 @@ impl Client {
     }
 
     fn open(&self) -> Result<UnixStream> {
-        open_connection(&self.config, &self.identity).map(|(stream, _)| stream)
+        let (stream, hello) = open_connection(&self.config, &self.identity)?;
+        // A daemon restarted since the last connection may announce more.
+        *self
+            .current_capabilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = hello.capabilities;
+        Ok(stream)
     }
 
     fn lock_connection(&self) -> MutexGuard<'_, Option<UnixStream>> {
@@ -556,7 +569,12 @@ impl SessionApi for Client {
     }
 
     fn daemon_capabilities(&self) -> Option<Vec<String>> {
-        Some(self.capabilities.clone())
+        Some(
+            self.current_capabilities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        )
     }
 
     fn set_reply_capture(&self, enabled: bool) -> Result<()> {
@@ -1618,6 +1636,8 @@ mod tests {
         /// Attach streams that ended (detach or disconnect).
         attach_ended: Mutex<usize>,
         stopped: AtomicBool,
+        /// What the hello answer announces.
+        capabilities: Mutex<Vec<String>>,
     }
 
     impl FakeDaemon {
@@ -1661,6 +1681,7 @@ mod tests {
                 commands: Mutex::new(vec![]),
                 attach_ended: Mutex::new(0),
                 stopped: AtomicBool::new(false),
+                capabilities: Mutex::new(vec!["attach".into()]),
             });
             let accept_state = state.clone();
             std::thread::spawn(move || {
@@ -1741,7 +1762,7 @@ mod tests {
         let ok = HelloOk {
             protocol: state.protocol,
             version: "fake".into(),
-            capabilities: vec!["attach".into()],
+            capabilities: state.capabilities.lock().unwrap().clone(),
             caller,
         };
         if frame::write_control(&mut stream, &Response::Hello(ok)).is_err() {
@@ -2337,6 +2358,33 @@ mod tests {
         };
         assert_eq!(client.create(create).unwrap().name, "again");
         assert_eq!(daemon.hello_count(), 2);
+    }
+
+    #[test]
+    fn daemon_capabilities_follow_a_restarted_daemon() {
+        let daemon = FakeDaemon::start();
+        let client = daemon.connect_user();
+        assert_eq!(
+            client.daemon_capabilities(),
+            Some(vec!["attach".to_string()])
+        );
+        // Restarted on a build that announces more: the connection it had
+        // closes (the fake closes it after answering a ping).
+        let restarted = vec!["attach".to_string(), "session.submit.blocked".to_string()];
+        *daemon.state.capabilities.lock().unwrap() = restarted.clone();
+        assert_eq!(client.request(&Request::Ping).unwrap(), Response::Pong);
+        std::thread::sleep(Duration::from_millis(50));
+        // The next request connects again, and says what the new one announced.
+        assert_eq!(client.list(None, false).unwrap().len(), 2);
+        assert_eq!(daemon.hello_count(), 2);
+        assert_eq!(client.daemon_capabilities(), Some(restarted));
+        // So does a stream's connection of its own (a resubscribe).
+        let again = vec!["attach".to_string(), "resources".to_string()];
+        *daemon.state.capabilities.lock().unwrap() = again.clone();
+        let _events = client.subscribe(SubscribeRequest::default()).unwrap();
+        assert_eq!(client.daemon_capabilities(), Some(again));
+        // What it announced when this client connected stays as it was.
+        assert_eq!(client.capabilities(), ["attach".to_string()]);
     }
 
     #[test]
