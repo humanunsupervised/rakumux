@@ -856,6 +856,34 @@ fn git_context_follows_the_cwd_and_head() {
     assert_eq!(listed[0].git, dead.git);
 }
 
+/// A `.git` that's a FIFO (another user's `mkfifo /tmp/.git`, or one
+/// unpacked from an archive) is no repository, and no request waits on it:
+/// git context is read while the daemon holds its state.
+#[test]
+fn a_fifo_named_git_blocks_no_request() {
+    let (done, answered) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let h = Harness::new();
+        let fifo = h.scope.path().join(".git");
+        let path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: `path` is a NUL-terminated string that outlives the call.
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        let created = h.create(Some("s")).git;
+        let listed = h.list(false)[0].git.clone();
+        let got = h.get(&h.list(false)[0].id).git;
+        let folder = projects(&h, &h.user)
+            .into_iter()
+            .find(|p| p.path == h.scope)
+            .unwrap()
+            .git;
+        let _ = done.send([created, listed, got, folder]);
+    });
+    let gits = answered
+        .recv_timeout(Duration::from_secs(10))
+        .expect("a request blocked on the FIFO");
+    assert_eq!(gits, [None, None, None, None]);
+}
+
 #[test]
 fn agent_working_directory_follows_internal_worktree_switches_without_changing_scope_or_terminal_cwd(
 ) {

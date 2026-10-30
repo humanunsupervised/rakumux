@@ -37,7 +37,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 2. **No git operations.** No worktree creation, git status, merge helpers or env-copy, and no
    `rakumux-cli`; the product never runs `git`. The one exception is read-only **git context**:
    the daemon reads `.git` files to show a session's branch, linked worktree and repository
-   name (`ptyd/src/git.rs`). Users run git inside a session like any other program. The one
+   name (`ptyd/src/git.rs`): regular files only, opened without waiting, and never a `.git`
+   (or the git dir it names) another user owns, as git does. Users run git inside a session like any other program. The one
    env-copy is your Sprite's: a folder's `.env` files go to it only when the user says so,
    once per folder (component 11), and the clone that takes them is typed for the user to run.
 3. **Sessions belong to folders.** A folder is a directory (canonical path; the wire calls it a

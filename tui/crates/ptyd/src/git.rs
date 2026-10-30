@@ -19,9 +19,18 @@
 //! worktree, else the common dir's parent (`<main>/.git`, `<main>/.bare`) or
 //! a bare repository's own name (`project.git`). A submodule is a
 //! repository of its own (its `origin`, else its folder).
+//!
+//! These files may be anyone's: a `.git` another user left in a shared
+//! folder (`/tmp/.git`), or one unpacked from an archive. As git does, a
+//! `.git`, or the git dir it names, that another user owns is ignored, and
+//! only regular files are read, opened without waiting: a FIFO or device
+//! there would otherwise block the daemon, which reads them while it
+//! answers requests.
 
 use session_core::model::GitInfo;
+use std::fs::{File, OpenOptions};
 use std::io::Read;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 
 /// Largest `.git` file or `HEAD` read; git's own are a line long.
@@ -37,14 +46,26 @@ const SHORT_ID: usize = 7;
 /// real HEAD lives in the reftable.
 const REFTABLE_PLACEHOLDER: &str = ".invalid";
 
-/// Git context of `dir` (absolute). `None` outside a repository, or when
-/// the nearest `.git` or its `HEAD` can't be read or parsed. A branch or
-/// worktree name that isn't [`displayable`] is left out.
+/// Git context of `dir` (absolute). `None` outside a repository, when the
+/// nearest `.git` or the git dir it names is another user's, or when a
+/// `.git` file or `HEAD` can't be read or parsed. A branch or worktree name
+/// that isn't [`displayable`] is left out.
 pub fn detect(dir: &Path) -> Option<GitInfo> {
+    // SAFETY: geteuid has no preconditions.
+    detect_as(dir, unsafe { libc::geteuid() })
+}
+
+/// [`detect`] for the user `uid`.
+fn detect_as(dir: &Path, uid: u32) -> Option<GitInfo> {
     let root = dir
         .ancestors()
         .find(|ancestor| std::fs::metadata(ancestor.join(".git")).is_ok())?;
     let dot_git = root.join(".git");
+    // The nearest `.git` decides: another user's isn't passed over for one
+    // further up.
+    if std::fs::symlink_metadata(&dot_git).ok()?.uid() != uid {
+        return None;
+    }
     let (git_dir, worktree) = if std::fs::metadata(&dot_git).ok()?.is_dir() {
         (dot_git, None)
     } else {
@@ -53,6 +74,9 @@ pub fn detect(dir: &Path) -> Option<GitInfo> {
         let worktree = linked_worktree(&git_dir);
         (git_dir, worktree)
     };
+    if std::fs::metadata(&git_dir).ok()?.uid() != uid {
+        return None;
+    }
     let head = parse_head(&read_small(&git_dir.join("HEAD"))?)?;
     let (branch, detached_at) = match head {
         Head::Branch(branch) => (Some(branch), None),
@@ -157,7 +181,7 @@ fn main_folder_of(common: &Path) -> Option<&str> {
 /// `None` when it can't be read or isn't text (a NUL byte). Only the first
 /// [`MAX_CONFIG_BYTES`] are read, without a line they'd cut.
 fn read_config(path: &Path) -> Option<String> {
-    let file = match std::fs::File::open(path) {
+    let file = match open_regular(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(String::new()),
         Err(_) => return None,
@@ -307,10 +331,31 @@ fn linked_worktree(git_dir: &Path) -> Option<String> {
 }
 
 fn read_small(path: &Path) -> Option<String> {
-    let file = std::fs::File::open(path).ok()?;
+    let file = open_regular(path).ok()?;
     let mut text = String::new();
     file.take(MAX_FILE_BYTES).read_to_string(&mut text).ok()?;
     Some(text)
+}
+
+/// `path` opened for reading when it's a regular file. Never a FIFO, which
+/// would block until something writes to it, nor a socket or device, whose
+/// open can act (`/dev/ptmx`). Checked before opening and again on the open
+/// file, which is opened non-blocking (and not as a controlling terminal)
+/// so that one swapped in between can't block either.
+fn open_regular(path: &Path) -> std::io::Result<File> {
+    let not_regular =
+        || std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file");
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(not_regular());
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(not_regular());
+    }
+    Ok(file)
 }
 
 /// Resolve `.` and `..` without touching the filesystem (`gitdir:` paths of
@@ -825,6 +870,74 @@ mod tests {
         assert_eq!((info.branch, info.worktree), (None, None));
         // Still a linked worktree: named after the main working tree.
         assert_eq!(info.repo.as_deref(), Some("main"));
+    }
+
+    /// A FIFO at `path`.
+    fn mkfifo(path: &Path) {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: `path` is a NUL-terminated string that outlives the call.
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    }
+
+    /// `detect(dir)`, failing when it doesn't return within seconds: an
+    /// open that waits for a FIFO's writer never would.
+    fn detect_promptly(dir: &Path) -> Option<GitInfo> {
+        let (done, result) = std::sync::mpsc::channel();
+        let dir = dir.to_path_buf();
+        std::thread::spawn(move || {
+            let _ = done.send(detect(&dir));
+        });
+        result
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("detect blocked on a FIFO")
+    }
+
+    #[test]
+    fn fifos_are_never_opened() {
+        let (_dir, root) = tempdir();
+        // A FIFO named `.git` (`mkfifo /tmp/.git`), or a link to one.
+        let shared = root.join("shared");
+        fs::create_dir_all(shared.join("work")).unwrap();
+        mkfifo(&shared.join(".git"));
+        assert_eq!(detect_promptly(&shared.join("work")), None);
+        let linked = root.join("linked");
+        fs::create_dir_all(&linked).unwrap();
+        std::os::unix::fs::symlink(shared.join(".git"), linked.join(".git")).unwrap();
+        assert_eq!(detect_promptly(&linked), None);
+
+        // `HEAD` a FIFO, in a `.git` dir or in the git dir a `.git` file names.
+        let main = root.join("main");
+        fs::create_dir_all(main.join(".git")).unwrap();
+        mkfifo(&main.join(".git/HEAD"));
+        assert_eq!(detect_promptly(&main), None);
+        let checkout = root.join("checkout");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            checkout.join(".git"),
+            format!("gitdir: {}\n", main.join(".git").display()),
+        )
+        .unwrap();
+        assert_eq!(detect_promptly(&checkout), None);
+
+        // `config` a FIFO: the branch shows, the name it would give doesn't.
+        let named = root.join("named");
+        repo(&named, "ref: refs/heads/main\n");
+        mkfifo(&named.join(".git/config"));
+        let info = detect_promptly(&named).unwrap();
+        assert_eq!(info.branch.as_deref(), Some("main"));
+        assert_eq!((info.repo, info.origin), (None, None));
+    }
+
+    #[test]
+    fn another_users_git_is_ignored() {
+        let (_dir, root) = tempdir();
+        repo(&root, "ref: refs/heads/main\n");
+        fs::create_dir_all(root.join("src")).unwrap();
+        // SAFETY: geteuid has no preconditions.
+        let me = unsafe { libc::geteuid() };
+        assert!(detect_as(&root.join("src"), me).is_some());
+        assert_eq!(detect_as(&root.join("src"), me + 1), None);
     }
 
     #[test]
