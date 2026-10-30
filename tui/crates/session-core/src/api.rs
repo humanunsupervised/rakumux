@@ -641,7 +641,8 @@ pub struct TranscriptCursor {
     /// How far: a byte offset into the agent's log, or the last
     /// `time_updated` OpenCode gave.
     pub offset: u64,
-    /// OpenCode: the id of the last row read at `offset`.
+    /// OpenCode: the id of the last row read at `offset`. GitHub Copilot:
+    /// the log file read (it rewrites its log when a turn is taken back).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
 }

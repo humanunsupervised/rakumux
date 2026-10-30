@@ -19,6 +19,9 @@
 //!   from the conversation [`super::transcript`] reads.
 //! - **Pi**: its conversation's folder (the header's `cwd`), its tool calls'
 //!   paths and commands, and the calls codemode scripts made.
+//! - **GitHub Copilot**: the session's directory as it starts, resumes and
+//!   `/cd`s, its tools' paths and shell commands, and the files they changed
+//!   (`fileEdits`).
 
 use super::transcript::{scan_log, TranscriptSource};
 use super::LogAgent;
@@ -30,6 +33,8 @@ use std::path::{Component, Path, PathBuf};
 mod claude;
 #[path = "codex/places.rs"]
 mod codex;
+#[path = "copilot/places.rs"]
+mod copilot;
 #[path = "open-code/places.rs"]
 mod opencode;
 #[path = "pi/places.rs"]
@@ -61,6 +66,8 @@ pub struct PlaceScan {
     home: Option<PathBuf>,
     /// The last read stopped before the end.
     behind: bool,
+    /// The log file read, for one its agent rewrites (GitHub Copilot's).
+    file: Option<(u64, u64)>,
 }
 
 impl PlaceScan {
@@ -75,6 +82,7 @@ impl PlaceScan {
                 .filter(|home| !home.is_empty())
                 .map(PathBuf::from),
             behind: true,
+            file: None,
         }
     }
 
@@ -99,6 +107,17 @@ impl PlaceScan {
                 conversation,
                 path,
             } => {
+                // GitHub Copilot rewrites its log when a turn is taken back:
+                // another file is read from its start.
+                if *agent == LogAgent::Copilot {
+                    let file = std::fs::metadata(path)
+                        .ok()
+                        .map(|metadata| super::copilot::identity(&metadata));
+                    if self.file != file {
+                        self.cursor = None;
+                    }
+                    self.file = file;
+                }
                 let from = self.cursor.as_ref().map_or(0, |cursor| cursor.offset);
                 let (cwd, home) = (&mut self.cwd, self.home.as_deref());
                 let read = scan_log(path, from, budget, |entry, _| {
@@ -110,6 +129,7 @@ impl PlaceScan {
                         LogAgent::Claude => claude::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Codex => codex::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Pi => pi::entry(entry, cwd, home, at, &mut touches),
+                        LogAgent::Copilot => copilot::entry(entry, cwd, home, at, &mut touches),
                     }
                 });
                 let Some((offset, more)) = read else {
@@ -154,6 +174,7 @@ pub fn agent_data_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = [
         crate::resume::claude_config_dir(),
         crate::resume::codex_home(),
+        crate::resume::copilot_home(),
         crate::resume::opencode_database().and_then(|db| db.parent().map(Path::to_path_buf)),
         crate::resume::pi_agent_dir(),
     ]

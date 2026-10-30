@@ -1428,6 +1428,22 @@ impl Inner {
             })
         });
         let subagent = subagent.is_some();
+        // A conversation its agent holds open but doesn't show (GitHub
+        // Copilot's sessions sidebar) isn't the session's: what its hooks say
+        // is left out.
+        let hidden = !subagent
+            && activity.as_ref().is_some_and(|activity| {
+                state
+                    .live
+                    .get(&record.id)
+                    .and_then(|live| live.output.as_ref())
+                    .is_some_and(|follower| follower.in_background(&activity.conversation_id))
+            });
+        let (activity, working_directory) = if hidden {
+            (None, None)
+        } else {
+            (activity, working_directory)
+        };
         if let Some(context) = &working_directory {
             let place = self.resolve_places(vec![context.path.clone()]);
             self.note_places(state, &record.id, place);

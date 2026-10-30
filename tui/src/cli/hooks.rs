@@ -10,7 +10,11 @@ mod adapters;
 
 const MAX_HOOK_BYTES: u64 = 1_048_576;
 
-pub(super) fn configuration(agent: HookAgent, out: &mut dyn Write) -> Result<i32, CliError> {
+pub(super) fn configuration(
+    agent: HookAgent,
+    install: bool,
+    out: &mut dyn Write,
+) -> Result<i32, CliError> {
     let config = adapters::config(agent.name()).ok_or_else(|| {
         CliError::Usage(match agent {
             HookAgent::Opencode => {
@@ -20,8 +24,45 @@ pub(super) fn configuration(agent: HookAgent, out: &mut dyn Write) -> Result<i32
             other => format!("{} has no hook configuration", other.name()),
         })
     })?;
-    writeln!(out, "{config}").map_err(output_error)?;
+    if !install {
+        writeln!(out, "{config}").map_err(output_error)?;
+        return Ok(0);
+    }
+    let path = install_file(agent, config, |name| std::env::var(name).ok())?;
+    writeln!(out, "Wrote {}.", path.display()).map_err(output_error)?;
+    writeln!(out, "Restart {} to load it.", agent_name(agent)).map_err(output_error)?;
     Ok(0)
+}
+
+/// Write `config` as the agent's file of Rakumux's own ([`adapters::install_path`]),
+/// replacing an earlier copy; nothing else is touched. Returns where.
+fn install_file(
+    agent: HookAgent,
+    config: &str,
+    var: impl Fn(&str) -> Option<String>,
+) -> Result<std::path::PathBuf, CliError> {
+    let path = adapters::install_path(agent.name(), var).ok_or_else(|| {
+        CliError::Usage(format!(
+            "{}'s hooks go into its own settings: print them without --install and merge them there",
+            agent.name()
+        ))
+    })?;
+    let failed = |error: std::io::Error| {
+        CliError::internal(format!("cannot write {}: {error}", path.display()))
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(failed)?;
+    }
+    std::fs::write(&path, format!("{config}\n")).map_err(failed)?;
+    Ok(path)
+}
+
+/// The agent as its users know it.
+fn agent_name(agent: HookAgent) -> &'static str {
+    match agent {
+        HookAgent::Copilot => "GitHub Copilot",
+        other => other.name(),
+    }
 }
 
 pub(super) fn run(
@@ -140,6 +181,54 @@ mod tests {
             session.reports.lock().unwrap()[0].activity.as_ref(),
             Some(&update)
         );
+    }
+
+    #[test]
+    fn copilots_hooks_install_as_a_file_of_rakumuxs_own() {
+        let home = tempfile::tempdir().unwrap();
+        let copilot = home.path().join("copilot-home");
+        std::fs::create_dir_all(copilot.join("hooks")).unwrap();
+        // The user's own hooks are left alone.
+        std::fs::write(copilot.join("hooks/mine.json"), "{\"version\":1}").unwrap();
+        let config = adapters::config("copilot").unwrap();
+        let var = |name: &str| match name {
+            "COPILOT_HOME" => Some(copilot.to_string_lossy().into_owned()),
+            "HOME" => Some(home.path().to_string_lossy().into_owned()),
+            _ => None,
+        };
+        let path = install_file(HookAgent::Copilot, config, var).unwrap();
+        assert_eq!(path, copilot.join("hooks/rakumux.json"));
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["version"], 1);
+        // Again: replaced, not added to.
+        std::fs::write(&path, "old").unwrap();
+        install_file(HookAgent::Copilot, config, var).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format!("{config}\n")
+        );
+        let mut names: Vec<_> = std::fs::read_dir(copilot.join("hooks"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["mine.json", "rakumux.json"]);
+        // Without COPILOT_HOME: ~/.copilot/hooks, made when missing.
+        let default = install_file(HookAgent::Copilot, config, |name| {
+            (name == "HOME").then(|| home.path().to_string_lossy().into_owned())
+        })
+        .unwrap();
+        assert_eq!(default, home.path().join(".copilot/hooks/rakumux.json"));
+        // Agents whose hooks are merged into their settings aren't installed.
+        let codex = adapters::config("codex").unwrap();
+        assert!(matches!(
+            install_file(HookAgent::Codex, codex, var),
+            Err(CliError::Usage(_))
+        ));
+        let mut out = Vec::new();
+        assert!(configuration(HookAgent::Copilot, false, &mut out).is_ok());
+        assert_eq!(String::from_utf8(out).unwrap(), format!("{config}\n"));
     }
 
     #[test]

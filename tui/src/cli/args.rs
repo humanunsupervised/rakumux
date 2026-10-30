@@ -368,6 +368,9 @@ pub enum SessionCommand {
     HookConfig {
         #[arg(long, value_enum)]
         agent: HookAgent,
+        /// Write it as a file of Rakumux's own the agent loads (GitHub Copilot)
+        #[arg(long)]
+        install: bool,
     },
     /// List this folder's sessions: {"sessions":[…]}
     List {

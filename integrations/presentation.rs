@@ -4,6 +4,8 @@ use ratatui::style::Color;
 mod claude;
 #[path = "codex/presentation.rs"]
 mod codex;
+#[path = "copilot/presentation.rs"]
+mod copilot;
 #[path = "open-code/presentation.rs"]
 mod opencode;
 #[path = "pi/presentation.rs"]
@@ -13,6 +15,7 @@ pub(super) fn color(agent: &str) -> Option<Color> {
     match agent {
         "claude" => Some(claude::color()),
         "codex" => Some(codex::color()),
+        "copilot" => Some(copilot::color()),
         "opencode" => Some(opencode::color()),
         "pi" => Some(pi::color()),
         _ => None,

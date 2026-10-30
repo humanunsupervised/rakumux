@@ -3,6 +3,8 @@
 mod claude;
 #[path = "codex/environment.rs"]
 mod codex;
+#[path = "copilot/environment.rs"]
+mod copilot;
 #[path = "pi/environment.rs"]
 mod pi;
 
@@ -17,5 +19,13 @@ pub(crate) fn inherited_marker(name: &str) -> bool {
     claude::VARIABLES.contains(&name)
         || codex::VARIABLES.contains(&name)
         || pi::VARIABLES.contains(&name)
+        || copilot::VARIABLES.contains(&name)
         || HOOK_HOSTS.contains(&name)
+}
+
+/// Settings an agent gives its own tools that must not reach a new session
+/// started from one of them, told by the rest of that environment (`var`):
+/// GitHub Copilot's git settings, beside its `COPILOT_CLI=1`.
+pub(crate) fn tool_setting(name: &str, var: impl Fn(&str) -> Option<String>) -> bool {
+    copilot::git_setting(name, var)
 }

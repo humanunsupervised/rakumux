@@ -14,6 +14,8 @@
 //! - **Pi**: `<agent dir>/sessions/--<folder>--/<time>_<id>.jsonl`, for the
 //!   conversation its Rakumux extension bound to the session, else the
 //!   folder's newest one.
+//! - **GitHub Copilot**: `$COPILOT_HOME/session-state/<id>/events.jsonl`, the
+//!   conversation being the one its process log says is on screen.
 //!
 //! For the agent feed, the follower also keeps the current turn's reply
 //! whole ([`Reply`]): what the agent said after its last tool call, or the
@@ -34,6 +36,8 @@ use std::path::{Path, PathBuf};
 mod claude;
 #[path = "codex/output.rs"]
 mod codex;
+#[path = "copilot/output.rs"]
+mod copilot;
 #[path = "open-code/output.rs"]
 mod opencode;
 #[path = "pi/output.rs"]
@@ -123,6 +127,7 @@ pub enum LogAgent {
     Claude,
     Codex,
     Pi,
+    Copilot,
 }
 
 /// Where an agent's output is read from.
@@ -164,12 +169,17 @@ pub struct Follower {
     /// When the conversation last had a prompt or an agent message, by its
     /// own clock (Unix milliseconds): the newest seen, never moving back.
     last_at: Option<i64>,
+    /// GitHub Copilot: which of the conversations its process holds open is
+    /// on screen.
+    foreground: Option<copilot::Foreground>,
 }
 
 impl Follower {
     /// Where `process`'s output can be read, when it runs `agent` (as
-    /// detected, `claude`, `codex` or `opencode`, or as its hooks name it).
+    /// detected, `claude`, `codex`, `opencode` or `copilot`, or as its hooks
+    /// name it).
     pub fn locate(process: &ProcessInfo, agent: &str) -> Option<Self> {
+        let mut foreground = None;
         let log = |agent, conversation, path| Source::Log {
             agent,
             conversation,
@@ -192,6 +202,11 @@ impl Follower {
                 cwd: crate::procinfo::cwd_of(process.pid),
                 conversation: None,
             },
+            // Its conversation is found on every read.
+            "copilot" => {
+                foreground = Some(copilot::Foreground::new(process)?);
+                log(LogAgent::Copilot, None, PathBuf::new())
+            }
             _ => return None,
         };
         Some(Self {
@@ -202,11 +217,12 @@ impl Follower {
             turn: Turn::default(),
             reply: None,
             last_at: None,
+            foreground,
         })
     }
 
     /// The agent as replies and turns name it: `claude-code`, `codex`,
-    /// `opencode` or `pi`.
+    /// `opencode`, `pi` or `copilot`.
     pub fn agent(&self) -> &'static str {
         match &self.source {
             Source::Log {
@@ -221,6 +237,10 @@ impl Follower {
                 agent: LogAgent::Pi,
                 ..
             } => "pi",
+            Source::Log {
+                agent: LogAgent::Copilot,
+                ..
+            } => "copilot",
             Source::OpenCode { .. } => "opencode",
         }
     }
@@ -230,7 +250,7 @@ impl Follower {
     pub fn conversation(&self) -> Option<String> {
         let id = match &self.source {
             Source::Log {
-                agent: LogAgent::Claude | LogAgent::Pi,
+                agent: LogAgent::Claude | LogAgent::Pi | LogAgent::Copilot,
                 conversation,
                 ..
             } => conversation.clone()?,
@@ -278,6 +298,15 @@ impl Follower {
         self.pid
     }
 
+    /// Whether `conversation` is one this agent's process showed and
+    /// doesn't now: GitHub Copilot's sessions sidebar keeps several open in
+    /// one process, and only the one on screen is the session's.
+    pub fn in_background(&self, conversation: &str) -> bool {
+        self.foreground
+            .as_ref()
+            .is_some_and(|foreground| foreground.in_background(conversation))
+    }
+
     /// The agent's latest line, once one was found.
     pub fn latest(&self) -> Option<&str> {
         self.latest.as_deref()
@@ -322,6 +351,9 @@ impl Follower {
                     LogAgent::Pi => {
                         pi::switch(self.pid, bound, conversation, path, offset, partial)
                     }
+                    LogAgent::Copilot => self.foreground.as_mut().is_some_and(|foreground| {
+                        foreground.switch(bound, conversation, path, offset, partial)
+                    }),
                     LogAgent::Codex => false,
                 };
                 if switched {
@@ -334,6 +366,7 @@ impl Follower {
                         LogAgent::Claude => claude::may_be_typed(line),
                         LogAgent::Codex => codex::may_be_typed(line),
                         LogAgent::Pi => pi::may_be_typed(line),
+                        LogAgent::Copilot => copilot::may_be_typed(line),
                     };
                     candidate
                         && serde_json::from_slice::<Value>(line)
@@ -342,6 +375,7 @@ impl Follower {
                                 LogAgent::Claude => claude::typed(&entry),
                                 LogAgent::Codex => codex::typed(&entry),
                                 LogAgent::Pi => pi::typed(&entry),
+                                LogAgent::Copilot => copilot::typed(&entry),
                             })
                             .is_some_and(|typed| prompt_line(&typed).is_some())
                 };
@@ -358,6 +392,7 @@ impl Follower {
                         LogAgent::Claude => (claude::typed(entry), claude::messages(entry)),
                         LogAgent::Codex => (codex::typed(entry), codex::messages(entry)),
                         LogAgent::Pi => (pi::typed(entry), pi::messages(entry)),
+                        LogAgent::Copilot => (copilot::typed(entry), copilot::messages(entry)),
                     };
                     let typed = typed.filter(|typed| prompt_line(typed).is_some());
                     if typed.is_some() || !messages.is_empty() {
@@ -377,6 +412,7 @@ impl Follower {
                         LogAgent::Claude => claude::reply_step(entry),
                         LogAgent::Codex => codex::reply_step(entry),
                         LogAgent::Pi => pi::reply_step(entry),
+                        LogAgent::Copilot => copilot::reply_step(entry),
                     };
                     self.reply = next_reply(self.reply.take(), step, *position);
                 }
@@ -387,6 +423,7 @@ impl Follower {
                     LogAgent::Claude => (newest(claude::line), newest(claude::prompt)),
                     LogAgent::Codex => (newest(codex::line), newest(codex::prompt)),
                     LogAgent::Pi => (newest(pi::line), newest(pi::prompt)),
+                    LogAgent::Copilot => (newest(copilot::line), newest(copilot::prompt)),
                 }
             }
             Source::OpenCode {
@@ -746,6 +783,7 @@ mod tests {
             turn: Turn::default(),
             reply: None,
             last_at: None,
+            foreground: None,
         }
     }
 

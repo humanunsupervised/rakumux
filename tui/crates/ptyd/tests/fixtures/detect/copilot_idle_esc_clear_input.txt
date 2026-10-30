@@ -1,0 +1,50 @@
+# GitHub Copilot CLI 1.0.105 after one Esc while typing: `esc again to clear input` isn't work.
+# Captured offline (120x40) against a local mock model; paths sanitised.
+agent: copilot
+expect: idle
+process: node
+cmdline: node /home/me/.nvm/versions/node/v22.20.0/bin/copilot
+title: GitHub Copilot
+alternate_screen: true
+ms_since_output: 1500
+---
+ [Current]  Sessions   Issues   Pull requests   Gists
+
+  ╭─╮╭─╮
+  ╰─╯╰─╯  Copilot v1.0.105 uses AI.
+  █ ▘▝ █  Check for mistakes.
+   ▔▔▔▔
+
+ ● No copilot-instructions.md found. Run /init to generate.
+
+ ● Tip: /skills
+   └ Manage skills for enhanced capabilities
+
+ ❯ please run cargo test -p parser                                                                               05:46
+
+ ✗ Shell Run the command Operation aborted by user
+   cargo test -p parser
+   Approval check
+     └ - Confirmation cancelled for shell command (cargo test)
+
+ ● Operation cancelled by user
+
+ ❯ which colour should the button be, ask me                                                                     05:47
+
+ ● Asked user Which colour?
+   └ red
+
+ ● Done: the tool ran. All finished.
+
+ ❯ think about the parser slow 5                                                                                 05:47
+
+ ❯ Thought for 1s
+
+ ● Mock reply: think about the parser slow 5
+
+
+ ~/project [⎇ main%]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ some text
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ esc again to clear input                                                                                    gpt-4.1

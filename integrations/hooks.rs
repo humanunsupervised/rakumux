@@ -3,11 +3,14 @@
 use serde_json::Value;
 use session_core::activity::{ActivityEvent, ActivityPhase, ActivityUpdate, ACTIVITY_VERSION};
 use session_core::api::{AgentWorkingDirectory, Report};
+use std::path::PathBuf;
 
 #[path = "claude-code/hooks.rs"]
 mod claude;
 #[path = "codex/hooks.rs"]
 mod codex;
+#[path = "copilot/hooks.rs"]
+mod copilot;
 #[path = "pi/hooks.rs"]
 mod pi;
 
@@ -15,6 +18,7 @@ pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, S
     match agent {
         "claude" => claude::normalize(input),
         "codex" => codex::normalize(input),
+        "copilot" => copilot::normalize(input),
         "opencode" => {
             let update: ActivityUpdate = serde_json::from_value(input.clone())
                 .map_err(|_| "invalid OpenCode activity update")?;
@@ -31,6 +35,9 @@ pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, S
 /// Reduce native input to activity and the root agent's logical directory.
 /// Tool arguments, transcripts, prompts and child-agent directories are ignored.
 pub fn report(agent: &str, input: &Value) -> Result<Option<Report>, String> {
+    if agent == "copilot" {
+        return copilot::report(input);
+    }
     let activity = normalize(agent, input)?;
     let context_only = agent == "claude" && input["hook_event_name"] == "CwdChanged";
     if activity.is_none() && !context_only {
@@ -131,6 +138,18 @@ pub fn config(agent: &str) -> Option<&'static str> {
     match agent {
         "claude" => Some(include_str!("claude-code/hooks.json")),
         "codex" => Some(include_str!("codex/hooks.json")),
+        "copilot" => Some(include_str!("copilot/hooks.json")),
+        _ => None,
+    }
+}
+
+/// Where `hook-config --install` writes `agent`'s configuration: a file of
+/// Rakumux's own that the agent loads beside the user's (GitHub Copilot's
+/// `~/.copilot/hooks/rakumux.json`). `None` for agents whose configuration
+/// is merged into the user's settings by hand. `var` reads the environment.
+pub fn install_path(agent: &str, var: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    match agent {
+        "copilot" => copilot::install_path(var),
         _ => None,
     }
 }

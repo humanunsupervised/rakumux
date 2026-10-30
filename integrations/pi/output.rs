@@ -391,6 +391,7 @@ mod tests {
             turn: Turn::default(),
             reply: None,
             last_at: None,
+            foreground: None,
         }
     }
 

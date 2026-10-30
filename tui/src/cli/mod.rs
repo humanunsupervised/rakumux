@@ -91,8 +91,8 @@ fn execute(cli: CliArgs) -> Result<i32, CliError> {
             command: args::SessionCommand::Hook { agent, event },
         } => hooks::run(&globals, agent, event.as_deref(), &mut out),
         Command::Session {
-            command: args::SessionCommand::HookConfig { agent },
-        } => hooks::configuration(agent, &mut out),
+            command: args::SessionCommand::HookConfig { agent, install },
+        } => hooks::configuration(agent, install, &mut out),
         Command::Daemon { command } => daemon::run(&globals, command, &mut out),
         Command::Remote { command } => remote::run(&globals, command, &mut out),
         Command::Sprite { command } => {

@@ -133,10 +133,16 @@ pub(crate) fn terminal_env(
     rakumux_bin: Option<&Path>,
 ) -> Vec<(String, String)> {
     let mut env: BTreeMap<String, String> = base.iter().cloned().collect();
+    let tool_settings: Vec<String> = env
+        .keys()
+        .filter(|name| agents::tool_setting(name, |other| env.get(other).cloned()))
+        .cloned()
+        .collect();
     env.retain(|name, _| {
         !STRIPPED.contains(&name.as_str())
             && !STRIPPED_PREFIXES.iter().any(|p| name.starts_with(p))
             && !agents::inherited_marker(name)
+            && !tool_settings.contains(name)
     });
     if let Some(bin) = rakumux_bin {
         env.insert(rakumux_env::BIN.into(), bin.to_string_lossy().into_owned());
@@ -297,6 +303,67 @@ mod tests {
             ("TERM", "xterm-256color"),
         ]);
         assert_eq!(env.into_iter().collect::<Vec<_>>(), expected);
+    }
+
+    #[test]
+    fn a_session_started_from_copilots_shell_tool_leaves_its_git_settings_behind() {
+        let id = SessionId::from_string("S1");
+        let token = Token::from_string("tok");
+        let identity = Identity {
+            session_id: &id,
+            token: &token,
+            socket: Path::new("/s"),
+            rakumux_bin: None,
+        };
+        let git = [
+            ("GIT_ASKPASS", ""),
+            ("SSH_ASKPASS", ""),
+            ("GIT_EDITOR", "true"),
+            ("GIT_TERMINAL_PROMPT", "0"),
+            ("GIT_OPTIONAL_LOCKS", "0"),
+            ("GIT_CONFIG_COUNT", "2"),
+            ("GIT_CONFIG_KEY_0", "credential.interactive"),
+            ("GIT_CONFIG_VALUE_0", "never"),
+            ("GIT_CONFIG_KEY_1", "core.fsmonitor"),
+            ("GIT_CONFIG_VALUE_1", ""),
+        ];
+        let mut inside = pairs(&[
+            ("PATH", "/bin"),
+            ("COPILOT_CLI", "1"),
+            (
+                "COPILOT_AGENT_SESSION_ID",
+                "0b6c2f0e-1a2b-4c3d-8e9f-0a1b2c3d4e5f",
+            ),
+            ("COPILOT_LOADER_PID", "42"),
+            ("COPILOT_CLI_BINARY_VERSION", "1.0.105"),
+            ("COPILOT_CLI_RESOLVED_DIST_DIR", "/c"),
+            ("COPILOT_HOME", "/home/me/.copilot"),
+            ("GIT_DIR", "/repo/.git"),
+            ("GIT_CONFIG_KEY_X", "kept"),
+        ]);
+        inside.extend(pairs(&git));
+        let env: BTreeMap<_, _> = child_env(&inside, &identity).into_iter().collect();
+        for (name, _) in git {
+            assert!(!env.contains_key(name), "{name}");
+        }
+        for name in [
+            "COPILOT_CLI",
+            "COPILOT_AGENT_SESSION_ID",
+            "COPILOT_LOADER_PID",
+            "COPILOT_CLI_BINARY_VERSION",
+            "COPILOT_CLI_RESOLVED_DIST_DIR",
+        ] {
+            assert!(!env.contains_key(name), "{name}");
+        }
+        // The user's own settings stay.
+        for name in ["PATH", "COPILOT_HOME", "GIT_DIR", "GIT_CONFIG_KEY_X"] {
+            assert!(env.contains_key(name), "{name}");
+        }
+        // Outside Copilot, the same git settings are the user's.
+        let outside: BTreeMap<_, _> = child_env(&pairs(&git), &identity).into_iter().collect();
+        for (name, value) in git {
+            assert_eq!(outside.get(name).map(String::as_str), Some(value), "{name}");
+        }
     }
 
     #[test]

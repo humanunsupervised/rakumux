@@ -1,0 +1,50 @@
+# GitHub Copilot CLI 1.0.105 asking to run a command (its native binary's Linux name).
+# Captured offline (120x40) against a local mock model; paths sanitised.
+agent: copilot
+expect: blocked
+process: MainThread
+cmdline: /home/me/.nvm/versions/node/v22.20.0/lib/node_modules/@github/copilot/node_modules/@github/copilot-linux-x64/copilot
+title: please run cargo test -p parser - GitHub Copilot
+alternate_screen: true
+ms_since_output: 1500
+---
+ [Current]  Sessions   Issues   Pull requests   Gists
+
+  ╭─╮╭─╮
+  ╰─╯╰─╯  Copilot v1.0.105 uses AI.
+  █ ▘▝ █  Check for mistakes.
+   ▔▔▔▔
+
+ ● No copilot-instructions.md found. Run /init to generate.
+
+ ● Tip: /skills
+   └ Manage skills for enhanced capabilities
+
+ ❯ please run cargo test -p parser                                                                               05:46
+
+ $ Shell Run the command
+   cargo test -p parser
+
+
+
+
+
+
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Run the command                                                                                                      │
+│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│ ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ │
+│ │ cargo test -p parser                                                                                             │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │
+│                                                                                                                      │
+│ Do you want to run this command?                                                                                     │
+│                                                                                                                      │
+│ ❯ 1. Yes                                                                                                             │
+│   2. Yes, and don't ask again for `cargo test` in this repo (~/project)                                              │
+│   3. No, and tell Copilot what to do differently (Esc to stop)                                                       │
+│                                                                                                                      │
+│ ↑/↓ to navigate · enter to select · esc to cancel                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

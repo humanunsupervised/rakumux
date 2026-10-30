@@ -1,0 +1,46 @@
+# GitHub Copilot CLI 1.0.105 asking to create a file.
+# Captured offline (120x40) against a local mock model; paths sanitised.
+agent: copilot
+expect: blocked
+process: node
+cmdline: node /home/me/.nvm/versions/node/v22.20.0/bin/copilot
+title: GitHub Copilot
+alternate_screen: true
+ms_since_output: 1500
+---
+ [Current]  Sessions   Issues   Pull requests   Gists
+
+                                                                                                                       ┃
+ ❯ please ask me                                                                                                 05:30 ┃
+                                                                                                                       ┃
+ ● Asked user Which colour?                                                                                         9s ┃
+   └ red                                                                                                               ┃
+                                                                                                                       ┃
+ ● Done: the tool ran. All finished.                                                                                   ┃
+                                                                                                                       ┃
+ ❯ please create /home/me/project/notes/todo.txt                                                                       ┃
+                                                                                                                       ┃
+ ✗ Create todo.txt Parent directory does not exist                                                                     ┃
+                                                                                                                       ┃
+ ● Done: the tool ran. All finished.                                                                                   ┃
+                                                                                                                       ┃
+ ❯ please create /home/me/project/todo.txt                                                                             ┃
+                                                                                                                       ┃
+ ○ Create todo.txt                                                                                                     ┃
+                                                                                                                       ┃
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Create file                                                                                                          │
+│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│ todo.txt +1 -0                                                                                                       │
+│ /home/me/project                                                                                                     │
+│                                                                                                                      │
+│ 1 +   made by the mock                                                                                               │
+│                                                                                                                      │
+│ Do you want to create /home/me/project/todo.txt?                                                                     │
+│                                                                                                                      │
+│ ❯ 1. Yes                                                                                                             │
+│   2. Yes, and don't ask again for file operations when in this repo (~/project)                                      │
+│   3. No, and tell Copilot what to do differently (Esc to stop)                                                       │
+│                                                                                                                      │
+│ ↑/↓ to navigate · enter to select · esc to cancel                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

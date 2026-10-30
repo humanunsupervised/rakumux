@@ -12,6 +12,9 @@
 //!   block of a reply), else 1.x's `part` rows, changed since the cursor.
 //! - **Pi**: one message per entry of its conversation file, at its byte
 //!   offset; tool results are the `tool` role's.
+//! - **GitHub Copilot**: one message per event of its log, at its byte
+//!   offset. Copilot rewrites the log when a turn is taken back, so a cursor
+//!   names the file it read (`key`), and another file is read from its start.
 //!
 //! Text is cut at [`MAX_PART_BYTES`] per part and otherwise left as the
 //! agent wrote it: the caller cleans it before it leaves the machine.
@@ -30,6 +33,8 @@ use std::path::{Path, PathBuf};
 mod claude;
 #[path = "codex/transcript.rs"]
 mod codex;
+#[path = "copilot/transcript.rs"]
+mod copilot;
 #[path = "open-code/transcript.rs"]
 mod opencode;
 #[path = "pi/transcript.rs"]
@@ -58,7 +63,7 @@ pub enum TranscriptSource {
 }
 
 impl TranscriptSource {
-    /// `claude-code`, `codex`, `opencode` or `pi`.
+    /// `claude-code`, `codex`, `opencode`, `pi` or `copilot`.
     pub fn agent(&self) -> &'static str {
         match self {
             TranscriptSource::Log {
@@ -73,6 +78,10 @@ impl TranscriptSource {
                 agent: LogAgent::Pi,
                 ..
             } => "pi",
+            TranscriptSource::Log {
+                agent: LogAgent::Copilot,
+                ..
+            } => "copilot",
             TranscriptSource::OpenCode { .. } => "opencode",
         }
     }
@@ -99,12 +108,15 @@ impl TranscriptSource {
         let after = after.filter(|cursor| cursor.conversation == conversation);
         let (messages, cursor, more) = match self {
             TranscriptSource::Log { agent, path, .. } => {
-                let from = after.map_or(0, |cursor| cursor.offset);
+                let key = file_key(*agent, path);
+                let from = after
+                    .filter(|cursor| cursor.key == key)
+                    .map_or(0, |cursor| cursor.offset);
                 let (messages, offset, more) = read_log(*agent, path, from, budget)?;
                 let cursor = TranscriptCursor {
                     conversation: conversation.to_owned(),
                     offset,
-                    key: None,
+                    key,
                 };
                 (messages, cursor, more)
             }
@@ -141,15 +153,27 @@ fn read_log(
     budget: usize,
 ) -> Option<(Vec<TranscriptMessage>, u64, bool)> {
     let mut messages = Vec::new();
+    let mut copilot_reading = copilot::Reading::default();
     let (next, more) = scan_log(path, from, budget, |entry, start| {
         let message = match agent {
             LogAgent::Claude => claude::message(entry, start),
             LogAgent::Codex => codex::message(entry, start),
             LogAgent::Pi => pi::message(entry, start),
+            LogAgent::Copilot => copilot_reading.message(entry, start),
         };
         messages.extend(message);
     })?;
     Some((messages, next, more))
+}
+
+/// Which file a cursor read, for logs their agent rewrites (GitHub
+/// Copilot's): its device and inode. `None` for append-only ones.
+fn file_key(agent: LogAgent, path: &Path) -> Option<String> {
+    if agent != LogAgent::Copilot {
+        return None;
+    }
+    let (device, inode) = super::copilot::identity(&std::fs::metadata(path).ok()?);
+    Some(format!("{device}:{inode}"))
 }
 
 /// Hand each complete JSON line of `path` from `from` (its start when the

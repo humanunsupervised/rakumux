@@ -29,6 +29,11 @@
 //!   newest file under `<agent dir>/sessions/`: `pi --session <file>` (Pi
 //!   hides its arguments, so only the model and thinking level, which the
 //!   conversation keeps, come back).
+//! - **GitHub Copilot**: the session its process log last registered in the
+//!   foreground (`$COPILOT_HOME/logs/process-<ms>-<pid>.log`, written by the
+//!   native binary, the npm loader's child); otherwise the one it holds open
+//!   (`session-state/<id>/inuse.<pid>.lock`), its hooks' or its `--resume`:
+//!   `copilot <flags> --resume=<id>`. Copilot restores the session's folder.
 //!
 //! Any agent's bound conversation reaches its resume plan
 //! ([`Context::bound_conversation`]): the newest the session bound for that
@@ -49,6 +54,8 @@ use std::time::Duration;
 mod claude;
 #[path = "codex/recovery.rs"]
 mod codex;
+#[path = "copilot/recovery.rs"]
+mod copilot;
 #[path = "open-code/recovery.rs"]
 mod opencode;
 #[path = "pi/recovery.rs"]
@@ -59,6 +66,11 @@ use claude::claude_flags;
 use claude::claude_resume;
 use codex::codex_resume;
 pub(crate) use codex::{codex_home, codex_open_rollout};
+use copilot::copilot_resume;
+pub(crate) use copilot::{
+    copilot_argv_conversation, copilot_home, copilot_log_dir, copilot_open_sessions, copilot_pids,
+    copilot_process_log, is_copilot_id, read_process_log, Shown,
+};
 use opencode::opencode_resume;
 pub(crate) use opencode::{opencode_database, opencode_recent_session};
 use pi::pi_resume;
@@ -97,6 +109,7 @@ pub fn plan(ctx: &Context<'_>) -> Plan {
         Some("codex") => Some(codex_resume(process, ctx.cwd)),
         Some("opencode") => Some(opencode_resume(process, ctx.cwd, ctx.bound_conversation)),
         Some("pi") => Some(pi_resume(ctx.cwd, ctx.bound_conversation)),
+        Some("copilot") => Some(copilot_resume(process, ctx.bound_conversation)),
         _ => None,
     };
     match resumed {

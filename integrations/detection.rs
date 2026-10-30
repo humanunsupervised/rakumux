@@ -36,6 +36,8 @@ use session_core::model::Lifecycle;
 mod claude;
 #[path = "codex/detection.rs"]
 mod codex;
+#[path = "copilot/detection.rs"]
+mod copilot;
 #[path = "open-code/detection.rs"]
 mod opencode;
 #[path = "pi/detection.rs"]
@@ -44,6 +46,7 @@ use claude::PROFILE as CLAUDE;
 #[cfg(test)]
 use claude::{is_claude_activity_line, is_numbered_yes_option};
 use codex::PROFILE as CODEX;
+use copilot::PROFILE as COPILOT;
 #[cfg(test)]
 use opencode::has_opencode_progress_bar;
 use opencode::PROFILE as OPENCODE;
@@ -165,9 +168,9 @@ static PROFILES: &[Profile] = &[
     QWEN,
     AIDER,
     CURSOR_AGENT,
+    COPILOT,
     generic("amp", &["amp"], &[&["@sourcegraph", "amp"]]),
     generic("droid", &["droid"], &[]),
-    generic("copilot", &["copilot"], &[&["@github", "copilot"]]),
     generic("crush", &["crush"], &[&["@charmland", "crush"]]),
     generic("kimi", &["kimi"], &[]),
     generic("kiro", &["kiro-cli"], &[]),
@@ -1377,6 +1380,7 @@ mod tests {
             ("gemini", &[Working, Blocked, Idle]),
             ("aider", &[Working, Blocked, Idle]),
             ("cursor-agent", &[Working, Blocked, Idle]),
+            ("copilot", &[Working, Blocked, Idle]),
         ];
         for (agent, states) in required {
             for state in *states {

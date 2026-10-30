@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event sessionStart || true", "timeoutSec": 3}],
+    "sessionEnd": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event sessionEnd || true", "timeoutSec": 3}],
+    "userPromptSubmitted": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event userPromptSubmitted || true", "timeoutSec": 3}],
+    "preToolUse": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event preToolUse || true", "timeoutSec": 3}],
+    "postToolUse": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event postToolUse || true", "timeoutSec": 3}],
+    "postToolUseFailure": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event postToolUseFailure || true", "timeoutSec": 3}],
+    "notification": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event notification || true", "timeoutSec": 3}],
+    "agentStop": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event agentStop || true", "timeoutSec": 3}],
+    "subagentStart": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event subagentStart || true", "timeoutSec": 3}],
+    "subagentStop": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event subagentStop || true", "timeoutSec": 3}],
+    "errorOccurred": [{"type": "command", "bash": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent copilot --event errorOccurred || true", "timeoutSec": 3}]
+  }
+}
