@@ -275,6 +275,8 @@ mod tests {
             ("CLAUDE_CODE_CHILD_SESSION", "1"),
             ("CLAUDE_CODE_MESSAGING_TOKEN", "m"),
             ("CODEX_THREAD_ID", "t"),
+            ("COPILOT_CLI", "1"),
+            ("GROK_HOOK_EVENT", "pre_tool_use"),
             ("OMPCODE", "1"),
             ("RAKUMUX_SESSION_ID", "PARENT"),
             ("RAKUMUX_SESSION_TOKEN", "parent-token"),

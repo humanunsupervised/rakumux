@@ -61,7 +61,8 @@ Cursor, GitHub Copilot and Grok also run Claude Code's hooks (the user's or the 
 `.claude/settings.json`). Fired there, `--agent claude` hooks report as that agent, never as
 Claude Code: Cursor's input carries `cursor_version`, Grok's its own `hookEventName` next to
 Claude's `hook_event_name` (or `GROK_HOOK_EVENT` is set), and GitHub Copilot sets
-`COPILOT_CLI=1`.
+`COPILOT_CLI=1`. Sessions never inherit those two variables (`environment.rs`), so a daemon
+started from inside one of those agents doesn't pass them on.
 
 ## Common activity protocol, version 1
 

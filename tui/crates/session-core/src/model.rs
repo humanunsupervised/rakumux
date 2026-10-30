@@ -73,7 +73,9 @@ pub enum Creator {
 /// Coding agent detected or reported in a session.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct AgentInfo {
-    /// e.g. "claude", "codex", "opencode", "pi".
+    /// The agent as detected or as its hooks name it: "claude", "codex",
+    /// "opencode", "copilot", "cursor-agent", "pi", "grok", "kimi", "droid",
+    /// "amp", or another agent detection knows ("gemini", "aider", …).
     pub kind: String,
     /// The agent's own session/conversation id, when reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
