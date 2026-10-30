@@ -599,6 +599,12 @@ fn copilot_in_a_session_end_to_end() {
         view.lifecycle == Lifecycle::Idle
     });
     let before = client.get(&id).unwrap().agent_turn.unwrap().id;
+    let mark = client
+        .replies(None)
+        .unwrap()
+        .0
+        .last()
+        .map(|reply| reply.id.clone());
     client.submit(&id, HOLD).unwrap();
     let holding = wait_view(&client, &id, "the long turn working", |view| {
         view.lifecycle == Lifecycle::Working
@@ -698,6 +704,25 @@ fn copilot_in_a_session_end_to_end() {
         answer.conversation_id.as_deref(),
         Some(conversation.as_str())
     );
+    // The long turn kept its own answer, captured as the reply's turn began
+    // (said before it), then the reply's answer: each once, in order.
+    let since: Vec<(String, i64)> = client
+        .replies(mark.as_ref())
+        .unwrap()
+        .0
+        .into_iter()
+        .map(|reply| (reply.text, reply.finished_at))
+        .collect();
+    eprintln!("replies since the long turn: {since:?}");
+    let texts: Vec<&str> = since.iter().map(|(text, _)| text.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "Mock reply: slow 12 hold the turn while",
+            "Mock reply: MIDTURN ping 4242 typed while it"
+        ]
+    );
+    assert!(since[0].1 < since[1].1, "{since:?}");
     eprintln!(
         "replies captured: {:?}",
         client
@@ -750,6 +775,19 @@ fn copilot_in_a_session_end_to_end() {
     });
     let running_turn = running.agent_turn.unwrap();
     let typed_at = std::time::Instant::now();
+    let typed_ms = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+    )
+    .unwrap();
+    let mark = client
+        .replies(None)
+        .unwrap()
+        .0
+        .last()
+        .map(|reply| reply.id.clone());
     client
         .submit_unless_blocked(&id, STEER, Duration::from_secs(1), Some(&foreground))
         .unwrap();
@@ -817,6 +855,18 @@ fn copilot_in_a_session_end_to_end() {
         "the command ran to its end: {after_run:#?}"
     );
     assert!(screen(&client, &id).matches(STEER).count() <= 1);
+    // The turn it was steered into went on from a tool call: it had no reply
+    // of its own, and none of what came after is taken for one.
+    let since: Vec<(String, i64)> = client
+        .replies(mark.as_ref())
+        .unwrap()
+        .0
+        .into_iter()
+        .map(|reply| (reply.text, reply.finished_at))
+        .collect();
+    eprintln!("replies since the steer: {since:?}");
+    assert!(!since.is_empty());
+    assert!(since.iter().all(|(_, at)| *at >= typed_ms), "{since:?}");
 
     // A second chat from the sidebar, working while the first is shown again:
     // its hooks aren't this session's (the second's finished turn doesn't

@@ -484,16 +484,23 @@ impl World {
         first: &str,
         typed: &str,
         work: &[(TranscriptRole, &str)],
+        held: Option<&str>,
     ) {
         let client = &self.client;
+        let mark = client
+            .replies(None)
+            .unwrap()
+            .0
+            .last()
+            .map(|reply| reply.id.clone());
         self.submit(id, first);
         let working = self.wait(id, "working on the held prompt", seen, |view| {
             view.lifecycle == Lifecycle::Working
                 && view.user_prompt.as_deref() == Some(first)
                 && view.agent_turn.is_some()
         });
-        let held = working.agent_turn.clone().unwrap();
-        assert!(held.conversation_id.is_some(), "{held:?}");
+        let held_turn = working.agent_turn.clone().unwrap();
+        assert!(held_turn.conversation_id.is_some(), "{held_turn:?}");
         let answer = format!("Echo: {typed}");
         let start = Instant::now();
         // Accepted while Pi works: it's in the foreground.
@@ -509,7 +516,7 @@ impl World {
         });
         let timeline = timeline.into_inner();
         let shown = format!(
-            "held turn {held:?}, then from the moment it was typed:\n{}",
+            "held turn {held_turn:?}, then from the moment it was typed:\n{}",
             timeline
                 .iter()
                 .map(Moment::line)
@@ -520,10 +527,10 @@ impl World {
         // A new turn of the same conversation, its prompt the typed one ...
         let taken = timeline
             .iter()
-            .position(|moment| moment.turn != Some(held.id))
+            .position(|moment| moment.turn != Some(held_turn.id))
             .unwrap_or_else(|| panic!("never a new turn; {shown}"));
         let new = &timeline[taken];
-        assert_eq!(new.conversation, held.conversation_id, "{shown}");
+        assert_eq!(new.conversation, held_turn.conversation_id, "{shown}");
         assert_eq!(new.prompt.as_deref(), Some(typed), "{shown}");
         // ... shown while the run still worked (steered in, not queued for
         // after it), never blocked on anything ...
@@ -563,21 +570,35 @@ impl World {
             !screen.contains("Steering:") && !below.contains(typed),
             "{screen}"
         );
-        // Its answer captured for the feed, the session's newest reply.
+        // Its answer captured for the feed, the session's newest reply; and
+        // before it the held prompt's own (`held`), when that turn had one
+        // (not one it went on from with a tool call), said before the take.
         let deadline = Instant::now() + WAIT;
         loop {
-            let (replies, _) = client.replies(None).unwrap();
-            let newest = replies.iter().rev().find(|reply| reply.session_id == *id);
-            if newest.is_some_and(|reply| reply.text == answer) {
-                let captured: Vec<&str> = replies
+            let (replies, _) = client.replies(mark.as_ref()).unwrap();
+            let replies: Vec<_> = replies
+                .into_iter()
+                .filter(|reply| reply.session_id == *id)
+                .collect();
+            if replies.last().is_some_and(|reply| reply.text == answer) {
+                let captured: Vec<(&str, i64)> = replies
                     .iter()
-                    .filter(|reply| reply.session_id == *id)
-                    .map(|reply| reply.text.as_str())
+                    .map(|reply| (reply.text.as_str(), reply.finished_at))
                     .collect();
                 eprintln!("replies captured: {captured:?}");
+                let texts: Vec<&str> = captured.iter().map(|(text, _)| *text).collect();
+                let expected: Vec<&str> = held.into_iter().chain([answer.as_str()]).collect();
+                assert_eq!(texts, expected, "{shown}");
+                assert!(
+                    captured.windows(2).all(|pair| pair[0].1 < pair[1].1),
+                    "{captured:?}"
+                );
+                for reply in &replies {
+                    assert_eq!(reply.conversation_id, held_turn.conversation_id);
+                }
                 break;
             }
-            assert!(Instant::now() < deadline, "no reply captured: {newest:?}");
+            assert!(Instant::now() < deadline, "no reply captured: {replies:?}");
             std::thread::sleep(Duration::from_millis(100));
         }
     }
@@ -839,6 +860,7 @@ fn pi_with_the_rakumux_extension() {
             TranscriptRole::Assistant,
             "text Echo: SLOW 6000 Before the steer",
         )],
+        Some("Echo: SLOW 6000 Before the steer"),
     );
     // While it runs a tool, too: the tool's work is done, then the model sees
     // the typed prompt (the fake model answers the newest prompt).
@@ -852,6 +874,7 @@ fn pi_with_the_rakumux_extension() {
             (TranscriptRole::Assistant, "call write"),
             (TranscriptRole::Tool, "result error=false"),
         ],
+        None,
     );
     assert!(world.repo.join("notes/b.txt").is_file(), "Pi ran the write");
 
@@ -995,6 +1018,7 @@ fn pi_alone_reports_through_osc_7501() {
             (TranscriptRole::Assistant, "call write"),
             (TranscriptRole::Tool, "result error=false"),
         ],
+        None,
     );
 
     // Blocked on a dialog, as Pi reports it.
