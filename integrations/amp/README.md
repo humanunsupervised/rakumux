@@ -37,7 +37,7 @@ Amp runs it as a system plugin in every Amp it starts. It does nothing outside a
 
 | | |
 |---|---|
-| Detection | `amp` (installer and npm builds), `@ampcode/cli` / `@sourcegraph/amp` under Node; approval dialogs block; a braille title spinner is work; its animation isn't |
+| Detection | `amp` (installer and npm builds), `@ampcode/cli` / `@sourcegraph/amp` under Node; approval dialogs and the signed-out log-in question block; a braille title spinner is work; its animation isn't |
 | State | the plugin's snapshots, above the screen |
 | Resume | `amp threads continue <thread> <flags>`: the bound thread, else the one the process continued, else `--last`; keeps `--dangerously-allow-all`, `-m/--mode`, `--settings-file`, `--mcp-config`, `--features`, `--fast`, `--[no-]ide`, `--[no-]notifications`, `--[no-]remote-control-terminal`, `--[no-]color`, `--log-*`. `amp --no-tui` (a runner) is a command |
 | Latest line, prompt, turn, reply, whole chat | from the copy (`output.rs`, `transcript.rs`) |
@@ -49,8 +49,8 @@ Amp runs it as a system plugin in every Amp it starts. It does nothing outside a
 
 - Without the plugin there is nothing to read: state comes from the screen and resume is
   `amp threads continue --last`.
-- The screen markers come from Amp's own strings, not a captured screen (Amp needs a sign-in to
-  draw one).
+- Apart from the log-in question, the screen markers come from Amp's own strings, not a
+  captured screen (Amp needs a sign-in to draw one).
 - History a thread had before the plugin first saw it is copied once (its newest 2000
   messages) without times; other messages carry the time the plugin copied them.
 - Only the thread Amp shows is followed; threads running in the background are copied when
