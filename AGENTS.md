@@ -190,7 +190,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    refresh token once a fifth of the lifetime is left (`refresh/renewal.rs`), and a restore
    renews one that expired meanwhile. A client that finds a service from an older release
    asks it to stop (`Shutdown`) and starts its own; a newer one is used as it is. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
-   `RAKUMUX_CLERK_CLIENT_ID`, `RAKUMUX_CLERK_DEVICE_PAGE`, `RAKUMUX_CLOUD_ORIGIN`.
+   `RAKUMUX_CLERK_CLIENT_ID`, `RAKUMUX_CLERK_DEVICE_PAGE`, `RAKUMUX_CLOUD_ORIGIN`, and
+   `RAKUMUX_CLOUD_CA` (a PEM file of certificates trusted for that origin besides the public
+   roots, for a local rakumux.com; ignored for rakumux.com and its subdomains).
    **Agent feed** (`rakumux_sensagent::feed`, contract `contracts/feed/`): while the account's
    feed is on (`feed` in the same features read), the service has the daemon capture
    replies (`reply_capture`), takes them from its `replies` subscription (and `reply_list` after
@@ -569,6 +571,10 @@ tui/
                              # layout::PHONE_BELOW columns) 300 ms in session mode and dialogs, 800 ms in
                              # Rakumux mode (the list and the feed)
     updater.rs, version.rs, theme.rs, icons.rs (plain / emoji / Nerd Font marks)
+  tests/mid_turn_replies.rs  # replies typed into Claude Code at work, end to end: real daemon and
+                             # account service, a local rakumux.com (mid_turn/fake_cloud.rs, HTTPS
+                             # through RAKUMUX_CLOUD_CA), a stand-in Claude Code (mid_turn/claude.sh);
+                             # Linux, in `cargo test --workspace` (~30 s)
 ```
 
 ## Session model

@@ -181,6 +181,18 @@ fn reviewed_clean_https_root_configuration_only() {
 }
 
 #[test]
+fn extra_roots_must_be_pem_certificates() {
+    for pem in [
+        &b""[..],
+        b"not a certificate",
+        b"-----BEGIN PUBLIC KEY-----\nAA==\n-----END PUBLIC KEY-----\n",
+    ] {
+        assert!(config().with_root_certificates(pem).is_err(), "{pem:?}");
+    }
+    assert!(config().roots.is_empty());
+}
+
+#[test]
 fn recorded_request_has_only_fixed_native_headers_and_sealed_body() {
     let (client, recorded) = client_with(Ok(success()), None);
     let request = request();

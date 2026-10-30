@@ -68,6 +68,9 @@ pub struct CloudAIConfig {
     /// so two machines with one name are told apart, and an enrolled
     /// machine's access token is taken only from the machine it was made for.
     machine_id: Option<HeaderValue>,
+    /// Certificates trusted for this origin besides the public roots: a
+    /// local rakumux.com for development and tests (`with_root_certificates`).
+    roots: Vec<reqwest::Certificate>,
 }
 
 /// The header naming the requesting machine by its id.
@@ -233,7 +236,21 @@ impl CloudAIConfig {
             machine_credentials,
             machine_token,
             machine_id: None,
+            roots: Vec::new(),
         })
+    }
+
+    /// Trust the certificates in `pem` (PEM, at least one) for this origin
+    /// besides the public roots: a local rakumux.com for development and
+    /// tests. Its caller never gives any for rakumux.com itself.
+    pub fn with_root_certificates(mut self, pem: &[u8]) -> Result<Self, CloudAIError> {
+        let invalid = || CloudAIError::InvalidConfiguration("expected PEM certificates");
+        let roots = reqwest::Certificate::from_pem_bundle(pem).map_err(|_| invalid())?;
+        if roots.is_empty() {
+            return Err(invalid());
+        }
+        self.roots = roots;
+        Ok(self)
     }
 
     /// Name this machine by `id` (a ULID) in every feed request; an id that
@@ -311,7 +328,11 @@ impl CloudAIClient {
 
     /// Build a HTTPS-only transport without making a request or reading sessions.
     pub fn new(config: CloudAIConfig) -> Result<Self, CloudAIError> {
-        let client = Client::builder()
+        let mut builder = Client::builder();
+        for root in &config.roots {
+            builder = builder.add_root_certificate(root.clone());
+        }
+        let client = builder
             .https_only(true)
             .redirect(redirect::Policy::none())
             .connect_timeout(CONNECT_TIMEOUT)

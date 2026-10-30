@@ -2178,6 +2178,8 @@ dependencies = [
  "rakumux-vt",
  "ratatui",
  "reqwest",
+ "ring",
+ "rustls",
  "semver",
  "serde",
  "serde_json",

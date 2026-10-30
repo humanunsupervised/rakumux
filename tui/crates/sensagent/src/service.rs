@@ -39,6 +39,10 @@ pub const ISSUER_ENV: &str = "RAKUMUX_CLERK_ISSUER";
 pub const CLIENT_ID_ENV: &str = "RAKUMUX_CLERK_CLIENT_ID";
 pub const DEVICE_PAGE_ENV: &str = "RAKUMUX_CLERK_DEVICE_PAGE";
 pub const CLOUD_ORIGIN_ENV: &str = "RAKUMUX_CLOUD_ORIGIN";
+/// A PEM file of certificates trusted for [`CLOUD_ORIGIN_ENV`]'s origin besides
+/// the public roots (a local rakumux.com, for development and tests); never for
+/// rakumux.com itself, which only the public roots vouch for.
+pub const CLOUD_CA_ENV: &str = "RAKUMUX_CLOUD_CA";
 
 /// How long a client waits for a service it started to accept connections: it
 /// restores a saved account online (provider discovery, a token refresh) first.
@@ -76,6 +80,8 @@ pub enum ServiceError {
 pub struct ServiceConfig {
     auth: DeviceAuthConfig,
     cloud_origin: String,
+    /// [`CLOUD_CA_ENV`]'s certificates, for an origin other than rakumux.com.
+    cloud_roots: Option<Vec<u8>>,
     turn_settings: Option<TurnSettingsSource>,
 }
 
@@ -111,9 +117,17 @@ impl ServiceConfig {
                 .with_userinfo_endpoint(USERINFO)
                 .map_err(|_| ServiceError::Configuration)?;
         }
+        let cloud_origin = value(CLOUD_ORIGIN_ENV, CLOUD_ORIGIN);
+        let cloud_roots = match std::env::var_os(CLOUD_CA_ENV) {
+            Some(path) if !is_rakumux_com(&cloud_origin) => {
+                Some(std::fs::read(path).map_err(|_| ServiceError::Configuration)?)
+            }
+            _ => None,
+        };
         Ok(Self {
             auth,
-            cloud_origin: value(CLOUD_ORIGIN_ENV, CLOUD_ORIGIN),
+            cloud_origin,
+            cloud_roots,
             turn_settings: None,
         })
     }
@@ -146,12 +160,8 @@ pub fn serve(
     })?;
     // This machine's id and name for the feed, kept beside its other files.
     let machine = crate::feed::MachineIdentity::load(Some(layout.root().join("machine.json")));
-    let cloud = CloudAIClient::new(
-        CloudAIConfig::new(&config.cloud_origin)
-            .and_then(|cloud| cloud.with_machine_id(machine.id()))
-            .map_err(|_| ServiceError::Configuration)?,
-    )
-    .map_err(|_| ServiceError::Configuration)?;
+    let cloud = CloudAIClient::new(cloud_config(&config, machine.id())?)
+        .map_err(|_| ServiceError::Configuration)?;
     let website = AccountWebsite::new(&config.cloud_origin).ok();
     let store = SqliteStatusStore::open(layout.status_dir()).map_err(|_| ServiceError::Setup)?;
     let account = Arc::new(AccountService::new(
@@ -224,17 +234,39 @@ fn enrolled_tokens(
     if credential.machine_id() != machine {
         eprintln!("rakumux-status: this machine's credential is for another machine id");
     }
-    let cloud = CloudAIClient::new(
-        CloudAIConfig::new(&config.cloud_origin)
-            .and_then(|cloud| cloud.with_machine_id(credential.machine_id()))
-            .map_err(|_| ServiceError::Configuration)?,
-    )
-    .map_err(|_| ServiceError::Configuration)?;
+    let cloud = CloudAIClient::new(cloud_config(config, credential.machine_id())?)
+        .map_err(|_| ServiceError::Configuration)?;
     Ok(Some(Arc::new(crate::enrolment::MachineTokens::new(
         cloud,
         config.auth.clone(),
         credential,
     ))))
+}
+
+/// Whether `origin` is rakumux.com's, or one of its subdomains' (an origin
+/// that doesn't parse counts too: it's refused anyway).
+fn is_rakumux_com(origin: &str) -> bool {
+    reqwest::Url::parse(origin)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .is_none_or(|host| {
+            let host = host.trim_end_matches('.');
+            host == "rakumux.com" || host.ends_with(".rakumux.com")
+        })
+}
+
+/// rakumux.com's (or the overriding origin's) client settings, naming this
+/// machine by `machine`.
+fn cloud_config(config: &ServiceConfig, machine: &str) -> Result<CloudAIConfig, ServiceError> {
+    let cloud = CloudAIConfig::new(&config.cloud_origin)
+        .and_then(|cloud| cloud.with_machine_id(machine))
+        .map_err(|_| ServiceError::Configuration)?;
+    match &config.cloud_roots {
+        Some(pem) => cloud
+            .with_root_certificates(pem)
+            .map_err(|_| ServiceError::Configuration),
+        None => Ok(cloud),
+    }
 }
 
 /// The session daemon, waiting briefly for one that is still starting (a client
@@ -424,6 +456,28 @@ mod tests {
         assert_eq!(auth.status_scope(), "profile");
         assert!(CloudAIConfig::new(CLOUD_ORIGIN).is_ok());
         assert!(AccountWebsite::new(CLOUD_ORIGIN).is_ok());
+    }
+
+    #[test]
+    fn extra_roots_are_never_trusted_for_rakumux_com() {
+        for origin in [
+            CLOUD_ORIGIN,
+            "https://rakumux.com/",
+            "https://RAKUMUX.com:443",
+            "https://rakumux.com.",
+            "https://www.rakumux.com",
+            "not an origin",
+        ] {
+            assert!(is_rakumux_com(origin), "{origin}");
+        }
+        for origin in [
+            "https://127.0.0.1:8443",
+            "https://localhost",
+            "https://rakumux.com.example",
+            "https://notrakumux.com",
+        ] {
+            assert!(!is_rakumux_com(origin), "{origin}");
+        }
     }
 
     #[test]

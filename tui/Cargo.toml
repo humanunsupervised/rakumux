@@ -46,3 +46,9 @@ tempfile = "3.8"
 [[bin]]
 name = "tui"
 path = "src/main.rs"
+
+[dev-dependencies]
+# tests/mid_turn_replies.rs: its local rakumux.com's TLS and the certificates
+# it makes for it (the versions reqwest already builds).
+rustls = "0.21"
+ring = "0.17"
