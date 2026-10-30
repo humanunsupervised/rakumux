@@ -201,8 +201,9 @@ impl FeedSync {
     }
 
     /// A reply the daemon captured: queued for upload unless its session is
-    /// private, unknown, or the feed is off. `reply_to` is the feed reply it
-    /// answers, when one was typed into its session.
+    /// private or unknown, rakumux.com doesn't take its agent, or the feed is
+    /// off. `reply_to` is the feed reply it answers, when one was typed into
+    /// its session.
     pub fn reply(&mut self, reply: AgentReply, reply_to: Option<String>) {
         if self.last_reply.as_ref().is_none_or(|last| reply.id > *last) {
             self.last_reply = Some(reply.id.clone());
@@ -216,6 +217,9 @@ impl FeedSync {
         if meta.private {
             return;
         }
+        let Some(agent) = super::agents::feed_agent(&reply.agent) else {
+            return;
+        };
         let Some(text) = crate::cloud::feed_text(&reply.text) else {
             return;
         };
@@ -228,7 +232,7 @@ impl FeedSync {
             session_name: meta.name.clone(),
             folder: meta.folder.clone(),
             branch: meta.branch.clone(),
-            agent: reply.agent,
+            agent: agent.to_owned(),
             conversation_id: reply.conversation_id.filter(|id| wire::conversation_id(id)),
             text,
             truncated: reply.truncated || cut,
@@ -524,6 +528,25 @@ mod tests {
             feed.next_request(NOW),
             Some(FeedRequest::Read { after: None })
         );
+    }
+
+    #[test]
+    fn replies_of_agents_rakumux_com_does_not_take_stay_out_of_the_batch() {
+        let mut feed = on();
+        let mut other = reply("S", "from an agent the feed doesn't know");
+        other.agent = "gemini".into();
+        feed.reply(other, None);
+        let mut kimi = reply("S", "from Kimi Code");
+        kimi.agent = "kimi".into();
+        feed.reply(kimi, None);
+        feed.reply(reply("S", "from Claude Code"), None);
+        let Some(FeedRequest::Upload { ids, body }) = feed.next_request(NOW) else {
+            panic!("expected an upload");
+        };
+        assert_eq!(ids.len(), 2, "the refused agent's reply never joins a batch");
+        let body = String::from_utf8(body).unwrap();
+        assert!(body.contains(r#""agent":"kimi""#) && body.contains(r#""agent":"claude-code""#));
+        assert!(!body.contains("gemini") && !body.contains("doesn't know"));
     }
 
     #[test]

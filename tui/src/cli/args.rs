@@ -453,6 +453,13 @@ pub enum HookAgent {
     Claude,
     Codex,
     Opencode,
+    Copilot,
+    CursorAgent,
+    Pi,
+    Grok,
+    Kimi,
+    Droid,
+    Amp,
 }
 
 impl HookAgent {
@@ -461,6 +468,13 @@ impl HookAgent {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Opencode => "opencode",
+            Self::Copilot => "copilot",
+            Self::CursorAgent => "cursor-agent",
+            Self::Pi => "pi",
+            Self::Grok => "grok",
+            Self::Kimi => "kimi",
+            Self::Droid => "droid",
+            Self::Amp => "amp",
         }
     }
 }

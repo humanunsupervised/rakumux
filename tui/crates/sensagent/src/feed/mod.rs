@@ -13,6 +13,7 @@
 //! directory. Private sessions are never uploaded, and every text is redacted
 //! of keys, credential assignments and tokens first.
 
+mod agents;
 mod cache;
 mod chats;
 mod job;

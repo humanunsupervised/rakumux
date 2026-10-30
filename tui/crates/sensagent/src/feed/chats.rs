@@ -295,8 +295,11 @@ impl ChatSync {
             followed.due = true;
             followed.next = now;
         }
+        let Some(agent) = super::agents::feed_agent(&page.agent) else {
+            return;
+        };
         let chat = ChatName {
-            agent: page.agent,
+            agent: agent.to_owned(),
             conversation_id: page.conversation_id,
             session_id: session.as_str().to_owned(),
             session_name: followed.name.clone(),
@@ -307,7 +310,7 @@ impl ChatSync {
             .into_iter()
             .filter_map(upload_message)
             .collect();
-        if !wire::conversation_id(&chat.conversation_id) || !known_agent(&chat.agent) {
+        if !wire::conversation_id(&chat.conversation_id) {
             return;
         }
         if messages.is_empty() {
@@ -369,10 +372,6 @@ impl ChatSync {
             }
         }
     }
-}
-
-fn known_agent(agent: &str) -> bool {
-    matches!(agent, "claude-code" | "codex" | "opencode")
 }
 
 /// A message as the feed uploads it: each text cleaned and cut, at most

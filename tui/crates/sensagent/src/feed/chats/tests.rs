@@ -68,6 +68,23 @@ fn upload_of(work: Option<ChatWork>) -> serde_json::Value {
 }
 
 #[test]
+fn only_chats_of_agents_rakumux_com_takes_are_uploaded() {
+    let mut chats = on(None);
+    let (session, _) = read_of(chats.next_work(NOW));
+    let mut other = page(vec![message(0, vec![text("Hidden.")])], 40, false);
+    other.agent = "gemini".into();
+    chats.read_done(session.clone(), Ok(other), NOW);
+    assert_eq!(chats.next_work(NOW), None, "nothing is queued for it");
+    chats.observe(&view("S", false));
+    let (session, _) = read_of(chats.next_work(NOW + READ_EVERY));
+    let mut droid = page(vec![message(0, vec![text("Done.")])], 40, false);
+    droid.agent = "droid".into();
+    chats.read_done(session, Ok(droid), NOW + READ_EVERY);
+    let body = upload_of(chats.next_work(NOW + READ_EVERY));
+    assert_eq!(body["chat"]["agent"], "droid");
+}
+
+#[test]
 fn a_live_chat_is_read_uploaded_then_read_on_from_where_it_was() {
     let mut chats = on(None);
     // Only the non-private session, and nothing while one request is out.

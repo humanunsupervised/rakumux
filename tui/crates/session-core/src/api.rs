@@ -557,7 +557,8 @@ pub const CAPABILITY_REPLIES: &str = "session.replies";
 pub struct AgentReply {
     pub id: ReplyId,
     pub session_id: SessionId,
-    /// `claude-code`, `codex` or `opencode`.
+    /// The agent as the feed names it: `claude-code`, `codex`, `opencode`,
+    /// `copilot`, `cursor-agent`, `pi`, `grok`, `kimi`, `droid` or `amp`.
     pub agent: String,
     /// The agent's own conversation id, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -648,7 +649,8 @@ pub struct TranscriptCursor {
 /// The answer to `session_transcript`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranscriptPage {
-    /// `claude-code`, `codex` or `opencode`.
+    /// The agent as the feed names it: `claude-code`, `codex`, `opencode`,
+    /// `copilot`, `cursor-agent`, `pi`, `grok`, `kimi`, `droid` or `amp`.
     pub agent: String,
     /// The agent's own conversation id.
     pub conversation_id: String,

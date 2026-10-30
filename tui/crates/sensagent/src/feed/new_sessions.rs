@@ -12,8 +12,8 @@
 //! rakumux.com listed there) picks one of two folders with the same name;
 //! none, or several without that, fails `folder_unknown`. The session is a
 //! login shell in the folder, with the agent's own command typed in as a
-//! startup command (`claude`, `codex`, `opencode`: what `rakumux new --cmd`
-//! would run), and the daemon's environment. (`not_accepted`, which older
+//! startup command (`claude`, `codex`, `opencode`, `cursor-agent`, …: what
+//! `rakumux new --cmd` would run), and the daemon's environment. (`not_accepted`, which older
 //! releases report while a setting of theirs is off, is never sent.)
 //!
 //! Each request is started at most once: its id is kept as handled before
@@ -54,6 +54,13 @@ pub(crate) enum Agent {
     ClaudeCode,
     Codex,
     OpenCode,
+    Copilot,
+    CursorAgent,
+    Pi,
+    Grok,
+    Kimi,
+    Droid,
+    Amp,
 }
 
 impl Agent {
@@ -62,17 +69,32 @@ impl Agent {
             "claude-code" => Some(Self::ClaudeCode),
             "codex" => Some(Self::Codex),
             "opencode" => Some(Self::OpenCode),
+            "copilot" => Some(Self::Copilot),
+            "cursor-agent" => Some(Self::CursorAgent),
+            "pi" => Some(Self::Pi),
+            "grok" => Some(Self::Grok),
+            "kimi" => Some(Self::Kimi),
+            "droid" => Some(Self::Droid),
+            "amp" => Some(Self::Amp),
             _ => None,
         }
     }
 
     /// The command that starts it, typed into the new session's shell as
     /// `rakumux new --cmd` would: this machine's own, never text from the cloud.
+    /// Cursor's is `cursor-agent`, never `agent`, which Grok installs too.
     fn command(self) -> &'static str {
         match self {
             Self::ClaudeCode => "claude",
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
+            Self::Copilot => "copilot",
+            Self::CursorAgent => "cursor-agent",
+            Self::Pi => "pi",
+            Self::Grok => "grok",
+            Self::Kimi => "kimi",
+            Self::Droid => "droid",
+            Self::Amp => "amp",
         }
     }
 }

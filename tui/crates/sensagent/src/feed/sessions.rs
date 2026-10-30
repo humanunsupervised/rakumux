@@ -143,12 +143,7 @@ impl SessionState {
         let agent = view
             .agent
             .as_ref()
-            .and_then(|agent| match agent.kind.as_str() {
-                "claude" | "claude-code" => Some("claude-code"),
-                "codex" => Some("codex"),
-                "opencode" | "opencode2" => Some("opencode"),
-                _ => None,
-            });
+            .and_then(|agent| super::agents::feed_agent(&agent.kind));
         let program = if agent.is_none() {
             program_of(view)
         } else {

@@ -86,6 +86,13 @@ fn each_agent_runs_its_own_command_and_none_leaves_the_shell_alone() {
     for (agent, command) in [
         (Some(Agent::Codex), Some("codex")),
         (Some(Agent::OpenCode), Some("opencode")),
+        (Some(Agent::Copilot), Some("copilot")),
+        (Some(Agent::CursorAgent), Some("cursor-agent")),
+        (Some(Agent::Pi), Some("pi")),
+        (Some(Agent::Grok), Some("grok")),
+        (Some(Agent::Kimi), Some("kimi")),
+        (Some(Agent::Droid), Some("droid")),
+        (Some(Agent::Amp), Some("amp")),
         (None, None),
     ] {
         let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")]);
@@ -382,4 +389,12 @@ fn the_session_list_says_this_machine_takes_new_sessions() {
     );
     let alone = SessionSync::new("studio".into(), false).handling(NEW_SESSIONS);
     assert_eq!(capabilities(alone), serde_json::json!(["new_sessions"]));
+}
+
+#[test]
+fn every_agent_the_contract_names_can_be_started() {
+    for name in crate::feed::agents::AGENTS {
+        assert!(Agent::of(name).is_some(), "{name}");
+    }
+    assert_eq!(Agent::of("gemini"), None);
 }

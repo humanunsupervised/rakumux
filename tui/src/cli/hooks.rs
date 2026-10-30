@@ -12,7 +12,12 @@ const MAX_HOOK_BYTES: u64 = 1_048_576;
 
 pub(super) fn configuration(agent: HookAgent, out: &mut dyn Write) -> Result<i32, CliError> {
     let config = adapters::config(agent.name()).ok_or_else(|| {
-        CliError::Usage("OpenCode uses `rakumux-mcp opencode-plugin --install` instead".into())
+        CliError::Usage(match agent {
+            HookAgent::Opencode => {
+                "OpenCode uses `rakumux-mcp opencode-plugin --install` instead".into()
+            }
+            other => format!("{} has no hook configuration", other.name()),
+        })
     })?;
     writeln!(out, "{config}").map_err(output_error)?;
     Ok(0)
