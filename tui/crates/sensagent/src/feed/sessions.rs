@@ -283,6 +283,14 @@ impl SessionSync {
         }
     }
 
+    /// Also say `capability` with every upload (what this machine handles).
+    pub fn handling(mut self, capability: &'static str) -> Self {
+        if !self.capabilities.contains(&capability) {
+            self.capabilities.push(capability);
+        }
+        self
+    }
+
     /// Follow the account: signed in with its Feed switch on. Turned on
     /// again, the list is sent at once.
     pub fn set_enabled(&mut self, enabled: bool, now: Duration) {

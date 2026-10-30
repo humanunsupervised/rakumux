@@ -94,6 +94,8 @@ pub(crate) enum FeedRequest {
     MachineEnrol { body: Vec<u8> },
     /// Revoke an enrolled machine's credential.
     MachineRevoke { machine: String },
+    /// Say whether a new session asked for on rakumux.com was started, as `body`.
+    NewSessionStatus { body: Vec<u8> },
 }
 
 impl FeedRequest {
@@ -828,6 +830,9 @@ struct WireReplies {
     /// Someone has rtop open on rakumux.com (present only then).
     #[serde(default)]
     resources_wanted: bool,
+    /// New sessions asked of this machine (`new_sessions`), read row by row.
+    #[serde(default)]
+    new_sessions: Option<serde_json::Value>,
 }
 
 /// Replies as read: those that fit the contract (replies to entries, and
@@ -846,6 +851,8 @@ pub(crate) struct RepliesRead {
     pub poll: Option<Duration>,
     /// Someone has rtop open on rakumux.com: send what this machine uses.
     pub resources_wanted: bool,
+    /// The new sessions pending for this machine, when the read brought them.
+    pub new_sessions: Vec<super::new_sessions::NewSessionAsk>,
 }
 
 impl RepliesRead {
@@ -901,6 +908,7 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
             .poll_ms
             .map(|ms| Duration::from_millis(ms.clamp(1_000, 60_000))),
         resources_wanted: page.resources_wanted,
+        new_sessions: super::new_sessions::asks(page.new_sessions),
     })
 }
 

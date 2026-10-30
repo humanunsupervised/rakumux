@@ -78,9 +78,12 @@ pub struct ServiceConfig {
     cloud_origin: String,
     turn_settings: Option<TurnSettingsSource>,
     remote_replies: Option<RemoteRepliesSource>,
+    remote_sessions: Option<RemoteRepliesSource>,
 }
 
-/// Reads whether replies written elsewhere are typed into this machine's sessions.
+/// Reads one of this machine's own settings: whether replies written elsewhere
+/// are typed into its sessions, or new sessions asked for on rakumux.com are
+/// started here.
 #[derive(Clone)]
 struct RemoteRepliesSource(crate::feed::AcceptRemote);
 
@@ -127,6 +130,7 @@ impl ServiceConfig {
             cloud_origin: value(CLOUD_ORIGIN_ENV, CLOUD_ORIGIN),
             turn_settings: None,
             remote_replies: None,
+            remote_sessions: None,
         })
     }
 
@@ -145,6 +149,13 @@ impl ServiceConfig {
     /// it, never.
     pub fn with_remote_replies(mut self, read: impl Fn() -> bool + Send + Sync + 'static) -> Self {
         self.remote_replies = Some(RemoteRepliesSource(Arc::new(read)));
+        self
+    }
+
+    /// Whether new sessions asked for on rakumux.com are started on this
+    /// machine: `read` says, every few seconds. Without it, never.
+    pub fn with_remote_sessions(mut self, read: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        self.remote_sessions = Some(RemoteRepliesSource(Arc::new(read)));
         self
     }
 }
@@ -202,6 +213,7 @@ pub fn serve(
         .following_account_switch()
         .with_chat_cursors(layout.status_dir().join("chats.json"))
         .with_reply_state(layout.status_dir().join("replies.json"))
+        .with_new_session_state(layout.status_dir().join("new-sessions.json"))
         .with_titles(layout.status_dir().join("titles.json"))
         .with_titled_chats(layout.status_dir().join("titled-chats.json"))
         .with_uploads(uploads)
@@ -214,6 +226,9 @@ pub fn serve(
     }
     if let Some(RemoteRepliesSource(read)) = config.remote_replies {
         refresher = refresher.with_remote_replies(read);
+    }
+    if let Some(RemoteRepliesSource(read)) = config.remote_sessions {
+        refresher = refresher.with_remote_sessions(read);
     }
     let runner = RefreshRunner::spawn_with_website(refresher, api, website)
         .map_err(|_| ServiceError::Setup)?;

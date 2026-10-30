@@ -3,9 +3,10 @@
 //! and read back from every machine of the account (`contracts/feed/`); and
 //! the whole chats those turns belong to, uploaded as they grow (`chats`) and
 //! read back a turn at a time (`turn`); replies written back (`replies`), with
-//! the files attached to them saved for the agent (`uploads`); and the
+//! the files attached to them saved for the agent (`uploads`); the
 //! machine's session list, for the website's Status and Folder (`sessions`);
-//! and, while someone has rtop open there, what the machine uses (`resources`).
+//! while someone has rtop open there, what the machine uses (`resources`);
+//! and the new sessions asked of it there (`new_sessions`).
 //!
 //! The cache and the upload queue are memory only, gone when the status
 //! service stops; where each chat's upload is up to is kept in the status
@@ -16,6 +17,7 @@ mod cache;
 mod chats;
 mod job;
 mod machine;
+mod new_sessions;
 mod poke;
 mod replies;
 mod resources;
@@ -33,6 +35,7 @@ pub(crate) use chats::{write_private, ChatSync, ChatWork, READ_BYTES};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
 pub(crate) use machine::MachineIdentity;
+pub(crate) use new_sessions::{NewSessionSync, NewSessionWork, NEW_SESSIONS};
 pub(crate) use poke::{listen, PokeEvent, PokeSync};
 pub use replies::{AcceptRemote, ReplyWrite, ReplyWriteStatus};
 pub(crate) use replies::{Fetch, Fetched, ReplySync, ReplyWork, TYPING_QUIET};

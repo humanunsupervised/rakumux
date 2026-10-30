@@ -64,6 +64,7 @@ fn page_of(
         more,
         poll: None,
         resources_wanted: false,
+        new_sessions: vec![],
     }))
 }
 
@@ -530,6 +531,7 @@ fn reads_come_as_soon_as_rakumux_com_says() {
             more: false,
             poll,
             resources_wanted: false,
+            new_sessions: vec![],
         }))
     };
     let mut replies = on(None, &[]);
@@ -583,6 +585,7 @@ fn read_messages(messages: Vec<SessionMessage>) -> Result<FeedResult, FeedFailur
         more: false,
         poll: None,
         resources_wanted: false,
+        new_sessions: vec![],
     }))
 }
 
@@ -1292,6 +1295,7 @@ fn a_sessions_replies_and_messages_go_in_in_the_order_they_were_written() {
         more: false,
         poll: None,
         resources_wanted: false,
+        new_sessions: vec![],
     }));
     replies.request_done(true, read, NOW);
     assert_eq!(replies.next_work(NOW), None);

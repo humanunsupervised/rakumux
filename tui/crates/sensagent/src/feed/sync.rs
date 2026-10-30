@@ -308,7 +308,8 @@ impl FeedSync {
                 | FeedResult::Download(_)
                 | FeedResult::Realtime(_)
                 | FeedResult::Enrolled(_)
-                | FeedResult::Revoked,
+                | FeedResult::Revoked
+                | FeedResult::NewSessionReported,
             ) => {}
             Err(failure) => self.fail(failure, now),
         }

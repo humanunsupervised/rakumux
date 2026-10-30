@@ -171,6 +171,10 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     accept_remote: Option<crate::feed::AcceptRemote>,
     /// Where replies keep what was typed in across a restart.
     reply_state: Option<std::path::PathBuf>,
+    /// Whether new sessions asked for on rakumux.com are started here.
+    accept_sessions: Option<crate::feed::AcceptRemote>,
+    /// Where new sessions keep which were started across a restart.
+    new_session_state: Option<std::path::PathBuf>,
     /// This machine's id and name for the feed, until the owner takes it.
     machine: Option<crate::feed::MachineIdentity>,
     /// The name this service last gave each session (its AI title).
@@ -207,6 +211,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             uploads: None,
             accept_remote: None,
             reply_state: None,
+            accept_sessions: None,
+            new_session_state: None,
             machine: None,
             titles: Titles::default(),
             titled: TitledChats::default(),
@@ -283,6 +289,32 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where replies keep their state, if anywhere.
     pub(crate) fn reply_state(&self) -> Option<std::path::PathBuf> {
         self.reply_state.clone()
+    }
+
+    /// Start new sessions asked for on rakumux.com while `read` says so (it's
+    /// read every few seconds); without it, never: each is refused as
+    /// `not_accepted`.
+    pub fn with_remote_sessions(mut self, read: crate::feed::AcceptRemote) -> Self {
+        self.accept_sessions = Some(read);
+        self
+    }
+
+    /// The setting for new sessions from rakumux.com, if any.
+    pub(crate) fn accept_sessions(&self) -> Option<crate::feed::AcceptRemote> {
+        self.accept_sessions.clone()
+    }
+
+    /// Keep which new sessions were started or decided here, and the reports
+    /// not yet taken, in `path`, so a restarted service never starts one
+    /// twice (memory only without it).
+    pub fn with_new_session_state(mut self, path: std::path::PathBuf) -> Self {
+        self.new_session_state = Some(path);
+        self
+    }
+
+    /// Where new sessions keep their state, if anywhere.
+    pub(crate) fn new_session_state(&self) -> Option<std::path::PathBuf> {
+        self.new_session_state.clone()
     }
 
     /// Go by `machine` in the feed (made from the hostname, memory only,

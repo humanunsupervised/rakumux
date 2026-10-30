@@ -49,6 +49,8 @@ pub(crate) enum FeedResult {
     Enrolled(String),
     /// The enrolled machine's credential is gone.
     Revoked,
+    /// rakumux.com took a new session's status.
+    NewSessionReported,
 }
 
 /// A finished feed request, tagged with the account revision it was made for.
@@ -74,7 +76,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::Attachment { .. }
             | FeedRequest::Realtime
             | FeedRequest::MachineEnrol { .. }
-            | FeedRequest::MachineRevoke { .. } => String::new(),
+            | FeedRequest::MachineRevoke { .. }
+            | FeedRequest::NewSessionStatus { .. } => String::new(),
         };
         let http = match &self.request {
             FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
@@ -90,6 +93,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::Realtime => FeedHttp::Realtime,
             FeedRequest::MachineEnrol { body } => FeedHttp::MachineEnrol(body),
             FeedRequest::MachineRevoke { machine } => FeedHttp::MachineRevoke(machine),
+            FeedRequest::NewSessionStatus { body } => FeedHttp::NewSessionStatus(body),
         };
         let outcome = self
             .account
@@ -126,6 +130,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                     FeedRequest::MachineRevoke { .. } => {
                         crate::enrolment::revoked(&reply).map(|()| FeedResult::Revoked)
                     }
+                    FeedRequest::NewSessionStatus { .. } => super::new_sessions::reported(&reply)
+                        .map(|()| FeedResult::NewSessionReported),
                 },
                 Some(Err(error)) => Err(transport(error)),
                 // The sign-in changed meanwhile; the owner fences this completion.

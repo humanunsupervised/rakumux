@@ -7,7 +7,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
 use session_core::api::{
-    AgentReply, CallerInfo, ErrorCode, EventEnvelope, ResourceSample, SessionEvent,
+    AgentReply, CallerInfo, CreateSession, ErrorCode, EventEnvelope, ResourceSample, SessionEvent,
     SubscribeRequest, TranscriptCursor, TranscriptPage, CAPABILITY_RESOURCES,
 };
 use session_core::client::SessionApi;
@@ -30,8 +30,9 @@ use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
     ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
-    FeedResult, FeedSync, Fetch, Fetched, PokeEvent, PokeSync, RealtimeToken, ReplySync, ReplyWork,
-    ResourceSync, ResourceWork, SessionMessage, SessionSync, TurnRead, Uploads,
+    FeedResult, FeedSync, Fetch, Fetched, NewSessionSync, NewSessionWork, PokeEvent, PokeSync,
+    RealtimeToken, ReplySync, ReplyWork, ResourceSync, ResourceWork, SessionMessage, SessionSync,
+    TurnRead, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -162,6 +163,11 @@ enum Message {
     CaptureSet(bool),
     /// Replies the daemon kept, for catching up.
     Replies(Vec<AgentReply>),
+    /// The daemon started the session a request from rakumux.com (its id)
+    /// asked for, or refused.
+    NewSessionCreated(String, Result<SessionView, ErrorCode>),
+    /// A new session's status report finished.
+    NewSessionReported(FeedCompletion),
     SignIn(u64, SignInEvent),
     Renewed(RenewalEvent),
     /// An enrolled machine's sign-in with its credential finished.
@@ -219,6 +225,10 @@ enum Work<A, C> {
     ReplyCapture(bool),
     /// Read the replies the daemon kept after this one (all of them for `None`).
     Replies(Option<ReplyId>),
+    /// Start the session a request from rakumux.com (its id) asks for.
+    CreateSession(String, CreateSession),
+    /// Report a new session's status.
+    NewSessionReport(FeedJob<A, C>),
 }
 
 /// Where the owner sends work. Replies being typed in and replies or session
@@ -241,7 +251,8 @@ impl<A, C> Workers<A, C> {
             | Work::Enrol(..)
             | Work::Revoke(..)
             | Work::ReadResources
-            | Work::ResourcesUpload(..) => self.replies.send(work),
+            | Work::ResourcesUpload(..)
+            | Work::CreateSession(..) => self.replies.send(work),
             work => self.shared.send(work),
         }
     }
@@ -609,8 +620,14 @@ fn own<S, A, C>(
         refresher.accept_remote(),
         refresher.reply_state(),
     );
+    let mut new_sessions = NewSessionSync::new(
+        machine.clone(),
+        refresher.accept_sessions(),
+        refresher.new_session_state(),
+    );
     let uploads = refresher.uploads().map(Uploads::new);
-    let mut sessions = SessionSync::new(machine.clone(), uploads.is_some());
+    let mut sessions =
+        SessionSync::new(machine.clone(), uploads.is_some()).handling(crate::feed::NEW_SESSIONS);
     let mut resources = ResourceSync::new();
     let mut pokes = PokeSync::new();
     // The running realtime connection's stop, if one runs.
@@ -661,6 +678,7 @@ fn own<S, A, C>(
             follow_sessions(&refresher, &mut sessions, work, now);
             follow_resources(&refresher, &mut resources, &sessions, work, now);
             let confirmed = sessions.confirmed();
+            follow_new_sessions(&refresher, &mut new_sessions, confirmed, work, now);
             follow_pokes(
                 &refresher,
                 &mut pokes,
@@ -733,6 +751,7 @@ fn own<S, A, C>(
                 replies.connected(&views);
                 sessions.connected(&views);
                 resources.connected();
+                new_sessions.connected(&views);
                 let _ = work.send(Work::Replies(after));
             }
             Message::Event(event) => {
@@ -746,12 +765,14 @@ fn own<S, A, C>(
                         chats.observe(session);
                         replies.observe(session);
                         sessions.observe(session);
+                        new_sessions.observe(session);
                     }
                     SessionEvent::Removed => {
                         feed.forget(&event.session_id);
                         chats.forget(&event.session_id);
                         replies.forget(&event.session_id);
                         sessions.forget(&event.session_id);
+                        new_sessions.forget(&event.session_id);
                     }
                     _ => {}
                 }
@@ -784,6 +805,7 @@ fn own<S, A, C>(
                         &mut chats,
                         &mut replies,
                         &mut sessions,
+                        &mut new_sessions,
                         now,
                     );
                 }
@@ -806,8 +828,12 @@ fn own<S, A, C>(
                 resources.done(current, outcome, now);
                 follow_resources(&refresher, &mut resources, &sessions, work, now);
             }
-            Message::ReplyDone(completion) => {
+            Message::ReplyDone(mut completion) => {
                 let current = refresher.is_current(completion.revision);
+                // New sessions asked of this machine come with its replies read.
+                if let Ok(FeedResult::Replies(read)) = &mut completion.outcome {
+                    new_sessions.read(current, std::mem::take(&mut read.new_sessions));
+                }
                 let taken = current && machine_taken(&completion.outcome);
                 // Someone has rtop open on rakumux.com: send what this machine uses.
                 if current
@@ -825,6 +851,7 @@ fn own<S, A, C>(
                         &mut chats,
                         &mut replies,
                         &mut sessions,
+                        &mut new_sessions,
                         now,
                     );
                 }
@@ -837,6 +864,48 @@ fn own<S, A, C>(
                     now,
                 );
                 follow_resources(&refresher, &mut resources, &sessions, work, now);
+                follow_new_sessions(
+                    &refresher,
+                    &mut new_sessions,
+                    sessions.confirmed(),
+                    work,
+                    now,
+                );
+            }
+            Message::NewSessionCreated(id, result) => {
+                if let Ok(view) = &result {
+                    // Followed at once, before its event: its first prompt
+                    // (a session message) may be read before that arrives.
+                    feed.observe(view);
+                    chats.observe(view);
+                    replies.observe(view);
+                    sessions.observe(view);
+                    // On a Sprite, stay up for that prompt.
+                    awake.hold(now);
+                }
+                new_sessions.created(&id, result);
+                follow_new_sessions(
+                    &refresher,
+                    &mut new_sessions,
+                    sessions.confirmed(),
+                    work,
+                    now,
+                );
+            }
+            Message::NewSessionReported(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::NewSessionReported => Ok(()),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                new_sessions.reported(current, outcome, now);
+                follow_new_sessions(
+                    &refresher,
+                    &mut new_sessions,
+                    sessions.confirmed(),
+                    work,
+                    now,
+                );
             }
             Message::Fetched(revision, reply, fetched) => {
                 let current = refresher.is_current(revision);
@@ -921,6 +990,7 @@ fn own<S, A, C>(
                         &mut chats,
                         &mut replies,
                         &mut sessions,
+                        &mut new_sessions,
                         now,
                     );
                 }
@@ -939,6 +1009,7 @@ fn own<S, A, C>(
                         &mut chats,
                         &mut replies,
                         &mut sessions,
+                        &mut new_sessions,
                         now,
                     );
                 }
@@ -1308,6 +1379,7 @@ fn rename(
     chats: &mut ChatSync,
     replies: &mut ReplySync,
     sessions: &mut SessionSync,
+    new_sessions: &mut NewSessionSync,
     now: Duration,
 ) {
     eprintln!(
@@ -1317,6 +1389,7 @@ fn rename(
     chats.rename(machine.to_owned(), now);
     replies.rename(machine.to_owned(), now);
     sessions.rename(machine.to_owned(), now);
+    new_sessions.rename(machine.to_owned());
 }
 
 /// Start the next chat read or upload, when one is due: only while signed in
@@ -1410,6 +1483,43 @@ fn follow_replies<S, A, C>(
                     let _ = work.send(Work::Discard(uploads.clone(), reply));
                 }
             }
+            None => return,
+        }
+    }
+}
+
+/// Start what new sessions asked for on rakumux.com need next: start one (or
+/// decide it can't be), then report. Only while signed in with the account's
+/// Feed switch on and rakumux.com `confirmed` this machine's name, as replies.
+fn follow_new_sessions<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    new_sessions: &mut NewSessionSync,
+    confirmed: bool,
+    work: &Workers<A, C>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled =
+        refresher.account().is_some() && refresher.feed_switch() == Some(true) && confirmed;
+    new_sessions.set_enabled(enabled, now);
+    // One start and one report out at a time: a few rounds at most.
+    for _ in 0..4 {
+        match new_sessions.next_work(now) {
+            Some(NewSessionWork::Create { id, request }) => {
+                let _ = work.send(Work::CreateSession(id, request));
+            }
+            Some(NewSessionWork::Report(request)) => match refresher.feed_job(request) {
+                Some(job) => {
+                    let _ = work.send(Work::NewSessionReport(job));
+                }
+                None => {
+                    new_sessions.reported(false, Err(FeedFailure::Unauthorized), now);
+                    return;
+                }
+            },
             None => return,
         }
     }
@@ -1776,6 +1886,20 @@ where
                     .map(|(replies, _)| replies)
                     .unwrap_or_default();
                 Message::Replies(replies)
+            }
+            Ok(Work::CreateSession(id, request)) => {
+                let result = api.create(request).map_err(|error| error.code);
+                Message::NewSessionCreated(id, result)
+            }
+            Ok(Work::NewSessionReport(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::NewSessionReported(completion),
+                    Err(_) => Message::NewSessionReported(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
             }
         };
         if owner.send(message).is_err() {
