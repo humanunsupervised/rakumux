@@ -1,7 +1,8 @@
 # rakumux-mcp
 
 Agent-specific adapters now live in root [`integrations/`](../integrations/README.md),
-including OpenCode's CLI plugin/installer and the optional Claude Code/Codex activity hooks.
+including OpenCode's CLI plugin/installer, Pi's extension/installer and the optional Claude
+Code/Codex activity hooks.
 Activity does not depend on MCP; it uses the daemon's authenticated self-report protocol.
 
 An [MCP](https://modelcontextprotocol.io) server (stdio) that lets coding agents (Claude Code,
@@ -79,7 +80,8 @@ Whether the variables reach the MCP server depends on the agent: Claude
 Code passes its environment to the servers it spawns (expected, not verified); Codex forwards only
 variables listed in `env_vars`, so list both; agents that remove variables named like `*TOKEN*`
 from MCP servers' environment (Gemini CLI) need both mapped explicitly in the server's `env`;
-OpenCode 1.x starts MCP servers inside each TUI, so they do; OpenCode 2.x runs MCP servers in a
+OpenCode 1.x starts MCP servers inside each TUI, so they do; Pi starts its stdio servers in its
+own process with its environment, so they do; OpenCode 2.x runs MCP servers in a
 background service shared by every conversation, so they don't.
 
 **OpenCode 2.x** tags every tool call with its conversation (`_meta["ai.opencode/sessionID"]`). The
@@ -175,6 +177,23 @@ service, bound its conversation, and a tagged call created a session as that Rak
 The current activity-enabled adapter has fake-client coverage; real-agent verification is
 separate. See [OpenCode integration](../integrations/open-code/README.md).
 
+### Pi
+
+```bash
+pi mcp add rakumux --exposure direct -- rakumux-mcp   # absolute path recommended
+```
+
+This writes `~/.pi/agent/mcp.json` (`$PI_CODING_AGENT_DIR/mcp.json`). `--exposure direct` gives
+the model the six tools as `mcp__rakumux__<tool>`; Pi's default (`codemode`) reaches them only
+from codemode scripts. Pi starts the server in its own process with its whole environment, so
+`RAKUMUX_SESSION_ID` and `RAKUMUX_SESSION_TOKEN` both reach it: don't set `inheritEnv: false`
+for it, or pass both in its `env`. Checked with Pi 1.4.0: `list_sessions`, called by the model
+in a Rakumux session, acted as that session and listed its own folder only (the end-to-end test
+in [`integrations/pi`](../integrations/pi/README.md)).
+
+Pi's activity, conversation and folder reach Rakumux through its Rakumux extension, which needs
+no MCP: `rakumux-mcp pi-plugin --install` (see [Pi integration](../integrations/pi/README.md)).
+
 ## Environment
 
 | Variable | Meaning |
@@ -184,7 +203,8 @@ separate. See [OpenCode integration](../integrations/open-code/README.md).
 | `RAKUMUX_API_BIN` | The `rakumux-api` binary to start |
 | `RAKUMUX_PTYD_BIN` | The daemon binary (passed on to the API) |
 
-`rakumux-mcp --version` and `--help` print and exit; any other argument is an error.
+`rakumux-mcp --version` and `--help` print and exit; `opencode-plugin` and `pi-plugin` print or
+install their agent's plugin; any other argument is an error.
 
 ## Code
 

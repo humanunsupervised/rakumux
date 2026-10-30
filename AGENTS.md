@@ -241,7 +241,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    is asked again in half an hour), and a `poke` makes `ReplySync` read at once) and types each
    pending one addressed to
    this machine into the entry's session with `session_submit` (a bracketed paste, then
-   Enter; the same for Claude Code, Codex and OpenCode, which have no API for a running
+   Enter; the same for Claude Code, Codex, OpenCode and Pi, which have no API for a running
    interactive session), only while it's live, not private, shows the entry's conversation
    (`agent_turn.conversation_id`) and its agent waits (`idle`/`done`; `working`, `blocked` or an
    unknown chat waits, the cloud expires a reply after an hour; `working` doesn't for an agent
@@ -445,8 +445,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 
 ## File structure
 
-Agent-specific hooks, detection profiles, resume code and the OpenCode plugin/installer live
-under `integrations/{open-code,claude-code,codex}/`. Shared engines live in `integrations/`.
+Agent-specific hooks, detection profiles, resume code, the OpenCode plugin and the Pi extension
+(each with its installer) live under `integrations/{open-code,claude-code,codex,pi}/`. Shared engines live in `integrations/`.
 See [integration boundaries and protocol](integrations/README.md). New integrations go there,
 not in UI handlers, API/MCP transport or control policy. Optional version-1 `Report.activity`
 is self-only (`session.activity` capability). The daemon validates, timestamps and expires
@@ -554,7 +554,7 @@ newest the daemon's follower of `agent_output` saw, kept after the agent exits a
 registry; the session row's age shows it, else `last_active_at`), `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree, repo}` of
 the current cwd; `repo`: the `origin` remote URL's last path component without `.git`, from the
 common git dir's `config`, else the main working tree's folder name (a bare repository's own,
-`x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex or OpenCode session's latest reasoning,
+`x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex, OpenCode or Pi session's latest reasoning,
 tool call or reply as one line, from its conversation log or database: `integrations/output.rs`),
 `user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
 messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
@@ -569,7 +569,7 @@ last_active_at, added_at, git}` on the wire.
   worktree (`path` = its `repo_root`, `git` its branch, or a detached HEAD's commit, linked
   worktree and repository name when last worked in; one kept before names gets it when touched), where its agent changed files (`edited`, always true): written
   or edited with its file tools (Claude Code's `Write`, `Edit`, `MultiEdit`, `NotebookEdit`;
-  OpenCode's `write`, `edit`, `multiedit`) or patched (`apply_patch` however Codex calls it,
+  OpenCode's `write`, `edit`, `multiedit`; Pi's `write`, `edit`, from a codemode script too) or patched (`apply_patch` however Codex calls it,
   OpenCode's `patch`). Working trees it only worked in (started in, `cd`'d into, searched, read
   from) are kept in memory and the registry, never listed, so one becomes a place, at its latest
   touch's time, once files there change: a session started in a main checkout that made a
@@ -580,11 +580,13 @@ last_active_at, added_at, git}` on the wire.
   conversation, from its start (512 KiB a second) and then as it grows: Claude Code's entries'
   `cwd` and its tools' file paths, search roots, `EnterWorktree` and Bash `cd`/`git -C`; Codex's
   turns' `cwd`, shell calls' `workdir` and commands, and `apply_patch`'s files; OpenCode's tools'
-  paths and commands. Its agent's working-directory reports and its terminal's directories count
+  paths and commands; Pi's conversation's `cwd`, its tools' paths and `bash` commands, and the
+  calls its codemode scripts made (`nestedCalls`). Its agent's working-directory reports and its terminal's directories count
   as worked in. Times are the conversation's own, so reading it again changes nothing, and a
   working tree's moves on a minute at a time; each session keeps 32 of each kind (changed, only
   worked in). Working trees in the agents' own data directories
-  (`~/.claude`, `~/.codex`, OpenCode's but its worktrees, Claude Code's `/tmp/claude-<uid>`) and
+  (`~/.claude`, `~/.codex`, OpenCode's but its worktrees, Claude Code's `/tmp/claude-<uid>`, Pi's
+  `~/.pi/agent`) and
   in `/proc`, `/sys`, `/dev` are never places. Kept in the registry, so ended sessions keep
   theirs; only paths are read. They stay on this machine (not in `rakumux-api`), except their
   names in the feed's session list (below).
@@ -624,7 +626,10 @@ process has open, else the newest `cli` thread of the folder in `~/.codex/state_
 `codex resume <flags> <id>`) and OpenCode (the conversation its plugin bound, else the newest
 top-level session of the folder in `opencode.db` → `opencode <flags> -s <id>`, or `opencode2 …`
 when V2 was started under that name); each keeps the
-flags that shape an interactive session (permissions, model, …). Any other program gives
+flags that shape an interactive session (permissions, model, …). Pi (the conversation its
+extension bound, else the folder's newest file under `~/.pi/agent/sessions/` → `pi --session
+<file>`) hides its arguments, so only what its conversation keeps (model, thinking level) comes
+back. Any other program gives
 `LastCommand`: its command line is typed at the prompt on revive but not run. A shell back at its
 prompt for 15 s clears it. An agent's own report (`ReportedByAgent`) wins while an agent runs.
 Startup commands always run on revive.
@@ -713,7 +718,8 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   hour), listed by `reply_list {after?}` and delivered as `reply` events only to
   subscriptions with `replies: true`. The audit log records turning capture on or off, never
   reply text; session callers, delegated callers and `rakumux-api` never see replies. OpenCode
-  replies are its turn's last text block. A reply's optional `position` is its turn's last
+  replies are its turn's last text block; Pi's, its turn's final response (one that stopped
+  without a tool to call), keyed by its entry's `id`. A reply's optional `position` is its turn's last
   message's in the conversation (below).
 - Agent conversations (user only, capability `session.transcript`;
   `integrations/transcript.rs`): `session_transcript {id, after?, max_bytes?}` reads a live
@@ -726,6 +732,9 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   subagents' and meta entries left out; Claude Code's human `queued_command` attachments, what
   was typed while a turn ran, are prompts, its other queued input isn't). OpenCode: rows changed since a `(time_updated, id)`
   watermark, OpenCode 2 one message per reply block (`seq × 1024 + block`), 1.x one per piece.
+  Pi: one message per entry of its conversation file at its byte offset (a `!` command the user
+  ran is theirs: a `bash` call and its output; Pi's system prompt, extensions' context and
+  summaries left out).
   About 512 KiB of log is read per request (at most 2 MiB); `more` says ask again. A cursor of
   another conversation reads the current one from its start.
 - Resource use (user only, capability `resources`; `resources.rs`, `procinfo/`):
@@ -763,7 +772,9 @@ session per minute. `rakumux new` inside a session needs `--detach`, since sessi
 Conversation bindings (`session_bind`) live in daemon memory: the newest binding of a conversation
 wins, and a session's bindings end when it exits. OpenCode 2.x runs MCP servers in a service shared by
 every conversation, so the Rakumux plugin for its TUI (`integrations/open-code/rakumux-session/`,
-installed with `rakumux-mcp opencode-plugin --install`) binds the conversations it shows. For any
+installed with `rakumux-mcp opencode-plugin --install`) binds the conversations it shows; Pi's
+Rakumux extension (`integrations/pi/rakumux-session/`, `rakumux-mcp pi-plugin --install`) binds
+the one it shows, since nothing outside Pi's process names it. For any
 agent, the conversation a session named is what the daemon follows (latest output, turn, replies,
 whole chat) and resumes for it: the newest it bound for that agent, else the one its hook
 activity reports, else its working-directory report's (`ControlService`'s `bound_conversation`,

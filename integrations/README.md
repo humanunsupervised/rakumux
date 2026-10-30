@@ -5,6 +5,7 @@ integrations/
   open-code/     # V2 CLI plugin, detection, recovery, installer, tests
   claude-code/   # Native command hooks, detection, recovery
   codex/         # Native command hooks, detection, recovery
+  pi/            # Extension and installer, detection, recovery, end-to-end test
   detection.rs   # Shared process/screen engine and retained older profiles
   recovery.rs    # Shared resume dispatch and safe argument/file helpers
   hooks.rs       # Adapter dispatch and metadata-only normalization
@@ -24,6 +25,7 @@ Older detection profiles remain supported; new hooks start with these three agen
 - [OpenCode](open-code/README.md)
 - [Claude Code](claude-code/README.md)
 - [Codex](codex/README.md)
+- [Pi](pi/README.md)
 
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
@@ -148,11 +150,12 @@ answered the query never asked, and reports nothing until it's restarted.
 
 ## Latest output and prompt
 
-`output.rs` gives each live Claude Code, Codex or OpenCode session two lines: what its agent
+`output.rs` gives each live Claude Code, Codex, OpenCode or Pi session two lines: what its agent
 last said or did (`SessionView.agent_output`) and what the user last typed to it
 (`SessionView.user_prompt`). The session list shows neither.
 - **Where it comes from:** the daemon reads it from the agent's own conversation on this
-  machine, at most once a second while the terminal shows output:
+  machine, at most once a second while the terminal shows output, and once more after it goes
+  quiet (so does the resume command and places, at their own pace):
   - Claude Code: `<config dir>/projects/*/<conversation>.jsonl` (the newest copy), for the
     conversation in `sessions/<pid>.json`. When the process parked its conversation in a
     background job (`parkedJobId`), it's the job's (`jobs/<job>/state.json`). It's checked on
@@ -162,6 +165,10 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
     1.x's newest assistant pieces in `part`, for the conversation the Rakumux plugin bound to
     the session (else the folder's newest, as resume does). Without the plugin, two OpenCodes
     in one folder show the same conversation's line.
+  - Pi: `<agent dir>/sessions/--<folder>--/<time>_<id>.jsonl`, for the conversation the
+    Rakumux extension bound to the session (else the folder's newest file, as Pi's
+    `--continue` picks). Without the extension, two Pis in one folder show the same
+    conversation's line, and a new Pi its folder's previous one until its first prompt.
 - **What's taken:** the last entry the main conversation's assistant wrote (its reasoning, a
   tool call as `Tool: description` or a short path, or its reply), and the user's last typed
   message (a slash command as `/name args`; the agents' own insertions such as reminders,
@@ -195,7 +202,9 @@ status service turns it on for an account whose feed is on), when the session tu
 `Done` after it was seen working, from a read of the log made after that; a key already
 captured is never captured again. See the protocol section of `AGENTS.md` (`reply_capture`,
 `reply_list`, `replies` subscriptions). The hook adapters still forward metadata only.
-For OpenCode, the reply is the last text block the agent wrote since the newest prompt. Each
+For OpenCode, the reply is the last text block the agent wrote since the newest prompt. For Pi,
+its turn's final response: an assistant entry that stopped (`stop`, or cut at `length`) with no
+tool to call, keyed by the entry's `id`; one that failed or was aborted is none. Each
 reply also says where its turn ends in the conversation (`position`, as below).
 
 ## Whole conversations
@@ -216,6 +225,10 @@ reasoning, its tool calls with their input, and the tools' output (the `tool` ro
   each block of a reply (`seq × 1024 + block`; a tool block holds its call and, once it ran, its
   result), or each 1.x piece (`time_created × 1024 + its place`). Bookkeeping pieces (steps,
   snapshots, patches) and text OpenCode added are left out.
+- **Pi:** one message per entry of its conversation file, at its byte offset, with the entry's
+  `id`. A skill is shown as typed (`/skill:name args`); a `!` command the user ran is theirs, a
+  `bash` call and its output. Pi's system prompt, extensions' context and summaries are left
+  out; branches left with `/tree` stay, in the order they were written.
 
 A log line longer than 8 MiB is passed over. Text is cut at 64 KiB per part and otherwise left
 as written: the status service cleans it before it leaves the machine.
@@ -224,10 +237,11 @@ as written: the status service cleans it before it leaves the machine.
 
 A reply the user writes back to a feed entry goes into the agent the same way for every
 integration: the status service types it into the session with `session_submit` (a bracketed
-paste, then Enter), as if the user typed it. None of the three has a supported way in from
+paste, then Enter), as if the user typed it. None of them has a supported way in from
 outside: Claude Code and Codex take prompts only from their terminal (their headless modes
 would run a second process on the same conversation), and OpenCode's server port belongs to
-its own TUI. So nothing here is agent-specific beyond what's already read: the conversation id
+its own TUI; Pi's RPC mode is a process of its own. So nothing here is agent-specific beyond
+what's already read: the conversation id
 (`agent_turn.conversation_id`) the reply must still match, and the lifecycle that says the
 agent waits for input, or works for one that takes what's typed during a turn and logs it as a
 prompt once it does (`QUEUES_INPUT` in `tui/crates/sensagent/src/feed/replies.rs`, by the
@@ -269,6 +283,11 @@ cargo test -p rakumux-ptyd resume:: --locked
 cargo test -p tui hook --locked
 cargo test -p rakumux-mcp --test opencode_plugin --locked
 node --test '../integrations/open-code/activity.test.mjs'
+cargo test -p rakumux-ptyd --lib pi:: --locked
+cargo test -p rakumux-mcp --test pi_extension --locked
+node --test '../integrations/pi/activity.test.mjs'
+# Real Pi (1.1 or later) against a fake local model, offline; needs `cargo build --workspace`.
+cargo test -p rakumux-ptyd --test pi_e2e --locked -- --ignored
 ```
 
 Fixtures/fake clients do not replace real-agent or native macOS verification. Verify those
