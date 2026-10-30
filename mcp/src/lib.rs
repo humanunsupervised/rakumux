@@ -11,6 +11,8 @@
 //! - `instructions`: the server instructions sent at `initialize`.
 //! - `opencode`: the plugin for OpenCode's TUI that links conversations to
 //!   sessions, and its installer.
+//! - `pi`: the extension for Pi that reports its activity and conversation to
+//!   the session, and its installer.
 
 pub mod client;
 pub mod instructions;
@@ -19,6 +21,8 @@ pub mod integrations;
 pub mod launch;
 #[path = "../../integrations/open-code/install.rs"]
 pub mod opencode;
+#[path = "../../integrations/pi/install.rs"]
+pub mod pi;
 pub mod render;
 pub mod server;
 pub mod tools;

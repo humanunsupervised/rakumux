@@ -8,6 +8,8 @@ use session_core::api::{AgentWorkingDirectory, Report};
 mod claude;
 #[path = "codex/hooks.rs"]
 mod codex;
+#[path = "pi/hooks.rs"]
+mod pi;
 
 pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, String> {
     match agent {
@@ -21,6 +23,7 @@ pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, S
             }
             Ok(Some(update))
         }
+        "pi" => pi::normalize(input),
         _ => Err("unknown hook adapter".into()),
     }
 }
@@ -36,12 +39,13 @@ pub fn report(agent: &str, input: &Value) -> Result<Option<Report>, String> {
     let child = input.get("agent_id").and_then(Value::as_str).is_some();
     let working_directory = if child || input["hook_event_name"] == "SessionEnd" {
         None
-    } else if agent == "opencode" {
+    } else if matches!(agent, "opencode" | "pi") {
+        // Their plugin or extension names the folder itself.
         input
             .get("working_directory")
             .map(|value| {
                 let context: AgentWorkingDirectory = serde_json::from_value(value.clone())
-                    .map_err(|_| "invalid OpenCode working directory")?;
+                    .map_err(|_| "invalid working directory")?;
                 if context.agent != agent {
                     return Err("working-directory agent does not match hook adapter");
                 }

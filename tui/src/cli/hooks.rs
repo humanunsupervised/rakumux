@@ -16,6 +16,7 @@ pub(super) fn configuration(agent: HookAgent, out: &mut dyn Write) -> Result<i32
             HookAgent::Opencode => {
                 "OpenCode uses `rakumux-mcp opencode-plugin --install` instead".into()
             }
+            HookAgent::Pi => "Pi uses `rakumux-mcp pi-plugin --install` instead".into(),
             other => format!("{} has no hook configuration", other.name()),
         })
     })?;

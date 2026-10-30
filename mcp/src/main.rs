@@ -1,9 +1,10 @@
 //! `rakumux-mcp`: Rakumux's MCP server for coding agents (stdio). See
-//! `mcp/README.md` for installing it in Claude Code, Codex and OpenCode.
+//! `mcp/README.md` for installing it in Claude Code, Codex, OpenCode and Pi.
 
 use rakumux_mcp::client::{ApiClient, EnvIdentity};
 use rakumux_mcp::launch::Launcher;
 use rakumux_mcp::opencode;
+use rakumux_mcp::pi;
 use rakumux_mcp::server::RakumuxServer;
 use rakumux_mcp::VERSION;
 use session_core::paths::Layout;
@@ -14,6 +15,7 @@ rakumux-mcp: Rakumux's MCP server (stdio) for coding agents.
 
 Usage: rakumux-mcp [--version | --help]
        rakumux-mcp opencode-plugin [--install [--dir DIR]]
+       rakumux-mcp pi-plugin [--install [--dir DIR]]
 
 Speaks MCP on stdin/stdout. Register it with your agent, e.g.
   claude mcp add --scope user rakumux -- rakumux-mcp
@@ -23,6 +25,11 @@ the Rakumux session the conversation runs in: `opencode-plugin` prints it,
 `--install` writes it to DIR/plugins/rakumux-session/tui.js (DIR: OpenCode's
 config directory, default $XDG_CONFIG_HOME/opencode or ~/.config/opencode),
 where OpenCode loads it on start. No OpenCode config file is changed.
+
+Pi's Rakumux extension reports what Pi does and which conversation it shows
+to the Rakumux session it runs in: `pi-plugin` prints it, `--install` writes
+it to DIR/extensions/rakumux-session.ts (DIR: Pi's agent directory, default
+$PI_CODING_AGENT_DIR or ~/.pi/agent), where Pi loads it on start.
 
 It drives rakumux-api (found through <RAKUMUX_HOME or ~/.rakumux>/api.json,
 started with `rakumux-api --detach` when needed; RAKUMUX_API_BIN overrides the
@@ -35,6 +42,7 @@ fn main() -> ExitCode {
         Some("opencode-plugin") => {
             return opencode::command(std::env::args().skip(2).collect(), USAGE)
         }
+        Some("pi-plugin") => return pi::command(std::env::args().skip(2).collect(), USAGE),
         Some("--version" | "-V") => {
             println!("rakumux-mcp {VERSION}");
             return ExitCode::SUCCESS;
