@@ -60,7 +60,11 @@ mod tests {
     fn every_amp_install_is_amp() {
         // The installer's binary, run through its `~/.local/bin` link.
         assert_eq!(
-            agent_of("amp", &["/home/me/.local/bin/amp"], Some("/home/me/.amp/bin/amp")),
+            agent_of(
+                "amp",
+                &["/home/me/.local/bin/amp"],
+                Some("/home/me/.amp/bin/amp")
+            ),
             Some("amp")
         );
         // npm's bin, hard-linked from the platform package.
@@ -73,7 +77,11 @@ mod tests {
             Some("amp")
         );
         assert_eq!(
-            agent_of("amp.exe", &["/opt/node_modules/@ampcode/cli/bin/amp.exe"], None),
+            agent_of(
+                "amp.exe",
+                &["/opt/node_modules/@ampcode/cli/bin/amp.exe"],
+                None
+            ),
             Some("amp")
         );
         // npm without the platform package: the wrapper script under Node.
@@ -84,10 +92,16 @@ mod tests {
             assert_eq!(agent_of("node", &["node", wrapper], None), Some("amp"));
         }
         // `npx @ampcode/cli`.
-        assert_eq!(agent_of("npx", &["npx", "-y", "@ampcode/cli@latest"], None), Some("amp"));
+        assert_eq!(
+            agent_of("npx", &["npx", "-y", "@ampcode/cli@latest"], None),
+            Some("amp")
+        );
         // Other programs with amp in their path aren't.
         assert_eq!(agent_of("ampy", &["ampy", "ls"], None), None);
-        assert_eq!(agent_of("node", &["node", "/srv/amp-site/server.js"], None), None);
+        assert_eq!(
+            agent_of("node", &["node", "/srv/amp-site/server.js"], None),
+            None
+        );
     }
 
     fn classify_screen(screen: &str, title: &str, ms_since_output: Option<u64>) -> Lifecycle {
@@ -117,8 +131,14 @@ mod tests {
             Lifecycle::Idle
         );
         // Its TUI animates: output a moment ago means nothing.
-        assert_eq!(classify_screen("› ", "demo - amp", Some(10)), Lifecycle::Idle);
-        assert_eq!(classify_screen("", "⠙ demo - amp", None), Lifecycle::Working);
+        assert_eq!(
+            classify_screen("› ", "demo - amp", Some(10)),
+            Lifecycle::Idle
+        );
+        assert_eq!(
+            classify_screen("", "⠙ demo - amp", None),
+            Lifecycle::Working
+        );
         assert!(!approvals_on_screen("amp"), "the plugin reports approvals");
     }
 }

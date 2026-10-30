@@ -78,8 +78,8 @@ fn assistant(blocks: &[Value]) -> Vec<TranscriptPart> {
 mod tests {
     use super::super::{LogAgent, TranscriptSource};
     use super::*;
-    use session_core::api::MAX_PART_BYTES;
     use serde_json::json;
+    use session_core::api::MAX_PART_BYTES;
 
     const FIXTURE: &str = include_str!("fixtures/thread.jsonl");
 
@@ -99,7 +99,10 @@ mod tests {
         let source = source(directory.path());
         let page = source.read(None, None).unwrap();
         assert_eq!(page.agent, "amp");
-        assert_eq!(page.conversation_id, "T-5f0c1d2e-3a4b-4c5d-8e9f-0a1b2c3d4e5f");
+        assert_eq!(
+            page.conversation_id,
+            "T-5f0c1d2e-3a4b-4c5d-8e9f-0a1b2c3d4e5f"
+        );
         assert!(!page.more);
         let roles: Vec<_> = page
             .messages

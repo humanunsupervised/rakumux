@@ -150,7 +150,9 @@ fn the_plugin_binds_reports_and_copies_the_thread_amp_shows() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
-    let threads = dir.path().join("cache/amp/plugin-cache/rakumux-session/threads");
+    let threads = dir
+        .path()
+        .join("cache/amp/plugin-cache/rakumux-session/threads");
     // A copy unused for 40 days goes; a recent one stays.
     std::fs::create_dir_all(&threads).unwrap();
     let old = threads.join("T-old.jsonl");
@@ -220,7 +222,13 @@ fn the_plugin_binds_reports_and_copies_the_thread_amp_shows() {
         .collect();
     let ids: Vec<String> = lines
         .iter()
-        .map(|line| format!("{}:{}", line["kind"].as_str().unwrap(), line["id"].as_str().unwrap()))
+        .map(|line| {
+            format!(
+                "{}:{}",
+                line["kind"].as_str().unwrap(),
+                line["id"].as_str().unwrap()
+            )
+        })
         .collect();
     assert_eq!(
         ids,
@@ -237,7 +245,10 @@ fn the_plugin_binds_reports_and_copies_the_thread_amp_shows() {
     assert!(lines[0].get("timestamp").is_none() && lines[1].get("timestamp").is_none());
     assert!(lines[2..].iter().all(|line| line["timestamp"].is_string()));
     assert!(lines[..6].iter().all(|line| line["cwd"] == "/repo"));
-    assert_eq!(lines[3]["content"][1]["files"], serde_json::json!(["/repo/src/a.rs"]));
+    assert_eq!(
+        lines[3]["content"][1]["files"],
+        serde_json::json!(["/repo/src/a.rs"])
+    );
     assert_eq!(lines[6]["status"], "done");
     assert!(!old.exists(), "a copy unused for 30 days is removed");
     assert!(recent.exists());
@@ -252,7 +263,11 @@ fn outside_a_rakumux_session_or_a_local_executor_the_plugin_does_nothing() {
     for env in [&[][..], &[("RAKUMUX_SESSION_ID", "01JSELF")][..]] {
         let dir = tempfile::tempdir().unwrap();
         let run = run(dir.path(), env);
-        assert!(run.stdout.contains(r#"{"registered":[]}"#), "{}", run.stdout);
+        assert!(
+            run.stdout.contains(r#"{"registered":[]}"#),
+            "{}",
+            run.stdout
+        );
         assert!(run.calls.is_empty());
         assert!(!dir.path().join("cache").exists());
     }
@@ -260,6 +275,10 @@ fn outside_a_rakumux_session_or_a_local_executor_the_plugin_does_nothing() {
     let mut env = SESSION.to_vec();
     env.push(("EXECUTOR", "remote"));
     let run = run(dir.path(), &env);
-    assert!(run.stdout.contains(r#"{"registered":[]}"#), "{}", run.stdout);
+    assert!(
+        run.stdout.contains(r#"{"registered":[]}"#),
+        "{}",
+        run.stdout
+    );
     assert!(run.calls.is_empty());
 }

@@ -130,7 +130,9 @@ fn subject(name: &str, input: &Value) -> Option<String> {
         }
         "apply_patch" => field("patchText").and_then(patched_file).map(short_path),
         "Grep" => field("pattern").map(String::from),
-        "glob" => field("filePattern").or_else(|| field("pattern")).map(String::from),
+        "glob" => field("filePattern")
+            .or_else(|| field("pattern"))
+            .map(String::from),
         "Task" => field("description").map(String::from),
         "web_search" | "finder" | "librarian" => field("query").map(String::from),
         "read_web_page" => field("url").map(String::from),
@@ -368,9 +370,7 @@ mod tests {
 
     #[test]
     fn replies_reset_at_prompts_and_tool_calls() {
-        let message = |role: &str, content: Value| {
-            serde_json::json!({"v": 1, "kind": "message", "id": 9, "role": role, "content": content})
-        };
+        let message = |role: &str, content: Value| serde_json::json!({"v": 1, "kind": "message", "id": 9, "role": role, "content": content});
         assert_eq!(
             reply_step(&message(
                 "assistant",
@@ -390,11 +390,17 @@ mod tests {
             Step::Reset
         );
         assert_eq!(
-            reply_step(&message("user", serde_json::json!([{"type": "text", "text": "go"}]))),
+            reply_step(&message(
+                "user",
+                serde_json::json!([{"type": "text", "text": "go"}])
+            )),
             Step::Reset
         );
         assert_eq!(
-            reply_step(&message("info", serde_json::json!([{"type": "text", "text": "Compacted"}]))),
+            reply_step(&message(
+                "info",
+                serde_json::json!([{"type": "text", "text": "Compacted"}])
+            )),
             Step::Keep
         );
         assert_eq!(

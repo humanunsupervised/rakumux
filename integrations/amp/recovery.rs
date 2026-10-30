@@ -37,7 +37,10 @@ pub(super) const AMP_OPTIONS: &[&str] = &[
 /// What to run for an `amp` process: `None` when it isn't a conversation
 /// (`--no-tui`, a runner), else its resume command (`Some(None)` when no
 /// thread can be named, which can't happen: `--last` always can).
-pub(super) fn amp_resume(process: &ProcessInfo, bound: Option<&str>) -> Option<Option<Vec<String>>> {
+pub(super) fn amp_resume(
+    process: &ProcessInfo,
+    bound: Option<&str>,
+) -> Option<Option<Vec<String>>> {
     let args = program_args(&process.cmdline, "amp");
     if args.iter().any(|arg| arg == "--no-tui") {
         return None;
@@ -95,7 +98,10 @@ pub(crate) fn amp_data_dirs() -> Vec<PathBuf> {
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .or_else(|| home_dir().map(|home| home.join(".amp")));
-    [install, amp_cache_dir(), config].into_iter().flatten().collect()
+    [install, amp_cache_dir(), config]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 #[cfg(test)]
@@ -160,7 +166,10 @@ mod tests {
         let older = "T-11111111-2222-3333-4444-555555555555";
         // The binding wins over the thread the process was started on.
         assert_eq!(
-            plan_for(&["amp", "threads", "continue", older, "--fast"], Some(BOUND)),
+            plan_for(
+                &["amp", "threads", "continue", older, "--fast"],
+                Some(BOUND)
+            ),
             resume(&["amp", "threads", "continue", BOUND, "--fast"])
         );
         // Without one, that thread, by id or URL, through the `t c` alias.
@@ -209,7 +218,13 @@ mod tests {
                 ],
                 Some(BOUND)
             ),
-            resume(&["amp", "threads", "continue", BOUND, "--dangerously-allow-all"])
+            resume(&[
+                "amp",
+                "threads",
+                "continue",
+                BOUND,
+                "--dangerously-allow-all"
+            ])
         );
         // Node running the npm wrapper.
         let process = ProcessInfo {

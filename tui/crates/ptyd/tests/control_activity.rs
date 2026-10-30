@@ -637,3 +637,98 @@ fn a_program_status_report_drives_the_sessions_lifecycle_and_subagent_count() {
     assert_eq!(activity.phase, ActivityPhase::Done);
     assert_eq!(activity.active_subagents, 0);
 }
+
+#[test]
+fn amps_plugin_drives_its_lifecycle_and_names_the_thread_it_resumes() {
+    use session_core::model::ResumeSource;
+    let thread = "T-5f0c1d2e-3a4b-4c5d-8e9f-0a1b2c3d4e5f";
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    let caller = harness.session_caller(&session.id);
+    harness.handle(
+        &caller,
+        Request::SessionBind {
+            agent: "amp".into(),
+            conversations: vec![thread.into()],
+        },
+    );
+    harness.host.set_foreground(
+        &session.id,
+        ptyd::host::ProcessInfo {
+            pid: 4242,
+            name: "amp".into(),
+            cmdline: vec![
+                "/home/me/.local/bin/amp".into(),
+                "--dangerously-allow-all".into(),
+            ],
+            exe: None,
+        },
+    );
+    let snapshot = |phase, subagents: &[&str], completion: Option<&str>| {
+        let mut report = update(
+            "amp",
+            ActivityEvent::Snapshot {
+                phase,
+                subagents: subagents.iter().map(|id| id.to_string()).collect(),
+            },
+        );
+        let activity = report.activity.as_mut().unwrap();
+        activity.conversation_id = thread.into();
+        activity.completion_id = completion.map(String::from);
+        assert_eq!(
+            harness.handle(&caller, Request::SessionReport(report)),
+            Response::Ok
+        );
+        harness.get(&session.id)
+    };
+    snapshot(ActivityPhase::RunningTool, &["toolu_task"], None);
+    // Amp's TUI animates, and its screen alone looks idle: the plugin's
+    // state stays.
+    harness
+        .host
+        .show(&session.id, "  fix the parser\n\n  ╭────╮\n  ╰────╯");
+    let view = eventually("output is detected as Amp", || {
+        let view = harness.get(&session.id);
+        (view.resume.as_ref()?.source == ResumeSource::KnownAgent).then_some(view)
+    });
+    assert_eq!(
+        view.resume.unwrap().argv,
+        [
+            "amp",
+            "threads",
+            "continue",
+            thread,
+            "--dangerously-allow-all"
+        ]
+    );
+    assert_eq!(view.agent.unwrap().kind, "amp");
+    let activity = view.activity.expect("the plugin's activity is kept");
+    assert_eq!(activity.phase, ActivityPhase::RunningTool);
+    assert_eq!(activity.active_subagents, 1);
+    assert_eq!(view.lifecycle, Lifecycle::Working);
+    // `awaiting-approval` waits for the user.
+    assert_eq!(
+        snapshot(ActivityPhase::NeedsInput, &[], None).lifecycle,
+        Lifecycle::Blocked
+    );
+    // A turn Amp ended as done is an unread reply until it's seen, and the
+    // plugin's heartbeats don't make it unread again.
+    assert_eq!(
+        snapshot(ActivityPhase::Done, &[], Some("msg-6")).lifecycle,
+        Lifecycle::Done
+    );
+    harness.handle(
+        &harness.user,
+        Request::SessionTouch {
+            id: session.id.clone(),
+        },
+    );
+    assert_eq!(
+        snapshot(ActivityPhase::Done, &[], Some("msg-6")).lifecycle,
+        Lifecycle::Idle
+    );
+    assert_eq!(
+        snapshot(ActivityPhase::Done, &[], Some("msg-9")).lifecycle,
+        Lifecycle::Done
+    );
+}
