@@ -20,8 +20,8 @@ mod provider;
 mod service;
 
 pub use account::{
-    AccessTokenLease, AccountError, AccountService, AccountSession, LoginTicket, SystemClock,
-    WallClock,
+    AccessTokenLease, AccountError, AccountService, AccountSession, LoginTicket, PendingRevocation,
+    SignOutRevocation, SystemClock, WallClock,
 };
 pub use client::ClerkDeviceClient;
 pub use config::{DeviceAuthConfig, AI_STATUS_SCOPE};
@@ -37,7 +37,7 @@ pub use model::{
     AuthorizationGrant, DeviceAuthorization, PollOutcome, SecretValue, VerificationPrompt,
 };
 pub(crate) use model::{ProviderIdentity, TokenReceipt};
-pub use provider::TokenProvider;
+pub use provider::{GrantRevoker, TokenProvider};
 pub use service::{
     ApplyResult, AttemptId, AuthService, AuthStatus, PollCompletion, PollId, PollRequest,
 };

@@ -25,8 +25,9 @@ Hosted production OAuth/inference remain unsupported/disabled in the private rep
   to this fixed client and exact policy job. It retains no bearer while queued;
   `run` rereads one current credential snapshot before borrowing its access token.
   A lease that waits 30 seconds must be reissued; credential expiry wins sooner.
-- Exact credential revisions still fence consent. Stable authorization epochs,
-  automatic refresh and remote grant revocation are not implemented.
+- Exact credential revisions still fence consent. Stable authorization epochs are not
+  implemented; renewal is the refresher's (`refresh/renewal.rs`), and revoking a signed-out
+  grant at Clerk the account service's (`AccountService::revoke_signed_out`).
 
 The injected account/store/capture implementations are trusted local code. A future
 IPC adapter must authenticate user-only control calls and keep token-use callbacks,

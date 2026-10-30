@@ -869,6 +869,8 @@ pub struct FakeAccount {
     pub messages_written: Mutex<Vec<(String, String, String)>>,
     /// The ids both were given, in order.
     pub reply_ids: Mutex<Vec<String>>,
+    /// What `sign_out` says of the revocation at Clerk (`None`: revoked).
+    pub revocation: Mutex<Option<crate::account::RevocationView>>,
     pub calls: Mutex<Vec<&'static str>>,
 }
 
@@ -967,10 +969,14 @@ impl crate::account::AccountAccess for FakeAccount {
         Ok(())
     }
 
-    fn sign_out(&self) -> std::result::Result<(), String> {
+    fn sign_out(&self) -> std::result::Result<crate::account::RevocationView, String> {
         self.call("sign_out");
         *self.account.lock().unwrap() = None;
-        Ok(())
+        Ok(self
+            .revocation
+            .lock()
+            .unwrap()
+            .unwrap_or(crate::account::RevocationView::Revoked))
     }
 
     fn statuses(

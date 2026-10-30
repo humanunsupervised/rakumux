@@ -171,6 +171,7 @@ pub fn serve(
     // An enrolled machine (the user's Sprite) signs in with its credential, never
     // Clerk: a new access token at once, else the saved one while it lasts.
     let tokens = enrolled_tokens(&layout, &config, machine.id())?;
+    let enrolled = tokens.is_some();
     let session = match &tokens {
         Some(tokens) => crate::enrolment::sign_in(&account, tokens)
             .ok()
@@ -205,8 +206,20 @@ pub fn serve(
     }
     let runner = RefreshRunner::spawn_with_website(refresher, api, website)
         .map_err(|_| ServiceError::Setup)?;
-    let server = OwnerServer::start(&mut claim, runner.client(), version)
-        .map_err(|_| ServiceError::Setup)?;
+    // A sign-out here also revokes the sign-in at Clerk; an enrolled machine's
+    // credential is revoked from the machine that enrolled it, never here.
+    let server = if enrolled {
+        OwnerServer::start(&mut claim, runner.client(), version)
+    } else {
+        let revoking = account.clone();
+        OwnerServer::start_revoking(
+            &mut claim,
+            runner.client(),
+            version,
+            Arc::new(move || revoking.revoke_signed_out_at_provider()),
+        )
+    }
+    .map_err(|_| ServiceError::Setup)?;
     while !stopping() && !server.shutdown_requested() {
         thread::sleep(Duration::from_secs(1));
     }

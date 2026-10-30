@@ -4,9 +4,11 @@ use thiserror::Error;
 
 use super::credentials::unix_seconds;
 use super::model::ProviderIdentity;
+use super::provider::GrantRevoker;
 use super::{
-    AccountIdentity, ApplyResult, AuthError, CredentialRevision, CredentialStore,
-    CredentialStoreError, DeviceAuthConfig, SavedCredentials, TokenProvider, VerifiedAuthorization,
+    AccountIdentity, ApplyResult, AuthError, AuthorizationGrant, ClerkDeviceClient,
+    CredentialRevision, CredentialStore, CredentialStoreError, DeviceAuthConfig, SavedCredentials,
+    TokenProvider, VerifiedAuthorization,
 };
 
 mod access;
@@ -65,6 +67,55 @@ pub enum AccountError {
     TokenLeaseExpired,
 }
 
+/// What a sign-out did at the provider, beyond removing this machine's credentials.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SignOutRevocation {
+    /// Nothing to revoke: no sign-in was removed, or it was an enrolled
+    /// machine's, whose credential is revoked from the machine that enrolled it.
+    NotNeeded,
+    /// The provider revoked the sign-in's refresh token: no new access tokens.
+    Revoked,
+    /// The provider couldn't be asked, or refused; the sign-in may still work
+    /// elsewhere until it ends on its own.
+    Failed(AuthError),
+}
+
+/// A removed sign-in still to be revoked at its provider. It owns what that
+/// takes, so it runs on any thread; it holds secrets, so it's never shown.
+pub struct PendingRevocation {
+    config: DeviceAuthConfig,
+    grant: AuthorizationGrant,
+}
+
+impl PendingRevocation {
+    /// Revoke it at the configured Clerk issuer, discovered now with a
+    /// sign-out's short timeouts.
+    pub fn run(self) -> SignOutRevocation {
+        match ClerkDeviceClient::discover_for_sign_out(self.config.clone()) {
+            Ok(client) => self.run_with(&client),
+            Err(error) => SignOutRevocation::Failed(error),
+        }
+    }
+
+    /// Revoke it with `revoker`.
+    pub fn run_with(self, revoker: &dyn GrantRevoker) -> SignOutRevocation {
+        match revoker.revoke(&self.grant) {
+            Ok(()) => SignOutRevocation::Revoked,
+            Err(error) => SignOutRevocation::Failed(error),
+        }
+    }
+}
+
+impl std::fmt::Debug for PendingRevocation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PendingRevocation { grant: [REDACTED] }")
+    }
+}
+
+/// What an enrolled machine's tokens start with: rakumux.com's, never Clerk's.
+const MACHINE_SECRET_PREFIX: &str = "rkm_";
+const MACHINE_ACCESS_PREFIX: &str = "rkma.";
+
 /// A generation-tagged local completion intent, not a bearer credential.
 #[derive(Clone, Debug)]
 pub struct LoginTicket {
@@ -108,6 +159,9 @@ pub struct AccountService<S, C = SystemClock> {
     store: S,
     clock: C,
     observation: Mutex<Option<ClockObservation>>,
+    /// The grant the last sign-out removed, until it's revoked at the provider
+    /// (`revoke_signed_out`).
+    signed_out: Mutex<Option<AuthorizationGrant>>,
 }
 
 struct ClockObservation {
@@ -136,6 +190,7 @@ impl<S: CredentialStore, C: WallClock> AccountService<S, C> {
             store,
             clock,
             observation: Mutex::new(None),
+            signed_out: Mutex::new(None),
         }
     }
 
@@ -186,11 +241,52 @@ impl<S: CredentialStore, C: WallClock> AccountService<S, C> {
 
     /// Clear private local credentials and retain a tombstone generation.
     ///
-    /// This does not revoke a remote OAuth grant or log out a browser; those are
-    /// separate provider operations. On storage error, stop AI use until resolved.
+    /// The removed grant is kept in memory for [`revoke_signed_out`](Self::revoke_signed_out),
+    /// which ends it at the provider; this never waits on the network. It does
+    /// not log out a browser. On storage error, stop AI use until resolved.
     pub fn sign_out(&self) -> Result<CredentialRevision, AccountError> {
         let snapshot = self.store.load()?;
-        Ok(self.store.compare_and_swap(snapshot.revision, None)?)
+        let revision = self.store.compare_and_swap(snapshot.revision, None)?;
+        if let Some(credentials) = snapshot.credentials {
+            if let Ok(mut signed_out) = self.signed_out.lock() {
+                *signed_out = Some(credentials.grant);
+            }
+        }
+        Ok(revision)
+    }
+
+    /// Revoke, with `revoker`, the sign-in the last [`sign_out`](Self::sign_out)
+    /// removed, once: a second call finds nothing. An enrolled machine's tokens
+    /// (rakumux.com's) are never sent to it.
+    pub fn revoke_signed_out(&self, revoker: &dyn GrantRevoker) -> SignOutRevocation {
+        self.take_signed_out()
+            .map_or(SignOutRevocation::NotNeeded, |pending| {
+                pending.run_with(revoker)
+            })
+    }
+
+    /// [`revoke_signed_out`](Self::revoke_signed_out) at the configured Clerk
+    /// issuer, discovered now with a sign-out's short timeouts.
+    pub fn revoke_signed_out_at_provider(&self) -> SignOutRevocation {
+        self.take_signed_out()
+            .map_or(SignOutRevocation::NotNeeded, PendingRevocation::run)
+    }
+
+    /// The sign-in the last sign-out removed, to revoke on another thread; none
+    /// for an enrolled machine's, whose credential is revoked on its own.
+    pub fn take_signed_out(&self) -> Option<PendingRevocation> {
+        let grant = self.signed_out.lock().ok()?.take()?;
+        let machine = grant
+            .access_token()
+            .expose_secret()
+            .starts_with(MACHINE_ACCESS_PREFIX)
+            || grant
+                .refresh_token()
+                .is_some_and(|token| token.expose_secret().starts_with(MACHINE_SECRET_PREFIX));
+        (!machine).then(|| PendingRevocation {
+            config: self.config.clone(),
+            grant,
+        })
     }
 
     /// Restore only after live account verification and a successful revision check.

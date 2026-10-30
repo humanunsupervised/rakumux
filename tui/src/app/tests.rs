@@ -4795,6 +4795,23 @@ async fn signing_out_stops_the_titles() {
     );
     assert!(!h.app.title_refreshing(&SessionId::from_string("A")));
     assert!(!h.app.titles_on());
+    assert_eq!(h.app.status(), Some("Signed out."));
+}
+
+#[tokio::test]
+async fn signing_out_says_when_clerk_couldnt_revoke_the_sign_in() {
+    let fake = testing::FakeAccount::signed_in();
+    *fake.revocation.lock().unwrap() = Some(crate::account::RevocationView::Failed);
+    let (mut h, account) = account_harness(fake);
+    h.app.open_account_dialog();
+    h.press(KeyCode::Char('o')).await;
+    assert!(account.calls().contains(&"sign_out"));
+    // Signed out here all the same.
+    assert_eq!(h.app.account, super::types::AccountStatus::SignedOut);
+    assert_eq!(
+        h.app.status(),
+        Some("Signed out here, but Clerk couldn't revoke the sign-in.")
+    );
 }
 
 fn mouse_at(h: &mut Harness, kind: crossterm::event::MouseEventKind, (column, row): (u16, u16)) {

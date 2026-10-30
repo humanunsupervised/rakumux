@@ -12,7 +12,7 @@ use super::schedule::{conversation, Outcome, RefreshFailure, RefreshScheduler, M
 use super::titles::{Retitle, RetitleOutcome, Retitled, TitledChats, Titles};
 use crate::auth::{
     AccountError, AccountService, AccountSession, ApplyResult, CredentialRevision, CredentialStore,
-    SystemClock, WallClock,
+    PendingRevocation, SignOutRevocation, SystemClock, WallClock,
 };
 use crate::cloud::{AccountFeatures, CloudAIError, FeatureChange, RemoteErrorCode};
 use crate::dispatch::{
@@ -179,6 +179,9 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     titled: TitledChats,
     /// An enrolled machine's tokens: they sign it in and renew it, never Clerk.
     machine_tokens: Option<std::sync::Arc<crate::enrolment::MachineTokens>>,
+    /// What becomes of a sign-in rakumux.com ended (`signed_out_by_account`):
+    /// revoked at Clerk on a thread of its own.
+    revoke: std::sync::Arc<dyn Fn(PendingRevocation) + Send + Sync>,
 }
 
 impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> {
@@ -211,6 +214,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             titles: Titles::default(),
             titled: TitledChats::default(),
             machine_tokens: None,
+            revoke: std::sync::Arc::new(spawn_revocation),
         }
     }
 
@@ -320,6 +324,17 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         tokens: std::sync::Arc<crate::enrolment::MachineTokens>,
     ) -> Self {
         self.machine_tokens = Some(tokens);
+        self
+    }
+
+    /// Hand a sign-in rakumux.com ended to `revoke` rather than revoking it at
+    /// Clerk: tests never reach the network.
+    #[cfg(test)]
+    pub(crate) fn revoking_with(
+        mut self,
+        revoke: impl Fn(PendingRevocation) + Send + Sync + 'static,
+    ) -> Self {
+        self.revoke = std::sync::Arc::new(revoke);
         self
     }
 
@@ -604,6 +619,10 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         }
         let saved = completion.change.is_some();
         match completion.outcome {
+            Err(DispatchError::Cloud(CloudAIError::SignedOut)) => {
+                self.signed_out_by_account();
+                return;
+            }
             Ok(features) => {
                 self.confirmed = Some(features);
                 if saved {
@@ -751,6 +770,24 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         result
     }
 
+    /// rakumux.com ended this sign-in: the account signed out all terminals, or
+    /// was deleted (its features read is refused with `X-Rakumux-Signed-Out`).
+    /// Sign out as the user would, then revoke the sign-in at Clerk on a thread
+    /// of its own, so a copy of its refresh token elsewhere stops working too. An
+    /// enrolled machine's credential is its own: nothing is revoked for it.
+    fn signed_out_by_account(&mut self) {
+        eprintln!("rakumux-status: rakumux.com signed this terminal out");
+        if let Err(error) = self.sign_out() {
+            self.note("signing out", &error);
+        }
+        let Some(pending) = self.service.account_service().take_signed_out() else {
+            return;
+        };
+        if self.machine_tokens.is_none() {
+            (self.revoke)(pending);
+        }
+    }
+
     fn forget_features(&mut self) {
         self.features = None;
         self.confirmed = None;
@@ -851,6 +888,22 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     }
 }
 
+/// Revoke a sign-in rakumux.com ended at Clerk, on a thread of its own: the
+/// owner thread never waits on the network.
+fn spawn_revocation(pending: PendingRevocation) {
+    let spawned = std::thread::Builder::new()
+        .name("rakumux-status-revoke".into())
+        .spawn(move || {
+            if let SignOutRevocation::Failed(error) = pending.run() {
+                // Static codes only (see `AuthError`).
+                eprintln!("rakumux-status: revoking the sign-in failed: {error:?}");
+            }
+        });
+    if spawned.is_err() {
+        eprintln!("rakumux-status: revoking the sign-in failed to start");
+    }
+}
+
 impl<S, A, C> fmt::Debug for StatusRefresher<S, A, C> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -911,6 +964,7 @@ pub(crate) fn outcome(error: &DispatchError) -> Outcome {
                     Outcome::Failed(Unavailable)
                 }
             },
+            CloudAIError::SignedOut => Outcome::Failed(Unauthorized),
             CloudAIError::Canceled | CloudAIError::PolicyUnavailable => Outcome::Interrupted,
             CloudAIError::InvalidConfiguration(_)
             | CloudAIError::InvalidResponse

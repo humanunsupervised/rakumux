@@ -71,8 +71,12 @@ pub enum OwnerRequest {
     },
     /// Stop sharing, if consent is still at `revision`.
     Disable { revision: u64 },
-    /// Stop sharing and remove local credentials.
+    /// Stop sharing and remove local credentials, then revoke the sign-in at
+    /// Clerk (best effort). Answered with `Done`; `SignOutAndRevoke` says how
+    /// the revocation went.
     SignOut,
+    /// `SignOut`, answered with `SignedOut`: whether Clerk revoked the sign-in.
+    SignOutAndRevoke,
     /// Start a device sign-in, replacing any unfinished one; answered with its state.
     SignInStart,
     /// Where the current sign-in is up to.
@@ -198,11 +202,42 @@ pub enum OwnerResponse {
         credential: EnrolledCredential,
     },
     Done,
+    /// Signed out here; what became of the sign-in at Clerk.
+    SignedOut {
+        revocation: RevocationView,
+    },
     Error {
         code: OwnerErrorCode,
     },
     #[serde(other)]
     Unknown,
+}
+
+/// What a sign-out did at Clerk, beyond removing this machine's credentials.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RevocationView {
+    /// Clerk revoked the sign-in's refresh token: no copy of it works.
+    Revoked,
+    /// Nothing to revoke (no sign-in, or an enrolled machine's credential,
+    /// revoked from the machine that enrolled it).
+    NotNeeded,
+    /// Clerk couldn't be reached or refused: a copy of the sign-in's tokens
+    /// may still work until they expire, or all terminals are signed out on
+    /// rakumux.com.
+    Failed,
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<&crate::auth::SignOutRevocation> for RevocationView {
+    fn from(revocation: &crate::auth::SignOutRevocation) -> Self {
+        match revocation {
+            crate::auth::SignOutRevocation::Revoked => Self::Revoked,
+            crate::auth::SignOutRevocation::NotNeeded => Self::NotNeeded,
+            crate::auth::SignOutRevocation::Failed(_) => Self::Failed,
+        }
+    }
 }
 
 /// An enrolled machine's credential file, holding its secret: written to

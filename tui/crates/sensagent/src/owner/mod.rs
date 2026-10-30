@@ -17,7 +17,7 @@ pub use claim::{OwnerClaim, OwnerRegistration};
 pub use client::OwnerClient;
 pub use layout::OwnerLayout;
 pub use protocol::{EnrolledCredential, OwnerErrorCode};
-pub use server::OwnerServer;
+pub use server::{OwnerServer, SignOutRevoker};
 
 /// Static owner failures; never paths, tokens or account text.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]

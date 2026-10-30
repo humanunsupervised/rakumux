@@ -885,3 +885,105 @@ fn restoring_an_expired_token_renews_it() {
         .unwrap()
         .contains(&("grant_type".into(), "refresh_token".into())));
 }
+
+fn revoking_metadata() -> Value {
+    let mut value = metadata();
+    value["revocation_endpoint"] = json!("https://clerk.example.com/oauth/token/revoke");
+    value
+}
+
+fn revocation_form(request: &RecordedRequest) -> Vec<(String, String)> {
+    assert_eq!(
+        request.endpoint.as_str(),
+        "https://clerk.example.com/oauth/token/revoke"
+    );
+    assert!(request.bearer.is_none());
+    request.form.clone().unwrap()
+}
+
+#[test]
+fn revoking_a_sign_in_revokes_its_refresh_token_then_its_access_token() {
+    let (client, recorded) = client(vec![
+        reply(200, revoking_metadata()),
+        reply(200, json!({})),
+        // Clerk's JWT access tokens can't be revoked: the grant is over all the same.
+        reply(400, json!({"error": "unsupported_token_type"})),
+    ]);
+    client.revoke(&grant()).unwrap();
+    let requests = recorded.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        revocation_form(&requests[1]),
+        vec![
+            ("client_id".to_owned(), "public-client".to_owned()),
+            ("token".to_owned(), "PRIVATE-REFRESH-TOKEN".to_owned()),
+            ("token_type_hint".to_owned(), "refresh_token".to_owned()),
+        ]
+    );
+    assert_eq!(
+        revocation_form(&requests[2]),
+        vec![
+            ("client_id".to_owned(), "public-client".to_owned()),
+            ("token".to_owned(), "PRIVATE-ACCESS-TOKEN".to_owned()),
+            ("token_type_hint".to_owned(), "access_token".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn a_refused_or_unreachable_revocation_fails_and_without_an_endpoint_none_is_tried() {
+    let (revoker, recorded) = client(vec![
+        reply(200, revoking_metadata()),
+        reply(400, json!({"error": "invalid_client"})),
+        reply(503, json!({})),
+        Err(AuthError::Network(NetworkFailure::Timeout)),
+    ]);
+    assert_eq!(
+        revoker.revoke(&grant()).unwrap_err(),
+        AuthError::InvalidClient
+    );
+    assert_eq!(
+        revoker.revoke(&grant()).unwrap_err(),
+        AuthError::HttpStatus(503)
+    );
+    assert_eq!(
+        revoker.revoke(&grant()).unwrap_err(),
+        AuthError::Network(NetworkFailure::Timeout)
+    );
+    // A failed refresh-token revocation never goes on to the access token.
+    assert_eq!(recorded.lock().unwrap().len(), 4);
+
+    // Without a refresh token the access token's revocation decides.
+    let (revoker, recorded) = client(vec![
+        reply(200, revoking_metadata()),
+        reply(400, json!({"error": "unsupported_token_type"})),
+    ]);
+    let mut without = grant();
+    without.refresh_token = None;
+    assert_eq!(
+        revoker.revoke(&without).unwrap_err(),
+        AuthError::ProviderRejected
+    );
+    assert_eq!(
+        revocation_form(&recorded.lock().unwrap()[1])[2],
+        ("token_type_hint".to_owned(), "access_token".to_owned())
+    );
+
+    let (revoker, recorded) = client(vec![reply(200, metadata())]);
+    assert_eq!(
+        revoker.revoke(&grant()).unwrap_err(),
+        AuthError::UnsupportedRevocation
+    );
+    assert_eq!(recorded.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_revocation_endpoint_off_the_issuer_is_refused_at_discovery() {
+    let mut value = metadata();
+    value["revocation_endpoint"] = json!("https://elsewhere.example.com/oauth/token/revoke");
+    let (transport, _) = transport(vec![reply(200, value)]);
+    assert_eq!(
+        ClerkDeviceClient::with_transport(config(), transport).err(),
+        Some(AuthError::UntrustedEndpoint)
+    );
+}

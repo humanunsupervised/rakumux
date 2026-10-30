@@ -190,10 +190,25 @@ struct FakeTransport {
     feed: AtomicBool,
     /// The session title sent with status text; none (an older service) by default.
     title: Arc<Mutex<Option<String>>>,
+    /// Feature reads refused as `unauthenticated`: `Some(None)` plainly,
+    /// `Some(Some(reason))` with `X-Rakumux-Signed-Out` (rakumux.com ended the sign-in).
+    refuse_features: Arc<Mutex<Option<Option<&'static str>>>>,
 }
 
 impl HttpTransport for FakeTransport {
     fn send(&self, mut request: Request) -> Result<HttpReply, CloudAIError> {
+        if request.method() == Method::GET {
+            if let Some(reason) = *self.refuse_features.lock().unwrap() {
+                let mut refused =
+                    super::error_reply(401, crate::cloud::RemoteErrorCode::Unauthenticated, None);
+                if let Some(reason) = reason {
+                    refused
+                        .headers
+                        .insert("x-rakumux-signed-out", HeaderValue::from_static(reason));
+                }
+                return Ok(refused);
+            }
+        }
         if request.method() == Method::PATCH {
             if !self.saves.load(Ordering::SeqCst) {
                 return Ok(super::error_reply(
@@ -313,6 +328,7 @@ fn cloud(origin: &str, requests: Requests, mode: ReplyMode) -> CloudAIClient {
         Arc::new(AtomicBool::new(true)),
         Arc::new(AtomicBool::new(true)),
         Arc::default(),
+        Arc::default(),
     )
 }
 
@@ -323,6 +339,7 @@ fn cloud_switched(
     summaries: Arc<AtomicBool>,
     saves: Arc<AtomicBool>,
     title: Arc<Mutex<Option<String>>>,
+    refuse_features: Arc<Mutex<Option<Option<&'static str>>>>,
 ) -> CloudAIClient {
     CloudAIClient::with_transport(
         CloudAIConfig::new(origin).unwrap(),
@@ -333,6 +350,7 @@ fn cloud_switched(
             saves,
             feed: AtomicBool::new(false),
             title,
+            refuse_features,
         }),
     )
 }
@@ -354,6 +372,8 @@ struct Fixture {
     saves: Arc<AtomicBool>,
     /// The session title the fake service sends; none by default.
     title: Arc<Mutex<Option<String>>>,
+    /// How the fake service refuses feature reads, if it does.
+    refuse_features: Arc<Mutex<Option<Option<&'static str>>>>,
     owner: Owner,
 }
 
@@ -376,6 +396,7 @@ impl Fixture {
         let summaries = Arc::new(AtomicBool::new(true));
         let saves = Arc::new(AtomicBool::new(true));
         let title = Arc::<Mutex<Option<String>>>::default();
+        let refuse_features = Arc::<Mutex<Option<Option<&'static str>>>>::default();
         let mut owner = StatusDispatchService::new(
             account.clone(),
             store.clone(),
@@ -386,6 +407,7 @@ impl Fixture {
                 summaries.clone(),
                 saves.clone(),
                 title.clone(),
+                refuse_features.clone(),
             ),
         );
         owner.set_account_session(Some(session.clone())).unwrap();
@@ -401,6 +423,7 @@ impl Fixture {
             summaries,
             saves,
             title,
+            refuse_features,
             owner,
         }
     }

@@ -11,7 +11,8 @@ use crate::feed::{FeedPage, FeedTurn, ReplyWrite};
 use super::layout::{current_uid, peer_uid};
 use super::protocol::{
     read_message, write_message, ConsentView, EnrolledCredential, FolderChoice, Hello, OfferView,
-    OwnerRequest, OwnerResponse, OwnerState, SignInView, StatusLine, MAX_SESSIONS, PROTOCOL,
+    OwnerRequest, OwnerResponse, OwnerState, RevocationView, SignInView, StatusLine, MAX_SESSIONS,
+    PROTOCOL,
 };
 use super::{OwnerError, OwnerLayout, OwnerRegistration};
 
@@ -135,10 +136,11 @@ impl OwnerClient {
         }
     }
 
-    /// Stop sharing and remove local credentials.
-    pub fn sign_out(&self) -> Result<(), OwnerError> {
-        match self.request(&OwnerRequest::SignOut)? {
-            OwnerResponse::Done => Ok(()),
+    /// Stop sharing and remove local credentials, then revoke the sign-in at
+    /// Clerk; how that went. Signed out here whatever it says.
+    pub fn sign_out(&self) -> Result<RevocationView, OwnerError> {
+        match self.request(&OwnerRequest::SignOutAndRevoke)? {
+            OwnerResponse::SignedOut { revocation } => Ok(revocation),
             _ => Err(OwnerError::Protocol),
         }
     }

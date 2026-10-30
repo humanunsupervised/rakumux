@@ -28,6 +28,7 @@ struct Harness {
     summaries: Arc<AtomicBool>,
     saves: Arc<AtomicBool>,
     title: Arc<Mutex<Option<String>>>,
+    refuse_features: Arc<Mutex<Option<Option<&'static str>>>>,
     refresher: Refresher,
 }
 
@@ -53,6 +54,7 @@ impl Harness {
             summaries,
             saves,
             title,
+            refuse_features,
             owner,
             ..
         } = fixture;
@@ -64,6 +66,7 @@ impl Harness {
             summaries,
             saves,
             title,
+            refuse_features,
             refresher: StatusRefresher::new(owner),
         }
     }
@@ -218,6 +221,41 @@ fn refreshing_waits_for_the_daemon_list_and_confirmed_consent() {
             features_unsaved: false,
         }
     );
+}
+
+#[test]
+fn a_terminal_rakumux_com_signed_out_signs_out_and_revokes_its_sign_in() {
+    let revoked = Arc::new(Mutex::new(Vec::new()));
+    let mut harness = Harness::from(Fixture::new(ReplyMode::Success)).following();
+    harness.refresher = {
+        let revoked = revoked.clone();
+        harness
+            .refresher
+            .revoking_with(move |pending| revoked.lock().unwrap().push(format!("{pending:?}")))
+    };
+    assert!(harness.read_features(0));
+    assert!(harness.refresher.account().is_some());
+
+    // A plain refusal (an expired token, say) changes nothing: renewing helps.
+    *harness.refuse_features.lock().unwrap() = Some(None);
+    assert!(harness.read_features(120));
+    assert!(harness.refresher.account().is_some());
+    assert!(revoked.lock().unwrap().is_empty());
+
+    // "Sign out all terminals" on rakumux.com: signed out here, the sign-in
+    // handed over to be revoked at Clerk, once.
+    *harness.refuse_features.lock().unwrap() = Some(Some("signed_out"));
+    assert!(harness.read_features(180));
+    assert!(harness.refresher.account().is_none());
+    assert!(harness.account.take_signed_out().is_none());
+    let revoked = revoked.lock().unwrap().clone();
+    assert_eq!(revoked.len(), 1);
+    // Its secrets are never shown or logged.
+    assert!(!revoked[0].contains("PRIVATE"), "{}", revoked[0]);
+    let state = harness.refresher.state(secs(180));
+    assert_eq!((state.summaries, state.feed), (None, None));
+    // Signed out: nothing more is read.
+    assert!(!harness.read_features(600));
 }
 
 #[test]
@@ -1209,6 +1247,7 @@ fn a_revoked_request_names_nothing_and_a_removed_session_forgets_its_title() {
 /// A refresher running on its own threads against a fake daemon.
 pub(super) struct Background {
     _directory: tempfile::TempDir,
+    pub(super) account: Arc<AccountService<FileCredentialStore, FakeClock>>,
     pub(super) requests: Requests,
     pub(super) runner: RefreshRunner,
     pub(super) client: RefreshClient,
@@ -1224,6 +1263,7 @@ impl Background {
         let events = (0..streams).map(|_| api.stream()).collect();
         let Harness {
             _directory,
+            account,
             requests,
             refresher,
             title,
@@ -1234,6 +1274,7 @@ impl Background {
         let client = runner.client();
         let background = Self {
             _directory,
+            account,
             requests,
             runner,
             client,

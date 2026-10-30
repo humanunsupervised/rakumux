@@ -75,6 +75,9 @@ pub struct CloudAIConfig {
 
 /// The header naming the requesting machine by its id.
 const MACHINE_ID_HEADER: &str = "x-rakumux-machine-id";
+/// Beside a 401: this sign-in is over (all terminals were signed out, or the
+/// account deleted), so renewing it won't help.
+const SIGNED_OUT_HEADER: &str = "x-rakumux-signed-out";
 
 /// The account's feature switches, as the destination reports them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -856,6 +859,9 @@ fn remote_failure<T>(status: u16, headers: &HeaderMap, body: &[u8]) -> Result<T,
     let (code, body_delay) = decode_error(body)?;
     if !code.accepts_status(status) {
         return Err(CloudAIError::InvalidResponse);
+    }
+    if code == super::RemoteErrorCode::Unauthenticated && headers.contains_key(SIGNED_OUT_HEADER) {
+        return Err(CloudAIError::SignedOut);
     }
     let header_delay = code
         .permits_retry_delay()

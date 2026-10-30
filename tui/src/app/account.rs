@@ -18,7 +18,7 @@ use session_core::model::SessionStatus;
 use super::runtime::AppEvent;
 use super::types::{AccountDialog, AccountDialogState, AccountStatus, AppMode};
 use super::App;
-use crate::account::{self, Account, MAX_SESSIONS};
+use crate::account::{self, Account, RevocationView, MAX_SESSIONS};
 
 /// How often the sessions' AI status is read while signed in.
 const STATUSES_EVERY: Duration = Duration::from_secs(2);
@@ -186,16 +186,21 @@ impl App {
             .job(move || AppEvent::SignedOut(access.sign_out()));
     }
 
-    pub(super) fn on_signed_out(&mut self, result: Result<(), String>) {
+    pub(super) fn on_signed_out(&mut self, result: Result<RevocationView, String>) {
         match result {
-            Ok(()) => {
+            Ok(revocation) => {
                 self.account = AccountStatus::SignedOut;
                 self.forget_statuses();
                 self.on_feed_switch();
                 if let AppMode::Account(dialog) = &mut self.mode {
                     dialog.state = AccountDialogState::SignedOut;
                 }
-                self.set_status("Signed out.");
+                self.set_status(match revocation {
+                    RevocationView::Failed | RevocationView::Unknown => {
+                        "Signed out here, but Clerk couldn't revoke the sign-in."
+                    }
+                    RevocationView::Revoked | RevocationView::NotNeeded => "Signed out.",
+                });
             }
             Err(error) => match &mut self.mode {
                 AppMode::Account(dialog) => dialog.state = AccountDialogState::Failed(error),

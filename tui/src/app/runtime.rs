@@ -165,7 +165,7 @@ pub enum AppEvent {
     SignIn(Result<rakumux_sensagent::owner::protocol::SignInView, String>),
     /// An unfinished sign-in was abandoned.
     SignInCancelled(Result<(), String>),
-    SignedOut(Result<(), String>),
+    SignedOut(Result<crate::account::RevocationView, String>),
     /// The sessions' AI status: which have a title being made.
     Statuses {
         generation: u64,

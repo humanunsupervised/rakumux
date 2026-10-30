@@ -166,7 +166,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusDispatchService<S, 
     }
 
     /// Stop local sharing before attempting credential removal, even if storage fails.
-    /// Browser logout and remote grant revocation are separate unimplemented operations.
+    /// The removed grant is revoked at Clerk afterwards, off this thread
+    /// (`AccountService::revoke_signed_out`); browser logout is not this service's.
     pub fn sign_out(&mut self) -> Result<(), DispatchError> {
         self.invalidate();
         self.session = None;

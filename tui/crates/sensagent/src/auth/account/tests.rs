@@ -694,3 +694,113 @@ fn status_gate_rejects_accounts_without_the_ai_feature_scope() {
         StatusError::FeatureUnauthorized
     );
 }
+
+/// Records what it was asked to revoke, and answers with `result`.
+struct Revoker {
+    revoked: std::sync::Mutex<Vec<(String, Option<String>)>>,
+    result: Result<(), AuthError>,
+}
+
+impl Revoker {
+    fn answering(result: Result<(), AuthError>) -> Self {
+        Self {
+            revoked: std::sync::Mutex::new(Vec::new()),
+            result,
+        }
+    }
+
+    fn revoked(&self) -> Vec<(String, Option<String>)> {
+        self.revoked.lock().unwrap().clone()
+    }
+}
+
+impl GrantRevoker for Revoker {
+    fn revoke(&self, grant: &AuthorizationGrant) -> Result<(), AuthError> {
+        self.revoked.lock().unwrap().push((
+            grant.access_token().expose_secret().to_owned(),
+            grant
+                .refresh_token()
+                .map(|token| token.expose_secret().to_owned()),
+        ));
+        self.result.clone()
+    }
+}
+
+#[test]
+fn signing_out_revokes_the_removed_sign_in_once() {
+    let (_directory, service, store, _clock) = setup();
+    let ticket = service.begin_login().unwrap();
+    service.commit_login(&ticket, verified("user_one")).unwrap();
+    let revoker = Revoker::answering(Ok(()));
+    // Nothing signed out yet: nothing to revoke.
+    assert_eq!(
+        service.revoke_signed_out(&revoker),
+        SignOutRevocation::NotNeeded
+    );
+
+    service.sign_out().unwrap();
+    assert!(store.load().unwrap().credentials().is_none());
+    assert_eq!(
+        service.revoke_signed_out(&revoker),
+        SignOutRevocation::Revoked
+    );
+    assert_eq!(
+        revoker.revoked(),
+        vec![(
+            "PRIVATE-ACCESS-TOKEN".to_owned(),
+            Some("PRIVATE-REFRESH-TOKEN".to_owned())
+        )]
+    );
+    // Taken once: a second sign-out request finds nothing more to revoke.
+    assert_eq!(
+        service.revoke_signed_out(&revoker),
+        SignOutRevocation::NotNeeded
+    );
+    assert_eq!(revoker.revoked().len(), 1);
+}
+
+#[test]
+fn a_failed_revocation_still_leaves_this_machine_signed_out() {
+    let (_directory, service, store, _clock) = setup();
+    let ticket = service.begin_login().unwrap();
+    let session = service.commit_login(&ticket, verified("user_one")).unwrap();
+    service.sign_out().unwrap();
+    let revoker = Revoker::answering(Err(AuthError::Network(
+        super::super::NetworkFailure::Connection,
+    )));
+    assert_eq!(
+        service.revoke_signed_out(&revoker),
+        SignOutRevocation::Failed(AuthError::Network(super::super::NetworkFailure::Connection))
+    );
+    assert_eq!(revoker.revoked().len(), 1);
+    assert!(store.load().unwrap().credentials().is_none());
+    assert!(!service.is_current(&session).unwrap());
+    // What it holds is never shown.
+    let pending = {
+        let ticket = service.begin_login().unwrap();
+        service.commit_login(&ticket, verified("user_one")).unwrap();
+        service.sign_out().unwrap();
+        service.take_signed_out().unwrap()
+    };
+    let shown = format!("{pending:?}");
+    assert!(!shown.contains("PRIVATE"));
+}
+
+#[test]
+fn an_enrolled_machines_tokens_are_never_sent_to_clerk() {
+    let (_directory, service, _store, _clock) = setup();
+    let ticket = service.begin_login().unwrap();
+    let mut machine = verified("user_one");
+    machine.grant.access_token =
+        crate::auth::SecretValue::try_from("rkma.v1.claims.signature".to_owned()).unwrap();
+    machine.grant.refresh_token =
+        Some(crate::auth::SecretValue::try_from(format!("rkm_{}", "s".repeat(43))).unwrap());
+    service.commit_login(&ticket, machine).unwrap();
+    service.sign_out().unwrap();
+    let revoker = Revoker::answering(Ok(()));
+    assert_eq!(
+        service.revoke_signed_out(&revoker),
+        SignOutRevocation::NotNeeded
+    );
+    assert!(revoker.revoked().is_empty());
+}

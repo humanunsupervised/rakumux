@@ -81,7 +81,11 @@ patterns when porting to Rust. Run these same fixtures against each implementati
 The static error codes are `invalid_request`, `unauthenticated`, `forbidden`,
 `rate_limited`, `upstream_unavailable` and `invalid_output`. Suggested HTTP statuses
 are 400 (or 413 for oversized input), 401, 403, 429, 503 and 502, respectively;
-HTTP behavior is an integration responsibility, not validated by JSON Schema.
+HTTP behavior is an integration responsibility, not validated by JSON Schema. A 401
+with the header `X-Rakumux-Signed-Out` (`signed_out` or `deleted`) says the sign-in
+is over (all the account's terminals were signed out, or the account was deleted):
+sign out and revoke it rather than renewing it (see the feed contract's "Ending a
+sign-in").
 
 ## Conformance tests
 

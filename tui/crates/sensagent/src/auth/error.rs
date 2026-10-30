@@ -20,6 +20,9 @@ pub enum AuthError {
     /// The configured issuer does not advertise the required device grant.
     #[error("the configured identity provider does not support device authorization")]
     UnsupportedDeviceGrant,
+    /// No trusted revocation endpoint (RFC 7009) was advertised.
+    #[error("the identity provider does not advertise token revocation")]
+    UnsupportedRevocation,
     /// No trusted UserInfo endpoint was advertised for account verification.
     #[error("the identity provider does not advertise supported account verification")]
     UnsupportedAccountVerification,

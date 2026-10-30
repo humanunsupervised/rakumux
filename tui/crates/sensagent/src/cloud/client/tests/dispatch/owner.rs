@@ -19,7 +19,7 @@ use crate::owner::{
     OwnerClaim, OwnerClient, OwnerError, OwnerErrorCode, OwnerLayout, OwnerRegistration,
     OwnerServer,
 };
-use crate::refresh::{SignInFailure, SignInPrompt, SignInState};
+use crate::refresh::{RefreshClient, SignInFailure, SignInPrompt, SignInState};
 
 struct Served {
     background: Background,
@@ -32,6 +32,32 @@ struct Served {
 
 impl Served {
     fn start() -> Self {
+        Self::serving(|_, claim, client| {
+            OwnerServer::start(claim, client, "synthetic-version").unwrap()
+        })
+    }
+
+    /// Sign-outs revoke the removed sign-in with `revoker` (as the service
+    /// does with Clerk).
+    fn revoking(revoker: Arc<dyn crate::auth::GrantRevoker>) -> Self {
+        Self::serving(move |account, claim, client| {
+            OwnerServer::start_revoking(
+                claim,
+                client,
+                "synthetic-version",
+                Arc::new(move || account.revoke_signed_out(revoker.as_ref())),
+            )
+            .unwrap()
+        })
+    }
+
+    fn serving(
+        start: impl FnOnce(
+            Arc<AccountService<FileCredentialStore, FakeClock>>,
+            &mut OwnerClaim,
+            RefreshClient,
+        ) -> OwnerServer,
+    ) -> Self {
         let (background, events) = Background::start(&[tracked_view(2)], 1);
         let home = tempfile::Builder::new()
             .prefix("synthetic-owner-home-")
@@ -39,8 +65,11 @@ impl Served {
             .unwrap();
         let layout = OwnerLayout::new(&Layout::with_home(home.path().to_path_buf()));
         let mut claim = OwnerClaim::claim(&layout, "synthetic-version").unwrap();
-        let server =
-            OwnerServer::start(&mut claim, background.client.clone(), "synthetic-version").unwrap();
+        let server = start(
+            background.account.clone(),
+            &mut claim,
+            background.client.clone(),
+        );
         Self {
             background,
             _events: events,
@@ -174,6 +203,69 @@ fn consent_offers_are_shown_then_used_once_by_their_own_connection() {
         client.consent_offer().unwrap_err(),
         OwnerError::Refused(OwnerErrorCode::SignedOut)
     );
+}
+
+/// Records what it's asked to revoke and answers with `result`, as Clerk would.
+struct Revoker {
+    asked: Mutex<Vec<String>>,
+    result: Result<(), crate::auth::AuthError>,
+}
+
+impl crate::auth::GrantRevoker for Revoker {
+    fn revoke(
+        &self,
+        grant: &crate::auth::AuthorizationGrant,
+    ) -> Result<(), crate::auth::AuthError> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push(grant.access_token().expose_secret().to_owned());
+        self.result.clone()
+    }
+}
+
+#[test]
+fn signing_out_revokes_the_sign_in_and_says_whether_clerk_did() {
+    use crate::auth::{AuthError, NetworkFailure};
+    use crate::owner::protocol::RevocationView;
+    for (result, expected) in [
+        (Ok(()), RevocationView::Revoked),
+        (
+            Err(AuthError::Network(NetworkFailure::Connection)),
+            RevocationView::Failed,
+        ),
+    ] {
+        let revoker = Arc::new(Revoker {
+            asked: Mutex::default(),
+            result,
+        });
+        let served = Served::revoking(revoker.clone());
+        let client = served.client();
+        let other = served.client();
+        assert!(client.state().unwrap().account.is_some());
+        assert_eq!(client.sign_out().unwrap(), expected);
+        // Signed out here whatever Clerk said.
+        assert_eq!(other.state().unwrap().account, None);
+        assert_eq!(revoker.asked.lock().unwrap().len(), 1);
+        // Once: signing out again finds nothing to revoke.
+        assert_eq!(client.sign_out().unwrap(), RevocationView::NotNeeded);
+        assert_eq!(revoker.asked.lock().unwrap().len(), 1);
+    }
+
+    // An older client's sign_out is answered as it was, and revokes all the same.
+    let revoker = Arc::new(Revoker {
+        asked: Mutex::default(),
+        result: Ok(()),
+    });
+    let served = Served::revoking(revoker.clone());
+    let token = served.token();
+    let (mut stream, welcome) = served.hello(PROTOCOL, &token);
+    assert!(matches!(welcome, OwnerResponse::Welcome { .. }));
+    assert_eq!(
+        ask(&mut stream, &OwnerRequest::SignOut),
+        OwnerResponse::Done
+    );
+    assert_eq!(revoker.asked.lock().unwrap().len(), 1);
 }
 
 #[test]

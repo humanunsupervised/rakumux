@@ -49,7 +49,8 @@ version and the registration's token; then requests and responses alternate.
 | `consent_offer` | origin, account and consent revision to show, with a one-use id |
 | `enable {offer, folders}` | the new consent; the offer must be this connection's latest |
 | `disable {revision}` | the new consent |
-| `sign_out` | done; sharing stops and local credentials are removed |
+| `sign_out` | done; sharing stops, local credentials are removed, then the sign-in is revoked at Clerk (best effort) |
+| `sign_out_and_revoke` | the same, answered `signed_out {revocation}`: `revoked`, `not_needed` (nothing to revoke, or an enrolled machine's) or `failed` (signed out here all the same) |
 
 Errors are static codes: `unauthenticated`, `protocol_mismatch`, `invalid_request`,
 `stale_offer`, `conflict` (a `disable` for an older consent revision), `signed_out`,

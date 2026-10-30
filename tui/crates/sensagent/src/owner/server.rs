@@ -13,10 +13,11 @@ use session_core::ids::{SessionId, Token};
 use super::layout::{current_uid, peer_uid};
 use super::protocol::{
     read_payload, write_message, AccountView, ConsentView, EnrolledCredential, Hello, OfferView,
-    OwnerErrorCode, OwnerRequest, OwnerResponse, OwnerState, SignInView, StatusLine,
-    MAX_CLIENT_NAME, MAX_MESSAGE, MAX_SESSIONS, PROTOCOL,
+    OwnerErrorCode, OwnerRequest, OwnerResponse, OwnerState, RevocationView, SignInView,
+    StatusLine, MAX_CLIENT_NAME, MAX_MESSAGE, MAX_SESSIONS, PROTOCOL,
 };
 use super::{OwnerClaim, OwnerError};
+use crate::auth::SignOutRevocation;
 use crate::cloud::FeatureChange;
 use crate::dispatch::StatusConsentOffer;
 use crate::feed::{FeedTurn, ReplyWrite};
@@ -36,6 +37,11 @@ const MAX_CONNECTIONS: usize = 32;
 
 type Connections = Arc<Mutex<HashMap<u64, UnixStream>>>;
 
+/// Revokes, at Clerk, the sign-in the last sign-out removed
+/// (`AccountService::revoke_signed_out_at_provider`). Blocking: run on the
+/// asking connection's thread, after the refresher signed out.
+pub type SignOutRevoker = Arc<dyn Fn() -> SignOutRevocation + Send + Sync>;
+
 /// Serves the owner's socket: user clients of this home only (same uid, and the
 /// registration's token). A connection thread per client forwards each request to
 /// the refresher's owner thread and waits for its answer. Session callers have no
@@ -53,10 +59,31 @@ pub struct OwnerServer {
 
 impl OwnerServer {
     /// Serve `claim`'s socket with `client`'s refresher. A claim serves once.
+    /// Sign-outs revoke nothing at Clerk: see [`start_revoking`](Self::start_revoking).
     pub fn start(
         claim: &mut OwnerClaim,
         client: RefreshClient,
         version: &str,
+    ) -> Result<Self, OwnerError> {
+        Self::serve(claim, client, version, None)
+    }
+
+    /// [`start`](Self::start), with a sign-out also revoking the sign-in at
+    /// Clerk through `revoke` once the refresher signed out.
+    pub fn start_revoking(
+        claim: &mut OwnerClaim,
+        client: RefreshClient,
+        version: &str,
+        revoke: SignOutRevoker,
+    ) -> Result<Self, OwnerError> {
+        Self::serve(claim, client, version, Some(revoke))
+    }
+
+    fn serve(
+        claim: &mut OwnerClaim,
+        client: RefreshClient,
+        version: &str,
+        revoke: Option<SignOutRevoker>,
     ) -> Result<Self, OwnerError> {
         let listener = claim.take_listener().ok_or(OwnerError::Socket)?;
         listener
@@ -72,6 +99,7 @@ impl OwnerServer {
             client,
             version: version.to_owned(),
             shutdown: shutdown.clone(),
+            revoke,
         });
         let accept = {
             let (stop, connections) = (stop.clone(), connections.clone());
@@ -140,6 +168,7 @@ struct Context {
     client: RefreshClient,
     version: String,
     shutdown: Arc<AtomicBool>,
+    revoke: Option<SignOutRevoker>,
 }
 
 fn accept(
@@ -295,6 +324,11 @@ fn serve(mut stream: UnixStream, context: &Context) {
                     context.shutdown.store(true, Ordering::SeqCst);
                     OwnerResponse::Done
                 }
+                Ok(OwnerRequest::SignOut) => {
+                    sign_out(context, &mut offer).map_or_else(refuse, |_| OwnerResponse::Done)
+                }
+                Ok(OwnerRequest::SignOutAndRevoke) => sign_out(context, &mut offer)
+                    .map_or_else(refuse, |revocation| OwnerResponse::SignedOut { revocation }),
                 Ok(request) => handle(request, &context.client, &mut offer),
                 Err(_) => refuse(OwnerErrorCode::InvalidRequest),
             },
@@ -333,12 +367,9 @@ fn handle(
                 consent: ConsentView::from(&consent),
             })
             .map_err(|error| OwnerErrorCode::from(&error)),
-        OwnerRequest::SignOut => {
-            *offer = None;
-            client
-                .sign_out()
-                .map(|()| OwnerResponse::Done)
-                .map_err(|error| OwnerErrorCode::from(&error))
+        // Answered by `serve`, which holds the revoker.
+        OwnerRequest::SignOut | OwnerRequest::SignOutAndRevoke => {
+            Err(OwnerErrorCode::InvalidRequest)
         }
         OwnerRequest::SignInStart => {
             *offer = None;
@@ -462,6 +493,29 @@ fn enrol_refused(failure: &crate::feed::FeedFailure) -> OwnerErrorCode {
         FeedFailure::MachineTaken => OwnerErrorCode::Conflict,
         FeedFailure::Off | FeedFailure::Unavailable(_) => OwnerErrorCode::Unavailable,
     }
+}
+
+/// Sign out (the refresher stops sharing and removes this machine's
+/// credentials), then revoke the removed sign-in at Clerk, on this connection's
+/// thread so the refresher keeps working meanwhile. Signed out whatever Clerk says.
+fn sign_out(
+    context: &Context,
+    offer: &mut Option<(String, StatusConsentOffer)>,
+) -> Result<RevocationView, OwnerErrorCode> {
+    *offer = None;
+    context
+        .client
+        .sign_out()
+        .map_err(|error| OwnerErrorCode::from(&error))?;
+    let revocation = context
+        .revoke
+        .as_ref()
+        .map_or(SignOutRevocation::NotNeeded, |revoke| revoke());
+    if let SignOutRevocation::Failed(error) = &revocation {
+        // Static codes only (see `AuthError`).
+        eprintln!("rakumux-status: revoking the sign-in failed: {error:?}");
+    }
+    Ok(RevocationView::from(&revocation))
 }
 
 fn refuse(code: OwnerErrorCode) -> OwnerResponse {

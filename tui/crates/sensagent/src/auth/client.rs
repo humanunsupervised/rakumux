@@ -14,6 +14,9 @@ use super::{
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const REFRESH_GRANT_TYPE: &str = "refresh_token";
+/// A sign-out waits for its revocation (`revoke`): discovery and two requests, each
+/// at most this long, well within an owner request's 30 s.
+const REVOCATION_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Blocking Clerk OAuth public client. Construct and call it off the UI thread.
 ///
@@ -25,16 +28,32 @@ pub struct ClerkDeviceClient {
     device_endpoint: Url,
     token_endpoint: Url,
     userinfo_endpoint: Option<Url>,
+    /// Where tokens are revoked (RFC 7009), when the issuer advertises it.
+    revocation_endpoint: Option<Url>,
 }
 
 impl ClerkDeviceClient {
     /// Discover an explicitly configured issuer; missing device support is an error.
     pub fn discover(config: DeviceAuthConfig) -> Result<Self, AuthError> {
+        Self::discover_within(config, Duration::from_secs(10), Duration::from_secs(30))
+    }
+
+    /// Discover the issuer for a sign-out's [`revoke`](Self::revoke), with
+    /// shorter timeouts: the user waits for it.
+    pub fn discover_for_sign_out(config: DeviceAuthConfig) -> Result<Self, AuthError> {
+        Self::discover_within(config, Duration::from_secs(5), REVOCATION_TIMEOUT)
+    }
+
+    fn discover_within(
+        config: DeviceAuthConfig,
+        connect: Duration,
+        total: Duration,
+    ) -> Result<Self, AuthError> {
         let client = Client::builder()
             .https_only(true)
             .redirect(redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
+            .connect_timeout(connect)
+            .timeout(total)
             .user_agent(concat!("rakumux-sensagent/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(network_error)?;
@@ -82,12 +101,18 @@ impl ClerkDeviceClient {
             (Some(pinned), _) => Some(pinned.clone()),
             (None, advertised) => advertised,
         };
+        let revocation_endpoint = metadata
+            .revocation_endpoint
+            .as_deref()
+            .map(|value| config.provider_endpoint(value))
+            .transpose()?;
         Ok(Self {
             config,
             transport,
             device_endpoint,
             token_endpoint,
             userinfo_endpoint,
+            revocation_endpoint,
         })
     }
 
@@ -193,6 +218,54 @@ impl ClerkDeviceClient {
         Err(AuthError::HttpStatus(response.status))
     }
 
+    /// Revoke `grant` at the issuer's advertised revocation endpoint (RFC 7009),
+    /// as the public client: its refresh token, which ends the grant and every
+    /// access token made from it, then its access token where the issuer can
+    /// revoke one (Clerk's JWT access tokens can't be, and expire within a day:
+    /// rakumux.com's "Sign out all terminals" refuses them sooner). Succeeds
+    /// once the refresh token is revoked, or, without one, the access token.
+    /// The issuer answers 200 for a token it no longer knows, so revoking twice
+    /// is harmless.
+    pub fn revoke(&self, grant: &AuthorizationGrant) -> Result<(), AuthError> {
+        if *grant.provider != ProviderIdentity::from(&self.config) {
+            return Err(AuthError::UntrustedEndpoint);
+        }
+        let endpoint = self
+            .revocation_endpoint
+            .as_ref()
+            .ok_or(AuthError::UnsupportedRevocation)?;
+        let Some(refresh_token) = grant.refresh_token() else {
+            return self.revoke_token(endpoint, grant.access_token(), "access_token");
+        };
+        self.revoke_token(endpoint, refresh_token, "refresh_token")?;
+        // Best effort: the grant is over already.
+        let _ = self.revoke_token(endpoint, grant.access_token(), "access_token");
+        Ok(())
+    }
+
+    fn revoke_token(
+        &self,
+        endpoint: &Url,
+        token: &SecretValue,
+        hint: &str,
+    ) -> Result<(), AuthError> {
+        let form = [
+            ("client_id", self.config.client_id.as_str()),
+            ("token", token.expose_secret()),
+            ("token_type_hint", hint),
+        ];
+        let response = self.transport.request(endpoint, Some(&form), None)?;
+        if response.status == 200 {
+            return Ok(());
+        }
+        if response.status == 400 || response.status == 401 || response.status == 403 {
+            if let Ok(error) = decode::<OAuthError>(&response) {
+                return Err(oauth_rejection(&error.error));
+            }
+        }
+        Err(AuthError::HttpStatus(response.status))
+    }
+
     /// Verify the exact access token against advertised, issuer-pinned UserInfo.
     ///
     /// Never infer an account by decoding an unverified ID token or email address.
@@ -255,6 +328,8 @@ struct Metadata {
     device_authorization_endpoint: Option<String>,
     token_endpoint: String,
     userinfo_endpoint: Option<String>,
+    #[serde(default)]
+    revocation_endpoint: Option<String>,
     #[serde(default)]
     grant_types_supported: Vec<String>,
 }

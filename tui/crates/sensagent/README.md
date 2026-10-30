@@ -95,7 +95,10 @@ enable login prompts, gate core features, create provider accounts or deploy ser
 The file backend is an explicitly selected, **unencrypted** fallback, not an OS
 keychain. Its parent directory must already exist and be trusted. No path is read
 from the real home or environment by this library. Local sign-out atomically writes
-a no-credential tombstone; it is not secure media erasure or remote grant revocation.
+a no-credential tombstone; it is not secure media erasure. The removed grant is kept in
+memory until `AccountService::revoke_signed_out` revokes its refresh token (and access
+token, where possible) at Clerk's advertised revocation endpoint (RFC 7009); an enrolled
+machine's tokens are never sent there.
 CommitUncertain means rename happened but directory durability was not confirmed:
 do not claim sign-in success or assume the old record remained; reconcile / reverify.
 
@@ -136,8 +139,8 @@ still require consent reconfirmation; stable authorization epochs are not added 
 
 ## Not implemented yet
 
-- Automatic refresh / remote grant revocation, shared running credential-owner service
-  and OS-keychain backends. Expired cached credentials currently require reauthentication.
+- OS-keychain backends. (Renewal, revoking a signed-out grant at Clerk and the shared
+  credential-owner service are implemented: `refresh/`, `auth/account.rs`, `owner/`.)
 - TUI continuation integration and real browser/provider round trips. Private `humanunsupervised/rakumux-cloud`
   owns guarded account pages; [public landing](../../../landing/README.md) remains static.
   Real Clerk configuration and end-to-end login remain pending.

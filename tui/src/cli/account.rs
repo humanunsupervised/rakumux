@@ -13,7 +13,7 @@ use session_core::model::{SessionStatus, SessionView};
 
 use super::args::AccountCommand;
 use super::{layout, output_error, version, CliError};
-use crate::account::{self, Account, AccountAccess, LocalAccount};
+use crate::account::{self, Account, AccountAccess, LocalAccount, RevocationView};
 use crate::printable::printable;
 use crate::qr::Qr;
 
@@ -122,13 +122,21 @@ fn logout(access: &dyn AccountAccess, out: &mut dyn Write) -> Result<i32, CliErr
     match access.account().map_err(CliError::internal)? {
         None => writeln!(out, "Not signed in.").map_err(output_error)?,
         Some(account) => {
-            access.sign_out().map_err(CliError::internal)?;
+            let revocation = access.sign_out().map_err(CliError::internal)?;
             writeln!(
                 out,
                 "Signed out {}. AI session titles stopped.",
                 printable(account.name())
             )
             .map_err(output_error)?;
+            if matches!(revocation, RevocationView::Failed | RevocationView::Unknown) {
+                writeln!(
+                    out,
+                    "Clerk couldn't revoke the sign-in, so a copy of it may still work. \
+                     Check your connection."
+                )
+                .map_err(output_error)?;
+            }
         }
     }
     Ok(0)
@@ -223,6 +231,27 @@ mod tests {
             feed: Some(true),
         };
         assert_eq!(describe(Some(&account)), "Signed in as person@example.com.");
+    }
+
+    #[test]
+    fn logging_out_says_when_clerk_couldnt_revoke_the_sign_in() {
+        use crate::app::testing::FakeAccount;
+        let revoked = FakeAccount::signed_in();
+        let mut out = Vec::new();
+        assert_eq!(logout(&revoked, &mut out).unwrap(), 0);
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "Signed out person@example.com. AI session titles stopped.\n"
+        );
+
+        let failed = FakeAccount::signed_in();
+        *failed.revocation.lock().unwrap() = Some(RevocationView::Failed);
+        let mut out = Vec::new();
+        assert_eq!(logout(&failed, &mut out).unwrap(), 0);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.starts_with("Signed out person@example.com."), "{text}");
+        assert!(text.contains("Clerk couldn't revoke the sign-in"), "{text}");
+        assert!(failed.account.lock().unwrap().is_none());
     }
 
     #[test]

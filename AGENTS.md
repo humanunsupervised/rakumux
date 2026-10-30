@@ -189,7 +189,19 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `profile` as the AI status scope (`DeviceAuthConfig::with_status_scope`), matching the
    website's check. Clerk's access tokens last 24 hours: the service renews them with the
    refresh token once a fifth of the lifetime is left (`refresh/renewal.rs`), and a restore
-   renews one that expired meanwhile. A client that finds a service from an older release
+   renews one that expired meanwhile. **Signing out** (Settings → Account, `rakumux account
+   logout`; `OwnerRequest::SignOutAndRevoke` → `SignedOut {revocation}`, an older client's
+   `SignOut` → `Done`) removes the credentials first, then revokes the sign-in's refresh token
+   (and its access token, where Clerk can) at Clerk's advertised revocation endpoint, as the
+   public client, on the asking connection's thread (`AccountService::revoke_signed_out`,
+   `ClerkDeviceClient::revoke`, 8 s a request): signed out here whatever Clerk says, and the
+   TUI and CLI say when it couldn't revoke. Clerk's JWT access tokens can't be revoked, so
+   rakumux.com also refuses them after **Sign out all terminals** on its Account page (a token
+   issued before it) or the account's deletion: a 401 with `X-Rakumux-Signed-Out` (contract
+   `contracts/feed/`, "Ending a sign-in"). A features read refused so signs this machine out
+   the same way and revokes its sign-in on a thread of its own (`signed_out_by_account`), so a
+   copy of its refresh token elsewhere stops working too. An enrolled machine's credential is
+   never sent to Clerk; `rakumux sprite disconnect` revokes it. A client that finds a service from an older release
    asks it to stop (`Shutdown`) and starts its own; a newer one is used as it is. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
    `RAKUMUX_CLERK_CLIENT_ID`, `RAKUMUX_CLERK_DEVICE_PAGE`, `RAKUMUX_CLOUD_ORIGIN`, and
    `RAKUMUX_CLOUD_CA` (a PEM file of certificates trusted for that origin besides the public
@@ -1239,7 +1251,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
 | `rakumux session hook --agent A [--event NAME]` / `hook-config --agent A [--install]` | An agent's hook (JSON on stdin, always exit 0 and `{}`, Droid's `{"suppressOutput":true}`; `--event` for input that doesn't name its event) / print its hook configuration, or write it as a file of Rakumux's own the agent loads (`--install`: GitHub Copilot's `~/.copilot/hooks/rakumux.json`, Grok Build's `~/.grok/hooks/rakumux.json`; refused for agents whose hooks are merged into their settings) (`integrations/README.md`) |
-| `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in and each live session's AI description (`--json` still carries `ai_session_titles`, `ai_session_summaries` and `feed` for scripts) |
+| `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `logout` also revokes the sign-in at Clerk (it says when it couldn't); `status` shows who is signed in and each live session's AI description (`--json` still carries `ai_session_titles`, `ai_session_summaries` and `feed` for scripts) |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux machine add NAME URL --token T \| ls [--json] \| rm NAME` | Other machines whose sessions are listed and used here (their `rakumux-api` URL and remote token) |
 | `rakumux sprite connect [--token T] [--sprite NAME] \| status \| disconnect` | Your own Fly.io Sprite for sessions (signed in, its replies in your feed and yours typed into its agents); `rakumux new --sprite` (or `--machine NAME`) runs a session there; `disconnect` revokes its feed credential; `--replies`/`--no-replies` of 0.1.32 and earlier are accepted and ignored |

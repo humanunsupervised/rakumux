@@ -16,7 +16,7 @@ use rakumux_sensagent::source::TurnSettings;
 use session_core::ids::SessionId;
 use session_core::paths::Layout;
 
-pub use rakumux_sensagent::owner::protocol::MAX_SESSIONS;
+pub use rakumux_sensagent::owner::protocol::{RevocationView, MAX_SESSIONS};
 
 /// The signed-in account, as the service reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,8 +60,9 @@ pub trait AccountAccess: Send + Sync {
     fn sign_in_status(&self) -> Result<SignInView, String>;
     /// Abandon an unfinished sign-in.
     fn cancel_sign_in(&self) -> Result<(), String>;
-    /// Stop titling sessions and remove this machine's sign-in.
-    fn sign_out(&self) -> Result<(), String>;
+    /// Stop titling sessions and remove this machine's sign-in, then revoke it
+    /// at Clerk; how that went (signed out here whatever it says).
+    fn sign_out(&self) -> Result<RevocationView, String>;
     /// The AI status of `sessions` (at most [`MAX_SESSIONS`]), in order:
     /// whether a title is being made, and its description; empty when the
     /// service isn't running.
@@ -239,10 +240,11 @@ impl AccountAccess for LocalAccount {
         self.with(false, OwnerClient::sign_in_cancel).map(|_| ())
     }
 
-    fn sign_out(&self) -> Result<(), String> {
+    fn sign_out(&self) -> Result<RevocationView, String> {
         // Credentials are removed by the service, so start it for them.
-        self.with(self.has_saved_account(), OwnerClient::sign_out)
-            .map(|_| ())
+        Ok(self
+            .with(self.has_saved_account(), OwnerClient::sign_out)?
+            .unwrap_or(RevocationView::NotNeeded))
     }
 
     fn statuses(&self, sessions: &[SessionId]) -> Result<Vec<StatusLine>, String> {

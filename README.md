@@ -241,7 +241,8 @@ sessions use.
 **Privacy:** your machine only ever calls out to rakumux.com. Nothing calls in. Before uploading,
 Rakumux masks text that looks like a key, a credential or a token. Private sessions are never
 sent. Being signed in is what lets rakumux.com reach a machine's sessions:
-`rakumux account logout` stops it.
+`rakumux account logout` stops it and revokes that machine's sign-in, and **Sign out all
+terminals** on [rakumux.com/account](https://rakumux.com/account) ends every machine's.
 
 The free plan covers all of this and keeps 7 days of history; Pro keeps 90. See
 [pricing](https://rakumux.com/pricing) and the [privacy policy](https://rakumux.com/privacy).

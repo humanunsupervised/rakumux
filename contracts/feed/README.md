@@ -224,6 +224,16 @@ conformance tests, not an HTTP server, database or local runtime.
   (or a new session) is written to an enrolled machine with a `wake_url`, the cloud sends `GET <wake_url>/v1/health`
   (no credential, at most every 10 s) to wake it: a paused Sprite reads nothing until something
   connects to it.
+- **Ending a sign-in:** a terminal signing out revokes its refresh token (and its access token,
+  where the issuer can) at Clerk's advertised `revocation_endpoint`. Clerk's access tokens are
+  JWTs it can't revoke, so the cloud also refuses, as `unauthenticated` (401) with the header
+  `X-Rakumux-Signed-Out` (`signed_out` or `deleted`), a Clerk access token issued (`iat`) before
+  the account last signed out all terminals (its Account page), and every token, an enrolled
+  machine's too, of a deleted account; on every route here, the features read and AI titles. A
+  machine told so signs out and revokes its sign-in rather than renewing it; one that ignores the
+  header (an older release) is refused until it renews its token. An enrolled machine's own
+  credential ends only when it's revoked (above). A server may act on what it read of an account
+  up to a minute earlier.
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
   message per code: `invalid_request` (400, or 413 for an oversized body), `unauthenticated`
   (401), `forbidden` (403: a route the caller may not use, such as an enrolled machine's token

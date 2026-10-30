@@ -40,6 +40,11 @@ pub enum CloudAIError {
     /// Unsupported/nonconformant HTTP status, with no response-body echo.
     #[error("AI-status service returned HTTP {0}")]
     HttpStatus(u16),
+    /// rakumux.com ended this sign-in (401 with `X-Rakumux-Signed-Out`): its
+    /// account signed out all terminals, or was deleted. Sign out and revoke
+    /// the sign-in rather than renewing it.
+    #[error("rakumux.com signed this terminal out")]
+    SignedOut,
     /// Verified canonical static server error; retries are never automatic.
     #[error("AI-status service rejected the request: {code:?}")]
     Remote {
