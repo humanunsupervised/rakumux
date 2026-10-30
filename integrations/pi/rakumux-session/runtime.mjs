@@ -26,8 +26,9 @@ export default function rakumuxSession(pi) {
     });
   }
 
-  // One call at a time; whatever changed meanwhile is sent next.
-  async function flush() {
+  // One call at a time; whatever changed meanwhile is sent next. `beat`
+  // sends the same snapshot again.
+  async function flush(beat = false) {
     if (sending) { again = true; return; }
     sending = true;
     try {
@@ -41,10 +42,11 @@ export default function rakumuxSession(pi) {
           else bindRetryAt = Date.now() + 10_000;
         }
         const input = JSON.stringify(update);
-        if (input !== previous || Date.now() - sentAt >= 10_000) {
+        if (input !== previous || beat) {
           if (await invoke(["session", "hook", "--agent", "pi"], input)) {
             previous = input;
             sentAt = Date.now();
+            beat = false;
           }
         }
       } while (again);
@@ -62,7 +64,7 @@ export default function rakumuxSession(pi) {
       state = reduce(state, name, event, ctx);
       if (name === "session_start" && !timer) {
         // Activity expires without updates: the same snapshot every 10 s.
-        timer = setInterval(() => void flush(), 10_000);
+        timer = setInterval(() => void flush(Date.now() - sentAt >= 9_000), 10_000);
         timer.unref?.();
       }
       void flush();
