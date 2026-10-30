@@ -11,6 +11,7 @@ integrations/
   grok/          # Grok Build: native command hooks, detection, recovery, output, places
   kimi/          # Kimi Code: plugin (hooks + MCP) and installer, detection, its log
   droid/         # Native command hooks, detection, recovery, output, offline e2e
+  amp/           # Plugin (state, binding, thread copy), detection, recovery, installer, tests
   detection.rs   # Shared process/screen engine and retained older profiles
   recovery.rs    # Shared resume dispatch and safe argument/file helpers
   hooks.rs       # Adapter dispatch and metadata-only normalization
@@ -37,6 +38,7 @@ Older detection profiles remain supported; new hooks start with these three agen
 - [Kimi Code](kimi/README.md): `rakumux-mcp kimi-plugin --install` (its hooks name the
   conversation and folder; lifecycle comes from OSC 7501 with nothing installed)
 - [Droid](droid/README.md)
+- [Amp](amp/README.md)
 
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
@@ -150,7 +152,8 @@ nor ends a turn.
 
 The TUI animates busy states locally. Needs-input/done markers are static. Agent-internal
 subagents are not Rakumux child sessions. These hook adapters forward metadata only, never
-prompts, tool arguments, output or transcripts.
+prompts, tool arguments, output or transcripts. The Amp plugin's thread copy is a local file
+the daemon reads, as it reads Claude Code's and Codex's logs; it never goes through a hook.
 
 ## Program status (OSC 7501)
 
@@ -171,7 +174,7 @@ answered the query never asked, and reports nothing until it's restarted.
 
 ## Latest output and prompt
 
-`output.rs` gives each live Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor or Grok Build session two lines: what its agent
+`output.rs` gives each live Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor, Grok Build, Kimi Code, Droid or Amp session two lines: what its agent
 last said or did (`SessionView.agent_output`) and what the user last typed to it
 (`SessionView.user_prompt`). The session list shows neither.
 - **Where it comes from:** the daemon reads it from the agent's own conversation on this
@@ -209,6 +212,10 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
     moves it), for the conversation its hooks report, else the folder's newest top-level one.
     Droid rewrites the file's first line in place when it names the session, so offsets and
     positions count from that line's end. Its hook rows and notices aren't messages.
+  - Amp: Amp keeps its threads on ampcode.com, so its Rakumux plugin keeps a private copy of
+    each thread it sees, `<Amp cache>/plugin-cache/rakumux-session/threads/<thread>.jsonl`
+    (owner only, removed after 30 days), in Amp's plugin schema; the daemon follows the copy of
+    the thread the plugin bound. Without the plugin there is nothing to read.
 - **What's taken:** the last entry the main conversation's assistant wrote (its reasoning, a
   tool call as `Tool: description` or a short path, or its reply), and the user's last typed
   message (a slash command as `/name args`; the agents' own insertions such as reminders,
@@ -252,7 +259,8 @@ text after its last tool call (keyed by the chat and the line's offset); Cursor 
 message's reasoning after its text, so a reply can end with it. For Grok Build, its text blocks
 since the last prompt or tool call, keyed by the turn's `promptId`. For Kimi Code, the main
 agent's text after its last tool call, keyed by the part's `uuid`, in a turn that completed
-(`turn.ended`; a cancelled or failed turn has none). Each
+(`turn.ended`; a cancelled or failed turn has none). For Amp, its thread copy's text after the
+last tool call (keyed by Amp's message id), once the plugin reported the turn done. Each
 reply also says where its turn ends in the conversation (`position`, as below).
 
 ## Whole conversations
@@ -296,6 +304,9 @@ reasoning, its tool calls with their input, and the tools' output (the `tool` ro
 - **Cursor:** one message per transcript line, at its byte offset: what the user typed (inside
   its `<user_query>`), the agent's text (with the reasoning Cursor joins to it) and tool calls.
   Cursor writes no tool output, call ids, ids or times.
+- **Amp:** one message per line of the plugin's thread copy, at its byte offset, with Amp's
+  message id: what was typed, the agent's text, thinking and tool calls (`tool_use`), and the
+  tools' results (the `tool` role). Amp's own notices (`info`) and turn ends are left out.
 
 A log line longer than 8 MiB is passed over. Text is cut at 64 KiB per part and otherwise left
 as written: the status service cleans it before it leaves the machine.
@@ -312,7 +323,8 @@ bracketed paste in its input box like typing (its `--print` mode is a second pro
 Build is the same: its headless and agent modes are processes of their own, and it takes a
 bracketed paste and Enter as one prompt. Kimi Code too (`kimi acp`, `kimi web` and `kimi rc` run
 processes of their own); typed during a turn, it queues the reply and logs it as a prompt when
-the turn ends. So nothing here is
+the turn ends. Amp is typed into the same way (its plugin isn't asked to append a message), and
+its plugin's copy shows the typed reply as the thread's next prompt. So nothing here is
 agent-specific beyond what's already read: the conversation id
 (`agent_turn.conversation_id`) the reply must still match, and the lifecycle that says the
 agent waits for input, or works for one that takes what's typed during a turn and logs it as a
@@ -370,6 +382,9 @@ cargo test -p rakumux-mcp --test pi_extension --locked
 node --test '../integrations/pi/activity.test.mjs'
 # Real Pi (1.1 or later) against a fake local model, offline; needs `cargo build --workspace`.
 cargo test -p rakumux-ptyd --test pi_e2e --locked -- --ignored
+cargo test -p rakumux-ptyd amp --locked
+cargo test -p rakumux-mcp amp --locked
+node --test '../integrations/amp/activity.test.mjs'
 ```
 
 Fixtures/fake clients do not replace real-agent or native macOS verification. Verify those

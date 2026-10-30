@@ -242,7 +242,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    pending one addressed to
    this machine into the entry's session with `session_submit` (a bracketed paste, then
    Enter; the same for Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor, Grok Build,
-   Kimi Code and Droid, which have no API for a running interactive session), only while it's live, not private, shows the entry's conversation
+   Kimi Code, Droid and Amp, which have no API for a running interactive session (Amp's plugin
+   isn't asked to add a message)), only while it's live, not private, shows the entry's conversation
    (`agent_turn.conversation_id`) and its agent waits (`idle`/`done`; `working`, `blocked` or an
    unknown chat waits, the cloud expires a reply after an hour; `working` doesn't for an agent
    that takes what's typed during a turn: **mid-turn**, below), not while someone typed
@@ -445,9 +446,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 
 ## File structure
 
-Agent-specific hooks, detection profiles, resume code, the OpenCode and Kimi Code plugins and the
-Pi extension (each with its installer) live under
-`integrations/{open-code,claude-code,codex,pi,copilot,cursor-agent,grok,kimi,droid}/`. Shared engines live in `integrations/`.
+Agent-specific hooks, detection profiles, resume code, the OpenCode, Kimi Code and Amp plugins
+and the Pi extension (each with its installer) live under
+`integrations/{open-code,claude-code,codex,pi,copilot,cursor-agent,grok,kimi,droid,amp}/`. Shared engines live in `integrations/`.
 See [integration boundaries and protocol](integrations/README.md). New integrations go there,
 not in UI handlers, API/MCP transport or control policy. Optional version-1 `Report.activity`
 is self-only (`session.activity` capability). The daemon validates, timestamps and expires
@@ -555,8 +556,9 @@ newest the daemon's follower of `agent_output` saw, kept after the agent exits a
 registry; the session row's age shows it, else `last_active_at`), `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree, repo}` of
 the current cwd; `repo`: the `origin` remote URL's last path component without `.git`, from the
 common git dir's `config`, else the main working tree's folder name (a bare repository's own,
-`x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor, Grok Build, Kimi Code or Droid session's latest reasoning,
-tool call or reply as one line, from its conversation log or database: `integrations/output.rs`),
+`x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor, Grok Build, Kimi Code, Droid or Amp session's latest reasoning,
+tool call or reply as one line, from its conversation log or database, Amp's from the copy of its
+thread its Rakumux plugin keeps: `integrations/output.rs`),
 `user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
 messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
 since, whose content `session_turn` returns; the conversation tells chats apart for their one
@@ -574,8 +576,9 @@ last_active_at, added_at, git}` on the wire.
   what GitHub Copilot's file tools wrote, its `fileEdits`; Cursor's `Write`, `StrReplace`,
   `Delete`, `EditNotebook`; Grok Build's finished edits' diffs; Kimi Code's `Write`, `Edit` and
   the files it tracks before changing them, its subagents' too; Droid's `Create`, `Edit`,
-  `MultiEdit`) or patched (`apply_patch` however Codex calls it, OpenCode's `patch`, Droid's
-  `ApplyPatch`). Working trees it only worked in (started in, `cd`'d into, searched, read
+  `MultiEdit`; Amp's `edit_file`, `create_file`, or any call Amp itself says changed files, its
+  `sed -i` too) or patched (`apply_patch` however Codex or Amp calls it, OpenCode's `patch`,
+  Droid's `ApplyPatch`). Working trees it only worked in (started in, `cd`'d into, searched, read
   from) are kept in memory and the registry, never listed, so one becomes a place, at its latest
   touch's time, once files there change: a session started in a main checkout that made a
   worktree and changed files only there lists that worktree alone. A known limit: other shell
@@ -593,12 +596,14 @@ last_active_at, added_at, git}` on the wire.
   `current_dir` and commands, and finished edits, its finished subagents' own logs included;
   Kimi Code's tools' resolved paths and Bash working directories and commands; Droid's session
   summary's `cwd` and `lastCwd`, and its tools' file paths, search roots, patches and `Execute`
-  commands (a Task subagent's calls, in a session file of its own, aren't read). Its agent's working-directory reports and its terminal's directories count
+  commands (a Task subagent's calls, in a session file of its own, aren't read); Amp's
+  workspace, tools' paths and commands (`Bash`'s `cwd`), from its plugin's thread copy. Its agent's working-directory reports and its terminal's directories count
   as worked in. Times are the conversation's own, so reading it again changes nothing, and a
   working tree's moves on a minute at a time; each session keeps 32 of each kind (changed, only
   worked in). Working trees in the agents' own data directories
   (`~/.claude`, `~/.codex`, `~/.copilot`, OpenCode's, `~/.cursor`, `~/.grok` and `~/.factory`
-  but their worktrees, `~/.kimi-code`, Claude Code's `/tmp/claude-<uid>`, Pi's `~/.pi/agent`) and
+  but their worktrees, `~/.kimi-code`, `~/.amp` and Amp's cache and config, Claude Code's
+  `/tmp/claude-<uid>`, Pi's `~/.pi/agent`) and
   in `/proc`, `/sys`, `/dev` are never places. Kept in the registry, so ended sessions keep
   theirs; only paths are read. They stay on this machine (not in `rakumux-api`), except their
   names in the feed's session list (below).
@@ -644,10 +649,12 @@ process has open under `~/.cursor/chats/`, else the one its hooks report, else t
 newest → `cursor-agent <flags> --resume <id>`, never `agent`; its commands that aren't a chat,
 such as `agent login`, are typed back, not run), Grok Build (of the sessions
 `~/.grok/active_sessions.json` lists for the process, the one its hooks named, else the one
-written last → `grok <flags> --resume <id>`, also when started as `agent`) and Droid (the
+written last → `grok <flags> --resume <id>`, also when started as `agent`), Droid (the
 conversation its hooks report, else the newest top-level session file of the folder in
 `~/.factory/sessions` → `droid <flags> --resume <id>`; `droid exec`, `droid mcp` and its other
-commands are typed, never run); each keeps the
+commands are typed, never run) and Amp (the thread its plugin bound, else the one the process
+continued, else Amp's last for the folder → `amp threads continue <id | --last> <flags>`;
+`amp --no-tui`, a runner, is a command); each keeps the
 flags that shape an interactive session (permissions, model, …). Pi (the conversation its
 extension bound, else the folder's newest file under `~/.pi/agent/sessions/` → `pi --session
 <file>`) hides its arguments, so only what its conversation keeps (model, thinking level) comes
@@ -746,7 +753,8 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   reply text; session callers, delegated callers and `rakumux-api` never see replies. OpenCode
   replies are its turn's last text block; Pi's, its turn's final response (one that stopped
   without a tool to call), keyed by its entry's `id`; Grok Build's, its text blocks since the
-  last prompt or tool call (keyed by the turn's `promptId`). A reply's optional `position` is its turn's last
+  last prompt or tool call (keyed by the turn's `promptId`); Amp's, its thread copy's text after
+  the last tool call, keyed by the message's id. A reply's optional `position` is its turn's last
   message's in the conversation (below).
 - Agent conversations (user only, capability `session.transcript`;
   `integrations/transcript.rs`): `session_transcript {id, after?, max_bytes?}` reads a live
@@ -773,6 +781,8 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   never past a final `turn_ended` line, which Cursor drops when it writes the file whole.
   Droid: one message per session-file line, at its offset past the file's first line (which
   Droid rewrites in place when it names the session), its hook rows and notices left out.
+  Amp: one message per line of its plugin's thread copy, at its byte offset (Amp's notices and
+  turn ends left out).
   About 512 KiB of log is read per request (at most 2 MiB); `more` says ask again. A cursor of
   another conversation reads the current one from its start.
 - Resource use (user only, capability `resources`; `resources.rs`, `procinfo/`):
@@ -812,7 +822,8 @@ wins, and a session's bindings end when it exits. OpenCode 2.x runs MCP servers 
 every conversation, so the Rakumux plugin for its TUI (`integrations/open-code/rakumux-session/`,
 installed with `rakumux-mcp opencode-plugin --install`) binds the conversations it shows; Pi's
 Rakumux extension (`integrations/pi/rakumux-session/`, `rakumux-mcp pi-plugin --install`) binds
-the one it shows, since nothing outside Pi's process names it. For any
+the one it shows, since nothing outside Pi's process names it, and the Rakumux plugin for Amp
+(`integrations/amp/rakumux-session/`, `rakumux-mcp amp-plugin --install`) the thread Amp shows. For any
 agent, the conversation a session named is what the daemon follows (latest output, turn, replies,
 whole chat) and resumes for it: the newest it bound for that agent, else the one its hook
 activity reports, else its working-directory report's (`ControlService`'s `bound_conversation`,

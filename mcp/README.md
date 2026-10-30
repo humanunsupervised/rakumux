@@ -1,7 +1,7 @@
 # rakumux-mcp
 
 Agent-specific adapters now live in root [`integrations/`](../integrations/README.md),
-including OpenCode's and Kimi Code's plugins/installers, Pi's extension/installer and the
+including OpenCode's, Kimi Code's and Amp's plugins/installers, Pi's extension/installer and the
 optional Claude Code/Codex activity hooks.
 Activity does not depend on MCP; it uses the daemon's authenticated self-report protocol.
 
@@ -87,7 +87,8 @@ OpenCode 1.x starts MCP servers inside each TUI, so they do; Pi starts its stdio
 own process with its environment, so they do; Grok Build starts them with its own environment,
 so both reach them (checked with 1.0.70); Kimi Code starts them with its whole environment, so
 both reach it (verified); Droid starts stdio servers with its own environment, so both do (read
-in Droid 1.0.0's code, not verified in a running Droid); OpenCode 2.x runs MCP servers in a
+in Droid 1.0.0's code, not verified in a running Droid); for Amp it's unverified, so map both
+explicitly in the server's `env` (below); OpenCode 2.x runs MCP servers in a
 background service shared by every conversation, so they don't.
 
 **OpenCode 2.x** tags every tool call with its conversation (`_meta["ai.opencode/sessionID"]`). The
@@ -285,6 +286,25 @@ Kimi names the tools `mcp__plugin-rakumux_rakumux__<tool>`; in Always Ask mode i
 each call ("Approve for this session" stops asking for that tool). Verified with Kimi Code
 2.4.0 in a Rakumux session (offline, against a mock model): the six tools, and `list_sessions`
 naming its own session "this is you". See [Kimi Code integration](../integrations/kimi/README.md).
+
+### Amp
+
+```bash
+amp mcp add rakumux \
+  --env 'RAKUMUX_SESSION_ID=${RAKUMUX_SESSION_ID}' \
+  --env 'RAKUMUX_SESSION_TOKEN=${RAKUMUX_SESSION_TOKEN}' \
+  -- rakumux-mcp
+```
+
+This writes `"amp.mcpServers": {"rakumux": {"command": "rakumux-mcp", "args": [], "env": {…}}}`
+to `~/.config/amp/settings.json`; Amp expands `${VAR}` from its own environment, so the server
+gets both identity variables, in single quotes above so your shell leaves them to Amp. Outside a
+Rakumux session they're empty, which `rakumux-mcp` treats as unset (it acts as the user).
+(Syntax checked against `amp mcp add --help`; whether Amp also passes its environment to local
+servers by itself is unverified, hence the explicit `env`.)
+
+Amp's state, resume and conversation need the Rakumux plugin, not MCP:
+`rakumux-mcp amp-plugin --install` (see [Amp integration](../integrations/amp/README.md)).
 
 ## Environment
 
