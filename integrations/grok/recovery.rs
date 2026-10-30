@@ -105,8 +105,9 @@ pub(crate) fn grok_conversation(
 }
 
 /// `sessions/<encoded cwd>/<id>/updates.jsonl` under `home`: in the folder
-/// named after `cwd` when that's where it is, else wherever it is (a long
-/// folder name is a slug and a hash).
+/// named after `cwd` when that's where the session is, else wherever it is (a
+/// long folder name is a slug and a hash). A session has its folder from its
+/// start, its log once something was typed.
 pub(crate) fn grok_log(home: &Path, id: &str, cwd: Option<&Path>) -> Option<PathBuf> {
     if !is_conversation_id(id) {
         return None;
@@ -114,9 +115,10 @@ pub(crate) fn grok_log(home: &Path, id: &str, cwd: Option<&Path>) -> Option<Path
     let sessions = home.join("sessions");
     let direct = cwd
         .and_then(Path::to_str)
-        .map(|cwd| sessions.join(encode(cwd)).join(id).join("updates.jsonl"));
-    if let Some(log) = direct.filter(|log| log.is_file()) {
-        return Some(log);
+        .map(|cwd| sessions.join(encode(cwd)).join(id));
+    if let Some(session) = direct.filter(|session| session.is_dir()) {
+        let log = session.join("updates.jsonl");
+        return log.is_file().then_some(log);
     }
     std::fs::read_dir(&sessions)
         .ok()?
@@ -250,6 +252,15 @@ mod tests {
         assert_eq!(grok_conversation(dir.path(), 42, Some(B)).unwrap().0, A);
         let empty = home(&[(A, 42, "2026-10-30T02:15:46Z")], &[]);
         assert_eq!(grok_conversation(empty.path(), 42, None), None);
+        // Its folder is there from the start: no need to look further.
+        let folder = empty.path().join("sessions/%2Fhome%2Fme%2Fproj").join(A);
+        std::fs::create_dir_all(&folder).unwrap();
+        assert_eq!(
+            grok_log(empty.path(), A, Some(Path::new("/home/me/proj"))),
+            None
+        );
+        std::fs::write(folder.join("updates.jsonl"), "").unwrap();
+        assert_eq!(grok_conversation(empty.path(), 42, None).unwrap().0, A);
     }
 
     #[test]
