@@ -1,0 +1,74 @@
+{
+  "upload": {
+    "valid": [
+      {
+        "version": 1,
+        "machine": "studio",
+        "at": 1761800000000,
+        "host": {
+          "cpus": 8,
+          "cpu_percent": 12.5,
+          "memory_used_bytes": 10737418240,
+          "memory_total_bytes": 17179869184,
+          "net_rx_bytes_per_s": 250,
+          "net_tx_bytes_per_s": 25
+        },
+        "rakumux": [
+          { "role": "server", "processes": 1, "usage": { "cpu_percent": 0.4, "memory_bytes": 31457280, "net_rx_bytes_per_s": 0, "net_tx_bytes_per_s": 0 } },
+          { "role": "window", "processes": 2, "usage": { "cpu_percent": 3.1, "memory_bytes": 83886080 } },
+          { "role": "account_service", "processes": 1, "usage": { "cpu_percent": 0, "memory_bytes": 20971520, "net_rx_bytes_per_s": 120, "net_tx_bytes_per_s": 900 } }
+        ],
+        "sessions": [
+          { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R2", "processes": 3, "usage": { "cpu_percent": 45.5, "memory_bytes": 870318080, "net_rx_bytes_per_s": 4500, "net_tx_bytes_per_s": 450 } },
+          { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R4", "processes": 1, "usage": { "memory_bytes": 5242880 } }
+        ]
+      },
+      {
+        "version": 1,
+        "machine": "my-sprite",
+        "at": 1761800000000,
+        "host": { "cpus": 2 },
+        "rakumux": [],
+        "sessions": []
+      }
+    ],
+    "invalid": [
+      { "note": "no host", "patch": { "host": null } },
+      { "note": "a host CPU share over 100", "host": { "cpu_percent": 100.5 } },
+      { "note": "no CPUs", "host": { "cpus": 0 } },
+      { "note": "a process name", "session": { "name": "claude" } },
+      { "note": "a command line", "session": { "command": "claude --resume x" } },
+      { "note": "a pid", "session": { "pid": 31 } },
+      { "note": "a session id that isn't one", "session": { "id": "fix-login" } },
+      { "note": "a session without processes", "session": { "processes": 0 } },
+      { "note": "negative memory", "usage": { "memory_bytes": -1 } },
+      { "note": "fractional memory", "usage": { "memory_bytes": 1.5 } },
+      { "note": "a rate as text", "usage": { "net_rx_bytes_per_s": "4.5 KB/s" } },
+      { "note": "usage without memory", "usage": { "memory_bytes": null } },
+      { "note": "a role that isn't a word", "role": { "role": "Server!" } },
+      { "note": "a path in a role", "role": { "role": "/usr/bin/rakumux" } },
+      { "note": "an unknown member", "patch": { "processes": [] } },
+      { "note": "another version", "patch": { "version": 2 } }
+    ]
+  },
+  "stored": {
+    "valid": [
+      { "version": 1, "wanted": true },
+      { "version": 1, "wanted": false }
+    ],
+    "invalid": [
+      { "version": 1 },
+      { "version": 1, "wanted": "yes" },
+      { "version": 1, "wanted": true, "stored": 1 }
+    ]
+  },
+  "replies": {
+    "valid": [
+      { "version": 1, "replies": [], "latest_seq": 0, "more": false, "poll_ms": 1000, "resources_wanted": true }
+    ],
+    "invalid": [
+      { "version": 1, "replies": [], "latest_seq": 0, "more": false, "resources_wanted": false },
+      { "version": 1, "replies": [], "latest_seq": 0, "more": false, "resources_wanted": "yes" }
+    ]
+  }
+}

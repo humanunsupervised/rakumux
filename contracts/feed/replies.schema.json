@@ -16,6 +16,10 @@
     },
     "latest_seq": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
     "more": { "type": "boolean" },
-    "poll_ms": { "type": "integer", "minimum": 1000, "maximum": 60000 }
+    "poll_ms": { "type": "integer", "minimum": 1000, "maximum": 60000 },
+    "resources_wanted": {
+      "description": "Someone has rtop open on rakumux.com: the reader sends what it uses now (`resources-upload`) at once and every few seconds while those uploads' answers say `wanted`. Present (true) only then; machines that don't report resources ignore it.",
+      "const": true
+    }
   }
 }

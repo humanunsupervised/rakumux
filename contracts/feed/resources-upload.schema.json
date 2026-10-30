@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:resources-upload",
+  "title": "POST /api/v1/feed/resources request",
+  "description": "What a machine and its Rakumux use now, for rtop on rakumux.com: the machine's CPU, memory and network, Rakumux's own processes by role, and each listed session's processes together. Sent only while rakumux.com wants it (a replies read's `resources_wanted`, then each answer's `wanted`), every few seconds; the cloud keeps only the latest per machine. Rates are the machine's own, from its last two readings. No process names, command lines, paths or pids: sessions are named by id, as the machine's session list names them, and only sessions that list has (never a private one).",
+  "x-maxBodyBytes": 65536,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "machine", "at", "host", "rakumux", "sessions"],
+  "properties": {
+    "version": { "const": 1 },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "at": { "$ref": "urn:rakumux:feed:v1:common#/$defs/timestampMs" },
+    "host": {
+      "description": "The whole machine: how many CPUs, the busy share of all of them together, memory in use (total less available), and bytes a second over every interface but loopback. A part the machine can't read is absent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpus"],
+      "properties": {
+        "cpus": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "cpu_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "memory_used_bytes": { "$ref": "#/$defs/bytes" },
+        "memory_total_bytes": { "$ref": "#/$defs/bytes" },
+        "net_rx_bytes_per_s": { "$ref": "#/$defs/bytes" },
+        "net_tx_bytes_per_s": { "$ref": "#/$defs/bytes" }
+      }
+    },
+    "rakumux": {
+      "description": "Rakumux's own processes, one item per role with how many processes have it: `server` (rakumux-ptyd), `window` (TUIs), `api` (rakumux-api), `account_service` (the status service) and `other` (CLI calls and anything else). Readers show a role they don't know as `other`.",
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "processes", "usage"],
+        "properties": {
+          "role": { "type": "string", "pattern": "^[a-z][a-z_]{0,31}$" },
+          "processes": { "type": "integer", "minimum": 1, "maximum": 10000 },
+          "usage": { "$ref": "#/$defs/usage" }
+        }
+      }
+    },
+    "sessions": {
+      "description": "Each running session the machine's session list has, its processes (the program its terminal started and every descendant) added together.",
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "processes", "usage"],
+        "properties": {
+          "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+          "processes": { "type": "integer", "minimum": 1, "maximum": 500 },
+          "usage": { "$ref": "#/$defs/usage" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "bytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "usage": {
+      "description": "What some processes use now: CPU as a percentage of one CPU (as `top` shows it: two busy CPUs are 200), resident memory, and bytes a second received and sent over their TCP connections (Linux only; absent where unknown). CPU is absent until two readings have it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memory_bytes"],
+      "properties": {
+        "cpu_percent": { "type": "number", "minimum": 0, "maximum": 409600 },
+        "memory_bytes": { "$ref": "#/$defs/bytes" },
+        "net_rx_bytes_per_s": { "$ref": "#/$defs/bytes" },
+        "net_tx_bytes_per_s": { "$ref": "#/$defs/bytes" }
+      }
+    }
+  }
+}

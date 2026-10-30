@@ -20,6 +20,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/replies/status` | [reply-status](reply-status.schema.json) | [reply](reply.schema.json) |
 | `GET /api/v1/feed/replies/attachments/{id}` | path only | the file's bytes, not JSON (below) |
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
+| `POST /api/v1/feed/resources` | [resources-upload](resources-upload.schema.json) | [resources-stored](resources-stored.schema.json) |
 | `GET /api/v1/feed/realtime` | header only | [realtime](realtime.schema.json) |
 | WebSocket at the realtime `url` | bearer `token` | [poke](poke.schema.json) messages |
 | `POST /api/v1/machines/credentials` | [machine-enrol](machine-enrol.schema.json) | [machine-credential](machine-credential.schema.json) |
@@ -133,8 +134,23 @@ conformance tests, not an HTTP server, database or local runtime.
   path. Kept while the account's Feed switch is on. The upload also says what the machine
   handles beyond the first version of this contract (`capabilities`, at most 16 unique names
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
-  fetches a reply's attachments and gives the agent their paths. The cloud keeps the latest list
+  fetches a reply's attachments and gives the agent their paths. `resources`, it sends what it uses
+  while rakumux.com asks (below). The cloud keeps the latest list
   and ignores names it doesn't know.
+- **Resources (rtop):** while someone has rtop open on rakumux.com, every machine of the account
+  says what it uses now. A replies read answers `resources_wanted: true` then (and only then);
+  the machine sends `resources-upload` at once and every few seconds while each answer's
+  `wanted` is true, and stops at false. An upload is `{version:1, machine, at, host, rakumux,
+  sessions}`: the machine's CPUs, CPU share, memory in use and total, and network bytes a second
+  (`host`); Rakumux's own processes by `role` with how many have it (`server`, `window`, `api`,
+  `account_service`, `other`; readers show one they don't know as `other`); and each running
+  session its session list has, by id, with how many processes it runs. Each part's `usage` is
+  CPU as a percentage of one CPU, resident memory, and TCP bytes a second received and sent
+  (absent where unknown); rates are the machine's own, from its last two readings. **No process
+  names, command lines, arguments, paths or pids**, and never a private session (one the session
+  list leaves out). The cloud keeps only each machine's latest upload, briefly, and shows it only
+  while it's fresh. A machine that sends them says `resources` in its session list's
+  `capabilities`.
 - **Pokes:** instead of reading its replies every few seconds, a machine can be told when to.
   `GET /api/v1/feed/realtime` (the machine id header required, else `invalid_request`) gives a
   WebSocket `url` and a `token` that admits that machine of the account once, before
@@ -166,7 +182,7 @@ conformance tests, not an HTTP server, database or local runtime.
   that on its other requests, with its id, which must be the one it was enrolled with. A
   revoked or unknown secret, or another id, is `unauthenticated`; at most 60 exchanges an hour
   per secret (`rate_limited`). An access token reaches what a machine does and nothing else:
-  the features read, AI session titles, the uploads (entries, messages, sessions) as its own
+  the features read, AI session titles, the uploads (entries, messages, sessions, resources) as its own
   machine, and its own replies (the replies read with `machine` set to the name it holds, their
   status and attachments) and the realtime token; the feed and turn reads, writing replies,
   changing features and the credential routes are `forbidden`. When a reply or session message

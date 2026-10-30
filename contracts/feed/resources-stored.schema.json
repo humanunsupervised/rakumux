@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:resources-stored",
+  "title": "POST /api/v1/feed/resources success",
+  "description": "The sample is stored (it replaced the machine's last one). `wanted` says whether to keep sending: someone still has rtop open on rakumux.com. A machine stops at false.",
+  "x-maxBodyBytes": 1024,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "wanted"],
+  "properties": {
+    "version": { "const": 1 },
+    "wanted": { "type": "boolean" }
+  }
+}
