@@ -127,7 +127,10 @@ fn block(block: &Value) -> Option<String> {
             let field = |key: &str| block.get("arguments")?.get(key)?.as_str();
             let subject = match name {
                 "bash" | "powershell" => field("command").map(String::from),
-                "read" | "write" | "edit" => field("path").map(short_path),
+                // Pi takes `@path` as `path`.
+                "read" | "write" | "edit" => {
+                    field("path").map(|path| short_path(path.strip_prefix('@').unwrap_or(path)))
+                }
                 "grep" | "find" => field("pattern").map(String::from),
                 "ls" => field("path").map(String::from),
                 _ => None,
@@ -237,6 +240,15 @@ mod tests {
                 "toolUse"
             )),
             Some("edit: app/account.rs".into())
+        );
+        assert_eq!(
+            line(&assistant(
+                "a1",
+                json!([{"type": "toolCall", "id": "c", "name": "read",
+                    "arguments": {"path": "@src/lib.rs"}}]),
+                "toolUse"
+            )),
+            Some("read: src/lib.rs".into())
         );
         assert_eq!(
             line(&assistant(
