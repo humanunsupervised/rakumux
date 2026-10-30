@@ -64,7 +64,7 @@ enum Out {
 
 /// rtop's readings on the owner thread.
 pub(crate) struct ResourceSync {
-    /// Signed in with the Feed switch on and this machine's name confirmed.
+    /// Signed in with the feed on and this machine's name confirmed.
     enabled: bool,
     /// Until when rakumux.com wants readings.
     wanted_until: Option<Duration>,
@@ -95,7 +95,7 @@ impl ResourceSync {
         }
     }
 
-    /// Follow the account: signed in with its Feed switch on and this
+    /// Follow the account: signed in with its feed on and this
     /// machine's name confirmed. Off, nothing is wanted or kept.
     pub fn set_enabled(&mut self, enabled: bool, now: Duration) {
         if enabled == self.enabled {

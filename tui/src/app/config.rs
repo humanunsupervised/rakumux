@@ -60,7 +60,7 @@ pub struct Settings {
 
 /// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
-/// `phone_offer_seen`, `remote_replies`, `remote_sessions`, `icons`, `sidebar_width`,
+/// `phone_offer_seen`, `icons`, `sidebar_width`,
 /// `stacked_list_percent`, `feed_width`, `session_order` and `section_order`;
 /// other keys in the section (daemon tuning such as `scrollback_rows`) are kept as they are
 /// when the TUI saves the file, except the retired ones
@@ -91,20 +91,6 @@ pub struct SessionsConfig {
     /// row turns it on any time.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub phone_offer_seen: bool,
-    /// Type replies written on rakumux.com or on the account's other
-    /// machines into this machine's agent sessions (Settings → Replies from
-    /// rakumux.com). Off, only replies written in this machine's TUI are.
-    /// Local only, never set from the website; the status service reads it
-    /// every few seconds.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub remote_replies: bool,
-    /// Start new sessions asked for on rakumux.com in this machine's folders
-    /// (Settings → New sessions from rakumux.com): a login shell, or one of
-    /// the agents it names, in a folder this machine lists there. Off, every
-    /// request fails as turned off. Local only, never set from the website;
-    /// the status service reads it every few seconds.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub remote_sessions: bool,
     /// The layout this window shows: Master detail, Grid or Tabs. Not saved:
     /// every start opens Master detail (an older file's `layout` is dropped).
     #[serde(skip)]
@@ -183,8 +169,6 @@ impl Default for SessionsConfig {
             cycle_keys_in_session: false,
             welcome_seen: false,
             phone_offer_seen: false,
-            remote_replies: false,
-            remote_sessions: false,
             layout: SessionLayout::default(),
             icons: Icons::default(),
             ai_summary: AiSummaryConfig::default(),
@@ -295,9 +279,16 @@ impl Default for CycleKeysConfig {
 
 /// Keys of the `"sessions"` section that earlier versions wrote and this
 /// one no longer reads: `selected_projects` (the shown projects; the folder
-/// filter isn't saved) and `layout` (every start opens Master detail).
+/// filter isn't saved), `layout` (every start opens Master detail), and
+/// `remote_replies` and `remote_sessions` (replies and new sessions from
+/// rakumux.com are taken whenever this machine is signed in).
 /// They're dropped on load, so the next save leaves them out.
-pub const RETIRED_SESSION_KEYS: [&str; 2] = ["selected_projects", "layout"];
+pub const RETIRED_SESSION_KEYS: [&str; 4] = [
+    "selected_projects",
+    "layout",
+    "remote_replies",
+    "remote_sessions",
+];
 
 impl Settings {
     pub fn load_from(path: &Path) -> Result<Self> {
@@ -497,6 +488,29 @@ mod tests {
         // Whatever its value.
         fs::write(&path, r#"{"sessions":{"selected_projects":"oops"}}"#).unwrap();
         assert_eq!(Settings::load_from(&path).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn the_retired_replies_and_sessions_switches_are_ignored_and_dropped_on_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        fs::write(
+            &path,
+            r#"{"sessions":{"remote_replies":true,"remote_sessions":"oops","welcome_seen":true}}"#,
+        )
+        .unwrap();
+        let settings = Settings::load_from(&path).unwrap();
+        assert!(settings.sessions.welcome_seen);
+        assert!(
+            settings.sessions.other.is_empty(),
+            "{:?}",
+            settings.sessions.other
+        );
+        settings.save_to(&path).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(raw["sessions"].get("remote_replies").is_none(), "{raw}");
+        assert!(raw["sessions"].get("remote_sessions").is_none(), "{raw}");
     }
 
     #[test]

@@ -24,25 +24,21 @@ pub struct Account {
     pub email: Option<String>,
     /// The provider's stable id, shown when there's no email.
     pub subject: String,
-    /// The account's AI session titles switch (rakumux.com/features);
-    /// `None` until read.
+    /// Whether the account's AI session titles are on (rakumux.com answers
+    /// on for every signed-in account); `None` until read.
     pub titles: Option<bool>,
-    /// The account's Feed switch (rakumux.com/features); `None` until read.
+    /// Whether the account's agent feed is on, likewise; `None` until read.
     pub feed: Option<bool>,
-    /// The last change to the switches couldn't be saved to the account.
-    pub features_unsaved: bool,
 }
 
 impl Account {
     fn from_state(state: OwnerState) -> Option<Self> {
         let (summaries, feed) = (state.summaries, state.feed);
-        let features_unsaved = state.features_unsaved;
         state.account.map(|account| Self {
             email: account.email,
             subject: account.subject,
             titles: summaries,
             feed,
-            features_unsaved,
         })
     }
 
@@ -85,11 +81,6 @@ pub trait AccountAccess: Send + Sync {
     /// the service only when this home has a saved account; signed out without
     /// one, it does nothing.
     fn summarize(&self, session: &SessionId) -> Result<(), String>;
-    /// Turn the account's AI session titles or Agent feed switch on or
-    /// off (`None` leaves one as it is), saved to the account as on
-    /// rakumux.com/features. The service applies it at once and saves it
-    /// next; [`Account::features_unsaved`] says when that failed.
-    fn set_features(&self, titles: Option<bool>, feed: Option<bool>) -> Result<(), String>;
     /// Replace the running service with this build's (the server's restart, `S`); none
     /// running starts none. Whether one was replaced.
     fn restart(&self) -> Result<bool, String>;
@@ -279,13 +270,6 @@ impl AccountAccess for LocalAccount {
             .map(|_| ())
     }
 
-    fn set_features(&self, titles: Option<bool>, feed: Option<bool>) -> Result<(), String> {
-        self.with(self.has_saved_account(), |client| {
-            client.set_features(titles, feed)
-        })?
-        .ok_or_else(|| "the account service isn't running".into())
-    }
-
     fn restart(&self) -> Result<bool, String> {
         // Held throughout, so this window's other requests wait rather than start one meanwhile.
         let mut cached = self
@@ -397,12 +381,7 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
         }
     }
     let settings = layout.home.join("config.json");
-    let replies = settings.clone();
-    let sessions = settings.clone();
-    let config = ServiceConfig::from_env()?
-        .with_turn_settings(move || turn_settings(&settings))
-        .with_remote_replies(move || remote_replies(&replies))
-        .with_remote_sessions(move || remote_sessions(&sessions));
+    let config = ServiceConfig::from_env()?.with_turn_settings(move || turn_settings(&settings));
     // Its HTTP clients block, which a thread of the async runtime may not do.
     std::thread::Builder::new()
         .name("rakumux-status-service".into())
@@ -414,18 +393,6 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
         .map_err(|_| ServiceError::Start)?
         .join()
         .map_err(|_| ServiceError::Start)?
-}
-
-/// `sessions.remote_replies` of `config.json`: off when it can't be read.
-fn remote_replies(path: &std::path::Path) -> bool {
-    crate::app::config::Settings::load_from(path)
-        .is_ok_and(|settings| settings.sessions.remote_replies)
-}
-
-/// `sessions.remote_sessions` of `config.json`: off when it can't be read.
-fn remote_sessions(path: &std::path::Path) -> bool {
-    crate::app::config::Settings::load_from(path)
-        .is_ok_and(|settings| settings.sessions.remote_sessions)
 }
 
 /// `sessions.ai_summary` of `config.json`: the defaults when it can't be read.

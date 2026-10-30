@@ -144,8 +144,7 @@ pub enum Command {
     /// Your Rakumux account: sign in for AI session titles and the agent feed
     ///
     /// Signed in, a background service titles each agent session in a few
-    /// words (a name you gave stays). AI session titles can be turned off on
-    /// rakumux.com/features.
+    /// words (a name you gave stays) and keeps the feed.
     Account {
         #[command(subcommand)]
         command: AccountCommand,
@@ -194,13 +193,13 @@ pub enum SpriteCommand {
         /// The Sprite's name (default: rakumux)
         #[arg(long)]
         sprite: Option<String>,
-        /// Type replies written on rakumux.com or your other machines into
-        /// the Sprite's agents, without asking (signed in, its agents'
-        /// replies reach your feed)
-        #[arg(long, conflicts_with = "no_replies")]
+        /// Accepted and ignored: replies from rakumux.com are typed into a
+        /// signed-in Sprite's agents (scripts written for 0.1.32 and earlier
+        /// still pass these)
+        #[arg(long, hide = true)]
         replies: bool,
-        /// Don't type replies from rakumux.com into the Sprite's agents
-        #[arg(long)]
+        /// Accepted and ignored, likewise
+        #[arg(long, hide = true)]
         no_replies: bool,
     },
     /// Which Sprite sessions go to, and whether it's reachable

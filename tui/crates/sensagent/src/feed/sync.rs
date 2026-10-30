@@ -84,7 +84,7 @@ pub(crate) struct FeedSync {
     signed_in: bool,
     /// Signed out, or the switch was read: whether to capture is known.
     known: bool,
-    /// Signed in, with the account's Feed switch on.
+    /// Signed in, with the account's feed on.
     enabled: bool,
     /// What the daemon was last told about capture; `None` since it (re)connected.
     capture: Option<bool>,
@@ -133,7 +133,7 @@ impl FeedSync {
         self
     }
 
-    /// Follow the account: signed in, and its Feed switch (`None` until read).
+    /// Follow the account: signed in, and its feed (`None` until read).
     /// Signing out or turning the switch off forgets the feed. True when the
     /// feed just turned on.
     pub fn set_account(&mut self, signed_in: bool, switch: Option<bool>, now: Duration) -> bool {

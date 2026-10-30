@@ -535,8 +535,7 @@ impl KeyAction {
                  Master detail and Grid (a tab of its own in Tabs), beside rtop. Enter reads a reply whole, again goes into \
                  its session when it runs here; r writes back to it; Esc gives the list the \
                  keys back. The footer's Feed button counts the replies that came since you \
-                 last looked. Needs your Rakumux account with the Agent feed on (Settings → \
-                 Available on sign-in)."
+                 last looked. Needs your Rakumux account (Settings → Account)."
                 .into(),
             KeyAction::NextFolder | KeyAction::PreviousFolder => {
                 "With several folders shown: the first session under the next or previous \
@@ -1746,8 +1745,8 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         row(
             "f",
             "The feed: shows it with the keys, gives it the keys, or hides it. What agents \
-             said when they finished a turn, on every machine of your account (turn it on in \
-             Settings → Available on sign-in), in a pane on the right (a tab in Tabs). With \
+             said when they finished a turn, on every machine of your account (signed in: \
+             Settings → Account), in a pane on the right (a tab in Tabs). With \
              its keys, ↑/↓ go through the replies; Enter reads one whole (Esc back), again goes \
              into its session; r writes back to it: typed into its session when its agent \
              waits, and shown with the answer as a thread; Esc gives the list the keys",
@@ -2094,7 +2093,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     );
     doc.heading("AI naming");
     doc.text(
-        "Signed in with AI session titles on (Settings → Available on sign-in), each agent \
+        "Signed in (Settings → Account), each agent \
          chat names its session by itself, once its agent has written 5 messages or \
          finished. `s` or the ↻ after a hovered session's name makes a new title. A name you \
          gave (`r`) stays until you ask for one.",

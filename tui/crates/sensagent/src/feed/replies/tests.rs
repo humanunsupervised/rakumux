@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 use super::*;
 use session_core::ids::ReplyId;
@@ -68,8 +68,8 @@ fn page_of(
     }))
 }
 
-fn on(accept_remote: Option<AcceptRemote>, views: &[SessionView]) -> ReplySync {
-    let mut replies = ReplySync::new("studio".into(), accept_remote, None);
+fn on(views: &[SessionView]) -> ReplySync {
+    let mut replies = ReplySync::new("studio".into(), None);
     replies.set_enabled(true, NOW);
     replies.connected(views);
     replies
@@ -94,15 +94,8 @@ fn report_of(work: Option<ReplyWork>) -> serde_json::Value {
     }
 }
 
-/// Read `pending`, then return what comes next. Those from "studio" were
-/// written here: this machine made their ids.
+/// Read `pending`, then return what comes next.
 fn after_reading(replies: &mut ReplySync, pending: Vec<FeedReply>) -> Option<ReplyWork> {
-    for reply in pending
-        .iter()
-        .filter(|reply| reply.from.as_deref() == Some("studio"))
-    {
-        replies.wrote(&reply.id);
-    }
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, read(pending), NOW);
     replies.next_work(NOW)
@@ -146,7 +139,7 @@ fn answer(conversation: Option<&str>, finished_at: i64) -> AgentReply {
 
 #[test]
 fn a_reply_written_here_is_typed_reported_and_answered() {
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let pending = reply("01K8A1", 4, Some("studio"));
     let work = after_reading(&mut replies, vec![pending]);
     assert_eq!(
@@ -187,7 +180,7 @@ fn a_reply_written_here_is_typed_reported_and_answered() {
 #[test]
 fn a_busy_or_blocked_agent_is_waited_for() {
     for lifecycle in [Lifecycle::Working, Lifecycle::Blocked, Lifecycle::Unknown] {
-        let mut replies = on(None, &[view("S", lifecycle, Some(CHAT))]);
+        let mut replies = on(&[view("S", lifecycle, Some(CHAT))]);
         let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
         assert_eq!(work, None, "{lifecycle:?}");
         replies.observe(&view("S", Lifecycle::Idle, Some(CHAT)));
@@ -197,14 +190,14 @@ fn a_busy_or_blocked_agent_is_waited_for() {
         ));
     }
     // A chat not known yet is waited for too.
-    let mut replies = on(None, &[view("S", Lifecycle::Done, None)]);
+    let mut replies = on(&[view("S", Lifecycle::Done, None)]);
     let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
     assert_eq!(work, None);
 }
 
 #[test]
 fn one_reply_at_a_time_goes_into_a_session() {
-    let mut replies = on(None, &[view("S", Lifecycle::Idle, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Idle, Some(CHAT))]);
     let first = reply("01K8A1", 4, Some("studio"));
     let second = reply("01K8A2", 5, Some("studio"));
     let work = after_reading(&mut replies, vec![second, first]);
@@ -224,7 +217,7 @@ fn one_reply_at_a_time_goes_into_a_session() {
 
 #[test]
 fn a_session_being_typed_into_takes_nothing_else_meanwhile() {
-    let mut replies = on(None, &[view("S", Lifecycle::Idle, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Idle, Some(CHAT))]);
     let first = reply("01K8A1", 4, Some("studio"));
     let second = reply("01K8A2", 5, Some("studio"));
     let work = after_reading(&mut replies, vec![second, first]);
@@ -246,7 +239,7 @@ fn a_session_being_typed_into_takes_nothing_else_meanwhile() {
 
 #[test]
 fn a_session_someone_is_typing_in_is_tried_again_once_they_pause() {
-    let mut replies = on(None, &[view("S", Lifecycle::Idle, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Idle, Some(CHAT))]);
     let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
     assert!(matches!(work, Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"));
     // The daemon refused: someone typed there. It stays pending, unreported…
@@ -265,28 +258,17 @@ fn a_session_someone_is_typing_in_is_tried_again_once_they_pause() {
 }
 
 #[test]
-fn replies_written_elsewhere_need_this_machines_setting() {
+fn replies_are_typed_wherever_they_were_written() {
+    // On rakumux.com, on another machine, or in this machine's TUI.
     let views = [view("S", Lifecycle::Done, Some(CHAT))];
-    for from in [None, Some("laptop")] {
-        let mut replies = on(None, &views);
-        let body = report_of(after_reading(&mut replies, vec![reply("01K8A1", 4, from)]));
-        assert_eq!(body["status"], "failed");
-        assert_eq!(body["failure"], "not_accepted");
+    for from in [None, Some("laptop"), Some("studio")] {
+        let mut replies = on(&views);
+        let work = after_reading(&mut replies, vec![reply("01K8A1", 4, from)]);
+        assert!(
+            matches!(work, Some(ReplyWork::Submit { ref reply, .. }) if reply == "01K8A1"),
+            "{from:?}: {work:?}"
+        );
     }
-
-    let accept = Arc::new(AtomicBool::new(true));
-    let setting = accept.clone();
-    let mut replies = on(
-        Some(Arc::new(move || setting.load(Ordering::SeqCst))),
-        &views,
-    );
-    let work = after_reading(&mut replies, vec![reply("01K8A1", 4, None)]);
-    assert!(matches!(work, Some(ReplyWork::Submit { .. })));
-
-    // Turned off, it's read again within seconds.
-    accept.store(false, Ordering::SeqCst);
-    assert!(replies.accepts_remote(NOW + Duration::from_secs(1)));
-    assert!(!replies.accepts_remote(NOW + SETTING_EVERY));
 }
 
 #[test]
@@ -319,7 +301,7 @@ fn a_reply_that_cant_be_typed_fails_with_why() {
         ),
     ];
     for (views, failure) in cases {
-        let mut replies = on(None, &views);
+        let mut replies = on(&views);
         let body = report_of(after_reading(
             &mut replies,
             vec![reply("01K8A1", 4, Some("studio"))],
@@ -329,7 +311,7 @@ fn a_reply_that_cant_be_typed_fails_with_why() {
     }
 
     // The daemon refused the text.
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
     replies.submitted("01K8A1".into(), Err(ErrorCode::SessionNotLive), NOW, 2_000);
     assert_eq!(report_of(replies.next_work(NOW))["failure"], "refused");
@@ -338,7 +320,7 @@ fn a_reply_that_cant_be_typed_fails_with_why() {
 
 #[test]
 fn only_this_machines_pending_replies_are_typed_and_never_twice() {
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let mut elsewhere = reply("01K8A1", 4, Some("studio"));
     elsewhere.machine = "laptop".into();
     let mut delivered = reply("01K8A2", 5, Some("studio"));
@@ -351,7 +333,6 @@ fn only_this_machines_pending_replies_are_typed_and_never_twice() {
 
     // Typed once read, then read again still pending before the report landed.
     let pending = reply("01K8A3", 6, Some("studio"));
-    replies.wrote("01K8A3");
     replies.written(&pending, NOW);
     assert_eq!(read_after(replies.next_work(NOW)), 5);
     replies.request_done(true, read(vec![pending.clone()]), NOW);
@@ -377,7 +358,7 @@ fn only_this_machines_pending_replies_are_typed_and_never_twice() {
 
 #[test]
 fn reads_follow_the_cursor_and_back_off_after_failures() {
-    let mut replies = on(None, &[]);
+    let mut replies = on(&[]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     assert_eq!(replies.next_work(NOW), None);
     replies.request_done(true, page_of(vec![], 7, 12, true), NOW);
@@ -408,7 +389,7 @@ fn reads_follow_the_cursor_and_back_off_after_failures() {
 #[test]
 fn reports_and_reads_wait_out_their_own_failures() {
     let hour = Duration::from_secs(3_600);
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     // rakumux.com asks to wait an hour (until its quota's window ends): reads
     // hold back a minute at most, as a refused read isn't counted and
@@ -419,7 +400,6 @@ fn reports_and_reads_wait_out_their_own_failures() {
     // A reply written here meanwhile waits for a read only so long, and,
     // typed in, is reported at once.
     let later = NOW + Duration::from_secs(30);
-    replies.wrote("01K8A1");
     replies.written(&reply("01K8A1", 4, Some("studio")), later);
     assert_eq!(replies.next_work(later), None);
     let later = later + ORDER_WAIT;
@@ -444,7 +424,6 @@ fn reports_and_reads_wait_out_their_own_failures() {
 
     // Reports rate-limited in turn don't hold back reads.
     replies.observe(&view("S", Lifecycle::Done, Some(CHAT)));
-    replies.wrote("01K8A2");
     replies.written(&reply("01K8A2", 6, Some("studio")), read_at);
     assert_eq!(read_after(replies.next_work(read_at)), 0);
     replies.request_done(
@@ -495,7 +474,7 @@ fn the_waits_rakumux_com_asks_for_are_capped() {
 
 #[test]
 fn a_pending_reply_on_a_later_page_is_typed_in() {
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     // The first page: replies delivered long ago. The account's newest, the
     // pending one, is on a later page.
@@ -503,7 +482,6 @@ fn a_pending_reply_on_a_later_page_is_typed_in() {
     old.status = ReplyStatus::Delivered;
     replies.request_done(true, page_of(vec![old], 100, 250, true), NOW);
     assert_eq!(read_after(replies.next_work(NOW)), 100);
-    replies.wrote("01K8A1");
     let pending = reply("01K8A1", 250, Some("studio"));
     replies.request_done(true, page_of(vec![pending], 250, 250, false), NOW);
     assert!(matches!(
@@ -514,7 +492,7 @@ fn a_pending_reply_on_a_later_page_is_typed_in() {
 
 #[test]
 fn a_page_whose_rows_were_all_left_out_still_moves_reads_on() {
-    let mut replies = on(None, &[]);
+    let mut replies = on(&[]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, page_of(vec![], 100, 300, true), NOW);
     assert_eq!(read_after(replies.next_work(NOW)), 100);
@@ -534,7 +512,7 @@ fn reads_come_as_soon_as_rakumux_com_says() {
             new_sessions: vec![],
         }))
     };
-    let mut replies = on(None, &[]);
+    let mut replies = on(&[]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     // A reply waits for this machine, or the website is open: every second.
     replies.request_done(true, paced(Some(Duration::from_secs(1))), NOW);
@@ -591,9 +569,8 @@ fn read_messages(messages: Vec<SessionMessage>) -> Result<FeedResult, FeedFailur
 
 #[test]
 fn a_session_message_waits_for_an_agent_then_goes_into_whatever_chat_it_shows() {
-    let remote: AcceptRemote = Arc::new(|| true);
     // A shell: nothing is typed into it.
-    let mut replies = on(Some(remote), &[view("S", Lifecycle::None, None)]);
+    let mut replies = on(&[view("S", Lifecycle::None, None)]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     let shown = replies.request_done(
         true,
@@ -640,12 +617,10 @@ fn a_session_message_waits_for_an_agent_then_goes_into_whatever_chat_it_shows() 
 
 #[test]
 fn a_session_message_written_here_is_typed_once_read_when_its_agent_waits() {
-    // This machine takes nothing written elsewhere, but its own TUI's message
-    // goes in, once a read reaches it.
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    // Its own TUI's message goes in once a read reaches it.
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let mut written = message("01K8A4", 9, Some(CHAT));
     written.from = Some("studio".into());
-    replies.wrote("01K8A4");
     replies.written_message(&written, NOW);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, read_messages(vec![written.clone()]), NOW);
@@ -673,26 +648,25 @@ fn a_session_message_written_here_is_typed_once_read_when_its_agent_waits() {
 
 #[test]
 fn a_session_message_follows_the_same_rules_for_where_it_may_go() {
-    // Written on rakumux.com: not typed here unless this machine takes those.
-    let mut replies = on(None, &[view("S", Lifecycle::Idle, None)]);
+    // Written on rakumux.com: typed here as one written in this machine's TUI is.
+    let mut replies = on(&[view("S", Lifecycle::Idle, None)]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, read_messages(vec![message("01K8A3", 8, None)]), NOW);
-    let body = report_of(replies.next_work(NOW));
-    assert_eq!(body["status"], "failed");
-    assert_eq!(body["failure"], "not_accepted");
+    assert!(matches!(
+        replies.next_work(NOW),
+        Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A3"
+    ));
 
     // A session that ended, or a private one, can't take it.
-    let remote: AcceptRemote = Arc::new(|| true);
     let mut private = view("S", Lifecycle::Idle, None);
     private.private = true;
-    let mut replies = on(Some(remote), &[private]);
+    let mut replies = on(&[private]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, read_messages(vec![message("01K8A4", 9, None)]), NOW);
     assert_eq!(report_of(replies.next_work(NOW))["failure"], "private");
 
     // With no chat to name, the agent's next reply answers it, whichever chat.
-    let remote: AcceptRemote = Arc::new(|| true);
-    let mut replies = on(Some(remote), &[view("S", Lifecycle::Done, None)]);
+    let mut replies = on(&[view("S", Lifecycle::Done, None)]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, read_messages(vec![message("01K8A5", 10, None)]), NOW);
     assert!(matches!(
@@ -767,7 +741,7 @@ const DOWN: &[u8] = br#"{"error":{"code":"unavailable","message":"Try later."}}"
 #[test]
 fn a_replys_files_are_fetched_then_its_text_typed_with_their_paths() {
     let (home, uploads) = uploads();
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let files = vec![file('A', "shot.png", 4), file('B', "Shot.PNG", 3)];
     let first = fetch_of(after_reading(
         &mut replies,
@@ -813,7 +787,7 @@ fn a_replys_files_are_fetched_then_its_text_typed_with_their_paths() {
 fn files_are_fetched_only_once_the_reply_could_go_in_and_never_twice() {
     let (_home, uploads) = uploads();
     // A busy agent: nothing is fetched for a reply that may wait an hour.
-    let mut replies = on(None, &[view("S", Lifecycle::Working, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Working, Some(CHAT))]);
     let pending = with_files(ATTACHED, vec![file('A', "log.txt", 2)]);
     assert_eq!(after_reading(&mut replies, vec![pending]), None);
     replies.observe(&view("S", Lifecycle::Idle, Some(CHAT)));
@@ -845,7 +819,7 @@ fn a_file_thats_gone_or_not_its_size_fails_the_reply_and_types_nothing() {
         (400, GONE),
     ] {
         let (home, uploads) = uploads();
-        let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+        let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
         let files = vec![file('A', "a.txt", 1), file('B', "b.txt", 8)];
         let first = fetch_of(after_reading(
             &mut replies,
@@ -883,7 +857,7 @@ fn a_file_thats_gone_or_not_its_size_fails_the_reply_and_types_nothing() {
 #[test]
 fn a_download_that_fails_for_now_is_tried_again_and_nothing_goes_in_meanwhile() {
     let (_home, uploads) = uploads();
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let files = vec![file('A', "a.txt", 1), file('B', "b.txt", 1)];
     let first = fetch_of(after_reading(
         &mut replies,
@@ -934,7 +908,7 @@ fn a_download_that_fails_for_now_is_tried_again_and_nothing_goes_in_meanwhile() 
 fn a_replys_files_go_when_it_wont_be_typed_in() {
     let saved_reply = |views: &[SessionView]| {
         let (home, uploads) = uploads();
-        let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+        let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
         let files = vec![file('A', "a.txt", 1)];
         let fetch = fetch_of(after_reading(
             &mut replies,
@@ -995,7 +969,7 @@ fn later_replies_to_a_session_wait_behind_one_fetching_its_files() {
     let (_home, uploads) = uploads();
     let mut other = view("T", Lifecycle::Idle, Some(CHAT));
     other.name = "other".into();
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT)), other]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT)), other]);
     let later = reply("01K8A1B2C3D4E5F6G7H8J9K0MP", 5, Some("studio"));
     let mut elsewhere = reply("01K8A1B2C3D4E5F6G7H8J9K0MQ", 6, Some("studio"));
     elsewhere.session_id = "T".into();
@@ -1049,7 +1023,7 @@ fn on_turn(lifecycle: Lifecycle, turn: u64) -> SessionView {
 
 /// Two replies to S, read together; the first is typed in.
 fn two_replies() -> ReplySync {
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let first = reply("01K8A1", 4, Some("studio"));
     let second = reply("01K8A2", 5, Some("studio"));
     let work = after_reading(&mut replies, vec![second, first]);
@@ -1163,7 +1137,7 @@ fn a_reply_its_chat_never_shows_as_a_prompt_fails_and_its_session_moves_on() {
 #[test]
 fn a_new_prompt_is_the_replys_only_when_it_begins_it_or_holds_its_start() {
     let typed_in = |text: &str| {
-        let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+        let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
         let mut pending = reply("01K8A1", 4, Some("studio"));
         pending.text = text.into();
         submitted_reply(after_reading(&mut replies, vec![pending]));
@@ -1201,10 +1175,9 @@ fn a_new_prompt_is_the_replys_only_when_it_begins_it_or_holds_its_start() {
     }
     // An agent whose turns the daemon doesn't follow takes a session message
     // once seen busy, as before.
-    let remote: AcceptRemote = Arc::new(|| true);
     let mut unfollowed = view("S", Lifecycle::Idle, None);
     unfollowed.agent_turn = None;
-    let mut replies = on(Some(remote), &[unfollowed.clone()]);
+    let mut replies = on(&[unfollowed.clone()]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, read_messages(vec![message("01K8A2", 6, None)]), NOW);
     assert_eq!(
@@ -1246,7 +1219,7 @@ fn a_reply_typed_in_fails_when_its_session_ends_or_its_chat_changes_first() {
 #[test]
 fn a_reply_typed_in_keeps_its_files_whatever_becomes_of_it() {
     let (home, uploads) = uploads();
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let files = vec![file('A', "shot.png", 4)];
     let fetch = fetch_of(after_reading(
         &mut replies,
@@ -1282,10 +1255,9 @@ fn a_reply_typed_in_keeps_its_files_whatever_becomes_of_it() {
 
 #[test]
 fn a_sessions_replies_and_messages_go_in_in_the_order_they_were_written() {
-    let remote: AcceptRemote = Arc::new(|| true);
     // Its chat isn't known yet: the reply to it waits, and the session
     // message written after it waits behind it.
-    let mut replies = on(Some(remote), &[view("S", Lifecycle::Done, None)]);
+    let mut replies = on(&[view("S", Lifecycle::Done, None)]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     let read = Ok(FeedResult::Replies(RepliesRead {
         replies: vec![reply("01K8A9", 4, None)],
@@ -1317,14 +1289,12 @@ fn a_sessions_replies_and_messages_go_in_in_the_order_they_were_written() {
 
 #[test]
 fn a_reply_written_here_goes_in_behind_one_written_before_it_elsewhere_not_read_yet() {
-    let remote: AcceptRemote = Arc::new(|| true);
-    let mut replies = on(Some(remote), &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     // A read goes out; meanwhile a reply is written on rakumux.com, then one
     // in this machine's TUI, and the read comes back without either.
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     let earlier = reply("01K8A1", 7, None);
     let mine = reply("01K8A2", 8, Some("studio"));
-    replies.wrote("01K8A2");
     replies.written(&mine, NOW);
     assert_eq!(replies.next_work(NOW), None, "not before a read reaches it");
     replies.request_done(true, read(vec![]), NOW);
@@ -1349,7 +1319,7 @@ fn a_reply_written_here_goes_in_behind_one_written_before_it_elsewhere_not_read_
 #[test]
 fn someone_typing_or_a_refusal_frees_the_session_for_its_next_reply() {
     // Refused by the daemon: failed, and the next goes in.
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let first = reply("01K8A1", 4, Some("studio"));
     let second = reply("01K8A2", 5, Some("studio"));
     after_reading(&mut replies, vec![first, second]);
@@ -1361,7 +1331,7 @@ fn someone_typing_or_a_refusal_frees_the_session_for_its_next_reply() {
     assert_eq!(report_of(replies.next_work(NOW))["failure"], "refused");
 
     // Someone typing: the same reply again once they pause, still first.
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let first = reply("01K8A1", 4, Some("studio"));
     let second = reply("01K8A2", 5, Some("studio"));
     after_reading(&mut replies, vec![first, second]);
@@ -1373,21 +1343,9 @@ fn someone_typing_or_a_refusal_frees_the_session_for_its_next_reply() {
     );
 }
 
-#[test]
-fn a_reply_naming_this_machine_as_its_writer_counts_as_written_here_only_with_an_id_it_made() {
-    // Another machine of the account (or a token taken from one) says the
-    // reply was written on studio: without the setting, it isn't typed.
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
-    assert_eq!(read_after(replies.next_work(NOW)), 0);
-    replies.request_done(true, read(vec![reply("01K8A1", 4, Some("studio"))]), NOW);
-    let body = report_of(replies.next_work(NOW));
-    assert_eq!(body["status"], "failed");
-    assert_eq!(body["failure"], "not_accepted");
-}
-
 /// Replies for studio keeping what's typed in in `path`, with session S.
 fn kept_at(path: &std::path::Path, views: &[SessionView]) -> ReplySync {
-    let mut replies = ReplySync::new("studio".into(), None, Some(path.to_path_buf()));
+    let mut replies = ReplySync::new("studio".into(), Some(path.to_path_buf()));
     replies.set_enabled(true, NOW);
     replies.connected(views);
     replies
@@ -1455,13 +1413,27 @@ fn reports_not_yet_taken_survive_the_switch_going_off_and_a_restart() {
 }
 
 #[test]
-fn replies_this_machine_wrote_are_still_its_own_after_a_restart() {
+fn an_older_file_naming_replies_written_here_still_loads() {
+    // Older releases kept the ids of replies written here (`own`), for a
+    // setting that's gone: ignored when read, dropped when saved.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("replies.json");
-    kept_at(&path, &[]).wrote("01K8A1");
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    std::fs::write(
+        &path,
+        format!(r#"{{"version":1,"own":{{"01K8A1":{at}}},"handled":{{"01K8A2":{at}}}}}"#),
+    )
+    .unwrap();
     let mut replies = kept_at(&path, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert!(saved.get("own").is_none(), "{saved}");
     assert_eq!(read_after(replies.next_work(NOW)), 0);
-    replies.request_done(true, read(vec![reply("01K8A1", 4, Some("studio"))]), NOW);
+    let pending = vec![reply("01K8A1", 4, Some("studio")), reply("01K8A2", 5, None)];
+    replies.request_done(true, read(pending), NOW);
+    // The one handled before isn't typed again; the other is.
     assert!(matches!(
         replies.next_work(NOW),
         Some(ReplyWork::Submit { reply, .. }) if reply == "01K8A1"
@@ -1470,7 +1442,7 @@ fn replies_this_machine_wrote_are_still_its_own_after_a_restart() {
 
 #[test]
 fn a_renamed_machine_reads_its_replies_from_the_start_under_its_new_name() {
-    let mut replies = on(None, &[]);
+    let mut replies = on(&[]);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     let mut old = reply("01K8A1", 4, None);
     old.status = ReplyStatus::Delivered;
@@ -1486,7 +1458,7 @@ fn a_renamed_machine_reads_its_replies_from_the_start_under_its_new_name() {
 
 #[test]
 fn a_reply_is_typed_only_while_the_program_seen_is_in_its_sessions_foreground() {
-    let mut replies = on(None, &[view("S", Lifecycle::Done, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Done, Some(CHAT))]);
     let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
     assert!(
         matches!(&work, Some(ReplyWork::Submit { foreground: Some(program), .. }) if program == "synthetic-agent")
@@ -1527,7 +1499,7 @@ fn type_and_take(replies: &mut ReplySync, id: &str, at: Duration, at_ms: i64) {
 
 #[test]
 fn back_to_back_replies_each_get_their_own_answer() {
-    let mut replies = on(None, &[view("S", Lifecycle::Idle, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Idle, Some(CHAT))]);
     let first = reply("01K8A1", 4, Some("studio"));
     let second = reply("01K8A2", 5, Some("studio"));
     assert!(matches!(
@@ -1558,7 +1530,7 @@ fn back_to_back_replies_each_get_their_own_answer() {
 
 #[test]
 fn a_reply_whose_turn_ended_without_an_answer_never_takes_a_later_one() {
-    let mut replies = on(None, &[view("S", Lifecycle::Idle, Some(CHAT))]);
+    let mut replies = on(&[view("S", Lifecycle::Idle, Some(CHAT))]);
     after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
     replies.submitted("01K8A1".into(), Ok(()), NOW, 2_000);
     taken(&mut replies);
@@ -1587,7 +1559,7 @@ fn read_with_poll(replies: &mut ReplySync, poll: Duration, at: Duration) {
 
 #[test]
 fn while_pokes_come_replies_are_read_when_poked_and_once_a_minute_in_case() {
-    let mut replies = on(None, &[]);
+    let mut replies = on(&[]);
     replies.set_pushed(true, NOW);
     read_with_poll(&mut replies, Duration::from_secs(15), NOW);
     // Nothing until a minute is up…
@@ -1608,7 +1580,7 @@ fn while_pokes_come_replies_are_read_when_poked_and_once_a_minute_in_case() {
 
 #[test]
 fn someone_watching_keeps_reads_at_rakumux_coms_pace_while_pushed() {
-    let mut replies = on(None, &[]);
+    let mut replies = on(&[]);
     replies.set_pushed(true, NOW);
     read_with_poll(&mut replies, WATCHED_POLL, NOW);
     assert!(replies.watched());
@@ -1617,7 +1589,7 @@ fn someone_watching_keeps_reads_at_rakumux_coms_pace_while_pushed() {
 
 #[test]
 fn a_poke_during_a_read_reads_again_once_it_is_back() {
-    let mut replies = on(None, &[]);
+    let mut replies = on(&[]);
     replies.set_pushed(true, NOW);
     read_after(replies.next_work(NOW));
     // The change may have come after the read was answered.
@@ -1632,7 +1604,7 @@ fn a_poke_during_a_read_reads_again_once_it_is_back() {
 
 #[test]
 fn a_closed_connection_brings_back_rakumux_coms_pace() {
-    let mut replies = on(None, &[]);
+    let mut replies = on(&[]);
     replies.set_pushed(true, NOW);
     read_with_poll(&mut replies, Duration::from_secs(15), NOW);
     replies.set_pushed(false, NOW + Duration::from_secs(1));

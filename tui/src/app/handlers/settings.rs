@@ -4,7 +4,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::types::{AccountFeature, AccountStatus, AppMode, AppResult, Focus, SettingsItem};
+use crate::app::types::{AppMode, AppResult, Focus, SettingsItem};
 use crate::app::App;
 use crate::help::{KeyAction, Modal, ModalAction, ModalTab};
 
@@ -202,28 +202,6 @@ fn open_item(app: &mut App, item: SettingsItem) {
             let next = app.icons().next();
             app.settings.sessions.icons = next;
             save_config(app, format!("Icons: {}", next.label()));
-        }
-        SettingsItem::AiTitles => app.toggle_feature(AccountFeature::AiTitles),
-        SettingsItem::AgentFeed => app.toggle_feature(AccountFeature::AgentFeed),
-        SettingsItem::RemoteReplies => {
-            if !matches!(app.account, AccountStatus::SignedIn(_)) {
-                app.set_status("Sign in to use Replies from rakumux.com: Settings → Account.");
-                return;
-            }
-            let on = !app.settings.sessions.remote_replies;
-            app.settings.sessions.remote_replies = on;
-            let state = if on { "on" } else { "off" };
-            save_config(app, format!("Replies from rakumux.com: {state}"));
-        }
-        SettingsItem::RemoteSessions => {
-            if !matches!(app.account, AccountStatus::SignedIn(_)) {
-                app.set_status("Sign in to use New sessions from rakumux.com: Settings → Account.");
-                return;
-            }
-            let on = !app.settings.sessions.remote_sessions;
-            app.settings.sessions.remote_sessions = on;
-            let state = if on { "on" } else { "off" };
-            save_config(app, format!("New sessions from rakumux.com: {state}"));
         }
         SettingsItem::Update => app.open_upgrade_dialog(),
         SettingsItem::Account => app.open_account_dialog(),

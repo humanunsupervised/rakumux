@@ -77,20 +77,6 @@ pub struct ServiceConfig {
     auth: DeviceAuthConfig,
     cloud_origin: String,
     turn_settings: Option<TurnSettingsSource>,
-    remote_replies: Option<RemoteRepliesSource>,
-    remote_sessions: Option<RemoteRepliesSource>,
-}
-
-/// Reads one of this machine's own settings: whether replies written elsewhere
-/// are typed into its sessions, or new sessions asked for on rakumux.com are
-/// started here.
-#[derive(Clone)]
-struct RemoteRepliesSource(crate::feed::AcceptRemote);
-
-impl std::fmt::Debug for RemoteRepliesSource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("RemoteRepliesSource")
-    }
 }
 
 /// Reads the turn settings (the TUI's `config.json`), again every minute.
@@ -129,8 +115,6 @@ impl ServiceConfig {
             auth,
             cloud_origin: value(CLOUD_ORIGIN_ENV, CLOUD_ORIGIN),
             turn_settings: None,
-            remote_replies: None,
-            remote_sessions: None,
         })
     }
 
@@ -141,21 +125,6 @@ impl ServiceConfig {
         read: impl Fn() -> TurnSettings + Send + Sync + 'static,
     ) -> Self {
         self.turn_settings = Some(TurnSettingsSource(Arc::new(read)));
-        self
-    }
-
-    /// Whether replies written on rakumux.com or other machines are typed
-    /// into this machine's sessions: `read` says, every few seconds. Without
-    /// it, never.
-    pub fn with_remote_replies(mut self, read: impl Fn() -> bool + Send + Sync + 'static) -> Self {
-        self.remote_replies = Some(RemoteRepliesSource(Arc::new(read)));
-        self
-    }
-
-    /// Whether new sessions asked for on rakumux.com are started on this
-    /// machine: `read` says, every few seconds. Without it, never.
-    pub fn with_remote_sessions(mut self, read: impl Fn() -> bool + Send + Sync + 'static) -> Self {
-        self.remote_sessions = Some(RemoteRepliesSource(Arc::new(read)));
         self
     }
 }
@@ -223,12 +192,6 @@ pub fn serve(
     }
     if let Some(TurnSettingsSource(read)) = config.turn_settings {
         refresher = refresher.with_turn_settings(move || read());
-    }
-    if let Some(RemoteRepliesSource(read)) = config.remote_replies {
-        refresher = refresher.with_remote_replies(read);
-    }
-    if let Some(RemoteRepliesSource(read)) = config.remote_sessions {
-        refresher = refresher.with_remote_sessions(read);
     }
     let runner = RefreshRunner::spawn_with_website(refresher, api, website)
         .map_err(|_| ServiceError::Setup)?;

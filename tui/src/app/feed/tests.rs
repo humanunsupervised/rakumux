@@ -215,7 +215,7 @@ async fn nothing_shows_the_feed_by_itself() {
         let (mut h, account) = feed_harness(FakeAccount::with_feed(), layout);
         assert_eq!(h.app.list.grouping(), Grouping::Status);
         // The feed is kept in the background to count what's new, asked
-        // without counting as shown, and learning the account's Feed switch
+        // without counting as shown, and learning the account's feed
         // is on brings nothing on screen.
         for after in [10, 11_000, 22_000] {
             tick(&mut h, Duration::from_millis(after));
@@ -1114,7 +1114,7 @@ async fn a_reply_that_isnt_stored_keeps_its_box_open_and_says_why() {
         .error_message
         .as_deref()
         .unwrap_or_default()
-        .contains("feed is off"));
+        .contains("feed isn't on"));
     assert_eq!(dialog.input.value(), "Try again");
     h.press(KeyCode::Esc).await;
     assert!(matches!(h.app.mode, AppMode::Normal));

@@ -6,7 +6,7 @@
 //! and Enter goes in.
 //!
 //! The service is asked for changes every 2 s while the feed is on screen,
-//! and every 10 s otherwise while the account's Feed switch is on (without
+//! and every 10 s otherwise while the account's feed is on (without
 //! counting as showing it), so the footer's button and the Feed tab can
 //! count the entries that arrived since it was last on screen. `r` writes
 //! back to the selected entry (`reply.rs`).
@@ -26,7 +26,7 @@ use crate::layout::{self, PaneSizes};
 
 /// How often the feed is asked for changes while it's shown.
 const FEED_EVERY: Duration = Duration::from_secs(2);
-/// How often otherwise, while the account's Feed switch is on: to count
+/// How often otherwise, while the account's feed is on: to count
 /// what's new.
 pub(in crate::app) const FEED_HIDDEN_EVERY: Duration = Duration::from_secs(10);
 /// Rows of a card, about, for paging through them.
@@ -122,16 +122,16 @@ impl App {
         }
     }
 
-    /// The account was checked or its Feed switch changed: signed out, the
-    /// feed is forgotten (but what was seen). With the switch on, the next
-    /// tick starts keeping it, to count what's new.
+    /// The account was checked: signed out, the feed is forgotten (but what
+    /// was seen). With the feed on, the next tick starts keeping it, to count
+    /// what's new.
     pub(in crate::app) fn on_feed_switch(&mut self) {
         if matches!(self.account, AccountStatus::SignedOut) {
             self.feed.clear();
         }
     }
 
-    /// Signed in with the account's Feed switch on.
+    /// Signed in with the account's feed on.
     fn feed_switch_on(&self) -> bool {
         matches!(&self.account, AccountStatus::SignedIn(account) if account.feed == Some(true))
     }

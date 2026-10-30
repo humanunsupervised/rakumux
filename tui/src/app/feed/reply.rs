@@ -129,7 +129,7 @@ impl App {
         let failure = match written.status {
             ReplyWriteStatus::Sent => None,
             ReplyWriteStatus::SignedOut => Some("You're signed out: sign in again to reply."),
-            ReplyWriteStatus::Off => Some("The Agent feed is off: turn it on in Settings."),
+            ReplyWriteStatus::Off => Some("The feed isn't on for your account yet."),
             ReplyWriteStatus::Invalid => Some("rakumux.com refused it."),
             ReplyWriteStatus::Unavailable | ReplyWriteStatus::Unknown => {
                 Some("Couldn't reach rakumux.com. Try again.")
@@ -145,8 +145,7 @@ impl App {
                 dialog.session_name
             ),
             Some(machine) => format!(
-                "Sent to {machine}: it goes into {} there when its agent waits, if {machine} \
-                 takes replies from rakumux.com.",
+                "Sent to {machine}: it goes into {} there when its agent waits.",
                 dialog.session_name
             ),
         };

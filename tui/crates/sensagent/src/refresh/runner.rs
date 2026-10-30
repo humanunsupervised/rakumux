@@ -615,16 +615,8 @@ fn own<S, A, C>(
     let mut awake = Awake::new();
     let mut last_tick = origin.elapsed();
     let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
-    let mut replies = ReplySync::new(
-        machine.clone(),
-        refresher.accept_remote(),
-        refresher.reply_state(),
-    );
-    let mut new_sessions = NewSessionSync::new(
-        machine.clone(),
-        refresher.accept_sessions(),
-        refresher.new_session_state(),
-    );
+    let mut replies = ReplySync::new(machine.clone(), refresher.reply_state());
+    let mut new_sessions = NewSessionSync::new(machine.clone(), refresher.new_session_state());
     let uploads = refresher.uploads().map(Uploads::new);
     let mut sessions =
         SessionSync::new(machine.clone(), uploads.is_some()).handling(crate::feed::NEW_SESSIONS);
@@ -1086,8 +1078,6 @@ fn own<S, A, C>(
                 // The TUI's id, sent again with a retry: rakumux.com answers
                 // a repeated id with the reply it stored, so it's typed once.
                 let id = id.map_or_else(ReplyId::generate, ReplyId::from_string);
-                // Read back, it counts as written here: this machine made its id.
-                replies.wrote(id.as_str());
                 let upload = crate::feed::is_entry_id(&entry)
                     .then(|| crate::feed::reply_upload(id.as_str(), &entry, &text, &machine))
                     .flatten();
@@ -1105,7 +1095,6 @@ fn own<S, A, C>(
             }
             Message::Command(Command::SessionMessage(target, session, text, id, answer)) => {
                 let id = id.map_or_else(ReplyId::generate, ReplyId::from_string);
-                replies.wrote(id.as_str());
                 let upload = crate::feed::session_message_upload(
                     id.as_str(),
                     &target,
@@ -1312,7 +1301,7 @@ fn follow_feed<S, A, C>(
 }
 
 /// Ask for a realtime token when one is due: only while signed in with the
-/// account's Feed switch on and this machine's name confirmed. Turned off,
+/// account's feed on and this machine's name confirmed. Turned off,
 /// the running connection stops and replies are read at rakumux.com's pace.
 #[allow(clippy::too_many_arguments)]
 fn follow_pokes<S, A, C>(
@@ -1393,7 +1382,7 @@ fn rename(
 }
 
 /// Start the next chat read or upload, when one is due: only while signed in
-/// with the account's Feed switch on.
+/// with the account's feed on.
 fn follow_chats<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
     chats: &mut ChatSync,
@@ -1424,7 +1413,7 @@ fn follow_chats<S, A, C>(
 
 /// Start what replies need next: reports, fetching files and typing pending
 /// ones into their sessions, reads. Only while signed in with the account's
-/// Feed switch on and rakumux.com `confirmed` this machine's name (it took a
+/// feed on and rakumux.com `confirmed` this machine's name (it took a
 /// session list under it), but for removing files no longer needed.
 fn follow_replies<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
@@ -1490,7 +1479,7 @@ fn follow_replies<S, A, C>(
 
 /// Start what new sessions asked for on rakumux.com need next: start one (or
 /// decide it can't be), then report. Only while signed in with the account's
-/// Feed switch on and rakumux.com `confirmed` this machine's name, as replies.
+/// feed on and rakumux.com `confirmed` this machine's name, as replies.
 fn follow_new_sessions<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
     new_sessions: &mut NewSessionSync,
@@ -1526,7 +1515,7 @@ fn follow_new_sessions<S, A, C>(
 }
 
 /// Upload the session list when it's due. Only while signed in with the
-/// account's Feed switch on.
+/// account's feed on.
 fn follow_sessions<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,
     sessions: &mut SessionSync,
@@ -1551,7 +1540,7 @@ fn follow_sessions<S, A, C>(
 }
 
 /// Start rtop's next reading or upload, when one is due: only while signed
-/// in with the account's Feed switch on and this machine's name confirmed,
+/// in with the account's feed on and this machine's name confirmed,
 /// and someone has rtop open on rakumux.com.
 fn follow_resources<S, A, C>(
     refresher: &StatusRefresher<S, A, C>,

@@ -46,37 +46,24 @@ pub fn draw_account(f: &mut Frame, dialog: &AccountDialog, area: Rect) {
         AccountDialogState::SigningOut => (vec![spinner("Signing out…")], vec![]),
         AccountDialogState::SignedOut => (
             vec![
-                Line::from("Sign in and each agent session gets an AI title from what it's doing."),
+                Line::from(
+                    "Sign in for AI session titles, the agent feed and your sessions on \
+                     rakumux.com.",
+                ),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Live sessions' recent terminal output and agent reports are sent to \
-                     rakumux.com to write them (secrets it recognises are removed first). Turn \
-                     AI session titles off any time in Settings → Available on sign-in.",
+                    "Your agents' chats and this machine's session list go to rakumux.com, \
+                     keys and tokens masked; private sessions never do. What you write there \
+                     is typed into this machine's sessions.",
                     muted,
                 )),
             ],
             vec![("Enter", "Sign in"), close],
         ),
-        AccountDialogState::SignedIn(account) => {
-            let titles = match account.titles {
-                Some(true) => "on",
-                Some(false) => "off",
-                None => "checking…",
-            };
-            (
-                vec![
-                    Line::from(format!("Signed in as {}.", account.name())),
-                    Line::from(""),
-                    Line::from(format!("AI session titles: {titles}")),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "Turn them on or off in Settings → Available on sign-in.",
-                        muted,
-                    )),
-                ],
-                vec![("o", "Sign out"), close],
-            )
-        }
+        AccountDialogState::SignedIn(account) => (
+            vec![Line::from(format!("Signed in as {}.", account.name()))],
+            vec![("o", "Sign out"), close],
+        ),
         AccountDialogState::Failed(error) => {
             (vec![error_line(error)], vec![("Enter", "Try again"), close])
         }

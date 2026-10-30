@@ -2176,8 +2176,12 @@ async fn ai_naming_waits_while_the_accounts_ai_session_titles_are_on() {
     assert!(!h.fake.calls().iter().any(|c| c.starts_with("rename")));
     assert_eq!(h.app.list.get(&id("N1")).unwrap().name, "auto-1");
 
-    // Turned off, the next settle names it here.
-    h.app.toggle_feature(super::types::AccountFeature::AiTitles);
+    // Off for the account (a rakumux.com from before they were always on),
+    // the next settle names it here.
+    h.app.on_account_checked(Ok(Some(crate::account::Account {
+        titles: Some(false),
+        ..testing::FakeAccount::person()
+    })));
     h.app.process_pending();
     settle(&mut h);
     assert!(h.fake.calls().contains(&"rename N1 fixed_name".to_string()));
@@ -4897,12 +4901,12 @@ async fn s_retitles_the_selected_session_once_at_a_time() {
 }
 
 #[tokio::test]
-async fn s_says_how_to_turn_titles_on() {
+async fn s_says_where_to_sign_in_for_titles() {
     let (mut h, account) = account_harness(testing::FakeAccount::default());
     h.press(KeyCode::Char('s')).await;
     assert_eq!(
         h.app.status(),
-        Some("Sign in and turn on AI session titles: Settings → Available on sign-in.")
+        Some("Sign in for AI session titles: Settings → Account.")
     );
     let off = testing::FakeAccount::default();
     *off.account.lock().unwrap() = Some(crate::account::Account {
@@ -4911,7 +4915,10 @@ async fn s_says_how_to_turn_titles_on() {
     });
     let (mut h, off) = account_harness(off);
     h.press(KeyCode::Char('s')).await;
-    assert!(h.app.status().unwrap().starts_with("Sign in and turn on"));
+    assert_eq!(
+        h.app.status(),
+        Some("AI session titles aren't on for your account yet.")
+    );
     assert!(account.summarized.lock().unwrap().is_empty());
     assert!(off.summarized.lock().unwrap().is_empty());
     // Signed in with them on: one is made.
@@ -5190,118 +5197,32 @@ async fn the_lines_under_a_name_stop_short_of_its_age_and_mark() {
 }
 
 #[tokio::test]
-async fn settings_turn_the_accounts_switches_on_and_off_once_signed_in() {
-    let row =
-        |item: SettingsItem, h: &Harness| h.app.modal_context(false).general[item.index()].clone();
-    // Signed out: both are greyed out and do nothing.
-    let (mut h, account) = account_harness(testing::FakeAccount::default());
-    for item in [SettingsItem::AiTitles, SettingsItem::AgentFeed] {
-        let setting = row(item, &h);
-        assert_eq!(setting.section, "Available on sign-in");
-        assert!(setting.disabled);
-        assert_eq!(setting.value, "On Off");
+async fn settings_have_no_switches_for_what_signing_in_brings() {
+    // Signed in or out: the account row, and nothing to turn on or off.
+    for account in [
+        testing::FakeAccount::default(),
+        testing::FakeAccount::signed_in(),
+    ] {
+        let (h, _) = account_harness(account);
+        let rows = h.app.modal_context(false).general;
+        assert!(rows.iter().any(|row| row.label == "Account"));
+        for row in &rows {
+            assert_ne!(row.section, "Available on sign-in", "{}", row.label);
+            assert!(!row.disabled, "{}", row.label);
+        }
+        for label in [
+            "AI session titles",
+            "Agent feed",
+            "Replies from rakumux.com",
+            "New sessions from rakumux.com",
+        ] {
+            assert!(rows.iter().all(|row| row.label != label), "{label}");
+        }
     }
-    h.press(KeyCode::Char(',')).await;
-    for c in "agent feed".chars() {
-        h.press(KeyCode::Char(c)).await;
-    }
-    h.press(KeyCode::Enter).await;
-    assert!(!account.calls().contains(&"set_features"));
-    assert_eq!(
-        h.app.status(),
-        Some("Sign in to use Agent feed: Settings → Account.")
-    );
-
-    // Signed in: they show the account's and change it.
-    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
-    assert_eq!(row(SettingsItem::AiTitles, &h).value, "[On] Off");
-    assert_eq!(row(SettingsItem::AgentFeed, &h).value, "On [Off]");
-    assert!(!row(SettingsItem::AgentFeed, &h).disabled);
-    h.press(KeyCode::Char(',')).await;
-    for c in "feed".chars() {
-        h.press(KeyCode::Char(c)).await;
-    }
-    h.press(KeyCode::Enter).await;
-    // Shown at once, saved by the service.
-    assert_eq!(row(SettingsItem::AgentFeed, &h).value, "[On] Off");
-    assert_eq!(h.app.status(), Some("Agent feed: on"));
-    h.app.process_pending();
-    assert!(account.calls().contains(&"set_features"));
-    assert_eq!(
-        account.account.lock().unwrap().as_ref().unwrap().feed,
-        Some(true)
-    );
-    // Still in Settings; Esc clears the search, then closes.
-    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
-    h.press(KeyCode::Esc).await;
-    h.press(KeyCode::Down).await;
-    h.press(KeyCode::Esc).await;
-    assert!(matches!(h.app.mode, AppMode::Normal));
 }
 
 #[tokio::test]
-async fn replies_from_rakumux_com_are_this_machines_own_setting() {
-    let row = |h: &Harness| {
-        h.app.modal_context(false).general[SettingsItem::RemoteReplies.index()].clone()
-    };
-    let (mut h, account) = account_harness(testing::FakeAccount::default());
-    assert!(row(&h).disabled);
-    assert_eq!(row(&h).section, "Available on sign-in");
-    h.press(KeyCode::Char(',')).await;
-    h.type_text("replies from").await;
-    h.press(KeyCode::Enter).await;
-    assert!(!h.app.settings.sessions.remote_replies);
-
-    let (mut h, _) = account_harness(testing::FakeAccount::signed_in());
-    assert_eq!(row(&h).value, "On [Off]");
-    h.press(KeyCode::Char(',')).await;
-    h.type_text("replies from").await;
-    h.press(KeyCode::Enter).await;
-    assert_eq!(row(&h).value, "[On] Off");
-    assert!(h.app.settings.sessions.remote_replies);
-    assert_eq!(h.app.status(), Some("Replies from rakumux.com: on"));
-    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
-    assert!(saved.sessions.remote_replies);
-    // Local: nothing is asked of the account.
-    assert!(!account.calls().contains(&"set_features"));
-}
-
-#[tokio::test]
-async fn new_sessions_from_rakumux_com_are_this_machines_own_setting() {
-    let row = |h: &Harness| {
-        h.app.modal_context(false).general[SettingsItem::RemoteSessions.index()].clone()
-    };
-    let (mut h, _) = account_harness(testing::FakeAccount::default());
-    assert!(row(&h).disabled);
-    assert_eq!(row(&h).section, "Available on sign-in");
-    assert_eq!(row(&h).label, "New sessions from rakumux.com");
-    h.press(KeyCode::Char(',')).await;
-    h.type_text("new sessions from").await;
-    h.press(KeyCode::Enter).await;
-    assert!(!h.app.settings.sessions.remote_sessions);
-
-    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
-    assert_eq!(row(&h).value, "On [Off]");
-    h.press(KeyCode::Char(',')).await;
-    h.type_text("new sessions from").await;
-    h.press(KeyCode::Enter).await;
-    assert_eq!(row(&h).value, "[On] Off");
-    assert!(h.app.settings.sessions.remote_sessions);
-    // Its own setting: replies from rakumux.com stay as they were.
-    assert!(!h.app.settings.sessions.remote_replies);
-    assert_eq!(h.app.status(), Some("New sessions from rakumux.com: on"));
-    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
-    assert!(saved.sessions.remote_sessions);
-    // Local: nothing is asked of the account.
-    assert!(!account.calls().contains(&"set_features"));
-    h.press(KeyCode::Enter).await;
-    assert!(!h.app.settings.sessions.remote_sessions);
-    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
-    assert!(!saved.sessions.remote_sessions);
-}
-
-#[tokio::test]
-async fn turning_ai_titles_off_clears_the_spinners_and_the_refresh() {
+async fn ai_titles_off_for_the_account_clear_the_spinners_and_the_refresh() {
     use crossterm::event::MouseEventKind;
     let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
     account
@@ -5312,14 +5233,12 @@ async fn turning_ai_titles_off_clears_the_spinners_and_the_refresh() {
     account_tick(&mut h);
     assert!(h.app.titles_on());
     assert!(h.app.title_refreshing(&SessionId::from_string("A")));
-    h.app.toggle_feature(super::types::AccountFeature::AiTitles);
+    // A rakumux.com from before they were always on says they're off.
+    account.account.lock().unwrap().as_mut().unwrap().titles = Some(false);
+    h.app.check_account();
     h.app.process_pending();
     assert!(!h.app.titles_on());
     assert!(!h.app.title_refreshing(&SessionId::from_string("A")));
-    assert_eq!(
-        account.account.lock().unwrap().as_ref().unwrap().titles,
-        Some(false)
-    );
     // No ↻ under the pointer either.
     screen_rows(&mut h, 160, 48);
     let over_a = hit_at(&h, Hit::ListRow(row_of(&h, "a"))).unwrap();
@@ -5329,7 +5248,7 @@ async fn turning_ai_titles_off_clears_the_spinners_and_the_refresh() {
     h.app.retitle_selected();
     assert_eq!(
         h.app.status(),
-        Some("Sign in and turn on AI session titles: Settings → Available on sign-in.")
+        Some("AI session titles aren't on for your account yet.")
     );
 }
 
@@ -6370,25 +6289,4 @@ async fn a_sprite_set_up_shows_whats_there_then_enter_opens_the_session() {
     h.press(KeyCode::Enter).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
     assert_eq!(h.fake.creates().len(), 1, "then the session");
-}
-
-#[tokio::test]
-async fn signed_in_a_new_sprite_asks_once_whether_replies_are_typed_into_its_agents() {
-    let (mut h, _account) = account_harness(testing::FakeAccount::signed_in());
-    account_tick(&mut h);
-    assert!(matches!(
-        h.app.account,
-        super::types::AccountStatus::SignedIn(_)
-    ));
-    h.app
-        .on_sprite_needed(Some(("org/1/secret".into(), "the sprite CLI")));
-    h.press(KeyCode::Enter).await;
-    assert!(matches!(
-        &h.app.mode,
-        AppMode::Sprite(crate::app::types::SpriteDialog {
-            state: crate::app::types::SpriteState::Replies { token }
-        }) if token == "org/1/secret"
-    ));
-    h.press(KeyCode::Esc).await;
-    assert!(matches!(h.app.mode, AppMode::Normal));
 }

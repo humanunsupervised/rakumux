@@ -53,10 +53,6 @@ pub enum SpriteState {
         input: TextInput,
         error: Option<String>,
     },
-    /// Signed in: are replies from rakumux.com typed into its agents?
-    Replies {
-        token: String,
-    },
     /// Setting up; the step it's at.
     Working {
         step: crate::sprites::Step,
@@ -385,26 +381,12 @@ pub enum SettingsItem {
     Rtop,
     /// Sign in to the Rakumux account (AI session titles, the agent feed).
     Account,
-    /// The account's AI session titles switch (as on rakumux.com/features).
-    AiTitles,
-    /// The account's Agent feed switch (likewise).
-    AgentFeed,
-    /// Type replies written on rakumux.com or other machines into this
-    /// machine's sessions (local, `sessions.remote_replies`).
-    RemoteReplies,
-    /// Start new sessions asked for on rakumux.com in this machine's folders
-    /// (local, `sessions.remote_sessions`).
-    RemoteSessions,
 }
 
 impl SettingsItem {
-    /// In Settings' order: signing in first, then what it brings, then the rest.
-    pub const ALL: [SettingsItem; 13] = [
+    /// In Settings' order: signing in first, then the rest.
+    pub const ALL: [SettingsItem; 9] = [
         SettingsItem::Account,
-        SettingsItem::AiTitles,
-        SettingsItem::AgentFeed,
-        SettingsItem::RemoteReplies,
-        SettingsItem::RemoteSessions,
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
@@ -426,10 +408,6 @@ impl SettingsItem {
             | SettingsItem::Rtop
             | SettingsItem::TerminalPanel => "App",
             SettingsItem::Account => "Account",
-            SettingsItem::AiTitles
-            | SettingsItem::AgentFeed
-            | SettingsItem::RemoteReplies
-            | SettingsItem::RemoteSessions => "Available on sign-in",
         }
     }
 
@@ -571,32 +549,6 @@ pub enum AccountStatus {
     Unknown,
     SignedOut,
     SignedIn(crate::account::Account),
-}
-
-/// A switch of the Rakumux account that Settings → Available on sign-in
-/// turns on and off, as rakumux.com/features does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccountFeature {
-    AiTitles,
-    AgentFeed,
-}
-
-impl AccountFeature {
-    /// What Settings calls it.
-    pub fn label(self) -> &'static str {
-        match self {
-            AccountFeature::AiTitles => "AI session titles",
-            AccountFeature::AgentFeed => "Agent feed",
-        }
-    }
-
-    /// Whether `account` has it on; `None` until read.
-    pub fn of(self, account: &crate::account::Account) -> Option<bool> {
-        match self {
-            AccountFeature::AiTitles => account.titles,
-            AccountFeature::AgentFeed => account.feed,
-        }
-    }
 }
 
 /// Where the welcome tour is.

@@ -78,7 +78,7 @@ impl PokeSync {
         }
     }
 
-    /// Follow the account (signed in, Feed switch on, its name confirmed).
+    /// Follow the account (signed in, feed on, its name confirmed).
     /// Returns true when a running connection must stop.
     pub fn set_enabled(&mut self, enabled: bool, now: Duration) -> bool {
         if enabled == self.enabled {

@@ -1,5 +1,5 @@
 //! New sessions asked for on rakumux.com (`contracts/feed/` `newSession`):
-//! while the account's Feed switch is on, the replies read brings the
+//! while the account's feed is on, the replies read brings the
 //! requests pending for this machine (the cloud sends them only because its
 //! session list says `new_sessions`), and the status service starts each one
 //! through the daemon as the user (`session_create`), then reports it
@@ -13,9 +13,8 @@
 //! none, or several without that, fails `folder_unknown`. The session is a
 //! login shell in the folder, with the agent's own command typed in as a
 //! startup command (`claude`, `codex`, `opencode`: what `rakumux new --cmd`
-//! would run), and the daemon's environment. Nothing is started while this
-//! machine's "New sessions from rakumux.com" setting is off: every request
-//! then fails `not_accepted`, so the website can say where to turn it on.
+//! would run), and the daemon's environment. (`not_accepted`, which older
+//! releases report while a setting of theirs is off, is never sent.)
 //!
 //! Each request is started at most once: its id is kept as handled before
 //! the daemon is asked, and with the reports rakumux.com hasn't taken yet,
@@ -31,7 +30,6 @@ use session_core::api::{CreateSession, ErrorCode};
 use session_core::ids::SessionId;
 use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
-use super::replies::AcceptRemote;
 use super::wire::{self, FeedFailure, FeedRequest};
 use crate::cloud::FeedHttpReply;
 
@@ -43,8 +41,6 @@ use kept::Kept;
 pub(crate) const NEW_SESSIONS: &str = "new_sessions";
 /// The most requests one read carries (contract).
 const MAX_ASKED: usize = 20;
-/// How long "New sessions from rakumux.com" is trusted before it's read again.
-const SETTING_EVERY: Duration = Duration::from_secs(10);
 /// The first and longest waits after a failed report.
 const RETRY_MIN: Duration = Duration::from_secs(5);
 const RETRY_MAX: Duration = Duration::from_secs(300);
@@ -162,7 +158,8 @@ pub(crate) fn asks(value: Option<serde_json::Value>) -> Vec<NewSessionAsk> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum NewSessionFailure {
-    /// "New sessions from rakumux.com" is off here.
+    /// A setting of an older release was off. Never decided now; read back
+    /// from a report kept before an upgrade.
     NotAccepted,
     /// No folder of that name is listed here now, or several and the request
     /// doesn't say which.
@@ -268,9 +265,6 @@ impl Listed {
 pub(crate) struct NewSessionSync {
     machine: String,
     enabled: bool,
-    accept: Option<AcceptRemote>,
-    accepted: bool,
-    accept_read: Option<Duration>,
     /// The folders of the sessions this machine lists, by session.
     listed: HashMap<SessionId, Listed>,
     /// The requests pending for this machine, as last read, oldest first.
@@ -285,16 +279,12 @@ pub(crate) struct NewSessionSync {
 }
 
 impl NewSessionSync {
-    /// New sessions for `machine`; `accept` says whether this machine takes
-    /// them (never without it); `kept` is the file that keeps which were
+    /// New sessions for `machine`; `kept` is the file that keeps which were
     /// handled across a restart (memory only without it).
-    pub fn new(machine: String, accept: Option<AcceptRemote>, kept: Option<PathBuf>) -> Self {
+    pub fn new(machine: String, kept: Option<PathBuf>) -> Self {
         Self {
             machine,
             enabled: false,
-            accept,
-            accepted: false,
-            accept_read: None,
             listed: HashMap::new(),
             asked: Vec::new(),
             creating: None,
@@ -305,7 +295,7 @@ impl NewSessionSync {
         }
     }
 
-    /// Follow the account: signed in with its Feed switch on and this
+    /// Follow the account: signed in with its feed on and this
     /// machine's name confirmed. Off, nothing is started; reports not yet
     /// taken are kept for when it's on again.
     pub fn set_enabled(&mut self, enabled: bool, now: Duration) {
@@ -366,7 +356,6 @@ impl NewSessionSync {
             return None;
         }
         if self.creating.is_none() {
-            let accepted = self.accepts(now);
             let waiting: Vec<NewSessionAsk> = self
                 .asked
                 .iter()
@@ -374,11 +363,6 @@ impl NewSessionSync {
                 .cloned()
                 .collect();
             for ask in waiting {
-                if !accepted {
-                    self.kept
-                        .decided(&ask.id, failed(NewSessionFailure::NotAccepted));
-                    continue;
-                }
                 let Some(scope) = self.folder(&ask) else {
                     self.kept
                         .decided(&ask.id, failed(NewSessionFailure::FolderUnknown));
@@ -429,19 +413,6 @@ impl NewSessionSync {
             .map(|listed| &listed.scope);
         let first = scopes.next()?;
         scopes.all(|scope| scope == first).then(|| first.clone())
-    }
-
-    /// Whether this machine takes new sessions from rakumux.com, read again
-    /// every [`SETTING_EVERY`].
-    fn accepts(&mut self, now: Duration) -> bool {
-        let stale = self
-            .accept_read
-            .is_none_or(|at| now.saturating_sub(at) >= SETTING_EVERY);
-        if stale {
-            self.accepted = self.accept.as_ref().is_some_and(|read| read());
-            self.accept_read = Some(now);
-        }
-        self.accepted
     }
 
     /// The daemon started the session for request `id` (or refused).

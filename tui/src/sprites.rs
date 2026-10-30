@@ -242,12 +242,10 @@ pub struct Ready {
 }
 
 /// The feed from the Sprite: the Rakumux account here enrols it, so its
-/// agents' replies reach the account's feed; `replies`: whether replies
-/// written on rakumux.com or another machine are typed into its agents
-/// (its `sessions.remote_replies`).
+/// agents' replies reach the account's feed and replies written to them
+/// are typed in.
 pub struct Feed<'a> {
     pub account: &'a dyn AccountAccess,
-    pub replies: bool,
 }
 
 /// A connected Sprite, and what became of its feed.
@@ -524,9 +522,8 @@ pub fn set_up(
 /// Enrol the Sprite for the feed with the account here and start its own
 /// account service: its credential (0600, in a 0700 directory, as the service
 /// requires) and `machine.json` (the daemon's machine id for it, so the feed
-/// and this daemon know it by one id, and its name), whether it types replies
-/// from elsewhere, and a `rakumux-status` service (restarted, so a new
-/// credential is taken). Enrolling again revokes the earlier credential.
+/// and this daemon know it by one id, and its name), and a `rakumux-status`
+/// service (restarted, so a new credential is taken). Enrolling again revokes the earlier credential.
 fn connect_feed(
     sprites: &Sprites,
     ready: &Ready,
@@ -560,7 +557,6 @@ fn connect_feed(
         identity.to_string().into_bytes(),
         "0600",
     )?;
-    set_remote_replies(sprites, name, &ready.home, feed.replies)?;
     sprites.put_service(
         name,
         "rakumux-status",
@@ -569,35 +565,6 @@ fn connect_feed(
     )?;
     sprites.restart_service(name, "rakumux-status")?;
     Ok(FeedSetUp::On)
-}
-
-/// Set the Sprite's `sessions.remote_replies` in its `config.json`, keeping
-/// everything else there; a file that isn't a JSON object is left alone.
-fn set_remote_replies(sprites: &Sprites, name: &str, home: &str, on: bool) -> Result<(), String> {
-    let path = format!("{home}/.rakumux/config.json");
-    let mut config = match sprites.read_file(name, &path)? {
-        Some(bytes) => serde_json::from_slice::<Value>(&bytes)
-            .ok()
-            .filter(Value::is_object)
-            .ok_or("the Sprite's Rakumux settings aren't readable")?,
-        None => json!({}),
-    };
-    with_remote_replies(&mut config, on);
-    sprites.write_file(name, &path, config.to_string().into_bytes(), "0600")
-}
-
-/// `config` (a JSON object) with `sessions.remote_replies` set to `on`.
-fn with_remote_replies(config: &mut Value, on: bool) {
-    let Some(object) = config.as_object_mut() else {
-        return;
-    };
-    let sessions = object.entry("sessions").or_insert_with(|| json!({}));
-    if !sessions.is_object() {
-        *sessions = json!({});
-    }
-    if let Some(sessions) = sessions.as_object_mut() {
-        sessions.insert("remote_replies".into(), Value::Bool(on));
-    }
 }
 
 /// Set the Sprite up with `token` and have the daemon reach it, saving
@@ -1021,24 +988,6 @@ mod tests {
             (0, "HOME=/home/sprite\n".into())
         );
         assert_eq!(parse_exec(b""), (-1, String::new()));
-    }
-
-    #[test]
-    fn replies_from_elsewhere_are_set_without_touching_other_settings() {
-        let mut config = json!({"sessions": {"icons": "nerd"}, "openai_model": "x"});
-        with_remote_replies(&mut config, true);
-        assert_eq!(
-            config,
-            json!({"sessions": {"icons": "nerd", "remote_replies": true}, "openai_model": "x"})
-        );
-        with_remote_replies(&mut config, false);
-        assert_eq!(config["sessions"]["remote_replies"], json!(false));
-        let mut empty = json!({});
-        with_remote_replies(&mut empty, true);
-        assert_eq!(empty, json!({"sessions": {"remote_replies": true}}));
-        let mut odd = json!({"sessions": 3});
-        with_remote_replies(&mut odd, true);
-        assert_eq!(odd, json!({"sessions": {"remote_replies": true}}));
     }
 
     #[test]

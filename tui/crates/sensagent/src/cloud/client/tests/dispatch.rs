@@ -186,7 +186,7 @@ struct FakeTransport {
     summaries: Arc<AtomicBool>,
     /// Whether `PATCH /api/v1/features` saves; refused with a 503 otherwise.
     saves: Arc<AtomicBool>,
-    /// The account's Feed switch, which only a save changes.
+    /// The account's feed, which only a save changes.
     feed: AtomicBool,
     /// The session title sent with status text; none (an older service) by default.
     title: Arc<Mutex<Option<String>>>,

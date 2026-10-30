@@ -506,16 +506,15 @@ mod tests {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("Settings"), "{screen}");
             assert!(!screen.contains("1 General"), "no tabs: {screen}");
-            // Signing in first, then what it brings, then the rest.
+            // Signing in first, then the rest.
             let at = |text: &str| {
                 screen
                     .find(text)
                     .unwrap_or_else(|| panic!("{text}: {screen}"))
             };
             assert!(screen.contains("▶ Account"), "{screen}");
-            assert!(at("▶ Account") < at("Available on sign-in"));
-            assert!(at("Available on sign-in") < at("Agent feed"));
-            assert!(at("Agent feed") < at("Appearance"));
+            assert!(at("▶ Account") < at("Appearance"));
+            assert!(!screen.contains("Available on sign-in"), "{screen}");
             assert!(screen.contains("[Master detail] Grid Tabs"), "{screen}");
             // The selected setting's note waits for `→`.
             assert!(!screen.contains("Session list on the left"), "{screen}");
@@ -2489,16 +2488,15 @@ mod tests {
         assert!(screen.contains(", Settings → Account"), "{screen}");
         let mut h = feed_harness(FakeAccount::signed_in(), None);
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("The feed is off."), "{screen}");
         assert!(
-            screen.contains(", Settings → Available on sign-in"),
+            screen.contains("The feed isn't on for your account yet."),
             "{screen}"
         );
         // A narrow pane wraps it rather than cutting it off.
         h.app.settings.sessions.feed_width = Some(30);
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains(", Settings → Available on"), "{screen}");
-        assert!(screen.contains("sign-in"), "{screen}");
+        assert!(screen.contains("The feed isn't on for your"), "{screen}");
+        assert!(screen.contains("account yet."), "{screen}");
         let mut h = feed_harness(FakeAccount::with_feed(), None);
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("No replies yet"), "{screen}");

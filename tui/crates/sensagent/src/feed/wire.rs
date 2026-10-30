@@ -52,7 +52,7 @@ const MAX_RESOURCES_BODY_BYTES: usize = 65_536;
 pub enum FeedFailure {
     /// The sign-in was refused; renewing it or signing in again helps.
     Unauthorized,
-    /// The account's Feed switch is off.
+    /// The account's feed is off.
     Off,
     /// Too many requests; try again after the delay, when given.
     RateLimited(Option<Duration>),

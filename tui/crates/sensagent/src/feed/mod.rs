@@ -1,5 +1,5 @@
 //! The agent feed: what agents said when they finished a turn, captured by
-//! the daemon while the account's Feed switch is on, uploaded to rakumux.com
+//! the daemon while the account's feed is on, uploaded to rakumux.com
 //! and read back from every machine of the account (`contracts/feed/`); and
 //! the whole chats those turns belong to, uploaded as they grow (`chats`) and
 //! read back a turn at a time (`turn`); replies written back (`replies`), with
@@ -37,8 +37,8 @@ pub use job::{FeedCompletion, FeedJob};
 pub(crate) use machine::MachineIdentity;
 pub(crate) use new_sessions::{NewSessionSync, NewSessionWork, NEW_SESSIONS};
 pub(crate) use poke::{listen, PokeEvent, PokeSync};
-pub use replies::{AcceptRemote, ReplyWrite, ReplyWriteStatus};
 pub(crate) use replies::{Fetch, Fetched, ReplySync, ReplyWork, TYPING_QUIET};
+pub use replies::{ReplyWrite, ReplyWriteStatus};
 pub(crate) use resources::{ResourceSync, ResourceWork};
 pub(crate) use sessions::SessionSync;
 pub use sync::machine_name;

@@ -874,11 +874,10 @@ impl FakeAccount {
             subject: "user_synthetic".into(),
             titles: Some(true),
             feed: Some(false),
-            features_unsaved: false,
         }
     }
 
-    /// Signed in with the Feed switch on.
+    /// Signed in with the feed on.
     pub fn with_feed() -> Self {
         let fake = Self::default();
         *fake.account.lock().unwrap() = Some(crate::account::Account {
@@ -1065,19 +1064,6 @@ impl crate::account::AccountAccess for FakeAccount {
                 messages: Vec::new(),
                 next: None,
             }))
-    }
-
-    fn set_features(
-        &self,
-        titles: Option<bool>,
-        feed: Option<bool>,
-    ) -> std::result::Result<(), String> {
-        self.call("set_features");
-        let mut account = self.account.lock().unwrap();
-        let account = account.as_mut().ok_or("signed out")?;
-        account.titles = titles.or(account.titles);
-        account.feed = feed.or(account.feed);
-        Ok(())
     }
 
     fn restart(&self) -> std::result::Result<bool, String> {

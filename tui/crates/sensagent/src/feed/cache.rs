@@ -191,7 +191,7 @@ fn is_false(value: &bool) -> bool {
 pub enum FeedStatus {
     /// Not signed in.
     SignedOut,
-    /// The account's Feed switch is off, or not read yet.
+    /// The account's feed is off, or not read yet.
     Off,
     /// On; the account's feed hasn't been read yet.
     Loading,

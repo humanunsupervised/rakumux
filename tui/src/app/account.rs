@@ -6,9 +6,8 @@
 //! the service every few seconds for which have one being made (a spinner
 //! after the name).
 //! Settings → Account opens the account dialog: sign in with a code
-//! approved in any browser, see who is signed in, sign out. Settings →
-//! Available on sign-in turns the account's AI session titles and Agent feed
-//! on and off, saved to the account as on rakumux.com/features.
+//! approved in any browser, see who is signed in, sign out. AI session
+//! titles and the agent feed are on for every signed-in account.
 
 use std::time::{Duration, Instant};
 
@@ -17,20 +16,17 @@ use session_core::ids::SessionId;
 use session_core::model::SessionStatus;
 
 use super::runtime::AppEvent;
-use super::types::{AccountDialog, AccountDialogState, AccountFeature, AccountStatus, AppMode};
+use super::types::{AccountDialog, AccountDialogState, AccountStatus, AppMode};
 use super::App;
 use crate::account::{self, Account, MAX_SESSIONS};
 
 /// How often the sessions' AI status is read while signed in.
 const STATUSES_EVERY: Duration = Duration::from_secs(2);
-/// How often the account is checked again while signed in (the AI session
-/// titles switch, a sign-out elsewhere).
+/// How often the account is checked again while signed in (what the
+/// account has on, a sign-out elsewhere).
 const ACCOUNT_EVERY: Duration = Duration::from_secs(60);
 /// How often a sign-in in progress is checked.
 const SIGN_IN_EVERY: Duration = Duration::from_secs(1);
-/// How soon the account is checked after a switch changed, to see that it
-/// was saved.
-const SAVED_AFTER: Duration = Duration::from_secs(3);
 
 impl App {
     /// Ask who is signed in (starting the service when this home has a
@@ -74,9 +70,6 @@ impl App {
             AccountStatus::SignedIn(account) => {
                 self.account_check_at = Some(Instant::now() + ACCOUNT_EVERY);
                 self.statuses_at.get_or_insert_with(Instant::now);
-                if std::mem::take(&mut self.features_saving) && account.features_unsaved {
-                    self.set_status("Couldn't save that to your account. Try again.");
-                }
                 if account.titles == Some(false) {
                     self.titles_refreshing.clear();
                 }
@@ -85,53 +78,6 @@ impl App {
         }
         self.account = status;
         self.on_feed_switch();
-    }
-
-    /// Settings → Available on sign-in: turn `feature` on or off for the
-    /// account. It shows changed at once; the account service saves it.
-    pub fn toggle_feature(&mut self, feature: AccountFeature) {
-        let AccountStatus::SignedIn(account) = &mut self.account else {
-            self.set_status(format!(
-                "Sign in to use {}: Settings → Account.",
-                feature.label()
-            ));
-            return;
-        };
-        let Some(on) = feature.of(account) else {
-            self.set_status("Still reading your account's settings…");
-            return;
-        };
-        let on = !on;
-        let (titles, feed) = match feature {
-            AccountFeature::AiTitles => {
-                account.titles = Some(on);
-                (Some(on), None)
-            }
-            AccountFeature::AgentFeed => {
-                account.feed = Some(on);
-                (None, Some(on))
-            }
-        };
-        account.features_unsaved = false;
-        if titles == Some(false) {
-            self.titles_refreshing.clear();
-        }
-        self.on_feed_switch();
-        self.features_saving = true;
-        let state = if on { "on" } else { "off" };
-        self.set_status(format!("{}: {state}", feature.label()));
-        let access = self.account_access.clone();
-        self.exec
-            .job(move || AppEvent::FeaturesSet(access.set_features(titles, feed)));
-    }
-
-    pub(super) fn on_features_set(&mut self, result: Result<(), String>) {
-        if let Err(error) = result {
-            self.features_saving = false;
-            self.set_status(format!("Couldn't change it: {error}"));
-        }
-        // Read back what the account has (and whether it was saved).
-        self.account_check_at = Some(Instant::now() + SAVED_AFTER);
     }
 
     /// Settings → Account.
@@ -336,13 +282,14 @@ impl App {
     /// `s`, or a click on the ↻ after a session's name: the account service
     /// makes a new AI title of `session` (from its agent's latest prompt and
     /// outputs since, else its screen) and names the session with it,
-    /// whatever its name. Signed out or with titles off, says how to turn
-    /// them on; while one is being made, does nothing. True when asked.
+    /// whatever its name. Signed out, says where to sign in; while one is
+    /// being made, does nothing. True when asked.
     pub fn retitle(&mut self, session: SessionId) -> bool {
         if !self.titles_on() {
-            self.set_status(
-                "Sign in and turn on AI session titles: Settings → Available on sign-in.",
-            );
+            self.set_status(match self.account {
+                AccountStatus::SignedIn(_) => "AI session titles aren't on for your account yet.",
+                _ => "Sign in for AI session titles: Settings → Account.",
+            });
             return false;
         }
         if self.title_refreshing(&session) {

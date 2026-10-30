@@ -196,23 +196,12 @@ fn live_descriptions(
 }
 
 fn describe(account: Option<&Account>) -> String {
-    let Some(account) = account else {
-        return "Not signed in. `rakumux account login` signs in for AI session titles.".into();
-    };
-    let titles = match account.titles {
-        Some(true) => "on",
-        Some(false) => "off (turn them on at rakumux.com/features)",
-        None => "not checked yet",
-    };
-    let feed = match account.feed {
-        Some(true) => "on",
-        Some(false) => "off (turn it on at rakumux.com/features)",
-        None => "not checked yet",
-    };
-    format!(
-        "Signed in as {}.\nAI session titles: {titles}.\nFeed: {feed}.",
-        account.name()
-    )
+    match account {
+        Some(account) => format!("Signed in as {}.", account.name()),
+        None => "Not signed in. `rakumux account login` signs in for AI session titles and \
+                 the agent feed."
+            .into(),
+    }
 }
 
 #[cfg(test)]
@@ -227,12 +216,8 @@ mod tests {
             subject: "user_1".into(),
             titles: Some(false),
             feed: Some(true),
-            features_unsaved: false,
         };
-        let text = describe(Some(&account));
-        assert!(text.contains("Signed in as person@example.com."));
-        assert!(text.contains("AI session titles: off"));
-        assert!(text.contains("Feed: on."));
+        assert_eq!(describe(Some(&account)), "Signed in as person@example.com.");
     }
 
     #[test]

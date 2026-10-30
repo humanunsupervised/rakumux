@@ -144,14 +144,11 @@ fn draw_feed_list(
             return;
         }
         FeedStatus::Off => {
-            let lines = vec![
-                Line::from(Span::styled("The feed is off.", strong)),
-                Line::from(vec![
-                    Span::styled(",", key),
-                    Span::styled(" Settings → Available on sign-in", muted),
-                ]),
-            ];
-            message(f, area, lines);
+            let line = Line::from(Span::styled(
+                "The feed isn't on for your account yet.",
+                strong,
+            ));
+            message(f, area, vec![line]);
             return;
         }
         FeedStatus::Loading if app.feed.cards().is_empty() => {

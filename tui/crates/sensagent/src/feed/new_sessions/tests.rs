@@ -1,6 +1,3 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
-
 use super::*;
 use crate::source::fake::live_view;
 
@@ -23,16 +20,9 @@ fn ask(id: &str, folder: &str, agent: Option<Agent>) -> NewSessionAsk {
     }
 }
 
-fn setting(on: bool) -> (AcceptRemote, Arc<AtomicBool>) {
-    let flag = Arc::new(AtomicBool::new(on));
-    let read = flag.clone();
-    (Arc::new(move || read.load(Ordering::SeqCst)), flag)
-}
-
-/// Enabled, with `views` followed and the setting `on`.
-fn on(views: &[SessionView], accept: bool) -> NewSessionSync {
-    let (read, _) = setting(accept);
-    let mut sync = NewSessionSync::new("studio".into(), Some(read), None);
+/// Enabled, with `views` followed.
+fn on(views: &[SessionView]) -> NewSessionSync {
+    let mut sync = NewSessionSync::new("studio".into(), None);
     sync.set_enabled(true, NOW);
     sync.connected(views);
     sync
@@ -55,10 +45,7 @@ fn created(name: &str) -> SessionView {
 
 #[test]
 fn a_request_starts_a_login_shell_in_the_listed_folder_with_the_agent_typed_in() {
-    let mut sync = on(
-        &[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/rakumux")],
-        true,
-    );
+    let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/rakumux")]);
     sync.read(true, vec![ask(ASK, "rakumux", Some(Agent::ClaudeCode))]);
     let Some(NewSessionWork::Create { id, request }) = sync.next_work(NOW) else {
         panic!("expected a create");
@@ -101,7 +88,7 @@ fn each_agent_runs_its_own_command_and_none_leaves_the_shell_alone() {
         (Some(Agent::OpenCode), Some("opencode")),
         (None, None),
     ] {
-        let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")], true);
+        let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")]);
         sync.read(true, vec![ask(ASK, "web", agent)]);
         let Some(NewSessionWork::Create { request, .. }) = sync.next_work(NOW) else {
             panic!("expected a create");
@@ -110,51 +97,6 @@ fn each_agent_runs_its_own_command_and_none_leaves_the_shell_alone() {
         assert_eq!(request.startup_cmds, expected);
         assert_eq!(request.argv, None);
     }
-}
-
-#[test]
-fn turned_off_every_request_fails_not_accepted_and_nothing_starts() {
-    let (read, flag) = setting(false);
-    let mut sync = NewSessionSync::new("studio".into(), Some(read), None);
-    sync.set_enabled(true, NOW);
-    sync.connected(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/rakumux")]);
-    sync.read(true, vec![ask(ASK, "rakumux", None)]);
-    let report = body(sync.next_work(NOW));
-    assert_eq!(report["status"], "failed");
-    assert_eq!(report["failure"], "not_accepted");
-    assert!(report.get("session").is_none());
-    sync.reported(true, Ok(()), NOW);
-    // Read again, it's decided: never started, never reported twice.
-    sync.read(true, vec![ask(ASK, "rakumux", None)]);
-    assert_eq!(sync.next_work(NOW), None);
-
-    // Turned on, it's read again within 10 s and the next request starts.
-    flag.store(true, Ordering::SeqCst);
-    sync.read(true, vec![ask(OTHER, "rakumux", None)]);
-    let soon = NOW + Duration::from_secs(1);
-    assert!(matches!(
-        sync.next_work(soon),
-        Some(NewSessionWork::Report(_))
-    ));
-    sync.reported(true, Ok(()), soon);
-    let later = NOW + SETTING_EVERY;
-    sync.read(
-        true,
-        vec![ask("01K8A2B3C4D5E6F7G8H9J0K1M5", "rakumux", None)],
-    );
-    assert!(matches!(
-        sync.next_work(later),
-        Some(NewSessionWork::Create { .. })
-    ));
-}
-
-#[test]
-fn without_the_setting_nothing_is_ever_started() {
-    let mut sync = NewSessionSync::new("studio".into(), None, None);
-    sync.set_enabled(true, NOW);
-    sync.connected(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/rakumux")]);
-    sync.read(true, vec![ask(ASK, "rakumux", Some(Agent::ClaudeCode))]);
-    assert_eq!(body(sync.next_work(NOW))["failure"], "not_accepted");
 }
 
 #[test]
@@ -169,7 +111,7 @@ fn only_folders_this_machine_lists_and_never_by_path() {
     });
     let mut dead = view("01K89ZQ4D2F6H8J0K2M4N6P8R3", "/home/me/old");
     dead.status = SessionStatus::Dead;
-    let mut sync = on(&[private, elsewhere, dead], true);
+    let mut sync = on(&[private, elsewhere, dead]);
     // Each id is decided once: a fresh one per folder.
     let folders = [
         ("secret", "01K8A2B3C4D5E6F7G8H9J0K1A1"),
@@ -188,10 +130,7 @@ fn only_folders_this_machine_lists_and_never_by_path() {
 #[test]
 fn a_folder_is_matched_by_its_name_exactly_as_listed() {
     // Folder names keep their spaces: the session list sends them as they are.
-    let mut sync = on(
-        &[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/ notes")],
-        true,
-    );
+    let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/ notes")]);
     let page = serde_json::json!({
         "version": 1, "replies": [], "latest_seq": 0, "more": false,
         "new_sessions": [{"id": ASK, "machine": "studio", "folder": " notes", "status": "pending",
@@ -227,7 +166,7 @@ fn a_folder_is_matched_by_its_name_exactly_as_listed() {
 fn two_folders_of_one_name_need_the_session_that_says_which() {
     let a = view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/work/api");
     let b = view("01K89ZQ4D2F6H8J0K2M4N6P8R1", "/home/me/play/api");
-    let mut sync = on(&[a, b.clone()], true);
+    let mut sync = on(&[a, b.clone()]);
     sync.read(true, vec![ask(ASK, "api", None)]);
     assert_eq!(body(sync.next_work(NOW))["failure"], "folder_unknown");
     sync.reported(true, Ok(()), NOW);
@@ -241,7 +180,7 @@ fn two_folders_of_one_name_need_the_session_that_says_which() {
     assert_eq!(request.scope, Some(b.scope));
 
     // A session named in another folder says nothing about this one.
-    let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")], true);
+    let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")]);
     let mut wrong = ask(ASK, "web", None);
     wrong.folder_session = Some(SessionId::from_string("01K89ZQ4D2F6H8J0K2M4N6P8R5"));
     sync.read(true, vec![wrong]);
@@ -253,7 +192,7 @@ fn two_folders_of_one_name_need_the_session_that_says_which() {
 
 #[test]
 fn the_daemon_refusing_fails_refused_and_requests_go_one_at_a_time() {
-    let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")], true);
+    let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")]);
     sync.read(true, vec![ask(ASK, "web", None), ask(OTHER, "web", None)]);
     let Some(NewSessionWork::Create { id, .. }) = sync.next_work(NOW) else {
         panic!("expected a create");
@@ -276,9 +215,8 @@ fn the_daemon_refusing_fails_refused_and_requests_go_one_at_a_time() {
 fn a_request_is_started_at_most_once_even_across_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("new-sessions.json");
-    let (read, _) = setting(true);
     let views = [view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")];
-    let mut sync = NewSessionSync::new("studio".into(), Some(read.clone()), Some(path.clone()));
+    let mut sync = NewSessionSync::new("studio".into(), Some(path.clone()));
     sync.set_enabled(true, NOW);
     sync.connected(&views);
     sync.read(true, vec![ask(ASK, "web", None)]);
@@ -290,7 +228,7 @@ fn a_request_is_started_at_most_once_even_across_a_restart() {
     // pending on rakumux.com, and read again it's never started again (nor
     // reported: it expires there).
     drop(sync);
-    let mut sync = NewSessionSync::new("studio".into(), Some(read.clone()), Some(path.clone()));
+    let mut sync = NewSessionSync::new("studio".into(), Some(path.clone()));
     sync.set_enabled(true, NOW);
     sync.connected(&views);
     sync.read(true, vec![ask(ASK, "web", None)]);
@@ -304,7 +242,7 @@ fn a_request_is_started_at_most_once_even_across_a_restart() {
     ));
     sync.created(OTHER, Ok(created("calm-heron")));
     drop(sync);
-    let mut sync = NewSessionSync::new("studio".into(), Some(read), Some(path.clone()));
+    let mut sync = NewSessionSync::new("studio".into(), Some(path.clone()));
     sync.set_enabled(true, NOW);
     sync.connected(&views);
     sync.read(true, vec![ask(OTHER, "web", None)]);
@@ -317,7 +255,7 @@ fn a_request_is_started_at_most_once_even_across_a_restart() {
 
 #[test]
 fn reports_back_off_and_a_refused_one_is_dropped() {
-    let mut sync = on(&[], true);
+    let mut sync = on(&[]);
     sync.read(true, vec![ask(ASK, "web", None), ask(OTHER, "web", None)]);
     assert!(matches!(
         sync.next_work(NOW),
@@ -337,7 +275,7 @@ fn reports_back_off_and_a_refused_one_is_dropped() {
 
 #[test]
 fn only_this_machines_requests_and_only_while_enabled() {
-    let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")], true);
+    let mut sync = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/web")]);
     let mut theirs = ask(ASK, "web", None);
     theirs.machine = "laptop".into();
     sync.read(true, vec![theirs]);
@@ -354,25 +292,6 @@ fn only_this_machines_requests_and_only_while_enabled() {
     sync.rename("studio-6m8b".into());
     sync.read(true, vec![ask(ASK, "web", None)]);
     assert_eq!(sync.next_work(NOW), None);
-}
-
-#[test]
-fn the_setting_is_read_at_most_every_ten_seconds() {
-    let reads = Arc::new(AtomicUsize::new(0));
-    let counted = reads.clone();
-    let read: AcceptRemote = Arc::new(move || {
-        counted.fetch_add(1, Ordering::SeqCst);
-        true
-    });
-    let mut sync = NewSessionSync::new("studio".into(), Some(read), None);
-    sync.set_enabled(true, NOW);
-    for second in 0..5 {
-        sync.read(true, vec![]);
-        let _ = sync.next_work(NOW + Duration::from_secs(second));
-    }
-    assert_eq!(reads.load(Ordering::SeqCst), 1);
-    let _ = sync.next_work(NOW + SETTING_EVERY);
-    assert_eq!(reads.load(Ordering::SeqCst), 2);
 }
 
 #[test]

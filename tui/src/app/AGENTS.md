@@ -72,7 +72,7 @@ new-session flow, and code boundaries.
   `feed_shown` are the drawer's on that tab; `feed_columns` puts the reply beside the cards from
   100 columns in the Tabs layout; `toggle_feed` (`f`, the footer's `FooterKey::Feed`, Settings'
   `KeyAction::Feed`) is `toggle_drawer(Feed)`; `feed_back` is the feed's Esc. It polls `AccountAccess::feed` off the UI thread every 2 s while
-  on screen, and every 10 s as a background read while the account's Feed switch is on, so
+  on screen, and every 10 s as a background read while the account's feed is on, so
   `feed_unseen` can count for the footer and the Feed tab (again at once while `more`). Its keys
   (`feed_key`: ←/→ and `h` do nothing, `l` is Enter, ↑/↓ scroll a reply being read) and Enter
   (`open_feed_entry`: read the reply whole; from there, or beside the cards, a reply whose

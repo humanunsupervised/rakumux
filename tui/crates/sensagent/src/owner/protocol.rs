@@ -101,9 +101,11 @@ pub enum OwnerRequest {
     /// programs; the title renames the session whatever its name. Answered
     /// with `Done`; `Statuses` shows `refreshing` until it's made.
     Summarize { session: SessionId },
-    /// Turn the account's feature switches on or off (as rakumux.com/features
-    /// does); an absent one stays as it is. Answered with `Done`; `State` shows
-    /// them changed at once, and `features_unsaved` if saving them failed.
+    /// Turn the account's feature switches on or off; an absent one stays as
+    /// it is. Answered with `Done`; `State` shows them changed at once, and
+    /// `features_unsaved` if saving them failed. Kept for older TUIs: the
+    /// features are on for every signed-in account now, and rakumux.com
+    /// accepts the change and ignores it (the next features read says on).
     SetFeatures {
         /// AI session titles.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -235,7 +237,7 @@ pub struct OwnerState {
     /// rakumux.com's wire), once read; absent when signed out or not yet known.
     #[serde(default)]
     pub summaries: Option<bool>,
-    /// The account's Feed switch, likewise.
+    /// The account's feed, likewise.
     #[serde(default)]
     pub feed: Option<bool>,
     /// The last change to the switches couldn't be saved; they show the account's.

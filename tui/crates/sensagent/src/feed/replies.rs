@@ -1,5 +1,5 @@
 //! Replies written back to feed entries (`contracts/feed/` `reply`): while the
-//! account's Feed switch is on, the status service reads the account's
+//! account's feed is on, the status service reads the account's
 //! replies as they change (every few seconds), keeps them for TUIs' threads,
 //! and types the pending ones addressed to this machine into their sessions
 //! (`session_submit`: a paste, then Enter, the same for every agent), then
@@ -12,18 +12,16 @@
 //! (written on rakumux.com to a session with no answer to reply to) goes in
 //! the same queue: it is typed once an agent runs there and waits,
 //! whatever chat it shows; never into a session without an agent, which is
-//! waited for. Session messages never reach TUIs. A reply written on rakumux.com or another machine is
-//! typed only when this machine's user turned that on in Settings; one
-//! written in this machine's TUI always is, once a read reaches it (5 s at
+//! waited for. Session messages never reach TUIs. A reply written on
+//! rakumux.com, another machine or this machine's TUI is typed alike; one
+//! written in this machine's TUI waits for a read that reaches it (5 s at
 //! most), so one written before it elsewhere, to the same session and not
 //! read here yet, goes in first. The agent's next reply in that
 //! session is uploaded as the reply's answer (`reply_to`).
 //!
-//! A reply counts as written here only when this machine made its id (`from`
-//! is what the writer said, and any machine of the account can say anything).
-//! Which replies were written here, typed in or decided, and the reports not
-//! yet taken, are kept across a restart (`kept`), so a reply is typed at most
-//! once whatever happens to the service.
+//! Which replies were typed in or decided, and the reports not yet taken, are
+//! kept across a restart (`kept`), so a reply is typed at most once whatever
+//! happens to the service.
 //!
 //! A reply with files attached (`attachments`) has them fetched once it is
 //! otherwise ready to be typed in, one at a time and each only once, saved
@@ -37,7 +35,6 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -74,8 +71,6 @@ const RETRY_MAX: Duration = Duration::from_secs(300);
 /// asks to wait until the window ends (up to an hour, a day for daily ones),
 /// while a refused request isn't counted. Pending replies expire in an hour.
 const RATE_LIMIT_MAX: Duration = Duration::from_secs(60);
-/// How long the "replies from elsewhere" setting is trusted before it's read again.
-const SETTING_EVERY: Duration = Duration::from_secs(10);
 /// A reply typed in is answered by its agent's next reply in its turn, which
 /// the daemon captures within 10 s of the turn ending: one whose turn ended
 /// this long ago without an answer has none, and is forgotten.
@@ -108,9 +103,6 @@ pub(crate) const SETTLE: Duration = Duration::from_secs(5);
 /// the same: reads failing, or slow behind other work, don't hold it back.
 const ORDER_WAIT: Duration = Duration::from_secs(5);
 
-/// Whether this machine takes replies written on rakumux.com or other machines.
-pub type AcceptRemote = Arc<dyn Fn() -> bool + Send + Sync>;
-
 /// What became of a reply a TUI wrote.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -118,7 +110,7 @@ pub enum ReplyWriteStatus {
     /// Stored on rakumux.com, for its machine to type into the session.
     Sent,
     SignedOut,
-    /// The account's Feed switch is off.
+    /// The account's feed is off.
     Off,
     /// The text says nothing, is too long, or the entry can't be replied to.
     Invalid,
@@ -539,9 +531,6 @@ impl Awaiting {
 pub(crate) struct ReplySync {
     machine: String,
     enabled: bool,
-    accept_remote: Option<AcceptRemote>,
-    remote: bool,
-    remote_read: Option<Duration>,
     sessions: HashMap<SessionId, Seen>,
     /// Where reads continue: the greatest reply seq read (the account's
     /// once a read said no more wait).
@@ -580,20 +569,12 @@ pub(crate) struct ReplySync {
 }
 
 impl ReplySync {
-    /// Replies for `machine`; `accept_remote` says whether replies written
-    /// elsewhere are typed here (never without it); `kept` is the file that
-    /// keeps what's typed in across a restart (memory only without it).
-    pub fn new(
-        machine: String,
-        accept_remote: Option<AcceptRemote>,
-        kept: Option<PathBuf>,
-    ) -> Self {
+    /// Replies for `machine`; `kept` is the file that keeps what's typed in
+    /// across a restart (memory only without it).
+    pub fn new(machine: String, kept: Option<PathBuf>) -> Self {
         Self {
             machine,
             enabled: false,
-            accept_remote,
-            remote: false,
-            remote_read: None,
             sessions: HashMap::new(),
             cursor: 0,
             out: None,
@@ -615,7 +596,7 @@ impl ReplySync {
         }
     }
 
-    /// Follow the account: signed in with its Feed switch on. Off, replies are
+    /// Follow the account: signed in with its feed on. Off, replies are
     /// read again from the start next time; reports not yet taken are kept,
     /// and go once it's on again (one for another account is refused, and
     /// dropped).
@@ -703,13 +684,6 @@ impl ReplySync {
         self.next_read = now;
     }
 
-    /// This machine made the id of a reply it's about to write: one read with
-    /// it counts as written here (a reply's `from` is only what its writer
-    /// said).
-    pub fn wrote(&mut self, id: &str) {
-        self.kept.wrote(id);
-    }
-
     /// A reply written in this machine's TUI was stored: typed here when its
     /// session runs here, once a read reaches it (its `seq`), which goes at
     /// once, so a reply written before it on rakumux.com to the same session,
@@ -775,7 +749,6 @@ impl ReplySync {
 
     /// The first pending reply that can be decided now: typed, or failed.
     fn deliver(&mut self, now: Duration) -> Option<ReplyWork> {
-        let remote = self.accepts_remote(now);
         self.held.retain(|_, until| *until > now);
         self.follow_deliveries(now);
         // A session a reply is going into (or whose reply's file is being
@@ -815,13 +788,9 @@ impl ReplySync {
             if behind.contains(reply.session_id.as_str()) {
                 continue;
             }
-            // Written here only when this machine made its id: `from` is
-            // whatever its writer said.
-            let elsewhere = !self.kept.is_own(id);
             let session = SessionId::from_string(reply.session_id.clone());
             let waits = Seen::waits;
             let outcome = match self.sessions.get(&session) {
-                _ if elsewhere && !remote => Err(ReplyFailure::NotAccepted),
                 None => Err(ReplyFailure::SessionGone),
                 Some(seen) if !seen.live => Err(ReplyFailure::SessionGone),
                 Some(seen) if seen.private => Err(ReplyFailure::Private),
@@ -1023,19 +992,6 @@ impl ReplySync {
                 self.handle(&reply, Some(ReplyFailure::AttachmentUnavailable));
             }
         }
-    }
-
-    /// Whether replies written elsewhere are typed here, read again every
-    /// [`SETTING_EVERY`].
-    fn accepts_remote(&mut self, now: Duration) -> bool {
-        let stale = self
-            .remote_read
-            .is_none_or(|at| now.saturating_sub(at) >= SETTING_EVERY);
-        if stale {
-            self.remote = self.accept_remote.as_ref().is_some_and(|read| read());
-            self.remote_read = Some(now);
-        }
-        self.remote
     }
 
     /// The session a reply handed to the daemon goes into, while the daemon

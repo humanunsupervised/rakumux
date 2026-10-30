@@ -57,7 +57,7 @@ pub struct RefreshState {
     /// The account's AI session titles switch (`ai_session_summaries` on the
     /// wire), once read; `None` when signed out or not yet known.
     pub summaries: Option<bool>,
-    /// The account's Feed switch, likewise.
+    /// The account's feed, likewise.
     pub feed: Option<bool>,
     /// The last change to the switches couldn't be saved; they show what the
     /// account has.
@@ -167,12 +167,8 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     chat_cursors: Option<std::path::PathBuf>,
     /// Where files attached to replies are saved, if anywhere.
     uploads: Option<std::path::PathBuf>,
-    /// Whether replies written elsewhere are typed into this machine's sessions.
-    accept_remote: Option<crate::feed::AcceptRemote>,
     /// Where replies keep what was typed in across a restart.
     reply_state: Option<std::path::PathBuf>,
-    /// Whether new sessions asked for on rakumux.com are started here.
-    accept_sessions: Option<crate::feed::AcceptRemote>,
     /// Where new sessions keep which were started across a restart.
     new_session_state: Option<std::path::PathBuf>,
     /// This machine's id and name for the feed, until the owner takes it.
@@ -209,9 +205,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             settings_due: Duration::ZERO,
             chat_cursors: None,
             uploads: None,
-            accept_remote: None,
             reply_state: None,
-            accept_sessions: None,
             new_session_state: None,
             machine: None,
             titles: Titles::default(),
@@ -253,19 +247,6 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         }
     }
 
-    /// Type replies written on rakumux.com or other machines into this
-    /// machine's sessions while `read` says so (it's read every few seconds);
-    /// without it, never.
-    pub fn with_remote_replies(mut self, read: crate::feed::AcceptRemote) -> Self {
-        self.accept_remote = Some(read);
-        self
-    }
-
-    /// The setting for replies written elsewhere, if any.
-    pub(crate) fn accept_remote(&self) -> Option<crate::feed::AcceptRemote> {
-        self.accept_remote.clone()
-    }
-
     /// Remember how far each chat was uploaded in `path`, so a restarted
     /// service carries on (memory only without it).
     pub fn with_chat_cursors(mut self, path: std::path::PathBuf) -> Self {
@@ -289,19 +270,6 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where replies keep their state, if anywhere.
     pub(crate) fn reply_state(&self) -> Option<std::path::PathBuf> {
         self.reply_state.clone()
-    }
-
-    /// Start new sessions asked for on rakumux.com while `read` says so (it's
-    /// read every few seconds); without it, never: each is refused as
-    /// `not_accepted`.
-    pub fn with_remote_sessions(mut self, read: crate::feed::AcceptRemote) -> Self {
-        self.accept_sessions = Some(read);
-        self
-    }
-
-    /// The setting for new sessions from rakumux.com, if any.
-    pub(crate) fn accept_sessions(&self) -> Option<crate::feed::AcceptRemote> {
-        self.accept_sessions.clone()
     }
 
     /// Keep which new sessions were started or decided here, and the reports
@@ -702,7 +670,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         }
     }
 
-    /// The account's Feed switch, once read; `None` when signed out or not yet known.
+    /// The account's feed, once read; `None` when signed out or not yet known.
     pub fn feed_switch(&self) -> Option<bool> {
         self.service
             .account_session()

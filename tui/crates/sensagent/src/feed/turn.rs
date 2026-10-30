@@ -22,7 +22,7 @@ const OUTPUT: usize = 8 * 1024;
 pub enum FeedTurnStatus {
     Ready,
     SignedOut,
-    /// The account's Feed switch is off.
+    /// The account's feed is off.
     Off,
     /// rakumux.com can't be reached, or refused.
     Unavailable,

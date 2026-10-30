@@ -40,9 +40,7 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
 
 /// The Sprite dialog: a found token is used (`y`/Enter) or another pasted
 /// (`n`); the token field takes typing and pastes, Enter sets up, Ctrl-o
-/// copies where tokens are made; signed in, `y`/Enter or `n` says whether
-/// replies from rakumux.com are typed into its agents; a failure is tried
-/// again with `r`; Enter on the ready card opens the session; `y`/Enter or
+/// copies where tokens are made; a failure is tried again with `r`; Enter on the ready card opens the session; `y`/Enter or
 /// `n` says whether a folder's `.env` files are copied.
 fn handle_sprite_key(app: &mut App, key: KeyEvent) {
     let AppMode::Sprite(dialog) = &mut app.mode else {
@@ -52,7 +50,7 @@ fn handle_sprite_key(app: &mut App, key: KeyEvent) {
         SpriteState::Found { token, .. } => match key.code {
             KeyCode::Char('y') | KeyCode::Enter => {
                 let token = token.clone();
-                app.sprite_token_chosen(token);
+                app.start_sprite_setup(token);
             }
             KeyCode::Char('n') => app.sprite_paste_token(),
             KeyCode::Esc | KeyCode::Char('q') => app.mode = AppMode::Normal,
@@ -68,25 +66,13 @@ fn handle_sprite_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 let token = input.value().trim().to_string();
-                app.sprite_token_chosen(token);
+                app.start_sprite_setup(token);
             }
             _ => {
                 if input.handle_key(&key) {
                     *error = None;
                 }
             }
-        },
-        SpriteState::Replies { token } => match key.code {
-            KeyCode::Char('y') | KeyCode::Enter => {
-                let token = token.clone();
-                app.start_sprite_setup(token, true);
-            }
-            KeyCode::Char('n') => {
-                let token = token.clone();
-                app.start_sprite_setup(token, false);
-            }
-            KeyCode::Esc | KeyCode::Char('q') => app.mode = AppMode::Normal,
-            _ => {}
         },
         SpriteState::Working { .. } => {}
         SpriteState::Failed { .. } => match key.code {

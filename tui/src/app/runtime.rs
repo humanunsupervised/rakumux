@@ -176,8 +176,6 @@ pub enum AppEvent {
         session: session_core::ids::SessionId,
         result: Result<(), String>,
     },
-    /// A switch of the account was changed (Settings → Available on sign-in).
-    FeaturesSet(Result<(), String>),
     /// A feed entry's turn, from its start or after what was held.
     FeedTurn {
         generation: u64,

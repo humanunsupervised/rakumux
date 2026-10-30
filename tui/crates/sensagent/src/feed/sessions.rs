@@ -1,5 +1,5 @@
 //! This machine's session list for rakumux.com (`contracts/feed/`
-//! `sessions-upload`): while the account's Feed switch is on, the status
+//! `sessions-upload`): while the account's feed is on, the status
 //! service keeps what the TUI's Status and Folders tabs group by for each
 //! session it follows (never a private one, and the daemon's list leaves out
 //! dead ones) and uploads the whole list whenever it changes, at most every
@@ -291,7 +291,7 @@ impl SessionSync {
         self
     }
 
-    /// Follow the account: signed in with its Feed switch on. Turned on
+    /// Follow the account: signed in with its feed on. Turned on
     /// again, the list is sent at once.
     pub fn set_enabled(&mut self, enabled: bool, now: Duration) {
         if enabled == self.enabled {

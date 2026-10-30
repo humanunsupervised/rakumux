@@ -141,14 +141,6 @@ pub fn draw_sprite(f: &mut Frame, area: Rect, dialog: &SpriteDialog) {
                 ],
             )
         }
-        SpriteState::Replies { .. } => (
-            vec![
-                Line::from("Its agents' replies reach your feed."),
-                Line::from(""),
-                Line::from("Type replies you write on rakumux.com into its agents?"),
-            ],
-            vec![("y/Enter", "Yes"), ("n", "No"), ("Esc", "Cancel")],
-        ),
         SpriteState::Working { step } => {
             let at = STEPS.iter().position(|s| s == step).unwrap_or(0);
             let lines = STEPS

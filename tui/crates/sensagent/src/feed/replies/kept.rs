@@ -1,7 +1,8 @@
 //! What replies keep across a restart of the service, in a file (0600) when
-//! given one: the replies this machine wrote (it made their ids), those it
-//! typed in or decided (never typed again), those handed to the daemon whose
-//! report isn't queued yet, and the reports rakumux.com hasn't taken yet.
+//! given one: the replies typed in or decided here (never typed again), those
+//! handed to the daemon whose report isn't queued yet, and the reports
+//! rakumux.com hasn't taken yet. (An older release also kept the replies this
+//! machine wrote, `own`, which is ignored when read and dropped when saved.)
 //! Without it a restarted service read its pending replies from the start and
 //! typed one again that it had typed but not yet reported (the report waits
 //! for the agent to take it, and backs off while rakumux.com can't be
@@ -37,9 +38,6 @@ pub(super) struct Report {
 #[derive(Default, Serialize, Deserialize)]
 struct KeptFile {
     version: u8,
-    /// Replies this machine wrote, by id: when (Unix ms).
-    #[serde(default)]
-    own: BTreeMap<String, i64>,
     /// Replies typed in or decided here: never typed again.
     #[serde(default)]
     handled: BTreeMap<String, i64>,
@@ -82,17 +80,6 @@ impl Kept {
         }
         kept.save();
         kept
-    }
-
-    /// This machine wrote the reply `id`: it made the id.
-    pub fn wrote(&mut self, id: &str) {
-        self.file.own.insert(id.to_owned(), now_ms());
-        self.save();
-    }
-
-    /// Whether this machine wrote the reply `id`.
-    pub fn is_own(&self, id: &str) -> bool {
-        self.file.own.contains_key(id)
     }
 
     /// Whether the reply `id` was typed in or decided here.
@@ -149,11 +136,7 @@ impl Kept {
 
     fn save(&mut self) {
         let now = now_ms();
-        for ids in [
-            &mut self.file.own,
-            &mut self.file.handled,
-            &mut self.file.typing,
-        ] {
+        for ids in [&mut self.file.handled, &mut self.file.typing] {
             ids.retain(|_, at| now.saturating_sub(*at) < KEEP_MS);
             while ids.len() > MAX_IDS {
                 let Some(oldest) = ids

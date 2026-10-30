@@ -141,23 +141,9 @@ impl App {
         self.mode = AppMode::Sprite(SpriteDialog { state });
     }
 
-    /// The Sprites token to set up with: signed in, ask first whether
-    /// replies from rakumux.com are typed into the Sprite's agents (its
-    /// agents' replies reach the feed); signed out, set up at once.
-    pub fn sprite_token_chosen(&mut self, token: String) {
-        if matches!(self.account, AccountStatus::SignedIn(_)) {
-            self.mode = AppMode::Sprite(SpriteDialog {
-                state: SpriteState::Replies { token },
-            });
-        } else {
-            self.start_sprite_setup(token, false);
-        }
-    }
-
     /// Set the Sprite up with `token`, then create the session. Signed in,
-    /// the account enrols it for the feed, typing `replies` from elsewhere
-    /// into its agents or not.
-    pub fn start_sprite_setup(&mut self, token: String, replies: bool) {
+    /// the account enrols it for the feed.
+    pub fn start_sprite_setup(&mut self, token: String) {
         let (Some(api), Some(home)) = (self.connection.api(), self.rakumux_home()) else {
             self.set_status("Not connected to the daemon.");
             return;
@@ -171,7 +157,6 @@ impl App {
         self.exec.job(move || {
             let feed = signed_in.then_some(sprites::Feed {
                 account: account.as_ref(),
-                replies,
             });
             let result = sprites::connect(api.as_ref(), &home, &token, None, feed, &mut |step| {
                 let _ = events.send(AppEvent::SpriteStep(step));

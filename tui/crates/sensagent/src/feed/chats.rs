@@ -1,4 +1,4 @@
-//! Whole chats for the agent feed: while the account's Feed switch is on,
+//! Whole chats for the agent feed: while the account's feed is on,
 //! each live, non-private session's agent conversation is read from the
 //! daemon (`session_transcript`) after where it was last uploaded, cleaned
 //! (terminal controls removed, keys, credential assignments and tokens
@@ -134,7 +134,7 @@ impl ChatSync {
         }
     }
 
-    /// Upload while signed in with the account's Feed switch on. Turning it
+    /// Upload while signed in with the account's feed on. Turning it
     /// off drops what wasn't uploaded; what was uploaded stays remembered.
     pub fn set_enabled(&mut self, enabled: bool, now: Duration) {
         if enabled == self.enabled {

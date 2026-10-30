@@ -335,9 +335,6 @@ pub struct App {
     feed_on_screen: bool,
     /// The line left of the docked feed pane: hovered or being dragged.
     pub feed_divider: DividerState,
-    /// A switch was changed from Settings; the next account check says if
-    /// saving it failed.
-    features_saving: bool,
     pub connection: Connection,
     /// The daemon was reachable once; losing it triggers reconnects.
     was_connected: bool,
@@ -467,7 +464,6 @@ impl App {
             rtop_on_screen: false,
             feed_on_screen: false,
             feed_divider: DividerState::default(),
-            features_saving: false,
             connection: Connection::Connecting,
             was_connected: false,
             checked_daemon_features: false,
@@ -903,63 +899,8 @@ impl App {
                 (
                     "Account",
                     value,
-                    "Sign in to your Rakumux account for AI session titles and the agent feed (Available on sign-in, below). Same as `rakumux account login`.",
+                    "Sign in to your Rakumux account for AI session titles, the agent feed and rtop on rakumux.com, and to reply to your agents and start sessions here from rakumux.com. Your agents' chats and this machine's session list go to rakumux.com, keys and tokens masked, private sessions never. Same as `rakumux account login`.",
                 )
-            }
-            SettingsItem::AiTitles | SettingsItem::AgentFeed => {
-                let feature = match item {
-                    SettingsItem::AiTitles => AccountFeature::AiTitles,
-                    _ => AccountFeature::AgentFeed,
-                };
-                let (value, disabled) = match &self.account {
-                    AccountStatus::SignedIn(account) => match feature.of(account) {
-                        Some(true) => ("[On] Off", false),
-                        Some(false) => ("On [Off]", false),
-                        None => ("…", false),
-                    },
-                    _ => ("On Off", true),
-                };
-                let note = match feature {
-                    AccountFeature::AiTitles => "Each agent chat names its session with a short AI title, made once the agent has written 5 messages or finished, then when you ask (the ↻ after a hovered session's name, or `s`). A name you gave stays until you ask. Your prompt and the agent's messages since are sent to rakumux.com to write it; private sessions never are. Saved to your account, as on rakumux.com/features.",
-                    AccountFeature::AgentFeed => "The Feed (f): what your agents said when they finished a turn, from every machine signed in to your account, newest first. Each finished reply and its chat are sent to rakumux.com, keys and tokens masked, private sessions never, and kept for 30 days; so is the list of this machine's sessions (names, folder names, branches, agents and what they're doing), for rakumux.com's Status and Folder pages. Saved to your account, as on rakumux.com/features.",
-                };
-                return SettingRow {
-                    section: item.section(),
-                    label: feature.label().into(),
-                    value: value.into(),
-                    note: note.into(),
-                    disabled,
-                };
-            }
-            SettingsItem::RemoteReplies => {
-                let signed_in = matches!(self.account, AccountStatus::SignedIn(_));
-                let value = match (signed_in, self.settings.sessions.remote_replies) {
-                    (false, _) => "On Off",
-                    (true, true) => "[On] Off",
-                    (true, false) => "On [Off]",
-                };
-                return SettingRow {
-                    section: item.section(),
-                    label: "Replies from rakumux.com".into(),
-                    value: value.into(),
-                    note: "Type replies written to the feed on rakumux.com, or on your other machines, into this machine's agent sessions, as if you typed them: only into the reply's own session, while it shows that chat and its agent waits for you. Replies can make your agents run commands here, so leave this off unless you want to steer them from elsewhere. Replies written in this window always go in. This machine only, never changed from the website.".into(),
-                    disabled: !signed_in,
-                };
-            }
-            SettingsItem::RemoteSessions => {
-                let signed_in = matches!(self.account, AccountStatus::SignedIn(_));
-                let value = match (signed_in, self.settings.sessions.remote_sessions) {
-                    (false, _) => "On Off",
-                    (true, true) => "[On] Off",
-                    (true, false) => "On [Off]",
-                };
-                return SettingRow {
-                    section: item.section(),
-                    label: "New sessions from rakumux.com".into(),
-                    value: value.into(),
-                    note: "Start new sessions here when you ask for one on rakumux.com: a shell, or Claude Code, Codex or OpenCode, in one of the folders rakumux.com lists for this machine (never a private session's, never a path or command from the website). A first prompt sent with one goes in as a reply, so it needs Replies from rakumux.com too. Leave this off unless you want to start sessions here from elsewhere. This machine only, never changed from the website.".into(),
-                    disabled: !signed_in,
-                };
             }
             SettingsItem::Rtop => (
                 "rtop",
@@ -1147,7 +1088,6 @@ impl App {
             AppEvent::SignedOut(result) => self.on_signed_out(result),
             AppEvent::Statuses { generation, result } => self.on_statuses(generation, result),
             AppEvent::TitleAsked { session, result } => self.on_title_asked(session, result),
-            AppEvent::FeaturesSet(result) => self.on_features_set(result),
             AppEvent::FeedTurn {
                 generation,
                 entry,
