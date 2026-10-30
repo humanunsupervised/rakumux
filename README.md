@@ -8,8 +8,8 @@
 
 ![Rakumux: the session list with where each session works, a live Claude Code session and the Feed](assets/rakumux-screenshot.png)
 
-Run Claude Code, Codex and OpenCode side by side, on your own subscriptions, along with any other
-program. Rakumux shows which agent is working, which needs you and which has finished. Your
+Run Claude Code, Codex, OpenCode, GitHub Copilot, Cursor, Pi, Grok, Kimi Code, Droid and Amp side
+by side, on your own subscriptions, along with any other program. Rakumux shows which agent is working, which needs you and which has finished. Your
 sessions keep running when you close the window, lose SSH or reboot.
 
 - **Every session in one list.** Group it by status, folder or app, with live previews. Pin,
@@ -230,8 +230,8 @@ stays. Press `s`, or the `↻` after a hovered name, for a new title.
 message into the session once the agent is waiting for you, or while it works when it's Claude
 Code, Codex or OpenCode, which take it at their next step.
 
-**New sessions from the web:** start a shell, Claude Code, Codex or OpenCode in one of a machine's
-folders from rakumux.com. The machine starts it only in a folder it already lists there, and never
+**New sessions from the web:** start a shell or any of those agents in one of a machine's folders
+from rakumux.com. The machine starts it only in a folder it already lists there, and never
 runs a path or command from the website.
 
 **rtop on the web:** while you have it open on rakumux.com, each machine reports what it and its
