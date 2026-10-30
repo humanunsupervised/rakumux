@@ -174,8 +174,9 @@ pub(crate) fn copilot_log_dir(process: &ProcessInfo, home: &Path) -> PathBuf {
     home.join("logs")
 }
 
-/// The newest process log (`process-<ms>-<pid>.log`) in `dir` of one of
-/// `pids`, and that pid.
+/// The process log (`process-<ms>-<pid>.log`) in `dir` of the first of
+/// `pids` that has one (the process, then its children: never a Copilot its
+/// own shell tool ran), its newest; and that pid.
 pub(crate) fn copilot_process_log(dir: &Path, pids: &[u32]) -> Option<(PathBuf, u32)> {
     std::fs::read_dir(dir)
         .ok()?
@@ -186,10 +187,11 @@ pub(crate) fn copilot_process_log(dir: &Path, pids: &[u32]) -> Option<(PathBuf, 
                 .strip_suffix(".log")?
                 .split_once('-')?;
             let (started, pid) = (started.parse::<u64>().ok()?, pid.parse::<u32>().ok()?);
-            pids.contains(&pid).then(|| (started, pid, dir.join(name)))
+            let nearest = pids.iter().position(|candidate| *candidate == pid)?;
+            Some((std::cmp::Reverse(nearest), started, pid, dir.join(name)))
         })
-        .max_by_key(|(started, _, _)| *started)
-        .map(|(_, pid, path)| (path, pid))
+        .max_by_key(|(nearest, started, _, _)| (*nearest, *started))
+        .map(|(_, _, pid, path)| (path, pid))
 }
 
 /// Read `path` from `offset` (its last [`MAX_PROCESS_LOG`] bytes when more
@@ -214,6 +216,50 @@ pub(crate) fn read_process_log(path: &Path, offset: u64, shown: &mut Shown) -> O
         }
     }
     Some(start + complete as u64)
+}
+
+/// The conversation a process log last put in the foreground, read from its
+/// end back (a piece at a time, at most [`MAX_PROCESS_LOG`]) to its last
+/// foreground line. `None` when that unregistered it (a switch half logged,
+/// or the process ending) or there's none.
+pub(crate) fn last_shown(path: &Path) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    const PIECE: u64 = 64 * 1024;
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let floor = len.saturating_sub(MAX_PROCESS_LOG);
+    let mut end = len;
+    // The start of a line cut by the piece before, kept for the next.
+    let mut carry = Vec::new();
+    while end > floor {
+        let start = end.saturating_sub(PIECE).max(floor);
+        file.seek(SeekFrom::Start(start)).ok()?;
+        let mut bytes = Vec::new();
+        (&mut file).take(end - start).read_to_end(&mut bytes).ok()?;
+        bytes.extend_from_slice(&carry);
+        // Unless at the floor, the first line may be cut: keep it for later.
+        let first = if start > floor {
+            bytes
+                .iter()
+                .position(|b| *b == b'\n')
+                .map_or(bytes.len(), |at| at + 1)
+        } else {
+            0
+        };
+        carry = bytes[..first].to_vec();
+        for line in bytes[first..].rsplit(|b| *b == b'\n') {
+            let Ok(line) = std::str::from_utf8(line) else {
+                continue;
+            };
+            if line.contains("foreground session: ") {
+                let mut shown = Shown::default();
+                shown.line(line);
+                return shown.current;
+            }
+        }
+        end = start;
+    }
+    None
 }
 
 /// The conversations `pids` hold open (`session-state/<id>/inuse.<pid>.lock`),
@@ -284,12 +330,8 @@ pub(crate) fn copilot_conversation(
     bound: Option<&str>,
 ) -> Option<String> {
     let pids = copilot_pids(process);
-    let logged =
-        copilot_process_log(&copilot_log_dir(process, home), &pids).and_then(|(log, _)| {
-            let mut shown = Shown::default();
-            read_process_log(&log, 0, &mut shown)?;
-            shown.current
-        });
+    let logged = copilot_process_log(&copilot_log_dir(process, home), &pids)
+        .and_then(|(log, _)| last_shown(&log));
     if logged.is_some() {
         return logged;
     }
@@ -381,6 +423,15 @@ mod tests {
                  2026-10-30T05:31:13.587Z [INFO] Unregistering foreground session: {B}\n\
                  2026-10-30T05:31:13.589Z [INFO] Registering foreground session: {A}\n"
             ),
+        );
+        // A Copilot its shell tool ran logs too: never the one shown.
+        write(
+            &logs.join("process-1793338099999-77.log"),
+            &format!("x [INFO] Registering foreground session: {B}\n"),
+        );
+        assert_eq!(
+            copilot_process_log(&logs, &[NATIVE, 77]).map(|(_, pid)| pid),
+            Some(NATIVE)
         );
         let process = native(&[
             "/opt/homebrew/bin/copilot",
@@ -537,6 +588,38 @@ mod tests {
             ),
             args(&["--yolo"])
         );
+    }
+
+    #[test]
+    fn a_long_process_log_is_read_from_its_end() {
+        let home = tempfile::tempdir().unwrap();
+        let log = home.path().join("process.log");
+        let filler = "2026-10-30T05:26:20.567Z [INFO] [rust:copilot_runtime::storage] something\n";
+        let mut text = format!("x Registering foreground session: {B}\n");
+        text.push_str(&filler.repeat(5_000));
+        text.push_str(&format!(
+            "x Unregistering foreground session: {B}\nx Registering foreground session: {A}\n"
+        ));
+        text.push_str(&filler.repeat(5_000));
+        std::fs::write(&log, &text).unwrap();
+        assert_eq!(last_shown(&log).as_deref(), Some(A));
+        // Its last foreground line unregistered one: none is shown.
+        std::fs::write(&log, format!("x Unregistering foreground session: {A}\n")).unwrap();
+        assert_eq!(last_shown(&log), None);
+        // Nothing before what's read.
+        let far = format!(
+            "x Registering foreground session: {A}\n{}",
+            "y".repeat(MAX_PROCESS_LOG as usize + 10)
+        );
+        std::fs::write(&log, far).unwrap();
+        assert_eq!(last_shown(&log), None);
+        // A line cut between two pieces is read whole.
+        let mut cut = format!("x Registering foreground session: {B}\n");
+        cut.push_str(&"z".repeat(64 * 1024 - 20));
+        cut.push_str(&format!("\nx Registering foreground session: {A}"));
+        cut.push_str(&format!("\n{}\n", "w".repeat(64 * 1024 - 30)));
+        std::fs::write(&log, cut).unwrap();
+        assert_eq!(last_shown(&log).as_deref(), Some(A));
     }
 
     #[test]

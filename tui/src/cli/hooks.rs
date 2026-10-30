@@ -53,7 +53,7 @@ fn install_file(
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(failed)?;
     }
-    std::fs::write(&path, format!("{config}\n")).map_err(failed)?;
+    std::fs::write(&path, format!("{}\n", config.trim_end())).map_err(failed)?;
     Ok(path)
 }
 
@@ -206,7 +206,7 @@ mod tests {
         install_file(HookAgent::Copilot, config, var).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            format!("{config}\n")
+            format!("{}\n", config.trim_end())
         );
         let mut names: Vec<_> = std::fs::read_dir(copilot.join("hooks"))
             .unwrap()

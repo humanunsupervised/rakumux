@@ -53,9 +53,9 @@ impl Foreground {
     }
 
     /// The conversation on screen now, if it's known: its process log's,
-    /// else (no log) the one it holds open, its hooks' (`bound`), the newest
-    /// it holds open, or its `--resume`. `None` keeps what was followed (a
-    /// switch half logged).
+    /// else (no log, or one that names none) the one it holds open, its
+    /// hooks' (`bound`), the newest it holds open, or its `--resume`. `None`
+    /// keeps what was followed (a switch half logged).
     fn current(&mut self, bound: Option<&str>) -> Option<String> {
         if self.process_log.is_none() {
             let dir = copilot_log_dir(&self.process, &self.home);
@@ -66,7 +66,10 @@ impl Foreground {
             if let Some(next) = read_process_log(path, *offset, &mut self.shown) {
                 *offset = next;
             }
-            return self.shown.current.clone();
+            // A log that names no conversation (a level without them) says nothing.
+            if self.shown.current.is_some() || !self.shown.earlier.is_empty() {
+                return self.shown.current.clone();
+            }
         }
         let open = copilot_open_sessions(&self.home, &copilot_pids(&self.process));
         match open.as_slice() {
@@ -533,6 +536,23 @@ mod tests {
         follower.follow(None);
         assert_eq!(follower.conversation().as_deref(), Some(A));
         assert!(follower.in_background(B) && !follower.in_background(A));
+    }
+
+    #[test]
+    fn a_process_log_that_names_no_conversation_falls_back_to_the_open_one() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        let mut follower = follower(home);
+        logged(home, "[ERROR] something went wrong");
+        std::fs::create_dir_all(home.join(format!("session-state/{A}"))).unwrap();
+        std::fs::write(
+            home.join(format!("session-state/{A}/inuse.{PID}.lock")),
+            "x",
+        )
+        .unwrap();
+        append(&log(home, A), &turn("Fix the parser", "Fixed it.", 1));
+        assert!(follower.follow(None));
+        assert_eq!(follower.conversation().as_deref(), Some(A));
     }
 
     #[test]
