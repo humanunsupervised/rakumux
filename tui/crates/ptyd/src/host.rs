@@ -164,6 +164,14 @@ pub enum HostEvent {
         id: TerminalId,
         session_id: SessionId,
     },
+    /// The program reported what it is doing (OSC 7501, the Program Status
+    /// Protocol). The terminal's foreground is read again just before, so
+    /// detection that follows sees the program that reported.
+    ProgramStatus {
+        id: TerminalId,
+        session_id: SessionId,
+        status: vt::ProgramStatus,
+    },
     /// Output arrived. Throttled: at most one per second per terminal, plus
     /// one final event 500 ms after output stops (so detection sees the
     /// settled screen).

@@ -102,7 +102,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 4. **`session-core`** (`tui/crates/session-core`, lib `session_core`): the shared contract: model,
    protocol, frame codec, ids, filesystem layout, and the blocking client.
 5. **`vt`** (`tui/crates/vt`): terminal emulation on `vt100`, shared by daemon (responding emulator
-   that answers terminal queries) and TUI (passive mirror), plus key/mouse/paste encoders.
+   that answers terminal queries, the Program Status Protocol's `OSC 7501;?` among them) and TUI
+   (passive mirror), plus key/mouse/paste encoders.
 6. **`shell/`**: launcher helpers (`gwr_*.sh`, `gwr/check-updates.sh`), build helpers (`build/`),
    `rakumux-local.sh` for running a local checkout, and `rakumux-command-hook.sh` (command
    history for AI naming).
@@ -489,6 +490,7 @@ tui/
       client.rs              # SessionApi trait, Client, AttachStream, EventStream
     vt/src/
       lib.rs                 # Emulator (passive / responding), query responder, Modes, Event
+      program_status.rs      # OSC 7501 (Program Status Protocol) reports: ProgramStatus
       input.rs               # encode_key, encode_paste, encode_mouse
     vt/examples/             # spike.rs (fidelity), throughput.rs
     ptyd/src/
@@ -497,7 +499,7 @@ tui/
       control_api.rs         # Control trait (server ↔ control)
       control/               # ControlService: registry, scope, identity, permissions, waits, audit,
                              # replies (reply capture's memory-only ring), places (where sessions
-                             # worked)
+                             # worked), program_status (a program's OSC 7501 records)
       host.rs                # TerminalHost trait (control ↔ terminals), SpawnSpec, HostEvent
       terminal/              # Host: PTY actors, emulators, replay ring, attach fan-out, adopt/handoff
       handoff.rs             # restart in place: HandoffState across exec, target check
@@ -589,7 +591,10 @@ last_active_at, added_at, git}` on the wire.
   `done` (finished a turn, not yet looked at), `idle`, `unknown`, `none` (no agent). Detected by the
   daemon from the screen and foreground process; agents can add a self-report. Hook activity wins
   over the screen, except an approval prompt on screen for an agent whose hooks report none
-  (Cursor: its profile's `approvals_on_screen`).
+  (Cursor: its profile's `approvals_on_screen`). Without hook activity, what an agent's program
+  says through OSC 7501, the Program Status Protocol (Pi, Kimi Code: `idle`, `working`, `blocked`,
+  `done`, `error`, `clear`, and child records counted as subagents), wins over the screen; the
+  daemon's terminal answers the protocol's query, so they report.
 - **Revive** starts a new terminal for a dead or exited session (same id, cwd and launch spec) and
   types its resume command (startup commands, a known agent's resume form, or one the agent
   reported). The daemon revives the sessions that were running by itself when it starts after an

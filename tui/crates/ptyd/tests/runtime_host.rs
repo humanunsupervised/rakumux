@@ -464,6 +464,35 @@ fn title_cwd_and_bell_become_events() {
 }
 
 #[test]
+fn programs_that_ask_for_program_status_get_it_and_their_reports_become_events() {
+    let home = TestHome::new();
+    let host = home.host();
+    let info = host.spawn(home.bash_spec(80, 24, b"")).unwrap();
+    wait_for_prompt(&*host, info.id);
+    let events = host.subscribe();
+    // Pi's and Kimi Code's start: ask, and report only once answered.
+    host.submit(
+        info.id,
+        r#"printf '\e]7501;?\e\\'; read -r -s -d '\' ans; case "$ans" in *7501*) printf '\e]7501;state=working:app=pi\e\\'; echo STATUS_$((6*7));; esac"#,
+    )
+    .unwrap();
+    wait_for_screen(&*host, info.id, "STATUS_42");
+    let deadline = Instant::now() + TIMEOUT;
+    let mut status = None;
+    while status.is_none() && Instant::now() < deadline {
+        if let Ok(HostEvent::ProgramStatus { status: s, .. }) =
+            events.recv_timeout(Duration::from_millis(100))
+        {
+            status = Some(s);
+        }
+    }
+    let status = status.expect("a program status event");
+    assert_eq!(status.state, vt::ProgramState::Working);
+    assert_eq!(status.app.as_deref(), Some("pi"));
+    host.shutdown();
+}
+
+#[test]
 fn quiet_foreground_directory_changes_replace_stale_osc7_context() {
     let home = TestHome::new();
     let destination = home.work.join("worktree");

@@ -2047,6 +2047,21 @@ impl Inner {
                     self.refresh(&mut state, &session_id);
                 }
             }
+            HostEvent::ProgramStatus {
+                id,
+                session_id,
+                status,
+            } => {
+                let mut state = self.lock();
+                if !state.is_current(&session_id, id) {
+                    return;
+                }
+                if let Some(live) = state.live.get_mut(&session_id) {
+                    live.tracker.on_program_status(&status, now_ms());
+                }
+                self.refresh(&mut state, &session_id);
+                self.changed.notify_all();
+            }
             HostEvent::Bell { .. } => {}
         }
     }

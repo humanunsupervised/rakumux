@@ -13,12 +13,18 @@
 //!   the activity is dropped. An agent waiting for its background agents, and
 //!   subagents still running after their parent's turn, look idle on its screen
 //!   by design and are never second-guessed.
+//! - Without fresh hook activity, what the program says through OSC 7501
+//!   (the Program Status Protocol: Pi, Kimi Code) wins over the screen while
+//!   detection names an agent; its child records count as subagents. It has
+//!   no expiry (the protocol has no heartbeat) and ends with the program's
+//!   `clear` or when detection names no agent.
 //! - For an agent whose hooks report no approval prompts (Cursor's;
 //!   `detect::approvals_on_screen`), a prompt its screen shows (`Blocked`)
 //!   wins over the hooks' busy state while it's shown. Other agents' hooks
 //!   report their prompts themselves and keep winning.
 
 use super::activity::ActivityTracker;
+use super::program_status::ProgramRecords;
 use crate::detect::Detection;
 use session_core::activity::{ActivityUpdate, AgentActivity};
 use session_core::model::Lifecycle;
@@ -41,6 +47,8 @@ pub(crate) struct LifecycleTracker {
     /// Last reported state (never `Done`; see `on_report`) and when.
     report: Option<(Lifecycle, i64)>,
     activity: Option<ActivityTracker>,
+    /// What the program says through OSC 7501, while detection names an agent.
+    program: Option<ProgramRecords>,
     /// A turn is in progress (Working seen since the last Idle).
     in_turn: bool,
     /// A turn finished and nobody has looked yet.
@@ -57,6 +65,7 @@ impl Default for LifecycleTracker {
             agent: None,
             report: None,
             activity: None,
+            program: None,
             in_turn: false,
             done: false,
             current: Lifecycle::None,
@@ -93,8 +102,33 @@ impl LifecycleTracker {
             .map(|activity| activity.conversation())
     }
 
+    /// The hook activity, else what the program says through OSC 7501.
     pub fn activity(&self) -> Option<AgentActivity> {
-        self.activity.as_ref().map(ActivityTracker::view)
+        self.activity
+            .as_ref()
+            .map(ActivityTracker::view)
+            .or_else(|| self.program().map(ProgramRecords::view))
+    }
+
+    /// The OSC 7501 records, while detection names an agent.
+    fn program(&self) -> Option<&ProgramRecords> {
+        self.program.as_ref().filter(|_| self.agent.is_some())
+    }
+
+    /// The program reported what it is doing (OSC 7501). Returns true when
+    /// the lifecycle changed.
+    pub fn on_program_status(&mut self, status: &vt::ProgramStatus, now_ms: i64) -> bool {
+        let records = self.program.get_or_insert_with(ProgramRecords::default);
+        let finished = records.apply(status, now_ms);
+        if records.is_empty() {
+            self.program = None;
+        }
+        // Hooks, when they report, say when a turn finished themselves.
+        if finished && self.activity.is_none() && self.agent.is_some() {
+            self.done = true;
+            self.in_turn = false;
+        }
+        self.recompute(now_ms)
     }
 
     pub fn activity_handoff(&self) -> Option<(ActivityUpdate, i64)> {
@@ -145,6 +179,10 @@ impl LifecycleTracker {
         }
         self.agent = detection.agent;
         self.detected = detected;
+        // The program that reported is gone (a shell, or nothing, again).
+        if self.agent.is_none() {
+            self.program = None;
+        }
         if self.hooks_contradicted(now_ms) {
             self.activity = None;
         }
@@ -243,9 +281,21 @@ impl LifecycleTracker {
                 hooked
             };
         }
-        match self.report {
-            Some((state, at)) if now_ms.saturating_sub(at) < REPORT_FRESH_MS => state,
-            _ => self.detected,
+        let fresh_report = self
+            .report
+            .filter(|(_, at)| now_ms.saturating_sub(*at) < REPORT_FRESH_MS);
+        if let Some((lifecycle, received_ms)) = self
+            .program()
+            .and_then(|program| Some((program.lifecycle()?, program.received_ms())))
+        {
+            return match fresh_report {
+                Some((state, at)) if at >= received_ms => state,
+                _ => lifecycle,
+            };
+        }
+        match fresh_report {
+            Some((state, _)) => state,
+            None => self.detected,
         }
     }
 
@@ -673,6 +723,127 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn program(state: vt::ProgramState, id: Option<&str>) -> vt::ProgramStatus {
+        vt::ProgramStatus {
+            state,
+            kind: None,
+            id: id.map(String::from),
+            app: Some("pi".into()),
+        }
+    }
+
+    #[test]
+    fn what_the_program_says_through_osc_7501_wins_over_its_screen() {
+        use session_core::activity::ActivityPhase;
+        use vt::ProgramState::*;
+        let pi = |lifecycle| Detection {
+            agent: Some("pi".into()),
+            lifecycle,
+        };
+        let mut t = LifecycleTracker::default();
+        t.on_detection(pi(Lifecycle::Unknown), 0);
+        t.on_program_status(&program(Idle, None), 1);
+        assert_eq!(t.current(), Lifecycle::Idle);
+        // Pi 1.4's screen looks idle while it works: the report wins.
+        t.on_program_status(&program(Working, None), 2);
+        t.on_detection(pi(Lifecycle::Idle), 3);
+        assert_eq!(t.current(), Lifecycle::Working);
+        assert_eq!(t.activity().unwrap().phase, ActivityPhase::Working);
+        t.on_program_status(&program(Done, None), 4);
+        assert_eq!(t.current(), Lifecycle::Done, "an unread reply");
+        t.on_touch(5);
+        assert_eq!(t.current(), Lifecycle::Idle);
+        t.on_program_status(&program(Done, None), 6);
+        assert_eq!(t.current(), Lifecycle::Idle, "the same done again");
+        // No expiry: the protocol has no heartbeat.
+        t.on_program_status(&program(Working, None), 7);
+        assert!(!t.tick(10 * 60_000));
+        assert_eq!(t.current(), Lifecycle::Working);
+        // Blocked on the user (a dialog).
+        t.on_program_status(&program(Blocked, None), 10 * 60_000 + 1);
+        assert_eq!(t.current(), Lifecycle::Blocked);
+        assert_eq!(t.activity().unwrap().phase, ActivityPhase::NeedsInput);
+        // A fresh self-report sent after it still wins.
+        t.on_report(Lifecycle::Working, 10 * 60_000 + 2);
+        assert_eq!(t.current(), Lifecycle::Working);
+        // The program leaves: the screen again.
+        t.on_program_status(&program(Clear, None), 10 * 60_000 + 3);
+        t.tick(10 * 60_000 + REPORT_FRESH_MS + 3);
+        assert_eq!(t.current(), Lifecycle::Done);
+        assert!(t.activity().is_none());
+    }
+
+    #[test]
+    fn child_records_count_as_subagents_and_hooks_still_rank_first() {
+        use session_core::activity::ActivityPhase;
+        use vt::ProgramState::*;
+        let kimi = |lifecycle| Detection {
+            agent: Some("kimi".into()),
+            lifecycle,
+        };
+        let mut t = LifecycleTracker::default();
+        t.on_detection(kimi(Lifecycle::Idle), 0);
+        t.on_program_status(&program(Working, None), 1);
+        t.on_program_status(&program(Working, Some("agent-1")), 2);
+        t.on_program_status(&program(Working, Some("agent-2")), 3);
+        assert_eq!(t.activity().unwrap().active_subagents, 2);
+        t.on_program_status(&program(Clear, Some("agent-2")), 4);
+        t.on_program_status(&program(Done, None), 5);
+        // A background subagent past the program's own turn: still working.
+        assert_eq!(t.current(), Lifecycle::Working);
+        assert_eq!(t.activity().unwrap().phase, ActivityPhase::WaitingForAgents);
+        t.on_program_status(&program(Done, Some("agent-1")), 6);
+        assert_eq!(t.current(), Lifecycle::Done);
+        // Fresh hook activity ranks above the records.
+        t.on_activity(
+            &ActivityUpdate {
+                agent: "kimi".into(),
+                ..phase(ActivityPhase::NeedsInput)
+            },
+            7,
+        );
+        assert_eq!(t.current(), Lifecycle::Blocked);
+        t.on_program_status(&program(Working, None), 8);
+        assert_eq!(t.current(), Lifecycle::Blocked);
+        assert_eq!(t.activity().unwrap().phase, ActivityPhase::NeedsInput);
+    }
+
+    #[test]
+    fn program_records_need_an_agent_and_end_with_it() {
+        use vt::ProgramState::*;
+        let mut t = LifecycleTracker::default();
+        let none = Detection {
+            agent: None,
+            lifecycle: Lifecycle::None,
+        };
+        // A program detection doesn't name: its records say nothing.
+        t.on_detection(none.clone(), 0);
+        t.on_program_status(&program(Working, None), 1);
+        assert_eq!(t.current(), Lifecycle::None);
+        assert!(t.activity().is_none());
+        // Reported, then named (the report arrives before detection runs).
+        t.on_detection(
+            Detection {
+                agent: Some("pi".into()),
+                lifecycle: Lifecycle::Idle,
+            },
+            2,
+        );
+        t.on_program_status(&program(Working, None), 3);
+        assert_eq!(t.current(), Lifecycle::Working);
+        // It crashed back to the shell without its clear.
+        t.on_detection(none, 4);
+        assert_eq!(t.current(), Lifecycle::None);
+        t.on_detection(
+            Detection {
+                agent: Some("claude".into()),
+                lifecycle: Lifecycle::Idle,
+            },
+            5,
+        );
+        assert_eq!(t.current(), Lifecycle::Idle, "nothing carried over");
     }
 
     #[test]

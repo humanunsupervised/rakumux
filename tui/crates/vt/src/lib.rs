@@ -3,12 +3,16 @@
 //! [`Emulator`] wraps a `vt100::Parser`. The daemon owns the authoritative
 //! emulator for each terminal and runs it with the query responder enabled, so
 //! programs get answers to terminal queries (cursor position, device
-//! attributes, colours, …) even when no client is attached. Client emulators
-//! are passive: they only mirror the screen, so replies are never sent twice.
+//! attributes, colours, the Program Status Protocol's support, …) even when no
+//! client is attached. Client emulators are passive: they only mirror the
+//! screen, so replies are never sent twice.
 
 use std::path::PathBuf;
 
 pub mod input;
+mod program_status;
+
+pub use program_status::{ProgramState, ProgramStatus};
 
 pub use vt100;
 
@@ -27,6 +31,8 @@ pub enum Event {
         data: String,
     },
     Bell,
+    /// OSC 7501: what the program says it is doing.
+    ProgramStatus(ProgramStatus),
 }
 
 /// Result of feeding bytes to an [`Emulator`].
@@ -181,6 +187,16 @@ impl vt100::Callbacks for Hooks {
             [b"11", b"?"] => {
                 if let Some(colors) = self.responder {
                     self.reply(&format!("\x1b]11;{}\x1b\\", rgb16(colors.background)));
+                }
+            }
+            [b"7501", body, ..] if program_status::is_query(body) => {
+                if self.responder.is_some() {
+                    self.reply(program_status::ANSWER);
+                }
+            }
+            [b"7501", body] => {
+                if let Some(status) = program_status::parse(body) {
+                    self.events.push(Event::ProgramStatus(status));
                 }
             }
             _ => {}
@@ -542,6 +558,53 @@ mod tests {
             String::from_utf8(out.replies).unwrap(),
             "\x1b]11;rgb:1a1a/1b1b/2626\x1b\\\x1b[?2004;1$y\x1b[?2026;0$y"
         );
+    }
+
+    #[test]
+    fn answers_the_program_status_query_before_device_attributes() {
+        // Pi's start: kitty keyboard query, then OSC 7501, then DA as a
+        // sentinel: a terminal that answers 7501 before DA supports it.
+        let mut emu = Emulator::responding(24, 80, 0, Colors::default());
+        let out = emu.feed(b"\x1b[?u\x1b]7501;?\x1b\\\x1b[c");
+        assert_eq!(out.replies, b"\x1b]7501;?\x1b\\\x1b[?62;22c");
+        assert!(out.events.is_empty());
+        // BEL-terminated, and with pairs a later revision may add.
+        let out = emu.feed(b"\x1b]7501;?\x07\x1b]7501;?;v=1\x1b\\");
+        assert_eq!(out.replies, b"\x1b]7501;?\x1b\\\x1b]7501;?\x1b\\");
+        let mut passive = Emulator::passive(24, 80, 0);
+        assert!(passive.feed(b"\x1b]7501;?\x1b\\").replies.is_empty());
+    }
+
+    #[test]
+    fn reports_program_status() {
+        for mut emu in [
+            Emulator::passive(24, 80, 0),
+            Emulator::responding(24, 80, 0, Colors::default()),
+        ] {
+            let out = emu.feed(
+                b"\x1b]7501;state=working:app=kimi-code:msg=VGl0bGU=\x1b\\\
+                  \x1b]7501;state=working:app=kimi-code:id=agent-1\x07\
+                  \x1b]7501;state=bogus\x1b\\",
+            );
+            assert!(out.replies.is_empty());
+            assert_eq!(
+                out.events,
+                vec![
+                    Event::ProgramStatus(ProgramStatus {
+                        state: ProgramState::Working,
+                        kind: None,
+                        id: None,
+                        app: Some("kimi-code".into()),
+                    }),
+                    Event::ProgramStatus(ProgramStatus {
+                        state: ProgramState::Working,
+                        kind: None,
+                        id: Some("agent-1".into()),
+                        app: Some("kimi-code".into()),
+                    }),
+                ]
+            );
+        }
     }
 
     #[test]

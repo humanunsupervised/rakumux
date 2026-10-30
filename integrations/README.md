@@ -128,6 +128,23 @@ The TUI animates busy states locally. Needs-input/done markers are static. Agent
 subagents are not Rakumux child sessions. These hook adapters forward metadata only, never
 prompts, tool arguments, output or transcripts.
 
+## Program status (OSC 7501)
+
+The daemon's terminal answers the Program Status Protocol's support query (`OSC 7501;?`,
+<https://www.superlogical.com/rex/docs/build/program-status>) with the same body, so programs that
+speak it (Pi from 1.1, Kimi Code 2.x) report what they do, with nothing installed:
+`state=idle|working|blocked|done|error|clear`, `kind` for `blocked`, `id` for a child record (Kimi
+Code's subagents). The daemon keeps each session's records in memory (`control/program_status.rs`)
+and never their texts (`msg`, `title`). Without fresh hook activity, and while detection names an
+agent, they set the lifecycle: `working` and children working or blocked are working, `blocked`
+waits for the user, `idle`, `done` and `error` are idle, and a `done` after anything else is a
+finished reply. They show as activity too (`working`, `needs_input`, `done`, `idle`, or
+`waiting_for_agents` while only children work), children counted as subagents. They rank above
+the screen and below fresh hook activity and a newer self-report, never expire (the protocol has
+no heartbeat), and end with the program's own `clear` or when detection names no agent. A restart
+in place drops them until the program's next report; a program started before its daemon
+answered the query never asked, and reports nothing until it's restarted.
+
 ## Latest output and prompt
 
 `output.rs` gives each live Claude Code, Codex or OpenCode session two lines: what its agent

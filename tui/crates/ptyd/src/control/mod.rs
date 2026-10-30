@@ -27,6 +27,7 @@ mod names;
 mod panes;
 mod places;
 mod policy;
+mod program_status;
 mod registry;
 mod replies;
 mod saved;

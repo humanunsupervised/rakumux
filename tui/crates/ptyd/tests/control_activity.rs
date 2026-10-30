@@ -546,3 +546,49 @@ fn a_subagents_own_hooks_keep_it_counted_without_taking_the_session_over() {
         Some("root")
     );
 }
+
+#[test]
+fn a_program_status_report_drives_the_sessions_lifecycle_and_subagent_count() {
+    use ptyd::host::HostEvent;
+    use vt::{ProgramState, ProgramStatus};
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    harness.host.set_foreground(
+        &session.id,
+        ptyd::host::ProcessInfo {
+            pid: 4242,
+            name: "kimi-code".into(),
+            cmdline: vec!["kimi-code".into()],
+            exe: Some("/home/me/.kimi-code/bin/kimi".into()),
+        },
+    );
+    let report = |state, id: Option<&str>| {
+        harness.host.emit(HostEvent::ProgramStatus {
+            id: harness.host.terminal_of(&session.id),
+            session_id: session.id.clone(),
+            status: ProgramStatus {
+                state,
+                kind: None,
+                id: id.map(String::from),
+                app: Some("kimi-code".into()),
+            },
+        });
+    };
+    report(ProgramState::Working, None);
+    report(ProgramState::Working, Some("agent-1"));
+    let view = eventually("the report is applied", || {
+        let view = harness.get(&session.id);
+        (view.activity.as_ref()?.active_subagents == 1).then_some(view)
+    });
+    assert_eq!(view.agent.unwrap().kind, "kimi");
+    assert_eq!(view.lifecycle, Lifecycle::Working);
+    report(ProgramState::Clear, Some("agent-1"));
+    report(ProgramState::Done, None);
+    let view = eventually("the turn finishes", || {
+        let view = harness.get(&session.id);
+        (view.lifecycle == Lifecycle::Done).then_some(view)
+    });
+    let activity = view.activity.unwrap();
+    assert_eq!(activity.phase, ActivityPhase::Done);
+    assert_eq!(activity.active_subagents, 0);
+}

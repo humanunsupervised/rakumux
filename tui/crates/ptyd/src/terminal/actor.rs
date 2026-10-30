@@ -724,6 +724,15 @@ impl Actor {
                 self.broadcast(StreamEvent::Bell);
                 self.publish(|session_id| HostEvent::Bell { id, session_id });
             }
+            vt::Event::ProgramStatus(status) => {
+                // The program that reports may have just started.
+                self.refresh_foreground(now);
+                self.publish(|session_id| HostEvent::ProgramStatus {
+                    id,
+                    session_id,
+                    status,
+                });
+            }
             vt::Event::Clipboard { selection, data } => {
                 if let Some(controller) = self.controller {
                     if let Some(sink) = self.sinks.iter_mut().find(|s| s.id == controller) {
