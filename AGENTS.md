@@ -748,7 +748,11 @@ session per minute. `rakumux new` inside a session needs `--detach`, since sessi
 Conversation bindings (`session_bind`) live in daemon memory: the newest binding of a conversation
 wins, and a session's bindings end when it exits. OpenCode 2.x runs MCP servers in a service shared by
 every conversation, so the Rakumux plugin for its TUI (`integrations/open-code/rakumux-session/`,
-installed with `rakumux-mcp opencode-plugin --install`) binds the conversations it shows.
+installed with `rakumux-mcp opencode-plugin --install`) binds the conversations it shows. For any
+agent, the conversation a session named is what the daemon follows (latest output, turn, replies,
+whole chat) and resumes for it: the newest it bound for that agent, else the one its hook
+activity reports, else its working-directory report's (`ControlService`'s `bound_conversation`,
+`resume::Context::bound_conversation`).
 
 Mutating requests and denials are written to the audit log. Tokens give attribution and prevent
 accidents; they don't stop a hostile process running as the same user.

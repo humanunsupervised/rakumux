@@ -412,3 +412,84 @@ fn an_esc_interrupted_claude_turn_ends_without_a_stop_hook() {
     });
     assert_eq!(view.lifecycle, Lifecycle::Done);
 }
+
+#[test]
+fn any_agents_conversation_named_by_its_hooks_or_a_binding_reaches_its_resume_command() {
+    use session_core::model::ResumeSource;
+    // The agent shows up after what the session said, so its first resume
+    // plan (made when the foreground changes) reads all of it.
+    let resumed = |harness: &Harness, id: &session_core::ids::SessionId| {
+        harness.host.set_foreground(
+            id,
+            ptyd::host::ProcessInfo {
+                pid: 4242,
+                name: "opencode2".into(),
+                cmdline: vec!["opencode2".into()],
+                exe: None,
+            },
+        );
+        harness.host.show(id, "■■■■⬝⬝⬝⬝  esc interrupt");
+        eventually("output is detected as OpenCode", || {
+            let resume = harness.get(id).resume?;
+            (resume.source == ResumeSource::KnownAgent).then_some(resume.argv)
+        })
+    };
+    let working = || {
+        Request::SessionReport(update(
+            "opencode",
+            ActivityEvent::Phase {
+                phase: ActivityPhase::Working,
+            },
+        ))
+    };
+
+    // No binding of its own: the conversation its hooks report. Another
+    // agent's binding names nothing for it.
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    let caller = harness.session_caller(&session.id);
+    harness.handle(
+        &caller,
+        Request::SessionBind {
+            agent: "pi".into(),
+            conversations: vec!["pi-chat".into()],
+        },
+    );
+    harness.handle(&caller, working());
+    assert_eq!(resumed(&harness, &session.id), ["opencode2", "-s", "root"]);
+
+    // A binding of its own wins over its hooks'.
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    let caller = harness.session_caller(&session.id);
+    harness.handle(&caller, working());
+    harness.handle(
+        &caller,
+        Request::SessionBind {
+            agent: "opencode".into(),
+            conversations: vec!["bound".into()],
+        },
+    );
+    assert_eq!(resumed(&harness, &session.id), ["opencode2", "-s", "bound"]);
+
+    // Hooks that report only where the agent works (Kimi Code's) name it too.
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    let caller = harness.session_caller(&session.id);
+    let report = Report {
+        working_directory: Some(session_core::api::AgentWorkingDirectory {
+            agent: "opencode".into(),
+            conversation_id: Some("from-cwd".into()),
+            path: harness.scope.path().to_path_buf(),
+        }),
+        ..Report::default()
+    };
+    assert_eq!(
+        harness.handle(&caller, Request::SessionReport(report)),
+        Response::Ok
+    );
+    assert_eq!(
+        resumed(&harness, &session.id),
+        ["opencode2", "-s", "from-cwd"]
+    );
+}

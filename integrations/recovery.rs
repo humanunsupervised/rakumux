@@ -26,6 +26,10 @@
 //!   session (`session_bind`); otherwise the newest top-level session of the
 //!   folder in `opencode.db`: `opencode <flags> -s <id>`.
 //!
+//! Any agent's bound conversation reaches its resume plan
+//! ([`Context::bound_conversation`]): the newest the session bound for that
+//! agent, else the one its hooks report (activity, then working directory).
+//!
 //! Each keeps the flags of the running process that shape an interactive
 //! session (permissions, model, …) and drops the rest (a prompt, `--print`,
 //! `--continue`, an older resume).
@@ -72,8 +76,9 @@ pub struct Context<'a> {
     pub process: &'a ProcessInfo,
     /// The directory the agent runs in.
     pub cwd: Option<&'a Path>,
-    /// The newest OpenCode conversation the session bound.
-    pub opencode_conversation: Option<&'a str>,
+    /// The conversation the session named for the process's agent: the
+    /// newest it bound (`session_bind`), else the one its hooks report.
+    pub bound_conversation: Option<&'a str>,
 }
 
 /// The plan for a session whose foreground process is `ctx.process`.
@@ -82,7 +87,7 @@ pub fn plan(ctx: &Context<'_>) -> Plan {
     let resumed = match crate::detect::agent_label(process) {
         Some("claude") => Some(claude_config_dir().and_then(|dir| claude_resume(process, &dir))),
         Some("codex") => Some(codex_resume(process, ctx.cwd)),
-        Some("opencode") => Some(opencode_resume(process, ctx.cwd, ctx.opencode_conversation)),
+        Some("opencode") => Some(opencode_resume(process, ctx.cwd, ctx.bound_conversation)),
         _ => None,
     };
     match resumed {
@@ -272,7 +277,7 @@ mod tests {
             plan(&Context {
                 process: &process,
                 cwd: None,
-                opencode_conversation: Some("ses_abc123"),
+                bound_conversation: Some("ses_abc123"),
             })
         };
         // `opencode` may be a different (1.x) install earlier on PATH.

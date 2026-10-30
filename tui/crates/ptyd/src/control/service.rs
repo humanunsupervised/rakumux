@@ -196,6 +196,33 @@ struct Binding {
     seq: u64,
 }
 
+impl State {
+    /// The conversation `agent` runs in session `id`, as the session named
+    /// it: the newest it bound (`session_bind`), else the one its fresh hook
+    /// activity reports, else its working-directory report's.
+    fn bound_conversation(&self, id: &SessionId, agent: &str) -> Option<String> {
+        let bound = self.bindings.get(id).and_then(|bindings| {
+            bindings
+                .iter()
+                .filter(|binding| binding.agent == agent)
+                .max_by_key(|binding| binding.seq)
+                .map(|binding| binding.conversation.clone())
+        });
+        bound.or_else(|| {
+            let live = self.live.get(id)?;
+            live.tracker
+                .hook_conversation(agent)
+                .map(str::to_owned)
+                .or_else(|| {
+                    live.working_directory
+                        .as_ref()
+                        .filter(|context| context.agent == agent)
+                        .and_then(|context| context.conversation_id.clone())
+                })
+        })
+    }
+}
+
 /// When a session's agent conversation last had a message, and the time
 /// last saved to the registry (Unix milliseconds).
 struct LastMessage {
@@ -2148,14 +2175,10 @@ impl Inner {
             live.output_checked_ms = now;
             let agent = live.tracker.detected_agent().map(String::from);
             let output = live.output.take();
-            // The OpenCode conversation its plugin bound here, if any.
-            let bound = state.bindings.get(session_id).and_then(|bindings| {
-                bindings
-                    .iter()
-                    .filter(|binding| binding.agent == "opencode")
-                    .max_by_key(|binding| binding.seq)
-                    .map(|binding| binding.conversation.clone())
-            });
+            // The conversation its agent named here, if any.
+            let bound = agent
+                .as_deref()
+                .and_then(|agent| state.bound_conversation(session_id, agent));
             (output, agent, bound)
         };
         let follower = match (process, agent) {
@@ -2306,7 +2329,7 @@ impl Inner {
         now: i64,
     ) -> Option<crate::resume::Plan> {
         let process = self.host.info(terminal)?.foreground?;
-        let opencode = {
+        let bound = {
             let mut state = self.lock();
             let live = state
                 .live
@@ -2319,19 +2342,14 @@ impl Inner {
             }
             live.resume_checked_ms = now;
             live.resume_checked_pid = Some(process.pid);
-            state.bindings.get(session_id).and_then(|bindings| {
-                bindings
-                    .iter()
-                    .filter(|b| b.agent == "opencode")
-                    .max_by_key(|b| b.seq)
-                    .map(|b| b.conversation.clone())
-            })
+            crate::detect::agent_label(&process)
+                .and_then(|agent| state.bound_conversation(session_id, agent))
         };
         let cwd = crate::procinfo::cwd_of(process.pid);
         Some(crate::resume::plan(&crate::resume::Context {
             process: &process,
             cwd: cwd.as_deref(),
-            opencode_conversation: opencode.as_deref(),
+            bound_conversation: bound.as_deref(),
         }))
     }
 

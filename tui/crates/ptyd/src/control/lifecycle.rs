@@ -73,6 +73,14 @@ impl LifecycleTracker {
             .or(self.agent.as_deref())
     }
 
+    /// The conversation `agent`'s hook activity is about, while it has some.
+    pub fn hook_conversation(&self, agent: &str) -> Option<&str> {
+        self.activity
+            .as_ref()
+            .filter(|activity| activity.agent == agent)
+            .map(|activity| activity.conversation())
+    }
+
     pub fn activity(&self) -> Option<AgentActivity> {
         self.activity.as_ref().map(ActivityTracker::view)
     }

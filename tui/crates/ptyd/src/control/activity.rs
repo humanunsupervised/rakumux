@@ -138,6 +138,11 @@ impl ActivityTracker {
         self.delta
     }
 
+    /// The root conversation its updates are about.
+    pub fn conversation(&self) -> &str {
+        &self.conversation
+    }
+
     pub fn is_for(&self, update: &ActivityUpdate) -> bool {
         self.agent == update.agent && self.conversation == update.conversation_id
     }

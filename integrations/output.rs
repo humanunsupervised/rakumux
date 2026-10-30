@@ -286,8 +286,10 @@ impl Follower {
     }
 
     /// Read what the conversation gained since the last time (a log from its
-    /// tail the first time). `bound` is the OpenCode conversation bound to
-    /// the session, if any. Returns whether either line changed.
+    /// tail the first time). `bound` is the conversation the session named
+    /// for this agent (bound with `session_bind`, else its hooks'), if any;
+    /// agents whose process names its own conversation (Claude Code, Codex)
+    /// don't need it. Returns whether either line changed.
     pub fn follow(&mut self, bound: Option<&str>) -> bool {
         let before = (self.turn.id, self.turn.total);
         let (line, prompt) = match &mut self.source {
