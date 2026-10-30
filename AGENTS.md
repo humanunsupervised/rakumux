@@ -290,8 +290,14 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    What's typed in survives a restart of the service (`feed/replies/kept.rs`,
    `sensagent/status/replies.json`, 0600): the ids it typed in or decided (marked before the
    daemon is asked, so a reply goes in at most once), those handed to the daemon and not yet
-   reported (reported `delivered` on the next start), and the reports rakumux.com hasn't taken
-   (kept while the feed is off too). The agent's answer to a reply is its reply that
+   decided with where each went (`typed_into`: session, the agent's turn and chat then, typed
+   mid-turn or not), and the reports rakumux.com hasn't taken (kept while the feed is off too).
+   The next start follows a reply handed to the daemon again once a read brings it still
+   pending: `delivered` when its agent took it (meanwhile too), else `not_taken` by the usual
+   rule, its session taking nothing else until then, so a restart never puts a second reply
+   beside one still in the agent's queue; one no read brings as pending any more (expired) is
+   dropped, and one an older release kept without `typed_into` is reported `delivered` at
+   once as before. The agent's answer to a reply is its reply that
    finished after the reply was typed in (typed mid-turn: after the agent took it, so the
    turn it was typed into, ending first, doesn't answer it; that turn keeps its own reply as a
    feed entry of its own, which the daemon captures even when the reply starts the next turn
@@ -913,7 +919,8 @@ accidents; they don't stop a hostile process running as the same user.
                                  SQLite; titles.json: the title it last gave each session;
                                  titled-chats.json: the chats whose automatic title was made;
                                  chats.json; replies.json: replies typed in or decided
-                                 here and reports not yet taken; new-sessions.json:
+                                 here, where each still going in went, and reports not
+                                 yet taken; new-sessions.json:
                                  new sessions from rakumux.com started or decided here and
                                  reports not yet taken), machine.json (this
                                  machine's feed name and id), its registration and private socket

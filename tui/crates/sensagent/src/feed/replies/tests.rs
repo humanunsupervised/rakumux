@@ -1399,14 +1399,23 @@ fn a_reply_handed_to_the_daemon_is_never_typed_again_after_a_restart_and_is_repo
         0o600
     );
     let mut replies = kept_at(&path, &views);
-    // It's reported delivered…
+    // Read again, still pending: never typed again, and followed as before…
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read(vec![pending.clone()]), NOW);
+    assert_eq!(replies.next_work(NOW), None);
+    // …so it's reported delivered once its agent is seen to take it.
+    taken(&mut replies);
     let body = report_of(replies.next_work(NOW));
-    assert_eq!(body["id"], "01K8A1");
-    assert_eq!(body["status"], "delivered");
+    assert_eq!(
+        (&body["id"], &body["status"]),
+        (&"01K8A1".into(), &"delivered".into())
+    );
     let mut delivered = pending.clone();
     delivered.status = ReplyStatus::Delivered;
     replies.request_done(true, Ok(FeedResult::Reply(delivered)), NOW);
-    // …and a read from the start that still says pending types nothing.
+    // A read from the start that still says pending types nothing.
+    drop(replies);
+    let mut replies = kept_at(&path, &views);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, read(vec![pending]), NOW);
     assert_eq!(replies.next_work(NOW), None);
@@ -2058,7 +2067,7 @@ fn read_pending(replies: &mut ReplySync, pending: Vec<FeedReply>, at: Duration) 
 }
 
 #[test]
-fn replies_to_an_agent_that_never_stops_each_go_in_once_the_one_before_was_taken() {
+fn stuck_queue_replies_to_an_agent_that_never_stops_each_go_in_once_the_one_before_was_taken() {
     // Claude Code kept at work for good (background subagents, one turn
     // after another): never seen waiting, never asking anything.
     let mut shown = running("claude", Lifecycle::Working);
@@ -2158,56 +2167,319 @@ fn a_restart_while_replies_go_into_an_agent_that_never_stops_holds_nothing_back(
         said("01K8A1", 4, "First."),
         said("01K8A2", 5, "Second."),
         said("01K8A3", 6, "Third."),
-        said("01K8A4", 7, "Fourth."),
     ];
-    let delivered = |id: &str, seq| {
-        let mut reply = pending.iter().find(|reply| reply.id == id).unwrap().clone();
-        reply.seq = seq;
-        reply.status = ReplyStatus::Delivered;
-        reply
-    };
     {
         let mut replies = kept_at(&path, &[running("claude", Lifecycle::Working)]);
         read_pending(&mut replies, pending.to_vec(), NOW);
         assert_eq!(worked_at(&mut replies, NOW).0, ["01K8A1"]);
         // The agent takes it, and the service stops (an update replaces it)
         // before it saw that.
-        replies.observe(&running_prompted("claude", Lifecycle::Working, "First."));
     }
-    // Restarted between replies, the agent at work on the first: the first
-    // is reported delivered, never typed again, and the second goes in.
+    // Restarted between replies, the agent at work on the first: once read
+    // again, the first is seen taken and reported delivered, never typed
+    // again, and the second goes in.
     let at = NOW + Duration::from_secs(5);
     let shown = running_prompted("claude", Lifecycle::Working, "First.");
     let mut replies = kept_at(&path, std::slice::from_ref(&shown));
-    assert_eq!(report_of(replies.next_work(at))["id"], "01K8A1");
-    report_taken(&mut replies, "01K8A1", at);
-    let mut read = pending[1..].to_vec();
-    read.push(delivered("01K8A1", 8));
-    read_pending(&mut replies, read, at);
-    assert_eq!(worked_at(&mut replies, at), (ids(&["01K8A2"]), vec![]));
-    // Taken: the third goes in. The service stops again before the agent
-    // took the third.
+    read_pending(&mut replies, pending.to_vec(), at);
+    assert_eq!(
+        worked_at(&mut replies, at),
+        (ids(&["01K8A2"]), ids(&["01K8A1"]))
+    );
     replies.observe(&running_prompted("claude", Lifecycle::Working, "Second."));
     assert_eq!(
         worked_at(&mut replies, at),
         (ids(&["01K8A3"]), ids(&["01K8A2"]))
     );
-    drop(replies);
-    // Restarted while the third goes in: it's taken as typed in, never typed
-    // again, and nothing holds its session back for good: the fourth goes in.
-    let mut replies = kept_at(&path, &[running("claude", Lifecycle::Working)]);
-    assert_eq!(report_of(replies.next_work(at))["id"], "01K8A3");
-    report_taken(&mut replies, "01K8A3", at);
-    read_pending(
-        &mut replies,
-        vec![
-            pending[3].clone(),
-            delivered("01K8A2", 9),
-            delivered("01K8A3", 10),
-        ],
-        at,
+}
+
+/// Restarted with a mid-turn reply going in: replies.json kept where the
+/// first of `pending` went, typed while S's Claude Code worked on `turn`
+/// (none: its first view's) and not taken yet. Returns the restarted
+/// service, its agent at work as `shown`, with `pending` read again.
+fn restarted_with_one_in_flight(
+    path: &std::path::Path,
+    pending: &[FeedReply],
+    shown: &SessionView,
+    at: Duration,
+) -> ReplySync {
+    {
+        let mut replies = kept_at(path, &[running("claude", Lifecycle::Working)]);
+        read_pending(&mut replies, pending.to_vec(), NOW);
+        assert_eq!(worked_at(&mut replies, NOW).0, [pending[0].id.as_str()]);
+    }
+    let mut replies = kept_at(path, std::slice::from_ref(shown));
+    read_pending(&mut replies, pending.to_vec(), at);
+    replies
+}
+
+#[test]
+fn restart_gap_a_reply_typed_mid_turn_and_not_yet_taken_holds_its_session_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    let pending = [said("01K8A1", 4, "First."), said("01K8A2", 5, "Second.")];
+    // Restarted while the first waits in Claude Code's queue (a long tool
+    // call): it isn't reported, and the second doesn't go in beside it…
+    let at = NOW + Duration::from_secs(5);
+    let at_work = running("claude", Lifecycle::Working);
+    let mut replies = restarted_with_one_in_flight(&path, &pending, &at_work, at);
+    assert_eq!(worked_at(&mut replies, at), (vec![], vec![]));
+    let later = at + Duration::from_secs(600);
+    replies.observe(&at_work);
+    assert_eq!(worked_at(&mut replies, later), (vec![], vec![]));
+    // …until the agent takes the first: delivered, and the second goes in.
+    replies.observe(&running_prompted("claude", Lifecycle::Working, "First."));
+    assert_eq!(
+        worked_at(&mut replies, later),
+        (ids(&["01K8A2"]), ids(&["01K8A1"]))
     );
-    assert_eq!(worked_at(&mut replies, at), (ids(&["01K8A4"]), vec![]));
+    drop(replies);
+
+    // Taken while the service was down: delivered once read again, and the
+    // second goes in.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    let took = running_prompted("claude", Lifecycle::Working, "First.");
+    let mut replies = restarted_with_one_in_flight(&path, &pending, &took, at);
+    assert_eq!(
+        worked_at(&mut replies, at),
+        (ids(&["01K8A2"]), ids(&["01K8A1"]))
+    );
+}
+
+#[test]
+fn restart_gap_a_reply_in_flight_at_a_restart_is_decided_as_before_and_never_holds_for_ever() {
+    let pending = [said("01K8A1", 4, "First."), said("01K8A2", 5, "Second.")];
+    let at = NOW + Duration::from_secs(5);
+    // Never taken: once its agent has waited 30 s without taking it, it
+    // fails `not_taken`, and the second goes in.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    let at_work = running("claude", Lifecycle::Working);
+    let mut replies = restarted_with_one_in_flight(&path, &pending, &at_work, at);
+    let waits = at + Duration::from_secs(60);
+    replies.observe(&running("claude", Lifecycle::Idle));
+    assert_eq!(next_at(&mut replies, waits), None);
+    let over = waits + TAKE_WITHIN;
+    assert_eq!(
+        submitted_reply(next_at(&mut replies, over)).as_deref(),
+        Some("01K8A2")
+    );
+    let body = report_of(next_at(&mut replies, over));
+    assert_eq!(
+        (&body["id"], &body["failure"]),
+        (&"01K8A1".into(), &"not_taken".into())
+    );
+
+    // No longer pending on rakumux.com (expired meanwhile): its session no
+    // longer waits for it, and it's never typed again.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    {
+        let mut replies = kept_at(&path, &[at_work.clone()]);
+        read_pending(&mut replies, pending.to_vec(), NOW);
+        assert_eq!(worked_at(&mut replies, NOW).0, ["01K8A1"]);
+    }
+    let mut replies = kept_at(&path, std::slice::from_ref(&at_work));
+    let mut expired = pending[0].clone();
+    expired.status = ReplyStatus::Expired;
+    expired.seq = 6;
+    read_pending(&mut replies, vec![expired, pending[1].clone()], at);
+    assert_eq!(worked_at(&mut replies, at), (ids(&["01K8A2"]), vec![]));
+    drop(replies);
+    let mut replies = kept_at(&path, std::slice::from_ref(&at_work));
+    read_pending(&mut replies, vec![pending[0].clone()], at);
+    assert_eq!(worked_at(&mut replies, at), (vec![], vec![]));
+}
+
+#[test]
+fn restart_gap_an_older_file_without_where_a_reply_went_still_loads() {
+    // An older release kept a reply handed to the daemon by its id alone:
+    // reported delivered on load as before, never typed again, holding
+    // nothing back.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"version":1,"handled":{{"01K8A1":{at}}},"typing":{{"01K8A1":{at}}},"reports":[]}}"#
+        ),
+    )
+    .unwrap();
+    let mut replies = kept_at(&path, &[running("claude", Lifecycle::Working)]);
+    let body = report_of(replies.next_work(NOW));
+    assert_eq!(
+        (&body["id"], &body["status"]),
+        (&"01K8A1".into(), &"delivered".into())
+    );
+    report_taken(&mut replies, "01K8A1", NOW);
+    let pending = vec![said("01K8A1", 4, "First."), said("01K8A2", 5, "Second.")];
+    read_pending(&mut replies, pending, NOW);
+    assert_eq!(worked_at(&mut replies, NOW), (ids(&["01K8A2"]), vec![]));
+    // What this release keeps loads in the older one's terms too: the new
+    // field is apart from the ones it reads.
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved["version"], 1);
+    assert!(saved["typing"].get("01K8A2").is_some(), "{saved}");
+    assert_eq!(saved["typed_into"]["01K8A2"]["session"], "S", "{saved}");
+    assert_eq!(saved["typed_into"]["01K8A2"]["mid_turn"], true, "{saved}");
+}
+
+#[test]
+fn regression_replies_written_while_claude_code_works_for_40_minutes_across_a_restart_all_go_in() {
+    // The production failure of 2026-10-30: a reply was handled at 09:51;
+    // more were written while the session's Claude Code stayed `working`
+    // for 40 minutes (background subagents, one turn after another), the
+    // account service restarted once in between, and the later replies were
+    // never tried: replies.json had nothing for them. Each must go in, in
+    // order, as soon as the one before was taken, the restart holding the
+    // one in flight until it's taken and nothing for ever.
+    let nine = |minute: u64, second: u64| NOW + Duration::from_secs(minute * 60 + second - 51 * 60);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    let first = said("01K8A1", 136, "Look at the parser.");
+    let second = said("01K8A2", 138, "Also the lexer.");
+    let third = said("01K8A3", 140, "And add tests.");
+    let fourth = said("01K8A4", 142, "Then run them.");
+    let fifth = said("01K8A5", 143, "Commit when green.");
+    let delivered = |reply: &FeedReply, seq| {
+        let mut reply = reply.clone();
+        reply.seq = seq;
+        reply.status = ReplyStatus::Delivered;
+        reply
+    };
+    let read_in = |replies: &mut ReplySync, written: Vec<FeedReply>, at: Duration| {
+        read_after(next_at_reading(replies, at));
+        replies.request_done(true, read(written), at);
+    };
+    // Its agent at work on the second reply, the same turn before the
+    // restart and after.
+    let at_work = running_prompted("claude", Lifecycle::Working, "Also the lexer.");
+    {
+        let mut replies = kept_at(&path, &[running("claude", Lifecycle::Working)]);
+        // 09:51:17: the first goes in mid-turn and is taken at once.
+        read_pending(&mut replies, vec![first.clone()], nine(51, 17));
+        assert_eq!(worked_at(&mut replies, nine(51, 17)).0, ["01K8A1"]);
+        replies.observe(&running_prompted(
+            "claude",
+            Lifecycle::Working,
+            "Look at the parser.",
+        ));
+        assert_eq!(
+            worked_at(&mut replies, nine(51, 18)),
+            (vec![], ids(&["01K8A1"]))
+        );
+        // 09:53:00: the second is written while the agent works on: it goes in.
+        read_in(&mut replies, vec![second.clone()], nine(53, 0));
+        assert_eq!(
+            worked_at(&mut replies, nine(53, 0)),
+            (ids(&["01K8A2"]), vec![]),
+            "a reply written while the agent works goes in once the one before was taken"
+        );
+        replies.observe(&at_work);
+        assert_eq!(
+            worked_at(&mut replies, nine(53, 30)),
+            (vec![], ids(&["01K8A2"]))
+        );
+        // 09:53:41: the third goes in, then waits in Claude Code's queue
+        // behind a long tool call.
+        read_in(&mut replies, vec![third.clone()], nine(53, 41));
+        assert_eq!(
+            worked_at(&mut replies, nine(53, 41)),
+            (ids(&["01K8A3"]), vec![])
+        );
+        // 09:54:24: the account service restarts.
+    }
+    let mut replies = kept_at(&path, std::slice::from_ref(&at_work));
+    // Its first work: no report of the third, which the agent hasn't taken,
+    // then a read from the start.
+    let mut reported = Vec::new();
+    let read_first = loop {
+        match replies.next_work(nine(54, 25)) {
+            Some(ReplyWork::Request(FeedRequest::ReplyStatus { body })) => {
+                let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                let id = body["id"].as_str().unwrap().to_owned();
+                report_taken(&mut replies, &id, nine(54, 25));
+                reported.push(id);
+            }
+            work => break work,
+        }
+    };
+    assert!(
+        reported.is_empty(),
+        "the reply in flight at the restart is followed, not reported: {reported:?}"
+    );
+    assert_eq!(read_after(read_first), 0);
+    replies.request_done(
+        true,
+        read(vec![
+            delivered(&first, 137),
+            delivered(&second, 139),
+            third.clone(),
+        ]),
+        nine(54, 25),
+    );
+    assert_eq!(
+        worked_at(&mut replies, nine(54, 25)),
+        (vec![], vec![]),
+        "the reply in flight at the restart holds its session"
+    );
+    // 09:57:52: the fourth is written while the third still waits: it waits
+    // behind the third, not beside it.
+    read_in(&mut replies, vec![fourth.clone()], nine(57, 52));
+    replies.observe(&at_work);
+    assert_eq!(
+        worked_at(&mut replies, nine(57, 52)),
+        (vec![], vec![]),
+        "the reply in flight at the restart still holds its session"
+    );
+    // 09:59: Claude Code takes the third; the fourth goes in and is taken.
+    replies.observe(&running_prompted(
+        "claude",
+        Lifecycle::Working,
+        "And add tests.",
+    ));
+    assert_eq!(
+        worked_at(&mut replies, nine(59, 0)),
+        (ids(&["01K8A4"]), ids(&["01K8A3"])),
+        "the reply in flight at the restart, once taken, lets the next in"
+    );
+    replies.observe(&running_prompted(
+        "claude",
+        Lifecycle::Working,
+        "Then run them.",
+    ));
+    assert_eq!(
+        worked_at(&mut replies, nine(59, 30)),
+        (vec![], ids(&["01K8A4"]))
+    );
+    // 10:10:11: the fifth, the agent still at work: in, and taken.
+    read_in(&mut replies, vec![fifth.clone()], nine(70, 11));
+    assert_eq!(
+        worked_at(&mut replies, nine(70, 11)),
+        (ids(&["01K8A5"]), vec![])
+    );
+    let mut shown = running_prompted("claude", Lifecycle::Working, "Commit when green.");
+    replies.observe(&shown);
+    assert_eq!(
+        worked_at(&mut replies, nine(70, 40)),
+        (vec![], ids(&["01K8A5"]))
+    );
+    // 10:31: still at work; nothing left, and every reply was typed in once.
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, nine(91, 0)), (vec![], vec![]));
+    assert!(replies.pending.is_empty());
+    for id in ["01K8A1", "01K8A2", "01K8A3", "01K8A4", "01K8A5"] {
+        assert!(replies.kept.handled(id), "{id}");
+    }
+    // The agent finally waits: nothing is left to type.
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, nine(92, 0)), (vec![], vec![]));
 }
 
 #[test]

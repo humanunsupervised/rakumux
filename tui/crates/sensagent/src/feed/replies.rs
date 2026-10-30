@@ -26,7 +26,9 @@
 //!
 //! Which replies were typed in or decided, and the reports not yet taken, are
 //! kept across a restart (`kept`), so a reply is typed at most once whatever
-//! happens to the service.
+//! happens to the service; one still going in, with the session it went into,
+//! so a restarted service follows it as before and types nothing else there
+//! meanwhile.
 //!
 //! A reply with files attached (`attachments`) has them fetched once it is
 //! otherwise ready to be typed in, one at a time and each only once, saved
@@ -53,7 +55,7 @@ use super::job::FeedResult;
 use super::wire::{self, FeedFailure, FeedRequest, RepliesRead, SessionMessage};
 
 mod kept;
-use kept::Kept;
+use kept::{Kept, TypedInto};
 
 /// How often the account's replies are read while the feed is on, unless
 /// rakumux.com's answer says otherwise (`poll_ms`: every second while a reply
@@ -693,12 +695,22 @@ pub(crate) struct ReplySync {
     fetch_retry: Backoff,
     /// Replies whose saved files are to be removed.
     discards: VecDeque<String>,
+    /// Replies handed to the daemon before this service started, not yet
+    /// decided, by id: their sessions take nothing else until a read brings
+    /// each again (still pending) and it's followed as a [`Delivery`], or
+    /// says it's no longer pending.
+    restored: HashMap<String, TypedInto>,
 }
 
 impl ReplySync {
     /// Replies for `machine`; `kept` is the file that keeps what's typed in
     /// across a restart (memory only without it).
     pub fn new(machine: String, kept: Option<PathBuf>) -> Self {
+        let kept = Kept::load(kept);
+        let restored = kept
+            .in_flight()
+            .map(|(id, into)| (id.clone(), into.clone()))
+            .collect();
         Self {
             machine,
             enabled: false,
@@ -713,13 +725,14 @@ impl ReplySync {
             report_retry: Backoff::new(Duration::ZERO),
             pending: HashMap::new(),
             deliveries: HashMap::new(),
-            kept: Kept::load(kept),
+            kept,
             awaiting: HashMap::new(),
             held: HashMap::new(),
             files: HashMap::new(),
             fetching: None,
             fetch_retry: Backoff::new(Duration::ZERO),
             discards: VecDeque::new(),
+            restored,
         }
     }
 
@@ -880,6 +893,7 @@ impl ReplySync {
     /// The first pending reply that can be decided now: typed, or failed.
     fn deliver(&mut self, now: Duration) -> Option<ReplyWork> {
         self.held.retain(|_, until| *until > now);
+        self.resume_restored(now);
         self.follow_deliveries(now);
         // A session a reply is going into (or whose reply's file is being
         // fetched) takes nothing else until its agent took it and waits
@@ -896,6 +910,7 @@ impl ReplySync {
                     .filter_map(|id| self.pending.get(id))
                     .map(|reply| reply.session_id.as_str()),
             )
+            .chain(self.restored.values().map(|into| into.session.as_str()))
             .collect();
         let mut ids: Vec<(u64, &String)> = self
             .pending
@@ -986,10 +1001,24 @@ impl ReplySync {
                 let saved = self.files.get(&id).map_or(&[][..], Vec::as_slice);
                 let text = typed(&reply.text, saved);
                 let target = reply.target.clone();
-                // Never typed again from now on, even if this service stops
-                // before the daemon answers.
-                self.kept.typing(&id);
                 let seen = self.sessions.get(&session);
+                let turn = (
+                    seen.and_then(|seen| seen.turn),
+                    seen.and_then(|seen| seen.conversation.clone()),
+                );
+                let mid_turn = seen.is_some_and(Seen::works_taking_input);
+                // Never typed again from now on, even if this service stops
+                // before the daemon answers; followed where it went after a
+                // restart.
+                self.kept.typing(
+                    &id,
+                    TypedInto {
+                        session: session.as_str().to_owned(),
+                        turn: turn.0,
+                        conversation: turn.1.clone(),
+                        mid_turn,
+                    },
+                );
                 let foreground = seen.and_then(|seen| seen.foreground.clone());
                 let delivery = Delivery {
                     reply: id.clone(),
@@ -997,14 +1026,11 @@ impl ReplySync {
                     sent: squash(&text),
                     since: now,
                     typed: false,
-                    turn: (
-                        seen.and_then(|seen| seen.turn),
-                        seen.and_then(|seen| seen.conversation.clone()),
-                    ),
+                    turn,
                     busy: false,
                     took: false,
                     taken: None,
-                    mid_turn: seen.is_some_and(Seen::works_taking_input),
+                    mid_turn,
                     waited: None,
                     free: false,
                 };
@@ -1024,6 +1050,46 @@ impl ReplySync {
                 // Decided without typing: look again (and report) at once.
                 self.deliver(now)
             }
+        }
+    }
+
+    /// Follow again each reply handed to the daemon before this service
+    /// started that a read brought again, still pending: as it was typed in
+    /// then, into the session, turn and chat it went into, so its agent's
+    /// taking it (or not) decides it as before.
+    fn resume_restored(&mut self, now: Duration) {
+        let read: Vec<String> = self
+            .restored
+            .keys()
+            .filter(|id| self.pending.contains_key(*id))
+            .cloned()
+            .collect();
+        for id in read {
+            let (Some(into), Some(reply)) = (self.restored.remove(&id), self.pending.get(&id))
+            else {
+                continue;
+            };
+            let session = SessionId::from_string(into.session);
+            let mut delivery = Delivery {
+                reply: id,
+                target: reply.target.clone(),
+                sent: squash(&reply.text),
+                since: now,
+                typed: true,
+                turn: (into.turn, into.conversation),
+                busy: false,
+                took: false,
+                taken: None,
+                mid_turn: into.mid_turn,
+                waited: None,
+                free: false,
+            };
+            // What its session shows now, as if just observed.
+            if let Some(seen) = self.sessions.get(&session) {
+                delivery.took = delivery.prompted(seen) == Some(true);
+                delivery.busy = (delivery.took || !delivery.mid_turn) && seen.busy();
+            }
+            self.deliveries.entry(session).or_default().push(delivery);
         }
     }
 
@@ -1396,6 +1462,9 @@ impl ReplySync {
                 for message in &read.messages {
                     self.take_message(message);
                 }
+                if !read.more {
+                    self.forget_restored();
+                }
                 // Past this page only while more wait: the account's newest
                 // seq is on a later page, after replies not read yet.
                 self.cursor = self.cursor.max(read.read_to());
@@ -1414,6 +1483,22 @@ impl ReplySync {
                 self.read_retry.failed(failure, now);
                 Vec::new()
             }
+        }
+    }
+
+    /// Reads caught up: a reply handed to the daemon before a restart that
+    /// no read brought as pending isn't any more (expired), and its session
+    /// no longer waits for it.
+    fn forget_restored(&mut self) {
+        let gone: Vec<String> = self
+            .restored
+            .keys()
+            .filter(|id| !self.pending.contains_key(*id))
+            .cloned()
+            .collect();
+        for id in gone {
+            self.restored.remove(&id);
+            self.kept.no_longer_pending(&id);
         }
     }
 
@@ -1440,7 +1525,10 @@ impl ReplySync {
         pending: impl FnOnce() -> Pending,
     ) {
         let mine = machine == self.machine;
-        if mine && status == ReplyStatus::Pending && !self.kept.handled(id) {
+        // One handed to the daemon before a restart is pending again only to
+        // be followed (`resume_restored`), never typed again.
+        let typable = !self.kept.handled(id) || self.restored.contains_key(id);
+        if mine && status == ReplyStatus::Pending && typable {
             self.pending.insert(id.to_owned(), pending());
         } else if self.pending.remove(id).is_some()
             && self.files.remove(id).is_some()

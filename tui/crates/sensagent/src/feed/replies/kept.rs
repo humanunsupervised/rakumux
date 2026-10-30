@@ -1,8 +1,12 @@
 //! What replies keep across a restart of the service, in a file (0600) when
 //! given one: the replies typed in or decided here (never typed again), those
-//! handed to the daemon whose report isn't queued yet, and the reports
-//! rakumux.com hasn't taken yet. (An older release also kept the replies this
-//! machine wrote, `own`, which is ignored when read and dropped when saved.)
+//! handed to the daemon whose report isn't queued yet with the session each
+//! went into (`typed_into`), and the reports rakumux.com hasn't taken yet.
+//! (An older release also kept the replies this machine wrote, `own`, which
+//! is ignored when read and dropped when saved.) A reply handed to the daemon
+//! is followed again after a restart, its session taking nothing else until
+//! its agent takes it or it's decided `not_taken`; one from a file without
+//! where it went (an older release's) is reported delivered on load.
 //! Without it a restarted service read its pending replies from the start and
 //! typed one again that it had typed but not yet reported (the report waits
 //! for the agent to take it, and backs off while rakumux.com can't be
@@ -35,6 +39,20 @@ pub(super) struct Report {
     pub at: i64,
 }
 
+/// Where a reply handed to the daemon went: its session, its agent's turn
+/// and chat just before, and whether the agent worked then (typed
+/// mid-turn), so a restarted service sees whether the agent took it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct TypedInto {
+    pub session: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    #[serde(default)]
+    pub mid_turn: bool,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct KeptFile {
     version: u8,
@@ -44,6 +62,9 @@ struct KeptFile {
     /// Replies handed to the daemon whose report isn't queued yet.
     #[serde(default)]
     typing: BTreeMap<String, i64>,
+    /// Where each of `typing` went (left out by older releases).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    typed_into: BTreeMap<String, TypedInto>,
     /// Reports not yet taken by rakumux.com, oldest first.
     #[serde(default)]
     reports: VecDeque<Report>,
@@ -56,8 +77,9 @@ pub(super) struct Kept {
 
 impl Kept {
     /// What `path` holds (nothing without it, or when it can't be read). A
-    /// reply that was being typed when the service stopped is taken as typed
-    /// in: it's never typed again, and reported delivered.
+    /// reply that was being typed when the service stopped is never typed
+    /// again: followed where it went ([`Kept::in_flight`]), or, without
+    /// that, taken as typed in and reported delivered.
     pub fn load(path: Option<PathBuf>) -> Self {
         let file = path
             .as_ref()
@@ -68,7 +90,13 @@ impl Kept {
         let mut kept = Self { path, file };
         let now = now_ms();
         let typing = std::mem::take(&mut kept.file.typing);
-        for (id, _) in typing {
+        let mut typed_into = std::mem::take(&mut kept.file.typed_into);
+        for (id, at) in typing {
+            if let Some(into) = typed_into.remove(&id) {
+                kept.file.typing.insert(id.clone(), at);
+                kept.file.typed_into.insert(id, into);
+                continue;
+            }
             if !kept.file.reports.iter().any(|report| report.id == id) {
                 kept.file.reports.push_back(Report {
                     id: id.clone(),
@@ -87,11 +115,19 @@ impl Kept {
         self.file.handled.contains_key(id)
     }
 
-    /// The reply `id` is about to be handed to the daemon: from now on it's
-    /// never typed again, whatever happens to this service.
-    pub fn typing(&mut self, id: &str) {
+    /// The replies handed to the daemon before this service started and not
+    /// decided yet, with where each went: still to be followed.
+    pub fn in_flight(&self) -> impl Iterator<Item = (&String, &TypedInto)> {
+        self.file.typed_into.iter()
+    }
+
+    /// The reply `id` is about to be handed to the daemon, `into` where it
+    /// goes: from now on it's never typed again, whatever happens to this
+    /// service.
+    pub fn typing(&mut self, id: &str, into: TypedInto) {
         let now = now_ms();
         self.file.typing.insert(id.to_owned(), now);
+        self.file.typed_into.insert(id.to_owned(), into);
         self.file.handled.insert(id.to_owned(), now);
         self.save();
     }
@@ -100,7 +136,16 @@ impl Kept {
     /// had the foreground): it may be typed later.
     pub fn untyped(&mut self, id: &str) {
         self.file.typing.remove(id);
+        self.file.typed_into.remove(id);
         self.file.handled.remove(id);
+        self.save();
+    }
+
+    /// Handed to the daemon before a restart, it's no longer pending on
+    /// rakumux.com (expired): never typed again, and nothing to report.
+    pub fn no_longer_pending(&mut self, id: &str) {
+        self.file.typing.remove(id);
+        self.file.typed_into.remove(id);
         self.save();
     }
 
@@ -109,6 +154,7 @@ impl Kept {
     pub fn decided(&mut self, id: &str, failure: Option<ReplyFailure>) {
         let now = now_ms();
         self.file.typing.remove(id);
+        self.file.typed_into.remove(id);
         self.file.handled.insert(id.to_owned(), now);
         self.file.reports.push_back(Report {
             id: id.to_owned(),
@@ -149,6 +195,8 @@ impl Kept {
                 ids.remove(&oldest);
             }
         }
+        let typing = &self.file.typing;
+        self.file.typed_into.retain(|id, _| typing.contains_key(id));
         self.file
             .reports
             .retain(|report| now.saturating_sub(report.at) < REPORT_KEEP_MS);
