@@ -64,7 +64,7 @@ impl Layout {
         if cfg!(target_os = "linux") {
             dirs.push(PathBuf::from(format!(
                 "/run/user/{}/rakumux",
-                unsafe_free_uid()
+                current_uid()
             )));
         }
         let mut layouts: Vec<Layout> = Vec::new();
@@ -115,7 +115,7 @@ impl Layout {
     /// `sun_path` limit; the name hashes the runtime dir so isolated homes
     /// get separate daemons.
     pub fn socket_path(&self) -> PathBuf {
-        let uid = unsafe_free_uid();
+        let uid = current_uid();
         PathBuf::from(format!("/tmp/rakumux-{uid}")).join(format!(
             "ptyd-{:016x}.sock",
             fnv1a(self.run_dir.to_string_lossy().as_bytes())
@@ -139,20 +139,10 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Current user id without libc: the owner of `/proc/self` (Linux) or of a
-/// fresh temp file (macOS).
-fn unsafe_free_uid() -> u32 {
-    use std::os::unix::fs::MetadataExt;
-    if let Ok(meta) = std::fs::metadata("/proc/self") {
-        return meta.uid();
-    }
-    let probe = std::env::temp_dir().join(format!("rakumux-uid-{}", std::process::id()));
-    let uid = std::fs::File::create(&probe)
-        .and_then(|_| std::fs::metadata(&probe))
-        .map(|m| m.uid())
-        .unwrap_or(0);
-    let _ = std::fs::remove_file(&probe);
-    uid
+/// The current (effective) user id: the owner of the per-user socket directory.
+fn current_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    unsafe { libc::geteuid() }
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -226,6 +216,26 @@ mod tests {
             a.registration_file(),
             PathBuf::from("/tmp/a-home/run/service.json")
         );
+    }
+
+    #[test]
+    fn the_socket_is_in_this_users_directory_from_any_thread() {
+        let expected = PathBuf::from(format!("/tmp/rakumux-{}", current_uid()));
+        let threads: Vec<_> = (0..16)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    let layout = Layout::with_home("/tmp/a-home".into());
+                    (0..50)
+                        .map(|_| layout.socket_path().parent().unwrap().to_path_buf())
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for thread in threads {
+            for dir in thread.join().unwrap() {
+                assert_eq!(dir, expected);
+            }
+        }
     }
 
     #[test]
