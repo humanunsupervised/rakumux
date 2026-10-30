@@ -119,6 +119,8 @@ fn prompted(lifecycle: Lifecycle, conversation: Option<&str>, prompt: &str) -> S
 /// it took it.
 fn taken(replies: &mut ReplySync) {
     let sent = replies.deliveries[&SessionId::from_string("S")]
+        .last()
+        .unwrap()
         .sent
         .clone();
     replies.observe(&prompted(Lifecycle::Working, Some(CHAT), &sent));
@@ -1969,35 +1971,35 @@ fn replies_written_one_after_another_mid_turn_each_get_their_turns_answer() {
     let mut replies = on(&[running("claude", Lifecycle::Working)]);
     let work = after_reading(
         &mut replies,
-        vec![
-            reply("01K8A1", 4, Some("studio")),
-            reply("01K8A2", 5, Some("studio")),
-        ],
+        vec![said("01K8A1", 4, "First."), said("01K8A2", 5, "Second.")],
     );
     assert_eq!(submitted_reply(work).as_deref(), Some("01K8A1"));
     replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
-    // Claude Code takes the first at its next step; the second waits for the
-    // turn to end, so the two don't share that turn's one answer.
+    // Not taken yet: the second waits behind it.
+    assert_eq!(next_at(&mut replies, NOW + Duration::from_secs(20)), None);
+    // Claude Code takes the first at its next step and works on: the second
+    // goes in, queued in the turn, without waiting for the turn to end.
     let took = NOW + Duration::from_secs(30);
-    let mut shown = running_prompted("claude", Lifecycle::Working, "Now add a test.");
+    let mut shown = running_prompted("claude", Lifecycle::Working, "First.");
     replies.observe(&shown);
+    assert_eq!(
+        submitted_reply(next_at(&mut replies, took)).as_deref(),
+        Some("01K8A2")
+    );
+    replies.submitted("01K8A2".into(), Ok(()), took, wall(took));
     assert_eq!(report_of(next_at(&mut replies, took))["id"], "01K8A1");
     report_taken(&mut replies, "01K8A1", took);
-    assert_eq!(next_at(&mut replies, took + Duration::from_secs(60)), None);
-    // The turn ends: the second goes in to the waiting agent.
+    // The turn ends with its own reply, and Claude Code takes the second as
+    // its next prompt.
     let ended = NOW + Duration::from_secs(120);
     shown.lifecycle = Lifecycle::Done;
     replies.observe(&shown);
-    assert_eq!(
-        submitted_reply(next_at(&mut replies, ended)).as_deref(),
-        Some("01K8A2")
-    );
-    replies.submitted("01K8A2".into(), Ok(()), ended, wall(ended));
-    let mut shown = running_prompted("claude", Lifecycle::Working, "Now add a test.");
+    assert_eq!(next_at(&mut replies, ended), None);
+    let mut shown = running_prompted("claude", Lifecycle::Working, "Second.");
     replies.observe(&shown);
     assert_eq!(report_of(next_at(&mut replies, ended))["id"], "01K8A2");
     report_taken(&mut replies, "01K8A2", ended);
-    // The first turn's answer, captured after the second went in, is the
+    // The first turn's answer, captured after the second was taken, is the
     // first's; the second's turn's is the second's.
     assert_eq!(
         replies.answered(&answer(Some(CHAT), wall(ended) - 100)),
@@ -2011,6 +2013,278 @@ fn replies_written_one_after_another_mid_turn_each_get_their_turns_answer() {
         replies.answered(&answer(Some(CHAT), wall(second) - 100)),
         Some("01K8A2".into())
     );
+}
+
+/// A reply to S's chat saying `text`.
+fn said(id: &str, seq: u64, text: &str) -> FeedReply {
+    let mut said = reply(id, seq, None);
+    said.text = text.into();
+    said
+}
+
+/// What `replies` does at `at` (reads answered with nothing new) until it
+/// has nothing more to do: the replies it typed in, in order, the daemon
+/// typing each, and those it reported delivered, rakumux.com taking each.
+fn worked_at(replies: &mut ReplySync, at: Duration) -> (Vec<String>, Vec<String>) {
+    let (mut typed, mut reported) = (Vec::new(), Vec::new());
+    loop {
+        match next_at(replies, at) {
+            Some(ReplyWork::Submit { reply, .. }) => {
+                assert!(replies.daemon_answered(reply.clone(), Ok(()), at, wall(at)));
+                typed.push(reply);
+            }
+            Some(ReplyWork::Request(FeedRequest::ReplyStatus { body })) => {
+                let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(body["status"], "delivered", "{body}");
+                let id = body["id"].as_str().unwrap().to_owned();
+                report_taken(replies, &id, at);
+                reported.push(id);
+            }
+            None => return (typed, reported),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+}
+
+/// `ids` as owned strings, to compare with [`worked_at`]'s.
+fn ids(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(|&id| id.to_owned()).collect()
+}
+
+/// Read `pending` (rakumux.com's first read since the service started).
+fn read_pending(replies: &mut ReplySync, pending: Vec<FeedReply>, at: Duration) {
+    assert_eq!(read_after(replies.next_work(at)), 0);
+    replies.request_done(true, read(pending), at);
+}
+
+#[test]
+fn replies_to_an_agent_that_never_stops_each_go_in_once_the_one_before_was_taken() {
+    // Claude Code kept at work for good (background subagents, one turn
+    // after another): never seen waiting, never asking anything.
+    let mut shown = running("claude", Lifecycle::Working);
+    let mut replies = on(std::slice::from_ref(&shown));
+    let pending = vec![
+        said("01K8A3", 6, "Third."),
+        said("01K8A1", 4, "First."),
+        said("01K8A2", 5, "Second."),
+    ];
+    read_pending(&mut replies, pending, NOW);
+    assert_eq!(worked_at(&mut replies, NOW), (ids(&["01K8A1"]), vec![]));
+    let mut at = NOW;
+    for (id, text, next) in [
+        ("01K8A1", "First.", Some("01K8A2")),
+        ("01K8A2", "Second.", Some("01K8A3")),
+        ("01K8A3", "Third.", None),
+    ] {
+        // Nothing more goes in until the agent takes it, however long that is.
+        at += Duration::from_secs(300);
+        replies.observe(&shown);
+        assert_eq!(worked_at(&mut replies, at), (vec![], vec![]), "{id}");
+        // Taken at its next step, the agent working on: delivered, and the
+        // next goes in, in rakumux.com's order.
+        shown = running_prompted("claude", Lifecycle::Working, text);
+        replies.observe(&shown);
+        at += Duration::from_secs(1);
+        let typed: Vec<String> = next.into_iter().map(Into::into).collect();
+        assert_eq!(worked_at(&mut replies, at), (typed, ids(&[id])), "{id}");
+    }
+    assert!(replies.pending.is_empty());
+}
+
+#[test]
+fn of_replies_an_agent_takes_within_one_turn_the_last_taken_before_its_answer_has_it() {
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    let pending = vec![
+        said("01K8A1", 4, "First."),
+        said("01K8A2", 5, "Second."),
+        said("01K8A3", 6, "Third."),
+    ];
+    read_pending(&mut replies, pending, NOW);
+    assert_eq!(worked_at(&mut replies, NOW).0, ["01K8A1"]);
+    // Steered into the turn it was typed into, between tool steps: the turn
+    // goes on, and an answer said before the take isn't the first's.
+    let first = NOW + Duration::from_secs(10);
+    replies.observe(&running_prompted("claude", Lifecycle::Working, "First."));
+    assert_eq!(
+        worked_at(&mut replies, first),
+        (ids(&["01K8A2"]), ids(&["01K8A1"]))
+    );
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), wall(first) - 1_000)),
+        None
+    );
+    // That turn ends with its own reply, and Claude Code takes the second as
+    // its next prompt at once, never seen waiting.
+    let said_at = NOW + Duration::from_secs(30);
+    let second = said_at + Duration::from_millis(300);
+    replies.observe(&running_prompted("claude", Lifecycle::Working, "Second."));
+    assert_eq!(
+        worked_at(&mut replies, second),
+        (ids(&["01K8A3"]), ids(&["01K8A2"]))
+    );
+    // Its reply, heard of after the second was taken, was said before that:
+    // the first's, never the second's.
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), wall(said_at))),
+        Some("01K8A1".into())
+    );
+    // The third is steered into the second's turn between tool steps.
+    let third = second + Duration::from_secs(20);
+    let mut shown = running_prompted("claude", Lifecycle::Working, "Third.");
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, third), (vec![], ids(&["01K8A3"])));
+    // That turn's one answer is the last reply taken in it, the third's; the
+    // second has none, and nothing later is anyone's.
+    let ended = third + Duration::from_secs(60);
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    worked_at(&mut replies, ended);
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), wall(ended) - 100)),
+        Some("01K8A3".into())
+    );
+    assert_eq!(
+        replies.answered(&answer(Some(CHAT), wall(ended) + 60_000)),
+        None
+    );
+    assert!(replies.awaiting.is_empty());
+}
+
+#[test]
+fn a_restart_while_replies_go_into_an_agent_that_never_stops_holds_nothing_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    let pending = [
+        said("01K8A1", 4, "First."),
+        said("01K8A2", 5, "Second."),
+        said("01K8A3", 6, "Third."),
+        said("01K8A4", 7, "Fourth."),
+    ];
+    let delivered = |id: &str, seq| {
+        let mut reply = pending.iter().find(|reply| reply.id == id).unwrap().clone();
+        reply.seq = seq;
+        reply.status = ReplyStatus::Delivered;
+        reply
+    };
+    {
+        let mut replies = kept_at(&path, &[running("claude", Lifecycle::Working)]);
+        read_pending(&mut replies, pending.to_vec(), NOW);
+        assert_eq!(worked_at(&mut replies, NOW).0, ["01K8A1"]);
+        // The agent takes it, and the service stops (an update replaces it)
+        // before it saw that.
+        replies.observe(&running_prompted("claude", Lifecycle::Working, "First."));
+    }
+    // Restarted between replies, the agent at work on the first: the first
+    // is reported delivered, never typed again, and the second goes in.
+    let at = NOW + Duration::from_secs(5);
+    let shown = running_prompted("claude", Lifecycle::Working, "First.");
+    let mut replies = kept_at(&path, std::slice::from_ref(&shown));
+    assert_eq!(report_of(replies.next_work(at))["id"], "01K8A1");
+    report_taken(&mut replies, "01K8A1", at);
+    let mut read = pending[1..].to_vec();
+    read.push(delivered("01K8A1", 8));
+    read_pending(&mut replies, read, at);
+    assert_eq!(worked_at(&mut replies, at), (ids(&["01K8A2"]), vec![]));
+    // Taken: the third goes in. The service stops again before the agent
+    // took the third.
+    replies.observe(&running_prompted("claude", Lifecycle::Working, "Second."));
+    assert_eq!(
+        worked_at(&mut replies, at),
+        (ids(&["01K8A3"]), ids(&["01K8A2"]))
+    );
+    drop(replies);
+    // Restarted while the third goes in: it's taken as typed in, never typed
+    // again, and nothing holds its session back for good: the fourth goes in.
+    let mut replies = kept_at(&path, &[running("claude", Lifecycle::Working)]);
+    assert_eq!(report_of(replies.next_work(at))["id"], "01K8A3");
+    report_taken(&mut replies, "01K8A3", at);
+    read_pending(
+        &mut replies,
+        vec![
+            pending[3].clone(),
+            delivered("01K8A2", 9),
+            delivered("01K8A3", 10),
+        ],
+        at,
+    );
+    assert_eq!(worked_at(&mut replies, at), (ids(&["01K8A4"]), vec![]));
+}
+
+#[test]
+fn an_agent_asking_something_holds_the_next_reply_even_once_the_last_was_taken() {
+    // Its chat shows the first taken, its agent asking for a permission.
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    let pending = vec![said("01K8A1", 4, "First."), said("01K8A2", 5, "Second.")];
+    read_pending(&mut replies, pending, NOW);
+    assert_eq!(worked_at(&mut replies, NOW).0, ["01K8A1"]);
+    let mut shown = running_prompted("claude", Lifecycle::Blocked, "First.");
+    replies.observe(&shown);
+    let later = NOW + Duration::from_secs(600);
+    assert_eq!(worked_at(&mut replies, later), (vec![], ids(&["01K8A1"])));
+    // Answered, it works on: the second goes in.
+    shown.lifecycle = Lifecycle::Working;
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, later).0, ["01K8A2"]);
+
+    // Taken and working on when it starts asking, before the next was read.
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    read_pending(&mut replies, vec![said("01K8A1", 4, "First.")], NOW);
+    assert_eq!(worked_at(&mut replies, NOW).0, ["01K8A1"]);
+    let mut shown = running_prompted("claude", Lifecycle::Working, "First.");
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, NOW), (vec![], ids(&["01K8A1"])));
+    shown.lifecycle = Lifecycle::Blocked;
+    replies.observe(&shown);
+    assert_eq!(read_after(next_at_reading(&mut replies, later)), 4);
+    replies.request_done(true, read(vec![said("01K8A2", 5, "Second.")]), later);
+    assert_eq!(worked_at(&mut replies, later), (vec![], vec![]));
+    shown.lifecycle = Lifecycle::Working;
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, later).0, ["01K8A2"]);
+}
+
+/// The next work at `at`, a read expected.
+fn next_at_reading(replies: &mut ReplySync, at: Duration) -> Option<ReplyWork> {
+    replies.read_now(at);
+    replies.next_work(at)
+}
+
+#[test]
+fn an_agent_that_doesnt_take_input_mid_turn_gets_the_next_reply_only_once_it_waits() {
+    // Gemini CLI, not known to take what's typed during a turn.
+    let mut replies = on(&[running("gemini", Lifecycle::Done)]);
+    let pending = vec![said("01K8A1", 4, "First."), said("01K8A2", 5, "Second.")];
+    read_pending(&mut replies, pending, NOW);
+    assert_eq!(worked_at(&mut replies, NOW).0, ["01K8A1"]);
+    // Its chat shows the first taken, and it works on it a long while.
+    let mut shown = running_prompted("gemini", Lifecycle::Working, "First.");
+    replies.observe(&shown);
+    let later = NOW + Duration::from_secs(600);
+    assert_eq!(worked_at(&mut replies, later), (vec![], ids(&["01K8A1"])));
+    // It waits: the second goes in.
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, later).0, ["01K8A2"]);
+
+    // Claude Code without its turns followed (an older daemon): its take
+    // can't be seen, only its working, so its session messages wait for it
+    // to wait as before.
+    let mut shown = running("claude", Lifecycle::Done);
+    shown.agent_turn = None;
+    let mut replies = on(std::slice::from_ref(&shown));
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(
+        true,
+        read_messages(vec![message("01K8A1", 4, None), message("01K8A2", 5, None)]),
+        NOW,
+    );
+    assert_eq!(worked_at(&mut replies, NOW).0, ["01K8A1"]);
+    shown.lifecycle = Lifecycle::Working;
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, later), (vec![], ids(&["01K8A1"])));
+    shown.lifecycle = Lifecycle::Idle;
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, later).0, ["01K8A2"]);
 }
 
 #[test]

@@ -10,8 +10,10 @@
 //! something), or one of the others that works, is waited for (the cloud
 //! expires a reply after an hour). A session's replies go in one at a time,
 //! oldest first, and each is reported delivered only once its agent is seen
-//! to take it (see `Delivery`); the next waits for the agent to wait again,
-//! so replies typed one after another each get their own turn's answer. A
+//! to take it (see `Delivery`). The next waits for the agent to wait again,
+//! or, while an agent of [`QUEUES_INPUT`] whose turns the daemon follows
+//! works, only for that take: an agent that never stops gets each in turn,
+//! as it would from someone typing at its prompt. A
 //! session message (written on rakumux.com to a session with no answer to
 //! reply to) goes in the same queue: it is typed once an agent runs there
 //! and takes input, whatever chat it shows; never into a session without an
@@ -420,9 +422,13 @@ impl Pending {
 
 /// A reply going into its session, and what its agent showed since: nothing
 /// else is typed there until the agent is seen to take it and then waits
-/// again. Taken means its chat shows a new prompt that is this reply (its
-/// first line, [`Delivery::matches`]), or, for an agent whose turns the
-/// daemon doesn't follow, that it works or asks something. Taken, it's
+/// again, or, for an agent that takes what's typed while it works
+/// ([`Seen::works_taking_input`]), until it's seen to take it and work on
+/// (`free`): the next goes in mid-turn, and this one is followed until its
+/// agent waits again, which ends its turn for its answer (see [`Awaiting`]).
+/// Taken means its chat shows a new prompt that is this reply (its first
+/// line, [`Delivery::matches`]), or, for an agent whose turns the daemon
+/// doesn't follow, that it works or asks something. Taken, it's
 /// reported delivered; its session ended, its chat changed, another prompt
 /// went in or none within [`TAKE_WITHIN`], failed. The agent's lifecycle can
 /// lag what it does, so a view that still shows it waiting proves nothing.
@@ -453,6 +459,9 @@ struct Delivery {
     /// Typed mid-turn and not taken yet: since when its agent has been seen
     /// waiting (or gone), its turn over; seen busy again, `None`.
     waited: Option<Duration>,
+    /// Its chat showed it taken and its agent works on, taking what's typed
+    /// meanwhile: its session takes the next reply now.
+    free: bool,
 }
 
 /// What a typed-in reply's agent has shown of it.
@@ -555,7 +564,8 @@ impl Delivery {
         Some(self.sent.starts_with(&line) || line.contains(&head))
     }
 
-    /// Taken: whether its session takes the next reply now.
+    /// Taken: whether its agent waits again (or its session ended), its turn
+    /// over, so it's no longer followed.
     fn done(&self, seen: Option<&Seen>, now: Duration) -> bool {
         let Some(seen) = seen.filter(|seen| seen.live) else {
             return true;
@@ -599,7 +609,10 @@ fn typed(text: &str, files: &[PathBuf]) -> String {
 /// typed mid-turn is answered only once its agent took it, by a reply that
 /// finished after that: the turn it was typed into may end before the agent
 /// takes it (it was writing its last message, or it takes queued text only
-/// then), and that turn's reply isn't its answer.
+/// then), and that turn's reply isn't its answer. Several taken within one
+/// turn (each typed mid-turn once the one before was taken) share its one
+/// answer as an answer's `reply_to` can: the last taken before it was said
+/// has it, the others none (see [`ReplySync::answered`]).
 struct Awaiting {
     reply: String,
     conversation: Option<String>,
@@ -661,8 +674,10 @@ pub(crate) struct ReplySync {
     report_retry: Backoff,
     /// This machine's pending replies and session messages, by id, as last read.
     pending: HashMap<String, Pending>,
-    /// The reply going into each session, until its agent took it and waits again.
-    deliveries: HashMap<SessionId, Delivery>,
+    /// The replies going into each session, oldest first, each until its
+    /// agent took it and waits again; only the newest can hold its session
+    /// back (the others are `free`).
+    deliveries: HashMap<SessionId, Vec<Delivery>>,
     /// Replies written, typed in or decided here, and reports not yet taken,
     /// kept across a restart.
     kept: Kept,
@@ -773,7 +788,7 @@ impl ReplySync {
 
     pub fn observe(&mut self, view: &SessionView) {
         let seen = Seen::of(view);
-        if let Some(delivery) = self.deliveries.get_mut(&view.id) {
+        for delivery in self.deliveries.get_mut(&view.id).into_iter().flatten() {
             delivery.took |= delivery.prompted(&seen) == Some(true);
             // Typed mid-turn, its agent was busy already: busy counts once it took it.
             if delivery.took || !delivery.mid_turn {
@@ -868,11 +883,13 @@ impl ReplySync {
         self.follow_deliveries(now);
         // A session a reply is going into (or whose reply's file is being
         // fetched) takes nothing else until its agent took it and waits
-        // again, and one someone is typing in nothing until they pause.
+        // again or works on taking input, and one someone is typing in
+        // nothing until they pause.
         let being_typed: HashSet<&str> = self
             .deliveries
-            .keys()
-            .map(SessionId::as_str)
+            .iter()
+            .filter(|(_, deliveries)| deliveries.iter().any(|delivery| !delivery.free))
+            .map(|(session, _)| session.as_str())
             .chain(
                 self.fetching
                     .iter()
@@ -989,8 +1006,12 @@ impl ReplySync {
                     taken: None,
                     mid_turn: seen.is_some_and(Seen::works_taking_input),
                     waited: None,
+                    free: false,
                 };
-                self.deliveries.insert(session.clone(), delivery);
+                self.deliveries
+                    .entry(session.clone())
+                    .or_default()
+                    .push(delivery);
                 Some(ReplyWork::Submit {
                     reply: id,
                     session,
@@ -1008,8 +1029,8 @@ impl ReplySync {
 
     /// Follow the replies typed in (see [`Delivery`]): one its agent took is
     /// reported delivered, one whose session ended or chat changed first
-    /// failed, and a session whose agent took its reply and waits again takes
-    /// the next.
+    /// failed, and a session whose agent took its reply and waits again, or
+    /// works on taking what's typed meanwhile, takes the next.
     fn follow_deliveries(&mut self, now: Duration) {
         let mut settled = Vec::new();
         // Replies typed mid-turn that their agent took now, those whose turn
@@ -1019,36 +1040,44 @@ impl ReplySync {
         let mut ended = Vec::new();
         let mut gone = Vec::new();
         let sessions = &self.sessions;
-        self.deliveries.retain(|session, delivery| {
+        for (session, deliveries) in &mut self.deliveries {
             let seen = sessions.get(session);
-            if !delivery.typed {
-                // The daemon hasn't answered yet.
-                return true;
-            }
-            if delivery.taken.is_none() {
-                delivery.follow_turn(seen, now);
-                match delivery.taking(seen, now) {
-                    Taking::Waiting => return true,
-                    Taking::Taken => {
-                        delivery.taken = Some(now);
-                        settled.push((delivery.reply.clone(), None));
-                        if delivery.mid_turn {
-                            took.push((session.clone(), delivery.reply.clone()));
+            deliveries.retain_mut(|delivery| {
+                if !delivery.typed {
+                    // The daemon hasn't answered yet.
+                    return true;
+                }
+                if delivery.taken.is_none() {
+                    delivery.follow_turn(seen, now);
+                    match delivery.taking(seen, now) {
+                        Taking::Waiting => return true,
+                        Taking::Taken => {
+                            delivery.taken = Some(now);
+                            settled.push((delivery.reply.clone(), None));
+                            if delivery.mid_turn {
+                                took.push((session.clone(), delivery.reply.clone()));
+                            }
+                        }
+                        Taking::Failed(failure) => {
+                            settled.push((delivery.reply.clone(), Some(failure)));
+                            gone.push((session.clone(), delivery.reply.clone()));
+                            return false;
                         }
                     }
-                    Taking::Failed(failure) => {
-                        settled.push((delivery.reply.clone(), Some(failure)));
-                        gone.push((session.clone(), delivery.reply.clone()));
-                        return false;
-                    }
                 }
-            }
-            let done = delivery.done(seen, now);
-            if done {
-                ended.push((session.clone(), delivery.reply.clone()));
-            }
-            !done
-        });
+                if delivery.done(seen, now) {
+                    ended.push((session.clone(), delivery.reply.clone()));
+                    return false;
+                }
+                // Its chat showed it taken, and its agent works on and takes
+                // what's typed meanwhile: the next needn't wait for the turn
+                // to end (it may never, for an agent kept busy).
+                delivery.free |= delivery.took && seen.is_some_and(Seen::works_taking_input);
+                true
+            });
+        }
+        self.deliveries
+            .retain(|_, deliveries| !deliveries.is_empty());
         for (reply, failure) in settled {
             self.settle(&reply, failure, true);
         }
@@ -1086,6 +1115,7 @@ impl ReplySync {
     fn delivering(&self, id: &str) -> bool {
         self.deliveries
             .values()
+            .flatten()
             .any(|delivery| delivery.reply == id && delivery.taken.is_none())
     }
 
@@ -1130,8 +1160,22 @@ impl ReplySync {
     fn submitting(&self, reply: &str) -> Option<SessionId> {
         self.deliveries
             .iter()
-            .find(|(_, delivery)| delivery.reply == reply && !delivery.typed)
+            .find(|(_, deliveries)| {
+                deliveries
+                    .iter()
+                    .any(|delivery| delivery.reply == reply && !delivery.typed)
+            })
             .map(|(session, _)| session.clone())
+    }
+
+    /// Forget `reply`'s delivery into `session`: the daemon didn't type it.
+    fn undeliver(&mut self, session: &SessionId, reply: &str) {
+        if let Some(deliveries) = self.deliveries.get_mut(session) {
+            deliveries.retain(|delivery| delivery.reply != reply);
+            if deliveries.is_empty() {
+                self.deliveries.remove(session);
+            }
+        }
     }
 
     /// Typed into its session (or the daemon refused it), at `now` on the
@@ -1150,7 +1194,11 @@ impl ReplySync {
         };
         match result {
             Ok(()) => {
-                let Some(delivery) = self.deliveries.get_mut(&session) else {
+                let Some(delivery) = self.deliveries.get_mut(&session).and_then(|deliveries| {
+                    deliveries
+                        .iter_mut()
+                        .find(|delivery| delivery.reply == reply)
+                }) else {
                     return;
                 };
                 delivery.typed = true;
@@ -1165,10 +1213,11 @@ impl ReplySync {
                         .and_then(|seen| seen.conversation.clone()),
                 };
                 let awaiting = self.awaiting.entry(session).or_default();
-                // Typed in only once the turns before ended.
-                for earlier in awaiting.iter_mut() {
-                    if earlier.ended.is_none() {
-                        earlier.ended = Some((now_ms, now));
+                // Typed to a waiting agent: the turns before ended. Typed
+                // mid-turn, the turn of the one before may still go on.
+                if !untaken {
+                    for earlier in awaiting.iter_mut() {
+                        earlier.ended.get_or_insert((now_ms, now));
                     }
                 }
                 awaiting.push_back(Awaiting {
@@ -1181,7 +1230,7 @@ impl ReplySync {
                 });
             }
             Err(_) => {
-                self.deliveries.remove(&session);
+                self.undeliver(&session, &reply);
                 self.handle(&reply, Some(ReplyFailure::Refused));
             }
         }
@@ -1235,7 +1284,7 @@ impl ReplySync {
 
     fn hold_back(&mut self, reply: String, now: Duration) {
         if let Some(session) = self.submitting(&reply) {
-            self.deliveries.remove(&session);
+            self.undeliver(&session, &reply);
             self.kept.untyped(&reply);
             self.held
                 .insert(session.as_str().to_owned(), now + TYPING_HOLD);
@@ -1263,7 +1312,10 @@ impl ReplySync {
     /// The reply `answer` answers: of those typed into its session in its
     /// conversation, the latest typed in (typed mid-turn: taken) before its
     /// turn finished, unless that one's turn had been seen to end before (see
-    /// [`Awaiting`]). The replies typed in before it lost their answers.
+    /// [`Awaiting`]). The replies typed in before it lost their answers: of
+    /// several an agent took within one turn, the last one taken before the
+    /// answer was said has it, so `reply_to` names one reply, never one taken
+    /// after its answer was written.
     pub fn answered(&mut self, answer: &AgentReply) -> Option<String> {
         let awaiting = self.awaiting.get_mut(&answer.session_id)?;
         let at = awaiting.iter().rposition(|entry| {

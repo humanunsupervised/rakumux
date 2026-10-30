@@ -267,7 +267,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    (a view still showing it waiting proves nothing, as the lifecycle lags); with no new prompt
    within 30 s, or another one, it fails `not_taken` (its Enter lost, it went into a menu, or a
    draft on a line of its own went first: it may still be in the input box); the next goes in
-   once the agent waits again (after being seen busy, or 5 s on). Typed in but its session
+   once the agent waits again (after being seen busy, or 5 s on), or, for a mid-turn agent
+   (below), once it was taken and the agent works on. Typed in but its session
    ended or chat changed first, it fails. **Mid-turn** (`QUEUES_INPUT` in `feed/replies.rs`,
    the one list, by the daemon's agent names: Claude Code, Codex, OpenCode, Pi, GitHub Copilot,
    Grok Build and Kimi Code, whose input box stays open while they work, Enter there queuing the
@@ -281,8 +282,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    rules. It's `delivered` once its chat shows it as a new prompt, at the agent's next step
    minutes on maybe, or as the next turn's prompt when the turn ends first; it fails
    `not_taken` only once the agent has waited (`idle`/`done`, or left) 30 s without taking it,
-   being seen busy again starting that over. A session's next reply still waits for the agent to
-   wait again, so two replies don't share one turn's answer.
+   being seen busy again starting that over. A session's next reply waits only for that take,
+   not for the agent to wait again: an agent kept at work (background subagents, one turn after
+   another) takes each in turn, never more than one going in at a time, and never while it's
+   `blocked`. The one before is still followed until the agent waits again, which ends its
+   turn for its answer.
    What's typed in survives a restart of the service (`feed/replies/kept.rs`,
    `sensagent/status/replies.json`, 0600): the ids it typed in or decided (marked before the
    daemon is asked, so a reply goes in at most once), those handed to the daemon and not yet
@@ -293,7 +297,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    feed entry of its own, which the daemon captures even when the reply starts the next turn
    at once, said before the take), and by the end of that reply's
    turn: so replies typed in one after another each get theirs, and one whose turn ended
-   without an answer (interrupted, an API error) never takes a later one.
+   without an answer (interrupted, an API error) never takes a later one. Of several an agent
+   took within one turn (steered in between its steps), the turn's answer goes to the last one
+   taken before it was said, and the others get none (`reply_to` names one reply); no answer
+   goes to a reply taken after it was said.
    It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
    `private`, `refused`, `attachment_unavailable`, `not_taken`; `not_accepted` stays in the
    contract for older releases, which send it while their own setting is off;
