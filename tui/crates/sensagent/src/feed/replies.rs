@@ -116,14 +116,30 @@ const ORDER_WAIT: Duration = Duration::from_secs(5);
 /// the agent takes it, which is how its delivery is seen (see `Delivery`).
 /// Claude Code logs it as a `queued_command` attachment, Codex as a
 /// `user_message`, and OpenCode as a user message (1.x shows it `QUEUED`;
-/// 2.x steers it in, or parks it with the turn's other queued prompts).
-/// Every other agent gets replies only while it waits.
+/// 2.x steers it in, or parks it with the turn's other queued prompts). Pi
+/// steers it in once the response and tool calls under way are done, a
+/// user message in the same run; GitHub Copilot holds it while its model
+/// answers and steers it in between tool steps (a shell command running
+/// then goes on in the background); Grok Build and Kimi Code queue it and
+/// log it as the next turn's prompt as soon as the turn ends (each checked
+/// end to end with the real CLI, offline). Every other agent gets replies
+/// only while it waits.
 ///
 /// An agent goes here once its integration reads what's typed during a
-/// turn as a prompt of its chat. Grok Build and Kimi Code queue it (Kimi
-/// writes it to its log only when the turn ends); GitHub Copilot, Droid,
-/// Amp and Pi queue or steer it too.
-const QUEUES_INPUT: &[&str] = &["claude", "claude-code", "codex", "opencode", "opencode2"];
+/// turn as a prompt of its chat, checked with the real agent. Droid and Amp
+/// are said to queue or steer it too, and Cursor to hold it for a second
+/// Enter; their end-to-end checks run stand-ins, which can't show it.
+const QUEUES_INPUT: &[&str] = &[
+    "claude",
+    "claude-code",
+    "codex",
+    "opencode",
+    "opencode2",
+    "pi",
+    "copilot",
+    "grok",
+    "kimi",
+];
 
 /// What became of a reply a TUI wrote.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

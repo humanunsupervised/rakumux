@@ -27,7 +27,8 @@ Either way the daemon reads the conversation file
 feed (the turn's final response, keyed by its entry `id`), the whole conversation on demand, and
 places (`write` and `edit`, also from codemode scripts; `read`, `grep`, `find`, `ls` and `bash`
 `cd`/`git -C` count as worked in). A feed reply is typed in with a bracketed paste and Enter
-while Pi waits; it shows up as the next prompt. On revive Pi resumes with
+while Pi waits, or while it works (never while it asks something): Pi steers it in once the
+response and tool calls under way are done, and it shows up as the next prompt in the same run. On revive Pi resumes with
 `pi --session <file>`, from any folder.
 
 The extension runs only in Pi's own TUI (never `pi -p`, `--mode json` or `rpc`, such as a

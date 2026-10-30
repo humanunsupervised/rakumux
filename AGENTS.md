@@ -269,10 +269,13 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    draft on a line of its own went first: it may still be in the input box); the next goes in
    once the agent waits again (after being seen busy, or 5 s on). Typed in but its session
    ended or chat changed first, it fails. **Mid-turn** (`QUEUES_INPUT` in `feed/replies.rs`,
-   the one list, by the daemon's agent names: Claude Code, Codex and OpenCode, whose input box
-   stays open while they work, Enter there queuing the text, or steering it in, for the next
-   step, and whose chat logs it as a prompt once taken; any other agent, and one whose turns
-   the daemon doesn't follow, gets replies only while it waits): a reply goes in while such an
+   the one list, by the daemon's agent names: Claude Code, Codex, OpenCode, Pi, GitHub Copilot,
+   Grok Build and Kimi Code, whose input box stays open while they work, Enter there queuing the
+   text, or steering it in, for the next step (Pi once the response and tool calls under way are
+   done; Copilot between tool steps, a shell command then going on in the background; Grok and
+   Kimi as the next turn's prompt once the turn ends), and whose chat logs it as a
+   prompt once taken, each checked end to end with the real agent; any other agent, and one
+   whose turns the daemon doesn't follow, gets replies only while it waits): a reply goes in while such an
    agent is `working` too, never while it's `blocked` (a permission prompt, question or menu
    would take the text as its answer), with the same quiet, foreground, chat and one-at-a-time
    rules. It's `delivered` once its chat shows it as a new prompt, at the agent's next step

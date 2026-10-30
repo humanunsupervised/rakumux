@@ -19,7 +19,8 @@ mod runtime_support;
 use runtime_support::{wait_until, TestHome};
 use serde_json::{json, Value};
 use session_core::api::{
-    CreateSession, ReadRequest, ReadSource, ReviveSession, SendRequest, TextFormat, TranscriptRole,
+    CreateSession, ErrorCode, ReadRequest, ReadSource, ReviveSession, SendRequest, TextFormat,
+    TranscriptPart, TranscriptRole,
 };
 use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
 use session_core::ids::SessionId;
@@ -32,6 +33,10 @@ use std::time::Duration;
 
 const EXE: &str = env!("CARGO_BIN_EXE_rakumux-ptyd");
 const SLOW: Duration = Duration::from_secs(45);
+/// A turn the scripted model holds a while, and replies typed during turns.
+const HOLD: &str = "slow 12 hold the turn while a reply comes";
+const MIDTURN: &str = "MIDTURN ping 4242 typed while it works";
+const STEER: &str = "MIDTURN pong 777 typed while a tool runs";
 
 // ------------------------------------------------------------ the model
 
@@ -239,6 +244,36 @@ fn screen(client: &Client, id: &SessionId) -> String {
         })
         .map(|read| read.text)
         .unwrap_or_default()
+}
+
+/// The session's whole conversation, a message a line: its role and its
+/// text, tool calls' names or tools' output.
+fn chat(client: &Client, id: &SessionId) -> Vec<(TranscriptRole, String)> {
+    let mut messages = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = client.transcript(id, cursor.as_ref(), None).unwrap();
+        messages.extend(page.messages.into_iter().map(|message| {
+            let text = message
+                .parts
+                .iter()
+                .map(|part| match part {
+                    TranscriptPart::Text { text, .. } | TranscriptPart::Reasoning { text, .. } => {
+                        text.as_str()
+                    }
+                    TranscriptPart::ToolCall { name, .. } => name.as_str(),
+                    TranscriptPart::ToolResult { output, .. } => output.as_str(),
+                    TranscriptPart::Unknown => "",
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            (message.role, text)
+        }));
+        if !page.more {
+            return messages;
+        }
+        cursor = Some(page.cursor);
+    }
 }
 
 /// Wait until `check` holds for the session; shows its screen when it
@@ -535,7 +570,7 @@ fn copilot_in_a_session_end_to_end() {
         .unwrap();
     let before = client.get(&id).unwrap().agent_turn.unwrap().id;
     client
-        .submit_expecting(
+        .submit_unless_blocked(
             &id,
             "a reply written back from the feed",
             Duration::from_secs(1),
@@ -554,6 +589,234 @@ fn copilot_in_a_session_end_to_end() {
         answered.agent_turn.unwrap().conversation_id.as_deref(),
         Some(conversation.as_str())
     );
+
+    // A reply typed while a turn works, as the status service types one
+    // mid-turn: Copilot holds it (`pending`) while the model answers, then
+    // takes it as the next turn's prompt; the turn it was typed into isn't
+    // broken off.
+    client.touch(&id).unwrap();
+    wait_view(&client, &id, "idle once read", |view| {
+        view.lifecycle == Lifecycle::Idle
+    });
+    let before = client.get(&id).unwrap().agent_turn.unwrap().id;
+    client.submit(&id, HOLD).unwrap();
+    let holding = wait_view(&client, &id, "the long turn working", |view| {
+        view.lifecycle == Lifecycle::Working
+            && view.user_prompt.as_deref() == Some(HOLD)
+            && view
+                .agent_turn
+                .as_ref()
+                .is_some_and(|turn| turn.id != before)
+    });
+    let holding_turn = holding.agent_turn.unwrap();
+    let typed_at = std::time::Instant::now();
+    client
+        .submit_unless_blocked(&id, MIDTURN, Duration::from_secs(1), Some(&foreground))
+        .unwrap();
+    // Held while the turn works: it goes on, and the reply waits.
+    assert!(!wait_until(Duration::from_secs(2), || {
+        client.get(&id).is_ok_and(|view| {
+            matches!(view.lifecycle, Lifecycle::Done | Lifecycle::Idle)
+                || view
+                    .agent_turn
+                    .as_ref()
+                    .is_some_and(|turn| turn.id != holding_turn.id)
+        })
+    }));
+    let taken = wait_view(&client, &id, "the reply taken as a new turn", |view| {
+        view.user_prompt.as_deref() == Some(MIDTURN)
+            && view
+                .agent_turn
+                .as_ref()
+                .is_some_and(|turn| turn.id != holding_turn.id)
+    });
+    let taken_turn = taken.agent_turn.clone().unwrap();
+    eprintln!(
+        "mid-turn reply: typed into turn {} (working), taken as turn {} after {} ms, {:?}",
+        holding_turn.id,
+        taken_turn.id,
+        typed_at.elapsed().as_millis(),
+        taken.lifecycle
+    );
+    assert_eq!(taken_turn.conversation_id, holding_turn.conversation_id);
+    assert_eq!(
+        taken_turn.conversation_id.as_deref(),
+        Some(conversation.as_str())
+    );
+    wait_view(&client, &id, "the reply answered", |view| {
+        view.lifecycle == Lifecycle::Done
+            && view.agent_output.as_deref() == Some("Mock reply: MIDTURN ping 4242 typed while it")
+            && view.agent_turn.as_ref().map(|turn| turn.id) == Some(taken_turn.id)
+    });
+    // Queued: the long turn finished with its own answer, then the reply
+    // went in once, as a prompt of its own, and was answered.
+    let messages = chat(&client, &id);
+    let hold_at = messages
+        .iter()
+        .rposition(|message| *message == (TranscriptRole::User, HOLD.to_string()))
+        .unwrap();
+    assert_eq!(
+        messages[hold_at + 1..],
+        [
+            (
+                TranscriptRole::Assistant,
+                "Mock reply: slow 12 hold the turn while".to_string()
+            ),
+            (TranscriptRole::User, MIDTURN.to_string()),
+            (
+                TranscriptRole::Assistant,
+                "Mock reply: MIDTURN ping 4242 typed while it".to_string()
+            ),
+        ],
+        "{messages:#?}"
+    );
+    // Not left in the input box.
+    assert!(screen(&client, &id).matches(MIDTURN).count() <= 1);
+    // Nor taken again: no other turn starts, and the chat stays as it is.
+    assert!(!wait_until(Duration::from_secs(3), || {
+        client.get(&id).is_ok_and(|view| {
+            view.agent_turn
+                .as_ref()
+                .is_some_and(|turn| turn.id != taken_turn.id)
+        })
+    }));
+    assert_eq!(chat(&client, &id), messages);
+    let answer = {
+        let mut found = None;
+        assert!(wait_until(SLOW, || {
+            found = client
+                .replies(None)
+                .unwrap()
+                .0
+                .into_iter()
+                .find(|reply| reply.text == "Mock reply: MIDTURN ping 4242 typed while it");
+            found.is_some()
+        }));
+        found.unwrap()
+    };
+    assert_eq!(
+        answer.conversation_id.as_deref(),
+        Some(conversation.as_str())
+    );
+    eprintln!(
+        "replies captured: {:?}",
+        client
+            .replies(None)
+            .unwrap()
+            .0
+            .iter()
+            .map(|reply| reply.text.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    // Typed while a shell command runs (`sleep` allowed here, so there's no
+    // approval and the turn is seen working): Copilot moves the command to
+    // the background and steers the reply in at once, as a prompt of its
+    // own; the command finishes all the same and the agent carries on.
+    client.touch(&id).unwrap();
+    wait_view(&client, &id, "idle once read", |view| {
+        view.lifecycle == Lifecycle::Idle
+    });
+    client.submit(&id, "please run sleep 1").unwrap();
+    wait_view(&client, &id, "the command's approval", |view| {
+        view.lifecycle == Lifecycle::Blocked
+    });
+    assert!(
+        wait_until(SLOW, || screen(&client, &id)
+            .contains("don't ask again for `sleep`")),
+        "{}",
+        screen(&client, &id)
+    );
+    // A reply now would answer the approval: refused, nothing typed.
+    let refused = client
+        .submit_unless_blocked(&id, "1", Duration::from_secs(1), Some(&foreground))
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::SessionBlocked, "{refused}");
+    keys(&client, &id, &["down"]);
+    std::thread::sleep(Duration::from_millis(300));
+    keys(&client, &id, &["enter"]);
+    wait_view(&client, &id, "the short command run", |view| {
+        view.lifecycle == Lifecycle::Done
+            && view.agent_output.as_deref() == Some("Done: the tool ran.")
+    });
+    client.touch(&id).unwrap();
+    wait_view(&client, &id, "idle once read", |view| {
+        view.lifecycle == Lifecycle::Idle
+    });
+    client.submit(&id, "please run sleep 12").unwrap();
+    let running = wait_view(&client, &id, "the long command running", |view| {
+        view.lifecycle == Lifecycle::Working
+            && view.agent_output.as_deref() == Some("Shell: sleep 12")
+    });
+    let running_turn = running.agent_turn.unwrap();
+    let typed_at = std::time::Instant::now();
+    client
+        .submit_unless_blocked(&id, STEER, Duration::from_secs(1), Some(&foreground))
+        .unwrap();
+    let steered = wait_view(&client, &id, "the reply steered in", |view| {
+        view.user_prompt.as_deref() == Some(STEER)
+            && view
+                .agent_turn
+                .as_ref()
+                .is_some_and(|turn| turn.id != running_turn.id)
+    });
+    let steered_turn = steered.agent_turn.clone().unwrap();
+    eprintln!(
+        "steered reply: typed into turn {} (working), taken as turn {} after {} ms, {:?}",
+        running_turn.id,
+        steered_turn.id,
+        typed_at.elapsed().as_millis(),
+        steered.lifecycle
+    );
+    assert_eq!(
+        steered_turn.conversation_id.as_deref(),
+        Some(conversation.as_str())
+    );
+    // Taken before the command finished: steered, not queued.
+    assert!(typed_at.elapsed() < Duration::from_secs(10));
+    wait_view(&client, &id, "the steered reply answered", |view| {
+        view.agent_turn.as_ref().map(|turn| turn.id) == Some(steered_turn.id)
+            && view.agent_output.as_deref() == Some("Mock reply: MIDTURN pong 777 typed while a")
+    });
+    wait_view(
+        &client,
+        &id,
+        "the command finished and the agent on",
+        |view| {
+            view.lifecycle == Lifecycle::Done
+                && view.agent_output.as_deref() == Some("Done: the tool ran.")
+        },
+    );
+    let messages = chat(&client, &id);
+    let run_at = messages
+        .iter()
+        .rposition(|message| *message == (TranscriptRole::User, "please run sleep 12".to_string()))
+        .unwrap();
+    let after_run = &messages[run_at + 1..];
+    eprintln!("after the command: {after_run:#?}");
+    assert_eq!(
+        after_run
+            .iter()
+            .filter(|message| **message == (TranscriptRole::User, STEER.to_string()))
+            .count(),
+        1,
+        "{after_run:#?}"
+    );
+    assert!(
+        after_run
+            .iter()
+            .any(|(role, text)| *role == TranscriptRole::Assistant
+                && text == "Mock reply: MIDTURN pong 777 typed while a"),
+        "{after_run:#?}"
+    );
+    assert!(
+        after_run
+            .iter()
+            .any(|(role, text)| *role == TranscriptRole::Tool
+                && text.contains("completed with exit code 0")),
+        "the command ran to its end: {after_run:#?}"
+    );
+    assert!(screen(&client, &id).matches(STEER).count() <= 1);
 
     // A second chat from the sidebar, working while the first is shown again:
     // its hooks aren't this session's (the second's finished turn doesn't
@@ -678,8 +941,5 @@ fn copilot_in_a_session_end_to_end() {
         std::thread::sleep(Duration::from_millis(1200));
     }
     let resumed = wait_view(&client, &id, "the conversation resumed", is_resumed);
-    assert_eq!(
-        resumed.user_prompt.as_deref(),
-        Some("a reply written back from the feed")
-    );
+    assert_eq!(resumed.user_prompt.as_deref(), Some(STEER));
 }

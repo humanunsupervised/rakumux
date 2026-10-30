@@ -57,7 +57,9 @@ To let Copilot drive sessions through MCP, see [mcp/README.md](../../mcp/README.
   commands, and the files its tools changed (`fileEdits`, what was written, not what was asked).
 - **Replies written back** are typed in with a bracketed paste, which Copilot takes as one prompt
   (a long one shows as `[Paste #1 - N lines]` and is kept whole), and confirmed by the next turn's
-  prompt.
+  prompt; while it waits or works, never while it asks something. Typed while its model answers,
+  Copilot holds it (`pending`) for the next turn; while a tool runs, it steers it in at once and
+  moves a running shell command to the background.
 - **New sessions.** Rakumux keeps Copilot's markers (`COPILOT_CLI`, `COPILOT_AGENT_SESSION_ID`, …)
   out of new sessions, and from a session started by Copilot's shell tool its git settings too
   (`GIT_EDITOR=true`, no credential prompts, its `GIT_CONFIG_*` entries).

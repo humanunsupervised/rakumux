@@ -11,13 +11,14 @@
 //! ```
 
 use session_core::api::{
-    CreateSession, ReadRequest, ReadSource, ReviveSession, SendRequest, TextFormat, TranscriptPart,
-    TranscriptRole,
+    CreateSession, ErrorCode, ReadRequest, ReadSource, ReviveSession, SendRequest, TextFormat,
+    TranscriptPart, TranscriptRole,
 };
 use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
 use session_core::ids::SessionId;
 use session_core::model::{Lifecycle, ResumeSource, ScopeRoot, SessionStatus, SessionView};
 use session_core::paths::{Layout, Registration};
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -431,11 +432,21 @@ impl World {
     }
 
     /// Type a prompt as a feed reply is typed in: a paste, then Enter, only
-    /// while Pi is in the foreground.
+    /// while Pi is in the foreground and asks nothing.
     fn submit(&self, id: &SessionId, text: &str) {
         self.client
-            .submit_expecting(id, text, Duration::from_millis(0), Some("pi"))
+            .submit_unless_blocked(id, text, Duration::from_millis(0), Some("pi"))
             .unwrap();
+    }
+
+    /// A reply typed in now would answer the dialog Pi shows: refused,
+    /// nothing typed.
+    fn refused_while_asking(&self, id: &SessionId) {
+        let refused = self
+            .client
+            .submit_unless_blocked(id, "2", Duration::from_millis(0), Some("pi"))
+            .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::SessionBlocked, "{refused}");
     }
 
     /// The Pi conversation files under the agent directory.
@@ -456,6 +467,171 @@ impl World {
         }
         files.sort();
         files
+    }
+
+    /// Type `typed` while Pi works on `first`, a prompt the fake model holds
+    /// a while, as a feed reply is typed mid-turn (`typed` holds the model
+    /// too, so the view can be seen working on it). Pi steers it in: `first`'s
+    /// turn does its `work` (the conversation's parts between the two
+    /// prompts), then `typed` is a new prompt of the same conversation, in
+    /// the same run (the view never stops working before it shows it), typed
+    /// once, nothing left queued or in the editor, and answered: its reply is
+    /// captured.
+    fn type_mid_turn(
+        &self,
+        id: &SessionId,
+        seen: &mut Seen,
+        first: &str,
+        typed: &str,
+        work: &[(TranscriptRole, &str)],
+    ) {
+        let client = &self.client;
+        self.submit(id, first);
+        let working = self.wait(id, "working on the held prompt", seen, |view| {
+            view.lifecycle == Lifecycle::Working
+                && view.user_prompt.as_deref() == Some(first)
+                && view.agent_turn.is_some()
+        });
+        let held = working.agent_turn.clone().unwrap();
+        assert!(held.conversation_id.is_some(), "{held:?}");
+        let answer = format!("Echo: {typed}");
+        let start = Instant::now();
+        // Accepted while Pi works: it's in the foreground.
+        self.submit(id, typed);
+        let timeline = RefCell::new(Vec::<Moment>::new());
+        self.wait(id, "the prompt typed mid-turn answered", seen, |view| {
+            let now = Moment::of(view, start.elapsed());
+            let mut timeline = timeline.borrow_mut();
+            if timeline.last().is_none_or(|last| !last.same(&now)) {
+                timeline.push(now);
+            }
+            view.lifecycle == Lifecycle::Done && view.agent_output.as_deref() == Some(&answer)
+        });
+        let timeline = timeline.into_inner();
+        let shown = format!(
+            "held turn {held:?}, then from the moment it was typed:\n{}",
+            timeline
+                .iter()
+                .map(Moment::line)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        eprintln!("typed {typed:?} while Pi worked on {first:?}: {shown}");
+        // A new turn of the same conversation, its prompt the typed one ...
+        let taken = timeline
+            .iter()
+            .position(|moment| moment.turn != Some(held.id))
+            .unwrap_or_else(|| panic!("never a new turn; {shown}"));
+        let new = &timeline[taken];
+        assert_eq!(new.conversation, held.conversation_id, "{shown}");
+        assert_eq!(new.prompt.as_deref(), Some(typed), "{shown}");
+        // ... shown while the run still worked (steered in, not queued for
+        // after it), never blocked on anything ...
+        assert!(
+            timeline[..=taken]
+                .iter()
+                .all(|moment| moment.lifecycle == Lifecycle::Working),
+            "{shown}"
+        );
+        // ... and the last until it was answered.
+        assert!(
+            timeline[taken..]
+                .iter()
+                .all(|moment| moment.turn == new.turn && moment.prompt == new.prompt),
+            "{shown}"
+        );
+        // The conversation: `first`, its work, then `typed` once, answered.
+        let page = client.transcript(id, None, None).unwrap();
+        let parts = parts(&page);
+        let from = parts
+            .iter()
+            .rposition(|(role, text)| {
+                *role == TranscriptRole::User && *text == format!("text {first}")
+            })
+            .unwrap_or_else(|| panic!("{parts:?}"));
+        let mut expected = vec![(TranscriptRole::User, format!("text {first}"))];
+        expected.extend(work.iter().map(|(role, text)| (*role, (*text).to_owned())));
+        expected.push((TranscriptRole::User, format!("text {typed}")));
+        expected.push((TranscriptRole::Assistant, format!("text {answer}")));
+        assert_eq!(parts[from..], expected);
+        // Nothing queued any more, nor left in the editor below the answer.
+        let screen = self.screen(id);
+        let (_, below) = screen
+            .rsplit_once(&answer)
+            .unwrap_or_else(|| panic!("no answer on screen:\n{screen}"));
+        assert!(
+            !screen.contains("Steering:") && !below.contains(typed),
+            "{screen}"
+        );
+        // Its answer captured for the feed, the session's newest reply.
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let (replies, _) = client.replies(None).unwrap();
+            let newest = replies.iter().rev().find(|reply| reply.session_id == *id);
+            if newest.is_some_and(|reply| reply.text == answer) {
+                let captured: Vec<&str> = replies
+                    .iter()
+                    .filter(|reply| reply.session_id == *id)
+                    .map(|reply| reply.text.as_str())
+                    .collect();
+                eprintln!("replies captured: {captured:?}");
+                break;
+            }
+            assert!(Instant::now() < deadline, "no reply captured: {newest:?}");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+/// What a session's view showed of its agent's turn, when.
+#[derive(Debug)]
+struct Moment {
+    at: Duration,
+    lifecycle: Lifecycle,
+    turn: Option<u64>,
+    conversation: Option<String>,
+    prompt: Option<String>,
+    output: Option<String>,
+}
+
+impl Moment {
+    fn of(view: &SessionView, at: Duration) -> Self {
+        Self {
+            at,
+            lifecycle: view.lifecycle,
+            turn: view.agent_turn.as_ref().map(|turn| turn.id),
+            conversation: conversation(view),
+            prompt: view.user_prompt.clone(),
+            output: view.agent_output.clone(),
+        }
+    }
+
+    /// Whether it shows what `other` shows, whenever.
+    fn same(&self, other: &Self) -> bool {
+        (
+            self.lifecycle,
+            self.turn,
+            &self.conversation,
+            &self.prompt,
+            &self.output,
+        ) == (
+            other.lifecycle,
+            other.turn,
+            &other.conversation,
+            &other.prompt,
+            &other.output,
+        )
+    }
+
+    fn line(&self) -> String {
+        format!(
+            "+{:>5} ms {:?} turn {:?} prompt {:?} output {:?}",
+            self.at.as_millis(),
+            self.lifecycle,
+            self.turn,
+            self.prompt,
+            self.output
+        )
     }
 }
 
@@ -625,6 +801,7 @@ fn pi_with_the_rakumux_extension() {
     world.wait(&id, "blocked on the dialog", &mut seen, |view| {
         view.lifecycle == Lifecycle::Blocked
     });
+    world.refused_while_asking(&id);
     assert!(seen.phases.contains("NeedsInput"), "{:?}", seen.phases);
     client
         .send(SendRequest {
@@ -649,6 +826,34 @@ fn pi_with_the_rakumux_extension() {
             && view.agent_output.as_deref() == Some("Echo: Thanks, that works")
     });
     assert_eq!(conversation(&view).as_deref(), Some(id_of_file.as_str()));
+
+    // Typed while Pi works, as a feed reply is typed mid-turn: Pi steers it
+    // in, a new prompt in the same conversation once the response it waits
+    // for (and its tool calls) is done, and answers it in the same run.
+    world.type_mid_turn(
+        &id,
+        &mut seen,
+        "SLOW 6000 Before the steer",
+        "SLOW 4000 MIDTURN ping 4242",
+        &[(
+            TranscriptRole::Assistant,
+            "text Echo: SLOW 6000 Before the steer",
+        )],
+    );
+    // While it runs a tool, too: the tool's work is done, then the model sees
+    // the typed prompt (the fake model answers the newest prompt).
+    world.type_mid_turn(
+        &id,
+        &mut seen,
+        "SLOW 6000 WRITE notes/b.txt",
+        "SLOW 4000 MIDTURN pong 4343",
+        &[
+            (TranscriptRole::Assistant, "text On it."),
+            (TranscriptRole::Assistant, "call write"),
+            (TranscriptRole::Tool, "result error=false"),
+        ],
+    );
+    assert!(world.repo.join("notes/b.txt").is_file(), "Pi ran the write");
 
     // Rakumux's MCP server, run by Pi with the session's environment: it acts
     // as this session, which sees its own folder only.
@@ -779,11 +984,25 @@ fn pi_alone_reports_through_osc_7501() {
         std::thread::sleep(Duration::from_millis(100));
     }
 
+    // Typed while it works, as Pi reports it: steered in as a new prompt.
+    world.type_mid_turn(
+        &id,
+        &mut seen,
+        "SLOW 6000 WRITE notes/b.txt",
+        "SLOW 4000 MIDTURN ping 4242",
+        &[
+            (TranscriptRole::Assistant, "text On it."),
+            (TranscriptRole::Assistant, "call write"),
+            (TranscriptRole::Tool, "result error=false"),
+        ],
+    );
+
     // Blocked on a dialog, as Pi reports it.
     world.submit(&id, "BASH echo GATED");
     world.wait(&id, "blocked on the dialog", &mut seen, |view| {
         view.lifecycle == Lifecycle::Blocked
     });
+    world.refused_while_asking(&id);
     client
         .send(SendRequest {
             id: id.clone(),

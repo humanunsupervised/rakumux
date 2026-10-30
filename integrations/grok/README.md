@@ -54,7 +54,8 @@ report.
   the like. Started as `agent`, it resumes as `grok`.
 - **Replies written back** are typed in as a bracketed paste and Enter, which Grok takes as
   one prompt (`expect_foreground: grok`); a draft left in its input box gets the reply
-  appended.
+  appended. Typed while Grok works (never while it asks something), it's queued and becomes the
+  next turn's prompt as soon as the turn ends.
 
 ## MCP
 

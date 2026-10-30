@@ -1677,8 +1677,10 @@ fn report_taken(replies: &mut ReplySync, id: &str, at: Duration) {
 }
 
 #[test]
-fn a_reply_goes_into_claude_code_codex_or_opencode_while_it_works() {
-    for agent in ["claude", "codex", "opencode"] {
+fn a_reply_goes_into_an_agent_that_takes_input_during_a_turn_while_it_works() {
+    for agent in [
+        "claude", "codex", "opencode", "pi", "copilot", "grok", "kimi",
+    ] {
         let mut replies = on(&[running(agent, Lifecycle::Working)]);
         let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
         assert_eq!(
@@ -1695,8 +1697,10 @@ fn a_reply_goes_into_claude_code_codex_or_opencode_while_it_works() {
         // Still at work on the same turn: nothing to say yet.
         replies.observe(&running(agent, Lifecycle::Working));
         assert_eq!(replies.next_work(NOW), None, "{agent}");
-        // It takes the reply at its next step: its chat shows it as a prompt
-        // (Claude Code's `queued_command`, Codex's `user_message`).
+        // It takes the reply at its next step (or as the next turn's prompt):
+        // its chat shows it as a prompt (Claude Code's `queued_command`,
+        // Codex's `user_message`, Pi's and Copilot's steered user message,
+        // Grok's and Kimi's next turn).
         replies.observe(&running_prompted(
             agent,
             Lifecycle::Working,
@@ -1717,10 +1721,16 @@ fn a_blocked_agent_or_one_that_doesnt_take_input_mid_turn_is_waited_for() {
         // Asking something: the text would answer it.
         running("claude", Lifecycle::Blocked),
         running("codex", Lifecycle::Blocked),
+        running("pi", Lifecycle::Blocked),
+        running("grok", Lifecycle::Blocked),
+        running("kimi", Lifecycle::Blocked),
         // What it does isn't known.
         running("claude", Lifecycle::Unknown),
         // Agents not known to take what's typed during a turn.
         running("gemini", Lifecycle::Working),
+        running("droid", Lifecycle::Working),
+        running("amp", Lifecycle::Working),
+        running("cursor-agent", Lifecycle::Working),
         running("fakeagent", Lifecycle::Working),
         view("S", Lifecycle::Working, Some(CHAT)),
     ];

@@ -63,8 +63,8 @@ Kimi needs `kimi` on `PATH` for a revive to resume it: the official script insta
   or a subagent is about to change), Read's files, Grep and Glob's roots, and Bash's working
   directories and `cd`/`git -C`.
 - **Replies written back** are pasted and entered (`session_submit`, expecting `kimi`,
-  `kimi-code` or the cut title the session shows). Typed during a turn, Kimi queues it and logs
-  it as a prompt when that turn ends.
+  `kimi-code` or the cut title the session shows), while Kimi waits or works, never while it asks
+  something. Typed during a turn, Kimi queues it and logs it as a prompt when that turn ends.
 - **Environment** (`environment.rs`): sessions never inherit `KIMI_PLUGIN_ROOT`, which Kimi sets
   for its plugins' hooks and MCP servers.
 
