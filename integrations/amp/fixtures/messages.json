@@ -1,0 +1,170 @@
+{
+ "_comment": "What the plugin receives from Amp (ThreadMessage, agent.end) for thread.jsonl: synthetic.",
+ "cwd": "/repo",
+ "files": {
+  "toolu_edit": [
+   "/repo/src/parser.rs"
+  ],
+  "toolu_bash": [
+   "/repo/crates/parser/lib.rs"
+  ]
+ },
+ "events": [
+  {
+   "timestamp": "2026-10-23T10:00:00.000Z",
+   "message": {
+    "role": "user",
+    "id": "msg-1",
+    "content": [
+     {
+      "type": "text",
+      "text": "Fix the failing parser tests"
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-10-23T10:00:10.000Z",
+   "message": {
+    "role": "assistant",
+    "id": "msg-2",
+    "content": [
+     {
+      "type": "thinking",
+      "thinking": "The test fails on a trailing newline."
+     },
+     {
+      "type": "tool_use",
+      "id": "toolu_edit",
+      "name": "edit_file",
+      "input": {
+       "path": "/repo/src/parser.rs",
+       "old_str": "line.trim()",
+       "new_str": "line.trim_end()"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-10-23T10:00:12.000Z",
+   "message": {
+    "role": "user",
+    "id": "msg-3",
+    "content": [
+     {
+      "type": "tool_result",
+      "toolUseID": "toolu_edit",
+      "status": "done",
+      "output": "Edited /repo/src/parser.rs"
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-10-23T10:00:30.000Z",
+   "message": {
+    "role": "assistant",
+    "id": "msg-4",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_bash",
+      "name": "Bash",
+      "input": {
+       "cmd": "cd crates/parser && sed -i 's/old/new/' lib.rs",
+       "cwd": "/repo"
+      }
+     },
+     {
+      "type": "tool_use",
+      "id": "toolu_patch",
+      "name": "apply_patch",
+      "input": {
+       "patchText": "*** Begin Patch\n*** Update File: src/lexer.rs\n@@\n-old\n+new\n*** End Patch"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-10-23T10:00:40.000Z",
+   "message": {
+    "role": "user",
+    "id": "msg-5",
+    "content": [
+     {
+      "type": "tool_result",
+      "toolUseID": "toolu_bash",
+      "status": "done",
+      "output": ""
+     },
+     {
+      "type": "tool_result",
+      "toolUseID": "toolu_patch",
+      "status": "error",
+      "output": "patch did not apply"
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-10-23T10:01:00.000Z",
+   "message": {
+    "role": "assistant",
+    "id": "msg-6",
+    "content": [
+     {
+      "type": "text",
+      "text": "The parser tests pass now: the tokenizer kept a trailing newline.\n\nRun `cargo test -p parser` to see."
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-10-23T10:01:01.000Z",
+   "end": {
+    "id": "msg-1",
+    "status": "done"
+   }
+  },
+  {
+   "timestamp": "2026-10-23T10:05:00.000Z",
+   "message": {
+    "role": "user",
+    "id": 7,
+    "content": [
+     {
+      "type": "text",
+      "text": "Now the TODOs"
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-10-23T10:05:05.000Z",
+   "message": {
+    "role": "assistant",
+    "id": 8,
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_grep",
+      "name": "Grep",
+      "input": {
+       "pattern": "TODO",
+       "path": "/repo/src"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-10-23T10:05:06.000Z",
+   "end": {
+    "id": 7,
+    "status": "cancelled"
+   }
+  }
+ ]
+}

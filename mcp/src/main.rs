@@ -1,11 +1,12 @@
 //! `rakumux-mcp`: Rakumux's MCP server for coding agents (stdio). See
-//! `mcp/README.md` for installing it in Claude Code, Codex, OpenCode and Pi.
+//! `mcp/README.md` for installing it in Claude Code, Codex, OpenCode and the
+//! other agents Rakumux follows.
 
 use rakumux_mcp::client::{ApiClient, EnvIdentity};
 use rakumux_mcp::launch::Launcher;
 use rakumux_mcp::server::RakumuxServer;
 use rakumux_mcp::VERSION;
-use rakumux_mcp::{kimi, opencode, pi};
+use rakumux_mcp::{amp, kimi, opencode, pi};
 use session_core::paths::Layout;
 use std::process::ExitCode;
 
@@ -16,6 +17,7 @@ Usage: rakumux-mcp [--version | --help]
        rakumux-mcp opencode-plugin [--install [--dir DIR]]
        rakumux-mcp pi-plugin [--install [--dir DIR]]
        rakumux-mcp kimi-plugin [--install [--dir DIR]]
+       rakumux-mcp amp-plugin [--install [--dir DIR]]
 
 Speaks MCP on stdin/stdout. Register it with your agent, e.g.
   claude mcp add --scope user rakumux -- rakumux-mcp
@@ -37,6 +39,12 @@ manifest, `--install` installs it in DIR (Kimi Code's home, default
 $KIMI_CODE_HOME or ~/.kimi-code) as `/plugins install` would; Kimi loads it
 on its next start or `/plugins reload`.
 
+Amp needs the Rakumux plugin to report its state and keep a private copy of
+its threads for Rakumux: `amp-plugin` prints it, `--install` writes it to
+DIR/plugins/rakumux-session.js (DIR: Amp's config directory, default
+$XDG_CONFIG_HOME/amp or ~/.config/amp), where Amp loads it on start. No Amp
+setting is changed.
+
 It drives rakumux-api (found through <RAKUMUX_HOME or ~/.rakumux>/api.json,
 started with `rakumux-api --detach` when needed; RAKUMUX_API_BIN overrides the
 binary). Inside a Rakumux session, RAKUMUX_SESSION_ID and RAKUMUX_SESSION_TOKEN
@@ -50,6 +58,7 @@ fn main() -> ExitCode {
         }
         Some("pi-plugin") => return pi::command(std::env::args().skip(2).collect(), USAGE),
         Some("kimi-plugin") => return kimi::command(std::env::args().skip(2).collect(), USAGE),
+        Some("amp-plugin") => return amp::command(std::env::args().skip(2).collect(), USAGE),
         Some("--version" | "-V") => {
             println!("rakumux-mcp {VERSION}");
             return ExitCode::SUCCESS;

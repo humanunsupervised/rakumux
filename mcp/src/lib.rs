@@ -15,7 +15,11 @@
 //!   the session, and its installer.
 //! - `kimi`: the plugin for Kimi Code (its hooks and this server), and its
 //!   installer.
+//! - `amp`: the plugin for Amp that links threads to sessions, reports their
+//!   state and keeps their copy for the daemon, and its installer.
 
+#[path = "../../integrations/amp/install.rs"]
+pub mod amp;
 pub mod client;
 pub mod instructions;
 #[path = "../../integrations/mcp.rs"]
