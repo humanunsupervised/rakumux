@@ -980,9 +980,8 @@ pub fn turn_lines(messages: &[TranscriptMessage], width: usize) -> Vec<Line<'sta
 /// and Cursor's `target_*`, Droid's `directory_path`), a pattern (Droid's
 /// `patterns`, Cursor's `glob_pattern`, Amp's `filePattern`), a URL or query,
 /// and last a patch (Amp's `patchText`, Droid's `input`). rakumux.com's chats
-/// (`toolSubject`) read them in this order too, but for `summary`,
-/// `target_notebook`, `target_directory`, `glob_pattern`, `filePattern`,
-/// `search_term` and `task`.
+/// (`toolSubject`) read the same fields in the same order, a blank one saying
+/// nothing there too.
 const SUBJECT_FIELDS: [&str; 22] = [
     "description",
     "summary",
