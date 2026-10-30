@@ -94,10 +94,21 @@ cargo test -p rakumux-mcp kimi --locked
 
 `control_kimi` runs Kimi Code's log format and screens through the daemon (lines, turn, reply,
 chat, places, resume, a reply typed in, a cancelled turn, the lock and folder fallbacks).
-Fixtures were captured from Kimi Code 2.4.0 against a local mock model. The real CLI was
-checked end to end offline: an isolated `KIMI_CODE_HOME` and `RAKUMUX_HOME`, an
-OpenAI-compatible mock on `127.0.0.1` (`KIMI_MODEL_PROVIDER_TYPE=openai`, `KIMI_MODEL_BASE_URL`,
-`KIMI_MODEL_NAME`, `KIMI_MODEL_API_KEY`), the plugin installed with this installer.
+Fixtures were captured from Kimi Code 2.4.0 against a local mock model.
+
+The real CLI was checked end to end, offline (it needs the installed `kimi`, so it isn't in CI):
+a throwaway daemon (`RAKUMUX_HOME`), an isolated `HOME` and `KIMI_CODE_HOME`, the plugin
+installed with `rakumux-mcp kimi-plugin --install`, and an OpenAI-compatible mock model on
+`127.0.0.1` (`KIMI_MODEL_PROVIDER_TYPE=openai`, `KIMI_MODEL_BASE_URL`, `KIMI_MODEL_NAME`,
+`KIMI_MODEL_API_KEY`, `KIMI_MODEL_REASONING_KEY=reasoning_content`) scripted to think, reply,
+write a file, run a command, start a subagent, ask a question and call Rakumux's MCP tools. It
+showed the trust panel blocked; a command's approval blocked, then working, then done; a
+subagent counted while it ran; `agent_output`, `user_prompt`, `agent_turn` and `session_turn`;
+`session_transcript`; one reply captured per completed turn, at its turn's last message; the
+checkout as an edited place; the hooks naming the conversation (`SessionStart`,
+`UserPromptSubmit`, `TurnStarted`, a subagent's turn left out); `list_sessions` from inside Kimi
+answering "this is you"; a reply typed in with `session_submit` showing up as a new turn; `/new`
+followed and resumed; and after a kill, a revive running `kimi -r <id>` into the same chat.
 
 References: <https://www.kimi.com/code/docs/en/kimi-code-cli/customization/plugins.html>,
 `…/customization/hooks.html`, `…/customization/mcp.html`, `…/reference/kimi-command.html`.
