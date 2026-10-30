@@ -398,9 +398,11 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
     }
     let settings = layout.home.join("config.json");
     let replies = settings.clone();
+    let sessions = settings.clone();
     let config = ServiceConfig::from_env()?
         .with_turn_settings(move || turn_settings(&settings))
-        .with_remote_replies(move || remote_replies(&replies));
+        .with_remote_replies(move || remote_replies(&replies))
+        .with_remote_sessions(move || remote_sessions(&sessions));
     // Its HTTP clients block, which a thread of the async runtime may not do.
     std::thread::Builder::new()
         .name("rakumux-status-service".into())
@@ -418,6 +420,12 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
 fn remote_replies(path: &std::path::Path) -> bool {
     crate::app::config::Settings::load_from(path)
         .is_ok_and(|settings| settings.sessions.remote_replies)
+}
+
+/// `sessions.remote_sessions` of `config.json`: off when it can't be read.
+fn remote_sessions(path: &std::path::Path) -> bool {
+    crate::app::config::Settings::load_from(path)
+        .is_ok_and(|settings| settings.sessions.remote_sessions)
 }
 
 /// `sessions.ai_summary` of `config.json`: the defaults when it can't be read.

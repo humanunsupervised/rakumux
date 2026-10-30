@@ -946,6 +946,21 @@ impl App {
                     disabled: !signed_in,
                 };
             }
+            SettingsItem::RemoteSessions => {
+                let signed_in = matches!(self.account, AccountStatus::SignedIn(_));
+                let value = match (signed_in, self.settings.sessions.remote_sessions) {
+                    (false, _) => "On Off",
+                    (true, true) => "[On] Off",
+                    (true, false) => "On [Off]",
+                };
+                return SettingRow {
+                    section: item.section(),
+                    label: "New sessions from rakumux.com".into(),
+                    value: value.into(),
+                    note: "Start new sessions here when you ask for one on rakumux.com: a shell, or Claude Code, Codex or OpenCode, in one of the folders rakumux.com lists for this machine (never a private session's, never a path or command from the website). A first prompt sent with one goes in as a reply, so it needs Replies from rakumux.com too. Leave this off unless you want to start sessions here from elsewhere. This machine only, never changed from the website.".into(),
+                    disabled: !signed_in,
+                };
+            }
             SettingsItem::Rtop => (
                 "rtop",
                 "CPU, memory, network · t".into(),

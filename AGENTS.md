@@ -310,7 +310,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    recent places go too, as names only (`PlaceState`: a path in the session's folder, `.` for
    the folder itself, else its last component; branch, worktree, `edited`, `last_at`), and
    only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`); a
-   list that would pass the contract's 256 KiB goes without them.
+   list that would pass the contract's 256 KiB goes without them. The list says
+   `capabilities: ["reply_attachments", "new_sessions"]`, and `resources` as below.
    **rtop on rakumux.com** (`feed/resources.rs`, `ResourceSync`; contract `contracts/feed/`,
    "Resources"): the list says `capabilities: ["resources"]` only while the daemon announces
    `resources` (read at each connect; an `unsupported` answer drops it too), so rakumux.com tells
@@ -326,6 +327,32 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    neither a read nor an answer asked for 30 s, or when the switch goes off, and keeps nothing
    but the last reading (dropped when it stops); a daemon without `resources` isn't asked again
    until it reconnects.
+   **New sessions from rakumux.com** (`feed/new_sessions.rs`, `NewSessionSync`; contract
+   `contracts/feed/`, "New sessions"): on rakumux.com the user can ask one of their machines
+   for a new session in a folder its session list names, a login shell or one agent (Claude
+   Code, Codex, OpenCode). Because its list says `new_sessions`, the machine's replies read
+   brings the requests pending for it (`new_sessions`, with every read until reported, so
+   pokes and the replies read's pace serve them too), under the same switch and once its name
+   is confirmed. The service starts each through the daemon as the user (`session_create`):
+   in the folder of the sessions it lists (live or exited, never a private one or another
+   machine's) whose name (`folder_of`, the last path component) is the request's, the one of
+   `folder_session` (a session rakumux.com listed there) when two folders share the name;
+   never a path or a command from the cloud. The session is a login shell in that folder with
+   a generated name, the daemon's environment and default size, and for an agent its own
+   command (`claude`, `codex`, `opencode`) typed in as a startup command, as `rakumux new
+   --cmd` would. It reports `created` with the session's id and name
+   (`POST /api/v1/feed/new-sessions/status`), or `failed`: `not_accepted` while this machine's
+   `sessions.remote_sessions` is off (Settings → New sessions from rakumux.com, local, off by
+   default, read every 10 s), `folder_unknown` (no listed folder of that name, or several
+   without `folder_session` saying which), `refused` (the daemon's error). One at a time; each
+   id is marked handled before the daemon is asked and kept with the reports not yet taken in
+   `sensagent/status/new-sessions.json` (0600, an hour), so a request is started at most once
+   whatever happens to the service (one it stopped starting before the daemon answered isn't
+   reported; rakumux.com expires it after 10 minutes). The new session is followed at once
+   (before its `created` event) and, on a Sprite, held up 20 s. A first prompt asked for with
+   it never reaches the machine with the request: rakumux.com writes it to the new session as
+   a session message once it's `created`, typed in like any (so it needs `remote_replies`
+   too).
    **Enrolled machines** (`rakumux_sensagent::enrolment`, contract `contracts/feed/`, "Enrolled
    machines"): a machine with no sign-in of its own (your Sprite) gets one from a signed-in
    machine of the account: `OwnerRequest::MachineEnrol {machine_id, name, wake_url}` →
@@ -751,7 +778,9 @@ accidents; they don't stop a hostile process running as the same user.
                                  SQLite; titles.json: the title it last gave each session;
                                  titled-chats.json: the chats whose automatic title was made;
                                  chats.json; replies.json: replies written, typed in or
-                                 decided here and reports not yet taken), machine.json (this
+                                 decided here and reports not yet taken; new-sessions.json:
+                                 new sessions from rakumux.com started or decided here and
+                                 reports not yet taken), machine.json (this
                                  machine's feed name and id), its registration and private socket
   uploads/<reply id>/            0700: files attached to feed replies (0600), fetched by the
                                  account service and typed to the agent as paths; kept 7 days
@@ -779,7 +808,9 @@ accidents; they don't stop a hostile process running as the same user.
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
   remote_replies (false: replies written to the feed on rakumux.com or other machines are typed
-  into this machine's sessions; Settings → Replies from rakumux.com),
+  into this machine's sessions; Settings → Replies from rakumux.com), remote_sessions (false:
+  new sessions asked for on rakumux.com are started in this machine's folders; Settings → New
+  sessions from rakumux.com),
   sidebar_width (dragged divider),
   feed_width (the docked feed pane's width, set by dragging the line left of it; left out until
   dragged), sprite_folders (folders whose new sessions run on your Sprite), sprite_env_copy
@@ -980,6 +1011,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Reply written back** (`FeedReply`): what the user wrote back to a feed entry, typed into
   the entry's session on its machine once its agent waits; with the entries that answer them
   they make a **thread**.
+- **New session from rakumux.com** (`NewSessionAsk`): a session the user asked a machine for
+  on rakumux.com, in a folder it lists there (by name), a shell or one named agent; started by
+  that machine's account service only while its `sessions.remote_sessions` is on.
 - **Daemon** (`rakumux-ptyd`): the single per-user server owning every session.
 - **Client**: anything connected to the daemon (TUI, CLI call, agent, `rakumux-api`).
 - **External API**: `rakumux-api`, HTTP on 127.0.0.1 over the daemon; found through `api.json`.

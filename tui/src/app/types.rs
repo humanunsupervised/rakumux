@@ -392,15 +392,19 @@ pub enum SettingsItem {
     /// Type replies written on rakumux.com or other machines into this
     /// machine's sessions (local, `sessions.remote_replies`).
     RemoteReplies,
+    /// Start new sessions asked for on rakumux.com in this machine's folders
+    /// (local, `sessions.remote_sessions`).
+    RemoteSessions,
 }
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then what it brings, then the rest.
-    pub const ALL: [SettingsItem; 12] = [
+    pub const ALL: [SettingsItem; 13] = [
         SettingsItem::Account,
         SettingsItem::AiTitles,
         SettingsItem::AgentFeed,
         SettingsItem::RemoteReplies,
+        SettingsItem::RemoteSessions,
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::CycleInSessions,
@@ -422,9 +426,10 @@ impl SettingsItem {
             | SettingsItem::Rtop
             | SettingsItem::TerminalPanel => "App",
             SettingsItem::Account => "Account",
-            SettingsItem::AiTitles | SettingsItem::AgentFeed | SettingsItem::RemoteReplies => {
-                "Available on sign-in"
-            }
+            SettingsItem::AiTitles
+            | SettingsItem::AgentFeed
+            | SettingsItem::RemoteReplies
+            | SettingsItem::RemoteSessions => "Available on sign-in",
         }
     }
 

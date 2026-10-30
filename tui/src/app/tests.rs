@@ -5267,6 +5267,40 @@ async fn replies_from_rakumux_com_are_this_machines_own_setting() {
 }
 
 #[tokio::test]
+async fn new_sessions_from_rakumux_com_are_this_machines_own_setting() {
+    let row = |h: &Harness| {
+        h.app.modal_context(false).general[SettingsItem::RemoteSessions.index()].clone()
+    };
+    let (mut h, _) = account_harness(testing::FakeAccount::default());
+    assert!(row(&h).disabled);
+    assert_eq!(row(&h).section, "Available on sign-in");
+    assert_eq!(row(&h).label, "New sessions from rakumux.com");
+    h.press(KeyCode::Char(',')).await;
+    h.type_text("new sessions from").await;
+    h.press(KeyCode::Enter).await;
+    assert!(!h.app.settings.sessions.remote_sessions);
+
+    let (mut h, account) = account_harness(testing::FakeAccount::signed_in());
+    assert_eq!(row(&h).value, "On [Off]");
+    h.press(KeyCode::Char(',')).await;
+    h.type_text("new sessions from").await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(row(&h).value, "[On] Off");
+    assert!(h.app.settings.sessions.remote_sessions);
+    // Its own setting: replies from rakumux.com stay as they were.
+    assert!(!h.app.settings.sessions.remote_replies);
+    assert_eq!(h.app.status(), Some("New sessions from rakumux.com: on"));
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert!(saved.sessions.remote_sessions);
+    // Local: nothing is asked of the account.
+    assert!(!account.calls().contains(&"set_features"));
+    h.press(KeyCode::Enter).await;
+    assert!(!h.app.settings.sessions.remote_sessions);
+    let saved = Settings::load_from(&h.home.path().join("config.json")).unwrap();
+    assert!(!saved.sessions.remote_sessions);
+}
+
+#[tokio::test]
 async fn turning_ai_titles_off_clears_the_spinners_and_the_refresh() {
     use crossterm::event::MouseEventKind;
     let (mut h, account) = account_harness(testing::FakeAccount::signed_in());

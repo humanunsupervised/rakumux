@@ -222,6 +222,10 @@ stays. Press `s`, or the `↻` after a hovered name, for a new title.
 session once the agent is waiting for you. Each machine takes replies written elsewhere only with
 **Replies from rakumux.com** turned on in its Settings.
 
+**New sessions from the web:** start a shell, Claude Code, Codex or OpenCode in one of a machine's
+folders from rakumux.com. The machine starts it only with **New sessions from rakumux.com**
+turned on in its Settings, and only in a folder it already lists there.
+
 **Privacy:** your machine only ever calls out to rakumux.com. Nothing calls in. Before uploading,
 Rakumux masks text that looks like a key, a credential or a token.
 

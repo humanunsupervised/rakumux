@@ -215,6 +215,16 @@ fn open_item(app: &mut App, item: SettingsItem) {
             let state = if on { "on" } else { "off" };
             save_config(app, format!("Replies from rakumux.com: {state}"));
         }
+        SettingsItem::RemoteSessions => {
+            if !matches!(app.account, AccountStatus::SignedIn(_)) {
+                app.set_status("Sign in to use New sessions from rakumux.com: Settings → Account.");
+                return;
+            }
+            let on = !app.settings.sessions.remote_sessions;
+            app.settings.sessions.remote_sessions = on;
+            let state = if on { "on" } else { "off" };
+            save_config(app, format!("New sessions from rakumux.com: {state}"));
+        }
         SettingsItem::Update => app.open_upgrade_dialog(),
         SettingsItem::Account => app.open_account_dialog(),
         SettingsItem::RestartUi => app.request_restart(),

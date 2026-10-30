@@ -60,7 +60,7 @@ pub struct Settings {
 
 /// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
-/// `phone_offer_seen`, `remote_replies`, `icons`, `sidebar_width`,
+/// `phone_offer_seen`, `remote_replies`, `remote_sessions`, `icons`, `sidebar_width`,
 /// `stacked_list_percent`, `feed_width`, `session_order` and `section_order`;
 /// other keys in the section (daemon tuning such as `scrollback_rows`) are kept as they are
 /// when the TUI saves the file, except the retired ones
@@ -98,6 +98,13 @@ pub struct SessionsConfig {
     /// every few seconds.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub remote_replies: bool,
+    /// Start new sessions asked for on rakumux.com in this machine's folders
+    /// (Settings → New sessions from rakumux.com): a login shell, or one of
+    /// the agents it names, in a folder this machine lists there. Off, every
+    /// request fails as turned off. Local only, never set from the website;
+    /// the status service reads it every few seconds.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub remote_sessions: bool,
     /// The layout this window shows: Master detail, Grid or Tabs. Not saved:
     /// every start opens Master detail (an older file's `layout` is dropped).
     #[serde(skip)]
@@ -177,6 +184,7 @@ impl Default for SessionsConfig {
             welcome_seen: false,
             phone_offer_seen: false,
             remote_replies: false,
+            remote_sessions: false,
             layout: SessionLayout::default(),
             icons: Icons::default(),
             ai_summary: AiSummaryConfig::default(),
