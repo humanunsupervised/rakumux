@@ -368,7 +368,7 @@ pub enum SessionCommand {
     HookConfig {
         #[arg(long, value_enum)]
         agent: HookAgent,
-        /// Write it as a file of Rakumux's own the agent loads (GitHub Copilot)
+        /// Write it as a file of Rakumux's own the agent loads (GitHub Copilot, Grok)
         #[arg(long)]
         install: bool,
     },
@@ -666,6 +666,15 @@ mod tests {
             assert_eq!((agent.name(), event), (name, None));
         }
         assert!(CliArgs::try_parse_from(argv("session hook --agent gemini")).is_err());
+        assert_eq!(
+            parse("session hook-config --agent grok --install").command,
+            Command::Session {
+                command: SessionCommand::HookConfig {
+                    agent: HookAgent::Grok,
+                    install: true,
+                }
+            }
+        );
     }
 
     #[test]

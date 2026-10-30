@@ -61,10 +61,10 @@ fn install_file(
 fn agent_name(agent: HookAgent) -> &'static str {
     match agent {
         HookAgent::Copilot => "GitHub Copilot",
+        HookAgent::Grok => "Grok",
         other => other.name(),
     }
 }
-
 pub(super) fn run(
     globals: &Globals,
     agent: HookAgent,
@@ -157,6 +157,38 @@ mod tests {
     use super::*;
     use crate::cli::fake::FakeApi;
     use session_core::activity::{ActivityEvent, ActivityPhase, ActivityUpdate, ACTIVITY_VERSION};
+
+    #[test]
+    fn groks_hooks_install_as_a_file_of_rakumuxs_own() {
+        let home = tempfile::tempdir().unwrap();
+        let grok = home.path().join("grok-home");
+        let var = |name: &str| match name {
+            "GROK_HOME" => Some(grok.to_string_lossy().into_owned()),
+            "HOME" => Some(home.path().to_string_lossy().into_owned()),
+            _ => None,
+        };
+        let path = install_file(HookAgent::Grok, "{\"hooks\": {}}", var).unwrap();
+        assert_eq!(path, grok.join("hooks/rakumux.json"));
+        install_file(HookAgent::Grok, adapters::config("grok").unwrap(), var).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(
+            written["hooks"]["Stop"].is_array(),
+            "an older one is replaced"
+        );
+        // Without GROK_HOME: ~/.grok/hooks.
+        let default = install_file(HookAgent::Grok, "{}", |name| {
+            (name == "HOME").then(|| home.path().to_string_lossy().into_owned())
+        })
+        .unwrap();
+        assert_eq!(default, home.path().join(".grok/hooks/rakumux.json"));
+        // Agents without a hooks folder of their own print it to be merged.
+        let mut out = Vec::new();
+        assert!(configuration(HookAgent::Claude, true, &mut out).is_err());
+        assert!(out.is_empty());
+        configuration(HookAgent::Grok, false, &mut out).unwrap();
+        assert!(String::from_utf8(out).unwrap().contains("--agent grok"));
+    }
 
     #[test]
     fn hook_transport_is_session_only_and_requires_daemon_support() {
