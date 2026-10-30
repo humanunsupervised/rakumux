@@ -1,0 +1,40 @@
+# Pi 1.4.0 waiting for the model's first reply: only the rule loader says so.
+# Captured (100x30, fullscreen).
+agent: pi
+expect: working
+process: pi
+cmdline: pi
+title: π - demo
+alternate_screen: true
+ms_since_output: 60
+---
+
+
+
+
+
+ SLOW 4000 BASH sleep 3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+── ⠇ Working ───────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+~/demo
+1.1%/128k (auto)                                                                 fake-model • medium

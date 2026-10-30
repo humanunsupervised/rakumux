@@ -1,0 +1,40 @@
+# Pi 1.4.0 waiting on an extension's `ctx.ui.confirm` (a permission gate):
+# the dialog replaces the editor between its rules. Captured (100x30, fullscreen).
+agent: pi
+expect: blocked
+process: pi
+cmdline: pi
+title: π - demo
+alternate_screen: true
+ms_since_output: 60
+---
+
+
+
+
+
+ BASH echo GATED
+
+
+ On it.
+
+
+ $ echo GATED
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Allow bash?
+ echo GATED
+
+ → Yes
+   No
+
+ ↑↓ navigate  enter select  escape/ctrl+c cancel
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+~/demo
+↑20 ↓10 0.0%/128k (auto)                                                         fake-model • medium

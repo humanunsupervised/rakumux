@@ -3,6 +3,8 @@
 mod claude;
 #[path = "codex/environment.rs"]
 mod codex;
+#[path = "pi/environment.rs"]
+mod pi;
 
 /// What `hooks::host` reads to tell that another agent runs Claude Code's
 /// hooks (GitHub Copilot's `COPILOT_CLI`, Grok's `GROK_HOOK_EVENT`). A daemon
@@ -14,5 +16,6 @@ const HOOK_HOSTS: &[&str] = &["COPILOT_CLI", "GROK_HOOK_EVENT"];
 pub(crate) fn inherited_marker(name: &str) -> bool {
     claude::VARIABLES.contains(&name)
         || codex::VARIABLES.contains(&name)
+        || pi::VARIABLES.contains(&name)
         || HOOK_HOSTS.contains(&name)
 }

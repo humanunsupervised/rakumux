@@ -1,0 +1,39 @@
+# Pi 1.4.0 with the user's own /resume picker open. Captured (100x30).
+agent: pi
+expect: idle
+process: pi
+cmdline: pi
+title: π - demo
+alternate_screen: true
+ms_since_output: 60
+---
+
+
+ On it.
+
+
+ $ echo GATED
+
+ GATED
+
+ Took 0.0s
+
+
+ Ran it.
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Resume Session (Current Folder)                  ◉ Current Folder | ○ All  Name: All  Sort: Threaded
+tab scope · re:<pattern> regex · "phrase" exact
+ctrl+s sort · ctrl+n named · ctrl+d delete · ctrl+p path (off) · ctrl+r rename
+
+>
+
+› BASH echo GATED                                                                              5 now
+  SLOW 4000 BASH sleep 3                                                                       5 now
+  THINK WRITE notes/a.txt                                                                       5 1m
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+~/demo
+↑40 ↓20 0.0%/128k (auto)                                                         fake-model • medium

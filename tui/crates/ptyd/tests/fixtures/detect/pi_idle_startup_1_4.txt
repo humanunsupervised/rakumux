@@ -1,0 +1,39 @@
+# Pi 1.4.0 after start, quiet startup. Captured (100x30, fullscreen).
+agent: pi
+expect: idle
+process: pi
+cmdline: pi
+title: π - demo
+alternate_screen: true
+ms_since_output: 60
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+~/demo
+0.0%/128k (auto)                                                                 fake-model • medium

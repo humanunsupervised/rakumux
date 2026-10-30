@@ -38,6 +38,8 @@ mod claude;
 mod codex;
 #[path = "open-code/detection.rs"]
 mod opencode;
+#[path = "pi/detection.rs"]
+mod pi;
 use claude::PROFILE as CLAUDE;
 #[cfg(test)]
 use claude::{is_claude_activity_line, is_numbered_yes_option};
@@ -45,6 +47,9 @@ use codex::PROFILE as CODEX;
 #[cfg(test)]
 use opencode::has_opencode_progress_bar;
 use opencode::PROFILE as OPENCODE;
+use pi::PROFILE as PI;
+#[cfg(test)]
+use pi::{has_pi_context_usage, is_pi_loader_line, is_pi_rule_loader};
 
 #[derive(Debug, Clone, Copy)]
 pub struct DetectInput<'a> {
@@ -172,33 +177,6 @@ static PROFILES: &[Profile] = &[
     generic("devin", &["devin"], &[]),
     generic("qodercli", &["qodercli"], &[]),
 ];
-
-/// Pi coding agent. Captured: 0.75.5 (inline, editor between rules, footer
-/// with context usage `0.0%/0`; busy loader `⠇ Running... (escape/ctrl+c to
-/// cancel)`, `⠋ Working... (escape to interrupt)`). Its startup help line
-/// mentions "escape interrupt", so bare "interrupt" is not evidence. Pi has
-/// no built-in approval prompts; its extension reports lifecycle itself.
-const PI: Profile = Profile {
-    label: "pi",
-    names: &["pi"],
-    packages: &[
-        &["@earendil-works", "pi-coding-agent"],
-        &["@mariozechner", "pi-coding-agent"],
-    ],
-    title_hint: |title| title == "π" || title.starts_with("π - "),
-    blocked: &[],
-    working: &[
-        marker(Region::Bottom(15), Test::Line(is_pi_loader_line)),
-        marker(
-            Region::Bottom(15),
-            Test::Any(&["working...", " to interrupt)"]),
-        ),
-    ],
-    idle: &[marker(Region::Bottom(4), Test::Line(has_pi_context_usage))],
-    quiet: Lifecycle::Unknown,
-    output_means_working: false,
-    approvals_on_screen: false,
-};
 
 const GEMINI_BLOCKED: &[Marker] = &[marker(
     Region::Bottom(25),
@@ -358,23 +336,6 @@ fn has_braille_spinner_word(line: &str) -> bool {
     line.split_whitespace().any(|word| {
         let mut chars = word.chars();
         matches!((chars.next(), chars.next()), (Some(c), None) if is_braille(c) && c != '\u{2800}')
-    })
-}
-
-/// Pi's loader: braille frame, then a message with an ellipsis.
-fn is_pi_loader_line(line: &str) -> bool {
-    split_glyph(line).is_some_and(|(glyph, rest)| {
-        is_braille(glyph) && (rest.contains("...") || rest.contains('…'))
-    })
-}
-
-/// Pi's footer shows context usage as `<percent>%/<window>`.
-fn has_pi_context_usage(line: &str) -> bool {
-    line.split_whitespace().any(|word| {
-        word.split_once("%/").is_some_and(|(percent, _)| {
-            percent.chars().any(|c| c.is_ascii_digit())
-                && percent.chars().all(|c| c.is_ascii_digit() || c == '.')
-        })
     })
 }
 
@@ -1179,6 +1140,12 @@ mod tests {
         assert!(!has_opencode_progress_bar("■■■ done"));
         assert!(is_pi_loader_line("⠇ Running... (escape/ctrl+c to cancel)"));
         assert!(!is_pi_loader_line("⠇ done"));
+        assert!(is_pi_rule_loader("── ⠼ Working ─────────"));
+        assert!(is_pi_rule_loader(
+            "── ⠋ Compacting context… (escape to cancel) ──"
+        ));
+        assert!(!is_pi_rule_loader("──────────────────────"));
+        assert!(!is_pi_rule_loader("⠼ Working"));
         assert!(has_pi_context_usage("0.0%/0 (auto)    unknown"));
         assert!(has_pi_context_usage("↑12k ↓1.2k $0.123 12.3%/200k (auto)"));
         assert!(!has_pi_context_usage("50% done"));
@@ -1406,8 +1373,7 @@ mod tests {
             ("claude", &[Working, Blocked, Idle]),
             ("codex", &[Working, Blocked, Idle]),
             ("opencode", &[Working, Blocked, Idle]),
-            // Pi has no built-in approval prompts (its extension reports).
-            ("pi", &[Working, Idle]),
+            ("pi", &[Working, Blocked, Idle]),
             ("gemini", &[Working, Blocked, Idle]),
             ("aider", &[Working, Blocked, Idle]),
             ("cursor-agent", &[Working, Blocked, Idle]),

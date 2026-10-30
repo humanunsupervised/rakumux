@@ -1,0 +1,40 @@
+# Pi 1.4.0 running a tool: the loader is drawn inside the rule above the editor
+# (`── ⠇ Working ──`). Captured (100x30, fullscreen) against an offline fake model.
+agent: pi
+expect: working
+process: pi
+cmdline: pi
+title: π - demo
+alternate_screen: true
+ms_since_output: 60
+---
+
+
+
+
+
+ SLOW 4000 BASH sleep 3
+
+
+ On it.
+
+
+ $ sleep 3
+
+ Elapsed 1.0s
+
+
+
+
+
+
+
+
+
+
+
+── ⠇ Working ───────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+~/demo
+↑20 ↓10 0.0%/128k (auto)                                                         fake-model • medium

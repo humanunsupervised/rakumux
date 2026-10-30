@@ -1,0 +1,40 @@
+# Pi 1.4.0 after a finished turn: the rule above the editor is plain again.
+# Captured (100x30, fullscreen).
+agent: pi
+expect: idle
+process: pi
+cmdline: pi
+title: π - demo
+alternate_screen: true
+ms_since_output: 60
+---
+
+
+
+
+
+ SLOW 4000 BASH sleep 3
+
+
+ On it.
+
+
+ $ sleep 3
+
+ (no output)
+
+ Took 3.0s
+
+
+ Ran it.
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+~/demo
+↑40 ↓20 0.0%/128k (auto)                                                         fake-model • medium

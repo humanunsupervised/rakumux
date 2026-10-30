@@ -1,0 +1,40 @@
+# Pi 1.4.0 running a `!` shell command: its loader is a line of its own, as in
+# 0.75. Captured (100x30, fullscreen).
+agent: pi
+expect: working
+process: pi
+cmdline: pi
+title: π - demo
+alternate_screen: true
+ms_since_output: 60
+---
+
+
+
+
+ BASH echo GATED
+
+
+ On it.
+
+
+ $ echo GATED
+
+ GATED
+
+ Took 0.0s
+
+
+ Ran it.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ $ sleep 3
+
+ ⠼ Running... (escape/ctrl+c to cancel)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+~/demo
+↑40 ↓20 0.0%/128k (auto)                                                         fake-model • medium
