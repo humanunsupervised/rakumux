@@ -389,6 +389,54 @@ fn session_identity_is_forwarded_and_opencode_calls_act_for_their_conversation()
 }
 
 #[test]
+fn a_session_id_without_its_token_never_acts_as_the_user() {
+    let (_dir, layout) = temp_home();
+    let stub = rich_stub();
+    stub.publish(&layout);
+    // Gemini CLI strips `*TOKEN*` variables; Codex forwards only those it's told.
+    for env in [
+        &[("RAKUMUX_SESSION_ID", "01JSELF")][..],
+        &[("RAKUMUX_SESSION_TOKEN", "self-token")][..],
+    ] {
+        let (mut mcp, _) = Mcp::initialized(&layout, env);
+        let before = stub.calls().len();
+        for (tool, arguments) in [
+            ("list_sessions", json!({})),
+            ("list_folders", json!({})),
+            ("rename_session", json!({"session": REVIEWER, "name": "x"})),
+        ] {
+            let result = mcp.call(tool, arguments);
+            assert_eq!(result["isError"], true, "{tool}: {result}");
+            assert_eq!(
+                result["structuredContent"]["error"]["code"],
+                "unauthenticated"
+            );
+            assert!(text(&result).contains("RAKUMUX_SESSION_TOKEN"), "{result}");
+        }
+        // An OpenCode conversation no session bound: no fallback to the user.
+        let unbound = json!({"ai.opencode/sessionID": "ses_unbound"});
+        let result = mcp.call_with_meta("list_sessions", json!({}), Some(unbound));
+        assert_eq!(result["isError"], true, "{result}");
+        // Only that attempt as the conversation reached the API.
+        let calls = stub.calls();
+        let sent: Vec<_> = calls[before..]
+            .iter()
+            .filter(|call| call.path != "/v1/health")
+            .collect();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(
+            sent[0].header("x-rakumux-agent-conversation"),
+            Some("ses_unbound")
+        );
+        // A bound conversation still acts as its session.
+        let bound = json!({"ai.opencode/sessionID": "ses_123"});
+        let result = mcp.call_with_meta("list_sessions", json!({}), Some(bound));
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(stub.last().header("x-rakumux-agent"), Some("opencode"));
+    }
+}
+
+#[test]
 fn outside_rakumux_an_unbound_opencode_conversation_acts_as_the_user() {
     let (_dir, layout) = temp_home();
     let stub = rich_stub();

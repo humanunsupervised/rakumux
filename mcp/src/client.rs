@@ -9,9 +9,12 @@
 //!
 //! Identity: when `RAKUMUX_SESSION_ID` and `RAKUMUX_SESSION_TOKEN` are
 //! both set, they are sent as `X-Rakumux-Session-Id`/`-Token`, so the
-//! daemon treats calls as coming from that session. A call tagged with an
-//! agent conversation (OpenCode) is sent as `X-Rakumux-Agent`/`-Conversation`
-//! instead: the daemon acts as the session that bound that conversation.
+//! daemon treats calls as coming from that session. With only one of them
+//! (an agent that strips `*TOKEN*` variables from MCP servers, or forwards
+//! only those it's told), no call acts as the user: each is refused. A call
+//! tagged with an agent conversation (OpenCode) is sent as
+//! `X-Rakumux-Agent`/`-Conversation` instead: the daemon acts as the session
+//! that bound that conversation.
 
 use crate::launch::Launcher;
 use rakumux_api::discovery::ApiInfo;
@@ -106,19 +109,62 @@ impl std::fmt::Debug for SessionIdentity {
 impl SessionIdentity {
     /// Both variables set and non-empty, else `None`.
     pub fn from_env() -> Option<Self> {
-        let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
-        Some(Self {
-            id: var(session_core::env::SESSION_ID)?,
-            token: var(session_core::env::SESSION_TOKEN)?,
-        })
+        match EnvIdentity::from_env() {
+            EnvIdentity::Session(identity) => Some(identity),
+            EnvIdentity::User | EnvIdentity::Incomplete => None,
+        }
     }
+}
+
+/// Who the environment says the caller is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvIdentity {
+    /// Neither variable: outside a Rakumux session, the user.
+    User,
+    /// Both variables: that session.
+    Session(SessionIdentity),
+    /// Only one of them: inside a session whose agent didn't pass both to
+    /// this server. Never the user; every call that would act as the user
+    /// is refused.
+    Incomplete,
+}
+
+impl EnvIdentity {
+    /// `RAKUMUX_SESSION_ID` and `RAKUMUX_SESSION_TOKEN`; an empty one counts
+    /// as unset.
+    pub fn from_env() -> Self {
+        Self::from_vars(
+            std::env::var(session_core::env::SESSION_ID).ok(),
+            std::env::var(session_core::env::SESSION_TOKEN).ok(),
+        )
+    }
+
+    fn from_vars(id: Option<String>, token: Option<String>) -> Self {
+        let set = |value: Option<String>| value.filter(|value| !value.is_empty());
+        match (set(id), set(token)) {
+            (None, None) => Self::User,
+            (Some(id), Some(token)) => Self::Session(SessionIdentity { id, token }),
+            _ => Self::Incomplete,
+        }
+    }
+}
+
+/// The refusal of a call that would act as the user while the environment
+/// gives half a session identity.
+fn incomplete_identity() -> ToolError {
+    ToolError::new(
+        "unauthenticated",
+        "rakumux-mcp got only one of RAKUMUX_SESSION_ID and RAKUMUX_SESSION_TOKEN, so it can't \
+         act as this Rakumux session and won't act as the user: configure the agent to pass both \
+         to rakumux-mcp",
+    )
 }
 
 /// The connection to the API, shared by every tool call.
 pub struct ApiClient {
     layout: Layout,
     http: reqwest::Client,
-    identity: Option<SessionIdentity>,
+    identity: EnvIdentity,
     launcher: Launcher,
     current: tokio::sync::Mutex<Option<ApiInfo>>,
 }
@@ -126,7 +172,7 @@ pub struct ApiClient {
 impl ApiClient {
     pub fn new(
         layout: Layout,
-        identity: Option<SessionIdentity>,
+        identity: EnvIdentity,
         launcher: Launcher,
     ) -> Result<Self, ToolError> {
         let http = reqwest::Client::builder()
@@ -148,18 +194,22 @@ impl ApiClient {
 
     /// The session identity forwarded with requests, if any.
     pub fn identity(&self) -> Option<&SessionIdentity> {
-        self.identity.as_ref()
+        match &self.identity {
+            EnvIdentity::Session(identity) => Some(identity),
+            EnvIdentity::User | EnvIdentity::Incomplete => None,
+        }
     }
 
     /// A view that sends the session identity (when `forward_identity` and
-    /// one is configured) or acts as the user.
+    /// one is configured) or acts as the user. With an incomplete identity,
+    /// every call it makes is refused.
     pub fn caller(&self, forward_identity: bool) -> Api<'_> {
         Api {
             client: self,
-            acting: if forward_identity && self.identity.is_some() {
-                Acting::Session
-            } else {
-                Acting::User
+            acting: match &self.identity {
+                EnvIdentity::Session(_) if forward_identity => Acting::Session,
+                EnvIdentity::Incomplete => Acting::Refused,
+                _ => Acting::User,
             },
         }
     }
@@ -231,6 +281,8 @@ enum Acting {
     User,
     /// The environment's session identity.
     Session,
+    /// None: the environment names a session without its token.
+    Refused,
     Conversation {
         agent: String,
         conversation: String,
@@ -269,6 +321,9 @@ impl Api<'_> {
         query: &[(&str, String)],
         body: Option<&Value>,
     ) -> Result<T, ToolError> {
+        if matches!(self.acting, Acting::Refused) {
+            return Err(incomplete_identity());
+        }
         let mut refreshed = false;
         loop {
             let info = self.client.connection(refreshed).await?;
@@ -279,9 +334,9 @@ impl Api<'_> {
                 .bearer_auth(&info.token)
                 .query(query);
             match &self.acting {
-                Acting::User => {}
+                Acting::User | Acting::Refused => {}
                 Acting::Session => {
-                    if let Some(identity) = &self.client.identity {
+                    if let Some(identity) = self.client.identity() {
                         request = request
                             .header(rakumux_api::headers::SESSION_ID, &identity.id)
                             .header(rakumux_api::headers::SESSION_TOKEN, &identity.token);
@@ -346,5 +401,35 @@ impl Api<'_> {
 
     fn token_changed(&self, info: &ApiInfo) -> bool {
         ApiInfo::load(&self.client.layout).map_or(true, |current| current.token != info.token)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn half_a_session_identity_is_never_the_user() {
+        let some = |value: &str| Some(value.to_owned());
+        assert_eq!(EnvIdentity::from_vars(None, None), EnvIdentity::User);
+        assert_eq!(
+            EnvIdentity::from_vars(some(""), some("")),
+            EnvIdentity::User
+        );
+        assert_eq!(
+            EnvIdentity::from_vars(some("01JSELF"), some("t")),
+            EnvIdentity::Session(SessionIdentity {
+                id: "01JSELF".into(),
+                token: "t".into(),
+            })
+        );
+        // Gemini CLI strips `*TOKEN*` variables from MCP servers' environment.
+        for (id, token) in [
+            (some("01JSELF"), None),
+            (some("01JSELF"), some("")),
+            (None, some("t")),
+        ] {
+            assert_eq!(EnvIdentity::from_vars(id, token), EnvIdentity::Incomplete);
+        }
     }
 }

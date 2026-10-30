@@ -1,7 +1,7 @@
 //! `rakumux-mcp`: Rakumux's MCP server for coding agents (stdio). See
 //! `mcp/README.md` for installing it in Claude Code, Codex and OpenCode.
 
-use rakumux_mcp::client::{ApiClient, SessionIdentity};
+use rakumux_mcp::client::{ApiClient, EnvIdentity};
 use rakumux_mcp::launch::Launcher;
 use rakumux_mcp::opencode;
 use rakumux_mcp::server::RakumuxServer;
@@ -27,7 +27,7 @@ where OpenCode loads it on start. No OpenCode config file is changed.
 It drives rakumux-api (found through <RAKUMUX_HOME or ~/.rakumux>/api.json,
 started with `rakumux-api --detach` when needed; RAKUMUX_API_BIN overrides the
 binary). Inside a Rakumux session, RAKUMUX_SESSION_ID and RAKUMUX_SESSION_TOKEN
-make it act as that session.";
+make it act as that session; with only one of them, every call is refused.";
 
 fn main() -> ExitCode {
     match std::env::args().nth(1).as_deref() {
@@ -55,7 +55,14 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let api = match ApiClient::new(layout, SessionIdentity::from_env(), Launcher::from_env()) {
+    let identity = EnvIdentity::from_env();
+    if identity == EnvIdentity::Incomplete {
+        eprintln!(
+            "rakumux-mcp: only one of RAKUMUX_SESSION_ID and RAKUMUX_SESSION_TOKEN is set; \
+             every call will be refused"
+        );
+    }
+    let api = match ApiClient::new(layout, identity, Launcher::from_env()) {
         Ok(api) => api,
         Err(error) => {
             eprintln!("rakumux-mcp: {}", error.message);

@@ -543,7 +543,11 @@ mod tests {
         let Some(FeedRequest::Upload { ids, body }) = feed.next_request(NOW) else {
             panic!("expected an upload");
         };
-        assert_eq!(ids.len(), 2, "the refused agent's reply never joins a batch");
+        assert_eq!(
+            ids.len(),
+            2,
+            "the refused agent's reply never joins a batch"
+        );
         let body = String::from_utf8(body).unwrap();
         assert!(body.contains(r#""agent":"kimi""#) && body.contains(r#""agent":"claude-code""#));
         assert!(!body.contains("gemini") && !body.contains("doesn't know"));

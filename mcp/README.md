@@ -71,12 +71,16 @@ every session), the server sends them to the API as `X-Rakumux-Session-Id` /
 folder, may read and list there, may create sessions there (within limits: 4 running sessions it
 started, nesting 2 deep, 8 running agent-created sessions per folder, 10 creates a minute; beyond
 that `limit_exceeded`), and may rename only itself (controlling other sessions is planned for
-0.7.0). Without them it acts as the user.
+0.7.0). Without either it acts as the user. With only one of them it never does: every call that
+isn't for a bound agent conversation (below) is refused (`unauthenticated`), since the server runs
+inside a session whose agent didn't pass both.
 
 Whether the variables reach the MCP server depends on the agent: Claude
 Code passes its environment to the servers it spawns (expected, not verified); Codex forwards only
-variables listed in `env_vars`; OpenCode 1.x starts MCP servers inside each TUI, so they do;
-OpenCode 2.x runs MCP servers in a background service shared by every conversation, so they don't.
+variables listed in `env_vars`, so list both; agents that remove variables named like `*TOKEN*`
+from MCP servers' environment (Gemini CLI) need both mapped explicitly in the server's `env`;
+OpenCode 1.x starts MCP servers inside each TUI, so they do; OpenCode 2.x runs MCP servers in a
+background service shared by every conversation, so they don't.
 
 **OpenCode 2.x** tags every tool call with its conversation (`_meta["ai.opencode/sessionID"]`). The
 Rakumux plugin for OpenCode's TUI (see "OpenCode" below) runs inside the Rakumux session and binds
@@ -85,7 +89,7 @@ tagged call is sent with `X-Rakumux-Agent: opencode` and `X-Rakumux-Agent-Conver
 daemon acts as the session that bound the conversation (`Auth::Delegated`; any environment identity
 is ignored, since it may be another session's). When no session bound it (no plugin, or OpenCode
 running outside Rakumux), the call acts as the user; if an environment identity is set, changes
-(`create_session`, `rename_session`) are refused instead.
+(`create_session`, `rename_session`) are refused instead, and with half of one, every call is.
 
 ## Finding the API
 
@@ -175,7 +179,7 @@ separate. See [OpenCode integration](../integrations/open-code/README.md).
 
 | Variable | Meaning |
 |---|---|
-| `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN` | Act as this session (both needed) |
+| `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN` | Act as this session (both needed; with one, calls are refused) |
 | `RAKUMUX_HOME` | Rakumux home (default `~/.rakumux`); where `api.json` lives |
 | `RAKUMUX_API_BIN` | The `rakumux-api` binary to start |
 | `RAKUMUX_PTYD_BIN` | The daemon binary (passed on to the API) |
