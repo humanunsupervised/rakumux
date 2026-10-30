@@ -459,6 +459,7 @@ mod tests {
             reply: None,
             reply_state: Default::default(),
             last_at: None,
+            moved_at: None,
             foreground: Some(Foreground::under(home.to_path_buf(), &process)),
         }
     }

@@ -2,7 +2,7 @@
 //! and a harness around `ControlService` with an isolated `RAKUMUX_HOME`.
 #![allow(dead_code)]
 
-use ptyd::control::{ControlConfig, ControlService, Detector, Limits};
+use ptyd::control::{Clock, ControlConfig, ControlService, Detector, Limits};
 use ptyd::control_api::{Caller, Control};
 use ptyd::detect::{DetectInput, Detection};
 use ptyd::host::{
@@ -554,6 +554,15 @@ impl Harness {
     }
 
     pub fn with_detector(detector: Detector) -> Self {
+        Self::on(detector, None)
+    }
+
+    /// [`Harness::with_detector`] on `clock` in place of the system's.
+    pub fn with_clock(detector: Detector, clock: Clock) -> Self {
+        Self::on(detector, Some(clock))
+    }
+
+    fn on(detector: Detector, clock: Option<Clock>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         std::fs::create_dir_all(root.join("project/sub")).unwrap();
@@ -562,7 +571,10 @@ impl Harness {
         let scope = ScopeRoot::from_canonical(root.join("project"));
         let host = FakeHost::new();
         let user_token = Token::generate();
-        let control = open(&layout, &user_token, host.clone(), detector);
+        let control = match clock {
+            Some(clock) => open_with_clock(&layout, &user_token, host.clone(), detector, clock),
+            None => open(&layout, &user_token, host.clone(), detector),
+        };
         let user = control
             .authenticate(&hello(Auth::User {
                 token: user_token.as_str().into(),
@@ -732,15 +744,29 @@ pub fn open(
     host: Arc<FakeHost>,
     detector: Detector,
 ) -> ControlService {
-    let config = ControlConfig {
+    ControlService::open_with_detector(config(layout, user_token), host, detector).unwrap()
+}
+
+/// [`open`] on `clock` in place of the system's.
+pub fn open_with_clock(
+    layout: &Layout,
+    user_token: &Token,
+    host: Arc<FakeHost>,
+    detector: Detector,
+    clock: Clock,
+) -> ControlService {
+    ControlService::open_with_clock(config(layout, user_token), host, detector, clock).unwrap()
+}
+
+fn config(layout: &Layout, user_token: &Token) -> ControlConfig {
+    ControlConfig {
         layout: layout.clone(),
         user_token: user_token.clone(),
         socket: PathBuf::from("/tmp/rakumux-test/ptyd.sock"),
         rakumux_bin: Some(PathBuf::from(RAKUMUX_BIN)),
         version: "test".into(),
         limits: Limits::default(),
-    };
-    ControlService::open_with_detector(config, host, detector).unwrap()
+    }
 }
 
 pub fn hello(auth: Auth) -> session_core::api::Hello {

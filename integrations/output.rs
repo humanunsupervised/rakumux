@@ -268,6 +268,11 @@ pub struct Follower {
     /// When the conversation last had a prompt or an agent message, by its
     /// own clock (Unix milliseconds): the newest seen, never moving back.
     last_at: Option<i64>,
+    /// When the conversation last moved on, by its own clock (Unix
+    /// milliseconds): a prompt, an agent message, or what the user's side
+    /// adds (a tool's result, an interruption); never moving back. Not the
+    /// agent's own bookkeeping (hooks' results, costs, titles).
+    moved_at: Option<i64>,
     /// GitHub Copilot: which of the conversations its process holds open is
     /// on screen.
     foreground: Option<copilot::Foreground>,
@@ -329,6 +334,7 @@ impl Follower {
             reply: None,
             reply_state: ReplyState::default(),
             last_at: None,
+            moved_at: None,
             foreground,
         })
     }
@@ -481,6 +487,14 @@ impl Follower {
         self.last_at
     }
 
+    /// When the conversation last moved on (Unix milliseconds, by its own
+    /// clock), once it did: unlike [`Self::last_at`], also when a question
+    /// or a prompt for permission is answered (Claude Code writes the
+    /// tool's result) or dismissed (the refused result, the interruption).
+    pub fn moved_at(&self) -> Option<i64> {
+        self.moved_at
+    }
+
     /// Read what the conversation gained since the last time (a log from its
     /// tail the first time). `bound` is the conversation the session named
     /// for this agent (bound with `session_bind`, else its hooks'), if any;
@@ -625,6 +639,11 @@ impl Follower {
                         LogAgent::Droid => droid::reply_step(entry),
                         LogAgent::Amp => amp::reply_step(entry),
                     };
+                    // A prompt or a message, or the user's side starting the
+                    // reply over (a tool's result, an interruption).
+                    if typed.is_some() || !messages.is_empty() || step != Step::Keep {
+                        self.moved_at = self.moved_at.max(at);
+                    }
                     // The next turn begins (a prompt; after a whole reply,
                     // whatever resets it): the reply this turn had, read as
                     // the log grew, is its finished reply.
@@ -697,7 +716,9 @@ impl Follower {
                 self.reply_state.primed = true;
                 match conversation {
                     Some(id) => {
-                        self.last_at = self.last_at.max(opencode::last_at(database, &id));
+                        let last_at = opencode::last_at(database, &id);
+                        self.last_at = self.last_at.max(last_at);
+                        self.moved_at = self.moved_at.max(last_at);
                         self.reply =
                             opencode::reply(database, &id).map(|(key, text, position)| Reply {
                                 position: Some(position),
@@ -1182,6 +1203,7 @@ mod tests {
             reply: None,
             reply_state: Default::default(),
             last_at: None,
+            moved_at: None,
             foreground: None,
         }
     }
@@ -1379,6 +1401,7 @@ mod tests {
             reply: None,
             reply_state: Default::default(),
             last_at: None,
+            moved_at: None,
             foreground: None,
         };
         row("u1", "user", 1, 100, json!({"text": "Fix the parser"}));
@@ -1631,8 +1654,54 @@ mod tests {
             reply: None,
             reply_state: Default::default(),
             last_at: None,
+            moved_at: None,
             foreground: None,
         }
+    }
+
+    /// Claude Code's AskUserQuestion, as its logs show it: the call, then its
+    /// hook's result and its own bookkeeping while the dialog waits (none of
+    /// it the conversation moving on), then the answer or the Esc.
+    #[test]
+    fn a_question_answered_or_dismissed_moves_the_conversation_on_its_bookkeeping_does_not() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("conversation.jsonl");
+        let mut file = File::create(&path).unwrap();
+        let mut write = |entry: serde_json::Value| writeln!(file, "{entry}").unwrap();
+        write(serde_json::json!({"type": "assistant", "uuid": "a1",
+            "timestamp": "2026-10-30T13:44:30.177Z",
+            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1",
+                "name": "AskUserQuestion", "input": {"questions": []}}]}}));
+        let mut follower = claude_log(path);
+        follower.follow(None);
+        let asked = Some(1_793_367_870_177);
+        assert_eq!(follower.moved_at(), asked);
+        write(serde_json::json!({"type": "attachment", "uuid": "h1",
+            "timestamp": "2026-10-30T13:44:30.200Z",
+            "attachment": {"type": "hook_success", "hookName": "PreToolUse:AskUserQuestion",
+                "hookEvent": "PreToolUse"}}));
+        write(serde_json::json!({"type": "cost-state"}));
+        write(serde_json::json!({"type": "last-prompt", "lastPrompt": "Plan it"}));
+        write(
+            serde_json::json!({"type": "system", "subtype": "turn_duration",
+            "timestamp": "2026-10-30T13:45:00.000Z"}),
+        );
+        follower.follow(None);
+        assert_eq!(follower.moved_at(), asked);
+        // Esc: the refused result, then the interruption.
+        write(serde_json::json!({"type": "user", "uuid": "u2",
+            "timestamp": "2026-10-30T13:49:08.453Z",
+            "message": {"role": "user", "content": [{"type": "tool_result",
+                "tool_use_id": "t1", "is_error": true, "content": "refused"}]}}));
+        follower.follow(None);
+        assert_eq!(follower.moved_at(), Some(1_793_368_148_453));
+        assert_eq!(follower.last_at(), asked, "no prompt or message since");
+        write(serde_json::json!({"type": "user", "uuid": "u3",
+            "timestamp": "2026-10-30T13:49:08.455Z",
+            "message": {"role": "user", "content": [{"type": "text",
+                "text": "[Request interrupted by user for tool use]"}]}}));
+        follower.follow(None);
+        assert_eq!(follower.moved_at(), Some(1_793_368_148_455));
     }
 
     /// The failure as it happened: a reply with two files, typed into

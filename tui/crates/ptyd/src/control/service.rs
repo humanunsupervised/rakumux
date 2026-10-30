@@ -268,6 +268,8 @@ pub(super) struct Inner {
     stopped_by_user: AtomicBool,
     /// Directories that are never places.
     places_excluded: places::Excluded,
+    /// What time it is (Unix milliseconds): the system's, or a test's.
+    clock: super::Clock,
 }
 
 impl Inner {
@@ -276,6 +278,7 @@ impl Inner {
         host: Arc<dyn TerminalHost>,
         registry: Registry,
         detector: Detector,
+        clock: super::Clock,
     ) -> Self {
         let saved_places = registry.places().unwrap_or_else(|error| {
             crate::log_warn!("control: reading places: {error}");
@@ -315,7 +318,13 @@ impl Inner {
             events: EventBus::default(),
             stop: Arc::new(AtomicBool::new(false)),
             stopped_by_user: AtomicBool::new(false),
+            clock,
         }
+    }
+
+    /// Now, by the control layer's clock (Unix milliseconds).
+    fn now(&self) -> i64 {
+        (self.clock)()
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -403,7 +412,7 @@ impl Inner {
         state.binding_seq = state.binding_seq.max(handed.binding_seq);
         for (id, update, received_ms) in handed.activity {
             if super::activity::validate(&update).is_ok()
-                && now_ms().saturating_sub(received_ms) < super::activity::FRESH_MS
+                && self.now().saturating_sub(received_ms) < super::activity::FRESH_MS
             {
                 if let Some(live) = state.live.get_mut(&id) {
                     live.tracker.on_activity(&update, received_ms);
@@ -695,7 +704,7 @@ impl Inner {
     /// the last `within_ms` (`keep_awake`).
     pub(super) fn busy_agents(&self, within_ms: i64) -> usize {
         let state = self.lock();
-        let now = now_ms();
+        let now = self.now();
         state
             .live
             .values()
@@ -970,7 +979,7 @@ impl Inner {
                 names::generate(|candidate| taken.contains(candidate))
             }
         };
-        let now = now_ms();
+        let now = self.now();
         let id = SessionId::generate();
         let record = SessionRecord {
             id: id.clone(),
@@ -1467,7 +1476,7 @@ impl Inner {
                 .map(|process| process.pid);
             live.working_directory = Some(context);
         }
-        let now = now_ms();
+        let now = self.now();
         let registry = registry(&state.registry)?;
         if let Some(agent) = &agent {
             registry.set_agent(&record.id, agent)?;
@@ -1689,23 +1698,37 @@ impl Inner {
             foreground,
             refuse_if_blocked,
         } = submit;
-        let (record, terminal, lifecycle) = {
+        let (record, terminal, lifecycle, activity) = {
             let state = self.lock();
             let record = self.target(&state, caller, Op::Submit, id)?;
-            let lifecycle = state.live.get(id).map(|live| live.tracker.current());
-            (record, self.running_terminal(&state, id), lifecycle)
+            let live = state.live.get(id);
+            let lifecycle = live.map(|live| live.tracker.current());
+            let activity = live.and_then(|live| live.tracker.activity());
+            (
+                record,
+                self.running_terminal(&state, id),
+                lifecycle,
+                activity,
+            )
         };
+        // What the check saw, for the log once the text is in.
+        let mut checked = None;
         if let (true, Some(terminal)) = (refuse_if_blocked, terminal) {
             // As the daemon has it (hooks, OSC 7501, reports) or as its
             // screen shows it now: an Enter would answer what it asks.
+            let info = self.host.info(terminal);
+            let detection = detect_on(&*self.host, self.detector, terminal);
             if lifecycle == Some(Lifecycle::Blocked)
-                || asks_now(&*self.host, self.detector, terminal)
+                || detection
+                    .as_ref()
+                    .is_some_and(|detection| detection.lifecycle == Lifecycle::Blocked)
             {
                 return Err(ApiError::new(
                     ErrorCode::SessionBlocked,
                     "the session's agent is asking something",
                 ));
             }
+            checked = Some((info, detection));
         }
         let written = terminal.map(|terminal| match refuse_if_blocked {
             true => self.host.submit_checked(
@@ -1713,7 +1736,7 @@ impl Inner {
                 text,
                 quiet,
                 foreground,
-                self.unless_asking(terminal),
+                self.unless_asking(terminal, id),
             ),
             false => self
                 .host
@@ -1725,6 +1748,37 @@ impl Inner {
         let result = written
             .ok_or_else(|| not_live(id))
             .and_then(|written| written.map_err(host_error));
+        if let (Some((info, detection)), Ok(())) = (checked, &result) {
+            // Never the text: what the daemon and the screen said, so a
+            // reply typed into a question can be told from the log.
+            let lifecycle = lifecycle.map_or_else(|| "none".to_owned(), |l| format!("{l:?}"));
+            let hooks = activity.map_or_else(
+                || "none".to_owned(),
+                |activity| {
+                    let age = (self.now() / 1000).saturating_sub(activity.updated_at);
+                    format!("{:?} {age}s ago", activity.phase)
+                },
+            );
+            let screen = detection.map_or_else(
+                || "unread".to_owned(),
+                |detection| {
+                    let agent = detection.agent.as_deref().unwrap_or("no agent");
+                    format!("{:?} ({agent})", detection.lifecycle)
+                },
+            );
+            let foreground = info
+                .as_ref()
+                .and_then(|info| info.foreground.as_ref())
+                .map_or("none", |process| process.name.as_str());
+            let size = info.as_ref().map_or_else(
+                || "unknown".to_owned(),
+                |info| format!("{}x{}", info.cols, info.rows),
+            );
+            crate::log_info!(
+                "control: guarded submit typed into {id}: lifecycle {lifecycle}, hooks {hooks}, \
+                 screen {screen}, foreground {foreground}, size {size}"
+            );
+        }
         let state = self.lock();
         self.audit_outcome(
             &state,
@@ -1798,7 +1852,7 @@ impl Inner {
         let mut state = self.lock();
         let record = self.target(&state, caller, Op::Touch, id)?;
         let result = registry(&state.registry)
-            .and_then(|r| r.touch(id, now_ms()).map_err(ApiError::from))
+            .and_then(|r| r.touch(id, self.now()).map_err(ApiError::from))
             .map(|()| self.mark_seen(&mut state, id));
         // The TUI touches on activation, not observer previews; only agents' touches are audited.
         if !caller.is_user() {
@@ -1983,7 +2037,7 @@ impl Inner {
             let made = if create { make_dir(path) } else { Ok(()) };
             let result = made.and_then(|()| project_dir(path)).and_then(|dir| {
                 let registry = registry(&state.registry)?;
-                registry.add_project(&dir, now_ms())?;
+                registry.add_project(&dir, self.now())?;
                 registry
                     .project(&dir)?
                     .ok_or_else(|| ApiError::new(ErrorCode::Internal, "the folder was not saved"))
@@ -2112,7 +2166,7 @@ impl Inner {
                     return;
                 }
                 if let Some(live) = state.live.get_mut(&session_id) {
-                    live.tracker.on_program_status(&status, now_ms());
+                    live.tracker.on_program_status(&status, self.now());
                 }
                 self.refresh(&mut state, &session_id);
                 self.changed.notify_all();
@@ -2124,7 +2178,7 @@ impl Inner {
     /// Re-evaluate lifecycles whose self-report went stale, and re-read git
     /// contexts when their poll is due.
     pub(super) fn on_tick(&self) {
-        let now = now_ms();
+        let now = self.now();
         let mut state = self.lock();
         let changed: Vec<SessionId> = state
             .live
@@ -2142,10 +2196,12 @@ impl Inner {
             let live = &inner.live;
             inner.git.poll_due(now, |id| live.contains_key(id))
         };
+        // Logs read on while their screen may be quiet: a finished turn's
+        // reply, a question's answer or dismissal.
         let replies: Vec<(SessionId, TerminalId)> = state
             .live
             .iter()
-            .filter(|(_, live)| live.reply_due.is_some())
+            .filter(|(_, live)| live.reply_due.is_some() || live.tracker.hook_asks(now))
             .map(|(id, live)| (id.clone(), live.terminal))
             .collect();
         // Output a check skipped for coming too soon after the last one, then
@@ -2202,7 +2258,8 @@ impl Inner {
             self.scan_places(terminal, &id, now);
             self.refresh(&mut self.lock(), &id);
         }
-        // A finished turn's reply may reach its log after the screen settles.
+        // A finished turn's reply may reach its log after the screen settles,
+        // and an Esc that dismissed a question may draw nothing more.
         for (id, terminal) in replies {
             let process = self.host.info(terminal).and_then(|info| info.foreground);
             self.follow_output(terminal, &id, process.as_ref(), now);
@@ -2224,7 +2281,7 @@ impl Inner {
     fn on_output(&self, terminal: TerminalId, session_id: &SessionId) {
         let detection = self.detect(terminal);
         let process = self.host.info(terminal).and_then(|info| info.foreground);
-        let now = now_ms();
+        let now = self.now();
         let plan = self.resume_plan(terminal, session_id, now);
         self.follow_output(terminal, session_id, process.as_ref(), now);
         self.scan_places(terminal, session_id, now);
@@ -2320,6 +2377,9 @@ impl Inner {
             _ => None,
         };
         let last_at = follower.as_ref().and_then(|follower| follower.last_at());
+        let followed = follower
+            .as_ref()
+            .and_then(|follower| Some((follower.conversation()?, follower.moved_at())));
         let finished = follower
             .as_mut()
             .map(crate::agent_output::Follower::take_finished)
@@ -2345,6 +2405,12 @@ impl Inner {
             if let Some(left) = left {
                 live.tracker.on_conversation_left(&left, now);
             }
+            live.tracker.on_followed(
+                followed
+                    .as_ref()
+                    .map(|(conversation, moved_at)| (conversation.as_str(), *moved_at)),
+                now,
+            );
         }
         if let Some(at) = last_at.filter(|_| state.is_current(session_id, terminal)) {
             self.note_last_message(&mut state, session_id, at);
@@ -2440,7 +2506,7 @@ impl Inner {
                 at: None,
             })
             .collect();
-        places::resolve(touches, &self.places_excluded, now_ms())
+        places::resolve(touches, &self.places_excluded, self.now())
     }
 
     /// Record that `id` worked in `worked`, saving its list when it
@@ -2663,7 +2729,7 @@ impl Inner {
 
     fn on_exited(&self, terminal: TerminalId, session_id: &SessionId, code: Option<i32>) {
         let detection = self.detect(terminal);
-        let now = now_ms();
+        let now = self.now();
         let mut state = self.lock();
         let Some(live) = state
             .live
@@ -2699,13 +2765,19 @@ impl Inner {
     /// screen, read when it's due, shows its agent asking nothing. The
     /// control state isn't consulted: the check runs on the terminal's
     /// writer thread, which must not wait for the state lock. A host gone
-    /// by then holds the Enter back.
-    fn unless_asking(&self, terminal: TerminalId) -> EnterCheck {
+    /// by then holds the Enter back. Holding it is logged for session `id`.
+    fn unless_asking(&self, terminal: TerminalId, id: &SessionId) -> EnterCheck {
         let host = Arc::downgrade(&self.host);
         let detector = self.detector;
+        let id = id.clone();
         Box::new(move || {
-            host.upgrade()
-                .is_some_and(|host| !asks_now(&*host, detector, terminal))
+            let goes = host
+                .upgrade()
+                .is_some_and(|host| !asks_now(&*host, detector, terminal));
+            if !goes {
+                crate::log_info!("control: guarded submit to {id}: its Enter held back");
+            }
+            goes
         })
     }
 
@@ -2812,7 +2884,7 @@ impl Inner {
     /// The session was seen (touch, controller attach): `done` → `idle`.
     fn mark_seen(&self, state: &mut State, id: &SessionId) {
         if let Some(live) = state.live.get_mut(id) {
-            live.tracker.on_touch(now_ms());
+            live.tracker.on_touch(self.now());
         }
         self.refresh(state, id);
         self.changed.notify_all();
@@ -3032,7 +3104,7 @@ impl Inner {
         match lifecycle {
             Lifecycle::Working => live.turn_started = true,
             Lifecycle::Done if live.turn_started => {
-                let now = now_ms();
+                let now = self.now();
                 live.turn_started = false;
                 live.done_at = Some(now);
                 live.reply_due = capturing.then(|| ReplyDue::new(now));
@@ -3180,7 +3252,7 @@ impl Inner {
         policy::authorize(caller, Op::ReplyList, None)?;
         let mut state = self.lock();
         let capturing = state.replies.enabled();
-        let replies = state.replies.after(after, now_ms());
+        let replies = state.replies.after(after, self.now());
         Ok(Response::Replies { replies, capturing })
     }
 
@@ -3188,7 +3260,7 @@ impl Inner {
         self.events.publish(EventEnvelope {
             scope: scope.clone(),
             session_id: id.clone(),
-            at: now_ms(),
+            at: self.now(),
             event,
         });
     }
@@ -3332,7 +3404,7 @@ impl Inner {
             return;
         };
         let entry = AuditEntry {
-            ts_ms: now_ms(),
+            ts_ms: self.now(),
             scope_root: scope.and_then(|s| s.path().to_str()).map(str::to_owned),
             caller: audit::caller_label(caller),
             method: op.method(),

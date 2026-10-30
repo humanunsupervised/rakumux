@@ -676,7 +676,15 @@ last_active_at, added_at, git}` on the wire.
   `done` (finished a turn, not yet looked at), `idle`, `unknown`, `none` (no agent). Detected by the
   daemon from the screen and foreground process; agents can add a self-report. Hook activity wins
   over the screen, except an approval prompt on screen for an agent whose hooks report none
-  (Cursor: its profile's `approvals_on_screen`). Without hook activity, what an agent's program
+  (Cursor: its profile's `approvals_on_screen`). It goes stale after 2 minutes without a hook (10
+  while subagents work), except a question or a prompt for permission (`NeedsInput`) in the
+  conversation the daemon follows for that agent: a dialog waits silently and the screen check
+  can misread it, so it lasts until a newer hook, the agent leaving, or that conversation moving
+  on after it (`Follower::moved_at`, by the log's own clock: a prompt, an agent message or what
+  the user's side adds, as Claude Code's tool result on an answer and the refused result and the
+  interruption on an Esc; never its bookkeeping), then goes stale as hooks do; its log is read
+  meanwhile though the screen is quiet. Without a followed conversation it goes stale at 2
+  minutes. Without hook activity, what an agent's program
   says through OSC 7501, the Program Status Protocol (Pi, Kimi Code: `idle`, `working`, `blocked`,
   `done`, `error`, `clear`, and child records counted as subagents), wins over the screen; the
   daemon's terminal answers the protocol's query, so they report.
@@ -769,7 +777,10 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   and its Enter is written only if detection, run again on the terminal's writer thread when the
   Enter is due (`host::EnterCheck`, asked without any lock), still sees no such prompt, so one
   that opened during the pause never takes the Enter as its answer (the text stays unsent in the
-  input box). A daemon without it submits anyway.
+  input box). A daemon without it submits anyway. Each such submit that goes in writes one line
+  to `ptyd.log`: the lifecycle the daemon had, its hook activity and age, what detection read
+  then and of which agent, the foreground process and the terminal size, never the text; an
+  Enter held back writes another.
   The daemon asks the terminal without its state lock.
 - `session_import {source}` (user only, capability `session.import`) restores an archive directory
   containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.

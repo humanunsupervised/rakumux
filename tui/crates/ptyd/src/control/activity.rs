@@ -1,4 +1,10 @@
 //! Bounded, ephemeral hook state. Session permissions are enforced by `report`.
+//!
+//! Hooks go stale after [`FRESH_MS`] without one, except a question or a
+//! prompt for permission (`NeedsInput`) in a conversation the daemon follows
+//! in the agent's log: it waits silently for as long as the user takes, so
+//! it lasts until that conversation moves on after it
+//! ([`ActivityTracker::unanswered`]).
 
 use session_core::activity::{
     ActivityEvent, ActivityPhase, ActivityUpdate, AgentActivity, ACTIVITY_VERSION,
@@ -63,6 +69,9 @@ pub(super) struct ActivityTracker {
     /// update about one of their conversations is its heartbeat.
     known: HashSet<String>,
     received_ms: i64,
+    /// When its conversation's latest update that asked the user something
+    /// (`NeedsInput`) was received; `None` while it asks nothing.
+    asked_ms: Option<i64>,
     /// The latest update was a delta (command hooks), which can miss the end of a turn;
     /// snapshots come from a live cache that keeps re-sending its state.
     delta: bool,
@@ -79,6 +88,7 @@ impl ActivityTracker {
             stopped: HashSet::new(),
             known: HashSet::new(),
             received_ms: now,
+            asked_ms: None,
             delta: false,
         }
     }
@@ -118,9 +128,11 @@ impl ActivityTracker {
                     self.stopped.clear();
                 }
                 self.phase = *phase;
+                self.asked_ms = (*phase == ActivityPhase::NeedsInput).then_some(now);
             }
             ActivityEvent::Snapshot { phase, subagents } => {
                 self.phase = *phase;
+                self.asked_ms = (*phase == ActivityPhase::NeedsInput).then_some(now);
                 self.subagents = subagents.iter().cloned().collect();
                 self.stopped.clear();
                 for id in subagents {
@@ -214,6 +226,20 @@ impl ActivityTracker {
 
     pub fn received_ms(&self) -> i64 {
         self.received_ms
+    }
+
+    /// Whether it asks the user something (`NeedsInput`) that `conversation`,
+    /// as the agent's log shows it, hasn't moved past: nothing of it is dated
+    /// after the update that asked (`moved_at`, by the conversation's clock,
+    /// so a call logged after its own hook still precedes it). Answering
+    /// writes the tool's result and dismissing the interruption, while the
+    /// question itself sends no heartbeat. Only its own conversation counts.
+    pub fn unanswered(&self, conversation: &str, moved_at: Option<i64>) -> bool {
+        self.phase == ActivityPhase::NeedsInput
+            && self.conversation == conversation
+            && self
+                .asked_ms
+                .is_some_and(|asked| moved_at.is_none_or(|moved| moved <= asked))
     }
 
     pub fn handoff(&self) -> (ActivityUpdate, i64) {
@@ -363,6 +389,29 @@ mod tests {
         let mut other = late.clone();
         other.agent = "codex".into();
         assert!(!tracker.accepts(&other));
+    }
+
+    #[test]
+    fn a_question_is_unanswered_until_its_own_conversation_moves_on_after_it() {
+        let phase = |phase| update(ActivityEvent::Phase { phase });
+        let mut tracker = ActivityTracker::new(&phase(ActivityPhase::NeedsInput), 0);
+        tracker.apply(&phase(ActivityPhase::NeedsInput), 1_000);
+        assert!(tracker.unanswered("turn", None));
+        assert!(tracker.unanswered("turn", Some(1_000)), "logged with it");
+        assert!(!tracker.unanswered("turn", Some(1_001)));
+        assert!(!tracker.unanswered("other", None));
+        // A live cache's snapshot asks as of when it came.
+        tracker.apply(
+            &update(ActivityEvent::Snapshot {
+                phase: ActivityPhase::NeedsInput,
+                subagents: vec![],
+            }),
+            2_000,
+        );
+        assert!(tracker.unanswered("turn", Some(1_500)));
+        // Answered: nothing asks.
+        tracker.apply(&phase(ActivityPhase::Working), 3_000);
+        assert!(!tracker.unanswered("turn", None));
     }
 
     #[test]

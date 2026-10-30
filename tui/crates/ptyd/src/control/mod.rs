@@ -94,6 +94,10 @@ pub struct ControlConfig {
 /// daemon; tests substitute their own.
 pub type Detector = fn(&DetectInput<'_>) -> Detection;
 
+/// What time it is (Unix milliseconds) for the control layer: the system's
+/// in the daemon; tests move their own on.
+pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
 /// The daemon's control layer (`control_api::Control`).
 pub struct ControlService {
     inner: Arc<service::Inner>,
@@ -115,7 +119,18 @@ impl ControlService {
         host: Arc<dyn TerminalHost>,
         detector: Detector,
     ) -> std::io::Result<Self> {
-        Self::open_inner(config, host, detector, None)
+        Self::open_inner(config, host, detector, None, None)
+    }
+
+    /// [`ControlService::open_with_detector`] on `clock` in place of the
+    /// system's, for tests that let minutes pass.
+    pub fn open_with_clock(
+        config: ControlConfig,
+        host: Arc<dyn TerminalHost>,
+        detector: Detector,
+        clock: Clock,
+    ) -> std::io::Result<Self> {
+        Self::open_inner(config, host, detector, None, Some(clock))
     }
 
     /// [`ControlService::open`] after a restart in place: the host already
@@ -126,7 +141,7 @@ impl ControlService {
         host: Arc<dyn TerminalHost>,
         handed: ControlHandoff,
     ) -> std::io::Result<Self> {
-        Self::open_inner(config, host, crate::detect::detect, Some(handed))
+        Self::open_inner(config, host, crate::detect::detect, Some(handed), None)
     }
 
     fn open_inner(
@@ -134,12 +149,14 @@ impl ControlService {
         host: Arc<dyn TerminalHost>,
         detector: Detector,
         handed: Option<ControlHandoff>,
+        clock: Option<Clock>,
     ) -> std::io::Result<Self> {
-        let registry = registry::Registry::open(&config.layout.registry_db(), service::now_ms())?;
+        let clock = clock.unwrap_or_else(|| Arc::new(service::now_ms));
+        let registry = registry::Registry::open(&config.layout.registry_db(), clock())?;
         let home = config.layout.home.clone();
         // Subscribe before adopting terminals so no event falls in between.
         let host_events = host.subscribe();
-        let inner = Arc::new(service::Inner::new(config, host, registry, detector));
+        let inner = Arc::new(service::Inner::new(config, host, registry, detector, clock));
         let local = Arc::downgrade(&inner);
         let machines = crate::machines::Machines::open(
             &home,

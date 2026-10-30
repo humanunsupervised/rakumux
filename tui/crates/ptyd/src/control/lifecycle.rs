@@ -13,6 +13,11 @@
 //!   the activity is dropped. An agent waiting for its background agents, and
 //!   subagents still running after their parent's turn, look idle on its screen
 //!   by design and are never second-guessed.
+//! - A question or a prompt for permission its hooks reported (`NeedsInput`)
+//!   doesn't go stale while the daemon follows that conversation in the
+//!   agent's log and it hasn't moved on since: it ends with a newer hook, the
+//!   agent leaving or the conversation moving on (an answer, an Esc), then
+//!   goes stale as hooks do. Without a followed conversation, it goes stale.
 //! - Without fresh hook activity, what the program says through OSC 7501
 //!   (the Program Status Protocol: Pi, Kimi Code) wins over the screen while
 //!   detection names an agent; its child records count as subagents. It has
@@ -47,6 +52,9 @@ pub(crate) struct LifecycleTracker {
     /// Last reported state (never `Done`; see `on_report`) and when.
     report: Option<(Lifecycle, i64)>,
     activity: Option<ActivityTracker>,
+    /// The agent conversation the daemon follows in the agent's log, and when
+    /// it last moved on by its own clock (`agent_output::Follower::moved_at`).
+    followed: Option<(String, Option<i64>)>,
     /// What the program says through OSC 7501, while detection names an agent.
     program: Option<ProgramRecords>,
     /// A turn is in progress (Working seen since the last Idle).
@@ -65,6 +73,7 @@ impl Default for LifecycleTracker {
             agent: None,
             report: None,
             activity: None,
+            followed: None,
             program: None,
             in_turn: false,
             done: false,
@@ -92,6 +101,39 @@ impl LifecycleTracker {
         self.activity
             .as_ref()
             .is_some_and(|activity| activity.is_subagent(update))
+    }
+
+    /// Its hook activity, still counting, says the agent asks the user
+    /// something (`NeedsInput`): what ends it may show only in the
+    /// conversation's log, not on a quiet screen.
+    pub fn hook_asks(&self, now_ms: i64) -> bool {
+        self.activity.as_ref().is_some_and(|activity| {
+            activity.view().phase == session_core::activity::ActivityPhase::NeedsInput
+                && self.counts(activity, now_ms)
+        })
+    }
+
+    /// The agent conversation the daemon follows in the agent's log, and when
+    /// it last moved on (`agent_output::Follower::moved_at`), or `None` while
+    /// none is followed: a question its hooks reported holds until it moves
+    /// on. Returns true when the lifecycle changed.
+    pub fn on_followed(&mut self, followed: Option<(&str, Option<i64>)>, now_ms: i64) -> bool {
+        self.followed =
+            followed.map(|(conversation, moved_at)| (conversation.to_owned(), moved_at));
+        self.tick(now_ms)
+    }
+
+    /// Whether hook activity still counts: fresh, or asking something its
+    /// followed conversation hasn't moved past
+    /// ([`ActivityTracker::unanswered`]), which has no heartbeat.
+    fn counts(&self, activity: &ActivityTracker, now_ms: i64) -> bool {
+        activity.fresh(now_ms)
+            || self
+                .followed
+                .as_ref()
+                .is_some_and(|(conversation, moved_at)| {
+                    activity.unanswered(conversation, *moved_at)
+                })
     }
 
     /// The conversation `agent`'s hook activity is about, while it has some.
@@ -233,7 +275,7 @@ impl LifecycleTracker {
         let stale = self
             .activity
             .as_ref()
-            .is_some_and(|activity| !activity.fresh(now_ms))
+            .is_some_and(|activity| !self.counts(activity, now_ms))
             || self.hooks_contradicted(now_ms);
         if stale {
             self.activity = None;
@@ -278,7 +320,7 @@ impl LifecycleTracker {
         if let Some(activity) = self
             .activity
             .as_ref()
-            .filter(|activity| activity.fresh(now_ms))
+            .filter(|activity| self.counts(activity, now_ms))
         {
             if let Some((state, received_ms)) = self.report {
                 if received_ms >= activity.received_ms()
@@ -655,6 +697,124 @@ mod tests {
         t.on_activity(&phase(ActivityPhase::RunningTool), 3_000);
         t.tick(60_000);
         assert_eq!(t.current(), Lifecycle::Working);
+    }
+
+    #[test]
+    fn a_question_in_a_followed_conversation_holds_until_the_conversation_moves_on() {
+        use super::super::activity::FRESH_MS;
+        use session_core::activity::ActivityPhase;
+        // AskUserQuestion at 1 s; its call is logged at 0.96 s (after its
+        // hook, dated before it); the screen reads as a prompt throughout.
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Idle), 0);
+        t.on_followed(Some(("root", Some(500))), 500);
+        t.on_activity(&phase(ActivityPhase::NeedsInput), 1_000);
+        t.on_followed(Some(("root", Some(960))), 1_500);
+        for at in [1_000 + FRESH_MS, 1_000 + 5 * 60_000, 1_000 + 60 * 60_000] {
+            t.on_detection(detection(Lifecycle::Idle), at);
+            assert!(!t.tick(at), "{at}");
+            assert_eq!(t.current(), Lifecycle::Blocked, "{at}");
+            assert!(t.hook_asks(at));
+        }
+        // Esc: the refused result, long after; the screen decides at once.
+        let esc = 1_000 + 61 * 60_000;
+        assert!(t.on_followed(Some(("root", Some(esc))), esc));
+        assert_eq!(t.current(), Lifecycle::Idle);
+        assert!(t.activity().is_none() && !t.hook_asks(esc));
+
+        // Answered within the two minutes: the usual freshness from then on.
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Idle), 0);
+        t.on_activity(&phase(ActivityPhase::NeedsInput), 1_000);
+        t.on_followed(Some(("root", Some(30_000))), 30_000);
+        assert_eq!(t.current(), Lifecycle::Blocked, "fresh still");
+        t.tick(1_000 + FRESH_MS);
+        assert_eq!(t.current(), Lifecycle::Idle);
+    }
+
+    #[test]
+    fn a_question_without_its_conversation_followed_goes_stale_as_before() {
+        use super::super::activity::FRESH_MS;
+        use session_core::activity::ActivityPhase;
+        for followed in [None, Some(("another", None))] {
+            let mut t = LifecycleTracker::default();
+            t.on_detection(detection(Lifecycle::Idle), 0);
+            t.on_followed(followed, 0);
+            t.on_activity(&phase(ActivityPhase::NeedsInput), 1_000);
+            assert!(!t.tick(FRESH_MS));
+            assert_eq!(t.current(), Lifecycle::Blocked, "{followed:?}");
+            assert!(t.tick(1_000 + FRESH_MS), "{followed:?}");
+            assert_eq!(t.current(), Lifecycle::Idle, "{followed:?}");
+        }
+        // A follower gone (its process changed) ends the hold too.
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Idle), 0);
+        t.on_followed(Some(("root", None)), 0);
+        t.on_activity(&phase(ActivityPhase::NeedsInput), 1_000);
+        t.tick(1_000 + FRESH_MS);
+        assert_eq!(t.current(), Lifecycle::Blocked);
+        t.on_followed(None, 2_000 + FRESH_MS);
+        assert_eq!(t.current(), Lifecycle::Idle);
+    }
+
+    #[test]
+    fn a_held_question_ends_with_a_newer_hook_or_the_agent_leaving() {
+        use super::super::activity::FRESH_MS;
+        use session_core::activity::{ActivityEvent, ActivityPhase};
+        let asked = |t: &mut LifecycleTracker| {
+            t.on_detection(detection(Lifecycle::Idle), 0);
+            t.on_followed(Some(("root", None)), 0);
+            t.on_activity(&phase(ActivityPhase::NeedsInput), 1_000);
+            t.tick(1_000 + 5 * 60_000);
+            assert_eq!(t.current(), Lifecycle::Blocked);
+        };
+        let later = 2_000 + 5 * 60_000;
+        // Answered: PostToolUse.
+        let mut t = LifecycleTracker::default();
+        asked(&mut t);
+        t.on_activity(&phase(ActivityPhase::Working), later);
+        assert_eq!(t.current(), Lifecycle::Working);
+        assert!(!t.hook_asks(later));
+        t.tick(later + FRESH_MS);
+        assert!(
+            t.activity().is_none(),
+            "a working hook goes stale as before"
+        );
+        // The agent exited to its shell.
+        let mut t = LifecycleTracker::default();
+        asked(&mut t);
+        t.on_detection(
+            Detection {
+                agent: None,
+                lifecycle: Lifecycle::None,
+            },
+            later,
+        );
+        assert_eq!(t.current(), Lifecycle::None);
+        assert!(t.activity().is_none());
+        // It showed another conversation (GitHub Copilot's sidebar).
+        let mut t = LifecycleTracker::default();
+        asked(&mut t);
+        t.on_conversation_left("root", later);
+        t.on_detection(detection(Lifecycle::Idle), later + 1);
+        assert_eq!(t.current(), Lifecycle::Idle);
+        // Esc within the two minutes, then a subagent's update: fresh as
+        // hooks are, never held again.
+        let mut t = LifecycleTracker::default();
+        t.on_detection(detection(Lifecycle::Idle), 0);
+        t.on_activity(&phase(ActivityPhase::NeedsInput), 1_000);
+        t.on_followed(Some(("root", Some(30_000))), 30_000);
+        t.on_activity(
+            &hook(ActivityEvent::Subagent {
+                id: "child".into(),
+                running: true,
+            }),
+            40_000,
+        );
+        assert_eq!(t.current(), Lifecycle::Blocked);
+        t.tick(40_000 + super::super::activity::FRESH_WITH_SUBAGENTS_MS);
+        assert!(t.activity().is_none(), "moved on since it asked");
+        assert_eq!(t.current(), Lifecycle::Idle);
     }
 
     #[test]

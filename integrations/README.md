@@ -128,7 +128,12 @@ timestamps receipt. `SessionView.activity` carries phase/count to all clients th
 and a newer fresh explicit lifecycle report wins until a later hook update. Hook state is
 carried through restart-in-place, cleared on detected agent changes/terminal exit, and expires after
 120 seconds without updates. Screen/process detection remains the fallback. Command hooks
-have no heartbeat: long quiet operations may fall back to detection before they finish.
+have no heartbeat: long quiet operations may fall back to detection before they finish. A
+`needs_input` (a question, a prompt for permission) in the conversation the daemon follows in
+the agent's log doesn't expire: it lasts until a newer update, the agent leaving, or that
+conversation moving on after it (`Follower::moved_at`: a prompt, an agent message or what the
+user's side adds, such as Claude Code's tool result on an answer or its interruption on an
+Esc, by the log's own clock), then expires as other activity does.
 
 Hooks fired inside a subagent (their input carries `agent_id`) never replace the parent's
 phase. Their tool and permission hooks are that subagent's heartbeat (`subagent`, running):

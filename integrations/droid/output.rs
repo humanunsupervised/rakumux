@@ -485,6 +485,7 @@ pub(super) mod tests {
             reply: None,
             reply_state: Default::default(),
             last_at: None,
+            moved_at: None,
             foreground: None,
         }
     }
