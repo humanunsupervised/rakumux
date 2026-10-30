@@ -13,11 +13,15 @@
 //!   sessions, and its installer.
 //! - `pi`: the extension for Pi that reports its activity and conversation to
 //!   the session, and its installer.
+//! - `kimi`: the plugin for Kimi Code (its hooks and this server), and its
+//!   installer.
 
 pub mod client;
 pub mod instructions;
 #[path = "../../integrations/mcp.rs"]
 pub mod integrations;
+#[path = "../../integrations/kimi/install.rs"]
+pub mod kimi;
 pub mod launch;
 #[path = "../../integrations/open-code/install.rs"]
 pub mod opencode;

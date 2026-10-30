@@ -9,6 +9,8 @@ mod copilot;
 mod cursor;
 #[path = "grok/environment.rs"]
 mod grok;
+#[path = "kimi/environment.rs"]
+mod kimi;
 #[path = "pi/environment.rs"]
 mod pi;
 
@@ -26,6 +28,7 @@ pub(crate) fn inherited_marker(name: &str) -> bool {
         || copilot::VARIABLES.contains(&name)
         || cursor::VARIABLES.contains(&name)
         || grok::VARIABLES.contains(&name)
+        || kimi::VARIABLES.contains(&name)
         || HOOK_HOSTS.contains(&name)
 }
 

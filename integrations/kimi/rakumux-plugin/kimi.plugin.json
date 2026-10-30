@@ -1,0 +1,14 @@
+{
+  "name": "rakumux",
+  "description": "Rakumux: tells the Rakumux session Kimi Code runs in which conversation it shows and where it works, and adds Rakumux's MCP server.",
+  "homepage": "https://rakumux.com",
+  "license": "Apache-2.0",
+  "hooks": [
+    {"event": "SessionStart", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent kimi", "timeout": 3},
+    {"event": "UserPromptSubmit", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent kimi", "timeout": 3},
+    {"event": "TurnStarted", "command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent kimi", "timeout": 3}
+  ],
+  "mcpServers": {
+    "rakumux": {"command": "rakumux-mcp"}
+  }
+}

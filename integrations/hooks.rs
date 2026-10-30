@@ -15,6 +15,8 @@ mod copilot;
 mod cursor;
 #[path = "grok/hooks.rs"]
 mod grok;
+#[path = "kimi/hooks.rs"]
+mod kimi;
 #[path = "pi/hooks.rs"]
 mod pi;
 
@@ -25,6 +27,7 @@ pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, S
         "copilot" => copilot::normalize(input),
         "cursor-agent" => cursor::normalize(input),
         "grok" => grok::normalize(input),
+        "kimi" => kimi::normalize(input),
         "opencode" => {
             let update: ActivityUpdate = serde_json::from_value(input.clone())
                 .map_err(|_| "invalid OpenCode activity update")?;
@@ -45,12 +48,17 @@ pub fn report(agent: &str, input: &Value) -> Result<Option<Report>, String> {
         return copilot::report(input);
     }
     let activity = normalize(agent, input)?;
-    let context_only = agent == "claude" && input["hook_event_name"] == "CwdChanged";
+    let context_only = (agent == "claude" && input["hook_event_name"] == "CwdChanged")
+        || (agent == "kimi" && kimi::names_context(input));
     if activity.is_none() && !context_only {
         return Ok(None);
     }
-    // Grok's subagents hook from sessions of their own (`subagentType`).
-    let child = input.get("agent_id").and_then(Value::as_str).is_some()
+    // Grok's subagents hook from sessions of their own (`subagentType`);
+    // Kimi Code names its main agent `main`.
+    let child = input
+        .get("agent_id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !(agent == "kimi" && id == "main"))
         || (agent == "grok" && input.get("subagentType").is_some());
     let working_directory = if child || input["hook_event_name"] == "SessionEnd" {
         None

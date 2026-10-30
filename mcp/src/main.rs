@@ -3,10 +3,9 @@
 
 use rakumux_mcp::client::{ApiClient, EnvIdentity};
 use rakumux_mcp::launch::Launcher;
-use rakumux_mcp::opencode;
-use rakumux_mcp::pi;
 use rakumux_mcp::server::RakumuxServer;
 use rakumux_mcp::VERSION;
+use rakumux_mcp::{kimi, opencode, pi};
 use session_core::paths::Layout;
 use std::process::ExitCode;
 
@@ -16,6 +15,7 @@ rakumux-mcp: Rakumux's MCP server (stdio) for coding agents.
 Usage: rakumux-mcp [--version | --help]
        rakumux-mcp opencode-plugin [--install [--dir DIR]]
        rakumux-mcp pi-plugin [--install [--dir DIR]]
+       rakumux-mcp kimi-plugin [--install [--dir DIR]]
 
 Speaks MCP on stdin/stdout. Register it with your agent, e.g.
   claude mcp add --scope user rakumux -- rakumux-mcp
@@ -31,6 +31,12 @@ to the Rakumux session it runs in: `pi-plugin` prints it, `--install` writes
 it to DIR/extensions/rakumux-session.ts (DIR: Pi's agent directory, default
 $PI_CODING_AGENT_DIR or ~/.pi/agent), where Pi loads it on start.
 
+Kimi Code takes Rakumux as a plugin: its hooks tell the session which
+conversation Kimi shows, and it adds this server. `kimi-plugin` prints its
+manifest, `--install` installs it in DIR (Kimi Code's home, default
+$KIMI_CODE_HOME or ~/.kimi-code) as `/plugins install` would; Kimi loads it
+on its next start or `/plugins reload`.
+
 It drives rakumux-api (found through <RAKUMUX_HOME or ~/.rakumux>/api.json,
 started with `rakumux-api --detach` when needed; RAKUMUX_API_BIN overrides the
 binary). Inside a Rakumux session, RAKUMUX_SESSION_ID and RAKUMUX_SESSION_TOKEN
@@ -43,6 +49,7 @@ fn main() -> ExitCode {
             return opencode::command(std::env::args().skip(2).collect(), USAGE)
         }
         Some("pi-plugin") => return pi::command(std::env::args().skip(2).collect(), USAGE),
+        Some("kimi-plugin") => return kimi::command(std::env::args().skip(2).collect(), USAGE),
         Some("--version" | "-V") => {
             println!("rakumux-mcp {VERSION}");
             return ExitCode::SUCCESS;

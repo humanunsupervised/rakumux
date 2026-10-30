@@ -21,6 +21,7 @@ pub(super) fn configuration(
                 "OpenCode uses `rakumux-mcp opencode-plugin --install` instead".into()
             }
             HookAgent::Pi => "Pi uses `rakumux-mcp pi-plugin --install` instead".into(),
+            HookAgent::Kimi => "Kimi Code uses `rakumux-mcp kimi-plugin --install` instead".into(),
             other => format!("{} has no hook configuration", other.name()),
         })
     })?;

@@ -10,6 +10,8 @@ mod copilot;
 mod cursor;
 #[path = "grok/presentation.rs"]
 mod grok;
+#[path = "kimi/presentation.rs"]
+mod kimi;
 #[path = "open-code/presentation.rs"]
 mod opencode;
 #[path = "pi/presentation.rs"]
@@ -24,6 +26,7 @@ pub(super) fn color(agent: &str) -> Option<Color> {
         "opencode" => Some(opencode::color()),
         "pi" => Some(pi::color()),
         "grok" => Some(grok::color()),
+        "kimi" => Some(kimi::color()),
         _ => None,
     }
 }
