@@ -578,6 +578,9 @@ tui/
                              # write); a phone over SSH (SSH_CONNECTION, SSH_CLIENT or SSH_TTY, and under
                              # layout::PHONE_BELOW columns) 300 ms in session mode and dialogs, 800 ms in
                              # Rakumux mode (the list and the feed)
+    printable.rs             # text from elsewhere (paths, git names, reports, messages) as a
+                             # terminal shows it: control characters as `?`; every TUI frame
+                             # (`ui::draw`) and each value the CLI prints as text (not `--json`)
     updater.rs, version.rs, theme.rs, icons.rs (plain / emoji / Nerd Font marks)
   tests/mid_turn_replies.rs  # replies typed into Claude Code at work, end to end: real daemon and
                              # account service, a local rakumux.com (mid_turn/fake_cloud.rs, HTTPS

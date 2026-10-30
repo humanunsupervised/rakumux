@@ -9,6 +9,7 @@
 use super::args::FoldersCommand;
 use super::table::{self, ago, git_text, Column};
 use super::{output_error, CliError, Invocation};
+use crate::printable::printable;
 use serde_json::json;
 use session_core::api::CallerInfo;
 use session_core::client::SessionApi;
@@ -67,8 +68,8 @@ fn add(
     writeln!(
         out,
         "Added folder {} ({})",
-        folder.name,
-        folder.path.path().display()
+        printable(&folder.name),
+        printable(&folder.path.path().to_string_lossy())
     )
     .map_err(output_error)?;
     Ok(0)
@@ -82,7 +83,12 @@ fn remove(
 ) -> Result<i32, CliError> {
     let path = invocation.folder_root(dir)?;
     api.remove_project(&path)?;
-    writeln!(out, "Removed folder {}", path.path().display()).map_err(output_error)?;
+    writeln!(
+        out,
+        "Removed folder {}",
+        printable(&path.path().to_string_lossy())
+    )
+    .map_err(output_error)?;
     Ok(0)
 }
 

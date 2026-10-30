@@ -14,6 +14,7 @@ use session_core::model::{SessionStatus, SessionView};
 use super::args::AccountCommand;
 use super::{layout, output_error, version, CliError};
 use crate::account::{self, Account, AccountAccess, LocalAccount};
+use crate::printable::printable;
 use crate::qr::Qr;
 
 /// How often `login` asks whether the code was approved.
@@ -49,7 +50,7 @@ extern "C" fn on_interrupt(_: libc::c_int) {
 
 fn login(access: &dyn AccountAccess, qr: bool, out: &mut dyn Write) -> Result<i32, CliError> {
     if let Some(account) = access.account().map_err(CliError::internal)? {
-        writeln!(out, "Signed in as {}.", account.name()).map_err(output_error)?;
+        writeln!(out, "Signed in as {}.", printable(account.name())).map_err(output_error)?;
         return Ok(0);
     }
     // Ctrl-C abandons the sign-in rather than leaving it waiting.
@@ -77,7 +78,7 @@ fn login(access: &dyn AccountAccess, qr: bool, out: &mut dyn Write) -> Result<i3
             SignInView::SignedIn => {
                 let account = access.account().map_err(CliError::internal)?;
                 let name = account.as_ref().map_or("your account", Account::name);
-                writeln!(out, "Signed in as {name}.").map_err(output_error)?;
+                writeln!(out, "Signed in as {}.", printable(name)).map_err(output_error)?;
                 return Ok(0);
             }
             SignInView::Failed { reason } => {
@@ -104,8 +105,8 @@ fn prompt_text(view: &SignInView, qr: bool) -> String {
     let mut lines = vec![
         "Open this link in any browser, sign in, and approve the code:".to_string(),
         String::new(),
-        format!("  Link  {link}"),
-        format!("  Code  {user_code}"),
+        format!("  Link  {}", printable(&link)),
+        format!("  Code  {}", printable(user_code)),
         String::new(),
     ];
     if let Some(code) = qr.then_some(link).and_then(Qr::encode) {
@@ -125,7 +126,7 @@ fn logout(access: &dyn AccountAccess, out: &mut dyn Write) -> Result<i32, CliErr
             writeln!(
                 out,
                 "Signed out {}. AI session titles stopped.",
-                account.name()
+                printable(account.name())
             )
             .map_err(output_error)?;
         }
@@ -164,7 +165,11 @@ fn status(
     } else {
         let mut text = describe(account.as_ref());
         for (session, description) in &described {
-            text.push_str(&format!("\n  {}  {description}", session.name));
+            text.push_str(&format!(
+                "\n  {}  {}",
+                printable(&session.name),
+                printable(description)
+            ));
         }
         text
     };
@@ -197,7 +202,7 @@ fn live_descriptions(
 
 fn describe(account: Option<&Account>) -> String {
     match account {
-        Some(account) => format!("Signed in as {}.", account.name()),
+        Some(account) => format!("Signed in as {}.", printable(account.name())),
         None => "Not signed in. `rakumux account login` signs in for AI session titles and \
                  the agent feed."
             .into(),

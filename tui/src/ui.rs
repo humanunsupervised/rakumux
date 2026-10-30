@@ -156,6 +156,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.hits = menu_hits;
         app.tab_hits.clear();
     }
+    // Paths, git names and reports may hold escape sequences: shown, never
+    // sent.
+    crate::printable::clean_frame(f.buffer_mut());
 }
 
 #[cfg(test)]
@@ -2975,5 +2978,43 @@ mod tests {
         h.app.process_pending();
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("restart it (S)"), "{screen}");
+    }
+
+    /// Folder names, git names and reports come from files and programs:
+    /// an escape sequence in one (a window title, a clipboard write, a
+    /// link) is shown as text, never sent to the terminal.
+    #[test]
+    fn control_characters_in_paths_branches_and_reports_are_shown_not_sent() {
+        use session_core::model::{GitInfo, Reported};
+        let evil = "/repo/evil\u{1b}]0;PWNED\u{7}dir";
+        let mut session = view("A", "fix-login", 20);
+        session.cwd = evil.into();
+        session.git = Some(GitInfo {
+            repo_root: evil.into(),
+            branch: Some("main\u{1b}]52;c;SGk=\u{7}\u{9b}31m".into()),
+            detached_at: None,
+            worktree: Some("wt\u{1b}]8;;http://x\u{1b}\\".into()),
+            repo: Some("repo".into()),
+            origin: None,
+        });
+        session.reported = Some(Reported {
+            state: None,
+            text: Some("done\u{1b}[2J\u{7f}\ttok".into()),
+            result: None,
+            at: 0,
+        });
+        for layout in SessionLayout::ALL {
+            let mut h = with_layout(vec![session.clone()], layout);
+            for (width, height) in SIZES {
+                let screen = render(&mut h.app, width, height);
+                let control = screen.chars().find(|c| c.is_control() && *c != '\n');
+                assert_eq!(control, None, "{layout:?} {width}x{height}:\n{screen}");
+            }
+        }
+        // Each shows as `?`, in its place.
+        let mut h = with_layout(vec![session], SessionLayout::Sidebar);
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("evil?]0;PWNED?dir"), "{screen}");
+        assert!(screen.contains("main?]52;c;SGk=??31m"), "{screen}");
     }
 }

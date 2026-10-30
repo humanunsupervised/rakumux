@@ -6,6 +6,7 @@ use super::args::{Command, LsArgs, MachineCommand, NewArgs};
 use super::attach::{self, AttachContext};
 use super::table::{self, ago, git_text, Column};
 use super::{folders, output_error, resolve_target, session, CliError, Invocation};
+use crate::printable::printable;
 use serde_json::json;
 use session_core::api::{CallerInfo, CreateSession};
 use session_core::client::SessionApi;
@@ -104,7 +105,13 @@ fn new(
     };
     let session = api.create(request)?;
     if args.detach {
-        writeln!(out, "Created session {} ({})", session.name, session.id).map_err(output_error)?;
+        writeln!(
+            out,
+            "Created session {} ({})",
+            printable(&session.name),
+            session.id
+        )
+        .map_err(output_error)?;
         return Ok(0);
     }
     attach::run(api, &AttachContext::new(invocation, scope), &session, out)
@@ -131,7 +138,9 @@ fn machine(
             writeln!(
                 out,
                 "Added {} ({}), {}",
-                machine.name, machine.id, machine.url
+                printable(&machine.name),
+                machine.id,
+                printable(&machine.url)
             )
             .map_err(output_error)?;
         }
@@ -151,11 +160,12 @@ fn machine(
                         .ok()
                         .and_then(|v| v.as_str().map(str::to_owned))
                         .unwrap_or_default();
-                    let version = m.version.as_deref().unwrap_or("-");
-                    writeln!(out, "{}  {}  {state}  {version}  {}", m.name, m.url, m.id)
+                    let version = printable(m.version.as_deref().unwrap_or("-"));
+                    let (name, url) = (printable(&m.name), printable(&m.url));
+                    writeln!(out, "{name}  {url}  {state}  {version}  {}", m.id)
                         .map_err(output_error)?;
                     if let Some(error) = m.error {
-                        writeln!(out, "    {error}").map_err(output_error)?;
+                        writeln!(out, "    {}", printable(&error)).map_err(output_error)?;
                     }
                 }
             }
@@ -163,7 +173,7 @@ fn machine(
         MachineCommand::Rm { target } => {
             let machine = find_machine(api, &target)?;
             api.remove_machine(&machine.id)?;
-            writeln!(out, "Forgot {}", machine.name).map_err(output_error)?;
+            writeln!(out, "Forgot {}", printable(&machine.name)).map_err(output_error)?;
         }
     }
     Ok(0)
@@ -240,7 +250,10 @@ fn ls(
     if sessions.is_empty() {
         let line = match shown.as_slice() {
             [] => "No folders yet".to_string(),
-            [scope] => format!("No sessions in {}", scope.path().display()),
+            [scope] => format!(
+                "No sessions in {}",
+                printable(&scope.path().to_string_lossy())
+            ),
             several => format!("No sessions in {} folders", several.len()),
         };
         writeln!(out, "{line}").map_err(output_error)?;
@@ -274,7 +287,7 @@ fn pin(
     let session = resolve_target(api, scope.as_ref(), target)?;
     let session = api.pin(&session.id, pinned)?;
     let verb = if pinned { "Pinned" } else { "Unpinned" };
-    writeln!(out, "{verb} {}", session.name).map_err(output_error)?;
+    writeln!(out, "{verb} {}", printable(&session.name)).map_err(output_error)?;
     Ok(0)
 }
 
@@ -306,7 +319,7 @@ fn rename(
         return Err(CliError::Usage("the new name is empty".into()));
     }
     let session = api.rename(&id, name)?;
-    writeln!(out, "Renamed to {}", session.name).map_err(output_error)?;
+    writeln!(out, "Renamed to {}", printable(&session.name)).map_err(output_error)?;
     Ok(0)
 }
 
@@ -321,10 +334,11 @@ fn kill(
     let session = resolve_target(api, scope.as_ref(), target)?;
     let killed = api.kill(&session.id, tree)?;
     let others = killed.iter().filter(|id| **id != session.id).count();
+    let name = printable(&session.name);
     let line = match others {
-        0 => format!("Killed {}", session.name),
-        1 => format!("Killed {} and 1 session it created", session.name),
-        n => format!("Killed {} and {n} sessions it created", session.name),
+        0 => format!("Killed {name}"),
+        1 => format!("Killed {name} and 1 session it created"),
+        n => format!("Killed {name} and {n} sessions it created"),
     };
     writeln!(out, "{line}").map_err(output_error)?;
     Ok(0)
@@ -339,7 +353,7 @@ fn rm(
     let scope = invocation.request_scope(api)?;
     let session = resolve_target(api, scope.as_ref(), target)?;
     api.delete(&session.id)?;
-    writeln!(out, "Deleted {}", session.name).map_err(output_error)?;
+    writeln!(out, "Deleted {}", printable(&session.name)).map_err(output_error)?;
     Ok(0)
 }
 
@@ -686,6 +700,60 @@ mod tests {
         );
         assert!(lines[2].contains("older"), "{text}");
         assert!(!lines[0].contains("FOLDER"), "{text}");
+    }
+
+    /// Folder names, git names and notes come from files and programs: an
+    /// escape sequence in one is printed as text, `--json` keeps it whole.
+    #[test]
+    fn ls_prints_control_characters_as_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let evil = root.join("evil\u{1b}]0;PWNED\u{7}dir");
+        std::fs::create_dir(&evil).unwrap();
+        let mut session = in_scope("01A", "api", &root);
+        session.cwd = evil.clone();
+        session.git = Some(session_core::model::GitInfo {
+            repo_root: root.clone(),
+            branch: Some("main\u{1b}]52;c;SGk=\u{7}".into()),
+            detached_at: None,
+            worktree: Some("wt\u{9b}31m".into()),
+            repo: None,
+            origin: None,
+        });
+        session.reported = Some(Reported {
+            state: None,
+            text: Some("done\u{1b}[2J\u{7f}".into()),
+            result: None,
+            at: 0,
+        });
+        let api = FakeApi::user(vec![session]);
+        let (_, text) = output(|out| ls(&api, &invocation(&root), ls_args(false, false), out));
+        assert_eq!(
+            text.chars().find(|c| c.is_control() && *c != '\n'),
+            None,
+            "{text:?}"
+        );
+        assert!(text.contains("evil?]0;PWNED?dir"), "{text}");
+        assert!(
+            text.contains("main?]52;c;SGk=? (worktree wt?31m)"),
+            "{text}"
+        );
+        assert!(text.contains("done?[2J?"), "{text}");
+
+        let (_, text) = output(|out| ls(&api, &invocation(&root), ls_args(true, false), out));
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value["sessions"][0]["cwd"], evil.display().to_string());
+        assert_eq!(
+            value["sessions"][0]["git"]["branch"],
+            "main\u{1b}]52;c;SGk=\u{7}"
+        );
+
+        let empty = FakeApi::user(vec![]);
+        let (_, text) = output(|out| ls(&empty, &invocation(&evil), ls_args(false, false), out));
+        assert_eq!(
+            text,
+            format!("No sessions in {}/evil?]0;PWNED?dir\n", root.display())
+        );
     }
 
     #[test]

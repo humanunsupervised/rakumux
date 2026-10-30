@@ -38,7 +38,8 @@ const SHORT_ID: usize = 7;
 const REFTABLE_PLACEHOLDER: &str = ".invalid";
 
 /// Git context of `dir` (absolute). `None` outside a repository, or when
-/// the nearest `.git` or its `HEAD` can't be read or parsed.
+/// the nearest `.git` or its `HEAD` can't be read or parsed. A branch or
+/// worktree name that isn't [`displayable`] is left out.
 pub fn detect(dir: &Path) -> Option<GitInfo> {
     let root = dir
         .ancestors()
@@ -64,9 +65,9 @@ pub fn detect(dir: &Path) -> Option<GitInfo> {
         .and_then(|url| without_credentials(&url));
     Some(GitInfo {
         repo_root: root.to_path_buf(),
-        branch,
+        branch: branch.filter(|name| displayable(name)),
         detached_at,
-        worktree,
+        worktree: worktree.filter(|name| displayable(name)),
         repo,
         origin,
     })
@@ -794,6 +795,36 @@ mod tests {
         assert_eq!(url("[remote \"origin\"]\n#\turl = a/b\n;url = a/b\n"), None);
         assert_eq!(url("[remote \"origin\"]\n\turl =\n"), None);
         assert_eq!(url("[remote \"origin\"]\n\turl = a/\\\nb\n"), None);
+    }
+
+    /// Branch and worktree names are file contents and folder names: one
+    /// that isn't readable (an escape sequence, a line break) is left out,
+    /// as the repository's name is.
+    #[test]
+    fn unreadable_branch_and_worktree_names_are_left_out() {
+        let (_dir, root) = tempdir();
+        let main = root.join("main");
+        repo(&main, "ref: refs/heads/main\u{1b}]0;PWNED\u{7}\n");
+        let info = detect(&main).unwrap();
+        assert_eq!((info.branch, info.detached_at), (None, None));
+        assert_eq!(info.repo.as_deref(), Some("main"));
+
+        let name = "fix\u{1b}]52;c;SGk=\u{7}";
+        let admin = main.join(".git/worktrees").join(name);
+        fs::create_dir_all(&admin).unwrap();
+        fs::write(admin.join("HEAD"), "ref: refs/heads/fix\u{9b}31m\n").unwrap();
+        fs::write(admin.join("commondir"), "../..\n").unwrap();
+        let checkout = root.join("fix");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            checkout.join(".git"),
+            format!("gitdir: {}\n", admin.display()),
+        )
+        .unwrap();
+        let info = detect(&checkout).unwrap();
+        assert_eq!((info.branch, info.worktree), (None, None));
+        // Still a linked worktree: named after the main working tree.
+        assert_eq!(info.repo.as_deref(), Some("main"));
     }
 
     #[test]

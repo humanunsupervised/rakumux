@@ -8,6 +8,7 @@ mod help;
 mod icons;
 mod layout;
 mod naming;
+mod printable;
 mod qr;
 mod remote_access;
 mod restart;
@@ -292,8 +293,13 @@ async fn main() -> Result<()> {
         RunOutcome::Exit => Ok(()),
         RunOutcome::Restart(launcher) => restart_current_process(launcher.as_deref()),
         RunOutcome::SwitchDirectory(path) => {
-            // The shell wrapper evaluates this line.
-            println!("cd \"{}\"", path);
+            // The shell wrapper evaluates this line; a folder name with a
+            // control character in it would be printed as is.
+            if path.chars().any(char::is_control) {
+                eprintln!("rakumux: not printing `cd`: the folder's name has control characters");
+            } else {
+                println!("cd \"{}\"", path);
+            }
             Ok(())
         }
     }

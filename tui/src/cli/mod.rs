@@ -24,6 +24,7 @@ mod session;
 mod sprite;
 mod table;
 
+use crate::printable::printable_lines;
 use args::{CliArgs, Command};
 use clap::Parser;
 use serde_json::json;
@@ -177,7 +178,7 @@ fn report_error(error: CliError, json_errors: bool, debug: bool, err: &mut dyn W
     match error {
         CliError::Exit(code) => code,
         CliError::Usage(message) => {
-            let _ = writeln!(err, "rakumux: {message}");
+            let _ = writeln!(err, "rakumux: {}", printable_lines(&message));
             let _ = writeln!(err, "Run `rakumux help` for usage.");
             2
         }
@@ -186,9 +187,12 @@ fn report_error(error: CliError, json_errors: bool, debug: bool, err: &mut dyn W
             if json_errors {
                 let _ = writeln!(err, "{}", json!({ "error": error }));
             } else {
-                let _ = writeln!(err, "rakumux: {}", error.message);
+                // Messages may name a path or another machine's text.
+                let _ = writeln!(err, "rakumux: {}", printable_lines(&error.message));
                 if debug {
-                    let _ = writeln!(err, "debug: {error} {:?}", error.details);
+                    let error_text = error.to_string();
+                    let shown = printable_lines(&error_text);
+                    let _ = writeln!(err, "debug: {shown} {:?}", error.details);
                 }
             }
             1

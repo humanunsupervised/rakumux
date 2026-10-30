@@ -1,7 +1,9 @@
 //! Plain-text tables and cell formats for the human-facing commands (`ls`,
 //! `folders`).
 
+use crate::printable::printable;
 use session_core::model::GitInfo;
+use std::borrow::Cow;
 
 /// A column: its header and one cell per row.
 pub(crate) struct Column {
@@ -12,7 +14,16 @@ pub(crate) struct Column {
 }
 
 impl Column {
+    /// Cells are shown [`printable`]: paths, git names and notes may hold
+    /// control characters.
     pub fn new(header: &'static str, cells: Vec<String>) -> Self {
+        let cells = cells
+            .into_iter()
+            .map(|cell| match printable(&cell) {
+                Cow::Borrowed(_) => cell,
+                Cow::Owned(shown) => shown,
+            })
+            .collect();
         Self {
             header,
             cells,

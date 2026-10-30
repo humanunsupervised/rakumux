@@ -12,6 +12,7 @@
 //! current directory, `Ctrl-\\` a literal `Ctrl-\\`.
 
 use super::{CliError, Invocation};
+use crate::printable::printable;
 use base64::Engine as _;
 use session_core::api::{
     ApiError, AttachRequest, CreateSession, ErrorCode, ReviveSession, Role, StreamCommand,
@@ -131,8 +132,9 @@ pub(crate) fn run(
         .map_err(|error| CliError::internal(format!("cannot read the terminal: {error}")))?;
     let outcome = AttachLoop::new(api, ctx, tx, rx, terminal_size, io::stdout()).run(stream);
     drop(guard);
-    let emit =
-        |out: &mut dyn Write, line: String| writeln!(out, "{line}").map_err(super::output_error);
+    let emit = |out: &mut dyn Write, line: String| {
+        writeln!(out, "{}", printable(&line)).map_err(super::output_error)
+    };
     match outcome {
         Ok(Outcome::Detached { name }) => emit(out, format!("[detached from {name}]")).map(|_| 0),
         Ok(Outcome::Exited { name, code }) => {
@@ -586,7 +588,7 @@ impl<'a, W: Write, S: FnMut() -> (u16, u16)> AttachLoop<'a, W, S> {
     /// Show `message` on the bottom line for a moment.
     fn notice(&mut self, message: &str) -> io::Result<()> {
         let (cols, rows) = self.terminal_size;
-        let text: String = format!(" rakumux: {message} ")
+        let text: String = format!(" rakumux: {} ", printable(message))
             .chars()
             .take(cols as usize)
             .collect();

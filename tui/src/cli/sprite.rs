@@ -4,6 +4,7 @@
 use super::args::SpriteCommand;
 use super::{output_error, version, CliError};
 use crate::account::{AccountAccess, LocalAccount};
+use crate::printable::printable;
 use crate::sprites;
 use session_core::client::SessionApi;
 use session_core::model::MachineView;
@@ -57,7 +58,8 @@ pub(crate) fn run(
             writeln!(
                 out,
                 "Ready: `rakumux new --sprite` runs a session on {} ({}).",
-                machine.name, machine.url
+                printable(&machine.name),
+                printable(&machine.url)
             )
             .map_err(output_error)?;
             let feed = match &connected.feed {
@@ -68,13 +70,20 @@ pub(crate) fn run(
                     (`rakumux account login`) and connect again for its replies in your feed."
                     .to_owned(),
                 sprites::FeedSetUp::Failed(error) => {
-                    format!("Its feed couldn't be connected ({error}); connect again to retry.")
+                    format!(
+                        "Its feed couldn't be connected ({}); connect again to retry.",
+                        printable(error)
+                    )
                 }
             };
             writeln!(out, "{feed}").map_err(output_error)?;
             if !connected.tools.is_empty() {
-                writeln!(out, "Installed there: {}.", connected.tools.join(", "))
-                    .map_err(output_error)?;
+                writeln!(
+                    out,
+                    "Installed there: {}.",
+                    printable(&connected.tools.join(", "))
+                )
+                .map_err(output_error)?;
             }
             writeln!(
                 out,
@@ -92,10 +101,10 @@ pub(crate) fn run(
                         .ok()
                         .and_then(|v| v.as_str().map(str::to_owned))
                         .unwrap_or_default();
-                    writeln!(out, "{}  {}  {state}", machine.name, machine.url)
-                        .map_err(output_error)?;
+                    let (name, url) = (printable(&machine.name), printable(&machine.url));
+                    writeln!(out, "{name}  {url}  {state}").map_err(output_error)?;
                     if let Some(error) = machine.error {
-                        writeln!(out, "  {error}").map_err(output_error)?;
+                        writeln!(out, "  {}", printable(&error)).map_err(output_error)?;
                     }
                 }
                 None if saved.token.is_some() => {
