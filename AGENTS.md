@@ -257,9 +257,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    lifecycle, or detection on its screen read then, says `blocked`, tried again 2 s later; and it
    holds back the Enter if a permission prompt, question or menu opened after the paste, so the
    Enter never answers one: the text stays in the input box and the reply fails `not_taken`
-   unless the agent takes it later; a daemon without `session.submit.blocked` submits anyway). A session takes its replies and session messages
-   one at a time, in rakumux.com's order (`seq`; a later one waits behind an earlier one that
-   waits; one written in this machine's TUI waits for a read that reaches it, made at once, at
+   unless the agent takes it later; a daemon without `session.submit.blocked` submits anyway,
+   so replies go in mid-turn only to a daemon that announces it, below). A session takes its
+   replies and session messages one at a time, in rakumux.com's order (`seq`; a later one waits
+   behind an earlier one that waits; one written in this machine's TUI waits for a read that
+   reaches it, made at once, at
    most 5 s, so one written before it on rakumux.com and not read here yet goes first): each is
    `delivered` once its chat shows it as a new prompt (a new `agent_turn` whose
    `user_prompt`'s letters and digits begin the reply's, or hold its first 32: typed after a
@@ -282,7 +284,13 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    whose turns the daemon doesn't follow, gets replies only while it waits): a reply goes in while such an
    agent is `working` too, never while it's `blocked` (a permission prompt, question or menu
    would take the text as its answer), with the same quiet, foreground, chat and one-at-a-time
-   rules. It's `delivered` once its chat shows it as a new prompt, at the agent's next step
+   rules, and only while the daemon announces `session.submit.blocked` (`DaemonFeatures`, read
+   at each (re)subscribe from `SessionApi::daemon_capabilities`, which is the latest hello's, so
+   a daemon restarted since counts): a prompt can open between the view and the keystrokes, and
+   a daemon without that guard (one `U` left running) would type the reply into it and then the
+   Enter that picks its highlighted option. With such a daemon replies to an agent at work wait
+   for it to wait, as before mid-turn, and the TUI offers the restart in place (`S`). It's
+   `delivered` once its chat shows it as a new prompt, at the agent's next step
    minutes on maybe, or as the next turn's prompt when the turn ends first; it fails
    `not_taken` only once the agent has waited (`idle`/`done`, or left) 30 s without taking it,
    being seen busy again starting that over. A session's next reply waits only for that take,
@@ -1115,7 +1123,8 @@ fallback. npm and Homebrew installs use their package manager. On a protocol mis
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
 `session.working_directory`, `session.agent_output`, `session.user_prompt`, `session.turn`,
-`session.replies`, `session.transcript`, `session.places`, `resources`, read with
+`session.replies`, `session.transcript`, `session.places`, `resources`,
+`session.submit.blocked` (replies typed into an agent at work), read with
 `SessionApi::daemon_capabilities`) it says what's missing
 and offers a restart: in place when the daemon has `daemon.restart` (sessions keep running;
 `y`/Enter), otherwise by stopping it (`y` only, since running sessions end).
