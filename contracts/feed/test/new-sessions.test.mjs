@@ -19,6 +19,13 @@ test("the stored request comes back", () => check("answer", validators.newSessio
 
 test("the replies read brings the new sessions pending for the reading machine", () => check("replies", validators.replies));
 
+test("a replies read carries at most 20 new sessions", () => {
+  const pending = fixtures.newSession.valid[1];
+  const read = (count) => ({ version: 1, replies: [], latest_seq: 0, more: false, new_sessions: Array.from({ length: count }, () => pending) });
+  assert.equal(validators.replies(read(20)), true);
+  assert.equal(validators.replies(read(21)), false);
+});
+
 test("an older replies read without new sessions still validates", () => {
   assert.equal(validators.replies({ version: 1, replies: [], latest_seq: 0, more: false }), true);
 });
