@@ -1,0 +1,23 @@
+# Cursor's agent CLI working while the user types a follow-up: the input box
+# has no placeholder (so no "ctrl+c to stop"), and its spinner is two braille
+# cells (2026.10.22's spinner-definitions). Hand-written.
+agent: cursor-agent
+expect: working
+process: MainThread
+cmdline: /home/me/.local/bin/agent --use-system-ca /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/index.js
+exe: /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/node
+alternate_screen: false
+ms_since_output: 80
+---
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ fix the failing parser tests                                             │
+ └──────────────────────────────────────────────────────────────────────────┘
+
+  ⬢ Read src/parser.rs
+
+  ⠘⠣ Running cargo test
+
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ → and then update the docs                                               │
+ └──────────────────────────────────────────────────────────────────────────┘
+  Auto · 18.2%

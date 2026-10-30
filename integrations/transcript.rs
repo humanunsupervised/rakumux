@@ -15,6 +15,8 @@
 //! - **GitHub Copilot**: one message per event of its log, at its byte
 //!   offset. Copilot rewrites the log when a turn is taken back, so a cursor
 //!   names the file it read (`key`), and another file is read from its start.
+//! - **Cursor**: one message per transcript line, at its byte offset: what
+//!   the user typed, the agent's text and tool calls (it writes no output).
 //!
 //! Text is cut at [`MAX_PART_BYTES`] per part and otherwise left as the
 //! agent wrote it: the caller cleans it before it leaves the machine.
@@ -35,6 +37,8 @@ mod claude;
 mod codex;
 #[path = "copilot/transcript.rs"]
 mod copilot;
+#[path = "cursor-agent/transcript.rs"]
+mod cursor;
 #[path = "open-code/transcript.rs"]
 mod opencode;
 #[path = "pi/transcript.rs"]
@@ -63,7 +67,7 @@ pub enum TranscriptSource {
 }
 
 impl TranscriptSource {
-    /// `claude-code`, `codex`, `opencode`, `pi` or `copilot`.
+    /// `claude-code`, `codex`, `opencode`, `pi`, `copilot` or `cursor-agent`.
     pub fn agent(&self) -> &'static str {
         match self {
             TranscriptSource::Log {
@@ -82,6 +86,10 @@ impl TranscriptSource {
                 agent: LogAgent::Copilot,
                 ..
             } => "copilot",
+            TranscriptSource::Log {
+                agent: LogAgent::Cursor,
+                ..
+            } => "cursor-agent",
             TranscriptSource::OpenCode { .. } => "opencode",
         }
     }
@@ -154,12 +162,13 @@ fn read_log(
 ) -> Option<(Vec<TranscriptMessage>, u64, bool)> {
     let mut messages = Vec::new();
     let mut copilot_reading = copilot::Reading::default();
-    let (next, more) = scan_log(path, from, budget, |entry, start| {
+    let (next, more) = scan(agent, path, from, budget, |entry, start| {
         let message = match agent {
             LogAgent::Claude => claude::message(entry, start),
             LogAgent::Codex => codex::message(entry, start),
             LogAgent::Pi => pi::message(entry, start),
             LogAgent::Copilot => copilot_reading.message(entry, start),
+            LogAgent::Cursor => cursor::message(entry, start),
         };
         messages.extend(message);
     })?;
@@ -174,6 +183,21 @@ fn file_key(agent: LogAgent, path: &Path) -> Option<String> {
     }
     let (device, inode) = super::copilot::identity(&std::fs::metadata(path).ok()?);
     Some(format!("{device}:{inode}"))
+}
+
+/// [`scan_log`] as `agent`'s log is read: Cursor's is written whole now and
+/// then (`cursor::scan`).
+pub(super) fn scan(
+    agent: LogAgent,
+    path: &Path,
+    from: u64,
+    budget: usize,
+    each: impl FnMut(&Value, u64),
+) -> Option<(u64, bool)> {
+    match agent {
+        LogAgent::Cursor => cursor::scan(path, from, budget, each),
+        _ => scan_log(path, from, budget, each),
+    }
 }
 
 /// Hand each complete JSON line of `path` from `from` (its start when the

@@ -38,6 +38,8 @@ mod claude;
 mod codex;
 #[path = "copilot/detection.rs"]
 mod copilot;
+#[path = "cursor-agent/detection.rs"]
+mod cursor;
 #[path = "open-code/detection.rs"]
 mod opencode;
 #[path = "pi/detection.rs"]
@@ -47,6 +49,9 @@ use claude::PROFILE as CLAUDE;
 use claude::{is_claude_activity_line, is_numbered_yes_option};
 use codex::PROFILE as CODEX;
 use copilot::PROFILE as COPILOT;
+#[cfg(test)]
+use cursor::is_cursor_activity_line;
+use cursor::PROFILE as CURSOR_AGENT;
 #[cfg(test)]
 use opencode::has_opencode_progress_bar;
 use opencode::PROFILE as OPENCODE;
@@ -238,36 +243,6 @@ const AIDER: Profile = Profile {
     approvals_on_screen: false,
 };
 
-/// Cursor's agent CLI (approval boxes "Run this command?" with `(y)` /
-/// `Skip (esc or n)`, busy hint `ctrl+c to stop`, `⬡ Generating…`). Ships a
-/// bundled node under `cursor-agent/versions/<v>/`. Its hooks have no
-/// approval event: `preToolUse` fires before the prompt it may draw.
-const CURSOR_AGENT: Profile = Profile {
-    label: "cursor-agent",
-    names: &["cursor-agent"],
-    packages: &[&["cursor-agent", "versions"]],
-    title_hint: |title| contains_ci(title, "cursor agent") || has_word(title, "cursor-agent"),
-    blocked: &[marker(
-        Region::Bottom(10),
-        Test::Any(&[
-            "run this command?",
-            "write to this file?",
-            "waiting for approval",
-            "skip (esc or n)",
-            "(y) (enter)",
-            "keep (n)",
-        ]),
-    )],
-    working: &[
-        marker(Region::Bottom(6), Test::Any(&["ctrl+c to stop"])),
-        marker(Region::Bottom(8), Test::Line(is_cursor_activity_line)),
-    ],
-    idle: &[],
-    quiet: Lifecycle::Idle,
-    output_means_working: false,
-    approvals_on_screen: true,
-};
-
 const GENERIC_BLOCKED: &[Marker] = &[
     marker(
         Region::Bottom(15),
@@ -348,17 +323,6 @@ fn is_aider_prompt(line: &str) -> bool {
     first.strip_suffix('>').is_some_and(|mode| {
         mode.chars()
             .all(|c| c.is_ascii_lowercase() || c == '-' || c == '_')
-    })
-}
-
-/// Cursor's activity line: `⬡ Generating…`, `⠋ Reading files`.
-fn is_cursor_activity_line(line: &str) -> bool {
-    split_glyph(line).is_some_and(|(glyph, rest)| {
-        (glyph == '⬡' || glyph == '⬢' || is_braille(glyph))
-            && rest
-                .split(|c: char| !c.is_alphabetic())
-                .next()
-                .is_some_and(|word| word.len() > 4 && word.ends_with("ing"))
     })
 }
 
@@ -1159,6 +1123,10 @@ mod tests {
         assert!(!is_aider_prompt("src/lib.rs>"));
         assert!(is_cursor_activity_line("⬡ Generating.."));
         assert!(!is_cursor_activity_line("⬡ Done"));
+        assert!(is_cursor_activity_line("⠰⠳ Thinking…"));
+        assert!(is_cursor_activity_line("⠀⠞ Running cargo test"));
+        assert!(!is_cursor_activity_line("⠰⠳⠘ Running"));
+        assert!(!is_cursor_activity_line("ab Running"));
         assert!(has_braille_spinner_word("⠹ demo"));
         assert!(has_braille_spinner_word("demo ⠹"));
         assert!(!has_braille_spinner_word("demo"));

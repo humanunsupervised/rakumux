@@ -6,6 +6,8 @@ mod claude;
 mod codex;
 #[path = "copilot/presentation.rs"]
 mod copilot;
+#[path = "cursor-agent/presentation.rs"]
+mod cursor;
 #[path = "open-code/presentation.rs"]
 mod opencode;
 #[path = "pi/presentation.rs"]
@@ -16,6 +18,7 @@ pub(super) fn color(agent: &str) -> Option<Color> {
         "claude" => Some(claude::color()),
         "codex" => Some(codex::color()),
         "copilot" => Some(copilot::color()),
+        "cursor-agent" => Some(cursor::color()),
         "opencode" => Some(opencode::color()),
         "pi" => Some(pi::color()),
         _ => None,

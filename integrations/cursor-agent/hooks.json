@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{"command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent cursor-agent", "timeout": 3}],
+    "sessionEnd": [{"command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent cursor-agent", "timeout": 3}],
+    "beforeSubmitPrompt": [{"command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent cursor-agent", "timeout": 3}],
+    "preToolUse": [{"command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent cursor-agent", "timeout": 3}],
+    "postToolUse": [{"command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent cursor-agent", "timeout": 3}],
+    "postToolUseFailure": [{"command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent cursor-agent", "timeout": 3}],
+    "subagentStart": [{"command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent cursor-agent", "timeout": 3}],
+    "subagentStop": [{"command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent cursor-agent", "timeout": 3}],
+    "stop": [{"command": "\"${RAKUMUX_BIN:-rakumux}\" session hook --agent cursor-agent", "timeout": 3}]
+  }
+}

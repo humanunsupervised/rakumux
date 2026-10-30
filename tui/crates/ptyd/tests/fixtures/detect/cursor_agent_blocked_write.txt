@@ -1,0 +1,25 @@
+# Cursor's agent CLI asking before it writes a file (question and options
+# from the 2026.10.22 bundle; layout hand-written).
+agent: cursor-agent
+expect: blocked
+process: MainThread
+cmdline: /home/me/.local/bin/agent --use-system-ca /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/index.js
+exe: /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/node
+alternate_screen: false
+ms_since_output: 1500
+---
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ add a CHANGELOG entry                                                    │
+ └──────────────────────────────────────────────────────────────────────────┘
+
+  ⬢ Write CHANGELOG.md  Waiting for approval...
+
+  Write to this file?
+  in /home/me/demo/CHANGELOG.md
+  → Proceed (y)
+    Reject & propose changes (p)
+    Skip (esc or n)
+
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ → Waiting for decision (y/n/p)...                                        │
+ └──────────────────────────────────────────────────────────────────────────┘

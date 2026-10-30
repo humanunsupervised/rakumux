@@ -22,8 +22,10 @@
 //! - **GitHub Copilot**: the session's directory as it starts, resumes and
 //!   `/cd`s, its tools' paths and shell commands, and the files they changed
 //!   (`fileEdits`).
+//! - **Cursor**: its tool calls' file paths, search roots, and Shell calls'
+//!   directories and commands, relative to the workspace.
 
-use super::transcript::{scan_log, TranscriptSource};
+use super::transcript::{scan, TranscriptSource};
 use super::LogAgent;
 use serde_json::Value;
 use session_core::api::{TranscriptCursor, TranscriptPart};
@@ -35,6 +37,8 @@ mod claude;
 mod codex;
 #[path = "copilot/places.rs"]
 mod copilot;
+#[path = "cursor-agent/places.rs"]
+mod cursor;
 #[path = "open-code/places.rs"]
 mod opencode;
 #[path = "pi/places.rs"]
@@ -120,7 +124,7 @@ impl PlaceScan {
                 }
                 let from = self.cursor.as_ref().map_or(0, |cursor| cursor.offset);
                 let (cwd, home) = (&mut self.cwd, self.home.as_deref());
-                let read = scan_log(path, from, budget, |entry, _| {
+                let read = scan(*agent, path, from, budget, |entry, _| {
                     let at = entry
                         .get("timestamp")
                         .and_then(Value::as_str)
@@ -130,6 +134,7 @@ impl PlaceScan {
                         LogAgent::Codex => codex::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Pi => pi::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Copilot => copilot::entry(entry, cwd, home, at, &mut touches),
+                        LogAgent::Cursor => cursor::entry(entry, cwd, home, at, &mut touches),
                     }
                 });
                 let Some((offset, more)) = read else {
@@ -177,6 +182,8 @@ pub fn agent_data_dirs() -> Vec<PathBuf> {
         crate::resume::copilot_home(),
         crate::resume::opencode_database().and_then(|db| db.parent().map(Path::to_path_buf)),
         crate::resume::pi_agent_dir(),
+        crate::resume::cursor_config_dir(),
+        crate::resume::cursor_data_dir(),
     ]
     .into_iter()
     .flatten()

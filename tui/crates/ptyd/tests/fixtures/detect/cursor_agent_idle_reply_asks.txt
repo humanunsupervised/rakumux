@@ -1,0 +1,22 @@
+# Cursor's agent CLI after a turn whose reply asks a question in the words of
+# an approval prompt: no options under it, so nothing waits. Hand-written.
+agent: cursor-agent
+expect: idle
+process: MainThread
+cmdline: /home/me/.local/bin/agent --use-system-ca /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/index.js
+exe: /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/node
+alternate_screen: false
+ms_since_output: 9000
+---
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ tidy the build scripts                                                   │
+ └──────────────────────────────────────────────────────────────────────────┘
+
+  The old release.sh is unused now. Delete this file? I left it in place
+  until you say so.
+
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ → Add a follow-up                                                        │
+ └──────────────────────────────────────────────────────────────────────────┘
+  Auto · 21.0%
+  / commands · @ files · ! shell

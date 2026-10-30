@@ -1,0 +1,24 @@
+# Cursor's agent CLI signed out, started as `agent` (2026.10.22): captured
+# from the real CLI in a throwaway Rakumux session (80x24). It waits for a key
+# to start signing in.
+agent: cursor-agent
+expect: blocked
+process: MainThread
+cmdline: /home/me/.local/bin/agent --use-system-ca /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/index.js
+exe: /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/node
+alternate_screen: false
+ms_since_output: 5000
+---
+
+
+
+
+
+
+
+
+
+
+                           Cursor Agent
+                           v2026.10.22-27dcf5f
+                           Press any key to log in...

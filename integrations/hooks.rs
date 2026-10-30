@@ -11,6 +11,8 @@ mod claude;
 mod codex;
 #[path = "copilot/hooks.rs"]
 mod copilot;
+#[path = "cursor-agent/hooks.rs"]
+mod cursor;
 #[path = "pi/hooks.rs"]
 mod pi;
 
@@ -19,6 +21,7 @@ pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, S
         "claude" => claude::normalize(input),
         "codex" => codex::normalize(input),
         "copilot" => copilot::normalize(input),
+        "cursor-agent" => cursor::normalize(input),
         "opencode" => {
             let update: ActivityUpdate = serde_json::from_value(input.clone())
                 .map_err(|_| "invalid OpenCode activity update")?;
@@ -46,6 +49,8 @@ pub fn report(agent: &str, input: &Value) -> Result<Option<Report>, String> {
     let child = input.get("agent_id").and_then(Value::as_str).is_some();
     let working_directory = if child || input["hook_event_name"] == "SessionEnd" {
         None
+    } else if agent == "cursor-agent" {
+        cursor::working_directory(input)
     } else if matches!(agent, "opencode" | "pi") {
         // Their plugin or extension names the folder itself.
         input
@@ -139,6 +144,7 @@ pub fn config(agent: &str) -> Option<&'static str> {
         "claude" => Some(include_str!("claude-code/hooks.json")),
         "codex" => Some(include_str!("codex/hooks.json")),
         "copilot" => Some(include_str!("copilot/hooks.json")),
+        "cursor-agent" => Some(include_str!("cursor-agent/hooks.json")),
         _ => None,
     }
 }
@@ -343,8 +349,9 @@ mod tests {
         assert_eq!(host("claude", &claude, env("GROK_AGENT", "1")), "claude");
         // Only Claude Code's hooks are run elsewhere; other adapters stay theirs.
         assert_eq!(host("codex", &cursor, env("COPILOT_CLI", "1")), "codex");
-        // Reported as that agent: an adapter of its own, never Claude Code's.
-        assert!(receive("claude", None, cursor, no_vars).is_err());
+        // Reported as that agent: an adapter of its own, never Claude Code's
+        // (Cursor's reads Cursor's step names, `preToolUse`).
+        assert!(receive("claude", None, cursor, no_vars).unwrap().is_none());
         let report = receive("claude", None, claude, no_vars).unwrap().unwrap();
         assert_eq!(report.activity.unwrap().agent, "claude");
     }

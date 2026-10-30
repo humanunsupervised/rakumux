@@ -1,0 +1,19 @@
+# Cursor's agent CLI asking its clarifying questions (AskQuestion): its input
+# box's placeholder (2026.10.22 bundle; layout hand-written).
+agent: cursor-agent
+expect: blocked
+process: MainThread
+cmdline: /home/me/.local/bin/agent --use-system-ca /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/index.js
+exe: /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/node
+alternate_screen: false
+ms_since_output: 3000
+---
+  ⬢ AskQuestion  Clarifying Questions (2)
+
+    Which database should the tests use?
+    › [ ] SQLite
+      [ ] Postgres
+
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ → Answer questions (Enter to select/next, Esc to skip)                   │
+ └──────────────────────────────────────────────────────────────────────────┘

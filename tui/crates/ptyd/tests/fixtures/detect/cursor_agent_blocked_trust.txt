@@ -1,0 +1,20 @@
+# Cursor's agent CLI asking to trust a new folder (strings from the
+# 2026.10.22 bundle; layout hand-written).
+agent: cursor-agent
+expect: blocked
+process: MainThread
+cmdline: /home/me/.local/bin/agent --use-system-ca /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/index.js
+exe: /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/node
+alternate_screen: false
+ms_since_output: 4000
+---
+  Cursor Agent
+  v2026.10.22-27dcf5f
+
+  ⚠ Workspace Trust Required
+
+  Do you trust the contents of this directory?
+  ~/demo
+
+  → Trust this workspace
+    Quit

@@ -34,6 +34,11 @@
 //!   native binary, the npm loader's child); otherwise the one it holds open
 //!   (`session-state/<id>/inuse.<pid>.lock`), its hooks' or its `--resume`:
 //!   `copilot <flags> --resume=<id>`. Copilot restores the session's folder.
+//! - **Cursor** (`agent`, `cursor-agent`): the chat whose `store.db` the
+//!   process has open (Linux), the one its hooks report, else the folder's
+//!   newest in `<config>/chats/<md5 of the folder>/`: `cursor-agent <flags>
+//!   --resume <id>`. Its commands that aren't chats (`agent login`) are typed
+//!   back, not run.
 //!
 //! Any agent's bound conversation reaches its resume plan
 //! ([`Context::bound_conversation`]): the newest the session bound for that
@@ -56,6 +61,8 @@ mod claude;
 mod codex;
 #[path = "copilot/recovery.rs"]
 mod copilot;
+#[path = "cursor-agent/recovery.rs"]
+mod cursor;
 #[path = "open-code/recovery.rs"]
 mod opencode;
 #[path = "pi/recovery.rs"]
@@ -71,6 +78,8 @@ pub(crate) use copilot::{
     copilot_argv_conversation, copilot_home, copilot_log_dir, copilot_open_sessions, copilot_pids,
     copilot_process_log, is_copilot_id, read_process_log, Shown,
 };
+use cursor::cursor_plan;
+pub(crate) use cursor::{cursor_chat, cursor_config_dir, cursor_data_dir};
 use opencode::opencode_resume;
 pub(crate) use opencode::{opencode_database, opencode_recent_session};
 use pi::pi_resume;
@@ -110,6 +119,7 @@ pub fn plan(ctx: &Context<'_>) -> Plan {
         Some("opencode") => Some(opencode_resume(process, ctx.cwd, ctx.bound_conversation)),
         Some("pi") => Some(pi_resume(ctx.cwd, ctx.bound_conversation)),
         Some("copilot") => Some(copilot_resume(process, ctx.bound_conversation)),
+        Some("cursor-agent") => return cursor_plan(process, ctx.cwd, ctx.bound_conversation),
         _ => None,
     };
     match resumed {

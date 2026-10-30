@@ -16,6 +16,9 @@
 //!   folder's newest one.
 //! - **GitHub Copilot**: `$COPILOT_HOME/session-state/<id>/events.jsonl`, the
 //!   conversation being the one its process log says is on screen.
+//! - **Cursor**: its chat's transcript
+//!   (`<data>/projects/<folder>/agent-transcripts/<chat>/<chat>.jsonl`), for
+//!   the chat whose store the process has open, else the one its hooks name.
 //!
 //! For the agent feed, the follower also keeps the current turn's reply
 //! whole ([`Reply`]): what the agent said after its last tool call, or the
@@ -38,6 +41,8 @@ mod claude;
 mod codex;
 #[path = "copilot/output.rs"]
 mod copilot;
+#[path = "cursor-agent/output.rs"]
+mod cursor;
 #[path = "open-code/output.rs"]
 mod opencode;
 #[path = "pi/output.rs"]
@@ -128,6 +133,7 @@ pub enum LogAgent {
     Codex,
     Pi,
     Copilot,
+    Cursor,
 }
 
 /// Where an agent's output is read from.
@@ -197,6 +203,8 @@ impl Follower {
             "codex" => log(LogAgent::Codex, None, codex::log(process)?),
             // Its file is found on the first read.
             "pi" => log(LogAgent::Pi, None, PathBuf::new()),
+            // Its chat is found on each read (`cursor::switch`).
+            "cursor-agent" => log(LogAgent::Cursor, None, PathBuf::new()),
             "opencode" | "opencode2" => Source::OpenCode {
                 database: crate::resume::opencode_database()?,
                 cwd: crate::procinfo::cwd_of(process.pid),
@@ -222,7 +230,7 @@ impl Follower {
     }
 
     /// The agent as replies and turns name it: `claude-code`, `codex`,
-    /// `opencode`, `pi` or `copilot`.
+    /// `opencode`, `pi`, `copilot` or `cursor-agent`.
     pub fn agent(&self) -> &'static str {
         match &self.source {
             Source::Log {
@@ -241,6 +249,10 @@ impl Follower {
                 agent: LogAgent::Copilot,
                 ..
             } => "copilot",
+            Source::Log {
+                agent: LogAgent::Cursor,
+                ..
+            } => "cursor-agent",
             Source::OpenCode { .. } => "opencode",
         }
     }
@@ -250,7 +262,7 @@ impl Follower {
     pub fn conversation(&self) -> Option<String> {
         let id = match &self.source {
             Source::Log {
-                agent: LogAgent::Claude | LogAgent::Pi | LogAgent::Copilot,
+                agent: LogAgent::Claude | LogAgent::Pi | LogAgent::Copilot | LogAgent::Cursor,
                 conversation,
                 ..
             } => conversation.clone()?,
@@ -354,6 +366,12 @@ impl Follower {
                     LogAgent::Copilot => self.foreground.as_mut().is_some_and(|foreground| {
                         foreground.switch(bound, conversation, path, offset, partial)
                     }),
+                    // Its chat is found again on each read; its transcript is
+                    // written whole now and then.
+                    LogAgent::Cursor => {
+                        cursor::switch(self.pid, bound, conversation, path, offset, partial)
+                            || cursor::realign(path, offset, partial)
+                    }
                     LogAgent::Codex => false,
                 };
                 if switched {
@@ -367,6 +385,7 @@ impl Follower {
                         LogAgent::Codex => codex::may_be_typed(line),
                         LogAgent::Pi => pi::may_be_typed(line),
                         LogAgent::Copilot => copilot::may_be_typed(line),
+                        LogAgent::Cursor => cursor::may_be_typed(line),
                     };
                     candidate
                         && serde_json::from_slice::<Value>(line)
@@ -376,11 +395,21 @@ impl Follower {
                                 LogAgent::Codex => codex::typed(&entry),
                                 LogAgent::Pi => pi::typed(&entry),
                                 LogAgent::Copilot => copilot::typed(&entry),
+                                LogAgent::Cursor => cursor::typed(&entry),
                             })
                             .is_some_and(|typed| prompt_line(&typed).is_some())
                 };
                 let Some(lines) = read(path, offset, partial, &typed) else {
                     return false;
+                };
+                // Cursor's lines have no times: what a read finds is as new
+                // as the file.
+                let written = match agent {
+                    LogAgent::Cursor => {
+                        cursor::hold_turn_end(&lines, offset, partial);
+                        cursor::modified_ms(path)
+                    }
+                    _ => None,
                 };
                 let entries: Vec<(u64, Value)> = lines
                     .iter()
@@ -393,13 +422,15 @@ impl Follower {
                         LogAgent::Codex => (codex::typed(entry), codex::messages(entry)),
                         LogAgent::Pi => (pi::typed(entry), pi::messages(entry)),
                         LogAgent::Copilot => (copilot::typed(entry), copilot::messages(entry)),
+                        LogAgent::Cursor => (cursor::typed(entry), cursor::messages(entry)),
                     };
                     let typed = typed.filter(|typed| prompt_line(typed).is_some());
                     if typed.is_some() || !messages.is_empty() {
                         let at = entry
                             .get("timestamp")
                             .and_then(Value::as_str)
-                            .and_then(transcript::timestamp);
+                            .and_then(transcript::timestamp)
+                            .or(written);
                         self.last_at = self.last_at.max(at);
                     }
                     if let Some(typed) = typed {
@@ -413,6 +444,9 @@ impl Follower {
                         LogAgent::Codex => codex::reply_step(entry),
                         LogAgent::Pi => pi::reply_step(entry),
                         LogAgent::Copilot => copilot::reply_step(entry),
+                        LogAgent::Cursor => {
+                            cursor::reply_step(entry, *position, conversation.as_deref())
+                        }
                     };
                     self.reply = next_reply(self.reply.take(), step, *position);
                 }
@@ -424,6 +458,7 @@ impl Follower {
                     LogAgent::Codex => (newest(codex::line), newest(codex::prompt)),
                     LogAgent::Pi => (newest(pi::line), newest(pi::prompt)),
                     LogAgent::Copilot => (newest(copilot::line), newest(copilot::prompt)),
+                    LogAgent::Cursor => (newest(cursor::line), newest(cursor::prompt)),
                 }
             }
             Source::OpenCode {
