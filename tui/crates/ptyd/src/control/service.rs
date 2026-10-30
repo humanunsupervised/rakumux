@@ -23,7 +23,7 @@ use super::policy::{self, Op, Target};
 use super::registry::{
     self, ProjectRecord, ProjectRemoval, ProjectSessions, Registry, SessionRecord,
 };
-use super::replies::{CapturedKeys, ReplyDue, ReplyRing, DONE_LAG_MS};
+use super::replies::{CapturedKeys, ReplyDue, ReplyRing};
 use super::saved;
 use super::waits::{self, Observed, Outcome};
 use super::{ControlConfig, Detector};
@@ -3042,10 +3042,11 @@ impl Inner {
     /// Capture the replies of turns that ended with the next turn's start
     /// ([`crate::agent_output::Finished`]), in order: an agent that queues
     /// or steers in what was typed during a turn starts on it at once, often
-    /// before its session is seen waiting. A turn whose end was seen
-    /// (`Done` after it began, by the time the next began) is the due
-    /// reply's: captured as that when one is due, else left (capture was
-    /// off, or its wait ran out). Never for a private session, never a
+    /// before its session is seen waiting. A turn whose end was seen (the
+    /// last `Done` came after it began and before the next one did: it was
+    /// the newest turn then) is the due reply's: captured as that when one
+    /// is due, else left (capture was off, or its wait ran out); a `Done`
+    /// after the next turn began is that turn's. Never for a private session, never a
     /// reply captured before, and never a later turn's for one that ended
     /// without its own (the follower keeps only a turn's own reply).
     fn capture_finished(
@@ -3075,7 +3076,7 @@ impl Inner {
             let ended = finished.ended.unwrap_or(now).max(at);
             let seen_ending = live
                 .done_at
-                .is_some_and(|done| done >= began && done <= ended.saturating_add(DONE_LAG_MS));
+                .is_some_and(|done| done >= began && done < ended);
             let finished_at = match (seen_ending, live.reply_due) {
                 (false, _) => at,
                 (true, Some(due)) => {

@@ -787,10 +787,10 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   follower's first read, a conversation it switched to, or a log read again from its start or
   past a gap), and only the turn's own reply: an interrupted or failed one, or one that went on
   with a tool call (a prompt steered in between tool steps), has none, and never takes the next
-  turn's. One whose end was seen (`Done` after its last message, by the time the next began, or
-  within 500 ms after: `DONE_LAG_MS`) is the `Done` capture's: taken as the due reply (at
-  `Done`'s time) when one is due, else left (capture was off, or its wait ran out), so turning
-  capture on never captures an earlier turn late. OpenCode, read from its database, gives a
+  turn's. One whose end was seen (the last `Done` came after it began and before the next turn
+  did: it was the newest then) is the `Done` capture's: taken as the due reply (at `Done`'s
+  time) when one is due, else left (capture was off, or its wait ran out), so turning capture on
+  never captures an earlier turn late; a `Done` after the next turn began is that one's. OpenCode, read from its database, gives a
   turn the next prompt ended its last text block with no tool block after it, once two reads
   agree (`opencode::turn_reply`). Never twice: a session's last 16 captured keys are kept.
 - Agent conversations (user only, capability `session.transcript`;

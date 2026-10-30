@@ -18,9 +18,6 @@ pub(crate) const REPLY_TTL_MS: i64 = 60 * 60 * 1000;
 /// How long after a turn finishes its reply may still reach the log (ms).
 pub(crate) const REPLY_WAIT_MS: i64 = 10_000;
 
-/// How long after an agent's turn ended (the next one began) its session
-/// may still be seen finishing it (`Done`, from its screen) (ms).
-pub(crate) const DONE_LAG_MS: i64 = 500;
 /// How many of a session's captured replies are remembered, so none is
 /// captured twice.
 const CAPTURED_KEYS: usize = 16;

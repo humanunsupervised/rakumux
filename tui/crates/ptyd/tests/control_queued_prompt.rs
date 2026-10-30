@@ -457,3 +457,35 @@ fn a_turn_seen_ending_before_its_reply_reached_the_log_and_the_next_prompt_ended
     assert_eq!(answer[0].text, "pong 4242");
     assert!(answer[0].finished_at > seen_done);
 }
+
+#[test]
+fn a_queued_turn_over_before_the_log_was_read_again_gives_both_replies_each_its_own() {
+    const PID: u32 = 4346;
+    const CONVERSATION: &str = "0d5f7b93-4e6a-4c8d-9f2b-3a4b5c6d7e8f";
+    let mut log = conversation_log(PID, CONVERSATION);
+    let (h, id, events) = claude_session(PID);
+    typed(&mut log, "u1", "Fix the parser");
+    working_until(&h, &id, "the prompt read", |view| {
+        (view.user_prompt.as_deref() == Some("Fix the parser")).then_some(())
+    });
+    // Its answer, the prompt queued meanwhile and that one's answer, all
+    // before the log is read again; then it waits: that `Done` is the
+    // queued turn's, not the first's.
+    let first_at = said(&mut log, "a1", "Fixed it.");
+    let (at, _) = stamp();
+    entry(
+        &mut log,
+        json!({"type": "attachment", "uuid": "q1", "timestamp": at,
+            "attachment": {"type": "queued_command", "prompt": "MIDTURN ping 4242",
+                "commandMode": "prompt", "origin": {"kind": "human"}}}),
+    );
+    said(&mut log, "a2", "pong 4242");
+    // (A moment later, so the times differ to the millisecond.)
+    std::thread::sleep(Duration::from_millis(20));
+    finishes(&h, &id);
+    let got = replies_in(&events, Duration::from_secs(3));
+    let texts: Vec<&str> = got.iter().map(|reply| reply.text.as_str()).collect();
+    assert_eq!(texts, ["Fixed it.", "pong 4242"], "{got:?}");
+    assert_eq!(got[0].finished_at, first_at);
+    assert!(got[1].finished_at > got[0].finished_at);
+}
