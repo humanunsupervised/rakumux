@@ -32,6 +32,8 @@
 use crate::host::ProcessInfo;
 use session_core::model::Lifecycle;
 
+#[path = "amp/detection.rs"]
+mod amp;
 #[path = "claude-code/detection.rs"]
 mod claude;
 #[path = "codex/detection.rs"]
@@ -50,6 +52,7 @@ mod kimi;
 mod opencode;
 #[path = "pi/detection.rs"]
 mod pi;
+use amp::PROFILE as AMP;
 use claude::PROFILE as CLAUDE;
 #[cfg(test)]
 use claude::{is_claude_activity_line, is_numbered_yes_option};
@@ -187,7 +190,7 @@ static PROFILES: &[Profile] = &[
     COPILOT,
     GROK,
     KIMI,
-    generic("amp", &["amp"], &[&["@sourcegraph", "amp"]]),
+    AMP,
     DROID,
     generic("crush", &["crush"], &[&["@charmland", "crush"]]),
     generic("kiro", &["kiro-cli"], &[]),
@@ -1432,6 +1435,7 @@ mod tests {
             ("grok", &[Working, Blocked, Idle]),
             ("kimi", &[Working, Blocked, Idle]),
             ("droid", &[Working, Blocked, Idle]),
+            ("amp", &[Working, Blocked, Idle]),
         ];
         for (agent, states) in required {
             for state in *states {

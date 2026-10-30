@@ -1,4 +1,6 @@
 //! Agent markers that must not leak from a parent terminal into a new session.
+#[path = "amp/environment.rs"]
+mod amp;
 #[path = "claude-code/environment.rs"]
 mod claude;
 #[path = "codex/environment.rs"]
@@ -32,6 +34,7 @@ pub(crate) fn inherited_marker(name: &str) -> bool {
         || grok::VARIABLES.contains(&name)
         || kimi::VARIABLES.contains(&name)
         || droid::VARIABLES.contains(&name)
+        || amp::VARIABLES.contains(&name)
         || HOOK_HOSTS.contains(&name)
 }
 

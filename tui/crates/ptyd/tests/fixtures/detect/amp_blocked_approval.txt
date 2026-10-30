@@ -1,0 +1,20 @@
+# Amp asking to run a tool (an `amp.permissions` rule with action "ask").
+# Hand-written from Amp's own dialog strings: Amp needs a sign-in to draw it.
+agent: amp
+expect: blocked
+process: amp
+cmdline: /home/me/.amp/bin/amp
+exe: /home/me/.amp/bin/amp
+alternate_screen: true
+ms_since_output: 300
+---
+  run the migration
+
+  Bash  npm run migrate
+
+  Waiting for approval
+  › Allow Once
+    Always Allow for Me
+    Always Allow for Workspace
+    Reject
+    Reject with feedback

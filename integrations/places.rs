@@ -32,6 +32,9 @@
 //! - **Droid**: its session's directories (the summary's `cwd` and
 //!   `lastCwd`), and its tool calls' file paths, search roots, patches and
 //!   `Execute` commands.
+//! - **Amp**: each message's workspace, and its tool calls' file paths (the
+//!   files Amp says they change, when the plugin recorded them), search
+//!   roots and commands, from the copy of the thread its plugin keeps.
 
 use super::transcript::{scan, TranscriptSource};
 use super::LogAgent;
@@ -39,6 +42,8 @@ use serde_json::Value;
 use session_core::api::{TranscriptCursor, TranscriptPart};
 use std::path::{Component, Path, PathBuf};
 
+#[path = "amp/places.rs"]
+mod amp;
 #[path = "claude-code/places.rs"]
 mod claude;
 #[path = "codex/places.rs"]
@@ -154,6 +159,7 @@ impl PlaceScan {
                         LogAgent::Grok => grok::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Kimi => kimi::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Droid => droid::entry(entry, cwd, home, at, &mut touches),
+                        LogAgent::Amp => amp::entry(entry, cwd, home, at, &mut touches),
                     }
                 });
                 let Some((offset, more)) = read else {
@@ -211,6 +217,7 @@ pub fn agent_data_dirs() -> Vec<PathBuf> {
     ]
     .into_iter()
     .flatten()
+    .chain(crate::resume::amp_data_dirs())
     .collect();
     // Claude Code's per-user scratch space: task output, scratchpads.
     // SAFETY: getuid has no preconditions and can't fail.

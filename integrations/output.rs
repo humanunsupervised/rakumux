@@ -29,6 +29,8 @@
 //! - **Droid**: `~/.factory/sessions/<folder>/<conversation>.jsonl`, the
 //!   conversation its hooks report, else the folder's newest one; positions
 //!   count from the end of its first line, which Droid rewrites.
+//! - **Amp**: the copy of the thread its Rakumux plugin bound to the
+//!   session, which the plugin keeps under Amp's cache (Amp keeps none).
 //!
 //! For the agent feed, the follower also keeps the current turn's reply
 //! whole ([`Reply`]): what the agent said after its last tool call, or the
@@ -45,6 +47,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+#[path = "amp/output.rs"]
+mod amp;
 #[path = "claude-code/output.rs"]
 mod claude;
 #[path = "codex/output.rs"]
@@ -155,6 +159,8 @@ pub enum LogAgent {
     /// Droid's session file, whose first line is rewritten in place: its
     /// offsets and positions count from the end of that line.
     Droid,
+    /// The copy of a thread the Rakumux plugin for Amp keeps.
+    Amp,
 }
 
 /// Where an agent's output is read from.
@@ -205,8 +211,8 @@ pub struct Follower {
 
 impl Follower {
     /// Where `process`'s output can be read, when it runs `agent` (as
-    /// detected, `claude`, `codex`, `opencode`, `copilot` or `grok`, or as
-    /// its hooks name it).
+    /// detected, `claude`, `codex`, `opencode`, `copilot`, `grok` or `amp`,
+    /// or as its hooks name it).
     pub fn locate(process: &ProcessInfo, agent: &str) -> Option<Self> {
         let mut foreground = None;
         let log = |agent, conversation, path| Source::Log {
@@ -236,6 +242,8 @@ impl Follower {
             "kimi" => log(LogAgent::Kimi, None, PathBuf::new()),
             // Found on the first read, from its hooks or its folder.
             "droid" => log(LogAgent::Droid, None, PathBuf::new()),
+            // The thread is the one bound: `follow` opens its copy.
+            "amp" => log(LogAgent::Amp, None, amp::threads_dir()?),
             "opencode" | "opencode2" => Source::OpenCode {
                 database: crate::resume::opencode_database()?,
                 cwd: crate::procinfo::cwd_of(process.pid),
@@ -261,8 +269,8 @@ impl Follower {
     }
 
     /// The agent as replies and turns name it: `claude-code`, `codex`,
-    /// `opencode`, `pi`, `copilot`, `cursor-agent`, `grok`, `kimi` or
-    /// `droid`.
+    /// `opencode`, `pi`, `copilot`, `cursor-agent`, `grok`, `kimi`, `droid`
+    /// or `amp`.
     pub fn agent(&self) -> &'static str {
         match &self.source {
             Source::Log {
@@ -297,12 +305,18 @@ impl Follower {
                 agent: LogAgent::Droid,
                 ..
             } => "droid",
+            Source::Log {
+                agent: LogAgent::Amp,
+                ..
+            } => "amp",
             Source::OpenCode { .. } => "opencode",
         }
     }
 
-    /// The conversation followed: Claude Code's or Pi's, Codex's thread from
-    /// its `rollout-<time>-<thread>.jsonl`, or the OpenCode session last read.
+    /// The conversation followed: the one its log was found for (Claude
+    /// Code's, Pi's, …), Codex's thread from its
+    /// `rollout-<time>-<thread>.jsonl`, the OpenCode session last read, or
+    /// the Amp thread bound.
     pub fn conversation(&self) -> Option<String> {
         let id = match &self.source {
             Source::Log {
@@ -312,7 +326,8 @@ impl Follower {
                     | LogAgent::Copilot
                     | LogAgent::Cursor
                     | LogAgent::Kimi
-                    | LogAgent::Droid,
+                    | LogAgent::Droid
+                    | LogAgent::Amp,
                 conversation,
                 ..
             } => conversation.clone()?,
@@ -436,11 +451,16 @@ impl Follower {
                     LogAgent::Droid => {
                         droid::switch(self.pid, bound, conversation, path, offset, partial)
                     }
+                    LogAgent::Amp => amp::switch(bound, conversation, path, offset, partial),
                     LogAgent::Codex => false,
                 };
                 if switched {
                     self.turn.begin(None);
                     self.reply = None;
+                }
+                // Amp's copy is read only once a thread is bound.
+                if agent == LogAgent::Amp && conversation.is_none() {
+                    return false;
                 }
                 // What the user typed: a turn's start.
                 let typed = |line: &[u8]| {
@@ -453,6 +473,7 @@ impl Follower {
                         LogAgent::Grok => grok::may_be_typed(line),
                         LogAgent::Kimi => kimi::may_be_typed(line),
                         LogAgent::Droid => droid::may_be_typed(line),
+                        LogAgent::Amp => amp::may_be_typed(line),
                     };
                     candidate
                         && serde_json::from_slice::<Value>(line)
@@ -466,6 +487,7 @@ impl Follower {
                                 LogAgent::Grok => grok::typed(&entry),
                                 LogAgent::Kimi => kimi::typed(&entry),
                                 LogAgent::Droid => droid::typed(&entry),
+                                LogAgent::Amp => amp::typed(&entry),
                             })
                             .is_some_and(|typed| prompt_line(&typed).is_some())
                 };
@@ -500,6 +522,7 @@ impl Follower {
                         LogAgent::Grok => (grok::typed(entry), grok::messages(entry)),
                         LogAgent::Kimi => (kimi::typed(entry), kimi::messages(entry)),
                         LogAgent::Droid => (droid::typed(entry), droid::messages(entry)),
+                        LogAgent::Amp => (amp::typed(entry), amp::messages(entry)),
                     };
                     let typed = typed.filter(|typed| prompt_line(typed).is_some());
                     if typed.is_some() || !messages.is_empty() {
@@ -523,6 +546,7 @@ impl Follower {
                         LogAgent::Grok => grok::reply_step(entry),
                         LogAgent::Kimi => kimi::reply_step(entry),
                         LogAgent::Droid => droid::reply_step(entry),
+                        LogAgent::Amp => amp::reply_step(entry),
                     };
                     self.reply = next_reply(self.reply.take(), step, *position);
                 }
@@ -538,6 +562,7 @@ impl Follower {
                     LogAgent::Grok => (newest(grok::line), newest(grok::prompt)),
                     LogAgent::Kimi => (newest(kimi::line), newest(kimi::prompt)),
                     LogAgent::Droid => (newest(droid::line), newest(droid::prompt)),
+                    LogAgent::Amp => (newest(amp::line), newest(amp::prompt)),
                 }
             }
             Source::OpenCode {

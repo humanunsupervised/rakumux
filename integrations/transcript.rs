@@ -25,6 +25,8 @@
 //! - **Droid**: one message per session-file line, at its offset past the
 //!   file's first line (which Droid rewrites); tool results are the `tool`
 //!   role's.
+//! - **Amp**: one message per line of the copy of the thread its Rakumux
+//!   plugin keeps, at its byte offset; tool results are the `tool` role's.
 //!
 //! Text is cut at [`MAX_PART_BYTES`] per part and otherwise left as the
 //! agent wrote it: the caller cleans it before it leaves the machine.
@@ -39,6 +41,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+#[path = "amp/transcript.rs"]
+mod amp;
 #[path = "claude-code/transcript.rs"]
 mod claude;
 #[path = "codex/transcript.rs"]
@@ -82,7 +86,7 @@ pub enum TranscriptSource {
 
 impl TranscriptSource {
     /// `claude-code`, `codex`, `opencode`, `pi`, `copilot`, `cursor-agent`,
-    /// `grok`, `kimi` or `droid`.
+    /// `grok`, `kimi`, `droid` or `amp`.
     pub fn agent(&self) -> &'static str {
         match self {
             TranscriptSource::Log {
@@ -117,6 +121,10 @@ impl TranscriptSource {
                 agent: LogAgent::Droid,
                 ..
             } => "droid",
+            TranscriptSource::Log {
+                agent: LogAgent::Amp,
+                ..
+            } => "amp",
             TranscriptSource::OpenCode { .. } => "opencode",
         }
     }
@@ -199,6 +207,7 @@ fn read_log(
             LogAgent::Grok => grok::message(entry, start),
             LogAgent::Kimi => kimi::message(entry, start),
             LogAgent::Droid => droid::message(entry, start),
+            LogAgent::Amp => amp::message(entry, start),
         };
         messages.extend(message);
     })?;

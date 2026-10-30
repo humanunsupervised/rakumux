@@ -1,0 +1,13 @@
+# Amp at work without the plugin: a braille spinner in the title (its title
+# controller's busy frames). Hand-written: Amp needs a sign-in to draw its TUI.
+agent: amp
+expect: working
+process: node
+cmdline: node /home/me/.npm-global/lib/node_modules/@sourcegraph/amp/node_modules/@ampcode/cli/cli-wrapper.cjs
+title: ⠋ demo - amp
+alternate_screen: true
+ms_since_output: 1500
+---
+  fix the failing parser tests
+
+  I'll look at the parser tests first.

@@ -5,6 +5,8 @@ use session_core::activity::{ActivityEvent, ActivityPhase, ActivityUpdate, ACTIV
 use session_core::api::{AgentWorkingDirectory, Report};
 use std::path::PathBuf;
 
+#[path = "amp/hooks.rs"]
+mod amp;
 #[path = "claude-code/hooks.rs"]
 mod claude;
 #[path = "codex/hooks.rs"]
@@ -40,6 +42,7 @@ pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, S
             Ok(Some(update))
         }
         "pi" => pi::normalize(input),
+        "amp" => amp::normalize(input),
         _ => Err("unknown hook adapter".into()),
     }
 }
@@ -81,6 +84,8 @@ pub fn report(agent: &str, input: &Value) -> Result<Option<Report>, String> {
                 Ok(context)
             })
             .transpose()?
+    } else if agent == "amp" {
+        amp::working_directory(input)?
     } else {
         input
             .get("cwd")

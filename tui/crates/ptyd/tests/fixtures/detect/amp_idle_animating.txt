@@ -1,0 +1,16 @@
+# Amp at rest: its TUI animates, so recent output alone isn't work.
+# Hand-written: Amp needs a sign-in to draw its TUI.
+agent: amp
+expect: idle
+process: amp
+cmdline: amp threads continue T-5f0c1d2e-3a4b-4c5d-8e9f-0a1b2c3d4e5f
+alternate_screen: true
+ms_since_output: 80
+---
+  fix the failing parser tests
+
+  The parser tests pass now: the tokenizer kept a trailing newline.
+
+  ╭──────────────────────────────────────────────────────────╮
+  │                                                          │
+  ╰──────────────────────────────────────────────────────────╯

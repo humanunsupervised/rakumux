@@ -1,5 +1,7 @@
 //! Provider-owned presentation metadata; shared UI code consumes only a colour.
 use ratatui::style::Color;
+#[path = "amp/presentation.rs"]
+mod amp;
 #[path = "claude-code/presentation.rs"]
 mod claude;
 #[path = "codex/presentation.rs"]
@@ -30,6 +32,7 @@ pub(super) fn color(agent: &str) -> Option<Color> {
         "pi" => Some(pi::color()),
         "grok" => Some(grok::color()),
         "kimi" => Some(kimi::color()),
+        "amp" => Some(amp::color()),
         _ => None,
     }
 }

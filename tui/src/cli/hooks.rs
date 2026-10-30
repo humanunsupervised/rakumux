@@ -22,6 +22,7 @@ pub(super) fn configuration(
             }
             HookAgent::Pi => "Pi uses `rakumux-mcp pi-plugin --install` instead".into(),
             HookAgent::Kimi => "Kimi Code uses `rakumux-mcp kimi-plugin --install` instead".into(),
+            HookAgent::Amp => "Amp uses `rakumux-mcp amp-plugin --install` instead".into(),
             other => format!("{} has no hook configuration", other.name()),
         })
     })?;

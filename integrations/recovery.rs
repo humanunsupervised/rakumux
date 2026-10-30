@@ -50,6 +50,9 @@
 //! - **Droid**: the conversation its hooks report; otherwise the newest
 //!   top-level session file of the folder in `~/.factory/sessions`: `droid
 //!   <flags> --resume <id>`. Its other commands (`droid exec`, …) are typed.
+//! - **Amp**: the thread its Rakumux plugin bound to the session, else the
+//!   one the process continued, else Amp's last for the folder:
+//!   `amp threads continue <id | --last> <flags>`.
 //!
 //! Any agent's bound conversation reaches its resume plan
 //! ([`Context::bound_conversation`]): the newest the session bound for that
@@ -66,6 +69,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[path = "amp/recovery.rs"]
+mod amp;
 #[path = "claude-code/recovery.rs"]
 mod claude;
 #[path = "codex/recovery.rs"]
@@ -84,6 +89,8 @@ mod kimi;
 mod opencode;
 #[path = "pi/recovery.rs"]
 mod pi;
+use amp::amp_resume;
+pub(crate) use amp::{amp_cache_dir, amp_data_dirs};
 pub(crate) use claude::claude_config_dir;
 #[cfg(test)]
 use claude::claude_flags;
@@ -153,6 +160,7 @@ pub fn plan(ctx: &Context<'_>) -> Plan {
         Some("droid") if droid_is_interactive(process) => {
             Some(droid_resume(process, ctx.cwd, ctx.bound_conversation))
         }
+        Some("amp") => amp_resume(process, ctx.bound_conversation),
         _ => None,
     };
     match resumed {
