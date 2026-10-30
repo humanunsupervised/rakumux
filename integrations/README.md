@@ -125,7 +125,9 @@ and finished phases, and subagents still running after their parent's turn, are 
 second-guessed: the parent's screen waits for input while they work.
 One GitHub Copilot process can hold several conversations open (its sessions sidebar); only the
 one on screen (its process log says which, `output.rs`) is the session's. Hooks from one it holds
-open but doesn't show are left out, activity and working directory alike.
+open but doesn't show are left out, activity and working directory alike, and a conversation the
+sidebar switches away from takes its turn in progress and its unread reply along (its turn ending
+in the background is no finished reply here).
 An agent whose hooks report no approval prompts (Cursor: `preToolUse` fires before the prompt
 it may draw, and nothing after) sets `approvals_on_screen` in its detection profile: while its
 screen shows a prompt (`Blocked`), that wins over its hooks' busy state. Claude Code, Codex and

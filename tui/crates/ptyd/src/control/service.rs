@@ -2265,13 +2265,20 @@ impl Inner {
                 .and_then(|agent| state.bound_conversation(session_id, agent));
             (output, agent, bound)
         };
+        let mut left = None;
         let follower = match (process, agent) {
             (Some(process), Some(agent)) => {
                 let mut follower = follower
                     .filter(|follower| follower.pid() == process.pid)
                     .or_else(|| crate::agent_output::Follower::locate(process, &agent));
                 if let Some(follower) = follower.as_mut() {
+                    let before = follower.conversation();
                     follower.follow(bound.as_deref());
+                    // The conversation shown before went to the background.
+                    left = before.filter(|before| {
+                        follower.in_background(before)
+                            && follower.conversation().as_deref() != Some(before.as_str())
+                    });
                 }
                 follower
             }
@@ -2295,6 +2302,9 @@ impl Inner {
                 .map(|follower| follower.turn().clone())
                 .filter(|turn| turn.prompt.is_some() || turn.total > 0);
             live.output = follower;
+            if let Some(left) = left {
+                live.tracker.on_conversation_left(&left, now);
+            }
         }
         if let Some(at) = last_at.filter(|_| state.is_current(session_id, terminal)) {
             self.note_last_message(&mut state, session_id, at);

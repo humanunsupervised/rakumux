@@ -202,6 +202,26 @@ impl LifecycleTracker {
         self.recompute(now_ms)
     }
 
+    /// The agent stopped showing conversation `left` and shows another (GitHub
+    /// Copilot's sessions sidebar): its turn in progress, its unread reply and
+    /// its hook activity aren't the session's any more, as when hooks name a
+    /// new conversation (so its screen going idle isn't a finished reply).
+    /// What the screen showed was `left`'s: unknown until the next detection,
+    /// which comes with the same output and sets the lifecycle.
+    pub fn on_conversation_left(&mut self, left: &str, now_ms: i64) {
+        if self
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.conversation() == left)
+        {
+            self.activity = None;
+        }
+        self.in_turn = false;
+        self.done = false;
+        self.detected = Lifecycle::Unknown;
+        self.detected_since = now_ms;
+    }
+
     /// The session was seen: `Done` turns into `Idle`.
     pub fn on_touch(&mut self, now_ms: i64) -> bool {
         self.done = false;
@@ -522,6 +542,40 @@ mod tests {
             tracker.on_activity(&update, 2);
             assert_eq!(tracker.current(), Lifecycle::Idle);
         }
+    }
+
+    #[test]
+    fn a_conversation_the_agent_stopped_showing_takes_its_turn_along() {
+        use session_core::activity::ActivityPhase;
+        // Working in a sidebar chat, then another chat shown, idle.
+        let mut tracker = LifecycleTracker::default();
+        tracker.on_detection(detection(Lifecycle::Working), 0);
+        tracker.on_activity(&phase(ActivityPhase::Working), 1);
+        assert_eq!(tracker.current(), Lifecycle::Working);
+        tracker.on_conversation_left("root", 2);
+        // A tick before the screen is read again starts no turn.
+        tracker.tick(3);
+        tracker.on_detection(detection(Lifecycle::Idle), 4);
+        assert_eq!(tracker.current(), Lifecycle::Idle, "no finished reply");
+        assert!(tracker.activity().is_none());
+        // Its unread reply goes along too.
+        let mut tracker = LifecycleTracker::default();
+        tracker.on_detection(detection(Lifecycle::Working), 0);
+        tracker.on_detection(detection(Lifecycle::Idle), 1);
+        assert_eq!(tracker.current(), Lifecycle::Done);
+        tracker.on_conversation_left("root", 2);
+        tracker.on_detection(detection(Lifecycle::Idle), 3);
+        assert_eq!(tracker.current(), Lifecycle::Idle);
+        // The chat now shown working is a turn of its own.
+        tracker.on_detection(detection(Lifecycle::Working), 4);
+        tracker.on_detection(detection(Lifecycle::Idle), 5);
+        assert_eq!(tracker.current(), Lifecycle::Done);
+        // Another conversation's activity stays.
+        let mut tracker = LifecycleTracker::default();
+        tracker.on_activity(&phase(ActivityPhase::RunningTool), 0);
+        tracker.on_conversation_left("other", 1);
+        tracker.on_detection(detection(Lifecycle::Idle), 2);
+        assert_eq!(tracker.current(), Lifecycle::Working);
     }
 
     fn hook(event: session_core::activity::ActivityEvent) -> ActivityUpdate {

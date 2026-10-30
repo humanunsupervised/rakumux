@@ -38,7 +38,8 @@ To let Copilot drive sessions through MCP, see [mcp/README.md](../../mcp/README.
   `/new`, its sessions sidebar). The one on screen is the one its process log last registered
   (`~/.copilot/logs/process-<ms>-<pid>.log`, `Registering foreground session: <id>`); without that
   log (`--log-level none`), the one it holds open (`session-state/<id>/inuse.<pid>.lock`), its
-  hooks', then `--resume`. Hooks from a conversation it holds open but doesn't show are left out.
+  hooks', then `--resume`. Hooks from a conversation it holds open but doesn't show are left out,
+  and switching away from one takes its turn in progress and unread reply along.
 - **Resume.** `copilot <flags> --resume=<id>`, keeping the flags that shape a session
   (permissions, model, tools, MCP, `--add-dir`, …) and dropping a prompt, `--continue`, `-w`,
   `-C` and the rest. Copilot goes back to the conversation's own folder. A folder it wasn't told
@@ -96,7 +97,8 @@ cargo test -p rakumux-sensagent copilot --locked          # a reply written back
 The end-to-end test runs the real `copilot` in a session of the real daemon, offline
 (`COPILOT_OFFLINE`) against a scripted model it serves itself, with no account: detection,
 folder trust, working/needs input/done/idle from the hooks, the line, prompt, turn and reply,
-places, the whole conversation, a reply typed in with `session_submit`, and resume after a kill.
+places, the whole conversation, a reply typed in with `session_submit`, a second chat from the
+sidebar finishing in the background without marking the session done, and resume after a kill.
 
 ```bash
 cargo build --workspace

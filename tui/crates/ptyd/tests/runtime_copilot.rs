@@ -555,6 +555,75 @@ fn copilot_in_a_session_end_to_end() {
         Some(conversation.as_str())
     );
 
+    // A second chat from the sidebar, working while the first is shown again:
+    // its hooks aren't this session's (the second's finished turn doesn't
+    // make the first look done).
+    client.touch(&id).unwrap();
+    wait_view(&client, &id, "idle once read", |view| {
+        view.lifecycle == Lifecycle::Idle
+    });
+    keys(&client, &id, &["left"]);
+    std::thread::sleep(Duration::from_millis(700));
+    keys(&client, &id, &["left"]);
+    std::thread::sleep(Duration::from_millis(700));
+    client
+        .send(SendRequest {
+            id: id.clone(),
+            keys: Vec::new(),
+            text: Some("n".into()),
+        })
+        .unwrap();
+    // Followed at the next output: the prompt typed into it.
+    std::thread::sleep(Duration::from_millis(1500));
+    client
+        .submit(&id, "slow 8 hello from the second chat")
+        .unwrap();
+    let second = wait_view(&client, &id, "the second chat working", |view| {
+        view.lifecycle == Lifecycle::Working
+            && view
+                .agent_turn
+                .as_ref()
+                .and_then(|turn| turn.conversation_id.as_deref())
+                .is_some_and(|chat| chat != conversation)
+    })
+    .agent_turn
+    .unwrap()
+    .conversation_id
+    .unwrap();
+    keys(&client, &id, &["left"]);
+    std::thread::sleep(Duration::from_millis(700));
+    keys(&client, &id, &["down"]);
+    std::thread::sleep(Duration::from_millis(500));
+    keys(&client, &id, &["enter"]);
+    wait_view(&client, &id, "the first chat shown again", |view| {
+        view.agent_turn
+            .as_ref()
+            .and_then(|turn| turn.conversation_id.as_deref())
+            == Some(conversation.as_str())
+    });
+    let second_log = copilot_home.join(format!("session-state/{second}/events.jsonl"));
+    assert!(
+        wait_until(SLOW, || std::fs::read_to_string(&second_log).is_ok_and(
+            |log| log.contains("Mock reply: slow 8 hello from the second")
+        )),
+        "the second chat's turn never finished"
+    );
+    // Its agentStop hook has come and gone.
+    std::thread::sleep(Duration::from_secs(3));
+    let shown = wait_view(&client, &id, "the first chat idle", |view| {
+        view.lifecycle == Lifecycle::Idle
+    });
+    assert_eq!(
+        shown.agent_turn.unwrap().conversation_id.as_deref(),
+        Some(conversation.as_str()),
+        "the session's conversation is the one on screen"
+    );
+    std::thread::sleep(Duration::from_secs(2));
+    let view = client.get(&id).unwrap();
+    assert_eq!(view.lifecycle, Lifecycle::Idle);
+    assert!(view.activity.is_none(), "{:?}", view.activity);
+    keys(&client, &id, &["right"]);
+
     // Killed, then revived: the same conversation, resumed.
     let resume = wait_view(&client, &id, "its resume command", |view| {
         view.resume
@@ -585,12 +654,30 @@ fn copilot_in_a_session_end_to_end() {
         })
         .unwrap();
     trust(&client, &id);
-    let resumed = wait_view(&client, &id, "the conversation resumed", |view| {
+    // The log is read while the terminal shows output: a still screen is read
+    // again once something is typed.
+    let is_resumed = |view: &SessionView| {
         view.agent_turn
             .as_ref()
             .and_then(|turn| turn.conversation_id.as_deref())
             == Some(conversation.as_str())
-    });
+    };
+    for _ in 0..10 {
+        if client.get(&id).is_ok_and(|view| is_resumed(&view)) {
+            break;
+        }
+        client
+            .send(SendRequest {
+                id: id.clone(),
+                keys: Vec::new(),
+                text: Some("x".into()),
+            })
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(1200));
+        keys(&client, &id, &["backspace"]);
+        std::thread::sleep(Duration::from_millis(1200));
+    }
+    let resumed = wait_view(&client, &id, "the conversation resumed", is_resumed);
     assert_eq!(
         resumed.user_prompt.as_deref(),
         Some("a reply written back from the feed")
