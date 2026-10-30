@@ -80,11 +80,10 @@ conformance tests, not an HTTP server, database or local runtime.
   only a pending reply): `not_taken` when it was typed in but the agent's chat showed no new
   prompt within 30 seconds, or another one (its Enter lost, the text in a menu). The
   agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as
-  the reply's `response`; page entries carry `reply_to` and `thread`. Machines take replies
-  written elsewhere only when the user turned that on there (`not_accepted` otherwise). `from`
-  names the machine a reply was written on, for showing; a machine counts a reply as written
-  there only when it made the reply's `id` itself, so another machine naming it in `from` can't
-  get past that setting.
+  the reply's `response`; page entries carry `reply_to` and `thread`. A signed-in machine takes
+  replies wherever they were written; `not_accepted` comes only from older releases, which took
+  replies written elsewhere only while a setting of theirs was on. `from` names the machine a
+  reply was written on, for showing.
   Readers take a `failure` they don't know as a failure without a reason.
 - **Session messages:** on rakumux.com or a machine the user can also write to a session that
   has no answer to reply to yet (a new chat, or one whose newest answer is in another chat): a
@@ -132,7 +131,7 @@ conformance tests, not an HTTP server, database or local runtime.
   working tree where it changed files; no `branch` while its HEAD is detached), most recent first, each `{name, inside,
   branch?, worktree?, edited, last_at}`: `name` is its path in the session's folder when it's
   there (`inside`; `.` for the folder itself), else its last path component, never an absolute
-  path. Kept while the account's Feed switch is on. The upload also says what the machine
+  path. The upload also says what the machine
   handles beyond the first version of this contract (`capabilities`, at most 16 unique names
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
   fetches a reply's attachments and gives the agent their paths; `resources`, it sends what it
@@ -165,9 +164,10 @@ conformance tests, not an HTTP server, database or local runtime.
   two folders with one name), never a private session's, and starts the agent as its own user
   would. It reports `new-session-status` (only the request's own machine, only a pending
   request): `created` with the session it started (`{id, name}`), which its next session list
-  shows, or `failed` with why: `not_accepted` (a setting of its own, off unless its user turned
-  it on: then every request fails so), `folder_unknown` (no listed folder of that name now, or
-  several and `folder_session` doesn't say which) or `refused` (its daemon couldn't start it).
+  shows, or `failed` with why: `folder_unknown` (no listed folder of that name now, or several
+  and `folder_session` doesn't say which) or `refused` (its daemon couldn't start it);
+  `not_accepted` comes only from older releases, which started none while a setting of theirs
+  was off.
   Readers take a `failure` they don't know as a failure without a reason. One still pending 10
   minutes after it was written is `expired`, so a machine that comes back later never starts
   sessions nobody is waiting for. When the request is written the cloud pokes the account's
@@ -215,7 +215,9 @@ conformance tests, not an HTTP server, database or local runtime.
   connects to it.
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
   message per code: `invalid_request` (400, or 413 for an oversized body), `unauthenticated`
-  (401), `forbidden` (403: the account's Feed switch is off), `machine_taken` (409: another
+  (401), `forbidden` (403: a route the caller may not use, such as an enrolled machine's token
+  on one it doesn't reach; before the feed was always on for a signed-in account, also the
+  account's Feed switch off), `machine_taken` (409: another
   machine holds the name, above), `rate_limited` (429) and
   `unavailable` (503). Retry delays are 1–86400 seconds, only for the last two. A turn, reply
   upload or reply status naming an entry or reply the account doesn't have is
@@ -252,9 +254,9 @@ No terminal output, full paths (beyond what the chat's own text holds), account 
 credentials, and no commands for a machine to run: a new session names a folder by its name and
 an agent from a fixed list. Files attached to replies travel only through the attachment download, never in a
 JSON body, and only from rakumux.com to the reply's machine. Schemas reject such fields, not
-secrets inside the text: the status service sends replies and chats only while the account's
-Feed switch is on, never a private session's, and masks keys, credential assignments and tokens
-in every text first (best effort).
+secrets inside the text: the status service sends replies and chats only while signed in, never
+a private session's, and masks keys, credential assignments and tokens in every text first
+(best effort).
 
 ## Conformance tests
 

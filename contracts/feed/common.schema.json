@@ -274,7 +274,7 @@
       "enum": ["pending", "delivered", "failed", "expired"]
     },
     "replyFailure": {
-      "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`), the session refused the text (`refused`), a file attached to it couldn't be fetched or wasn't what the reply said (`attachment_unavailable`), or it was typed in but its agent didn't take it as a prompt (`not_taken`: its chat showed no new prompt within 30 seconds, or another one; it may still be in the session's input box). Readers take a value they don't know as a failure without a reason.",
+      "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`: only from older releases, while a setting of theirs is off), the session refused the text (`refused`), a file attached to it couldn't be fetched or wasn't what the reply said (`attachment_unavailable`), or it was typed in but its agent didn't take it as a prompt (`not_taken`: its chat showed no new prompt within 30 seconds, or another one; it may still be in the session's input box). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
       "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused", "attachment_unavailable", "not_taken"]
     },
@@ -440,7 +440,7 @@
       "enum": ["pending", "created", "failed", "expired"]
     },
     "newSessionFailure": {
-      "description": "Why a machine didn't start a new session asked for on rakumux.com: it doesn't take new sessions from rakumux.com (`not_accepted`: a setting of its own, off unless its user turned it on), it lists no folder of that name now, or several and `folder_session` doesn't say which (`folder_unknown`), or its daemon couldn't start the session (`refused`). Readers take a value they don't know as a failure without a reason.",
+      "description": "Why a machine didn't start a new session asked for on rakumux.com: it doesn't take new sessions from rakumux.com (`not_accepted`: only from older releases, while a setting of theirs is off), it lists no folder of that name now, or several and `folder_session` doesn't say which (`folder_unknown`), or its daemon couldn't start the session (`refused`). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
       "enum": ["not_accepted", "folder_unknown", "refused"]
     },
