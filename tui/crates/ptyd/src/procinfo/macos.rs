@@ -26,7 +26,12 @@ pub(super) fn process_info(pid: u32) -> Option<ProcessInfo> {
     // install is a file named after its version); argv[0] is what the user
     // ran, like Linux's comm.
     let name = name_from_argv0(&cmdline).unwrap_or(kernel_name);
-    Some(ProcessInfo { pid, name, cmdline })
+    Some(ProcessInfo {
+        pid,
+        name,
+        cmdline,
+        exe: executable_path(raw),
+    })
 }
 
 fn kernel_name(pid: libc::pid_t) -> Option<String> {

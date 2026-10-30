@@ -1,0 +1,23 @@
+# Cursor's agent CLI started as `agent`, the installer's primary command:
+# its launcher execs the bundled node under argv[0] `agent`, and Node 24
+# renames its main thread, so Linux shows `MainThread`. Only the file it runs
+# (exe) says which agent. Hand-written.
+agent: cursor-agent
+expect: working
+process: MainThread
+cmdline: /home/me/.local/bin/agent --use-system-ca /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/index.js
+exe: /home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f/node
+alternate_screen: false
+ms_since_output: 30
+---
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ fix the failing parser tests                                             │
+ └──────────────────────────────────────────────────────────────────────────┘
+
+  ⬡ Generating..
+
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ → Add a follow-up                                                        │
+ └──────────────────────────────────────────────────────────────────────────┘
+  Auto · 12.4%
+  ctrl+c to stop

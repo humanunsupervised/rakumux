@@ -82,6 +82,7 @@ fn a_prompt_queued_mid_turn_is_a_new_turn_with_that_prompt_and_its_reply_answers
             pid: PID,
             name: "claude".into(),
             cmdline: vec!["claude".into()],
+            exe: None,
         },
     );
 

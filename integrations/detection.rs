@@ -6,7 +6,11 @@
 //! matched against known executables (`claude`, `codex`, …) and package
 //! paths (`node_modules/@anthropic-ai/claude-code/…`), seeing through
 //! interpreters and launchers (`node …/codex.js`, `bun …/opencode`,
-//! `python -m aider`, `npx @openai/codex`, `sh -c 'exec claude'`). The
+//! `python -m aider`, `npx @openai/codex`, `sh -c 'exec claude'`). Then
+//! the file it runs, matched the same way, for programs that renamed
+//! themselves (Cursor's bundled Node shows as `MainThread`, Kimi Code as
+//! `kimi-code`). The bare name `agent`, which both Cursor and Grok install,
+//! is never an agent by itself: only the file behind it says which. The
 //! terminal title is used only when there is no process information or the
 //! foreground is an opaque wrapper (an unrecognised script under a runtime,
 //! `ssh`, `docker`, …). Shells and other programs mean no agent, even if a
@@ -496,6 +500,15 @@ fn profile_for_process(process: &ProcessInfo) -> ProcessMatch {
             return ProcessMatch::Agent(profile);
         }
     }
+    // Its install path, when it renamed itself or runs as a shared name.
+    if let Some(profile) = process
+        .exe
+        .as_deref()
+        .and_then(|exe| exe.to_str())
+        .and_then(profile_for_token)
+    {
+        return ProcessMatch::Agent(profile);
+    }
     let runtime = [process.name.as_str(), argv0_word]
         .into_iter()
         .map(normalized_basename)
@@ -795,11 +808,77 @@ mod tests {
             pid: 4242,
             name: name.to_string(),
             cmdline: cmdline.iter().map(|s| s.to_string()).collect(),
+            exe: None,
         }
     }
 
     fn agent_of(name: &str, cmdline: &[&str]) -> Option<&'static str> {
         identify(Some(&process(name, cmdline)), "").map(|p| p.label)
+    }
+
+    fn agent_running(name: &str, cmdline: &[&str], exe: &str) -> Option<&'static str> {
+        let process = ProcessInfo {
+            exe: Some(PathBuf::from(exe)),
+            ..process(name, cmdline)
+        };
+        identify(Some(&process), "").map(|p| p.label)
+    }
+
+    #[test]
+    fn renamed_agents_are_named_by_the_file_they_run() {
+        let versions = "/home/me/.local/share/cursor-agent/versions/2026.10.22-27dcf5f";
+        let script = format!("{versions}/index.js");
+        let node = format!("{versions}/node");
+        // Cursor started as `agent`: Node 24 renames its main thread on Linux,
+        // and macOS names it after argv[0].
+        for name in ["MainThread", "agent"] {
+            let argv = ["/home/me/.local/bin/agent", "--use-system-ca", &script];
+            assert_eq!(agent_of(name, &argv), None, "{name} alone says nothing");
+            assert_eq!(
+                agent_running(name, &argv, &node),
+                Some("cursor-agent"),
+                "{name}"
+            );
+        }
+        // Kimi Code's native binary renames itself and wipes its arguments.
+        assert_eq!(agent_of("kimi-code", &["kimi-code"]), None);
+        assert_eq!(
+            agent_running("kimi-code", &["kimi-code"], "/home/me/.kimi-code/bin/kimi"),
+            Some("kimi")
+        );
+        // A name or command line that says which agent still wins.
+        assert_eq!(
+            agent_running(
+                "claude",
+                &["claude"],
+                "/home/me/.local/share/claude/versions/2.1.0"
+            ),
+            Some("claude")
+        );
+        // Programs whose file says nothing stay what they were.
+        assert_eq!(agent_running("bash", &["bash"], "/usr/bin/bash"), None);
+        assert_eq!(
+            agent_running("node", &["node", "server.js"], "/usr/bin/node"),
+            None
+        );
+        assert_eq!(
+            agent_running(
+                "node",
+                &["node", "/opt/codex/bin/codex.js"],
+                "/usr/bin/node"
+            ),
+            Some("codex")
+        );
+    }
+
+    #[test]
+    fn no_agent_claims_the_bare_name_agent() {
+        // Both Cursor and Grok install a command named `agent`.
+        assert!(PROFILES
+            .iter()
+            .all(|profile| !profile.names.contains(&"agent")));
+        assert_eq!(agent_of("agent", &["agent"]), None);
+        assert_eq!(agent_of("agent", &["/home/me/.local/bin/agent"]), None);
     }
 
     #[test]
@@ -1191,6 +1270,7 @@ mod tests {
         let mut expect = None;
         let mut name = None;
         let mut cmdline = None;
+        let mut exe = None;
         let mut title = String::new();
         let mut alternate_screen = false;
         let mut ms_since_output = None;
@@ -1214,6 +1294,7 @@ mod tests {
                             .collect::<Vec<_>>(),
                     )
                 }
+                "exe" => exe = Some(PathBuf::from(value)),
                 "title" => title = value.to_string(),
                 "alternate_screen" => alternate_screen = value == "true",
                 "ms_since_output" => ms_since_output = Some(value.parse().unwrap()),
@@ -1224,6 +1305,7 @@ mod tests {
             pid: 4242,
             cmdline: cmdline.clone().unwrap_or_else(|| vec![name.clone()]),
             name,
+            exe: exe.clone(),
         });
         Fixture {
             path: path.to_path_buf(),

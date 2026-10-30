@@ -883,6 +883,7 @@ fn agent_working_directory_follows_internal_worktree_switches_without_changing_s
                 pid: 4242,
                 name: agent.into(),
                 cmdline: vec![agent.into()],
+                exe: None,
             },
         );
         let caller = h.session_caller(&started.id);
@@ -961,6 +962,7 @@ fn agent_working_directory_follows_internal_worktree_switches_without_changing_s
                 pid: 5000,
                 name: "bash".into(),
                 cmdline: vec!["bash".into(), "-l".into()],
+                exe: None,
             },
         );
         assert_eq!(
@@ -974,6 +976,7 @@ fn agent_working_directory_follows_internal_worktree_switches_without_changing_s
                 pid: 6000,
                 name: agent.into(),
                 cmdline: vec![agent.into()],
+                exe: None,
             },
         );
         assert_eq!(
@@ -1001,6 +1004,7 @@ fn agent_working_directory_survives_handoff_and_rejects_invalid_paths() {
             pid: 4242,
             name: "codex".into(),
             cmdline: vec!["codex".into()],
+            exe: None,
         },
     );
     let caller = h.session_caller(&started.id);
@@ -1160,6 +1164,7 @@ fn places_are_where_a_sessions_agent_changed_files_and_outlive_its_terminal() {
             pid: std::process::id(),
             name: "codex".into(),
             cmdline: vec!["codex".into()],
+            exe: None,
         },
     );
     let caller = h.session_caller(&s.id);

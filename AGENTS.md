@@ -501,8 +501,9 @@ tui/
       handoff.rs             # restart in place: HandoffState across exec, target check
                              # detection/resume modules are mounted from integrations/
       persist.rs             # ScrollbackStore: sessions/<id>/{scrollback.ansi, meta.json}
-      procinfo/              # foreground process, cwd, RSS (Linux /proc, macOS libproc); the process
-                             # table, the machine's counters, TCP traffic per socket (tcp.rs, Linux)
+      procinfo/              # foreground process (name, command line, the file it runs: `exe`), cwd,
+                             # RSS (Linux /proc, macOS libproc); the process table, the machine's
+                             # counters, TCP traffic per socket (tcp.rs, Linux)
       resources.rs           # resource_usage: the daemon's, clients' and sessions' processes
       log.rs                 # ~/.rakumux/logs/ptyd.log
   src/

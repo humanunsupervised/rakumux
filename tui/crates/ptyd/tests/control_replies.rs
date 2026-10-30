@@ -71,6 +71,7 @@ fn codex_session(h: &Harness) -> (SessionId, File) {
             pid: std::process::id(),
             name: "codex".into(),
             cmdline: vec!["codex".into()],
+            exe: None,
         },
     );
     (session.id, file)

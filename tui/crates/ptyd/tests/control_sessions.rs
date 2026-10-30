@@ -865,6 +865,7 @@ fn a_submit_expecting_its_agent_is_refused_once_the_shell_has_the_foreground_una
         pid: 4242,
         name: name.into(),
         cmdline: vec![name.into()],
+        exe: None,
     };
     let expecting = |text: &str| Request::SessionSubmit {
         id: session.id.clone(),

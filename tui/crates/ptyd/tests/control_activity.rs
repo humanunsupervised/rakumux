@@ -334,6 +334,7 @@ fn opencode_v2_started_as_opencode2_keeps_its_activity_through_terminal_output()
             pid: 4242,
             name: "opencode2".into(),
             cmdline: vec!["opencode2".into()],
+            exe: None,
         },
     );
     harness.handle(
@@ -382,6 +383,7 @@ fn an_esc_interrupted_claude_turn_ends_without_a_stop_hook() {
             pid: 4242,
             name: "claude".into(),
             cmdline: vec!["claude".into()],
+            exe: None,
         },
     );
     harness.handle(

@@ -220,6 +220,7 @@ mod tests {
             pid,
             name: "claude".into(),
             cmdline: args(cmdline),
+            exe: None,
         }
     }
 
@@ -243,6 +244,7 @@ mod tests {
                 "opus",
                 "fix the bug",
             ]),
+            exe: None,
         };
         assert_eq!(crate::detect::agent_label(&process), Some("claude"));
         assert_eq!(
@@ -265,6 +267,7 @@ mod tests {
                 pid: 7,
                 name: name.into(),
                 cmdline: args(cmdline),
+                exe: None,
             };
             plan(&Context {
                 process: &process,

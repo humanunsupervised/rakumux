@@ -64,12 +64,16 @@ pub enum TerminalState {
 }
 
 /// Process details of the PTY's foreground process group leader.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProcessInfo {
     pub pid: u32,
     /// Executable name, e.g. "claude", "node", "bash".
     pub name: String,
     pub cmdline: Vec<String>,
+    /// The file it runs (Linux `/proc/<pid>/exe`, macOS `proc_pidpath`), when
+    /// readable: it names a program that renamed itself or its arguments
+    /// (Cursor's bundled Node as `MainThread`, `kimi-code`).
+    pub exe: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

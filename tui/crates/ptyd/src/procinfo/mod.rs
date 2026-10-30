@@ -7,7 +7,8 @@
 //! (`claude`, `node`, `bash`): `comm` on Linux, `argv[0]`'s basename on
 //! macOS (where the kernel's name is the resolved file, e.g. a version
 //! number for Claude Code's native installs). Seeing through interpreters
-//! (`node …/codex`) is left to `detect`, which gets the full `cmdline`.
+//! (`node …/codex`) is left to `detect`, which gets the full `cmdline`, and
+//! the file the process runs (`exe`), for programs that renamed themselves.
 
 use crate::host::ProcessInfo;
 use session_core::api::MachineUsage;
@@ -619,6 +620,13 @@ mod tests {
             assert_eq!(cwd_of(pid), None);
             assert_eq!(process_info(0), None);
             assert_eq!(process_info(u32::MAX), None);
+        }
+
+        #[test]
+        fn the_file_a_process_runs_is_read() {
+            let own = process_info(std::process::id()).unwrap();
+            let exe = std::env::current_exe().unwrap().canonicalize().unwrap();
+            assert_eq!(own.exe.map(|path| path.canonicalize().unwrap()), Some(exe));
         }
 
         #[test]

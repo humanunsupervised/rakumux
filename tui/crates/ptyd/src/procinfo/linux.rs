@@ -26,7 +26,19 @@ pub(super) fn process_info(pid: u32) -> Option<ProcessInfo> {
         pid,
         name: untruncated_name(comm, &cmdline),
         cmdline,
+        exe: executable(pid),
     })
+}
+
+/// `/proc/<pid>/exe`: unreadable for other users' processes. A file replaced
+/// since it started (an agent that updated itself) is still named by its
+/// path, without the kernel's ` (deleted)`.
+fn executable(pid: u32) -> Option<PathBuf> {
+    let path = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+    match path.to_str().and_then(|p| p.strip_suffix(" (deleted)")) {
+        Some(original) => Some(PathBuf::from(original)),
+        None => Some(path),
+    }
 }
 
 pub(super) fn cwd_of(pid: u32) -> Option<PathBuf> {
