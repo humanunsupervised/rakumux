@@ -1,0 +1,30 @@
+# Grok Build 1.0.70 --minimal waiting for its model: only the status row says so. Captured from a synthetic session.
+agent: grok
+expect: working
+process: grok
+cmdline: grok --minimal
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: grok
+alternate_screen: false
+ms_since_output: 300
+---
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│                                                      ⠀⠀⠀⣀⣤⣤⣀⠀⠀⡠                                                      │
+│                                                      ⠀⢀⡾⠋⠁⠀⢁⢴⡎⠀                                                      │
+│                                                      ⠀⢸⡇⠀⠀⠐⠁⢀⣿⠀                                                      │
+│                                                      ⠀⢈⠗⢀⣀⣀⣠⡾⠃⠀                                                      │
+│                                                      ⠐⠁⠀⠈⠉⠉⠉⠀⠀⠀                                                      │
+│                                                                                                                      │
+│ Grok Build  v1.0.70                                                                                                  │
+│ /home/me/proj                                                                                                        │
+│ Model · fake-model                                                                                                   │
+│ /help for commands                                                                                                   │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+❯ PAUSE hi
+
+⠧ Waiting for response… 2.0s                                                                                 2.0s ⇣1.35k
+❯
+fake-model · 1.3K / 256K (1%) · ctrl+o transcript

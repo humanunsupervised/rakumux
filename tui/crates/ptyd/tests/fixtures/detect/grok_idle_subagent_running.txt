@@ -1,0 +1,49 @@
+# Grok Build 1.0.70 at its prompt while a background subagent works (its hooks and OSC 7501 report that). Captured from a synthetic session.
+agent: grok
+expect: idle
+process: grok
+cmdline: grok
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: Hello from the fake model. The answer is… - grok
+alternate_screen: true
+ms_since_output: 5000
+---
+
+  main ~/proj                                                                            ◆ 1 │ 20 / 256K │ [Dashboard]
+
+     ▾ Subagents 1
+     ⸬ Subagent Helper · Waiting for response…                                                 fake-model 12s [↗][✗]
+
+
+     ❯ SPAWNLAZY please                                                                                      5:49 AM
+
+
+     ◆ Thought for 0.0s
+     ◆ Subagent running: “Helper” · Waiting for response… (fake-model)
+     ◆ Thought for 0.0s
+
+     Done with spawn_subagent. All good.                                                                     5:49 AM
+
+     Worked for 3.2s
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                       █
+                                                                                                                       █
+
+    ◎ 1 subagent still running
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                                                │
+  ╰───────────────────────────────────────────────────────────────────────────────────────────────────── fake-model ─╯
+
+  Shift+Tab:mode  │  Ctrl+x:shortcuts

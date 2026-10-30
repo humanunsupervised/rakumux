@@ -72,8 +72,10 @@ pub(super) const PROFILE: Profile = Profile {
     ],
     idle: &[
         marker(Region::Bottom(12), Test::Line(is_grok_prompt_line)),
+        // The footer, or `--minimal`'s (`minimal · /help`, then `❯` and the
+        // model's line).
         marker(
-            Region::Bottom(2),
+            Region::Bottom(3),
             Test::Any(&["shift+tab:mode", "minimal · /help"]),
         ),
         marker(Region::Title, Test::Line(is_grok_title)),

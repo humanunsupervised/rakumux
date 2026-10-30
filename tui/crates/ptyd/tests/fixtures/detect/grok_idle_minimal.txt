@@ -1,0 +1,27 @@
+# Grok Build 1.0.70 --minimal (no alternate screen; its title stays `grok`) at its prompt. Captured from a synthetic session.
+agent: grok
+expect: idle
+process: grok
+cmdline: grok --minimal
+exe: /home/me/.grok/downloads/grok-linux-x86_64
+title: grok
+alternate_screen: false
+ms_since_output: 5000
+---
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                      │
+│                                                      ⠀⠀⠀⣀⣤⣤⣀⠀⠀⡠                                                      │
+│                                                      ⠀⢀⡾⠋⠁⠀⢁⢴⡎⠀                                                      │
+│                                                      ⠀⢸⡇⠀⠀⠐⠁⢀⣿⠀                                                      │
+│                                                      ⠀⢈⠗⢀⣀⣀⣠⡾⠃⠀                                                      │
+│                                                      ⠐⠁⠀⠈⠉⠉⠉⠀⠀⠀                                                      │
+│                                                                                                                      │
+│ Grok Build  v1.0.70                                                                                                  │
+│ /home/me/proj                                                                                                        │
+│ Model · fake-model                                                                                                   │
+│ /help for commands                                                                                                   │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+minimal · /help
+❯
+fake-model · 1.3K / 256K (1%) · ctrl+o transcript
