@@ -5,7 +5,8 @@ agents (Claude Code, Codex, OpenCode, Pi, …) side by side. A **session** is a 
 terminal. One per-user daemon, **`rakumux-ptyd`**, owns every session; the **`rakumux`** TUI and
 CLI are clients of it, and so is **`rakumux-api`**, a local HTTP API that the **`rakumux-mcp`**
 server uses to let coding agents drive sessions. Source: `humanunsupervised/rakumux`;
-website: <https://rakumux.com>. The core is licensed under Apache-2.0 (`LICENSE`).
+website: <https://rakumux.com>; docs: <https://docs.rakumux.com>. The core is licensed under
+Apache-2.0 (`LICENSE`).
 The mobile app is maintained separately in `humanunsupervised/rakumux-mobile` and is not included
 in this repository's license grant. Public preparation and release checks: `PUBLISHING.md`.
 

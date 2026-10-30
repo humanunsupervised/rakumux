@@ -2,7 +2,7 @@
 
 **A terminal multiplexer for coding agents.**
 
-[rakumux.com](https://rakumux.com) · [Docs](https://rakumux.com/docs) · [Releases](https://github.com/humanunsupervised/rakumux/releases) · [Pricing](https://rakumux.com/pricing)
+[rakumux.com](https://rakumux.com) · [Docs](https://docs.rakumux.com) · [Releases](https://github.com/humanunsupervised/rakumux/releases) · [Pricing](https://rakumux.com/pricing)
 
 楽 (*raku*) means easy, and read *gaku* it means music: tmux, made easy.
 

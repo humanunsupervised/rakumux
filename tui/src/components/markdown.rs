@@ -627,7 +627,7 @@ mod tests {
     #[test]
     fn tables_line_up_and_links_say_where_they_go() {
         let lines = render(
-            "| File | Lines |\n|---|---|\n| parser.rs | 120 |\n| a.rs | 3 |\n\nSee [the docs](https://rakumux.com/docs) or <https://x.dev>.",
+            "| File | Lines |\n|---|---|\n| parser.rs | 120 |\n| a.rs | 3 |\n\nSee [the docs](https://docs.rakumux.com) or <https://x.dev>.",
             40,
             Style::default(),
         );
@@ -639,7 +639,7 @@ mod tests {
                 "parser.rs │ 120",
                 "a.rs      │ 3",
                 "",
-                "See the docs <https://rakumux.com/docs>",
+                "See the docs <https://docs.rakumux.com>",
                 "or https://x.dev.",
             ]
         );
