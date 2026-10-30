@@ -9,6 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 use session_core::api::{
     AgentReply, CallerInfo, CreateSession, ErrorCode, EventEnvelope, ResourceSample, SessionEvent,
     SubscribeRequest, TranscriptCursor, TranscriptPage, CAPABILITY_RESOURCES,
+    CAPABILITY_SUBMIT_BLOCKED,
 };
 use session_core::client::SessionApi;
 use session_core::ids::{ReplyId, SessionId};
@@ -116,10 +117,35 @@ enum Command {
     MachineRevoke(String, Sender<Result<(), FeedFailure>>),
 }
 
+/// What the daemon announces of what this service uses, read at each
+/// (re)subscribe: a daemon restarted since (in place, or replaced) may
+/// announce more, or less.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct DaemonFeatures {
+    /// It answers `resource_usage` (capability `resources`), for rtop.
+    resources: bool,
+    /// It refuses to type into an agent that asks something (capability
+    /// `session.submit.blocked`): replies go in mid-turn only then.
+    guards_prompts: bool,
+}
+
+impl DaemonFeatures {
+    /// From the capabilities the daemon announced; none when they aren't known.
+    fn of(capabilities: Option<&[String]>) -> Self {
+        let has = |wanted: &str| {
+            capabilities.is_some_and(|names| names.iter().any(|name| name == wanted))
+        };
+        Self {
+            resources: has(CAPABILITY_RESOURCES),
+            guards_prompts: has(CAPABILITY_SUBMIT_BLOCKED),
+        }
+    }
+}
+
 enum Message {
-    /// A fresh list: every session the daemon has, dead ones too, and
-    /// whether it answers `resource_usage` (capability `resources`) for rtop.
-    Resync(Vec<SessionView>, bool),
+    /// A fresh list: every session the daemon has, dead ones too, and what
+    /// the daemon announces of what this service uses.
+    Resync(Vec<SessionView>, DaemonFeatures),
     Event(Box<EventEnvelope>),
     Disconnected,
     Captured(Box<Captured>),
@@ -730,8 +756,8 @@ fn own<S, A, C>(
                     );
                 }
             }
-            Message::Resync(views, reports) => {
-                sessions.set_resources(reports);
+            Message::Resync(views, daemon) => {
+                sessions.set_resources(daemon.resources);
                 // Every session the daemon has: what's kept of others goes.
                 refresher.keep_only(views.iter().map(|view| &view.id));
                 let views: Vec<SessionView> = views
@@ -741,7 +767,7 @@ fn own<S, A, C>(
                 let _ = refresher.resync(&views, now);
                 let after = feed.connected(&views);
                 chats.connected(&views);
-                replies.connected(&views);
+                replies.connected(&views, daemon.guards_prompts);
                 sessions.connected(&views);
                 resources.connected();
                 new_sessions.connected(&views);
@@ -1767,7 +1793,9 @@ where
             }
             Ok(Work::Submit(reply, session, text, foreground)) => {
                 // Never while its agent asks something: the Enter would
-                // answer it (a daemon without the check submits anyway).
+                // answer it (a daemon without the check submits anyway, so
+                // replies go into an agent at work only when it has it:
+                // `ReplySync::connected`).
                 let result = api
                     .submit_unless_blocked(
                         &session,
@@ -1906,11 +1934,10 @@ fn follow(api: &dyn SessionApi, owner: &Sender<Message>, stop: &AtomicBool) {
             // Dead sessions too, for what's kept of sessions across restarts;
             // the rest of the service follows the others.
             if let Ok(views) = api.list_all(true) {
-                // Only a daemon that says so answers `resource_usage`.
-                let reports = api
-                    .daemon_capabilities()
-                    .is_some_and(|names| names.iter().any(|name| name == CAPABILITY_RESOURCES));
-                if owner.send(Message::Resync(views, reports)).is_err() {
+                // Read again at each subscribe: the daemon may have been
+                // restarted on another build since.
+                let daemon = DaemonFeatures::of(api.daemon_capabilities().as_deref());
+                if owner.send(Message::Resync(views, daemon)).is_err() {
                     return;
                 }
                 delay = RECONNECT_MIN;
@@ -1937,3 +1964,6 @@ fn follow(api: &dyn SessionApi, owner: &Sender<Message>, stop: &AtomicBool) {
         delay = delay.saturating_mul(2).min(RECONNECT_MAX);
     }
 }
+
+#[cfg(test)]
+mod tests;

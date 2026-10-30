@@ -6,8 +6,10 @@
 //! says so. It delivers only to the entry's own session, while it runs, isn't
 //! private, still shows the entry's conversation and its agent waits for
 //! input, or works when it's one that takes what's typed during a turn
-//! ([`QUEUES_INPUT`]: typed **mid-turn**); a blocked agent (asking
-//! something), or one of the others that works, is waited for (the cloud
+//! ([`QUEUES_INPUT`]: typed **mid-turn**) and the daemon refuses to type
+//! into an agent that asks something (`session.submit.blocked`); a blocked
+//! agent (asking something), one of the others that works, or any that
+//! works while the daemon lacks that guard, is waited for (the cloud
 //! expires a reply after an hour). A session's replies go in one at a time,
 //! oldest first, and each is reported delivered only once its agent is seen
 //! to take it (see `Delivery`). The next waits for the agent to wait again,
@@ -118,9 +120,13 @@ const ORDER_WAIT: Duration = Duration::from_secs(5);
 /// the text (or steers it in) for the agent's next step, or the next turn
 /// when this one ends first, and their chat shows it as a new prompt once
 /// the agent takes it, which is how its delivery is seen (see `Delivery`).
-/// Claude Code logs it as a `queued_command` attachment, Codex as a
-/// `user_message`, and OpenCode as a user message (1.x shows it `QUEUED`;
-/// 2.x steers it in, or parks it with the turn's other queued prompts). Pi
+/// Only while the daemon refuses to type into an agent that asks something
+/// (capability `session.submit.blocked`, see [`ReplySync::connected`]): a
+/// prompt can open between the view and the keystrokes, and without that
+/// guard it takes the text and its Enter as its answer. Claude Code logs it
+/// as a `queued_command` attachment, Codex as a `user_message`, and
+/// OpenCode as a user message (1.x shows it `QUEUED`; 2.x steers it in, or
+/// parks it with the turn's other queued prompts). Pi
 /// steers it in once the response and tool calls under way are done, a
 /// user message in the same run; GitHub Copilot holds it while its model
 /// answers and steers it in between tool steps (a shell command running
@@ -348,17 +354,19 @@ impl Seen {
 
     /// Its agent works on a turn and takes what's typed meanwhile: one of
     /// [`QUEUES_INPUT`], whose turns the daemon follows, so its chat shows
-    /// the reply as a prompt once it takes it. Never while it asks something
-    /// (`blocked`: a permission prompt, a question or a menu would take the
-    /// text as its answer), nor while what it does isn't known.
-    fn works_taking_input(&self) -> bool {
-        self.queues && self.lifecycle == Lifecycle::Working && self.turn.is_some()
+    /// the reply as a prompt once it takes it, while the daemon refuses to
+    /// type into an agent that asks something (`guarded`). Never while it
+    /// asks something (`blocked`: a permission prompt, a question or a menu
+    /// would take the text as its answer), nor while what it does isn't
+    /// known.
+    fn works_taking_input(&self, guarded: bool) -> bool {
+        guarded && self.queues && self.lifecycle == Lifecycle::Working && self.turn.is_some()
     }
 
     /// A reply can be typed in now: its agent waits for input, or works and
-    /// takes what's typed meanwhile.
-    fn takes_input(&self) -> bool {
-        self.waits() || self.works_taking_input()
+    /// takes what's typed meanwhile (`guarded`: see [`Seen::works_taking_input`]).
+    fn takes_input(&self, guarded: bool) -> bool {
+        self.waits() || self.works_taking_input(guarded)
     }
 
     /// Its agent works, or asks something.
@@ -425,13 +433,13 @@ impl Pending {
 /// A reply going into its session, and what its agent showed since: nothing
 /// else is typed there until the agent is seen to take it and then waits
 /// again, or, for an agent that takes what's typed while it works
-/// ([`Seen::works_taking_input`]), until it's seen to take it and work on
-/// (`free`): the next goes in mid-turn, and this one is followed until its
-/// agent waits again, which ends its turn for its answer (see [`Awaiting`]).
-/// Taken means its chat shows a new prompt that is this reply (its first
-/// line, [`Delivery::matches`]), or, for an agent whose turns the daemon
-/// doesn't follow, that it works or asks something. Taken, it's
-/// reported delivered; its session ended, its chat changed, another prompt
+/// ([`Seen::works_taking_input`], the daemon guarding), until it's seen to
+/// take it and work on (`free`): the next goes in mid-turn, and this one is
+/// followed until its agent waits again, which ends its turn for its answer
+/// (see [`Awaiting`]). Taken means its chat shows a new prompt that is this
+/// reply (its first line, [`Delivery::matches`]), or, for an agent whose
+/// turns the daemon doesn't follow, that it works or asks something. Taken,
+/// it's reported delivered; its session ended, its chat changed, another prompt
 /// went in or none within [`TAKE_WITHIN`], failed. The agent's lifecycle can
 /// lag what it does, so a view that still shows it waiting proves nothing.
 /// Typed mid-turn, its agent was busy already: only its chat's new prompt
@@ -659,6 +667,9 @@ pub(crate) struct ReplySync {
     machine: String,
     enabled: bool,
     sessions: HashMap<SessionId, Seen>,
+    /// The daemon refuses to type into an agent that asks something
+    /// (`session.submit.blocked`): replies go in mid-turn only then.
+    guarded: bool,
     /// Where reads continue: the greatest reply seq read (the account's
     /// once a read said no more wait).
     cursor: u64,
@@ -715,6 +726,7 @@ impl ReplySync {
             machine,
             enabled: false,
             sessions: HashMap::new(),
+            guarded: false,
             cursor: 0,
             out: None,
             next_read: Duration::ZERO,
@@ -791,8 +803,16 @@ impl ReplySync {
         }
     }
 
-    /// The daemon (re)connected: these are its sessions.
-    pub fn connected(&mut self, views: &[SessionView]) {
+    /// The daemon (re)connected: these are its sessions, and `guarded` says
+    /// whether it refuses to type into an agent that asks something
+    /// (capability `session.submit.blocked`, read at each connect, as a
+    /// daemon restarted since may announce it). Replies go into an agent at
+    /// work (mid-turn) only then: a permission prompt can open between its
+    /// view and the keystrokes, and a daemon without the guard types the
+    /// reply into it, then the Enter that picks its highlighted option.
+    /// Without it, replies wait for the agent to wait, as before mid-turn.
+    pub fn connected(&mut self, views: &[SessionView], guarded: bool) {
+        self.guarded = guarded;
         self.sessions.clear();
         for view in views {
             self.observe(view);
@@ -936,7 +956,8 @@ impl ReplySync {
                 continue;
             }
             let session = SessionId::from_string(reply.session_id.clone());
-            let takes = Seen::takes_input;
+            let guarded = self.guarded;
+            let takes = |seen: &Seen| seen.takes_input(guarded);
             let outcome = match self.sessions.get(&session) {
                 None => Err(ReplyFailure::SessionGone),
                 Some(seen) if !seen.live => Err(ReplyFailure::SessionGone),
@@ -1006,7 +1027,7 @@ impl ReplySync {
                     seen.and_then(|seen| seen.turn),
                     seen.and_then(|seen| seen.conversation.clone()),
                 );
-                let mid_turn = seen.is_some_and(Seen::works_taking_input);
+                let mid_turn = seen.is_some_and(|seen| seen.works_taking_input(self.guarded));
                 // Never typed again from now on, even if this service stops
                 // before the daemon answers; followed where it went after a
                 // restart.
@@ -1106,6 +1127,7 @@ impl ReplySync {
         let mut ended = Vec::new();
         let mut gone = Vec::new();
         let sessions = &self.sessions;
+        let guarded = self.guarded;
         for (session, deliveries) in &mut self.deliveries {
             let seen = sessions.get(session);
             deliveries.retain_mut(|delivery| {
@@ -1138,7 +1160,8 @@ impl ReplySync {
                 // Its chat showed it taken, and its agent works on and takes
                 // what's typed meanwhile: the next needn't wait for the turn
                 // to end (it may never, for an agent kept busy).
-                delivery.free |= delivery.took && seen.is_some_and(Seen::works_taking_input);
+                delivery.free |=
+                    delivery.took && seen.is_some_and(|seen| seen.works_taking_input(guarded));
                 true
             });
         }

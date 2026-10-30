@@ -77,6 +77,7 @@ pub(crate) struct FakeSessionApi {
     reads: Mutex<Vec<ReadRequest>>,
     panic_get: Mutex<Option<usize>>,
     turn: Mutex<Option<TurnContent>>,
+    capabilities: Mutex<Option<Vec<String>>>,
 }
 
 impl FakeSessionApi {
@@ -103,7 +104,15 @@ impl FakeSessionApi {
             reads: Mutex::new(Vec::new()),
             panic_get: Mutex::new(None),
             turn: Mutex::new(None),
+            capabilities: Mutex::new(None),
         }
+    }
+
+    /// What `daemon_capabilities` answers from now on (the latest hello's);
+    /// unknown until set.
+    pub(crate) fn set_capabilities(&self, capabilities: &[&str]) {
+        let names = capabilities.iter().map(|&name| name.to_owned()).collect();
+        *self.capabilities.lock().unwrap() = Some(names);
     }
 
     /// What `turn` answers; without one it fails.
@@ -305,6 +314,10 @@ impl SessionApi for FakeSessionApi {
 
     fn attach(&self, _request: AttachRequest) -> Result<AttachStream> {
         self.refuse("attach")
+    }
+
+    fn daemon_capabilities(&self) -> Option<Vec<String>> {
+        self.capabilities.lock().unwrap().clone()
     }
 
     fn subscribe(&self, request: SubscribeRequest) -> Result<EventStream> {

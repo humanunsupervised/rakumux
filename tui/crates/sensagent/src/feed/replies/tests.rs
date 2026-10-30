@@ -8,6 +8,11 @@ use crate::source::fake::live_view;
 
 const NOW: Duration = Duration::from_secs(100);
 const CHAT: &str = "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23";
+/// A current daemon: it refuses to type into an agent that asks something
+/// (`session.submit.blocked`), so replies go in mid-turn.
+const GUARDED: bool = true;
+/// An older daemon, without that guard: replies wait for the agent to wait.
+const UNGUARDED: bool = false;
 
 fn view(id: &str, lifecycle: Lifecycle, conversation: Option<&str>) -> SessionView {
     let mut view = live_view(&SessionId::from_string(id), "/home/me/rakumux", 1);
@@ -71,7 +76,7 @@ fn page_of(
 fn on(views: &[SessionView]) -> ReplySync {
     let mut replies = ReplySync::new("studio".into(), None);
     replies.set_enabled(true, NOW);
-    replies.connected(views);
+    replies.connected(views, GUARDED);
     replies
 }
 
@@ -949,7 +954,7 @@ fn a_replys_files_go_when_it_wont_be_typed_in() {
             served(&fetch, &uploads, 200, b"a"),
             NOW,
         );
-        replies.connected(views);
+        replies.connected(views, GUARDED);
         (home, replies)
     };
     // Its session ended before it went in: rakumux.com hears why, and its
@@ -1230,7 +1235,7 @@ fn a_reply_typed_in_fails_when_its_session_ends_or_its_chat_changes_first() {
     ];
     for (views, failure) in cases {
         let mut replies = two_replies();
-        replies.connected(&views);
+        replies.connected(&views, GUARDED);
         let body = report_of(replies.next_work(NOW));
         assert_eq!(
             (&body["id"], &body["status"]),
@@ -1268,7 +1273,7 @@ fn a_reply_typed_in_keeps_its_files_whatever_becomes_of_it() {
     expired.status = ReplyStatus::Expired;
     assert_eq!(read_after(replies.next_work(NOW + READ_EVERY)), 4);
     replies.request_done(true, read(vec![expired]), NOW + READ_EVERY);
-    replies.connected(&[]);
+    replies.connected(&[], GUARDED);
     assert_eq!(
         report_of(next_at(&mut replies, NOW + READ_EVERY))["failure"],
         "session_gone"
@@ -1376,7 +1381,7 @@ fn someone_typing_or_a_refusal_frees_the_session_for_its_next_reply() {
 fn kept_at(path: &std::path::Path, views: &[SessionView]) -> ReplySync {
     let mut replies = ReplySync::new("studio".into(), Some(path.to_path_buf()));
     replies.set_enabled(true, NOW);
-    replies.connected(views);
+    replies.connected(views, GUARDED);
     replies
 }
 
@@ -2582,6 +2587,114 @@ fn an_agent_asking_something_holds_the_next_reply_even_once_the_last_was_taken()
     shown.lifecycle = Lifecycle::Working;
     replies.observe(&shown);
     assert_eq!(worked_at(&mut replies, later).0, ["01K8A2"]);
+}
+
+/// Whether S's newest reply going in was typed mid-turn.
+fn typed_mid_turn(replies: &ReplySync) -> bool {
+    replies.deliveries[&SessionId::from_string("S")]
+        .last()
+        .unwrap()
+        .mid_turn
+}
+
+#[test]
+fn a_daemon_without_the_prompt_guard_gets_replies_to_an_agent_at_work_only_once_it_waits() {
+    // Updated with `U`, the server not restarted: its daemon lacks
+    // `session.submit.blocked`, so it would type a reply into a permission
+    // prompt that opened as it went in, and its Enter would answer it.
+    let mut shown = running("claude", Lifecycle::Working);
+    let mut replies = ReplySync::new("studio".into(), None);
+    replies.set_enabled(true, NOW);
+    replies.connected(std::slice::from_ref(&shown), UNGUARDED);
+    let pending = vec![said("01K8A1", 4, "First."), said("01K8A2", 5, "Second.")];
+    read_pending(&mut replies, pending, NOW);
+    // Claude Code at work: held, however long it works.
+    assert_eq!(worked_at(&mut replies, NOW), (vec![], vec![]));
+    let mut at = NOW + Duration::from_secs(600);
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, at), (vec![], vec![]));
+    // It waits: the first goes in, typed to a waiting agent.
+    shown.lifecycle = Lifecycle::Done;
+    replies.observe(&shown);
+    assert_eq!(
+        next_at(&mut replies, at)
+            .and_then(|work| submitted_reply(Some(work)))
+            .as_deref(),
+        Some("01K8A1")
+    );
+    assert!(!typed_mid_turn(&replies));
+    assert!(replies.daemon_answered("01K8A1".into(), Ok(()), at, wall(at)));
+    // It takes it and works on it: delivered, and the second waits for it
+    // to wait again, not only for that take.
+    shown = running_prompted("claude", Lifecycle::Working, "First.");
+    replies.observe(&shown);
+    at += Duration::from_secs(1);
+    assert_eq!(worked_at(&mut replies, at), (vec![], ids(&["01K8A1"])));
+    at += Duration::from_secs(600);
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, at), (vec![], vec![]));
+    shown.lifecycle = Lifecycle::Idle;
+    replies.observe(&shown);
+    assert_eq!(worked_at(&mut replies, at), (ids(&["01K8A2"]), vec![]));
+    assert!(!typed_mid_turn(&replies));
+
+    // A session message to it waits the same way.
+    let mut replies = ReplySync::new("studio".into(), None);
+    replies.set_enabled(true, NOW);
+    replies.connected(&[running("claude", Lifecycle::Working)], UNGUARDED);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    replies.request_done(true, read_messages(vec![message("01K8A3", 6, None)]), NOW);
+    assert_eq!(replies.next_work(NOW), None);
+
+    // With the guard, the same reply goes in while it works.
+    let mut replies = on(&[running("claude", Lifecycle::Working)]);
+    read_pending(&mut replies, vec![said("01K8A1", 4, "First.")], NOW);
+    assert_eq!(worked_at(&mut replies, NOW), (ids(&["01K8A1"]), vec![]));
+    assert!(typed_mid_turn(&replies));
+}
+
+#[test]
+fn a_daemon_restarted_with_the_prompt_guard_gets_replies_mid_turn_again() {
+    let shown = running("claude", Lifecycle::Working);
+    let mut replies = ReplySync::new("studio".into(), None);
+    replies.set_enabled(true, NOW);
+    replies.connected(std::slice::from_ref(&shown), UNGUARDED);
+    read_pending(&mut replies, vec![said("01K8A1", 4, "First.")], NOW);
+    assert_eq!(worked_at(&mut replies, NOW), (vec![], vec![]));
+    // `S` restarts the daemon in place on this build: the service connects
+    // again, and the daemon now refuses to type into a prompt.
+    let at = NOW + Duration::from_secs(5);
+    replies.connected(std::slice::from_ref(&shown), GUARDED);
+    assert_eq!(worked_at(&mut replies, at), (ids(&["01K8A1"]), vec![]));
+    assert!(typed_mid_turn(&replies));
+    // Taken at its next step, the agent at work: the next one goes in too.
+    read_pending_more(&mut replies, vec![said("01K8A2", 5, "Second.")], at);
+    replies.observe(&running_prompted("claude", Lifecycle::Working, "First."));
+    let at = at + Duration::from_secs(1);
+    assert_eq!(
+        worked_at(&mut replies, at),
+        (ids(&["01K8A2"]), ids(&["01K8A1"]))
+    );
+    assert!(typed_mid_turn(&replies));
+    // Connected again to a daemon without it (replaced by an older one):
+    // what's pending waits for the agent to wait.
+    read_pending_more(&mut replies, vec![said("01K8A3", 6, "Third.")], at);
+    replies.connected(
+        &[running_prompted("claude", Lifecycle::Working, "Second.")],
+        UNGUARDED,
+    );
+    let at = at + Duration::from_secs(1);
+    assert_eq!(worked_at(&mut replies, at), (vec![], ids(&["01K8A2"])));
+}
+
+/// Read `pending` after earlier reads.
+fn read_pending_more(replies: &mut ReplySync, pending: Vec<FeedReply>, at: Duration) {
+    replies.read_now(at);
+    assert!(matches!(
+        replies.next_work(at),
+        Some(ReplyWork::Request(FeedRequest::Replies { .. }))
+    ));
+    replies.request_done(true, read(pending), at);
 }
 
 /// The next work at `at`, a read expected.

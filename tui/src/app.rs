@@ -1474,7 +1474,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 12] = [
+const DAEMON_FEATURES: [(&str, &str); 13] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1508,6 +1508,12 @@ const DAEMON_FEATURES: [(&str, &str); 12] = [
         "where each session has worked",
     ),
     (session_core::api::CAPABILITY_RESOURCES, "rtop"),
+    // Replies from the feed go into an agent at work only while the daemon
+    // refuses to type into a prompt it opens (the account service checks).
+    (
+        session_core::api::CAPABILITY_SUBMIT_BLOCKED,
+        "replies while an agent works",
+    ),
 ];
 
 /// The daemon restarts in place, keeping the sessions (`daemon.restart`).

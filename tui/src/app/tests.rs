@@ -335,6 +335,53 @@ async fn an_older_server_that_restarts_in_place_is_restarted_with_enter() {
 }
 
 #[tokio::test]
+async fn a_server_without_the_prompt_guard_is_offered_a_restart_in_place() {
+    // Updated with `U`: the server still runs the older build, which would
+    // type a reply into a prompt an agent at work opens as it goes in.
+    let fake = FakeApi::new(vec![view("A", "a", 10)]);
+    {
+        let mut state = fake.state.lock().unwrap();
+        state.restarts_in_place = true;
+        state.lacks = vec![session_core::api::CAPABILITY_SUBMIT_BLOCKED];
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let options = options(&fake, scope(), &dir);
+    let mut h = start(options, fake, dir);
+    match &h.app.mode {
+        AppMode::DaemonRestart(dialog) => {
+            assert_eq!(dialog.missing, ["replies while an agent works"]);
+            assert!(dialog.in_place && !dialog.requested);
+        }
+        mode => panic!("no restart offer: {mode:?}"),
+    }
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("replies while an agent works"), "{text}");
+    assert!(text.contains("keep running"), "{text}");
+    h.press(KeyCode::Enter).await;
+    h.app.process_pending();
+    assert!(
+        h.fake
+            .calls()
+            .iter()
+            .any(|c| c.starts_with("restart_daemon")),
+        "{:?}",
+        h.fake.calls()
+    );
+    assert_eq!(
+        h.app.status(),
+        Some("Restarted the Rakumux server and its services; your sessions kept running.")
+    );
+}
+
+#[tokio::test]
 async fn s_and_settings_restart_the_server_in_place_after_asking() {
     let fake = FakeApi::new(vec![view("A", "a", 10)]);
     fake.state.lock().unwrap().restarts_in_place = true;
@@ -3106,7 +3153,8 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
                 "the agent feed",
                 "whole chats in the agent feed",
                 "where each session has worked",
-                "rtop"
+                "rtop",
+                "replies while an agent works"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -3627,7 +3675,8 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "the agent feed",
                 "whole chats in the agent feed",
                 "where each session has worked",
-                "rtop"
+                "rtop",
+                "replies while an agent works"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),

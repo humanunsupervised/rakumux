@@ -157,6 +157,9 @@ pub struct FakeState {
     /// No `sessions.all`, like a daemon from before it: `list_all` and
     /// `subscribe { all }` fail.
     pub all_unsupported: bool,
+    /// Capabilities a current daemon announces that this one doesn't, like
+    /// one from before them.
+    pub lacks: Vec<&'static str>,
     /// What `resources` answers, in turn; the last again and again. None
     /// answers `unsupported`.
     pub resources: Vec<session_core::api::ResourceSample>,
@@ -452,11 +455,13 @@ impl SessionApi for FakeApi {
                 session_core::api::CAPABILITY_TRANSCRIPT,
                 session_core::api::CAPABILITY_PLACES,
                 session_core::api::CAPABILITY_RESOURCES,
+                session_core::api::CAPABILITY_SUBMIT_BLOCKED,
             ]);
         }
         if state.restarts_in_place {
             capabilities.push(session_core::api::CAPABILITY_DAEMON_RESTART);
         }
+        capabilities.retain(|capability| !state.lacks.contains(capability));
         Some(capabilities.into_iter().map(String::from).collect())
     }
 
