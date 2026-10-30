@@ -64,6 +64,16 @@ impl Icons {
         }
     }
 
+    /// Marks rtop: what this machine and Rakumux use now.
+    pub fn rtop(self) -> &'static str {
+        match self {
+            Icons::Plain => "▥",
+            Icons::Emoji => "📊",
+            // nf-fa-tachometer
+            Icons::Nerd => "\u{f0e4}",
+        }
+    }
+
     /// Marks the list's Status tab: what sessions are doing.
     pub fn status(self) -> &'static str {
         match self {

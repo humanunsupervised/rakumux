@@ -31,7 +31,6 @@ pub async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> AppResult {
         AppMode::Sprite(_) => handle_sprite_key(app, key),
         AppMode::Pairing(_) => handle_pairing_key(app, key),
         AppMode::Account(_) => handle_account_key(app, key),
-        AppMode::Top(_) => handle_top_key(app, key),
         AppMode::Auth(_) | AppMode::AuthEmail(_) | AppMode::AuthCode(_) => {
             super::auth::handle_auth_key(app, key).await
         }
@@ -265,27 +264,6 @@ fn handle_account_key(app: &mut App, key: KeyEvent) {
         (AccountDialogState::Waiting(_), KeyCode::Char('c') | KeyCode::Char('C')) => {
             app.copy_sign_in_link()
         }
-        _ => {}
-    }
-}
-
-/// Top: `↑`/`↓` (`j`/`k`), PgUp/PgDn, Home/End (`g`/`G`) select, `←`/`→`
-/// (`h`/`l`) and Space fold and unfold a session's processes, `s` sorts the
-/// sessions, Enter goes into the selected one, Esc (`q`, `t`) closes.
-fn handle_top_key(app: &mut App, key: KeyEvent) {
-    match key.code {
-        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('t') => app.close_top(),
-        KeyCode::Down | KeyCode::Char('j') => app.top_move(1),
-        KeyCode::Up | KeyCode::Char('k') => app.top_move(-1),
-        KeyCode::PageDown => app.top_page(1),
-        KeyCode::PageUp => app.top_page(-1),
-        KeyCode::Home | KeyCode::Char('g') => app.top_move(isize::MIN),
-        KeyCode::End | KeyCode::Char('G') => app.top_move(isize::MAX),
-        KeyCode::Left | KeyCode::Char('h') => app.top_fold(Some(false)),
-        KeyCode::Right | KeyCode::Char('l') => app.top_fold(Some(true)),
-        KeyCode::Char(' ') => app.top_fold(None),
-        KeyCode::Char('s') => app.top_sort(),
-        KeyCode::Enter => app.top_enter(),
         _ => {}
     }
 }

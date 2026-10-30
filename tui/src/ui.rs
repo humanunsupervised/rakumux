@@ -19,7 +19,7 @@ use crate::components::{
         draw_daemon_restart_dialog, draw_feed_reply_dialog, draw_rename_dialog,
         draw_upgrade_dialog,
     },
-    feed::draw_feed,
+    drawer::draw_drawer,
     folder_picker::draw_folder_picker,
     footer::draw_footer,
     section_picker::draw_section_picker,
@@ -99,7 +99,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     let main_cursor = draw_session_detail(f, app, &screen);
     if let Some(feed) = screen.feed {
-        draw_feed(f, app, feed, &mut hits);
+        draw_drawer(f, app, feed, &mut hits);
     }
     if let Some(line) = screen.feed_divider {
         draw_divider(f, app.feed_divider, line, false);
@@ -143,7 +143,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             crate::components::phone_access::draw_pairing(f, dialog, modal_area)
         }
         AppMode::Account(dialog) => crate::components::account::draw_account(f, dialog, modal_area),
-        AppMode::Top(view) => crate::components::top::draw_top(f, app, view, modal_area),
         AppMode::Auth(menu) => draw_auth_menu(f, menu, modal_area),
         AppMode::AuthEmail(dialog) => draw_auth_email_dialog(f, dialog, modal_area),
         AppMode::AuthCode(dialog) => draw_auth_code_dialog(f, dialog, modal_area),
@@ -2353,7 +2352,7 @@ mod tests {
         assert!(wide.contains("hello from the fake"), "{wide}");
         assert_eq!(screen.detail.unwrap().right(), feed.x - 1);
         // The pane's band names it, bright while it has the keys.
-        assert_eq!(pane[1], "   ≡ Feed", "{wide}");
+        assert_eq!(pane[1], "   ≡ Feed   ▥ rtop", "{wide}");
         assert_eq!(pane[2], "   ▁▁▁▁▁▁", "{wide}");
         let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
         terminal.draw(|f| draw(f, &mut h.app)).unwrap();
@@ -2391,7 +2390,7 @@ mod tests {
         h.press(KeyCode::Enter).await;
         let wide = render(&mut h.app, 160, 48);
         let pane = pane_column(&wide, feed.x);
-        assert_eq!(pane[1], "   ‹ ≡ Feed", "{wide}");
+        assert_eq!(pane[1], "   ‹ ≡ Feed   ▥ rtop", "{wide}");
         assert!(wide.contains("Enter goes into its session"), "{wide}");
         assert!(wide.contains("Run cargo test to check."), "{wide}");
         assert!(wide.contains("hello from the fake"), "{wide}");
@@ -2594,7 +2593,7 @@ mod tests {
         assert!(h.app.feed_has_keys());
         render(&mut h.app, 160, 48);
         tap(&mut h, Hit::FooterKey(FooterKey::Feed));
-        assert!(!h.app.feed_open());
+        assert!(!h.app.drawer_open());
         // On a phone it fits beside the label and Help.
         h.app.resize(40, 20);
         h.press(KeyCode::Char('f')).await;
@@ -2625,7 +2624,7 @@ mod tests {
         let phone = render(&mut h.app, 45, 40);
         assert_eq!(
             phone.lines().nth(1).unwrap().trim_end(),
-            "   ≡ Feed",
+            "   ≡ Feed   ▥ rtop",
             "{phone}"
         );
         assert!(phone.contains("nightly-build"), "{phone}");
@@ -2634,7 +2633,7 @@ mod tests {
         let reading = render(&mut h.app, 45, 40);
         assert_eq!(
             reading.lines().nth(1).unwrap().trim_end(),
-            "   ‹ ≡ Feed",
+            "   ‹ ≡ Feed   ▥ rtop",
             "{reading}"
         );
         assert!(reading.contains("finished 5m ago"), "{reading}");
@@ -2674,7 +2673,7 @@ mod tests {
         // Selected: the cards on the left, the selected reply beside them.
         let width = usize::from(crate::layout::sidebar_width(160));
         let cards = list_column(&screen, width);
-        assert_eq!(cards[2], "   ≡ Feed", "{screen}");
+        assert_eq!(cards[2], "   ≡ Feed   ▥ rtop", "{screen}");
         assert!(cards[5].starts_with(" ╭ api  claude · repo ─"), "{screen}");
         assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
         assert!(screen.contains("finished 2m ago"), "{screen}");
@@ -2710,10 +2709,14 @@ mod tests {
         let cards = h.app.screen().grid.unwrap();
         assert_eq!(cards.right() + 1, feed.x);
         assert_eq!(feed.right(), grid.right());
-        assert_eq!(pane_column(&screen, feed.x)[1], "   ≡ Feed", "{screen}");
+        assert_eq!(
+            pane_column(&screen, feed.x)[1],
+            "   ≡ Feed   ▥ rtop",
+            "{screen}"
+        );
         assert!(screen.contains("api"), "{screen}");
         assert_ne!(screen, before);
-        h.app.close_feed();
+        h.app.close_drawer();
         render(&mut h.app, 160, 48);
         assert_eq!(h.app.screen().grid, Some(grid));
     }
@@ -2774,8 +2777,23 @@ mod tests {
         }
     }
 
+    /// The drawer's column at `x` of a rendered screen, its lines trimmed.
+    fn drawer_text(screen: &str, x: usize) -> String {
+        screen
+            .lines()
+            .map(|line| {
+                line.chars()
+                    .skip(x)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[tokio::test]
-    async fn top_from_settings_shows_every_process_and_goes_into_a_session() {
+    async fn rtop_from_settings_shows_in_the_drawer_and_goes_into_a_session() {
         let mut h = harness(vec![view("A", "fix-login", 20), view("B", "notes", 10)]);
         h.fake.state.lock().unwrap().resources =
             vec![resource_sample(1_000, 1), resource_sample(2_000, 2)];
@@ -2783,51 +2801,60 @@ mod tests {
         let AppMode::Modal { state, .. } = &mut h.app.mode else {
             panic!("Settings didn't open");
         };
-        state.selected = SettingsItem::Top.index();
+        state.selected = SettingsItem::Rtop.index();
         h.press(KeyCode::Enter).await;
-        assert!(matches!(h.app.mode, AppMode::Top(_)));
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        assert!(h.app.rtop_has_keys(), "rtop opens with the keys");
+        render(&mut h.app, 160, 48);
+        assert!(h.app.rtop_shown());
         // The second sample comes soon, with the first rates.
         h.app
             .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(1));
         h.app.process_pending();
-        let calls = h.fake.calls().iter().filter(|c| *c == "resources").count();
-        assert_eq!(calls, 2);
+        let calls = |h: &Harness| h.fake.calls().iter().filter(|c| *c == "resources").count();
+        assert_eq!(calls(&h), 2);
 
+        // Docked on the right, beside the session, under the band's tabs.
         let screen = render(&mut h.app, 160, 48);
+        let drawer = h.app.screen().feed.unwrap();
+        assert_eq!((drawer.x, drawer.right()), (116, 160));
+        let pane = drawer_text(&screen, usize::from(drawer.x));
         for text in [
+            "Feed   ",
+            "rtop",
             "this window",
             "rakumux-ptyd",
             "rakumux-api",
             "fix-login",
             "notes",
             "claude",
-            "--resume",
+            "MEMORY▾",
             "Total",
             "of 16 GB",
         ] {
-            assert!(screen.contains(text), "{text} missing:\n{screen}");
+            assert!(pane.contains(text), "{text} missing:\n{pane}");
         }
         // 900 ms of CPU in a second: 90% of one CPU.
-        let claude = screen
-            .lines()
-            .find(|l| l.contains("claude  --resume"))
-            .unwrap();
+        let claude = pane.lines().find(|l| l.contains("claude")).unwrap();
         assert!(
             claude.contains("90%") && claude.contains("800 MB"),
             "{claude}"
         );
-        // Narrow screens keep the numbers that matter.
-        for (width, height) in [(80, 24), (44, 30)] {
+        // Narrow windows keep the numbers that matter: in the session's
+        // place (80 columns), the screen on a phone.
+        for (width, height) in [(90, 30), (44, 30)] {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("fix-login"), "{width}:\n{screen}");
             assert!(screen.contains("MEMORY"), "{width}:\n{screen}");
         }
+        render(&mut h.app, 160, 48);
 
-        // Down to claude, fold its session from there, then go into it.
-        let rows = |h: &Harness| match &h.app.mode {
-            AppMode::Top(view) => h.app.top_rows(view),
-            _ => Vec::new(),
-        };
+        // `s` sorts by CPU; down to claude, fold its session from there,
+        // then go into it.
+        h.press(KeyCode::Char('s')).await;
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("CPU▾"), "{screen}");
+        let rows = |h: &Harness| h.app.rtop_rows();
         let claude_at = rows(&h).iter().position(|r| r.name == "claude").unwrap();
         for _ in 0..claude_at {
             h.press(KeyCode::Down).await;
@@ -2835,22 +2862,119 @@ mod tests {
         h.press(KeyCode::Left).await;
         assert!(rows(&h).iter().all(|r| r.name != "claude"));
         h.press(KeyCode::Enter).await;
-        assert!(matches!(h.app.mode, AppMode::Normal));
         assert_eq!(h.selected().as_deref(), Some("A"));
         assert_eq!(h.app.focus, Focus::Session);
+        assert!(!h.app.drawer_has_keys());
+        render(&mut h.app, 160, 48);
+        assert!(h.app.rtop_shown(), "it stays beside the session");
 
-        // `t` opens it again; Esc closes it.
+        // `t` gives it the keys again; `t` once more hides it, and nothing
+        // more is read.
         h.rakumux().await;
         h.press(KeyCode::Char('t')).await;
-        assert!(matches!(h.app.mode, AppMode::Top(_)));
-        h.press(KeyCode::Esc).await;
-        assert!(matches!(h.app.mode, AppMode::Normal));
+        assert!(h.app.rtop_has_keys());
+        h.press(KeyCode::Char('t')).await;
+        assert!(!h.app.drawer_open());
+        render(&mut h.app, 160, 48);
+        h.app
+            .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(5));
+        h.app.process_pending();
+        let read = calls(&h);
+        h.app
+            .on_tick(std::time::Instant::now() + std::time::Duration::from_secs(10));
+        h.app.process_pending();
+        assert_eq!(calls(&h), read, "hidden, rtop reads nothing");
     }
 
     #[tokio::test]
-    async fn top_on_an_older_server_says_to_restart_it() {
+    async fn the_drawer_switches_between_the_feed_and_rtop() {
+        let mut h = harness(vec![view("A", "fix-login", 20)]);
+        h.fake.state.lock().unwrap().resources = vec![resource_sample(1_000, 1)];
+        h.press(KeyCode::Char('f')).await;
+        assert!(h.app.feed_has_keys());
+        render(&mut h.app, 160, 48);
+        h.app.process_pending();
+        let calls = |h: &Harness| h.fake.calls().iter().filter(|c| *c == "resources").count();
+        assert_eq!(calls(&h), 0, "the Feed's tab doesn't sample");
+
+        // `t` switches the drawer to rtop with the keys, in the same place.
+        let feed_area = h.app.screen().feed;
+        h.press(KeyCode::Char('t')).await;
+        assert!(h.app.rtop_has_keys());
+        assert!(!h.app.feed_shown());
+        render(&mut h.app, 160, 48);
+        assert_eq!(h.app.screen().feed, feed_area);
+        h.app.process_pending();
+        assert!(calls(&h) >= 1);
+
+        // A click on the band's Feed switches back; rtop forgets its sample.
+        let feed_tab = h
+            .app
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == Hit::DrawerTab(crate::app::drawer::DrawerTab::Feed))
+            .map(|(area, _)| *area)
+            .unwrap();
+        h.app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: feed_tab.x + 1,
+            row: feed_tab.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        h.app.process_pending();
+        assert!(h.app.feed_has_keys());
+        render(&mut h.app, 160, 48);
+        h.app.on_tick(std::time::Instant::now());
+        assert!(!h.app.rtop.loaded());
+
+        // Esc gives the list the keys back; the drawer stays beside the
+        // session on whichever tab it was.
+        h.press(KeyCode::Char('t')).await;
+        h.press(KeyCode::Esc).await;
+        assert!(!h.app.drawer_has_keys());
+        assert!(h.app.drawer_open());
+        assert_eq!(h.app.drawer_tab(), crate::app::drawer::DrawerTab::Rtop);
+    }
+
+    #[tokio::test]
+    async fn the_tabs_layout_names_the_drawer_by_its_tab_and_a_phone_gives_it_the_screen() {
+        let mut h = harness(vec![view("A", "fix-login", 20)]);
+        h.fake.state.lock().unwrap().resources = vec![resource_sample(1_000, 1)];
+        h.app.set_layout(SessionLayout::Tabs);
+        h.press(KeyCode::Char('t')).await;
+        let screen = render(&mut h.app, 160, 48);
+        let bar = screen.lines().next().unwrap();
+        assert!(bar.contains("rtop") && !bar.contains("Feed"), "{bar}");
+        h.app.process_pending();
+        let screen = render(&mut h.app, 160, 48);
+        // Full width: every column, the processes' arguments too.
+        assert!(screen.contains("↓ NET"), "{screen}");
+        h.press(KeyCode::Char('f')).await;
+        let bar = render(&mut h.app, 160, 48)
+            .lines()
+            .next()
+            .unwrap()
+            .to_string();
+        assert!(bar.contains("Feed") && !bar.contains("rtop"), "{bar}");
+
+        // A phone: the drawer fills the screen while it has the keys; Esc
+        // hides it.
+        let mut h = harness(vec![view("A", "fix-login", 20)]);
+        h.fake.state.lock().unwrap().resources = vec![resource_sample(1_000, 1)];
+        render(&mut h.app, 44, 30);
+        h.press(KeyCode::Char('t')).await;
+        render(&mut h.app, 44, 30);
+        assert_eq!(h.app.screen().feed.map(|a| a.width), Some(44));
+        h.press(KeyCode::Esc).await;
+        assert!(!h.app.drawer_open());
+    }
+
+    #[tokio::test]
+    async fn rtop_on_an_older_server_says_to_restart_it() {
         let mut h = harness(vec![view("A", "a", 10)]);
         h.press(KeyCode::Char('t')).await;
+        render(&mut h.app, 160, 48);
+        h.app.process_pending();
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("restart it (S)"), "{screen}");
     }

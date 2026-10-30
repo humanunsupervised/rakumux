@@ -2,10 +2,11 @@
 //! end (the folder filter under All folders), then the tabs drawn by
 //! `layout::render_tabs_from`: the sessions that filter shows, in the
 //! Folders tab's order whatever the active tab (`SessionList::tab_order`),
-//! so tabs keep their places as statuses change. While the feed is shown
-//! the Feed tab comes first, before a line, unnumbered and never moved
-//! (`draw_feed_tab`). A phone's session-mode tab row (and Grid's) is the
-//! same bar without the filter or the Feed tab.
+//! so tabs keep their places as statuses change. While the drawer is shown
+//! its tab comes first, named by its active tab (Feed or rtop), before a
+//! line, unnumbered and never moved (`draw_drawer_tab`). A phone's
+//! session-mode tab row (and Grid's) is the same bar without the filter or
+//! the drawer's tab.
 
 use ratatui::{
     layout::Rect,
@@ -15,9 +16,11 @@ use ratatui::{
     Frame,
 };
 
+use super::drawer::tab_icon;
 use super::folder_picker::draw_selector;
 use super::footer::feed_count;
 use super::format::{activity_badge, needs_attention, status_glyph};
+use crate::app::drawer::DrawerTab;
 use crate::app::types::{AppMode, Focus};
 use crate::app::{App, Hit};
 use crate::layout::{self, TabItem};
@@ -27,9 +30,9 @@ use crate::theme;
 const SELECTOR_MAX: u16 = 28;
 
 /// Tab items for the visible sessions, in the tabs' order. None is
-/// highlighted while the Feed tab is selected.
+/// highlighted while the drawer's tab is selected.
 pub fn tab_items(app: &App) -> (Vec<TabItem>, usize) {
-    let feed = app.feed_has_keys();
+    let feed = app.drawer_has_keys();
     let visible = app.list.tab_order();
     let selected = app
         .list
@@ -81,7 +84,7 @@ pub fn draw_session_tabs(
         return layout::render_tabs_from(area, f.buffer_mut(), &items, selected, app.tab_first);
     }
     let focused =
-        app.focus == Focus::List && matches!(app.mode, AppMode::Normal) && !app.feed_has_keys();
+        app.focus == Focus::List && matches!(app.mode, AppMode::Normal) && !app.drawer_has_keys();
     let selector = draw_selector(
         f,
         app,
@@ -97,8 +100,8 @@ pub fn draw_session_tabs(
         width: area.width.saturating_sub(selector.width + 1),
         ..area
     };
-    if app.feed_tab_shown() {
-        let used = draw_feed_tab(f, app, tabs, hits);
+    if app.drawer_tab_shown() {
+        let used = draw_drawer_tab(f, app, tabs, hits);
         tabs.x += used;
         tabs.width = tabs.width.saturating_sub(used);
     }
@@ -115,13 +118,14 @@ pub fn draw_session_tabs(
     layout::render_tabs_from(tabs, f.buffer_mut(), &items, selected, app.tab_first)
 }
 
-/// The Feed tab at the left of `area`, ` ≡ Feed ●2 ` (its count of new
-/// entries in the unread mark's amber), highlighted as a selected tab while
-/// the feed has the keys, then a line before the sessions' tabs. Records
-/// its target; returns the columns used.
-fn draw_feed_tab(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) -> u16 {
+/// The drawer's tab at the left of `area`, named by its active tab:
+/// ` ≡ Feed ●2 ` (the count of new entries in the unread mark's amber) or
+/// ` ▥ rtop `, highlighted as a selected tab while the drawer has the keys,
+/// then a line before the sessions' tabs. Records its target; returns the
+/// columns used.
+fn draw_drawer_tab(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) -> u16 {
     let p = theme::palette();
-    let selected = app.feed_has_keys();
+    let selected = app.drawer_has_keys();
     let base = if selected {
         Style::default().bg(p.surface)
     } else {
@@ -134,12 +138,14 @@ fn draw_feed_tab(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit
             p.text_primary
         })
         .add_modifier(Modifier::BOLD);
+    let tab = app.drawer_tab();
+    let icon = tab_icon(app, tab);
     let mut spans = vec![
         Span::styled(" ", base),
-        Span::styled(app.icons().feed(), base.fg(p.accent_primary)),
-        Span::styled(" Feed", name),
+        Span::styled(icon, base.fg(p.accent_primary)),
+        Span::styled(format!(" {}", tab.label()), name),
     ];
-    if let Some(count) = feed_count(app) {
+    if let Some(count) = feed_count(app).filter(|_| tab == DrawerTab::Feed) {
         spans.push(Span::styled(format!(" {count}"), base.fg(p.accent_gold)));
     }
     spans.push(Span::styled(" ", base));
@@ -149,7 +155,7 @@ fn draw_feed_tab(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit
         ..area
     };
     f.render_widget(Paragraph::new(Line::from(spans)), tab);
-    hits.push((tab, Hit::FeedTab));
+    hits.push((tab, Hit::DrawerBarTab));
     let line = Rect {
         x: tab.right() + 1,
         width: 1,

@@ -116,7 +116,7 @@ impl App {
             self.leave_session_focus(true);
         }
         self.focus = Focus::Terminal;
-        self.feed_lost_keys();
+        self.drawer_lost_keys();
         self.zoomed = false;
         self.came_from_terminal = false;
         self.terminal_panel.needs_refocus = false;

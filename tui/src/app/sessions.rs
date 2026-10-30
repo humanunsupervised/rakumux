@@ -18,6 +18,7 @@ use session_core::ids::SessionId;
 use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
 use super::detail::{classify_output, Attachment, DetailView, OutputAction};
+use super::drawer::DrawerTab;
 use super::folders::{self, SyncResult};
 use super::grouping::{Grouping, Section, StatusGroup};
 use super::runtime::{cancel_flag, AppEvent};
@@ -583,7 +584,7 @@ impl App {
         self.came_from_terminal = false;
         self.grid.clear();
         self.focus = Focus::Session;
-        self.feed_lost_keys();
+        self.drawer_lost_keys();
         self.pending_key = None;
         self.came_from = None;
         if let Some(id) = self.detail.session_id().cloned() {
@@ -1235,10 +1236,10 @@ impl App {
                 .iter()
                 .find(|(area, _)| inside(Some(*area)))
                 .map(|(_, hit)| *hit);
-            // A click beside the feed gives the list the keys back; the
+            // A click beside the drawer gives the list the keys back; the
             // footer's buttons leave them where they are.
-            if !inside(screen.feed) && !inside(screen.footer) && hit != Some(Hit::FeedTab) {
-                self.unfocus_feed();
+            if !inside(screen.feed) && !inside(screen.footer) && hit != Some(Hit::DrawerBarTab) {
+                self.unfocus_drawer();
             }
             if let Some(index) = layout::tab_at(&self.tab_hits, event.column, event.row) {
                 let id = self.list.tab_order().get(index).map(|s| s.id.clone());
@@ -1370,17 +1371,29 @@ impl App {
                     return;
                 }
                 Some(Hit::FeedReply) => {
-                    self.focus_feed();
+                    self.show_drawer_tab(DrawerTab::Feed);
                     self.open_feed_reply();
                     return;
                 }
                 Some(Hit::FeedBack) => {
-                    self.focus_feed();
+                    self.show_drawer_tab(DrawerTab::Feed);
                     self.feed.reading = false;
                     return;
                 }
-                Some(Hit::FeedPane | Hit::FeedTab) => {
-                    self.focus_feed();
+                Some(Hit::DrawerTab(tab)) => {
+                    // The Feed's name while a reply is read: back to the cards.
+                    if tab == DrawerTab::Feed && self.drawer_tab() == DrawerTab::Feed {
+                        self.feed.reading = false;
+                    }
+                    self.show_drawer_tab(tab);
+                    return;
+                }
+                Some(Hit::RtopRow(index)) => {
+                    self.click_rtop_row(index);
+                    return;
+                }
+                Some(Hit::Drawer | Hit::DrawerBarTab) => {
+                    self.focus_drawer();
                     return;
                 }
                 // Hiding or showing the list leaves the mode as it is.
@@ -1390,10 +1403,10 @@ impl App {
                 }
                 Some(Hit::ModeBadge) => {
                     // Like the Rakumux key in session mode, Esc in
-                    // Rakumux mode (the feed's own Esc while it has the keys).
+                    // Rakumux mode (the drawer's own Esc while it has the keys).
                     match self.focus {
                         Focus::Session | Focus::Terminal => self.enter_rakumux_mode(),
-                        Focus::List if self.feed_has_keys() => self.feed_back(),
+                        Focus::List if self.drawer_has_keys() => self.drawer_back(),
                         Focus::List => self.return_to_session(),
                     }
                     return;
@@ -1424,12 +1437,16 @@ impl App {
             self.terminal_panel_mouse(event);
         } else if inside(screen.feed) {
             // The wheel scrolls the reply under it, else goes through the
-            // cards.
+            // cards, or rtop's rows.
             let step = match event.kind {
                 MouseEventKind::ScrollUp => -1,
                 MouseEventKind::ScrollDown => 1,
                 _ => return,
             };
+            if self.drawer_tab() == DrawerTab::Rtop {
+                self.rtop_move(step);
+                return;
+            }
             let on_reply = match self.feed_columns() {
                 Some((_, _, reply)) => inside(Some(reply)),
                 None => self.feed.reading,

@@ -91,7 +91,7 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `Tab` / `1`–`9` | Last session / that session |
 | `n` | New session in the current folder |
 | `←` `→` | Switch tabs: Status, Folders, App |
-| `f` | Show, focus or hide the feed |
+| `f` / `t` | Show, focus or hide the feed / rtop |
 | `P` / `/` | Filter by folder / by text |
 | `p` | Pin or unpin |
 | `w` / `W` | Where the session (every session) has worked: the git working trees where it changed files |
@@ -126,9 +126,14 @@ Tabs across the top of the list group your sessions:
 Pinned sessions sit above every group.
 
 `f` (or the footer's **≡ Feed** button) shows the **Feed** beside your sessions: your agents'
-replies, newest first (needs an account). It's a pane on the right in Master detail and Grid, a
-tab in Tabs. `Enter` reads a reply, again goes into its session; `Esc` gives the list the keys
-back, and `f` hides the feed. The button counts the replies that came in since you last looked.
+replies, newest first (needs an account). It's a tab of the drawer on the right in Master detail
+and Grid (a tab of its own in Tabs). `Enter` reads a reply, again goes into its session; `Esc`
+gives the list the keys back, and `f` hides the feed. The button counts the replies that came in
+since you last looked.
+
+`t` shows **rtop** in the same drawer: the CPU, memory and network this machine, Rakumux and
+each session's processes use now. `s` sorts, `←` `→` fold a session's processes, `Enter` goes
+into it; `f` and `t` switch between the two.
 
 ### Status
 

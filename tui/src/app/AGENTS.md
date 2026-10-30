@@ -68,20 +68,10 @@ new-session flow, and code boundaries.
   capped at 500, the selection kept by id, the reply's scroll, `reading` (the selected reply
   read whole in the cards' place), the service's generation and revision, and the ids that were
   on screen: `mark_seen`, `unseen` counts the rest that finished after the window started) and
-  `pane.rs`, which puts it on screen. `feed_open` (shown; this window's, hidden at every start,
-  nothing opens it by itself) and `feed_focused` (it has Rakumux mode's keys: `feed_has_keys`;
-  `feed_lost_keys` when session mode or the terminal panel takes them) go to the layout as
-  `PaneSizes::feed` (`layout::FeedShown`), and `Screen::feed` says where it is: docked on the
-  right (Master detail, Grid; `Screen::feed_divider`, `drag_feed_divider` saves
-  `sessions.feed_width`), the session's place on narrower windows in Rakumux mode, the body
-  under the tab bar while the Tabs layout's Feed tab is selected (`feed_tab_shown`;
-  `feed_columns` puts the reply beside the cards from 100 columns), or the screen on a phone
-  while it has the keys. `feed_shown` is whether it's on screen. `toggle_feed` (`f`, the
-  footer's `FooterKey::Feed`, Settings' `KeyAction::Feed`): shown with the keys, the keys, or
-  hidden; `unfocus_feed` (Esc, a click beside it, a grouping picked) gives the list the keys,
-  hiding it where it would leave the screen; `feed_back` is the feed's Esc. Every change runs
-  `feed_moved`: the session on screen takes its new pane size (`sync_terminal_size`), Grid's
-  previews follow their cards. It polls `AccountAccess::feed` off the UI thread every 2 s while
+  `pane.rs`, which puts it on the drawer's Feed tab (`drawer.rs`, below): `feed_has_keys` and
+  `feed_shown` are the drawer's on that tab; `feed_columns` puts the reply beside the cards from
+  100 columns in the Tabs layout; `toggle_feed` (`f`, the footer's `FooterKey::Feed`, Settings'
+  `KeyAction::Feed`) is `toggle_drawer(Feed)`; `feed_back` is the feed's Esc. It polls `AccountAccess::feed` off the UI thread every 2 s while
   on screen, and every 10 s as a background read while the account's Feed switch is on, so
   `feed_unseen` can count for the footer and the Feed tab (again at once while `more`). Its keys
   (`feed_key`: ←/→ and `h` do nothing, `l` is Enter, ↑/↓ scroll a reply being read) and Enter
@@ -91,12 +81,29 @@ new-session flow, and code boundaries.
   (`AccountAccess::feed_turn`, off the UI thread, the rest asked for at once while `next`;
   `FeedStore` keeps the last 20 turns, `TurnState`), drawn in order by
   `components::feed::turn_lines` (`›` prompts, quiet reasoning, `●` tool calls with the first
-  lines of their output). `components/feed.rs::draw_feed` draws it into `Screen::feed`: a band
-  (`≡ Feed`, the accent while it has the keys, `‹` back while reading) over the cards or the
-  reply; `components/session_tabs.rs` draws the Feed tab.
+  lines of their output). `components/feed.rs::draw_feed` draws it under the drawer's band
+  (`‹` back while reading) over the cards or the reply.
+- `drawer.rs`: the drawer, `DrawerTab` Feed or Rtop. `drawer_open` (shown; this window's, hidden
+  at every start, nothing opens it by itself), `drawer_focused` (it has Rakumux mode's keys:
+  `drawer_has_keys`; `drawer_lost_keys` when session mode or the terminal panel takes them) and
+  `drawer_tab` go to the layout as `PaneSizes::feed` (`layout::FeedShown`), and `Screen::feed`
+  says where it is: docked on the right (Master detail, Grid; `Screen::feed_divider`,
+  `drag_feed_divider` saves `sessions.feed_width`), the session's place on narrower windows in
+  Rakumux mode, the body under the tab bar while the Tabs layout's drawer tab is selected
+  (`drawer_tab_shown`), or the screen on a phone while it has the keys. `drawer_shown` is
+  whether it's on screen. `toggle_drawer(tab)` (`f` Feed, `t` rtop): shown on that tab with the
+  keys, switched to it, the keys, or hidden; `show_drawer_tab` (a click on the band's tab,
+  `Hit::DrawerTab`); `unfocus_drawer` (Esc, a click beside it, a grouping picked) gives the
+  list the keys, hiding it where it would leave the screen; `drawer_back` is the active tab's
+  Esc, `drawer_key` its keys, `drawer_session` what the footer names. Every change runs
+  `drawer_moved`: the session on screen takes its new pane size (`sync_terminal_size`), Grid's
+  previews follow their cards, and the tab that came on screen starts (feed read, rtop sample)
+  while the other stops. `components/drawer.rs::draw_drawer` draws the band (`≡ Feed   ▥ rtop`,
+  the active one underlined, the accent while it has the keys) and the active tab;
+  `components/session_tabs.rs` draws the Tabs layout's drawer tab, named by its active tab.
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
   folders / App / Status), `filter_label` (the Tabs layout's selector, Grid's header),
-  `switch_tab`/`show_tab` (both give the list the keys from the feed), `open_tab_picker` (Folders: the Folders modal) and the App and
+  `switch_tab`/`show_tab` (both give the list the keys from the drawer), `open_tab_picker` (Folders: the Folders modal) and the App and
   Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
   then `picker_sections` (sessions' apps or every status but unknown, plus the filter's), typing
   narrows by name, Tab ticks (Space too while nothing is typed: status names have spaces), Enter
@@ -140,13 +147,16 @@ new-session flow, and code boundaries.
   hidden (`App::toggle_list`: `b`, Settings, the list's `« Hide list` row, `Hit::HideList`;
   `PaneSizes::list_hidden`, this window's only): `Screen::rail` (`layout::RAIL_COLS`) replaces
   the list and divider, and a click on it (`Hit::ShowList`) shows the list again.
-- `top.rs`: Top (`AppMode::Top(TopView)`, `t` or Settings → Top; drawn by
-  `components/top.rs`). Asks `SessionApi::resources` off the UI thread (`AppEvent::Resources`,
-  checked against the opening's generation) on ticks about every second, the second sample half a
+- `rtop.rs`: rtop, the drawer's rtop tab (`App::rtop: RtopView`, `t` or Settings → rtop; drawn
+  by `components/rtop.rs`, the sorted column marked `▾`). Asks `SessionApi::resources` off the
+  UI thread (`AppEvent::Resources`, checked against the view's generation) on ticks about every
+  second while its tab is on screen (`rtop_shown`, `rtop_timers`), the second sample half a
   second after the first; keeps only the last two samples, for rates (`Usage`: % of one CPU,
-  memory, bytes a second), and forgets them on close. `TopView::rows` is pure: this window, the
+  memory, bytes a second), and forgets them when it leaves the screen (`RtopView::forget`; the
+  sort, folds and selection stay). Its keys are `rtop_key`; `Hit::RtopRow` selects a row, again
+  (a tap on a phone) goes in. `TopView::rows` is pure: this window, the
   server, other windows, other clients, then sessions sorted by `TopSort` with their process
-  trees (`tree_order`), folded per session; `top_rows` names sessions from the list (name, then
+  trees (`tree_order`), folded per session; `rtop_rows` names sessions from the list (name, then
   `AppKey` and folder). The selection is kept by `RowKey` as rows change; Enter `go_into`s the
   row's session.
 - `grid.rs` and `grid/tests.rs`: Grid's visible-page observer previews, generation checks,
@@ -173,8 +183,9 @@ new-session flow, and code boundaries.
   mode label (`Hit::ModeBadge`: `enter_rakumux_mode` / `return_to_session`) and key hints
   (`Hit::FooterKey`: what the keys do), the list's `« Hide list` row and the hidden list's rail
   (`Hit::HideList`, `Hit::ShowList`: `toggle_list`, in either mode), and the feed (`Hit::FeedEntry`
-  selects a card, a second click opens it; `Hit::FeedBack`, `Hit::FeedReply`, `Hit::FeedPane`, the
-  Tabs layout's `Hit::FeedTab`): a click on it gives it the keys, a click beside it (not the
+  selects a card, a second click opens it; `Hit::FeedBack`, `Hit::FeedReply`, the band's
+  `Hit::DrawerTab`, rtop's `Hit::RtopRow`, `Hit::Drawer` anywhere else on it, the Tabs layout's
+  `Hit::DrawerBarTab`): a click on it gives it the keys, a click beside it (not the
   footer) gives them to the list. The divider drags side to side, or up and down when
   stacked; the line left of the docked feed (`Screen::feed_divider`) drags side to side.
   Clicking "+ New session" creates and enters its shell immediately at any width,
@@ -215,8 +226,9 @@ new-session flow, and code boundaries.
 - `handlers/`: key handling by target (`Focus::List` = Rakumux mode, `Focus::Session` = main
   session, `Focus::Terminal` = utility shell):
   - Rakumux mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
-    `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs; `f` the feed: shown with the keys,
-    the keys, hidden; `feed_key` while it has them),
+    `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs; `f` the drawer's Feed and `t` its rtop:
+    shown on that tab with the keys, switched to it, the keys, hidden; `drawer_key` while it has
+    them),
     `gg` via `App::pending_key`,
     `d`/`dd` opens delete confirmation, `b` hides or shows the list, Enter/`i`
     go in, Esc (cancel first) or the
@@ -316,3 +328,5 @@ timers ───────────┘                                     
   empty, live, exited and dead states in both layouts, at phone sizes (45×40, 40×20) for the
   list-then-session layout, taps and dialogs, and at narrow-window sizes (90×40, 90×20) for the
   stacked layout.
+- The drawer: `feed/tests.rs` for the Feed tab, `ui.rs` for rtop and switching tabs
+  (`rtop_from_settings_…`, `the_drawer_switches_…`, `the_tabs_layout_names_the_drawer_…`).

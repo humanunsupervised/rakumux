@@ -2,11 +2,12 @@
 //! has the keys, and the session is previewed. Arrows and Vim keys both
 //! move (←/→ switch the list's tabs); Enter (or `i`) goes into a session;
 //! Esc cancels what's pending, then goes back to the session Rakumux mode
-//! was entered from. `f` shows the feed and gives it the keys, gives them
-//! to it while it's shown, and hides it while it has them; with them, the
-//! moves go through its cards, Enter reads one and Esc gives them back
-//! (`App::feed_key`). `b` hides Master detail's list beside the session,
-//! and shows it again.
+//! was entered from. `f` shows the drawer on the Feed and gives it the
+//! keys, `t` on rtop: switches to that tab, gives it the keys while the list
+//! has them, and hides the drawer while that tab has them; with them, the
+//! moves go through the Feed's cards or rtop's rows, Enter reads a reply or
+//! goes into a row's session and Esc gives them back (`App::drawer_key`).
+//! `b` hides Master detail's list beside the session, and shows it again.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -24,8 +25,8 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
     // The second key of `gg`; anything else drops the first.
     if let Some(first) = app.pending_key.take() {
         match (first, key.code) {
-            ('g', KeyCode::Char('g')) if !ctrl && !alt && app.feed_has_keys() => {
-                app.feed_to_top();
+            ('g', KeyCode::Char('g')) if !ctrl && !alt && app.drawer_has_keys() => {
+                app.drawer_to_top();
                 return AppResult::Continue;
             }
             ('g', KeyCode::Char('g')) if !ctrl && !alt => {
@@ -42,14 +43,14 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         return AppResult::Continue;
     }
     if let Some(delta) = app.cycle_direction(&key) {
-        if app.feed_has_keys() {
-            app.move_feed_selection(delta as isize);
+        if app.drawer_has_keys() {
+            app.move_drawer_selection(delta as isize);
         } else {
             app.cycle_session(delta);
         }
         return AppResult::Continue;
     }
-    if app.feed_has_keys() && app.feed_key(key) {
+    if app.drawer_has_keys() && app.drawer_key(key) {
         return AppResult::Continue;
     }
     match key.code {
@@ -107,7 +108,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('n') => app.open_new_session(),
         KeyCode::Char('N') => app.toggle_sprite(),
         KeyCode::Char('T') => app.toggle_terminal_panel(),
-        KeyCode::Char('t') => app.open_top(),
+        KeyCode::Char('t') => app.toggle_rtop(),
         KeyCode::Char('b') => app.toggle_list(),
         KeyCode::Char('f') => app.toggle_feed(),
         KeyCode::Char('v') => app.set_layout(app.next_layout()),

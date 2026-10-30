@@ -1,21 +1,9 @@
-//! The feed on screen. Every start hides it; `f`, the footer's Feed button
-//! or Settings shows it. Master detail and Grid dock it as a pane on the
-//! right, a draggable line left of it, and the session's pane narrows (the
-//! session on screen takes the new size, as a dragged divider gives it). A
-//! window too narrow to keep the session usable beside it shows it in the
-//! session's place in Rakumux mode only. Tabs shows it as a tab of its own
-//! before the sessions'; a phone shows it alone, full screen
-//! (`layout::split_with` decides where).
-//!
-//! It takes Rakumux mode's keys from the list (`feed_focused`): `f` shows
-//! and focuses it, focuses it while the list has them, and hides it while
-//! it has them; a click focuses the side it lands on; Esc gives the keys
-//! back to the list, hiding it where it would vanish (a phone, Grid's cards
-//! on a narrow window). Session mode gives them back too. In the pane,
-//! Enter reads the selected card's reply whole in the cards' place (Esc
-//! back), and Enter there goes into its session when it runs here; the
-//! Feed tab, wide enough, shows the cards and the selected reply side by
-//! side, and Enter goes in.
+//! The feed on screen: the drawer's Feed tab (`app/drawer.rs` says where
+//! the drawer goes and who has its keys). In the pane, Enter reads the
+//! selected card's reply whole in the cards' place (Esc back), and Enter
+//! there goes into its session when it runs here; the Feed tab of the Tabs
+//! layout, wide enough, shows the cards and the selected reply side by side,
+//! and Enter goes in.
 //!
 //! The service is asked for changes every 2 s while the feed is on screen,
 //! and every 10 s otherwise while the account's Feed switch is on (without
@@ -30,10 +18,11 @@ use rakumux_sensagent::feed::{FeedPage, FeedTurn};
 use ratatui::layout::Rect;
 use session_core::ids::SessionId;
 
+use crate::app::drawer::DrawerTab;
 use crate::app::runtime::AppEvent;
-use crate::app::types::{AccountStatus, Focus};
+use crate::app::types::AccountStatus;
 use crate::app::{App, DividerState};
-use crate::layout::{self, FeedShown, PaneSizes, SessionLayout};
+use crate::layout::{self, PaneSizes};
 
 /// How often the feed is asked for changes while it's shown.
 const FEED_EVERY: Duration = Duration::from_secs(2);
@@ -44,43 +33,21 @@ pub(in crate::app) const FEED_HIDDEN_EVERY: Duration = Duration::from_secs(10);
 const CARD_ROWS: isize = 6;
 
 impl App {
-    /// The feed is shown (a pane, a tab or the screen), whether or not it's
-    /// on screen in this mode.
-    #[cfg(test)]
-    pub fn feed_open(&self) -> bool {
-        self.feed_open
-    }
-
-    /// The feed has Rakumux mode's keys: its pane is focused, its tab
-    /// selected.
+    /// The feed has Rakumux mode's keys: the drawer has them on its Feed tab.
     pub fn feed_has_keys(&self) -> bool {
-        self.feed_open && self.feed_focused && self.focus == Focus::List
+        self.drawer_has_keys() && self.drawer_tab == DrawerTab::Feed
     }
 
-    /// The feed as the layout places it.
-    pub(in crate::app) fn feed_layout(&self) -> FeedShown {
-        match (self.feed_open, self.feed_focused) {
-            (false, _) => FeedShown::Hidden,
-            (true, false) => FeedShown::Shown,
-            (true, true) => FeedShown::Focused,
-        }
-    }
-
-    /// The feed is on screen: its cards, or a reply read whole.
+    /// The feed is on screen: the drawer shows its Feed tab (its cards, or a
+    /// reply read whole).
     pub fn feed_shown(&self) -> bool {
-        self.screen().feed.is_some()
+        self.drawer_shown() && self.drawer_tab == DrawerTab::Feed
     }
 
-    /// The Tabs layout's tab bar has the Feed tab (phones show no tab bar
-    /// in Rakumux mode; the feed fills the screen there).
-    pub fn feed_tab_shown(&self) -> bool {
-        self.feed_open && self.session_layout() == SessionLayout::Tabs && !self.phone()
-    }
-
-    /// The cards, the line and the selected reply side by side: the Feed
-    /// tab, wide enough (`layout::feed_tab_columns`).
+    /// The cards, the line and the selected reply side by side: the Tabs
+    /// layout's drawer on the Feed, wide enough (`layout::feed_tab_columns`).
     pub fn feed_columns(&self) -> Option<(Rect, Rect, Rect)> {
-        if !self.feed_tab_shown() {
+        if !self.drawer_tab_shown() || self.drawer_tab != DrawerTab::Feed {
             return None;
         }
         self.screen().feed.and_then(layout::feed_tab_columns)
@@ -92,95 +59,27 @@ impl App {
         self.feed_shown() && (self.feed.reading || self.feed_columns().is_some())
     }
 
-    /// `f`, the footer's Feed button or Settings: show the feed with the
-    /// keys, give it the keys while the list has them, or hide it while it
-    /// has them.
+    /// `f`, the footer's Feed button or Settings: show the drawer on the
+    /// Feed with the keys, switch it to the Feed, give it the keys while the
+    /// list has them, or hide it while the Feed has them.
     pub fn toggle_feed(&mut self) {
-        if !self.feed_open {
-            self.open_feed();
-        } else if self.feed_has_keys() {
-            self.close_feed();
-        } else {
-            self.focus_feed();
-        }
+        self.toggle_drawer(DrawerTab::Feed);
     }
 
-    /// Show the feed and give it the keys; changes since what's held are
-    /// asked for at once.
+    /// Show the drawer on the Feed and give it the keys.
+    #[cfg(test)]
     pub fn open_feed(&mut self) {
-        if !self.feed_open {
-            self.feed_open = true;
-            self.feed.reading = false;
-            self.feed.due = Some(Instant::now());
-        }
-        self.focus_feed();
+        self.open_drawer(DrawerTab::Feed);
     }
 
-    /// Give the feed Rakumux mode's keys (from a session, in Rakumux mode).
-    pub fn focus_feed(&mut self) {
-        if !self.feed_open {
-            return;
-        }
-        if self.focus != Focus::List {
-            self.enter_rakumux_mode();
-        }
-        self.feed_focused = true;
-        self.pending_key = None;
-        self.feed_moved();
-    }
-
-    /// Hide the feed.
-    pub fn close_feed(&mut self) {
-        if !self.feed_open {
-            return;
-        }
-        self.feed_open = false;
-        self.feed_focused = false;
-        self.feed.reading = false;
-        self.feed_divider = DividerState::default();
-        self.feed_moved();
-    }
-
-    /// The list takes Rakumux mode's keys back. Where the feed would then
-    /// leave the screen (a phone, Grid's cards on a narrow window) it's
-    /// hidden; Tabs keeps its tab.
-    pub fn unfocus_feed(&mut self) {
-        if !self.feed_focused {
-            return;
-        }
-        self.feed_focused = false;
-        if self.feed_open && !self.feed_shown() && !self.feed_tab_shown() {
-            self.feed_open = false;
-            self.feed.reading = false;
-        }
-        self.feed_moved();
-    }
-
-    /// Session mode or the terminal panel took the keys: the list has them
-    /// when Rakumux mode comes back.
-    pub(in crate::app) fn feed_lost_keys(&mut self) {
-        self.feed_focused = false;
-    }
-
-    /// Esc while the feed has the keys (the RAKUMUX MODE label too): a reply
-    /// read in the cards' place goes back to them, else the list gets the
-    /// keys.
+    /// The feed's Esc: a reply read in the cards' place goes back to them,
+    /// else the list gets the keys.
     pub fn feed_back(&mut self) {
         if self.feed.reading && self.feed_columns().is_none() {
             self.feed.reading = false;
         } else {
-            self.unfocus_feed();
+            self.unfocus_drawer();
         }
-    }
-
-    /// The feed came, went or moved: the session on screen takes its pane's
-    /// new size (as a dragged divider gives it), Grid's previews follow
-    /// their cards, what the feed showed counts as seen, and one coming on
-    /// screen is asked for changes at once.
-    fn feed_moved(&mut self) {
-        self.sync_terminal_size();
-        self.sync_grid();
-        self.feed_timers(Instant::now());
     }
 
     /// When the feed comes on screen or leaves it, what it holds is seen;
@@ -196,7 +95,7 @@ impl App {
         }
     }
 
-    /// The line left of the docked pane dragged to `column`: the pane takes
+    /// The line left of the docked drawer dragged to `column`: it takes
     /// the columns right of it, within what docks.
     pub(in crate::app) fn drag_feed_divider(&mut self, column: u16) {
         let wanted = self.area.right().saturating_sub(column.saturating_add(1));
@@ -376,7 +275,7 @@ impl App {
             KeyCode::Enter | KeyCode::Char('i' | 'l') => self.open_feed_entry(),
             KeyCode::Char('r') => self.open_feed_reply(),
             KeyCode::Esc => self.feed_back(),
-            // The feed has no tabs to switch.
+            // Its cards have no sides to go to.
             KeyCode::Left | KeyCode::Right | KeyCode::Char('h') => {}
             KeyCode::Char('p' | 's' | 'J' | 'K' | 'd' | 'x' | 'z' | 'c' | '/' | '{' | '}') => {}
             _ => return false,
@@ -416,7 +315,7 @@ impl App {
     /// does.
     pub fn click_feed_entry(&mut self, index: usize) {
         let again = self.feed_has_keys() && self.feed.selected_index() == Some(index);
-        self.focus_feed();
+        self.show_drawer_tab(DrawerTab::Feed);
         self.feed.select(index);
         if again || self.phone() {
             self.open_feed_entry();
@@ -447,7 +346,7 @@ impl App {
             return;
         };
         if self.list.get(&session).is_some() {
-            self.feed_focused = false;
+            self.drawer_focused = false;
             self.go_into(session);
             return;
         }

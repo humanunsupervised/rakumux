@@ -1,5 +1,5 @@
-//! The agent feed (`app/feed`) where the screen puts it ([`draw_feed`]): a
-//! band naming it, in the accent while it has the keys, over the replies
+//! The agent feed (`app/feed`) in the drawer ([`draw_feed`]): the drawer's
+//! band (`drawer.rs`), in the accent while it has the keys, over the replies
 //! newest first, each a card (its session, then its agent and branch, on
 //! the left of its top border; its age and where it's up to on the right;
 //! the start of the reply inside), or what the feed is waiting for (a
@@ -22,6 +22,7 @@ use ratatui::{
 };
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
 
+use super::drawer::draw_band;
 use super::format::{now_secs, relative_time, truncate};
 use super::markdown;
 use super::session_list::{first_visible_row, folder_item_height};
@@ -53,15 +54,15 @@ fn status(app: &App) -> FeedStatus {
     }
 }
 
-/// The feed in `area` (`Screen::feed`): its band over the cards, or the
-/// reply read in their place; in a wide Feed tab, the cards with the
-/// selected reply beside them. A click anywhere on it focuses it.
+/// The feed in `area` (the drawer's, on its Feed tab): the drawer's band
+/// over the cards, or the reply read in their place; in a wide Feed tab,
+/// the cards with the selected reply beside them.
 pub fn draw_feed(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     if area.width == 0 || area.height == 0 {
         return;
     }
     let p = theme::palette();
-    let focused = app.feed_has_keys();
+    let focused = app.drawer_has_keys();
     let (cards, beside) = match app.feed_columns() {
         Some((cards, line, reply)) => {
             let lines: Vec<Line> = (0..line.height).map(|_| Line::from("│")).collect();
@@ -82,7 +83,7 @@ pub fn draw_feed(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit
         ..cards
     };
     let reading = app.feed.reading && beside.is_none();
-    draw_band(f, app, band, focused, reading, hits);
+    draw_band(f, app, band, reading, hits);
     let below = Rect {
         y: band.bottom(),
         height: cards.height - band.height,
@@ -95,69 +96,6 @@ pub fn draw_feed(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit
     }
     if let Some(reply) = beside {
         draw_feed_reply(f, app, reply, hits);
-    }
-    hits.push((area, Hit::FeedPane));
-}
-
-/// The feed's band, as tall as the list's tabs so the cards start where the
-/// sessions do: `≡ Feed`, underlined like an active tab, in the accent while
-/// it has the keys. While a reply is read in the cards' place it starts with
-/// `‹`, and a click on it goes back to them.
-fn draw_band(
-    f: &mut Frame,
-    app: &App,
-    area: Rect,
-    focused: bool,
-    reading: bool,
-    hits: &mut Vec<(Rect, Hit)>,
-) {
-    let p = theme::palette();
-    f.render_widget(Block::default().style(Style::default().bg(p.surface)), area);
-    let (mark, label) = if focused {
-        (p.accent_primary, p.text_bright)
-    } else {
-        (p.neutral_gray, p.neutral_gray)
-    };
-    let icon = app.icons().feed();
-    let title = "Feed";
-    let mut spans = vec![Span::raw(" ".repeat(INDENT))];
-    let mut start = INDENT;
-    if reading {
-        spans.push(Span::styled(
-            "‹ ",
-            Style::default().fg(mark).add_modifier(Modifier::BOLD),
-        ));
-        start += 2;
-        hits.push((area, Hit::FeedBack));
-    }
-    spans.extend([
-        Span::styled(icon, Style::default().fg(mark)),
-        Span::raw(" "),
-        Span::styled(
-            title,
-            Style::default().fg(label).add_modifier(Modifier::BOLD),
-        ),
-    ]);
-    f.render_widget(
-        Paragraph::new(Line::from(spans)),
-        Rect {
-            y: area.y + area.height / 2,
-            height: 1,
-            ..area
-        },
-    );
-    if area.height >= 3 {
-        let width = str_width(icon) + 1 + str_width(title);
-        f.render_widget(
-            Paragraph::new(Span::styled("▁".repeat(width), Style::default().fg(mark))),
-            Rect {
-                x: area.x.saturating_add(start as u16),
-                y: area.bottom() - 1,
-                width: width as u16,
-                height: 1,
-            }
-            .intersection(area),
-        );
     }
 }
 

@@ -244,9 +244,9 @@ pub enum KeyAction {
     HideList,
     /// Reveal/focus the independent shell below the detail pane.
     TerminalPanel,
-    /// `t`: Top, what this machine, Rakumux and every session's processes
+    /// `t`: rtop, what this machine, Rakumux and every session's processes
     /// use now.
-    Resources,
+    Rtop,
     Help,
     Settings,
     /// Sign in to the Rakumux account, or see who's signed in.
@@ -305,7 +305,7 @@ impl KeyAction {
         KeyAction::CycleLayout,
         KeyAction::HideList,
         KeyAction::TerminalPanel,
-        KeyAction::Resources,
+        KeyAction::Rtop,
         KeyAction::Help,
         KeyAction::Settings,
         KeyAction::Account,
@@ -358,7 +358,7 @@ impl KeyAction {
             | KeyAction::CycleLayout
             | KeyAction::HideList
             | KeyAction::TerminalPanel
-            | KeyAction::Resources => "Sessions and folders",
+            | KeyAction::Rtop => "Sessions and folders",
             KeyAction::Help
             | KeyAction::Settings
             | KeyAction::Account
@@ -411,7 +411,7 @@ impl KeyAction {
             KeyAction::CycleLayout => "Cycle layout (Master detail, Grid, Tabs)",
             KeyAction::HideList => "Hide or show the session list",
             KeyAction::TerminalPanel => "Terminal panel (show, focus or hide)",
-            KeyAction::Resources => "Top: CPU, memory and network",
+            KeyAction::Rtop => "rtop (show, focus or hide)",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
             KeyAction::Account => "Sign in, or your account",
@@ -476,7 +476,7 @@ impl KeyAction {
             KeyAction::CycleLayout => plain(&["v"]),
             KeyAction::HideList => plain(&["b"]),
             KeyAction::TerminalPanel => plain(&["T"]),
-            KeyAction::Resources => plain(&["t"]),
+            KeyAction::Rtop => plain(&["t"]),
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
             KeyAction::Account => plain(&["a"]),
@@ -531,8 +531,8 @@ impl KeyAction {
                 "The tabs (Status, Folders, App) are the first row; ←/→ switch them.".into()
             }
             KeyAction::Feed => "What your agents said when they finished a turn, on every \
-                 machine of your account, newest first: a pane on the right of Master detail \
-                 and Grid, a tab of its own in Tabs. Enter reads a reply whole, again goes into \
+                 machine of your account, newest first: a tab of the drawer on the right of \
+                 Master detail and Grid (a tab of its own in Tabs), beside rtop. Enter reads a reply whole, again goes into \
                  its session when it runs here; r writes back to it; Esc gives the list the \
                  keys back. The footer's Feed button counts the replies that came since you \
                  last looked. Needs your Rakumux account with the Agent feed on (Settings → \
@@ -606,12 +606,13 @@ impl KeyAction {
                  sessions; drag the divider to resize the split."
                     .into()
             }
-            KeyAction::Resources => "This window, the Rakumux server, its other clients and \
+            KeyAction::Rtop => "This window, the Rakumux server, its other clients and \
                  every running session, each session's processes under it: CPU (100% is one \
-                 CPU), memory and network, about every second. s sorts the sessions, ←/→ fold \
-                 a session's processes, Enter goes into it. Network counts each process's TCP \
-                 connections to other machines (Linux; the machine's total everywhere). Nothing \
-                 is recorded."
+                 CPU), memory and network, about every second, in the drawer on the right \
+                 beside the Feed (f switches to it). s sorts the sessions, ←/→ fold a \
+                 session's processes, Enter goes into it, Esc gives the list the keys back. \
+                 Network counts each process's TCP connections to other machines (Linux; the \
+                 machine's total everywhere). Nothing is recorded."
                 .into(),
             KeyAction::Account => "Signed out, it asks for a sign-in code to approve in any \
                  browser (the footer's Sign in does too); signed in, it shows the account and \
@@ -1635,15 +1636,18 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
          closing or reloading this UI ends the temporary shell. A daemon restart in place \
          preserves it, reconnecting read-only until refocused.",
     );
-    doc.heading("Top");
+    doc.heading("rtop");
     doc.text(
-        "t in Rakumux mode, or Settings, Top, shows what this machine and Rakumux use now: \
-         this window, the server, its other windows and clients, then every running session \
-         with its processes under it (the shell, the agent and what it started). CPU is a \
-         percentage of one CPU, memory is resident memory, network what each process's TCP \
-         connections carry to other machines (Linux; elsewhere only the machine's total). It \
-         updates about every second and records nothing. s sorts the sessions by memory, \
-         CPU, network or name; ←/→ fold a session's processes; Enter goes into it.",
+        "t in Rakumux mode, or Settings, rtop, shows what this machine and Rakumux use now, \
+         in the drawer on the right beside the Feed (its band names both; f and t switch, \
+         and hide it while their tab has the keys): this window, the server, its other \
+         windows and clients, then every running session with its processes under it (the \
+         shell, the agent and what it started). CPU is a percentage of one CPU, memory is \
+         resident memory, network what each process's TCP connections carry to other \
+         machines (Linux; elsewhere only the machine's total). It updates about every second \
+         while it's on screen and records nothing. s sorts the sessions by memory, CPU, \
+         network or name (▾ marks the column); ←/→ fold a session's processes; Enter goes \
+         into it; Esc gives the list the keys back.",
     );
     doc.heading("Folders");
     doc.text(
@@ -1804,9 +1808,10 @@ fn mouse(doc: &mut Doc) {
          to show everything, or outside it to close it.",
     );
     doc.bullet(
-        "Click the footer's Feed button to show the feed (again to hide it). Click a reply to \
-         select it, again to read it; click either side to give it the keys. Drag the line \
-         left of the feed to resize it.",
+        "Click the footer's Feed button to show the feed (again to hide it). Click Feed or \
+         rtop on the drawer's band to switch. Click a reply or an rtop row to select it, again \
+         to read it or go into its session; click either side to give it the keys. Drag the \
+         line left of the drawer to resize it.",
     );
     doc.bullet(
         "Drag a session up or down the list (or a tab left or right) to move it; a blue bar \
@@ -1818,8 +1823,8 @@ fn mouse(doc: &mut Doc) {
     );
     doc.bullet(
         "Click the mode in the middle of the footer: SESSION MODE switches to Rakumux mode, \
-         RAKUMUX MODE does what Esc does (back to the session you came from; while the feed has \
-         the keys, Esc there). Click a button on the right of the footer (`f ≡ Feed`, `? Help`, \
+         RAKUMUX MODE does what Esc does (back to the session you came from; while the drawer \
+         has the keys, Esc there). Click a button on the right of the footer (`f ≡ Feed`, `? Help`, \
          `, Settings`, or in a session the Rakumux key) to do what it says. Phones send taps \
          as clicks, so all of this works there too.",
     );

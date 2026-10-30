@@ -380,8 +380,9 @@ pub enum SettingsItem {
     RestartServer,
     /// Independent shell below the main detail pane.
     TerminalPanel,
-    /// What this machine, Rakumux and every session's processes use now.
-    Top,
+    /// rtop: what this machine, Rakumux and every session's processes use
+    /// now, in the drawer.
+    Rtop,
     /// Sign in to the Rakumux account (AI session titles, the agent feed).
     Account,
     /// The account's AI session titles switch (as on rakumux.com/features).
@@ -406,7 +407,7 @@ impl SettingsItem {
         SettingsItem::Update,
         SettingsItem::RestartUi,
         SettingsItem::RestartServer,
-        SettingsItem::Top,
+        SettingsItem::Rtop,
         SettingsItem::TerminalPanel,
     ];
 
@@ -418,7 +419,7 @@ impl SettingsItem {
             SettingsItem::Update
             | SettingsItem::RestartUi
             | SettingsItem::RestartServer
-            | SettingsItem::Top
+            | SettingsItem::Rtop
             | SettingsItem::TerminalPanel => "App",
             SettingsItem::Account => "Account",
             SettingsItem::AiTitles | SettingsItem::AgentFeed | SettingsItem::RemoteReplies => {
@@ -634,8 +635,6 @@ pub enum AppMode {
     Pairing(PairingDialog),
     /// The account dialog (Settings → Account).
     Account(AccountDialog),
-    /// Top (Settings → Top, `t`): what Rakumux's processes use now.
-    Top(super::top::TopView),
     Auth(AuthMenu),
     AuthEmail(AuthEmailDialog),
     AuthCode(AuthCodeDialog),

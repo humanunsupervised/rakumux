@@ -1,7 +1,8 @@
-//! Top (`AppMode::Top`): the machine's CPU, memory and network on one line,
-//! then a row for this window, the server, the other clients and each
-//! session (its processes under it), and their total pinned at the bottom.
-//! Columns give way on narrow screens: the pid first, then sent and
+//! rtop (`app/rtop.rs`) in the drawer, under its band: the machine's CPU,
+//! memory and network, then a row for this window, the server, the other
+//! clients and each session (its processes under it), and their total
+//! pinned at the bottom. The column the sessions are sorted by has a `▾`.
+//! Columns give way on narrow drawers: the pid first, then sent and
 //! received merge into one network column, then it goes.
 
 use ratatui::{
@@ -12,15 +13,14 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::top::{MachineSummary, RowKey, TopRow, TopView, Usage};
-use crate::app::App;
-use crate::components::dialogs::{dialog_frame, draw_keys, error_line, padded, padding, text_rows};
-use crate::components::utils::{get_spinner_char, popup_area};
+use crate::app::rtop::{MachineSummary, RowKey, RtopRow, RtopSort, RtopView, Usage};
+use crate::app::{App, Hit};
+use crate::components::dialogs::{error_line, text_rows};
+use crate::components::utils::get_spinner_char;
 use crate::layout::{str_width, truncate};
 use crate::theme;
 
-const TITLE: &str = "Top";
-/// The widest Top gets: wider only spreads the columns apart.
+/// The widest rtop's columns get: wider only spreads them apart.
 const MAX_COLS: u16 = 124;
 const PID_COLS: usize = 7;
 const CPU_COLS: usize = 7;
@@ -80,29 +80,20 @@ impl Columns {
     }
 }
 
-pub fn draw_top(f: &mut Frame, app: &App, view: &TopView, area: Rect) {
+/// rtop in `area` (the drawer under its band). Records a target per row
+/// shown; the selected row is highlighted while rtop has the keys.
+pub fn draw_rtop(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, Hit)>) {
     let p = theme::palette();
-    let mut popup = popup_area(area, 94, 94);
-    if popup.width > MAX_COLS {
-        popup.x += (popup.width - MAX_COLS) / 2;
-        popup.width = MAX_COLS;
-    }
-    let (pad_x, pad_y) = padding(area);
-    let inner = padded(
-        dialog_frame(f, popup, TITLE, p.accent_primary),
-        pad_x,
-        pad_y,
-    );
-    let sort = format!("Sort: {}", view.sort.label());
-    let keys = [
-        ("↑↓", "Select"),
-        ("←→", "Fold"),
-        ("s", sort.as_str()),
-        ("Enter", "Go in"),
-        ("Esc", "Close"),
-    ];
-    let body = draw_keys(f, inner, &keys);
-    if body.height < 4 {
+    let view = &app.rtop;
+    // A row between the band and the machine's line, a column each side, so
+    // the names start under the band's text, their `▾` left of it.
+    let body = Rect {
+        x: area.x.saturating_add(1),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(2).min(MAX_COLS),
+        height: area.height.saturating_sub(1),
+    };
+    if body.height < 2 || body.width < 8 {
         return;
     }
     let width = usize::from(body.width);
@@ -116,7 +107,7 @@ pub fn draw_top(f: &mut Frame, app: &App, view: &TopView, area: Rect) {
             Style::default().fg(p.accent_primary),
         ))],
     };
-    let summary_rows = text_rows(&summary, body.width).min(body.height / 3);
+    let summary_rows = text_rows(&summary, body.width).min(body.height / 3).max(1);
     f.render_widget(
         Paragraph::new(summary).wrap(Wrap { trim: true }),
         Rect {
@@ -129,10 +120,10 @@ pub fn draw_top(f: &mut Frame, app: &App, view: &TopView, area: Rect) {
         return;
     }
 
-    let rows = app.top_rows(view);
+    let rows = app.rtop_rows();
     let selected = view.selected_index(&rows);
     f.render_widget(
-        Paragraph::new(header_line(columns, width)),
+        Paragraph::new(header_line(columns, width, view.sort)),
         Rect {
             y: header_at,
             height: 1,
@@ -145,7 +136,8 @@ pub fn draw_top(f: &mut Frame, app: &App, view: &TopView, area: Rect) {
         height: body.bottom().saturating_sub(header_at + 1 + 2),
         ..body
     };
-    let lines = row_lines(&rows, selected, columns, width);
+    let highlighted = app.rtop_has_keys().then_some(selected);
+    let lines = row_lines(&rows, highlighted, columns, width);
     let height = usize::from(list.height);
     view.page.set(height.max(1));
     let line_of_selected = lines
@@ -159,12 +151,19 @@ pub fn draw_top(f: &mut Frame, app: &App, view: &TopView, area: Rect) {
         first = line_of_selected + 1 - height;
     }
     view.first.set(first);
-    let shown: Vec<Line> = lines
-        .into_iter()
-        .skip(first)
-        .take(height)
-        .map(|(_, line)| line)
-        .collect();
+    let mut shown = Vec::with_capacity(height);
+    for (offset, (row, line)) in lines.into_iter().skip(first).take(height).enumerate() {
+        if let Some(index) = row {
+            let cell = Rect {
+                x: area.x,
+                y: list.y + offset as u16,
+                width: area.width,
+                height: 1,
+            };
+            hits.push((cell, Hit::RtopRow(index)));
+        }
+        shown.push(line);
+    }
     f.render_widget(Paragraph::new(shown), list);
 
     let rule_at = list.bottom();
@@ -180,10 +179,10 @@ pub fn draw_top(f: &mut Frame, app: &App, view: &TopView, area: Rect) {
         },
     );
     let total = Line::from(cells(
-        "Total",
+        "  Total",
         "",
         None,
-        &TopView::total(&rows),
+        &RtopView::total(&rows),
         columns,
         width,
         Style::default()
@@ -277,24 +276,32 @@ fn machine_parts(machine: &MachineSummary, bars: bool) -> Vec<Vec<Span<'static>>
     parts
 }
 
-fn header_line(columns: Columns, width: usize) -> Line<'static> {
+/// The columns' names, the one the sessions are sorted by with a `▾`.
+fn header_line(columns: Columns, width: usize, sort: RtopSort) -> Line<'static> {
     let p = theme::palette();
     let style = Style::default()
         .fg(p.text_muted)
         .add_modifier(Modifier::BOLD);
+    let name = |label: &str, by: RtopSort| {
+        if sort == by {
+            format!("{label}▾")
+        } else {
+            label.to_string()
+        }
+    };
     let name_cols = width.saturating_sub(columns.fixed());
-    let mut text = pad_right("  NAME", name_cols);
+    let mut text = pad_right(&name("  NAME", RtopSort::Name), name_cols);
     if columns.pid {
         text.push_str(&pad_left("PID", PID_COLS));
     }
-    text.push_str(&pad_left("CPU", CPU_COLS));
-    text.push_str(&pad_left("MEMORY", MEMORY_COLS));
+    text.push_str(&pad_left(&name("CPU", RtopSort::Cpu), CPU_COLS));
+    text.push_str(&pad_left(&name("MEMORY", RtopSort::Memory), MEMORY_COLS));
     match (columns.net, columns.net_split) {
         (true, true) => {
-            text.push_str(&pad_left("↓ NET", NET_COLS));
-            text.push_str(&pad_left("↑ NET", NET_COLS));
+            text.push_str(&pad_left(&name("↓ NET", RtopSort::Network), NET_COLS));
+            text.push_str(&pad_left(&name("↑ NET", RtopSort::Network), NET_COLS));
         }
-        (true, false) => text.push_str(&pad_left("NET", NET_COLS)),
+        (true, false) => text.push_str(&pad_left(&name("NET", RtopSort::Network), NET_COLS)),
         (false, _) => {}
     }
     Line::from(Span::styled(text, style))
@@ -303,8 +310,8 @@ fn header_line(columns: Columns, width: usize) -> Line<'static> {
 /// Each row's line, with the row it shows; a blank line (no row) sets the
 /// sessions apart from Rakumux's own processes.
 fn row_lines(
-    rows: &[TopRow],
-    selected: usize,
+    rows: &[RtopRow],
+    selected: Option<usize>,
     columns: Columns,
     width: usize,
 ) -> Vec<(Option<usize>, Line<'static>)> {
@@ -335,7 +342,7 @@ fn row_lines(
             width,
             name_style,
         );
-        if index == selected {
+        if Some(index) == selected {
             for span in &mut spans {
                 span.style = span.style.bg(p.selection);
             }

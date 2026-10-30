@@ -228,9 +228,9 @@ async fn nothing_shows_the_feed_by_itself() {
             "{layout:?}"
         );
         assert_eq!(h.app.feed.status(), Some(FeedStatus::Ready));
-        assert!(!h.app.feed_open(), "{layout:?}");
+        assert!(!h.app.drawer_open(), "{layout:?}");
         assert!(h.app.screen().feed.is_none(), "{layout:?}");
-        assert!(!h.app.feed_tab_shown(), "{layout:?}");
+        assert!(!h.app.drawer_tab_shown(), "{layout:?}");
         // Nor on a phone.
         h.app.resize(45, 40);
         tick(&mut h, Duration::from_secs(40));
@@ -240,7 +240,7 @@ async fn nothing_shows_the_feed_by_itself() {
     let (mut h, account) = feed_harness(FakeAccount::signed_in(), SessionLayout::Sidebar);
     tick(&mut h, Duration::from_secs(120));
     assert!(account.feed_asks().is_empty());
-    assert!(!h.app.feed_open());
+    assert!(!h.app.drawer_open());
 }
 
 #[tokio::test]
@@ -282,13 +282,13 @@ async fn f_docks_the_feed_on_the_right_and_esc_and_f_move_the_keys() {
     h.press(KeyCode::Char('f')).await;
     assert!(h.app.feed_has_keys());
     h.press(KeyCode::Char('f')).await;
-    assert!(!h.app.feed_open());
+    assert!(!h.app.drawer_open());
     assert_eq!(h.app.screen(), before);
     // Picking a grouping (P, a tab's modal) gives the list the keys.
     show_feed(&mut h).await;
     h.app.show_tab(Grouping::App);
     assert!(!h.app.feed_has_keys());
-    assert!(h.app.feed_open());
+    assert!(h.app.drawer_open());
 }
 
 #[tokio::test]
@@ -325,7 +325,7 @@ async fn the_session_takes_the_size_the_feed_leaves_it() {
     h.fake.outgoing(index);
     h.press(KeyCode::Char('f')).await;
     h.press(KeyCode::Char('f')).await;
-    assert!(!h.app.feed_open());
+    assert!(!h.app.drawer_open());
     assert_eq!(h.app.terminal_size(), wide);
     assert_eq!(
         h.fake.outgoing(index),
@@ -483,9 +483,9 @@ async fn in_tabs_the_feed_is_a_tab_of_its_own() {
     account.queue_feed(page(1, 1, vec![entry("L", "B", 1_000, Some(1))], false));
     let before = h.app.screen();
     let selected = h.selected();
-    assert!(!h.app.feed_tab_shown());
+    assert!(!h.app.drawer_tab_shown());
     show_feed(&mut h).await;
-    assert!(h.app.feed_tab_shown());
+    assert!(h.app.drawer_tab_shown());
     // The tab bar stays; the feed fills the rest, its cards beside the
     // selected reply.
     let screen = h.app.screen();
@@ -497,21 +497,21 @@ async fn in_tabs_the_feed_is_a_tab_of_its_own() {
     // Esc: the session's tab you were on; the Feed tab stays.
     h.press(KeyCode::Esc).await;
     assert!(!h.app.feed_has_keys());
-    assert!(h.app.feed_tab_shown());
+    assert!(h.app.drawer_tab_shown());
     assert_eq!(h.app.screen(), before);
     assert_eq!(h.selected(), selected);
     // `f` selects it again, then hides it with its tab.
     h.press(KeyCode::Char('f')).await;
     assert!(h.app.feed_has_keys());
     h.press(KeyCode::Char('f')).await;
-    assert!(!h.app.feed_tab_shown());
+    assert!(!h.app.drawer_tab_shown());
     assert_eq!(h.app.screen(), before);
     assert_eq!(h.selected(), selected);
     // A click on the Feed tab selects it; one on a session's tab goes back
     // to the sessions.
     show_feed(&mut h).await;
     h.press(KeyCode::Esc).await;
-    let tab = target(&mut h, Hit::FeedTab);
+    let tab = target(&mut h, Hit::DrawerBarTab);
     click_at(&mut h, tab.x + 1, tab.y);
     assert!(h.app.feed_has_keys());
     draw(&mut h);
@@ -524,17 +524,17 @@ async fn in_tabs_the_feed_is_a_tab_of_its_own() {
     h.press(KeyCode::Enter).await;
     assert_eq!(h.app.focus, Focus::Session);
     assert_eq!(h.selected().as_deref(), Some("B"));
-    assert!(h.app.feed_tab_shown());
+    assert!(h.app.drawer_tab_shown());
     assert!(!h.app.feed_has_keys());
     // In session mode the Feed tab stays; a click on it gives Rakumux mode
     // the feed.
-    let tab = target(&mut h, Hit::FeedTab);
+    let tab = target(&mut h, Hit::DrawerBarTab);
     click_at(&mut h, tab.x + 1, tab.y);
     assert_eq!(h.app.focus, Focus::List);
     assert!(h.app.feed_has_keys());
     // Hiding the feed while its tab is selected: the session you were on.
     h.press(KeyCode::Char('f')).await;
-    assert!(!h.app.feed_tab_shown());
+    assert!(!h.app.drawer_tab_shown());
     assert_eq!(h.selected().as_deref(), Some("B"));
     assert!(h.app.screen().detail.is_some());
 }
@@ -579,7 +579,7 @@ async fn in_grid_the_feed_is_a_pane_beside_the_cards_and_never_touches_them() {
     ] {
         h.press(code).await;
     }
-    assert!(!h.app.feed_open());
+    assert!(!h.app.drawer_open());
     for index in 0..h.fake.attach_count() {
         assert_eq!(h.fake.attach_request(index).role, Role::Observer);
         for message in h.fake.outgoing(index) {
@@ -611,7 +611,7 @@ async fn on_a_phone_the_feed_fills_the_screen_while_it_has_the_keys() {
         assert_eq!(screen.feed, Some(ratatui::layout::Rect::new(0, 0, 45, 39)));
         assert!(screen.list.is_none() && screen.tabs.is_none(), "{layout:?}");
         assert!(screen.detail.is_none(), "{layout:?}");
-        assert!(!h.app.feed_tab_shown(), "{layout:?}");
+        assert!(!h.app.drawer_tab_shown(), "{layout:?}");
         // Enter reads a reply; Esc goes back to the cards, then hides the
         // feed.
         h.press(KeyCode::Down).await;
@@ -621,7 +621,7 @@ async fn on_a_phone_the_feed_fills_the_screen_while_it_has_the_keys() {
         assert!(!h.app.feed.reading);
         assert!(h.app.feed_has_keys());
         h.press(KeyCode::Esc).await;
-        assert!(!h.app.feed_open(), "{layout:?}");
+        assert!(!h.app.drawer_open(), "{layout:?}");
         assert!(h.app.screen().feed.is_none());
         // A tap on a card reads it at once; Enter goes into its session,
         // full screen.
@@ -681,7 +681,7 @@ async fn too_narrow_to_dock_it_the_feed_takes_the_sessions_place_in_rakumux_mode
     assert_eq!(screen.feed, Some(ratatui::layout::Rect::new(0, 0, 90, 39)));
     assert!(!h.app.browsing_grid());
     h.press(KeyCode::Esc).await;
-    assert!(!h.app.feed_open());
+    assert!(!h.app.drawer_open());
     assert!(h.app.browsing_grid());
 }
 

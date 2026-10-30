@@ -47,7 +47,7 @@ impl App {
     /// Make `grouping`'s tab active: its sections and filter apply, and the
     /// list has the keys.
     pub fn show_tab(&mut self, grouping: Grouping) {
-        self.unfocus_feed();
+        self.unfocus_drawer();
         if grouping != self.list.grouping() {
             self.list.set_grouping(grouping);
             self.reconcile_detail();
@@ -203,7 +203,7 @@ impl App {
     /// Show these apps or statuses (none: all of them) under their tab,
     /// which becomes the active one.
     pub fn show_sections(&mut self, grouping: Grouping, sections: Vec<Section>) {
-        self.unfocus_feed();
+        self.unfocus_drawer();
         self.list.set_grouping(grouping);
         self.list.set_section_filter(grouping, sections);
         self.reconcile_detail();

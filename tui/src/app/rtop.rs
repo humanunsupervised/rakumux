@@ -1,9 +1,10 @@
-//! Top (Settings → Top, or `t` in Rakumux mode): what this machine, this
-//! window, the Rakumux server, its other clients and every live session's
-//! processes use now: CPU, memory and network. Read from the daemon
-//! (`SessionApi::resources`, capability `resources`) about every second
-//! while it's open, off the UI thread; rates are the differences between the
-//! last two samples. Nothing is recorded: closing it forgets them.
+//! rtop (the drawer's rtop tab: `t` in Rakumux mode, or Settings → rtop):
+//! what this machine, this window, the Rakumux server, its other clients
+//! and every live session's processes use now: CPU, memory and network.
+//! Read from the daemon (`SessionApi::resources`, capability `resources`)
+//! about every second while its tab is on screen, off the UI thread; rates
+//! are the differences between the last two samples. Nothing is recorded:
+//! leaving the screen forgets them (its sort, folds and selection stay).
 //!
 //! Rows: this window, the server, the other windows and clients, then the
 //! sessions (sorted by `s`), each with its processes as a tree under it when
@@ -16,9 +17,11 @@ use std::time::{Duration, Instant};
 use session_core::api::{ApiError, ClientUsage, ErrorCode, ProcessUsage, ResourceSample};
 use session_core::ids::SessionId;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use super::drawer::DrawerTab;
 use super::grouping::AppKey;
 use super::runtime::AppEvent;
-use super::types::AppMode;
 use super::App;
 
 /// How often a new sample is asked for: a little under the idle tick, so
@@ -29,29 +32,20 @@ const FIRST_RATES_AFTER: Duration = Duration::from_millis(500);
 
 /// What sessions are sorted by (`s` goes to the next).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TopSort {
+pub enum RtopSort {
     Memory,
     Cpu,
     Network,
     Name,
 }
 
-impl TopSort {
+impl RtopSort {
     pub fn next(self) -> Self {
         match self {
-            TopSort::Memory => TopSort::Cpu,
-            TopSort::Cpu => TopSort::Network,
-            TopSort::Network => TopSort::Name,
-            TopSort::Name => TopSort::Memory,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            TopSort::Memory => "memory",
-            TopSort::Cpu => "CPU",
-            TopSort::Network => "network",
-            TopSort::Name => "name",
+            RtopSort::Memory => RtopSort::Cpu,
+            RtopSort::Cpu => RtopSort::Network,
+            RtopSort::Network => RtopSort::Name,
+            RtopSort::Name => RtopSort::Memory,
         }
     }
 }
@@ -107,9 +101,9 @@ impl Usage {
     }
 }
 
-/// A row of Top.
+/// A row of rtop.
 #[derive(Debug, Clone, PartialEq)]
-pub struct TopRow {
+pub struct RtopRow {
     pub key: RowKey,
     /// Steps in from the left: a session's processes under it, each
     /// process's children under it.
@@ -135,19 +129,20 @@ pub struct MachineSummary {
     pub tx: Option<f64>,
 }
 
-/// How a session is named in Top: its name, then its app and folder.
+/// How a session is named in rtop: its name, then its app and folder.
 pub type SessionLabel = (String, String);
 
-/// The open Top view (`AppMode::Top`).
+/// rtop's state (`App::rtop`): its samples while it's on screen, and its
+/// sort, folds and selection.
 #[derive(Debug, Clone)]
-pub struct TopView {
+pub struct RtopView {
     generation: u64,
     latest: Option<ResourceSample>,
     previous: Option<ResourceSample>,
     pub error: Option<String>,
     busy: bool,
     due: Option<Instant>,
-    pub sort: TopSort,
+    pub sort: RtopSort,
     /// The selected row; the first when it's gone.
     selected: Option<RowKey>,
     /// Sessions whose processes are folded under their row.
@@ -157,21 +152,34 @@ pub struct TopView {
     pub page: Cell<usize>,
 }
 
-impl TopView {
-    fn new(generation: u64) -> Self {
+impl Default for RtopView {
+    fn default() -> Self {
         Self {
-            generation,
+            generation: 0,
             latest: None,
             previous: None,
             error: None,
             busy: false,
             due: None,
-            sort: TopSort::Memory,
+            sort: RtopSort::Memory,
             selected: None,
             folded: HashSet::new(),
             first: Cell::new(0),
             page: Cell::new(1),
         }
+    }
+}
+
+impl RtopView {
+    /// Forget the samples (and drop a sample asked for before): rtop left the
+    /// screen. Its sort, folds and selection stay.
+    fn forget(&mut self) {
+        self.generation += 1;
+        self.latest = None;
+        self.previous = None;
+        self.error = None;
+        self.busy = false;
+        self.due = None;
     }
 
     /// No sample yet, or none with rates: worth ticking fast for.
@@ -227,7 +235,7 @@ impl TopView {
         &self,
         own_pid: u32,
         label: &dyn Fn(&SessionId) -> Option<SessionLabel>,
-    ) -> Vec<TopRow> {
+    ) -> Vec<RtopRow> {
         let Some(latest) = &self.latest else {
             return Vec::new();
         };
@@ -238,7 +246,7 @@ impl TopView {
             .unwrap_or_default();
         let seconds = self.seconds();
         let usage = |process: &ProcessUsage| usage_of(process, earlier.get(&process.pid), seconds);
-        let row = |key: RowKey, process: &ProcessUsage, name: String, detail: String| TopRow {
+        let row = |key: RowKey, process: &ProcessUsage, name: String, detail: String| RtopRow {
             key,
             depth: 0,
             name,
@@ -295,7 +303,7 @@ impl TopView {
         for ((name, detail), total, session) in sessions {
             let several = session.processes.len() > 1;
             let open = several.then(|| !self.folded.contains(&session.id));
-            rows.push(TopRow {
+            rows.push(RtopRow {
                 key: RowKey::Session(session.id.clone()),
                 depth: 0,
                 name,
@@ -306,7 +314,7 @@ impl TopView {
             });
             if open == Some(true) {
                 let tree = tree_order(&session.processes, self.sort, &usage);
-                rows.extend(tree.into_iter().map(|(process, depth)| TopRow {
+                rows.extend(tree.into_iter().map(|(process, depth)| RtopRow {
                     depth: depth + 1,
                     ..row(
                         RowKey::Process(session.id.clone(), process.pid),
@@ -321,7 +329,7 @@ impl TopView {
     }
 
     /// The total of every Rakumux process (sessions' processes included).
-    pub fn total(rows: &[TopRow]) -> Usage {
+    pub fn total(rows: &[RtopRow]) -> Usage {
         let mut total = Usage::default();
         for row in rows
             .iter()
@@ -333,14 +341,14 @@ impl TopView {
     }
 
     /// The selected row's index in `rows`.
-    pub fn selected_index(&self, rows: &[TopRow]) -> usize {
+    pub fn selected_index(&self, rows: &[RtopRow]) -> usize {
         self.selected
             .as_ref()
             .and_then(|key| rows.iter().position(|row| &row.key == key))
             .unwrap_or(0)
     }
 
-    fn select(&mut self, rows: &[TopRow], index: usize) {
+    fn select(&mut self, rows: &[RtopRow], index: usize) {
         self.selected = rows
             .get(index.min(rows.len().saturating_sub(1)))
             .map(|r| r.key.clone());
@@ -372,16 +380,16 @@ fn usage_of(process: &ProcessUsage, earlier: Option<&ProcessUsage>, seconds: Opt
 }
 
 /// Larger use first (None last), names alphabetically; by `sort`.
-fn compare(sort: TopSort, a: (&String, &Usage), b: (&String, &Usage)) -> std::cmp::Ordering {
+fn compare(sort: RtopSort, a: (&String, &Usage), b: (&String, &Usage)) -> std::cmp::Ordering {
     let by = |f: fn(&Usage) -> Option<f64>| {
         let key = |u: &Usage| f(u).unwrap_or(-1.0);
         key(b.1).total_cmp(&key(a.1))
     };
     let order = match sort {
-        TopSort::Memory => by(|u| Some(u.memory as f64)),
-        TopSort::Cpu => by(|u| u.cpu),
-        TopSort::Network => by(Usage::network),
-        TopSort::Name => std::cmp::Ordering::Equal,
+        RtopSort::Memory => by(|u| Some(u.memory as f64)),
+        RtopSort::Cpu => by(|u| u.cpu),
+        RtopSort::Network => by(Usage::network),
+        RtopSort::Name => std::cmp::Ordering::Equal,
     };
     order.then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
 }
@@ -391,7 +399,7 @@ fn compare(sort: TopSort, a: (&String, &Usage), b: (&String, &Usage)) -> std::cm
 /// first.
 fn tree_order<'a>(
     processes: &'a [ProcessUsage],
-    sort: TopSort,
+    sort: RtopSort,
     usage: &dyn Fn(&ProcessUsage) -> Usage,
 ) -> Vec<(&'a ProcessUsage, usize)> {
     let Some(root) = processes.first() else {
@@ -454,34 +462,44 @@ fn short_id(id: &SessionId) -> String {
 }
 
 impl App {
-    /// Open Top and ask for the first sample.
-    pub fn open_top(&mut self) {
-        self.top_generation += 1;
-        self.mode = AppMode::Top(TopView::new(self.top_generation));
-        self.read_resources(Instant::now());
+    /// rtop is on screen: the drawer shows its rtop tab.
+    pub fn rtop_shown(&self) -> bool {
+        self.drawer_shown() && self.drawer_tab == DrawerTab::Rtop
     }
 
-    pub fn close_top(&mut self) {
-        if matches!(self.mode, AppMode::Top(_)) {
-            self.mode = AppMode::Normal;
+    /// rtop has Rakumux mode's keys: the drawer has them on its rtop tab.
+    pub fn rtop_has_keys(&self) -> bool {
+        self.drawer_has_keys() && self.drawer_tab == DrawerTab::Rtop
+    }
+
+    /// `t` or Settings: show the drawer on rtop with the keys, switch it to
+    /// rtop, give it the keys while the list has them, or hide it while
+    /// rtop has them.
+    pub fn toggle_rtop(&mut self) {
+        self.toggle_drawer(DrawerTab::Rtop);
+    }
+
+    /// Show the drawer on rtop and give it the keys.
+    pub fn open_rtop(&mut self) {
+        self.open_drawer(DrawerTab::Rtop);
+    }
+
+    /// The tick's rtop work: coming on screen it asks for a sample at once,
+    /// leaving it forgets them; on screen, it asks when one is due.
+    pub(super) fn rtop_timers(&mut self, now: Instant) {
+        let shown = self.rtop_shown();
+        if shown != self.rtop_on_screen {
+            self.rtop_on_screen = shown;
+            self.rtop.forget();
         }
-    }
-
-    /// Ask for a sample when one is due.
-    pub(super) fn top_timers(&mut self, now: Instant) {
-        let AppMode::Top(view) = &self.mode else {
-            return;
-        };
-        if !view.busy && view.due.is_none_or(|due| now >= due) {
+        if shown && !self.rtop.busy && self.rtop.due.is_none_or(|due| now >= due) {
             self.read_resources(now);
         }
     }
 
     fn read_resources(&mut self, now: Instant) {
         let api = self.api();
-        let AppMode::Top(view) = &mut self.mode else {
-            return;
-        };
+        let view = &mut self.rtop;
         view.due = Some(now + EVERY);
         let Some(api) = api else {
             view.error = Some("Not connected to the Rakumux server.".into());
@@ -500,9 +518,7 @@ impl App {
         generation: u64,
         result: Result<ResourceSample, ApiError>,
     ) {
-        let AppMode::Top(view) = &mut self.mode else {
-            return;
-        };
+        let view = &mut self.rtop;
         if view.generation != generation {
             return;
         }
@@ -518,7 +534,7 @@ impl App {
             Err(error) if error.code == ErrorCode::Unsupported => {
                 view.error = Some(
                     "The running Rakumux server is older than this app: restart it (S) to see \
-                     Top."
+                     rtop."
                         .into(),
                 )
             }
@@ -526,74 +542,108 @@ impl App {
         }
     }
 
-    /// Top's rows as this window names the sessions.
-    pub fn top_rows(&self, view: &TopView) -> Vec<TopRow> {
+    /// rtop's rows as this window names the sessions.
+    pub fn rtop_rows(&self) -> Vec<RtopRow> {
         let label = |id: &SessionId| {
             let session = self.list.get(id)?;
             let app = AppKey::of(session);
             let folder = self.folders.name_of(&session.scope);
             Some((session.name.clone(), format!("{} · {folder}", app.as_str())))
         };
-        view.rows(std::process::id(), &label)
+        self.rtop.rows(std::process::id(), &label)
     }
 
-    /// Move Top's selection `delta` rows (clamped).
-    pub fn top_move(&mut self, delta: isize) {
-        self.with_top_rows(|view, rows| {
-            let index = view.selected_index(rows).saturating_add_signed(delta);
-            view.select(rows, index);
-        });
+    /// Rakumux mode keys while rtop has them: `↑`/`↓` (`j`/`k`, the cycle
+    /// keys), PgUp/PgDn and `Ctrl-d`/`Ctrl-u`, Home/End (`gg`/`G`) select,
+    /// `←`/`→` (`h`/`l`) and Space fold and unfold a session's processes,
+    /// `s` sorts the sessions, Enter goes into the selected row's session,
+    /// Esc gives the list the keys. `false` leaves the key to the list's
+    /// handler (`t` and `f` among them); keys that act on the list's
+    /// selected session do nothing here.
+    pub fn rtop_key(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Char('d') if ctrl => self.rtop_page_by(1, 2),
+            KeyCode::Char('u') if ctrl => self.rtop_page_by(-1, 2),
+            KeyCode::PageDown => self.rtop_page_by(1, 1),
+            KeyCode::PageUp => self.rtop_page_by(-1, 1),
+            _ if ctrl => return false,
+            KeyCode::Down | KeyCode::Char('j') => self.rtop_move(1),
+            KeyCode::Up | KeyCode::Char('k') => self.rtop_move(-1),
+            KeyCode::Home => self.rtop_move(isize::MIN / 2),
+            KeyCode::End | KeyCode::Char('G') => self.rtop_move(isize::MAX / 2),
+            KeyCode::Char('g') => self.pending_key = Some('g'),
+            KeyCode::Left | KeyCode::Char('h') => self.rtop_fold(Some(false)),
+            KeyCode::Right | KeyCode::Char('l') => self.rtop_fold(Some(true)),
+            KeyCode::Char(' ') => self.rtop_fold(None),
+            KeyCode::Char('s') => self.rtop.sort = self.rtop.sort.next(),
+            KeyCode::Enter | KeyCode::Char('i') => self.rtop_enter(),
+            KeyCode::Esc => self.unfocus_drawer(),
+            KeyCode::Char(
+                'p' | 'r' | 'J' | 'K' | 'd' | 'x' | 'z' | 'c' | '/' | '{' | '}' | 'w' | 'W' | 'y',
+            ) => {}
+            _ => return false,
+        }
+        true
     }
 
-    /// Move Top's selection a page.
-    pub fn top_page(&mut self, pages: isize) {
-        let page = match &self.mode {
-            AppMode::Top(view) => view.page.get().max(1),
-            _ => return,
-        };
-        self.top_move(pages.saturating_mul(isize::try_from(page).unwrap_or(1)));
+    /// Move rtop's selection `delta` rows (clamped).
+    pub fn rtop_move(&mut self, delta: isize) {
+        let rows = self.rtop_rows();
+        let view = &mut self.rtop;
+        let index = view.selected_index(&rows).saturating_add_signed(delta);
+        view.select(&rows, index);
+    }
+
+    /// Move rtop's selection by a `1/parts` of a page, `pages` times.
+    fn rtop_page_by(&mut self, pages: isize, parts: usize) {
+        let page = (self.rtop.page.get().max(1) / parts).max(1);
+        self.rtop_move(pages.saturating_mul(isize::try_from(page).unwrap_or(1)));
     }
 
     /// Fold (`Some(false)`), unfold (`Some(true)`) or toggle (`None`) the
     /// processes of the selected session. Folding from one of its processes
     /// selects the session.
-    pub fn top_fold(&mut self, open: Option<bool>) {
-        self.with_top_rows(|view, rows| {
-            let index = view.selected_index(rows);
-            let Some(row) = rows.get(index) else {
-                return;
-            };
-            let Some(id) = row.key.session().cloned() else {
-                return;
-            };
-            let is_open = !view.folded.contains(&id);
-            let has_processes = row.open.is_some() || matches!(row.key, RowKey::Process(..));
-            if !has_processes {
-                return;
-            }
-            if open.unwrap_or(!is_open) {
-                view.folded.remove(&id);
-            } else {
-                view.folded.insert(id.clone());
-                view.selected = Some(RowKey::Session(id));
-            }
-        });
-    }
-
-    pub fn top_sort(&mut self) {
-        if let AppMode::Top(view) = &mut self.mode {
-            view.sort = view.sort.next();
+    pub fn rtop_fold(&mut self, open: Option<bool>) {
+        let rows = self.rtop_rows();
+        let view = &mut self.rtop;
+        let index = view.selected_index(&rows);
+        let Some(row) = rows.get(index) else {
+            return;
+        };
+        let Some(id) = row.key.session().cloned() else {
+            return;
+        };
+        let is_open = !view.folded.contains(&id);
+        let has_processes = row.open.is_some() || matches!(row.key, RowKey::Process(..));
+        if !has_processes {
+            return;
+        }
+        if open.unwrap_or(!is_open) {
+            view.folded.remove(&id);
+        } else {
+            view.folded.insert(id.clone());
+            view.selected = Some(RowKey::Session(id));
         }
     }
 
-    /// Enter: into the selected row's session.
-    pub fn top_enter(&mut self) {
-        let AppMode::Top(view) = &self.mode else {
-            return;
-        };
-        let rows = self.top_rows(view);
+    /// The selected row's session when this window lists it: what the footer
+    /// names while rtop has the keys.
+    pub fn rtop_session(&self) -> Option<&session_core::model::SessionView> {
+        let rows = self.rtop_rows();
+        let id = rows
+            .get(self.rtop.selected_index(&rows))?
+            .key
+            .session()?
+            .clone();
+        self.list.get(&id)
+    }
+
+    /// Enter: into the selected row's session (the list gets the keys back).
+    pub fn rtop_enter(&mut self) {
+        let rows = self.rtop_rows();
         let Some(id) = rows
-            .get(view.selected_index(&rows))
+            .get(self.rtop.selected_index(&rows))
             .and_then(|row| row.key.session().cloned())
         else {
             return;
@@ -602,17 +652,20 @@ impl App {
             self.set_status("This window doesn't list that session.");
             return;
         }
-        self.mode = AppMode::Normal;
+        self.drawer_focused = false;
         self.go_into(id);
     }
 
-    fn with_top_rows(&mut self, change: impl FnOnce(&mut TopView, &[TopRow])) {
-        let AppMode::Top(view) = &self.mode else {
-            return;
-        };
-        let rows = self.top_rows(view);
-        if let AppMode::Top(view) = &mut self.mode {
-            change(view, &rows);
+    /// A click on the row at `index`: rtop gets the keys and the row is
+    /// selected; a second click (a tap on a phone) goes into its session as
+    /// Enter does.
+    pub fn click_rtop_row(&mut self, index: usize) {
+        let rows = self.rtop_rows();
+        let again = self.rtop_has_keys() && self.rtop.selected_index(&rows) == index;
+        self.show_drawer_tab(DrawerTab::Rtop);
+        self.rtop.select(&rows, index);
+        if again || self.phone() {
+            self.rtop_enter();
         }
     }
 }
@@ -689,14 +742,14 @@ mod tests {
         }
     }
 
-    fn names(rows: &[TopRow]) -> Vec<(String, usize)> {
+    fn names(rows: &[RtopRow]) -> Vec<(String, usize)> {
         rows.iter().map(|r| (r.name.clone(), r.depth)).collect()
     }
 
     #[test]
     fn rows_put_this_window_and_the_server_first_then_sessions_with_their_trees() {
         let (a, b) = (SessionId::generate(), SessionId::generate());
-        let mut view = TopView::new(1);
+        let mut view = RtopView::default();
         view.take(sample(1000, 1, &a, &b));
         let rows = view.rows(20, &labels(&a));
         let b_name = short_id(&b);
@@ -731,7 +784,7 @@ mod tests {
     #[test]
     fn rates_come_from_the_last_two_samples() {
         let (a, b) = (SessionId::generate(), SessionId::generate());
-        let mut view = TopView::new(1);
+        let mut view = RtopView::default();
         view.take(sample(1000, 1, &a, &b));
         view.take(sample(3000, 2, &a, &b));
         assert!(!view.waiting());
@@ -747,7 +800,7 @@ mod tests {
         assert_eq!(machine.cpu, Some(12.5));
         assert_eq!(machine.memory_used, Some(10_000));
         assert_eq!(machine.rx, Some(250.0));
-        let total = TopView::total(&rows);
+        let total = RtopView::total(&rows);
         assert_eq!(total.memory, 30 + 40 + 41 + 12 + 830 + 900);
         assert_eq!(total.cpu, Some(5.0 + 10.0 + 45.5));
     }
@@ -765,17 +818,17 @@ mod tests {
     #[test]
     fn sorting_and_folding_reorder_sessions_and_hide_processes() {
         let (a, b) = (SessionId::generate(), SessionId::generate());
-        let mut view = TopView::new(1);
+        let mut view = RtopView::default();
         view.take(sample(1000, 1, &a, &b));
         view.take(sample(2000, 2, &a, &b));
-        view.sort = TopSort::Cpu;
+        view.sort = RtopSort::Cpu;
         let rows = view.rows(20, &labels(&a));
         assert_eq!(rows[4].name, "fix-login");
         // By name, with both named (an unnamed one's id sorts anywhere).
         let both = |id: &SessionId| {
             labels(&a)(id).or_else(|| Some(("zsh-session".into(), "shell · web".into())))
         };
-        view.sort = TopSort::Name;
+        view.sort = RtopSort::Name;
         let rows = view.rows(20, &both);
         assert_eq!(rows[4].name, "fix-login");
         assert_eq!(rows[8].name, "zsh-session");
@@ -792,7 +845,7 @@ mod tests {
             process(35, Some(99), "orphan", 0, 1),
             process(31, Some(30), "claude", 0, 2),
         ];
-        let order: Vec<(u32, usize)> = tree_order(&processes, TopSort::Memory, &|p| Usage {
+        let order: Vec<(u32, usize)> = tree_order(&processes, RtopSort::Memory, &|p| Usage {
             memory: p.rss_bytes,
             ..Usage::default()
         })

@@ -2020,7 +2020,7 @@ async fn settings_shows_and_hides_the_feed_from_either_focus() {
         assert!(h.app.feed_has_keys());
         run_feed(&mut h);
         h.press(KeyCode::Enter).await;
-        assert!(!h.app.feed_open());
+        assert!(!h.app.drawer_open());
     }
 }
 
@@ -3102,7 +3102,7 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
                 "the agent feed",
                 "whole chats in the agent feed",
                 "where each session has worked",
-                "Top"
+                "rtop"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -3623,7 +3623,7 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "the agent feed",
                 "whole chats in the agent feed",
                 "where each session has worked",
-                "Top"
+                "rtop"
             ]
         ),
         mode => panic!("no restart offer: {mode:?}"),
@@ -3993,7 +3993,7 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     // Status comes first; there they stop (the feed is no tab).
     h.press(KeyCode::Left).await;
     assert_eq!(h.app.list.grouping(), Grouping::Status);
-    assert!(!h.app.feed_open());
+    assert!(!h.app.drawer_open());
     h.press(KeyCode::Right).await;
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);

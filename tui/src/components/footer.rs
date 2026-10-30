@@ -255,7 +255,7 @@ fn push_buttons(
 fn named_session(app: &App) -> Option<&SessionView> {
     let in_view = || app.detail.session_id().and_then(|id| app.list.get(id));
     match app.focus {
-        Focus::List if app.feed_has_keys() => app.feed_session(),
+        Focus::List if app.drawer_has_keys() => app.drawer_session(),
         Focus::List => app.list.selected_session().or_else(in_view),
         Focus::Session => in_view(),
         Focus::Terminal => None,

@@ -30,6 +30,7 @@ mod auto_name;
 pub mod config;
 mod connection;
 mod detail;
+pub mod drawer;
 mod feature_flags;
 pub mod feed;
 pub mod folders;
@@ -42,6 +43,7 @@ mod new_session;
 pub mod path_complete;
 mod phone_access;
 pub mod places;
+pub mod rtop;
 mod runtime;
 pub mod screen;
 mod session_list;
@@ -49,7 +51,6 @@ mod sessions;
 pub mod sprite;
 pub mod terminal_panel;
 mod text_input;
-pub mod top;
 pub mod types;
 mod upgrade;
 
@@ -187,10 +188,15 @@ pub enum Hit {
     FeedReply,
     /// The `‹` on the feed's band while a reply is read: back to the cards.
     FeedBack,
-    /// Anywhere else on the feed: focuses it.
-    FeedPane,
-    /// The Tabs layout's Feed tab: selects it.
-    FeedTab,
+    /// Anywhere else on the drawer: focuses it.
+    Drawer,
+    /// A tab on the drawer's band: shows it, with the keys.
+    DrawerTab(drawer::DrawerTab),
+    /// The Tabs layout's tab for the drawer: selects it.
+    DrawerBarTab,
+    /// A row of rtop (its index): selects it, or goes into its session as
+    /// Enter does when it's selected already (at once on a phone).
+    RtopRow(usize),
     /// The open Folders modal (clicks inside it don't close it).
     FolderMenu,
     /// A row of the Folders modal.
@@ -296,8 +302,6 @@ pub struct App {
     /// The account was asked for and hasn't answered; when to ask again.
     account_checking: bool,
     account_check_at: Option<Instant>,
-    /// Each opening of Top: a sample asked for before it closed is dropped.
-    top_generation: u64,
     /// When to ask where a sign-in is up to; a question is outstanding.
     sign_in_poll_at: Option<Instant>,
     sign_in_polling: bool,
@@ -312,12 +316,21 @@ pub struct App {
     title_asks: HashSet<SessionId>,
     /// The agent feed (`app/feed`).
     pub feed: feed::FeedStore,
-    /// The feed is shown (`f`): a pane on the right, a tab, or the screen on
-    /// a phone. This window only, never saved: every start hides it.
-    feed_open: bool,
-    /// The feed has Rakumux mode's keys (its pane focused, its tab
+    /// The drawer (`app/drawer.rs`) is shown (`f`, `t`): a pane on the
+    /// right, a tab, or the screen on a phone. This window only, never
+    /// saved: every start hides it.
+    drawer_open: bool,
+    /// The drawer has Rakumux mode's keys (its pane focused, its tab
     /// selected) rather than the list. Session mode clears it.
-    feed_focused: bool,
+    drawer_focused: bool,
+    /// The drawer's tab: the Feed or rtop.
+    drawer_tab: drawer::DrawerTab,
+    /// rtop (`app/rtop.rs`): its samples while it's on screen, its sort,
+    /// folds and selection for as long as the window runs.
+    pub rtop: rtop::RtopView,
+    /// rtop was on screen when last checked: off screen it forgets its
+    /// samples.
+    rtop_on_screen: bool,
     /// The feed was on screen when last checked: what it showed is seen.
     feed_on_screen: bool,
     /// The line left of the docked feed pane: hovered or being dragged.
@@ -439,7 +452,6 @@ impl App {
             account: AccountStatus::Unknown,
             account_checking: false,
             account_check_at: None,
-            top_generation: 0,
             sign_in_poll_at: None,
             sign_in_polling: false,
             statuses_at: None,
@@ -448,8 +460,11 @@ impl App {
             titles_refreshing: HashSet::new(),
             title_asks: HashSet::new(),
             feed: feed::FeedStore::new(rakumux_sensagent::feed::machine_name()),
-            feed_open: false,
-            feed_focused: false,
+            drawer_open: false,
+            drawer_focused: false,
+            drawer_tab: drawer::DrawerTab::Feed,
+            rtop: rtop::RtopView::default(),
+            rtop_on_screen: false,
             feed_on_screen: false,
             feed_divider: DividerState::default(),
             features_saving: false,
@@ -646,7 +661,7 @@ impl App {
             list_cols: self.settings.sessions.sidebar_width,
             list_percent: self.settings.sessions.stacked_list_percent,
             list_hidden: self.list_hidden,
-            feed: self.feed_layout(),
+            feed: self.drawer_layout(),
             feed_cols: self.settings.sessions.feed_width,
         }
     }
@@ -931,10 +946,10 @@ impl App {
                     disabled: !signed_in,
                 };
             }
-            SettingsItem::Top => (
-                "Top",
+            SettingsItem::Rtop => (
+                "rtop",
                 "CPU, memory, network · t".into(),
-                "What this machine, this window, the Rakumux server and every running session's processes use now: CPU, memory and network traffic, about every second. Nothing is recorded.",
+                "What this machine, this window, the Rakumux server and every running session's processes use now: CPU, memory and network traffic, about every second, in the drawer on the right beside the Feed. Nothing is recorded.",
             ),
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
@@ -975,6 +990,7 @@ impl App {
                     && session.lifecycle == session_core::model::Lifecycle::Working
             })
             || self.creating_session
+            || (self.rtop_on_screen && self.rtop.waiting())
             || self.terminal_panel.busy()
             || matches!(self.detail.view, DetailView::Loading(_))
             || match &self.mode {
@@ -985,7 +1001,6 @@ impl App {
                 AppMode::Upgrade(d) => d.checking || d.installing,
                 AppMode::Pairing(d) => d.busy(),
                 AppMode::Account(d) => d.busy(),
-                AppMode::Top(d) => d.waiting(),
                 _ => false,
             }
     }
@@ -1013,7 +1028,7 @@ impl App {
         }
         self.account_timers(now);
         self.feed_timers(now);
-        self.top_timers(now);
+        self.rtop_timers(now);
         changed
     }
 
@@ -1537,7 +1552,7 @@ const DAEMON_FEATURES: [(&str, &str); 12] = [
         session_core::api::CAPABILITY_PLACES,
         "where each session has worked",
     ),
-    (session_core::api::CAPABILITY_RESOURCES, "Top"),
+    (session_core::api::CAPABILITY_RESOURCES, "rtop"),
 ];
 
 /// The daemon restarts in place, keeping the sessions (`daemon.restart`).
