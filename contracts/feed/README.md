@@ -39,6 +39,11 @@ conformance tests, not an HTTP server, database or local runtime.
   out). `text` is at most **32768 UTF-8 bytes**;
   `truncated` says the reply was longer. `finished_at` is the machine's clock (Unix ms);
   the cloud may clamp it to its own receipt time.
+- **Agents:** `agent` (`agent` in common) is one of `claude-code`, `codex`, `opencode`,
+  `copilot`, `cursor-agent`, `pi`, `grok`, `kimi`, `droid` and `amp`, wherever it's named
+  (replies, chats, session lists, new sessions). A machine leaves out the replies and chats of
+  any other agent, and lists its sessions with a `program` instead; the cloud must take an agent
+  before machines send it.
 - **Accepted:** every uploaded id with its `seq`, in upload order.
 - **Page:** `{version:1, entries, latest_seq, more}`. `seq` is the account's arrival order, the
   only cursor: `after` syncs what arrived since, `before` pages back. The account's seqs are

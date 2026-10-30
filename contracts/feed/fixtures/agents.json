@@ -1,0 +1,4 @@
+{
+  "known": ["claude-code", "codex", "opencode", "copilot", "cursor-agent", "pi", "grok", "kimi", "droid", "amp"],
+  "unknown": ["claude", "Claude-Code", "cursor", "opencode2", "gemini", "aider", ""]
+}

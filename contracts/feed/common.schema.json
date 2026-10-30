@@ -55,8 +55,9 @@
       }
     },
     "agent": {
+      "description": "The coding agent, by the name Rakumux gives it: Claude Code, Codex, OpenCode, GitHub Copilot CLI (`copilot`), Cursor Agent CLI (`cursor-agent`), Pi, Grok, Kimi Code (`kimi`), Droid or Amp. A machine leaves out what another agent said.",
       "type": "string",
-      "enum": ["claude-code", "codex", "opencode"]
+      "enum": ["claude-code", "codex", "opencode", "copilot", "cursor-agent", "pi", "grok", "kimi", "droid", "amp"]
     },
     "conversationId": {
       "description": "The agent's own conversation id.",

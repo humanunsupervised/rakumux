@@ -46,7 +46,7 @@
       { "note": "extra entry field", "entry": { "prompt": "what the user asked" } },
       { "note": "lowercase ULID", "entry": { "id": "01k8a0rz0v3x5q2n9t7w4y6m8b" } },
       { "note": "ULID with an I", "entry": { "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8I" } },
-      { "note": "unknown agent", "entry": { "agent": "pi" } },
+      { "note": "unknown agent", "entry": { "agent": "aider" } },
       { "note": "empty text", "entry": { "text": "" } },
       { "note": "whitespace-only text", "entry": { "text": " \n\t " } },
       { "note": "terminal escape in text", "entry": { "text": "red \u001b[31mtext" } },
