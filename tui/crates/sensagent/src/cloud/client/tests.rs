@@ -1048,6 +1048,28 @@ fn feed_uploads_are_one_sized_post_and_reads_one_get() {
 }
 
 #[test]
+fn rtops_readings_are_one_sized_post_to_their_route() {
+    let (client, recorded) = client_with(Ok(reply(200, r#"{"version":1,"wanted":true}"#)), None);
+    let body = br#"{"version":1,"machine":"studio"}"#;
+    let answer = client
+        .feed(&token(), FeedHttp::Resources(body), &Cancellation::new())
+        .unwrap();
+    assert_eq!(answer.status, 200);
+    let recorded = recorded.lock().unwrap();
+    let outgoing = &recorded[0].request;
+    assert_eq!(outgoing.method(), Method::POST);
+    assert_eq!(
+        outgoing.url().as_str(),
+        "https://reviewed.example:8443/api/v1/feed/resources"
+    );
+    assert_eq!(
+        outgoing.headers()[header::CONTENT_LENGTH],
+        body.len().to_string()
+    );
+    assert_eq!(recorded[0].body, body);
+}
+
+#[test]
 fn an_attached_file_is_one_get_read_as_bytes_up_to_its_size() {
     const FILE: &str = "01K8A1C0FFEE0000000000000A";
     let file = |status: u16, body: Vec<u8>, coding: Option<&'static str>| {

@@ -7,8 +7,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
 use session_core::api::{
-    AgentReply, CallerInfo, ErrorCode, EventEnvelope, SessionEvent, SubscribeRequest,
-    TranscriptCursor, TranscriptPage,
+    AgentReply, CallerInfo, ErrorCode, EventEnvelope, ResourceSample, SessionEvent,
+    SubscribeRequest, TranscriptCursor, TranscriptPage,
 };
 use session_core::client::SessionApi;
 use session_core::ids::{ReplyId, SessionId};
@@ -31,7 +31,7 @@ use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusCons
 use crate::feed::{
     ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
     FeedResult, FeedSync, Fetch, Fetched, PokeEvent, PokeSync, RealtimeToken, ReplySync, ReplyWork,
-    SessionMessage, SessionSync, TurnRead, Uploads,
+    ResourceSync, ResourceWork, SessionMessage, SessionSync, TurnRead, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -132,6 +132,10 @@ enum Message {
     ChatDone(FeedCompletion),
     /// The session list's upload finished.
     SessionsDone(FeedCompletion),
+    /// What the daemon said everything uses now (rtop), or why it couldn't.
+    Resources(Result<ResourceSample, ErrorCode>),
+    /// A reading's upload finished.
+    ResourcesDone(FeedCompletion),
     /// The realtime token request finished.
     RealtimeDone(FeedCompletion),
     /// What realtime connection `generation` did.
@@ -182,6 +186,10 @@ enum Work<A, C> {
     ReplyRequest(FeedJob<A, C>),
     /// Upload this machine's session list.
     SessionsUpload(FeedJob<A, C>),
+    /// Ask the daemon what everything uses now (rtop).
+    ReadResources,
+    /// Upload what this machine uses.
+    ResourcesUpload(FeedJob<A, C>),
     /// Ask where to connect to be poked.
     Realtime(FeedJob<A, C>),
     /// Type a reply (its id) into a session while the program seen in its
@@ -216,7 +224,8 @@ enum Work<A, C> {
 /// messages written in a TUI have a worker of their own, so they never wait
 /// behind the shared workers' file downloads (up to a minute each), AI
 /// descriptions and chat uploads: a TUI waits 30 s for its answer, and gives
-/// up on one the cloud then stores all the same.
+/// up on one the cloud then stores all the same. rtop's readings go there
+/// too, every couple of seconds while someone watches.
 struct Workers<A, C> {
     shared: Sender<Work<A, C>>,
     replies: Sender<Work<A, C>>,
@@ -229,7 +238,9 @@ impl<A, C> Workers<A, C> {
             | Work::WriteReply(..)
             | Work::WriteMessage(..)
             | Work::Enrol(..)
-            | Work::Revoke(..) => self.replies.send(work),
+            | Work::Revoke(..)
+            | Work::ReadResources
+            | Work::ResourcesUpload(..) => self.replies.send(work),
             work => self.shared.send(work),
         }
     }
@@ -599,6 +610,7 @@ fn own<S, A, C>(
     );
     let uploads = refresher.uploads().map(Uploads::new);
     let mut sessions = SessionSync::new(machine.clone(), uploads.is_some());
+    let mut resources = ResourceSync::new();
     let mut pokes = PokeSync::new();
     // The running realtime connection's stop, if one runs.
     let mut poke_stop: Option<Arc<AtomicBool>> = None;
@@ -646,6 +658,7 @@ fn own<S, A, C>(
                 now,
             );
             follow_sessions(&refresher, &mut sessions, work, now);
+            follow_resources(&refresher, &mut resources, &sessions, work, now);
             let confirmed = sessions.confirmed();
             follow_pokes(
                 &refresher,
@@ -717,6 +730,7 @@ fn own<S, A, C>(
                 chats.connected(&views);
                 replies.connected(&views);
                 sessions.connected(&views);
+                resources.connected();
                 let _ = work.send(Work::Replies(after));
             }
             Message::Event(event) => {
@@ -772,9 +786,29 @@ fn own<S, A, C>(
                     );
                 }
             }
+            Message::Resources(result) => {
+                let listed = |id: &SessionId| sessions.lists(id);
+                resources.read_done(result, &machine, &listed, now);
+                follow_resources(&refresher, &mut resources, &sessions, work, now);
+            }
+            Message::ResourcesDone(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::ResourcesStored(wanted) => Ok(wanted),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                resources.done(current, outcome, now);
+                follow_resources(&refresher, &mut resources, &sessions, work, now);
+            }
             Message::ReplyDone(completion) => {
                 let current = refresher.is_current(completion.revision);
                 let taken = current && machine_taken(&completion.outcome);
+                // Someone has rtop open on rakumux.com: send what this machine uses.
+                if current
+                    && matches!(&completion.outcome, Ok(FeedResult::Replies(read)) if read.resources_wanted)
+                {
+                    resources.wanted(now);
+                }
                 feed.merge_replies(replies.request_done(current, completion.outcome, now));
                 if taken && renamed_at.is_none_or(|at| now.saturating_sub(at) >= RENAME_EVERY) {
                     renamed_at = Some(now);
@@ -796,6 +830,7 @@ fn own<S, A, C>(
                     work,
                     now,
                 );
+                follow_resources(&refresher, &mut resources, &sessions, work, now);
             }
             Message::Fetched(revision, reply, fetched) => {
                 let current = refresher.is_current(revision);
@@ -1399,6 +1434,38 @@ fn follow_sessions<S, A, C>(
     }
 }
 
+/// Start rtop's next reading or upload, when one is due: only while signed
+/// in with the account's Feed switch on and this machine's name confirmed,
+/// and someone has rtop open on rakumux.com.
+fn follow_resources<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    resources: &mut ResourceSync,
+    sessions: &SessionSync,
+    work: &Workers<A, C>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled = refresher.account().is_some()
+        && refresher.feed_switch() == Some(true)
+        && sessions.confirmed();
+    resources.set_enabled(enabled, now);
+    match resources.next_work(now) {
+        Some(ResourceWork::Read) => {
+            let _ = work.send(Work::ReadResources);
+        }
+        Some(ResourceWork::Upload(request)) => match refresher.feed_job(request) {
+            Some(job) => {
+                let _ = work.send(Work::ResourcesUpload(job));
+            }
+            None => resources.done(false, Err(FeedFailure::Unauthorized), now),
+        },
+        None => {}
+    }
+}
+
 /// The wall clock in Unix milliseconds, as replies' times are.
 fn wall_ms() -> i64 {
     SystemTime::now()
@@ -1563,6 +1630,19 @@ where
                 match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
                     Ok(completion) => Message::SessionsDone(completion),
                     Err(_) => Message::SessionsDone(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
+            }
+            Ok(Work::ReadResources) => {
+                Message::Resources(api.resources().map_err(|error| error.code))
+            }
+            Ok(Work::ResourcesUpload(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::ResourcesDone(completion),
+                    Err(_) => Message::ResourcesDone(FeedCompletion {
                         revision,
                         outcome: Err(FeedFailure::Unavailable(None)),
                     }),

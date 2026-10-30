@@ -349,13 +349,13 @@ fn the_list_says_this_machine_takes_replies_with_files_when_it_saves_them() {
     let upload = body(sessions.next_request(NOW, WALL));
     assert_eq!(
         upload["capabilities"],
-        serde_json::json!(["reply_attachments"])
+        serde_json::json!(["reply_attachments", "resources"])
     );
 
     let mut sessions = SessionSync::new("studio".into(), false);
     sessions.set_enabled(true, NOW);
     let upload = body(sessions.next_request(NOW, WALL));
-    assert!(upload.get("capabilities").is_none(), "{upload}");
+    assert_eq!(upload["capabilities"], serde_json::json!(["resources"]));
 }
 
 #[test]

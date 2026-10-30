@@ -39,6 +39,8 @@ pub(crate) enum FeedResult {
     /// This machine's session list was stored: how many sessions it holds,
     /// and what more the cloud takes.
     SessionsStored(wire::SessionsStored),
+    /// What this machine uses was stored; whether rakumux.com still wants it.
+    ResourcesStored(bool),
     /// Where to connect to be poked.
     Realtime(wire::RealtimeToken),
     /// A file attached to a reply, or that it's gone.
@@ -68,6 +70,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::ReplyUpload { .. }
             | FeedRequest::ReplyStatus { .. }
             | FeedRequest::Sessions { .. }
+            | FeedRequest::Resources { .. }
             | FeedRequest::Attachment { .. }
             | FeedRequest::Realtime
             | FeedRequest::MachineEnrol { .. }
@@ -82,6 +85,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::Replies { .. } => FeedHttp::Replies(&query),
             FeedRequest::ReplyStatus { body } => FeedHttp::ReplyStatus(body),
             FeedRequest::Sessions { body } => FeedHttp::Sessions(body),
+            FeedRequest::Resources { body } => FeedHttp::Resources(body),
             FeedRequest::Attachment { id, size } => FeedHttp::Attachment { id, size: *size },
             FeedRequest::Realtime => FeedHttp::Realtime,
             FeedRequest::MachineEnrol { body } => FeedHttp::MachineEnrol(body),
@@ -108,6 +112,9 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                     FeedRequest::Replies { .. } => wire::replies(&reply).map(FeedResult::Replies),
                     FeedRequest::Sessions { .. } => {
                         wire::sessions_stored(&reply).map(FeedResult::SessionsStored)
+                    }
+                    FeedRequest::Resources { .. } => {
+                        wire::resources_stored(&reply).map(FeedResult::ResourcesStored)
                     }
                     FeedRequest::Attachment { size, .. } => {
                         wire::download(reply, *size).map(FeedResult::Download)

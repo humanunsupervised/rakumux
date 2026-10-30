@@ -26,6 +26,8 @@ const FEED_TURN_PATH: &str = "/api/v1/feed/turn";
 const FEED_REPLIES_PATH: &str = "/api/v1/feed/replies";
 const FEED_REPLY_STATUS_PATH: &str = "/api/v1/feed/replies/status";
 const FEED_SESSIONS_PATH: &str = "/api/v1/feed/sessions";
+/// What this machine uses now, for rtop on rakumux.com.
+const FEED_RESOURCES_PATH: &str = "/api/v1/feed/resources";
 const FEED_REALTIME_PATH: &str = "/api/v1/feed/realtime";
 /// Followed by `/{id}`, a ULID.
 const FEED_ATTACHMENTS_PATH: &str = "/api/v1/feed/replies/attachments";
@@ -55,6 +57,7 @@ pub struct CloudAIConfig {
     feed_replies: Url,
     feed_reply_status: Url,
     feed_sessions: Url,
+    feed_resources: Url,
     feed_attachments: Url,
     feed_realtime: Url,
     machine_credentials: Url,
@@ -129,6 +132,8 @@ pub(crate) enum FeedHttp<'a> {
     ReplyStatus(&'a [u8]),
     /// `POST /api/v1/feed/sessions` with this machine's session list.
     Sessions(&'a [u8]),
+    /// `POST /api/v1/feed/resources` with what this machine uses now (rtop).
+    Resources(&'a [u8]),
     /// `GET /api/v1/feed/replies/attachments/{id}`: a file of `size` bytes.
     Attachment { id: &'a str, size: u64 },
     /// `GET /api/v1/feed/realtime`: where to connect to be poked.
@@ -199,6 +204,7 @@ impl CloudAIConfig {
         let (feed_replies, feed_reply_status) =
             (path(FEED_REPLIES_PATH), path(FEED_REPLY_STATUS_PATH));
         let feed_sessions = path(FEED_SESSIONS_PATH);
+        let feed_resources = path(FEED_RESOURCES_PATH);
         let feed_realtime = path(FEED_REALTIME_PATH);
         let feed_attachments = path(FEED_ATTACHMENTS_PATH);
         let (machine_credentials, machine_token) =
@@ -215,6 +221,7 @@ impl CloudAIConfig {
             feed_replies,
             feed_reply_status,
             feed_sessions,
+            feed_resources,
             feed_attachments,
             feed_realtime,
             machine_credentials,
@@ -427,12 +434,14 @@ impl CloudAIClient {
             | FeedHttp::Messages(body)
             | FeedHttp::ReplyUpload(body)
             | FeedHttp::ReplyStatus(body)
-            | FeedHttp::Sessions(body) => {
+            | FeedHttp::Sessions(body)
+            | FeedHttp::Resources(body) => {
                 let url = match request {
                     FeedHttp::Messages(_) => &self.config.feed_messages,
                     FeedHttp::ReplyUpload(_) => &self.config.feed_replies,
                     FeedHttp::ReplyStatus(_) => &self.config.feed_reply_status,
                     FeedHttp::Sessions(_) => &self.config.feed_sessions,
+                    FeedHttp::Resources(_) => &self.config.feed_resources,
                     _ => &self.config.feed_entries,
                 };
                 let mut outgoing = Request::new(Method::POST, url.clone());

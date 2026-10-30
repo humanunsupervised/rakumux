@@ -304,6 +304,7 @@ impl FeedSync {
                 | FeedResult::Message(_)
                 | FeedResult::Replies(_)
                 | FeedResult::SessionsStored(_)
+                | FeedResult::ResourcesStored(_)
                 | FeedResult::Download(_)
                 | FeedResult::Realtime(_)
                 | FeedResult::Enrolled(_)

@@ -41,6 +41,11 @@ pub(crate) const MAX_ATTACHMENT_BYTES: u64 = 4 * 1024 * 1024;
 /// What this machine handles beyond the contract's first version, said with
 /// its session list when it can save replies' files (`capabilities`).
 pub(crate) const REPLY_ATTACHMENTS: &str = "reply_attachments";
+/// Said with every session list: this machine sends what it uses while
+/// rakumux.com asks, for rtop there (`resources-upload`).
+pub(crate) const RESOURCES: &str = "resources";
+/// The largest resources upload the contract takes (`x-maxBodyBytes`).
+const MAX_RESOURCES_BODY_BYTES: usize = 65_536;
 
 /// Why a feed request failed. Static: never reply text, URLs or tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +84,8 @@ pub(crate) enum FeedRequest {
     ReplyStatus { body: Vec<u8> },
     /// Upload this machine's whole session list, as `body`.
     Sessions { body: Vec<u8> },
+    /// Upload what this machine uses now (rtop), as `body`.
+    Resources { body: Vec<u8> },
     /// Fetch a file attached to a reply: `size` bytes, as the reply says.
     Attachment { id: String, size: u64 },
     /// Ask where to connect to be poked, and a token for it.
@@ -346,6 +353,34 @@ pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<SessionsStored, F
         stored: stored.stored,
         places: stored.accepts.iter().any(|name| name == "places"),
     })
+}
+
+/// What this machine uses now, as rtop on rakumux.com shows it
+/// (`resources-upload`); `None` when it doesn't fit the contract's cap.
+pub(crate) fn resources_upload(upload: &super::resources::Upload<'_>) -> Option<FeedRequest> {
+    let body = serde_json::to_vec(upload).ok()?;
+    (body.len() <= MAX_RESOURCES_BODY_BYTES).then_some(FeedRequest::Resources { body })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResourcesStoredWire {
+    version: u8,
+    wanted: bool,
+}
+
+/// Whether rakumux.com still wants what this machine uses
+/// (`resources-stored`): someone still has rtop open there.
+pub(crate) fn resources_stored(reply: &FeedHttpReply) -> Result<bool, FeedFailure> {
+    if reply.status != 200 {
+        return Err(failure(reply));
+    }
+    let stored: ResourcesStoredWire =
+        serde_json::from_slice(&reply.body).map_err(|_| FeedFailure::Invalid)?;
+    if stored.version != 1 {
+        return Err(FeedFailure::Invalid);
+    }
+    Ok(stored.wanted)
 }
 
 #[derive(Deserialize)]
@@ -790,6 +825,9 @@ struct WireReplies {
     more: bool,
     #[serde(default)]
     poll_ms: Option<u64>,
+    /// Someone has rtop open on rakumux.com (present only then).
+    #[serde(default)]
+    resources_wanted: bool,
 }
 
 /// Replies as read: those that fit the contract (replies to entries, and
@@ -806,6 +844,8 @@ pub(crate) struct RepliesRead {
     pub latest_seq: u64,
     pub more: bool,
     pub poll: Option<Duration>,
+    /// Someone has rtop open on rakumux.com: send what this machine uses.
+    pub resources_wanted: bool,
 }
 
 impl RepliesRead {
@@ -860,6 +900,7 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
         poll: page
             .poll_ms
             .map(|ms| Duration::from_millis(ms.clamp(1_000, 60_000))),
+        resources_wanted: page.resources_wanted,
     })
 }
 
@@ -1948,5 +1989,100 @@ mod tests {
         // A cloud without pokes.
         let off = r#"{"error":{"code":"invalid_request","message":"Invalid feed request."}}"#;
         assert_eq!(realtime(&reply(404, off)), Err(FeedFailure::Invalid));
+    }
+
+    #[test]
+    fn rakumux_com_says_whether_it_still_wants_resources() {
+        assert_eq!(
+            resources_stored(&reply(200, r#"{"version":1,"wanted":true}"#)),
+            Ok(true)
+        );
+        assert_eq!(
+            resources_stored(&reply(200, r#"{"version":1,"wanted":false}"#)),
+            Ok(false)
+        );
+        for broken in [
+            r#"{"version":2,"wanted":true}"#,
+            r#"{"version":1}"#,
+            r#"{"version":1,"wanted":"yes"}"#,
+            r#"{"version":1,"wanted":true,"stored":1}"#,
+        ] {
+            assert_eq!(
+                resources_stored(&reply(200, broken)),
+                Err(FeedFailure::Invalid),
+                "{broken}"
+            );
+        }
+        let off = r#"{"error":{"code":"forbidden","message":"The feed is off."}}"#;
+        assert_eq!(resources_stored(&reply(403, off)), Err(FeedFailure::Off));
+    }
+
+    #[test]
+    fn a_replies_read_says_when_rtop_is_open_on_rakumux_com() {
+        let read = |extra: &str| {
+            replies(&reply(
+                200,
+                &format!(r#"{{"version":1,"replies":[],"latest_seq":0,"more":false{extra}}}"#),
+            ))
+            .unwrap()
+            .resources_wanted
+        };
+        assert!(!read(""));
+        assert!(!read(r#","poll_ms":1000"#));
+        assert!(read(r#","poll_ms":1000,"resources_wanted":true"#));
+    }
+
+    #[test]
+    fn a_resources_upload_bigger_than_the_contract_takes_isnt_made() {
+        use session_core::api::{MachineUsage, ProcessUsage, ResourceSample, SessionUsage};
+        let process = |pid: u32| ProcessUsage {
+            pid,
+            parent: None,
+            name: "node".into(),
+            command: String::new(),
+            cpu_ms: 0,
+            rss_bytes: u64::MAX,
+            net_rx_bytes: Some(u64::MAX),
+            net_tx_bytes: Some(u64::MAX),
+        };
+        let sample = |at_ms: i64| ResourceSample {
+            at_ms,
+            machine: MachineUsage {
+                cpus: 4,
+                ..Default::default()
+            },
+            daemon: process(1),
+            clients: Vec::new(),
+            sessions: (0..250)
+                .map(|index| SessionUsage {
+                    id: session_core::ids::SessionId::from_string(format!(
+                        "01K89ZQ4D2F6H8J0K2M4N{index:05}"
+                    )),
+                    processes: vec![process(1000 + index)],
+                })
+                .collect(),
+        };
+        // 200 sessions at the largest numbers still fit.
+        let mut resources = super::super::resources::ResourceSync::new();
+        let now = Duration::from_secs(10);
+        resources.set_enabled(true, now);
+        resources.wanted(now);
+        resources.next_work(now);
+        resources.read_done(Ok(sample(1_761_800_000_000)), "studio", &|_| true, now);
+        let later = now + Duration::from_secs(1);
+        resources.next_work(later);
+        resources.read_done(Ok(sample(1_761_800_001_000)), "studio", &|_| true, later);
+        let Some(super::super::resources::ResourceWork::Upload(FeedRequest::Resources { body })) =
+            resources.next_work(later)
+        else {
+            panic!("expected an upload");
+        };
+        assert!(body.len() <= MAX_RESOURCES_BODY_BYTES, "{}", body.len());
+        let upload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(upload["sessions"].as_array().unwrap().len(), 200);
+        assert_eq!(
+            upload["sessions"][0]["usage"]["memory_bytes"],
+            9_007_199_254_740_991_u64
+        );
     }
 }

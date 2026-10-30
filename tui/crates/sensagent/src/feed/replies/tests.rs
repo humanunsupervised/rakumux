@@ -63,6 +63,7 @@ fn page_of(
         latest_seq,
         more,
         poll: None,
+        resources_wanted: false,
     }))
 }
 
@@ -528,6 +529,7 @@ fn reads_come_as_soon_as_rakumux_com_says() {
             latest_seq: 0,
             more: false,
             poll,
+            resources_wanted: false,
         }))
     };
     let mut replies = on(None, &[]);
@@ -580,6 +582,7 @@ fn read_messages(messages: Vec<SessionMessage>) -> Result<FeedResult, FeedFailur
         latest_seq,
         more: false,
         poll: None,
+        resources_wanted: false,
     }))
 }
 
@@ -1288,6 +1291,7 @@ fn a_sessions_replies_and_messages_go_in_in_the_order_they_were_written() {
         latest_seq: 5,
         more: false,
         poll: None,
+        resources_wanted: false,
     }));
     replies.request_done(true, read, NOW);
     assert_eq!(replies.next_work(NOW), None);

@@ -4,7 +4,8 @@
 //! the whole chats those turns belong to, uploaded as they grow (`chats`) and
 //! read back a turn at a time (`turn`); replies written back (`replies`), with
 //! the files attached to them saved for the agent (`uploads`); and the
-//! machine's session list, for the website's Status and Folder (`sessions`).
+//! machine's session list, for the website's Status and Folder (`sessions`);
+//! and, while someone has rtop open there, what the machine uses (`resources`).
 //!
 //! The cache and the upload queue are memory only, gone when the status
 //! service stops; where each chat's upload is up to is kept in the status
@@ -17,6 +18,7 @@ mod job;
 mod machine;
 mod poke;
 mod replies;
+mod resources;
 mod sessions;
 mod sync;
 mod turn;
@@ -34,6 +36,7 @@ pub(crate) use machine::MachineIdentity;
 pub(crate) use poke::{listen, PokeEvent, PokeSync};
 pub use replies::{AcceptRemote, ReplyWrite, ReplyWriteStatus};
 pub(crate) use replies::{Fetch, Fetched, ReplySync, ReplyWork, TYPING_QUIET};
+pub(crate) use resources::{ResourceSync, ResourceWork};
 pub(crate) use sessions::SessionSync;
 pub use sync::machine_name;
 pub(crate) use sync::FeedSync;

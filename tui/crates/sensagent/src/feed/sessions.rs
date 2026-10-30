@@ -259,12 +259,14 @@ pub(crate) struct SessionSync {
 impl SessionSync {
     /// The list for `machine`; `reply_attachments` says it saves replies'
     /// files for their agents (`capabilities`), so rakumux.com sends it those.
+    /// Every list says it sends what it uses for rtop (`resources`).
     pub fn new(machine: String, reply_attachments: bool) -> Self {
-        let capabilities = if reply_attachments {
+        let mut capabilities = if reply_attachments {
             vec![wire::REPLY_ATTACHMENTS]
         } else {
             Vec::new()
         };
+        capabilities.push(wire::RESOURCES);
         Self {
             machine,
             capabilities,
@@ -335,6 +337,12 @@ impl SessionSync {
 
     pub fn forget(&mut self, session: &SessionId) {
         self.sessions.remove(session);
+    }
+
+    /// Whether the list has `session`: never a private one, a dead one or
+    /// another machine's. rtop's readings name only these.
+    pub fn lists(&self, session: &SessionId) -> bool {
+        self.sessions.contains_key(session)
     }
 
     /// The list as it stands, the most recently used first, within the
