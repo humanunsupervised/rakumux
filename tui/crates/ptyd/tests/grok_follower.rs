@@ -177,6 +177,24 @@ fn a_grok_conversation_is_followed_where_the_process_shows_it() {
     let reply = follower.reply().unwrap();
     assert!(reply.truncated && reply.text.len() <= MAX_REPLY_BYTES);
     assert_eq!(reply.key, "p2");
+    // That prompt began the next turn (Grok sends what was typed during a
+    // turn once it ends): the turn before keeps its reply, as the log grew.
+    let finished = follower.take_finished();
+    assert_eq!(finished.len(), 1, "{finished:?}");
+    assert_eq!(
+        (
+            finished[0].reply.key.as_str(),
+            finished[0].reply.text.as_str()
+        ),
+        ("subagent-completed-x", "Your helper found two files.")
+    );
+    assert_eq!(finished[0].conversation.as_deref(), Some(A));
+    assert_eq!(
+        (finished[0].at, finished[0].ended),
+        (Some(1_793_338_236_010), Some(1_793_338_236_012))
+    );
+    // Once: and the subagent's wake-up before it began no turn of its own.
+    assert!(follower.take_finished().is_empty());
 
     // `/new`, then a prompt there: the process shows that one now.
     let b = session_log(home.path(), B);

@@ -457,6 +457,7 @@ mod tests {
             prompt: None,
             turn: Turn::default(),
             reply: None,
+            reply_state: Default::default(),
             last_at: None,
             foreground: Some(Foreground::under(home.to_path_buf(), &process)),
         }
@@ -536,6 +537,77 @@ mod tests {
         follower.follow(None);
         assert_eq!(follower.conversation().as_deref(), Some(A));
         assert!(follower.in_background(B) && !follower.in_background(A));
+    }
+
+    #[test]
+    fn a_turn_its_queued_prompt_ended_keeps_its_reply() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        let mut follower = follower(home);
+        logged(home, &format!("Registering foreground session: {A}"));
+        follower.follow(None);
+        append(&log(home, A), &turn("Fix the parser", "Fixed it.", 1));
+        follower.follow(None);
+        // As it works on the next prompt, a reply typed meanwhile waits
+        // (pending); its answer done, Copilot sends it as the next turn.
+        append(
+            &log(home, A),
+            &[event(
+                "user.message",
+                json!({"content": "Now the docs", "messageId": "u2"}),
+            )],
+        );
+        follower.follow(None);
+        append(
+            &log(home, A),
+            &[event(
+                "assistant.message",
+                json!({"messageId": "m2", "content": "Docs written.", "toolRequests": []}),
+            )],
+        );
+        follower.follow(None);
+        assert_eq!(follower.take_finished(), [], "none ended yet");
+        append(
+            &log(home, A),
+            &[event(
+                "user.message",
+                json!({"content": "MIDTURN ping 4242", "messageId": "u3"}),
+            )],
+        );
+        follower.follow(None);
+        let finished = follower.take_finished();
+        assert_eq!(finished.len(), 1, "{finished:?}");
+        assert_eq!(finished[0].reply.key, "m2");
+        assert_eq!(finished[0].reply.text, "Docs written.");
+        assert_eq!(finished[0].conversation.as_deref(), Some(A));
+        // Steered in between tool steps: the turn has no reply of its own.
+        append(
+            &log(home, A),
+            &[
+                event(
+                    "assistant.message",
+                    json!({"messageId": "m3", "content": "Running it.",
+                        "toolRequests": [{"toolCallId": "c1", "name": "bash",
+                            "arguments": {"command": "sleep 12"}}]}),
+                ),
+                event(
+                    "user.message",
+                    json!({"content": "MIDTURN pong 777", "messageId": "u4"}),
+                ),
+            ],
+        );
+        follower.follow(None);
+        assert_eq!(follower.take_finished(), []);
+        // The turn read from the log's past (another conversation shown)
+        // isn't one that ended as the log grew.
+        logged(home, &format!("Unregistering foreground session: {A}"));
+        logged(home, &format!("Registering foreground session: {B}"));
+        let mut past = turn("Old", "Old answer.", 5);
+        past.extend(turn("Older", "Older answer.", 6));
+        append(&log(home, B), &past);
+        follower.follow(None);
+        assert_eq!(follower.conversation().as_deref(), Some(B));
+        assert_eq!(follower.take_finished(), []);
     }
 
     #[test]

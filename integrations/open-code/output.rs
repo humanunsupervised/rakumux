@@ -234,6 +234,184 @@ fn reply_v1(
     found
 }
 
+/// The reply of a turn that ended with the next prompt: its last text, with
+/// nothing (no tool call) after it, so the agent didn't go on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct TurnReply {
+    /// As [`reply`] keys it.
+    pub key: String,
+    pub text: String,
+    pub position: u64,
+    /// When its turn's prompt was (Unix ms).
+    pub began: Option<i64>,
+    /// When it was last written (Unix ms).
+    pub at: Option<i64>,
+    /// When the next prompt was (Unix ms).
+    pub ended: Option<i64>,
+}
+
+/// The reply of `turn` (a [`turn`] id) in `conversation`, once the next
+/// prompt ended it, from whichever layout holds it.
+pub(super) fn turn_reply(database: &Path, conversation: &str, turn: u64) -> Option<TurnReply> {
+    let connection = crate::resume::open_read_only(database)?;
+    turn_reply_v2(&connection, conversation, turn)
+        .or_else(|| turn_reply_v1(&connection, conversation, turn))
+}
+
+/// OpenCode 2: the turn after the prompt at `seq` `turn - 1`, up to the next
+/// prompt; its replies' blocks in order.
+fn turn_reply_v2(
+    connection: &rusqlite::Connection,
+    conversation: &str,
+    turn: u64,
+) -> Option<TurnReply> {
+    let prompt = i64::try_from(turn.checked_sub(1)?).ok()?;
+    let began: Option<i64> = connection
+        .query_row(
+            "SELECT time_updated FROM session_message \
+             WHERE session_id = ?1 AND type = 'user' AND seq = ?2",
+            rusqlite::params![conversation, prompt],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let (next, ended): (i64, Option<i64>) = connection
+        .query_row(
+            "SELECT seq, time_updated FROM session_message \
+             WHERE session_id = ?1 AND type = 'user' AND seq > ?2 ORDER BY seq LIMIT 1",
+            rusqlite::params![conversation, prompt],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok()?;
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT id, seq, time_updated, data FROM session_message WHERE session_id = ?1 \
+             AND type = 'assistant' AND seq > ?2 AND seq < ?3 ORDER BY seq LIMIT {TURN_ROWS}"
+        ))
+        .ok()?;
+    let rows = statement
+        .query_map(rusqlite::params![conversation, prompt, next], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .ok()?;
+    let mut last = None;
+    for (id, seq, updated, data) in rows.filter_map(Result::ok) {
+        let Ok(data) = serde_json::from_str::<Value>(&data) else {
+            continue;
+        };
+        let Some(blocks) = data.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for (index, block) in blocks.iter().enumerate() {
+            match block.get("type").and_then(Value::as_str) {
+                Some("text") => {
+                    if let Some(text) = block.get("text").and_then(Value::as_str).and_then(written)
+                    {
+                        let position = u64::try_from(seq).ok()?.checked_mul(1024)? + index as u64;
+                        last = Some(TurnReply {
+                            key: format!("{id}:{index}"),
+                            text,
+                            position,
+                            began,
+                            at: updated,
+                            ended,
+                        });
+                    }
+                }
+                Some("tool") => last = None,
+                _ => {}
+            }
+        }
+    }
+    last
+}
+
+/// OpenCode 1.x: the turn of the user message created at `turn`, up to the
+/// next one; the assistant's pieces in order.
+fn turn_reply_v1(
+    connection: &rusqlite::Connection,
+    conversation: &str,
+    turn: u64,
+) -> Option<TurnReply> {
+    let since = i64::try_from(turn).ok()?;
+    let user = "json_extract(data, '$.role') = 'user'";
+    let prompted: i64 = connection
+        .query_row(
+            &format!(
+                "SELECT COUNT(*) FROM message \
+                 WHERE session_id = ?1 AND time_created = ?2 AND {user}"
+            ),
+            rusqlite::params![conversation, since],
+            |row| row.get(0),
+        )
+        .ok()?;
+    if prompted == 0 {
+        return None;
+    }
+    let next: i64 = connection
+        .query_row(
+            &format!(
+                "SELECT MIN(time_created) FROM message \
+                 WHERE session_id = ?1 AND time_created > ?2 AND {user}"
+            ),
+            rusqlite::params![conversation, since],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .ok()??;
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT part.id, part.data, part.time_updated, message.time_created, \
+               (SELECT COUNT(*) FROM part AS earlier \
+                WHERE earlier.message_id = part.message_id AND earlier.id < part.id) \
+             FROM part JOIN message ON message.id = part.message_id \
+             WHERE part.session_id = ?1 AND message.time_created >= ?2 \
+               AND message.time_created < ?3 \
+               AND json_extract(message.data, '$.role') = 'assistant' \
+             ORDER BY message.time_created, part.id LIMIT {TURN_ROWS}"
+        ))
+        .ok()?;
+    let rows = statement
+        .query_map(rusqlite::params![conversation, since, next], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })
+        .ok()?;
+    let mut last = None;
+    for (id, part, updated, created, ordinal) in rows.filter_map(Result::ok) {
+        let Ok(part) = serde_json::from_str::<Value>(&part) else {
+            continue;
+        };
+        match part.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(text) = part.get("text").and_then(Value::as_str).and_then(written) {
+                    let position = u64::try_from(created).ok()?.checked_mul(1024)?
+                        + u64::try_from(ordinal).ok()?.min(1023);
+                    last = Some(TurnReply {
+                        key: id,
+                        text,
+                        position,
+                        began: Some(since),
+                        at: updated,
+                        ended: Some(next),
+                    });
+                }
+            }
+            Some("tool") => last = None,
+            _ => {}
+        }
+    }
+    last
+}
+
 /// The latest line of `conversation`, whichever of the two layouts holds
 /// it (the newer one, when both do).
 pub(super) fn latest(database: &Path, conversation: &str) -> Option<String> {
@@ -568,5 +746,97 @@ mod tests {
             super::reply(&database, "ses_b"),
             Some(("p1".into(), "Fixed it.".into(), 0))
         );
+    }
+
+    #[test]
+    fn a_1x_turn_that_the_next_prompt_ended_has_its_last_text_as_its_reply() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("opencode.db");
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT,
+                   seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT);
+                 CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER,
+                   time_updated INTEGER, data TEXT);
+                 CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
+                   time_created INTEGER, time_updated INTEGER, data TEXT);",
+            )
+            .unwrap();
+        let message = |id: &str, at: i64, role: &str| {
+            connection
+                .execute(
+                    "INSERT INTO message VALUES (?1, 'ses_b', ?2, ?2, ?3)",
+                    rusqlite::params![id, at, json!({"role": role}).to_string()],
+                )
+                .unwrap();
+        };
+        let part = |id: &str, message: &str, at: i64, data: Value| {
+            connection
+                .execute(
+                    "INSERT INTO part VALUES (?1, ?2, 'ses_b', ?3, ?3, ?4)",
+                    rusqlite::params![id, message, at, data.to_string()],
+                )
+                .unwrap();
+        };
+        message("u1", 100, "user");
+        part(
+            "p0",
+            "u1",
+            100,
+            json!({"type": "text", "text": "Fix the parser"}),
+        );
+        message("a1", 101, "assistant");
+        part(
+            "p1",
+            "a1",
+            102,
+            json!({"type": "tool", "tool": "edit", "state": {}}),
+        );
+        part(
+            "p2",
+            "a1",
+            103,
+            json!({"type": "text", "text": "Fixed the parser."}),
+        );
+        // Not ended yet: no reply of its own.
+        assert_eq!(turn_reply(&database, "ses_b", 100), None);
+        message("u2", 200, "user");
+        part(
+            "p3",
+            "u2",
+            200,
+            json!({"type": "text", "text": "And the docs"}),
+        );
+        assert_eq!(
+            turn_reply(&database, "ses_b", 100),
+            Some(TurnReply {
+                key: "p2".into(),
+                text: "Fixed the parser.".into(),
+                position: 101 * 1024 + 1,
+                began: Some(100),
+                at: Some(103),
+                ended: Some(200),
+            })
+        );
+        // The key the turn's reply had while it was the newest.
+        message("a2", 201, "assistant");
+        part(
+            "p4",
+            "a2",
+            202,
+            json!({"type": "text", "text": "Looking at the docs."}),
+        );
+        part(
+            "p5",
+            "a2",
+            203,
+            json!({"type": "tool", "tool": "read", "state": {}}),
+        );
+        message("u3", 300, "user");
+        // It went on with a tool call: nothing said after it.
+        assert_eq!(turn_reply(&database, "ses_b", 200), None);
+        // Not a prompt's turn.
+        assert_eq!(turn_reply(&database, "ses_b", 150), None);
     }
 }

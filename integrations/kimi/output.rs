@@ -181,6 +181,9 @@ pub(super) fn reply_step(entry: &Value) -> Step {
         Some("turn.ended") if entry.get("reason").and_then(Value::as_str) != Some("completed") => {
             Step::Reset
         }
+        // What it said is the turn's whole reply: the next prompt's
+        // `turn.prompt` ends it.
+        Some("turn.ended") => Step::Finish,
         Some("context.append_loop_event") => {
             let Some(event) = entry.get("event") else {
                 return Step::Keep;
@@ -332,7 +335,7 @@ mod tests {
             Step::Reset
         );
         for (reason, step) in [
-            ("completed", Step::Keep),
+            ("completed", Step::Finish),
             ("cancelled", Step::Reset),
             ("failed", Step::Reset),
         ] {

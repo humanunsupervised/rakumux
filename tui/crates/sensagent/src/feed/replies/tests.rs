@@ -1930,6 +1930,41 @@ fn a_reply_typed_mid_turn_is_answered_by_the_turn_that_took_it() {
 }
 
 #[test]
+fn the_turn_a_reply_ended_at_once_keeps_its_own_reply_and_the_turn_it_began_answers_it() {
+    // Queued (Grok, Kimi) or steered in (Pi, Copilot), the reply starts its
+    // turn the moment the one it was typed into ends, never seen waiting:
+    // the daemon captures that turn's own reply as the take is read, at
+    // when it was said.
+    for agent in ["grok", "kimi", "pi", "copilot"] {
+        let mut replies = on(&[running(agent, Lifecycle::Working)]);
+        after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+        replies.submitted("01K8A1".into(), Ok(()), NOW, wall(NOW));
+        let said = NOW + Duration::from_secs(8);
+        let held = answer(Some(CHAT), wall(said));
+        // Its event comes before the view showing the take: not taken yet,
+        // nothing it answers.
+        assert_eq!(replies.answered(&held), None, "{agent}");
+        let took = said + Duration::from_millis(300);
+        let mut shown = running_prompted(agent, Lifecycle::Working, "Now add a test.");
+        replies.observe(&shown);
+        report_of(next_at(&mut replies, took));
+        report_taken(&mut replies, "01K8A1", took);
+        // Nor after it: it was said before the take.
+        assert_eq!(replies.answered(&held), None, "{agent}");
+        // The turn the reply began, seen to end: its reply is the answer.
+        let ended = took + Duration::from_secs(20);
+        shown.lifecycle = Lifecycle::Done;
+        replies.observe(&shown);
+        next_at(&mut replies, ended);
+        assert_eq!(
+            replies.answered(&answer(Some(CHAT), wall(ended) - 100)),
+            Some("01K8A1".into()),
+            "{agent}"
+        );
+    }
+}
+
+#[test]
 fn replies_written_one_after_another_mid_turn_each_get_their_turns_answer() {
     let mut replies = on(&[running("claude", Lifecycle::Working)]);
     let work = after_reading(

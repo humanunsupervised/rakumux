@@ -244,6 +244,7 @@ mod tests {
             prompt: None,
             turn: Turn::default(),
             reply: None,
+            reply_state: Default::default(),
             last_at: None,
             foreground: None,
         }
@@ -326,6 +327,33 @@ mod tests {
         assert_eq!(follower.reply(), None);
         // Nothing new: nothing changes.
         assert!(!follower.follow(Some(THREAD)));
+    }
+
+    #[test]
+    fn a_turn_the_next_prompt_ended_keeps_its_reply() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut follower = follower(directory.path());
+        let path = directory.path().join(format!("{THREAD}.jsonl"));
+        let mut file = std::fs::File::create(&path).unwrap();
+        let lines: Vec<&str> = FIXTURE.lines().collect();
+        // Its prompt first, then the turn as the log grows, then the next
+        // prompt (Amp steers in what's typed during a turn).
+        writeln!(file, "{}", lines[0]).unwrap();
+        follower.follow(Some(THREAD));
+        for line in &lines[1..7] {
+            writeln!(file, "{line}").unwrap();
+        }
+        follower.follow(Some(THREAD));
+        assert_eq!(follower.take_finished(), []);
+        for line in &lines[7..] {
+            writeln!(file, "{line}").unwrap();
+        }
+        follower.follow(Some(THREAD));
+        let finished = follower.take_finished();
+        assert_eq!(finished.len(), 1, "{finished:?}");
+        assert_eq!(finished[0].reply.key, "msg-6");
+        assert_eq!(finished[0].conversation.as_deref(), Some(THREAD));
+        assert_eq!(finished[0].at, Some(1_792_749_660_000));
     }
 
     #[test]

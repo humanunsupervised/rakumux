@@ -35,9 +35,12 @@
 //! For the agent feed, the follower also keeps the current turn's reply
 //! whole ([`Reply`]): what the agent said after its last tool call, or the
 //! turn's last message. The control layer captures it when the turn
-//! finishes, and only while reply capture is on. The whole conversation is
-//! read on demand ([`transcript`]), and where the agent works from it
-//! ([`places`]).
+//! finishes, and only while reply capture is on. A turn can end with the
+//! next one's prompt before its session is ever seen waiting (an agent that
+//! queues or steers in what was typed during the turn starts on it at once):
+//! the reply it had then is kept as [`Finished`], for the control layer to
+//! capture too. The whole conversation is read on demand ([`transcript`]),
+//! and where the agent works from it ([`places`]).
 
 use crate::host::ProcessInfo;
 use serde_json::Value;
@@ -133,6 +136,62 @@ pub struct Reply {
     pub position: Option<u64>,
 }
 
+/// A turn's reply as it stood when the next turn began (its prompt, or for
+/// Codex its next task), read as the log grew: the turn ended there, whether
+/// or not its session was seen waiting in between.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Finished {
+    pub reply: Reply,
+    /// The conversation it's in.
+    pub conversation: Option<String>,
+    /// When its turn began (its prompt), as the log says (Unix ms).
+    pub began: Option<i64>,
+    /// When its last message was written, as the log says (Unix ms).
+    pub at: Option<i64>,
+    /// When the turn after it began, as the log says (Unix ms).
+    pub ended: Option<i64>,
+}
+
+/// The most finished replies kept for the control layer between two reads.
+const MAX_FINISHED: usize = 16;
+/// How many reads an OpenCode turn that ended is looked at for its reply.
+const OPENCODE_PREVIOUS_READS: u8 = 5;
+
+/// How the reply being built came to be, to tell a finished one.
+#[derive(Debug, Default)]
+struct ReplyState {
+    /// When its last message was written (Unix ms), if the log says.
+    at: Option<i64>,
+    /// When the turn under way began (its prompt), if the log says.
+    began: Option<i64>,
+    /// Its last message was read as the log grew, not from the log's past
+    /// (a follower's first read, a conversation it switched to, a log read
+    /// again from its start or past a gap): only such a reply is finished.
+    live: bool,
+    /// The log followed was read once: what a read finds after is new.
+    primed: bool,
+    /// It's a finished turn's whole reply (Codex's `task_complete`): it ends
+    /// with whatever resets it, not only with a prompt.
+    complete: bool,
+    /// Replies of turns that ended since the control layer last took them.
+    finished: VecDeque<Finished>,
+    /// OpenCode: a turn that ended when the next prompt came, whose reply
+    /// is looked at again until it reads the same twice.
+    opencode_previous: Option<OpenCodePrevious>,
+}
+
+/// An OpenCode turn that ended with the next prompt.
+#[derive(Debug)]
+struct OpenCodePrevious {
+    /// The turn (as [`Turn::id`]) and its conversation.
+    turn: u64,
+    conversation: String,
+    /// What the last read found its reply to be.
+    seen: Option<opencode::TurnReply>,
+    /// Reads left before it's given up on.
+    reads_left: u8,
+}
+
 /// How one log entry changes the reply being built.
 #[derive(Debug, PartialEq, Eq)]
 enum Step {
@@ -144,6 +203,9 @@ enum Step {
     Text { key: String, text: String },
     /// The whole reply of a finished turn (Codex's `task_complete`).
     Complete { key: String, text: String },
+    /// The turn ended (Kimi Code's `turn.ended`, completed): what it said
+    /// is its whole reply, finished by whatever resets it.
+    Finish,
 }
 
 /// An agent whose log is an append-only file of JSON lines.
@@ -201,6 +263,8 @@ pub struct Follower {
     prompt: Option<String>,
     turn: Turn,
     reply: Option<Reply>,
+    /// What tells the reply being built finished, and those that did.
+    reply_state: ReplyState,
     /// When the conversation last had a prompt or an agent message, by its
     /// own clock (Unix milliseconds): the newest seen, never moving back.
     last_at: Option<i64>,
@@ -263,6 +327,7 @@ impl Follower {
             prompt: None,
             turn: Turn::default(),
             reply: None,
+            reply_state: ReplyState::default(),
             last_at: None,
             foreground,
         })
@@ -375,6 +440,12 @@ impl Follower {
         self.reply.as_ref()
     }
 
+    /// The replies of the turns that ended (with the next turn's start)
+    /// since the last call, oldest first ([`Finished`]).
+    pub fn take_finished(&mut self) -> Vec<Finished> {
+        self.reply_state.finished.drain(..).collect()
+    }
+
     /// The process whose conversation this is.
     pub fn pid(&self) -> u32 {
         self.pid
@@ -417,6 +488,9 @@ impl Follower {
     /// don't need it. Returns whether either line changed.
     pub fn follow(&mut self, bound: Option<&str>) -> bool {
         let before = (self.turn.id, self.turn.total);
+        // Replies of turns that ended in this read, their conversation named
+        // once it's read.
+        let mut ended: Vec<Finished> = Vec::new();
         let (line, prompt) = match &mut self.source {
             Source::Log {
                 agent,
@@ -457,6 +531,9 @@ impl Follower {
                 if switched {
                     self.turn.begin(None);
                     self.reply = None;
+                    self.reply_state.live = false;
+                    self.reply_state.complete = false;
+                    self.reply_state.primed = false;
                 }
                 // Amp's copy is read only once a thread is bound.
                 if agent == LogAgent::Amp && conversation.is_none() {
@@ -491,6 +568,9 @@ impl Follower {
                             })
                             .is_some_and(|typed| prompt_line(&typed).is_some())
                 };
+                // Where the next line was to start: a read that starts
+                // elsewhere (from the start again, or past a gap) isn't new.
+                let from = offset.saturating_sub(partial.len() as u64);
                 let lines = match agent {
                     LogAgent::Droid => droid::read(path, offset, partial, &typed),
                     _ => read(path, offset, partial, &typed),
@@ -498,6 +578,9 @@ impl Follower {
                 let Some(lines) = lines else {
                     return false;
                 };
+                let live =
+                    self.reply_state.primed && lines.first().is_none_or(|(at, _)| *at == from);
+                self.reply_state.primed = true;
                 // Cursor's lines have no times: what a read finds is as new
                 // as the file.
                 let written = match agent {
@@ -525,15 +608,9 @@ impl Follower {
                         LogAgent::Amp => (amp::typed(entry), amp::messages(entry)),
                     };
                     let typed = typed.filter(|typed| prompt_line(typed).is_some());
+                    let at = entry_time(agent, entry).or(written);
                     if typed.is_some() || !messages.is_empty() {
-                        let at = entry_time(agent, entry).or(written);
                         self.last_at = self.last_at.max(at);
-                    }
-                    if let Some(typed) = typed {
-                        self.turn.begin(prompt_text(&typed));
-                    }
-                    for message in &messages {
-                        self.turn.push(message);
                     }
                     let step = match agent {
                         LogAgent::Claude => claude::reply_step(entry),
@@ -548,7 +625,39 @@ impl Follower {
                         LogAgent::Droid => droid::reply_step(entry),
                         LogAgent::Amp => amp::reply_step(entry),
                     };
-                    self.reply = next_reply(self.reply.take(), step, *position);
+                    // The next turn begins (a prompt; after a whole reply,
+                    // whatever resets it): the reply this turn had, read as
+                    // the log grew, is its finished reply.
+                    let next_turn =
+                        typed.is_some() || (step == Step::Reset && self.reply_state.complete);
+                    if next_turn && live && self.reply_state.live {
+                        if let Some(reply) = &self.reply {
+                            ended.push(Finished {
+                                reply: reply.clone(),
+                                conversation: None,
+                                began: self.reply_state.began,
+                                at: self.reply_state.at,
+                                ended: at,
+                            });
+                        }
+                    }
+                    if let Some(typed) = typed {
+                        self.turn.begin(prompt_text(&typed));
+                        self.reply_state.began = at;
+                    }
+                    for message in &messages {
+                        self.turn.push(message);
+                    }
+                    if step == Step::Finish {
+                        self.reply_state.complete = self.reply.is_some();
+                    } else if step != Step::Keep {
+                        let complete = matches!(step, Step::Complete { .. });
+                        self.reply = next_reply(self.reply.take(), step, *position);
+                        let state = &mut self.reply_state;
+                        state.at = self.reply.as_ref().and(at);
+                        state.live = live && self.reply.is_some();
+                        state.complete = complete;
+                    }
                 }
                 let newest = |line: fn(&Value) -> Option<String>| {
                     entries.iter().rev().find_map(|(_, entry)| line(entry))
@@ -577,10 +686,15 @@ impl Follower {
                         .and_then(crate::resume::opencode_recent_session),
                 };
                 let conversation = conversation.filter(|id| crate::resume::is_conversation_id(id));
-                if *followed != conversation {
+                let switched = *followed != conversation;
+                if switched {
                     *followed = conversation.clone();
                     self.reply = None;
+                    self.reply_state.primed = false;
+                    self.reply_state.opencode_previous = None;
                 }
+                let live = self.reply_state.primed;
+                self.reply_state.primed = true;
                 match conversation {
                     Some(id) => {
                         self.last_at = self.last_at.max(opencode::last_at(database, &id));
@@ -591,6 +705,16 @@ impl Follower {
                             });
                         if let Some((turn_id, prompt, messages)) = opencode::turn(database, &id) {
                             if turn_id != self.turn.id {
+                                // The turn before ended with this prompt: its
+                                // reply is read once it stays put.
+                                if live && self.turn.id != 0 {
+                                    self.reply_state.opencode_previous = Some(OpenCodePrevious {
+                                        turn: self.turn.id,
+                                        conversation: id.clone(),
+                                        seen: None,
+                                        reads_left: OPENCODE_PREVIOUS_READS,
+                                    });
+                                }
                                 self.turn = Turn {
                                     id: turn_id,
                                     ..Turn::default()
@@ -603,6 +727,32 @@ impl Follower {
                                 self.turn.push(message);
                             }
                         }
+                        if let Some(previous) = self.reply_state.opencode_previous.as_mut() {
+                            let now = (previous.conversation == id)
+                                .then(|| opencode::turn_reply(database, &id, previous.turn))
+                                .flatten();
+                            if now.is_some() && now == previous.seen {
+                                if let Some(found) = now {
+                                    ended.push(Finished {
+                                        reply: Reply {
+                                            position: Some(found.position),
+                                            ..bounded(found.key, found.text)
+                                        },
+                                        conversation: None,
+                                        began: found.began,
+                                        at: found.at,
+                                        ended: found.ended,
+                                    });
+                                }
+                                self.reply_state.opencode_previous = None;
+                            } else {
+                                previous.seen = now;
+                                previous.reads_left = previous.reads_left.saturating_sub(1);
+                                if previous.reads_left == 0 {
+                                    self.reply_state.opencode_previous = None;
+                                }
+                            }
+                        }
                         (
                             opencode::latest(database, &id),
                             opencode::latest_prompt(database, &id),
@@ -612,6 +762,17 @@ impl Follower {
                 }
             }
         };
+        if !ended.is_empty() {
+            let conversation = self.conversation();
+            let finished = &mut self.reply_state.finished;
+            for mut reply in ended {
+                reply.conversation = conversation.clone();
+                if finished.len() == MAX_FINISHED {
+                    finished.pop_front();
+                }
+                finished.push_back(reply);
+            }
+        }
         // A read with nothing new keeps what was there.
         let mut changed = before != (self.turn.id, self.turn.total);
         for (found, kept) in [(line, &mut self.latest), (prompt, &mut self.prompt)] {
@@ -772,7 +933,7 @@ fn next_reply(reply: Option<Reply>, step: Step, position: u64) -> Option<Reply> 
         ..reply
     };
     match step {
-        Step::Keep => reply,
+        Step::Keep | Step::Finish => reply,
         Step::Reset => None,
         Step::Text { key, text } => {
             let text = match reply {
@@ -935,6 +1096,7 @@ mod tests {
             prompt: None,
             turn: Turn::default(),
             reply: None,
+            reply_state: Default::default(),
             last_at: None,
             foreground: None,
         }
@@ -991,6 +1153,198 @@ mod tests {
         .unwrap();
         follower.follow(None);
         assert_eq!(follower.last_at(), Some(1_792_630_501_000));
+    }
+
+    /// A Codex rollout of conversation `THREAD` in `directory`, and its
+    /// file, written with [`timed_event`].
+    fn codex_rollout(directory: &Path) -> (PathBuf, File) {
+        let path = directory.join(format!("rollout-2026-10-23T10-00-00-{THREAD}.jsonl"));
+        let file = File::create(&path).unwrap();
+        (path, file)
+    }
+
+    const THREAD: &str = "019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b";
+
+    /// An event of a Codex rollout, stamped `at` (RFC 3339).
+    fn timed_event(file: &mut File, at: &str, payload: serde_json::Value) {
+        let entry = serde_json::json!({"timestamp": at, "type": "event_msg", "payload": payload});
+        writeln!(file, "{entry}").unwrap();
+    }
+
+    #[test]
+    fn a_turn_that_ends_with_the_next_ones_start_keeps_its_own_reply() {
+        use serde_json::json;
+        let directory = tempfile::tempdir().unwrap();
+        let (path, mut file) = codex_rollout(directory.path());
+        // Already in the log: a whole turn and the start of the next. The
+        // log's past: nothing finished in it.
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:00.000Z",
+            json!({"type": "task_started"}),
+        );
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:00.000Z",
+            json!({"type": "user_message", "message": "Fix the parser"}),
+        );
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:09.000Z",
+            json!({"type": "task_complete",
+            "turn_id": "t1", "last_agent_message": "Fixed the parser."}),
+        );
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:09.040Z",
+            json!({"type": "task_started"}),
+        );
+        let mut follower = codex_log(path);
+        follower.follow(None);
+        assert_eq!(follower.take_finished(), []);
+
+        // As the log grows: a turn finished, and the next started at once.
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:10.000Z",
+            json!({"type": "user_message", "message": "And the docs"}),
+        );
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:20.000Z",
+            json!({"type": "task_complete",
+            "turn_id": "t2", "last_agent_message": "Updated the docs."}),
+        );
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:20.030Z",
+            json!({"type": "task_started"}),
+        );
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:20.030Z",
+            json!({"type": "user_message", "message": "Now the tests"}),
+        );
+        follower.follow(None);
+        let finished = follower.take_finished();
+        assert_eq!(finished.len(), 1, "{finished:?}");
+        assert_eq!(
+            (
+                finished[0].reply.key.as_str(),
+                finished[0].reply.text.as_str()
+            ),
+            ("t2", "Updated the docs.")
+        );
+        assert_eq!(finished[0].conversation.as_deref(), Some(THREAD));
+        assert_eq!(finished[0].at, Some(1_793_354_420_000));
+        assert_eq!(finished[0].ended, Some(1_793_354_420_030));
+        assert_eq!(follower.take_finished(), [], "taken once");
+
+        // Steered in mid-task (no task_complete before it): the turn under
+        // way has no reply of its own yet, so none is finished.
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:30.000Z",
+            json!({"type": "user_message", "message": "Skip the slow ones"}),
+        );
+        timed_event(
+            &mut file,
+            "2026-10-30T10:00:40.000Z",
+            json!({"type": "task_complete",
+            "turn_id": "t3", "last_agent_message": "Ran the fast tests."}),
+        );
+        follower.follow(None);
+        assert_eq!(follower.take_finished(), []);
+        assert_eq!(follower.reply().map(|reply| reply.key.as_str()), Some("t3"));
+    }
+
+    #[test]
+    fn an_opencode_turn_that_ended_with_the_next_prompt_gives_its_reply_once_it_stays_put() {
+        use serde_json::json;
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("opencode.db");
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT,
+                   seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT);
+                 CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER,
+                   time_updated INTEGER, data TEXT);
+                 CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
+                   time_created INTEGER, time_updated INTEGER, data TEXT);",
+            )
+            .unwrap();
+        let row = |id: &str, kind: &str, seq: i64, at: i64, data: serde_json::Value| {
+            connection
+                .execute(
+                    "INSERT INTO session_message VALUES (?1, 'ses_a', ?2, ?3, ?4, ?4, ?5)",
+                    rusqlite::params![id, kind, seq, at, data.to_string()],
+                )
+                .unwrap();
+        };
+        let mut follower = Follower {
+            pid: 1,
+            source: Source::OpenCode {
+                database: database.clone(),
+                cwd: None,
+                conversation: None,
+            },
+            latest: None,
+            prompt: None,
+            turn: Turn::default(),
+            reply: None,
+            reply_state: Default::default(),
+            last_at: None,
+            foreground: None,
+        };
+        row("u1", "user", 1, 100, json!({"text": "Fix the parser"}));
+        follower.follow(Some("ses_a"));
+        row(
+            "a1",
+            "assistant",
+            2,
+            110,
+            json!({"content": [
+            {"type": "tool", "name": "edit", "state": {"input": {"filePath": "src/a.rs"}}},
+            {"type": "text", "text": "Fixed the parser."}]}),
+        );
+        follower.follow(Some("ses_a"));
+        // The next prompt, at once: the turn before ended with it.
+        row("u2", "user", 3, 120, json!({"text": "And the docs"}));
+        follower.follow(Some("ses_a"));
+        assert_eq!(follower.take_finished(), [], "looked at again first");
+        follower.follow(Some("ses_a"));
+        let finished = follower.take_finished();
+        assert_eq!(finished.len(), 1, "{finished:?}");
+        assert_eq!(
+            (
+                finished[0].reply.key.as_str(),
+                finished[0].reply.text.as_str()
+            ),
+            ("a1:1", "Fixed the parser.")
+        );
+        assert_eq!(finished[0].reply.position, Some(2 * 1024 + 1));
+        assert_eq!((finished[0].at, finished[0].ended), (Some(110), Some(120)));
+        assert_eq!(finished[0].conversation.as_deref(), Some("ses_a"));
+        follower.follow(Some("ses_a"));
+        assert_eq!(follower.take_finished(), [], "once");
+
+        // A turn whose last text came before a tool call it went on with,
+        // and the next prompt: it said nothing after, so nothing's finished.
+        row(
+            "a2",
+            "assistant",
+            4,
+            130,
+            json!({"content": [
+            {"type": "text", "text": "Let me look at the docs."},
+            {"type": "tool", "name": "read", "state": {"input": {"filePath": "README.md"}}}]}),
+        );
+        row("u3", "user", 5, 140, json!({"text": "Stop, do the tests"}));
+        for _ in 0..3 {
+            follower.follow(Some("ses_a"));
+        }
+        assert_eq!(follower.take_finished(), []);
     }
 
     #[test]

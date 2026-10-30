@@ -23,7 +23,7 @@ use super::policy::{self, Op, Target};
 use super::registry::{
     self, ProjectRecord, ProjectRemoval, ProjectSessions, Registry, SessionRecord,
 };
-use super::replies::{ReplyDue, ReplyRing};
+use super::replies::{CapturedKeys, ReplyDue, ReplyRing, DONE_LAG_MS};
 use super::saved;
 use super::waits::{self, Observed, Outcome};
 use super::{ControlConfig, Detector};
@@ -120,8 +120,10 @@ struct LiveSession {
     turn_started: bool,
     /// A turn finished while reply capture was on; its reply isn't captured yet.
     reply_due: Option<ReplyDue>,
-    /// The last reply captured (`agent_output::Reply::key`), never twice.
-    reply_key: Option<String>,
+    /// When its session was last seen finishing a turn (`Done`).
+    done_at: Option<i64>,
+    /// The replies captured last (`agent_output::Reply::key`), never twice.
+    reply_keys: CapturedKeys,
     /// The user's latest prompt (`SessionView::user_prompt`).
     user_prompt: Option<String>,
     /// The agent's current turn (`session_turn`, `SessionView::agent_turn`).
@@ -151,7 +153,8 @@ impl LiveSession {
             agent_output: None,
             turn_started: false,
             reply_due: None,
-            reply_key: None,
+            done_at: None,
+            reply_keys: CapturedKeys::default(),
             user_prompt: None,
             turn: None,
             places_scan: None,
@@ -2296,7 +2299,7 @@ impl Inner {
             (output, agent, bound)
         };
         let mut left = None;
-        let follower = match (process, agent) {
+        let mut follower = match (process, agent) {
             (Some(process), Some(agent)) => {
                 let mut follower = follower
                     .filter(|follower| follower.pid() == process.pid)
@@ -2315,6 +2318,11 @@ impl Inner {
             _ => None,
         };
         let last_at = follower.as_ref().and_then(|follower| follower.last_at());
+        let finished = follower
+            .as_mut()
+            .map(crate::agent_output::Follower::take_finished)
+            .unwrap_or_default();
+        let agent = follower.as_ref().map(crate::agent_output::Follower::agent);
         let mut state = self.lock();
         if let Some(live) = state
             .live
@@ -2338,6 +2346,9 @@ impl Inner {
         }
         if let Some(at) = last_at.filter(|_| state.is_current(session_id, terminal)) {
             self.note_last_message(&mut state, session_id, at);
+        }
+        if let Some(agent) = agent.filter(|_| state.is_current(session_id, terminal)) {
+            self.capture_finished(&mut state, session_id, agent, finished, now);
         }
         self.capture_reply(&mut state, session_id, now);
     }
@@ -3019,10 +3030,73 @@ impl Inner {
         match lifecycle {
             Lifecycle::Working => live.turn_started = true,
             Lifecycle::Done if live.turn_started => {
+                let now = now_ms();
                 live.turn_started = false;
-                live.reply_due = capturing.then(|| ReplyDue::new(now_ms()));
+                live.done_at = Some(now);
+                live.reply_due = capturing.then(|| ReplyDue::new(now));
             }
             _ => {}
+        }
+    }
+
+    /// Capture the replies of turns that ended with the next turn's start
+    /// ([`crate::agent_output::Finished`]), in order: an agent that queues
+    /// or steers in what was typed during a turn starts on it at once, often
+    /// before its session is seen waiting. A turn whose end was seen
+    /// (`Done` after it began, by the time the next began) is the due
+    /// reply's: captured as that when one is due, else left (capture was
+    /// off, or its wait ran out). Never for a private session, never a
+    /// reply captured before, and never a later turn's for one that ended
+    /// without its own (the follower keeps only a turn's own reply).
+    fn capture_finished(
+        &self,
+        state: &mut State,
+        id: &SessionId,
+        agent: &str,
+        finished: Vec<crate::agent_output::Finished>,
+        now: i64,
+    ) {
+        if finished.is_empty() {
+            return;
+        }
+        let private = state.views.get(id).is_none_or(|view| view.private);
+        let State { live, replies, .. } = state;
+        let Some(live) = live.get_mut(id) else {
+            return;
+        };
+        for finished in finished {
+            if !replies.enabled() || private || live.reply_keys.contains(&finished.reply.key) {
+                continue;
+            }
+            // When it began, when its last message was written, and when
+            // the next turn began: the log's clock where it says, else now.
+            let at = finished.at.or(finished.ended).unwrap_or(now).min(now);
+            let began = finished.began.unwrap_or(at).min(at);
+            let ended = finished.ended.unwrap_or(now).max(at);
+            let seen_ending = live
+                .done_at
+                .is_some_and(|done| done >= began && done <= ended.saturating_add(DONE_LAG_MS));
+            let finished_at = match (seen_ending, live.reply_due) {
+                (false, _) => at,
+                (true, Some(due)) => {
+                    live.reply_due = None;
+                    due.since
+                }
+                (true, None) => continue,
+            };
+            live.reply_keys.insert(finished.reply.key.clone());
+            let reply = AgentReply {
+                id: ReplyId::generate(),
+                session_id: id.clone(),
+                agent: agent.to_owned(),
+                conversation_id: finished.conversation,
+                text: finished.reply.text,
+                truncated: finished.reply.truncated,
+                finished_at,
+                position: finished.reply.position,
+            };
+            replies.push(reply.clone(), now);
+            self.publish(&live.scope, id, SessionEvent::Reply { reply });
         }
     }
 
@@ -3047,7 +3121,7 @@ impl Inner {
             .filter(|_| live.output_checked_ms >= due.since)
             .and_then(|follower| {
                 let reply = follower.reply()?;
-                (live.reply_key.as_deref() != Some(reply.key.as_str()))
+                (!live.reply_keys.contains(&reply.key))
                     .then(|| (follower.agent(), follower.conversation(), reply.clone()))
             });
         let Some((agent, conversation_id, reply)) = found else {
@@ -3057,7 +3131,7 @@ impl Inner {
             return;
         };
         live.reply_due = None;
-        live.reply_key = Some(reply.key);
+        live.reply_keys.insert(reply.key);
         let reply = AgentReply {
             id: ReplyId::generate(),
             session_id: id.clone(),

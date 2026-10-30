@@ -483,6 +483,7 @@ pub(super) mod tests {
             prompt: None,
             turn: Turn::default(),
             reply: None,
+            reply_state: Default::default(),
             last_at: None,
             foreground: None,
         }
@@ -490,6 +491,34 @@ pub(super) mod tests {
 
     fn prompt_line(id: &str, text: &str) -> Value {
         message(id, "user", json!([{"type": "text", "text": text}]))
+    }
+
+    #[test]
+    fn a_turn_its_queued_prompt_ended_keeps_its_reply() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(format!("{ID}.jsonl"));
+        write_session(&path, "New session", &[prompt_line("u1", "Fix the test")]);
+        let mut follower = follower(path.clone());
+        follower.follow(Some(ID));
+        append(
+            &path,
+            &message(
+                "a1",
+                "assistant",
+                json!([{"type": "text", "text": "Fixed it."}]),
+            ),
+        );
+        append(&path, &hook_row("h1", "Stop"));
+        follower.follow(Some(ID));
+        assert_eq!(follower.take_finished(), []);
+        // Droid sends what was typed during the turn once it ends.
+        append(&path, &prompt_line("u2", "Now the docs"));
+        follower.follow(Some(ID));
+        let finished = follower.take_finished();
+        assert_eq!(finished.len(), 1, "{finished:?}");
+        assert_eq!(finished[0].reply.key, "a1");
+        assert_eq!(finished[0].reply.text, "Fixed it.");
+        assert_eq!(finished[0].conversation.as_deref(), Some(ID));
     }
 
     #[test]

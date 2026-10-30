@@ -404,6 +404,7 @@ mod tests {
             prompt: None,
             turn: Turn::default(),
             reply: None,
+            reply_state: Default::default(),
             last_at: None,
             foreground: None,
         }
@@ -412,6 +413,34 @@ mod tests {
     fn write_lines(path: &Path, lines: &[Value]) {
         let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
         std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn a_turn_the_next_prompt_ended_keeps_its_reply() {
+        use std::io::Write;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("c1.jsonl");
+        write_lines(&path, &[user("fix the test")]);
+        let mut follower = follower(path.clone());
+        follower.follow(None);
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        for line in [
+            assistant(json!([{"type": "tool_use", "name": "Read", "input": {"path": "/r/a.rs"}}])),
+            assistant(json!([{"type": "text", "text": "Fixed it."}])),
+        ] {
+            writeln!(file, "{line}").unwrap();
+        }
+        follower.follow(None);
+        assert_eq!(follower.take_finished(), []);
+        writeln!(file, "{}", user("now the docs")).unwrap();
+        follower.follow(None);
+        let finished = follower.take_finished();
+        assert_eq!(finished.len(), 1, "{finished:?}");
+        assert_eq!(finished[0].reply.text, "Fixed it.");
+        assert_eq!(finished[0].conversation.as_deref(), Some("c1"));
     }
 
     #[test]

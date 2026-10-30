@@ -180,6 +180,74 @@ fn a_finished_turns_reply_reaches_only_subscriptions_that_ask() {
 }
 
 #[test]
+fn a_task_the_next_one_followed_at_once_keeps_its_reply_and_a_steered_prompt_adds_none() {
+    let _log = one_log_at_a_time();
+    let h = Harness::with_detector(codex_detector);
+    let (id, mut file) = codex_session(&h);
+    assert_eq!(
+        h.handle(&h.user, Request::ReplyCapture { enabled: true }),
+        Response::Ok
+    );
+    let replies = subscribe(&h, true);
+    let mut frame = 0;
+    let mut working_until =
+        |what: &str, check: &dyn Fn(&session_core::model::SessionView) -> bool| {
+            eventually(what, || {
+                frame += 1;
+                h.host.show(&id, &format!("thinking [working] {frame}"));
+                check(&h.get(&id)).then_some(())
+            })
+        };
+    event(&mut file, serde_json::json!({"type": "task_started"}));
+    event(
+        &mut file,
+        serde_json::json!({"type": "user_message", "message": "Fix the parser"}),
+    );
+    working_until("the first task", &|view| {
+        view.user_prompt.as_deref() == Some("Fix the parser")
+    });
+    // A prompt steered into the task under way: no reply ends with it.
+    event(
+        &mut file,
+        serde_json::json!({"type": "user_message", "message": "Skip the slow tests"}),
+    );
+    working_until("the steered prompt", &|view| {
+        view.user_prompt.as_deref() == Some("Skip the slow tests")
+    });
+    assert!(replies_in(&replies, Duration::from_millis(600)).is_empty());
+    // The task completes and the next one starts at once: never seen waiting.
+    event(
+        &mut file,
+        serde_json::json!({"type": "task_complete", "turn_id": "t1",
+            "last_agent_message": "Fixed it, fast tests only."}),
+    );
+    event(&mut file, serde_json::json!({"type": "task_started"}));
+    event(
+        &mut file,
+        serde_json::json!({"type": "user_message", "message": "Now the docs"}),
+    );
+    working_until("the next task", &|view| {
+        view.user_prompt.as_deref() == Some("Now the docs")
+    });
+    let got = replies_in(&replies, Duration::from_secs(2));
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].text, "Fixed it, fast tests only.");
+    // The next task, seen to end: its own reply, once.
+    event(
+        &mut file,
+        serde_json::json!({"type": "task_complete", "turn_id": "t2",
+            "last_agent_message": "Docs written."}),
+    );
+    h.host.show(&id, "> [idle]");
+    settle(&h, &id, Lifecycle::Done);
+    let got: Vec<String> = replies_in(&replies, Duration::from_secs(3))
+        .into_iter()
+        .map(|reply| reply.text)
+        .collect();
+    assert_eq!(got, ["Docs written."]);
+}
+
+#[test]
 fn nothing_is_captured_while_capture_is_off() {
     let _log = one_log_at_a_time();
     let h = Harness::with_detector(codex_detector);

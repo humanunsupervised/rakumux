@@ -390,6 +390,7 @@ mod tests {
             prompt: None,
             turn: Turn::default(),
             reply: None,
+            reply_state: Default::default(),
             last_at: None,
             foreground: None,
         }
@@ -480,6 +481,37 @@ mod tests {
         assert_ne!(follower.turn().id, first);
         assert_eq!(follower.reply(), None);
         assert_eq!(follower.prompt(), Some("Now the docs"));
+        // The turn it ended (the prompt steered in as the response finished,
+        // or typed once it waited) keeps its reply, read as the log grew.
+        let finished = follower.take_finished();
+        assert_eq!(finished.len(), 1, "{finished:?}");
+        assert_eq!(finished[0].reply.key, "a2");
+        assert_eq!(
+            finished[0].reply.text,
+            "Fixed: the parser skips blank lines."
+        );
+        assert_eq!(finished[0].conversation.as_deref(), Some(id));
+        assert_eq!(
+            (finished[0].at, finished[0].ended),
+            (Some(1_793_326_440_000), Some(1_793_326_500_000))
+        );
+        // Steered in after a tool call: the turn has no reply of its own.
+        for line in [
+            at(
+                assistant(
+                    "a3",
+                    json!([{"type": "toolCall", "id": "c2", "name": "read",
+                        "arguments": {"path": "/repo/README.md"}}]),
+                    "toolUse",
+                ),
+                "2026-10-30T02:15:05.000Z",
+            ),
+            at(user(json!("Skip the README")), "2026-10-30T02:15:06.000Z"),
+        ] {
+            file.write_all(line.as_bytes()).unwrap();
+        }
+        assert!(follower.follow(None));
+        assert_eq!(follower.take_finished(), []);
     }
 
     #[test]

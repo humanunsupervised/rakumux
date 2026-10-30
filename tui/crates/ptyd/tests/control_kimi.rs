@@ -469,3 +469,72 @@ fn without_hooks_the_lock_names_the_conversation_and_else_the_folders_newest() {
     });
     assert_eq!(chat(view).as_deref(), Some("session_older"));
 }
+
+#[test]
+fn a_turn_its_queued_prompt_ended_before_it_was_seen_waiting_keeps_its_own_reply() {
+    let kimi = Kimi::new();
+    let (h, id) = (&kimi.h, &kimi.id);
+    let conversation = "session_4b2a9e0c-1d3f-4e5a-8b6c-7d8e9f0a1b2c";
+    let mut log = kimi.conversation(conversation, h.scope.path(), 100);
+    kimi.hooks_name(conversation);
+    kimi.start();
+    let replies = kimi.replies();
+    kimi.settle(WORKING, Lifecycle::Working);
+    log.prompt("Fix the parser", 0);
+    kimi.eventually("the prompt read", WORKING, || {
+        (h.get(id).user_prompt.as_deref() == Some("Fix the parser")).then_some(())
+    });
+    log.part("c1", "text", "Held: fixed the parser.");
+    kimi.eventually("its answer read", WORKING, || {
+        (h.get(id).agent_output.as_deref() == Some("Held: fixed the parser.")).then_some(())
+    });
+    // The turn ends and Kimi starts on what was typed meanwhile at once:
+    // its session is never seen waiting in between.
+    log.ended(0, "completed");
+    log.prompt("MIDTURN ping 4242", 1);
+    let view = kimi.eventually("the queued prompt's turn", WORKING, || {
+        let view = h.get(id);
+        (view.user_prompt.as_deref() == Some("MIDTURN ping 4242")).then_some(view)
+    });
+    assert_eq!(view.lifecycle, Lifecycle::Working);
+    let held = replies_in(&replies, Duration::from_secs(2));
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0].text, "Held: fixed the parser.");
+    assert_eq!(held[0].conversation_id.as_deref(), Some(conversation));
+    assert_eq!(held[0].agent, "kimi");
+    // The queued prompt's own answer, when its turn ends and Kimi waits.
+    log.part("c2", "text", "pong 4242");
+    log.ended(1, "completed");
+    kimi.settle(IDLE, Lifecycle::Done);
+    let answered = replies_in(&replies, Duration::from_secs(3));
+    assert_eq!(answered.len(), 1, "{answered:?}");
+    assert_eq!(answered[0].text, "pong 4242");
+    assert!(answered[0].finished_at > held[0].finished_at);
+
+    // A turn cancelled, the next one queued at once: the cancelled one has
+    // no reply, and never takes the next one's.
+    h.handle(&h.user, Request::SessionTouch { id: id.clone() });
+    kimi.settle(WORKING, Lifecycle::Working);
+    log.prompt("Now the docs", 2);
+    log.part("c3", "text", "Half of the docs");
+    kimi.eventually("the half answer read", WORKING, || {
+        (h.get(id).agent_output.as_deref() == Some("Half of the docs")).then_some(())
+    });
+    log.ended(2, "cancelled");
+    log.prompt("Then the tests", 3);
+    kimi.eventually("the next prompt", WORKING, || {
+        (h.get(id).user_prompt.as_deref() == Some("Then the tests")).then_some(())
+    });
+    assert!(
+        replies_in(&replies, Duration::from_millis(1_500)).is_empty(),
+        "a cancelled turn has no reply"
+    );
+    log.part("c4", "text", "Tests pass.");
+    log.ended(3, "completed");
+    kimi.settle(IDLE, Lifecycle::Done);
+    let last: Vec<String> = replies_in(&replies, Duration::from_secs(3))
+        .into_iter()
+        .map(|reply| reply.text)
+        .collect();
+    assert_eq!(last, ["Tests pass."]);
+}
