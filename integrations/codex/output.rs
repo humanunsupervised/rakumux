@@ -1,5 +1,5 @@
 //! Codex's latest output, from the rollout file of its thread.
-use super::{first_line, prompt_line, tool_line, Step};
+use super::{contains, first_line, prompt_line, tool_line, Step};
 use crate::host::ProcessInfo;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -87,6 +87,11 @@ pub(super) fn typed(entry: &Value) -> Option<String> {
         ("event_msg", "user_message") => Some(payload.get("message")?.as_str()?.to_string()),
         _ => None,
     }
+}
+
+/// Whether a log line may be one [`typed`] takes, before it's parsed.
+pub(super) fn may_be_typed(line: &[u8]) -> bool {
+    contains(line, br#""user_message""#)
 }
 
 /// A shell call's command, without its `bash -lc` wrapper.

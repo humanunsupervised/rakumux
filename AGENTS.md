@@ -577,7 +577,9 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `projects`, `session.pin`, `session.git`, `auth.delegated`, `sessions.all` and `daemon.restart`
   advertise the additions. `session_turn {id}` (user only, capability `session.turn`) returns a
   live agent's current turn: `TurnContent {id, prompt?, messages, total}`, the newest 100
-  messages, each one line of at most 600 characters, for AI titles. `session_submit {id, text,
+  messages, each one line of at most 600 characters, for AI titles. A follower that starts on a
+  log longer than its 256 KiB tail (a new agent process, a restart in place, another
+  conversation) reads the tail's turn from its prompt when that's within 8 MiB before it. `session_submit {id, text,
   quiet_ms?, expect_foreground?}` (paste, then Enter in a write of its own 500 ms later, nothing
   written between them: Claude Code drops an Enter that comes with a paste ending in `.png`/`.jpg`/`.gif`/
   `.webp` while it checks for an image, leaving the text unsent): with `quiet_ms` (capability

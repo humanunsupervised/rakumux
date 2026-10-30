@@ -40,6 +40,9 @@ pub mod transcript;
 
 /// The most of a log read at once: a log that grew more is read from its tail.
 const MAX_READ: u64 = 256 * 1024;
+/// How far before its tail a new follower looks for the prompt of the turn the
+/// tail is in, and reads the turn from it.
+const MAX_PROMPT_SEARCH: u64 = 8 * 1024 * 1024;
 /// The longest line kept, in characters.
 pub const MAX_LINE: usize = 240;
 /// The longest prompt or message a turn keeps, in characters.
@@ -302,7 +305,22 @@ impl Follower {
                     self.turn.begin(None);
                     self.reply = None;
                 }
-                let Some(lines) = read(path, offset, partial) else {
+                // What the user typed: a turn's start.
+                let typed = |line: &[u8]| {
+                    let candidate = match agent {
+                        LogAgent::Claude => claude::may_be_typed(line),
+                        LogAgent::Codex => codex::may_be_typed(line),
+                    };
+                    candidate
+                        && serde_json::from_slice::<Value>(line)
+                            .ok()
+                            .and_then(|entry| match agent {
+                                LogAgent::Claude => claude::typed(&entry),
+                                LogAgent::Codex => codex::typed(&entry),
+                            })
+                            .is_some_and(|typed| prompt_line(&typed).is_some())
+                };
+                let Some(lines) = read(path, offset, partial, &typed) else {
                     return false;
                 };
                 let entries: Vec<(u64, Value)> = lines
@@ -432,8 +450,15 @@ fn switch_conversation(
 
 /// The complete lines `path` gained since `offset` (moved past them), each
 /// with where it starts in the file; the start of an unfinished one waits in
-/// `partial`.
-fn read(path: &Path, offset: &mut u64, partial: &mut Vec<u8>) -> Option<Vec<(u64, Vec<u8>)>> {
+/// `partial`. More than [`MAX_READ`] is read from the tail; the first time,
+/// from the newest line before it that `prompt` picks (the user's prompt of
+/// the turn the tail is in), within [`MAX_PROMPT_SEARCH`].
+fn read(
+    path: &Path,
+    offset: &mut u64,
+    partial: &mut Vec<u8>,
+    prompt: &dyn Fn(&[u8]) -> bool,
+) -> Option<Vec<(u64, Vec<u8>)>> {
     let mut file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
     if len < *offset {
@@ -445,24 +470,40 @@ fn read(path: &Path, offset: &mut u64, partial: &mut Vec<u8>) -> Option<Vec<(u64
         return Some(Vec::new());
     }
     let skipped = len - *offset > MAX_READ;
-    let start = if skipped { len - MAX_READ } else { *offset };
+    let first = *offset == 0;
+    let tail = len - MAX_READ.min(len);
+    let start = match (skipped, first) {
+        (false, _) => *offset,
+        (true, true) => tail.saturating_sub(MAX_PROMPT_SEARCH),
+        (true, false) => tail,
+    };
     file.seek(SeekFrom::Start(start)).ok()?;
     let mut bytes = Vec::new();
     file.take(len - start).read_to_end(&mut bytes).ok()?;
+    *offset = start + bytes.len() as u64;
     let (mut data, base) = if skipped {
         partial.clear();
-        // Mid-line: from the next one.
-        match bytes.iter().position(|b| *b == b'\n') {
-            Some(at) => (bytes.split_off(at + 1), start + at as u64 + 1),
-            None => (Vec::new(), start),
-        }
+        // Mid-line: from the next one, or the prompt before it when the
+        // tail has none.
+        let window = usize::try_from(tail - start).ok()?;
+        let from = match bytes[window..].iter().position(|b| *b == b'\n') {
+            Some(at) => {
+                let from = window + at + 1;
+                let prompted = bytes[from..].split(|b| *b == b'\n').any(prompt);
+                (!prompted)
+                    .then(|| newest_line(&bytes[..from], start == 0, prompt))
+                    .flatten()
+                    .unwrap_or(from)
+            }
+            None => bytes.len(),
+        };
+        (bytes.split_off(from), start + from as u64)
     } else {
-        let base = (*offset).saturating_sub(partial.len() as u64);
+        let base = start.saturating_sub(partial.len() as u64);
         let mut data = std::mem::take(partial);
         data.extend_from_slice(&bytes);
         (data, base)
     };
-    *offset = start + bytes.len() as u64;
     let complete = data
         .iter()
         .rposition(|b| *b == b'\n')
@@ -480,6 +521,30 @@ fn read(path: &Path, offset: &mut u64, partial: &mut Vec<u8>) -> Option<Vec<(u64
         at += line.len() as u64 + 1;
     }
     Some(lines)
+}
+
+/// Where the newest line of `head` that `wanted` picks starts. `head` ends
+/// a line; its first is whole only when `whole` (the file's start).
+fn newest_line(head: &[u8], whole: bool, wanted: &dyn Fn(&[u8]) -> bool) -> Option<usize> {
+    let mut end = head.len().checked_sub(1)?;
+    loop {
+        let begin = match head[..end].iter().rposition(|b| *b == b'\n') {
+            Some(at) => at + 1,
+            None if whole => 0,
+            None => return None,
+        };
+        if wanted(&head[begin..end]) {
+            return Some(begin);
+        }
+        end = begin.checked_sub(1)?;
+    }
+}
+
+/// Whether `haystack` holds `needle`.
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// The reply after one more log entry, the one at `position`.
@@ -882,5 +947,103 @@ mod tests {
         let mut follower = codex_log(path);
         assert!(follower.follow(None));
         assert_eq!(follower.latest(), Some("At the end"));
+    }
+
+    /// A Codex rollout line: an event of `kind` with `message`.
+    fn codex_event(kind: &str, message: &str) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({"type":"event_msg","payload":{"type":kind,"message":message}})
+        )
+    }
+
+    #[test]
+    fn a_long_logs_turn_keeps_its_prompt_from_before_the_tail() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("log.jsonl");
+        let mut file = File::create(&path).unwrap();
+        file.write_all(codex_event("user_message", "An earlier prompt").as_bytes())
+            .unwrap();
+        file.write_all(codex_event("agent_message", "An earlier reply").as_bytes())
+            .unwrap();
+        file.write_all(codex_event("user_message", "Fix the flaky login test").as_bytes())
+            .unwrap();
+        file.write_all(codex_event("agent_message", "Reading the test").as_bytes())
+            .unwrap();
+        // Tool output the agent read: more than the tail.
+        let output = format!(
+            "{}\n",
+            serde_json::json!({"type":"response_item",
+                "payload":{"type":"function_call_output","output":"y".repeat(1000)}})
+        );
+        for _ in 0..400 {
+            file.write_all(output.as_bytes()).unwrap();
+        }
+        file.write_all(codex_event("agent_message", "Fixed: it waits for the form").as_bytes())
+            .unwrap();
+        // A new follower (the daemon restarted in place, say) reads the tail,
+        // and the turn it's in from its prompt.
+        let mut follower = codex_log(path);
+        assert!(follower.follow(None));
+        let turn = follower.turn().clone();
+        assert_eq!(turn.prompt.as_deref(), Some("Fix the flaky login test"));
+        assert_eq!(
+            turn.messages,
+            ["Reading the test", "Fixed: it waits for the form"]
+        );
+        assert_eq!(turn.total, 2);
+        assert_eq!(follower.prompt(), Some("Fix the flaky login test"));
+        // Read once: nothing new is nothing more.
+        assert!(!follower.follow(None));
+        assert_eq!(follower.turn(), &turn);
+    }
+
+    #[test]
+    fn a_tail_with_its_prompt_is_read_alone() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("log.jsonl");
+        let mut file = File::create(&path).unwrap();
+        file.write_all(codex_event("user_message", "An earlier prompt").as_bytes())
+            .unwrap();
+        for _ in 0..400 {
+            file.write_all(codex_event("agent_message", &"y".repeat(1000)).as_bytes())
+                .unwrap();
+        }
+        file.write_all(codex_event("user_message", "Now the docs").as_bytes())
+            .unwrap();
+        file.write_all(codex_event("agent_message", "Writing them").as_bytes())
+            .unwrap();
+        let mut follower = codex_log(path);
+        assert!(follower.follow(None));
+        assert_eq!(follower.turn().prompt.as_deref(), Some("Now the docs"));
+        assert_eq!(follower.turn().messages, ["Writing them"]);
+        // Only the tail was read: the earlier turn's messages weren't seen.
+        assert_eq!(follower.turn().id, 1);
+    }
+
+    #[test]
+    fn a_tail_without_its_prompt_nearby_is_a_turn_without_one() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("log.jsonl");
+        let mut file = File::create(&path).unwrap();
+        file.write_all(codex_event("user_message", "Too far back").as_bytes())
+            .unwrap();
+        let output = format!(
+            "{}\n",
+            serde_json::json!({"type":"response_item",
+                "payload":{"type":"function_call_output","output":"y".repeat(64 * 1024)}})
+        );
+        let lines = (MAX_PROMPT_SEARCH + MAX_READ) / output.len() as u64 + 2;
+        for _ in 0..lines {
+            file.write_all(output.as_bytes()).unwrap();
+        }
+        file.write_all(codex_event("agent_message", "Done").as_bytes())
+            .unwrap();
+        let mut follower = codex_log(path);
+        assert!(follower.follow(None));
+        assert_eq!(follower.turn().prompt, None);
+        assert_eq!(follower.turn().messages, ["Done"]);
+        assert!(!follower.follow(None));
+        assert_eq!(follower.turn().total, 1);
     }
 }

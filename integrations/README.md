@@ -127,7 +127,9 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
   notifications and command output dropped), each cut to its first line: no control
   characters, at most 240 characters.
 - **What isn't:** tool output and subagents' entries are never taken, and a log is read only
-  from where it was last read, at most 256 KiB at a time.
+  from where it was last read, at most 256 KiB at a time. A follower new to a longer log reads
+  its last 256 KiB, from the prompt of the turn they're in when that's within 8 MiB before
+  them (found by looking only at what the user typed), so the turn keeps its prompt.
 - **The turn:** the daemon also keeps the agent's current turn: the user's last prompt and
   every message the agent wrote since (reasoning, replies, tool calls), each flattened to one
   line of at most 600 characters, the newest 100. `SessionView.agent_turn` counts them and

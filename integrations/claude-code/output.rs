@@ -1,5 +1,5 @@
 //! Claude Code's latest output, from its conversation transcript.
-use super::{first_line, prompt_line, short_path, tool_line, Step};
+use super::{contains, first_line, prompt_line, short_path, tool_line, Step};
 
 /// Thinking and replies longer than this are cut, in bytes, before they're
 /// shaped into a line or a summary's message.
@@ -135,6 +135,13 @@ pub(super) fn typed(entry: &Value) -> Option<String> {
         return None;
     }
     Some(text)
+}
+
+/// Whether a log line may be one [`typed`] takes, before it's parsed: a
+/// `user` entry that holds no tool result, or a queued prompt.
+pub(super) fn may_be_typed(line: &[u8]) -> bool {
+    (contains(line, br#""type":"user""#) && !contains(line, br#""type":"tool_result""#))
+        || contains(line, br#""queued_command""#)
 }
 
 /// What the user typed while a turn ran: Claude Code queues it and logs it,
@@ -361,6 +368,31 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn every_line_typed_takes_passes_the_cheap_check_first() {
+        let user = |content: Value| json!({"type": "user", "message": {"role": "user", "content": content}});
+        let queued = json!({"type": "attachment", "attachment": {"type": "queued_command",
+            "prompt": "Also the web app", "commandMode": "prompt", "origin": {"kind": "human"}}});
+        let entries = [
+            user(json!("Fix the login test")),
+            user(json!([{"type": "text", "text": "Mention \"type\":\"tool_result\" here"}])),
+            user(json!([{"type": "image"}, {"type": "text", "text": "This screenshot"}])),
+            queued,
+            user(json!([{"type": "tool_result", "content": "output"}])),
+            json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}}),
+        ];
+        for entry in &entries {
+            let line = serde_json::to_vec(entry).unwrap();
+            if super::typed(entry).is_some() {
+                assert!(may_be_typed(&line), "{entry}");
+            }
+        }
+        let tool = serde_json::to_vec(&entries[4]).unwrap();
+        assert!(!may_be_typed(&tool));
+        let reply = serde_json::to_vec(&entries[5]).unwrap();
+        assert!(!may_be_typed(&reply));
     }
 
     #[test]
