@@ -442,6 +442,76 @@ mod tests {
         );
     }
 
+    /// A paste block as Claude Code logs it: `<pasted_content id="…">`, the
+    /// paste on lines of its own, and the closing tag naming the same id.
+    fn pasted(id: &str, text: &str) -> String {
+        format!("<pasted_content id=\"{id}\">\n{text}\n</pasted_content id=\"{id}\">")
+    }
+
+    const REPLY_WITH_FILES: &str = "Here's what I sent from the web app.\n\n\
+        /home/me/.rakumux/uploads/01JREPLY/image.png\n\
+        /home/me/.rakumux/uploads/01JREPLY/image (2).png";
+
+    /// The bug behind replies with files never confirmed: typed while a
+    /// turn ran, such a reply is a queued prompt that is one paste block,
+    /// and it was dropped as if Claude Code had added it.
+    #[test]
+    fn pasted_prompt_bug_a_queued_paste_is_a_prompt_and_starts_the_reply_over() {
+        let queued = |prompt_value: Value| {
+            json!({"type": "attachment", "uuid": "5110f9e2-c20b-4dbd-9606-b04ec4dc25b2",
+                "timestamp": "2026-10-30T11:10:14.035Z",
+                "attachment": {"type": "queued_command", "prompt": prompt_value,
+                    "commandMode": "prompt", "origin": {"kind": "human"}, "humanTurn": true}})
+        };
+        let reply = queued(json!(pasted("6524", REPLY_WITH_FILES)));
+        assert_eq!(
+            prompt(&reply),
+            Some("Here's what I sent from the web app.".into())
+        );
+        assert_eq!(reply_step(&reply), Step::Reset);
+        assert!(may_be_typed(&serde_json::to_vec(&reply).unwrap()));
+        // Typed after a draft, after a blank line: the draft is the line.
+        let drafted = queued(json!(format!(
+            "a draft\n\n{}",
+            pasted("0a1b", REPLY_WITH_FILES)
+        )));
+        assert_eq!(prompt(&drafted), Some("a draft".into()));
+        // Two pastes.
+        let two = queued(json!(format!(
+            "{}\n\n{}",
+            pasted("1111", "first\nsecond"),
+            pasted("2222", "third\nfourth")
+        )));
+        assert_eq!(prompt(&two), Some("first".into()));
+        // In blocks, as an older Claude Code logs a queued prompt.
+        let blocks =
+            queued(json!([{"type": "text", "text": pasted("3333", "in blocks\nline two")}]));
+        assert_eq!(prompt(&blocks), Some("in blocks".into()));
+    }
+
+    #[test]
+    fn pasted_prompt_bug_a_paste_typed_while_claude_code_waits_is_a_prompt() {
+        let user = |content: Value| json!({"type": "user", "message": {"role": "user", "content": content}});
+        // As Claude Code logs it: a blank line, the block, a newline.
+        let alone = user(json!(format!("\n\n{}\n", pasted("6524", REPLY_WITH_FILES))));
+        assert_eq!(
+            prompt(&alone),
+            Some("Here's what I sent from the web app.".into())
+        );
+        assert_eq!(reply_step(&alone), Step::Reset);
+        assert!(may_be_typed(&serde_json::to_vec(&alone).unwrap()));
+        let around = user(json!(format!(
+            "Check this\n\n{}\n\nthen fix it",
+            pasted("c0ff", "error: boom\nat line 3")
+        )));
+        assert_eq!(prompt(&around), Some("Check this".into()));
+        let in_blocks = user(json!([
+            {"type": "image"},
+            {"type": "text", "text": format!("\n\n{}\n", pasted("beef", "pasted\nlines"))}
+        ]));
+        assert_eq!(prompt(&in_blocks), Some("pasted".into()));
+    }
+
     #[test]
     fn prompts_tool_results_and_subagents_are_not_lines() {
         assert_eq!(

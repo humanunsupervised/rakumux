@@ -2100,6 +2100,75 @@ fn stuck_queue_replies_to_an_agent_that_never_stops_each_go_in_once_the_one_befo
     assert!(replies.pending.is_empty());
 }
 
+/// The bug behind replies with files never confirmed delivered: a reply of
+/// several lines with two files, typed into Claude Code while it worked.
+/// Claude Code logs it, once it takes it, as one paste block, and the
+/// daemon now reads that as the new turn's prompt: `user_prompt` is the
+/// reply's first line (`integrations/output.rs`'s
+/// `pasted_prompt_bug_a_reply_with_files_queued_mid_turn_begins_a_turn_with_its_first_line`,
+/// and `control_queued_prompt.rs`'s for the daemon's view). From that view
+/// the reply is delivered and the session's next reply goes in; from the
+/// view an older daemon gave (no new turn, the prompt before), it waited
+/// for ever and held the next one behind it.
+#[test]
+fn pasted_prompt_bug_a_reply_with_files_typed_mid_turn_is_delivered_by_its_first_line_and_frees_the_next(
+) {
+    let (home, uploads) = uploads();
+    let mut shown = running("claude", Lifecycle::Working);
+    shown.user_prompt = Some("Fix the parser".into());
+    let mut replies = on(std::slice::from_ref(&shown));
+    let mut with_files = with_files(
+        ATTACHED,
+        vec![file('A', "image.png", 4), file('B', "image.png", 3)],
+    );
+    with_files.text = "Here's what I sent from the web app.\nBoth show the error.".into();
+    let pending = vec![with_files, said("01K8A9", 5, "Then the docs.")];
+    let first = fetch_of(after_reading(&mut replies, pending));
+    let fetched = served(&first, &uploads, 200, b"\x89PNG");
+    replies.fetched(true, ATTACHED.into(), fetched, NOW);
+    let second = fetch_of(replies.next_work(NOW));
+    let fetched = served(&second, &uploads, 200, b"PNG");
+    replies.fetched(true, ATTACHED.into(), fetched, NOW);
+    let dir = home.path().join("uploads").join(ATTACHED);
+    assert_eq!(
+        typed_text(replies.next_work(NOW)),
+        format!(
+            "Here's what I sent from the web app.\nBoth show the error.\n\n{}\n{}",
+            dir.join("image.png").display(),
+            dir.join("image (2).png").display()
+        )
+    );
+    assert!(replies.daemon_answered(ATTACHED.into(), Ok(()), NOW, wall(NOW)));
+
+    // As an older daemon showed it once Claude Code took it: the same turn,
+    // the prompt before. Nothing is reported, and the next reply waits.
+    let mut at = NOW;
+    for _ in 0..3 {
+        at += Duration::from_secs(60);
+        replies.observe(&shown);
+        assert_eq!(worked_at(&mut replies, at), (vec![], vec![]));
+    }
+
+    // As the daemon shows it now: a new turn, its prompt the reply's first
+    // line, the agent at work. Delivered, and the next reply goes in.
+    shown = running_prompted(
+        "claude",
+        Lifecycle::Working,
+        "Here's what I sent from the web app.",
+    );
+    replies.observe(&shown);
+    at += Duration::from_secs(1);
+    assert_eq!(
+        worked_at(&mut replies, at),
+        (ids(&["01K8A9"]), ids(&[ATTACHED]))
+    );
+    shown = running_prompted("claude", Lifecycle::Working, "Then the docs.");
+    replies.observe(&shown);
+    at += Duration::from_secs(1);
+    assert_eq!(worked_at(&mut replies, at), (vec![], ids(&["01K8A9"])));
+    assert!(replies.pending.is_empty());
+}
+
 #[test]
 fn of_replies_an_agent_takes_within_one_turn_the_last_taken_before_its_answer_has_it() {
     let mut replies = on(&[running("claude", Lifecycle::Working)]);

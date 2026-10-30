@@ -1,10 +1,11 @@
 //! Claude Code's conversation, from its transcript: each entry of the main
 //! conversation is a message, at its byte offset. What the user typed is the
-//! `user` role's (Claude Code's own insertions taken out), tool results the
-//! `tool` role's, and the assistant's text, thinking and tool calls the
-//! `assistant` role's. What the user typed while a turn ran is logged as a
-//! queued prompt, also the `user` role's. Subagents' entries, meta entries and compaction
-//! summaries are left out, as Claude Code's own view does.
+//! `user` role's (Claude Code's own insertions taken out, its paste blocks
+//! as the text pasted), tool results the `tool` role's, and the assistant's
+//! text, thinking and tool calls the `assistant` role's. What the user typed
+//! while a turn ran is logged as a queued prompt, also the `user` role's.
+//! Subagents' entries, meta entries and compaction summaries are left out, as
+//! Claude Code's own view does.
 use super::{assemble, call, compact, reasoning, result, text, timestamp};
 use serde_json::Value;
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
@@ -218,6 +219,41 @@ mod tests {
         assert_eq!(typed.at, Some(1_792_749_600_000));
         assert_eq!(texts(&typed), ["text: Also the docs"]);
         assert_eq!(message(&queued("peer", "From another agent"), 0), None);
+    }
+
+    /// A prompt of pastes is the user's whole text in the chat uploaded: a
+    /// reply with files typed mid-turn (a queued paste block) and one typed
+    /// while Claude Code waited, with text around the paste.
+    #[test]
+    fn pasted_prompt_bug_pasted_text_is_the_users_message_whole() {
+        let block = |id: &str, text: &str| {
+            format!("<pasted_content id=\"{id}\">\n{text}\n</pasted_content id=\"{id}\">")
+        };
+        let reply = "Here's what I sent from the web app.\n\n\
+            /home/me/.rakumux/uploads/01JREPLY/image.png\n\
+            /home/me/.rakumux/uploads/01JREPLY/image (2).png";
+        let queued = json!({"type": "attachment", "uuid": "5110f9e2-c20b-4dbd-9606-b04ec4dc25b2",
+            "timestamp": "2026-10-23T10:00:00.000Z",
+            "attachment": {"type": "queued_command", "prompt": block("6524", reply),
+                "commandMode": "prompt", "origin": {"kind": "human"}}});
+        let typed = message(&queued, 90).unwrap();
+        assert_eq!(typed.role, TranscriptRole::User);
+        assert_eq!(texts(&typed), [format!("text: {reply}")]);
+        let around = message(
+            &entry(
+                "user",
+                json!(format!(
+                    "Look at this\n\n{}\n\nWhy?<system-reminder>x</system-reminder>",
+                    block("0b1c", "error: boom\nat line 3")
+                )),
+            ),
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            texts(&around),
+            ["text: Look at this\n\nerror: boom\nat line 3\n\nWhy?"]
+        );
     }
 
     #[test]

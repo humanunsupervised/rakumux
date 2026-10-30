@@ -989,10 +989,17 @@ fn first_line(text: &str) -> Option<String> {
 /// `/name args`, and a paste's first line only when nothing was typed
 /// around it.
 fn prompt_line(text: &str) -> Option<String> {
-    first_line(&typed_text(text)?)
+    let pieces = sent(text)?;
+    let line = |pasted: bool| {
+        pieces
+            .iter()
+            .filter(|piece| piece.pasted == pasted)
+            .find_map(|piece| first_line(&piece.text))
+    };
+    line(false).or_else(|| line(true))
 }
 
-/// What the user typed, whole, flattened for a summary ([`flat`]).
+/// What the user sent, whole, flattened for a summary ([`flat`]).
 fn prompt_text(text: &str) -> Option<String> {
     flat(&typed_text(text)?)
 }
@@ -1008,13 +1015,55 @@ fn flat(text: &str) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// What the user typed in `text`, the agents' own insertions taken out (see
-/// [`prompt_line`]).
+/// What the user sent in `text`, whole: what they typed, the agents' own
+/// insertions taken out, and what they pasted, in order (see [`sent`]).
 fn typed_text(text: &str) -> Option<String> {
+    let pieces = sent(text)?;
+    let texts: Vec<&str> = pieces
+        .iter()
+        .map(|piece| piece.text.trim_matches('\n'))
+        .collect();
+    Some(texts.join("\n\n"))
+}
+
+/// A piece of what the user sent: typed, or pasted.
+struct Piece {
+    text: String,
+    pasted: bool,
+}
+
+/// What the user sent in `text`, in order, each piece with a line in it:
+/// what they typed, the agents' own insertions taken out, and what they
+/// pasted that Claude Code logs as a block of its own (a paste of several
+/// lines: a reply typed in with its files' paths among them), as pasted
+/// ([`pastes`]). A slash command is one piece, `/name args`. `None` when
+/// nothing is left.
+fn sent(text: &str) -> Option<Vec<Piece>> {
     if let Some(command) = tagged(text, "command-name") {
         let args = tagged(text, "command-args").unwrap_or_default();
-        return Some(format!("{} {}", command.trim(), args.trim()));
+        return Some(vec![Piece {
+            text: format!("{} {}", command.trim(), args.trim()),
+            pasted: false,
+        }]);
     }
+    let pieces: Vec<Piece> = pastes(text)
+        .into_iter()
+        .map(|(text, pasted)| Piece {
+            text: if pasted {
+                text.to_owned()
+            } else {
+                without_insertions(text)
+            },
+            pasted,
+        })
+        .filter(|piece| first_line(&piece.text).is_some())
+        .collect();
+    (!pieces.is_empty()).then_some(pieces)
+}
+
+/// `text` without the agents' own wrapped insertions (reminders,
+/// notifications, command output).
+fn without_insertions(text: &str) -> String {
     let mut typed = text.to_string();
     for tag in [
         "system-reminder",
@@ -1029,15 +1078,50 @@ fn typed_text(text: &str) -> Option<String> {
             typed = stripped;
         }
     }
-    let paste = tagged(&typed, "pasted_content");
-    while let Some(stripped) = without(&typed, "pasted_content") {
-        typed = stripped;
+    typed
+}
+
+/// The opening tag of Claude Code's block around a paste.
+const PASTE_OPEN: &str = "<pasted_content";
+
+/// `text` split at Claude Code's paste blocks: the text around them
+/// (`false`) and each paste's own (`true`), in order. Claude Code logs a
+/// paste of several lines (in a prompt, or one queued while a turn ran) as
+/// `<pasted_content id="…">\n…\n</pasted_content id="…">`, its closing tag
+/// naming the same id, with the user's text around it; a block never closed
+/// is text, as Claude Code reads it.
+fn pastes(text: &str) -> Vec<(&str, bool)> {
+    let mut pieces = Vec::new();
+    let (mut typed_from, mut from) = (0, 0);
+    while let Some(found) = text[from..].find(PASTE_OPEN) {
+        let open = from + found;
+        from = open + PASTE_OPEN.len();
+        let Some(head) = text[from..].find('>') else {
+            break;
+        };
+        // ` id="…"`, or nothing.
+        let attributes = &text[from..from + head];
+        if attributes.contains(['\n', '<'])
+            || !(attributes.is_empty() || attributes.starts_with(' '))
+        {
+            continue;
+        }
+        let body = from + head + 1;
+        let close = format!("</pasted_content{attributes}>");
+        let Some(length) = text[body..].find(&close) else {
+            continue;
+        };
+        let end = body + length;
+        let inner = &text[body..end];
+        let inner = inner.strip_prefix('\n').unwrap_or(inner);
+        let inner = inner.strip_suffix('\n').unwrap_or(inner);
+        pieces.push((&text[typed_from..open], false));
+        pieces.push((inner, true));
+        typed_from = end + close.len();
+        from = typed_from;
     }
-    if first_line(&typed).is_some() {
-        Some(typed)
-    } else {
-        paste.filter(|paste| first_line(paste).is_some())
-    }
+    pieces.push((&text[typed_from..], false));
+    pieces
 }
 
 /// The text inside `text`'s first `<tag …>…</tag>`.
@@ -1424,13 +1508,192 @@ mod tests {
             Some("Ship it".into())
         );
         assert_eq!(
-            prompt_line("<pasted_content id=\"1\">\nerror: boom\n</pasted_content>\nWhy?"),
+            prompt_line(&(paste_block("1f0a", "error: boom") + "\nWhy?")),
             Some("Why?".into())
         );
         assert_eq!(
-            prompt_line("<pasted_content id=\"1\">\nerror: boom\n</pasted_content>"),
+            prompt_line(&paste_block("1f0a", "error: boom")),
             Some("error: boom".into())
         );
+    }
+
+    /// A paste as Claude Code logs it in a prompt: a blank line, then
+    /// `<pasted_content id="…">`, the paste on lines of its own, and the
+    /// closing tag naming the same id.
+    fn paste_block(id: &str, text: &str) -> String {
+        format!("\n\n<pasted_content id=\"{id}\">\n{text}\n</pasted_content id=\"{id}\">\n")
+    }
+
+    /// The bug behind replies with files never confirmed: a reply of
+    /// several lines (its text, a blank line, its files' paths) typed into
+    /// Claude Code is logged as one paste block, `</pasted_content id="…">`
+    /// closing it; read as an unclosed `<pasted_content>`, the whole prompt
+    /// was dropped, so no new turn and no `user_prompt` showed it.
+    #[test]
+    fn pasted_prompt_bug_a_prompt_that_is_one_paste_is_what_was_pasted() {
+        let reply = "Here's what I sent from the web app.\nTwo screenshots:\n\n\
+            /home/me/.rakumux/uploads/01JREPLY/image.png\n\
+            /home/me/.rakumux/uploads/01JREPLY/image (2).png";
+        // Queued while a turn ran: the block alone, no blank line before it.
+        let queued =
+            format!("<pasted_content id=\"6524\">\n{reply}\n</pasted_content id=\"6524\">");
+        assert_eq!(
+            prompt_line(&queued),
+            Some("Here's what I sent from the web app.".into())
+        );
+        assert_eq!(typed_text(&queued).as_deref(), Some(reply));
+        assert_eq!(
+            prompt_text(&queued).as_deref(),
+            Some(
+                "Here's what I sent from the web app. Two screenshots: \
+                 /home/me/.rakumux/uploads/01JREPLY/image.png \
+                 /home/me/.rakumux/uploads/01JREPLY/image (2).png"
+            )
+        );
+        // Typed at the prompt: the same, after a blank line.
+        let typed = paste_block("a3f9", reply);
+        assert_eq!(
+            prompt_line(&typed),
+            Some("Here's what I sent from the web app.".into())
+        );
+        assert_eq!(typed_text(&typed).as_deref(), Some(reply));
+    }
+
+    #[test]
+    fn pasted_prompt_bug_pastes_and_what_was_typed_around_them_are_all_the_users() {
+        // Typed, then a paste, then typed again: the line is what was
+        // typed; the whole prompt keeps everything, in order.
+        let text = format!(
+            "Look at this log{}Why does it fail?",
+            paste_block("0b1c", "error: boom\n  at parser.rs:12")
+        );
+        assert_eq!(prompt_line(&text), Some("Look at this log".into()));
+        assert_eq!(
+            typed_text(&text).as_deref(),
+            Some("Look at this log\n\nerror: boom\n  at parser.rs:12\n\nWhy does it fail?")
+        );
+        // Two pastes, nothing typed: the first paste's first line, and both.
+        let two = paste_block("aaaa", "first paste\nline two") + &paste_block("bbbb", "second");
+        assert_eq!(prompt_line(&two), Some("first paste".into()));
+        assert_eq!(
+            typed_text(&two).as_deref(),
+            Some("first paste\nline two\n\nsecond")
+        );
+        // Text between pastes, and a paste's last line ending in a newline.
+        let between = paste_block("c0de", "one\n") + "and" + &paste_block("d00d", "two");
+        assert_eq!(prompt_line(&between), Some("and".into()));
+        assert_eq!(typed_text(&between).as_deref(), Some("one\n\nand\n\ntwo"));
+        // Claude Code's own insertions around a paste are still left out.
+        let reminded =
+            paste_block("e1e1", "the paste") + "<system-reminder>be careful</system-reminder>";
+        assert_eq!(prompt_line(&reminded), Some("the paste".into()));
+        assert_eq!(typed_text(&reminded).as_deref(), Some("the paste"));
+        // Without an id, closed the same way.
+        assert_eq!(
+            prompt_line("<pasted_content>\nplain\n</pasted_content>"),
+            Some("plain".into())
+        );
+    }
+
+    #[test]
+    fn pasted_prompt_bug_a_block_not_closed_as_it_opened_is_text() {
+        // Never closed, or closed with another id: text, as Claude Code
+        // reads it, not a prompt left empty.
+        let open = "<pasted_content id=\"1234\">\nhalf a paste";
+        assert_eq!(
+            prompt_line(open),
+            Some("<pasted_content id=\"1234\">".into())
+        );
+        let other = "<pasted_content id=\"1234\">\nx\n</pasted_content id=\"9999\">";
+        assert_eq!(typed_text(other).as_deref(), Some(other));
+        // A tag that only begins the same way.
+        assert_eq!(
+            prompt_line("<pasted_contents>\nx\n</pasted_contents>"),
+            Some("<pasted_contents>".into())
+        );
+        // An empty paste and nothing else: nothing was sent.
+        assert_eq!(prompt_line(&paste_block("ffff", "")), None);
+    }
+
+    fn claude_log(path: PathBuf) -> Follower {
+        Follower {
+            pid: 1,
+            source: Source::Log {
+                agent: LogAgent::Claude,
+                conversation: Some("5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23".into()),
+                path,
+                offset: 0,
+                partial: Vec::new(),
+            },
+            latest: None,
+            prompt: None,
+            turn: Turn::default(),
+            reply: None,
+            reply_state: Default::default(),
+            last_at: None,
+            foreground: None,
+        }
+    }
+
+    /// The failure as it happened: a reply with two files, typed into
+    /// Claude Code while it worked, logged once it took it as a queued
+    /// prompt that is one paste block. The follower must show it as a new
+    /// turn whose prompt is the reply's first line (what the account
+    /// service matches it by).
+    #[test]
+    fn pasted_prompt_bug_a_reply_with_files_queued_mid_turn_begins_a_turn_with_its_first_line() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("conversation.jsonl");
+        let mut file = File::create(&path).unwrap();
+        let mut write = |entry: serde_json::Value| writeln!(file, "{entry}").unwrap();
+        write(serde_json::json!({"type": "user", "uuid": "u1",
+            "timestamp": "2026-10-30T10:00:00.000Z",
+            "message": {"role": "user", "content": "Fix the parser"}}));
+        write(serde_json::json!({"type": "assistant", "uuid": "a1",
+            "timestamp": "2026-10-30T10:00:05.000Z",
+            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1",
+                "name": "Bash", "input": {"command": "cargo test"}}]}}));
+        let mut follower = claude_log(path);
+        assert!(follower.follow(None));
+        assert_eq!(follower.prompt(), Some("Fix the parser"));
+        let first = follower.turn().id;
+
+        let reply = "Here's what I sent from the web app.\n\n\
+            /home/me/.rakumux/uploads/01JREPLY/image.png\n\
+            /home/me/.rakumux/uploads/01JREPLY/image (2).png";
+        write(serde_json::json!({"type": "user", "uuid": "u2",
+            "timestamp": "2026-10-30T10:00:20.000Z",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}));
+        write(serde_json::json!({"type": "attachment", "uuid": "q1",
+            "timestamp": "2026-10-30T10:00:21.000Z",
+            "attachment": {"type": "queued_command", "commandMode": "prompt",
+                "origin": {"kind": "human"}, "humanTurn": true,
+                "prompt": format!("<pasted_content id=\"6524\">\n{reply}\n</pasted_content id=\"6524\">")}}));
+        assert!(follower.follow(None));
+        assert_eq!(
+            follower.prompt(),
+            Some("Here's what I sent from the web app.")
+        );
+        let turn = follower.turn();
+        assert_eq!(turn.id, first + 1, "a new turn");
+        assert_eq!(
+            turn.prompt.as_deref(),
+            Some(
+                "Here's what I sent from the web app. \
+                 /home/me/.rakumux/uploads/01JREPLY/image.png \
+                 /home/me/.rakumux/uploads/01JREPLY/image (2).png"
+            )
+        );
+        assert_eq!(turn.total, 0, "nothing said since");
+
+        // The same reply typed while Claude Code waited: a `user` entry.
+        write(serde_json::json!({"type": "user", "uuid": "u3",
+            "timestamp": "2026-10-30T10:01:00.000Z",
+            "message": {"role": "user", "content": paste_block("77ab", "Second reply\nwith two lines")}}));
+        assert!(follower.follow(None));
+        assert_eq!(follower.prompt(), Some("Second reply"));
+        assert_eq!(follower.turn().id, first + 2);
     }
 
     #[test]

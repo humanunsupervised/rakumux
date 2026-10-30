@@ -489,3 +489,85 @@ fn a_queued_turn_over_before_the_log_was_read_again_gives_both_replies_each_its_
     assert_eq!(got[0].finished_at, first_at);
     assert!(got[1].finished_at > got[0].finished_at);
 }
+
+/// The bug behind replies with files never confirmed delivered: a reply of
+/// several lines (its text, a blank line, its two files' paths), typed into
+/// Claude Code while it worked, is logged once Claude Code takes it as a
+/// queued prompt that is one paste block,
+/// `<pasted_content id="…">\n…\n</pasted_content id="…">`. The daemon read
+/// that as Claude Code's own insertion and dropped it: no new turn, and
+/// `user_prompt` stayed the prompt before, so the account service never saw
+/// it taken and held the session's next reply behind it. It must be a new
+/// turn whose prompt is the reply's first line, while the agent works on,
+/// and the reply that turn ends with is captured as its answer.
+#[test]
+fn pasted_prompt_bug_a_reply_with_files_queued_mid_turn_is_a_new_turn_with_its_first_line() {
+    const PID: u32 = 4347;
+    const CONVERSATION: &str = "1e6a8c04-5f7b-4d9e-8a3c-4b5c6d7e8f90";
+    const REPLY: &str = "Here's what I sent from the web app.\n\n\
+        /home/me/.rakumux/uploads/01JREPLY/image.png\n\
+        /home/me/.rakumux/uploads/01JREPLY/image (2).png";
+    let mut log = conversation_log(PID, CONVERSATION);
+    let (h, id, events) = claude_session(PID);
+    typed(&mut log, "u1", "Fix the parser");
+    let first = working_until(&h, &id, "the first turn", |view| {
+        (view.user_prompt.as_deref() == Some("Fix the parser")).then_some(view.agent_turn.clone()?)
+    });
+    entry(
+        &mut log,
+        assistant(
+            "a1",
+            json!([{"type": "tool_use", "id": "t1", "name": "Bash",
+                "input": {"command": "cargo test", "description": "Run the tests"}}]),
+        ),
+    );
+    entry(
+        &mut log,
+        json!({"type": "user", "uuid": "u2", "timestamp": stamp().0,
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}),
+    );
+    // Taken at its next step, as Claude Code logs it.
+    entry(
+        &mut log,
+        json!({"type": "attachment", "uuid": "q1", "timestamp": stamp().0,
+        "attachment": {"type": "queued_command", "commandMode": "prompt",
+            "origin": {"kind": "human"}, "humanTurn": true,
+            "prompt": format!(
+                "<pasted_content id=\"6524\">\n{REPLY}\n</pasted_content id=\"6524\">"
+            )}}),
+    );
+    let taken = working_until(&h, &id, "the queued paste's turn", |view| {
+        (view.user_prompt.as_deref() == Some("Here's what I sent from the web app."))
+            .then(|| view.clone())
+    });
+    let turn = taken.agent_turn.expect("its turn");
+    assert_ne!(turn.id, first.id, "a new turn");
+    assert_eq!(turn.conversation_id.as_deref(), Some(CONVERSATION));
+    assert_eq!(taken.lifecycle, Lifecycle::Working, "still at work");
+    // The turn's prompt is the whole reply, its files' paths too.
+    let content = match h.handle(&h.user, Request::SessionTurn { id: id.clone() }) {
+        Response::Turn { turn } => turn,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        content.prompt.as_deref(),
+        Some(
+            "Here's what I sent from the web app. \
+             /home/me/.rakumux/uploads/01JREPLY/image.png \
+             /home/me/.rakumux/uploads/01JREPLY/image (2).png"
+        )
+    );
+
+    // What the agent says next is that turn's: its answer.
+    said(&mut log, "a2", "Both screenshots show the parser error.");
+    working_until(&h, &id, "the answer read", |view| {
+        (view.agent_output.as_deref() == Some("Both screenshots show the parser error."))
+            .then_some(())
+    });
+    finishes(&h, &id);
+    let answer = replies_in(&events, Duration::from_secs(3));
+    assert_eq!(answer.len(), 1, "{answer:?}");
+    assert_eq!(answer[0].text, "Both screenshots show the parser error.");
+    assert_eq!(answer[0].conversation_id.as_deref(), Some(CONVERSATION));
+}

@@ -263,7 +263,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `user_prompt`'s letters and digits begin the reply's, or hold its first 32: typed after a
    draft on the same line; without a `user_prompt`, from an older daemon, any new turn in its
    chat; Claude Code logs what's typed while a turn runs as a `queued_command` attachment once
-   it takes it, which the daemon reads as a prompt too), or, for an agent whose turns the daemon doesn't follow, once seen `working`/`blocked`
+   it takes it, which the daemon reads as a prompt too, and a paste of several lines, a reply
+   with files among them, as a `<pasted_content id="…">` block, read as what was typed), or, for an agent whose turns the daemon doesn't follow, once seen `working`/`blocked`
    (a view still showing it waiting proves nothing, as the lifecycle lags); with no new prompt
    within 30 s, or another one, it fails `not_taken` (its Enter lost, it went into a menu, or a
    draft on a line of its own went first: it may still be in the input box); the next goes in
@@ -815,7 +816,8 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   error?}`, each cut at 64 KiB (`truncated`). Claude Code and Codex: one message per log line at
   its byte offset (the cursor is the next offset; prompts without the agents' insertions,
   subagents' and meta entries left out; Claude Code's human `queued_command` attachments, what
-  was typed while a turn ran, are prompts, its other queued input isn't). Kimi Code: the same,
+  was typed while a turn ran, are prompts, its other queued input isn't; its
+  `<pasted_content id="…">` blocks, a paste of several lines, are the user's text in place). Kimi Code: the same,
   one message per record of the main agent's `wire.jsonl` (what the user typed, steers too;
   Kimi's reminders left out). GitHub Copilot: one
   message per event of its main agent at its byte offset, with the event's id; it rewrites its

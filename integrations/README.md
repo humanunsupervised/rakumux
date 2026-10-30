@@ -229,7 +229,10 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
   tool call as `Tool: description` or a short path, or its reply), and the user's last typed
   message (a slash command as `/name args`; the agents' own insertions such as reminders,
   notifications and command output dropped), each cut to its first line: no control
-  characters, at most 240 characters.
+  characters, at most 240 characters. Claude Code logs a paste of several lines (a reply typed
+  in with its files' paths among them), typed or queued, as a block,
+  `<pasted_content id="…">\n…\n</pasted_content id="…">`: its text is what the user sent,
+  the line a paste's first only when nothing was typed around it.
 - **What isn't:** tool output and subagents' entries are never taken, and a log is read only
   from where it was last read, at most 256 KiB at a time. A follower new to a longer log reads
   its last 256 KiB, from the prompt of the turn they're in when that's within 8 MiB before
@@ -276,7 +279,8 @@ reply also says where its turn ends in the conversation (`position`, as below).
 
 `transcript.rs` reads a followed conversation whole, on demand (`session_transcript`), with
 the mappings beside each agent's output parser (`<agent>/transcript.rs`): what the user typed
-(the agents' own insertions taken out, as for the prompt line), the agent's text and visible
+(the agents' own insertions taken out and Claude Code's pastes in place, as for the prompt
+line), the agent's text and visible
 reasoning, its tool calls with their input, and the tools' output (the `tool` role), in order.
 
 - **Claude Code:** one message per entry of the main conversation's transcript, at its byte
