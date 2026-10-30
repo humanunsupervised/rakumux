@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:new-session-status",
+  "title": "POST /api/v1/feed/new-sessions/status request",
+  "description": "The machine a new session was asked of says it started it (`created`, with the session) or couldn't (`failed`, with why). Only a pending request changes, and only for the machine it names; otherwise the stored request comes back unchanged.",
+  "x-maxBodyBytes": 4096,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "machine", "status"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "status": { "type": "string", "enum": ["created", "failed"] },
+    "session": { "$ref": "urn:rakumux:feed:v1:common#/$defs/createdSession" },
+    "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/newSessionFailure" }
+  },
+  "oneOf": [
+    {
+      "required": ["session"],
+      "properties": {
+        "status": { "const": "created" },
+        "session": { "$ref": "urn:rakumux:feed:v1:common#/$defs/createdSession" },
+        "failure": false
+      }
+    },
+    {
+      "required": ["failure"],
+      "properties": {
+        "status": { "const": "failed" },
+        "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/newSessionFailure" },
+        "session": false
+      }
+    }
+  ]
+}

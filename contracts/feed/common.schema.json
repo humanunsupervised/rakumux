@@ -433,6 +433,91 @@
         "edited": { "type": "boolean" },
         "last_at": { "$ref": "#/$defs/timestampMs" }
       }
+    },
+    "newSessionStatus": {
+      "description": "`pending` until its machine starts the session (`created`) or can't (`failed`); `expired` when it stayed pending 10 minutes.",
+      "type": "string",
+      "enum": ["pending", "created", "failed", "expired"]
+    },
+    "newSessionFailure": {
+      "description": "Why a machine didn't start a new session asked for on rakumux.com: it doesn't take new sessions from rakumux.com (`not_accepted`: a setting of its own, off unless its user turned it on), it lists no folder of that name now, or several and `folder_session` doesn't say which (`folder_unknown`), or its daemon couldn't start the session (`refused`). Readers take a value they don't know as a failure without a reason.",
+      "type": "string",
+      "enum": ["not_accepted", "folder_unknown", "refused"]
+    },
+    "createdSession": {
+      "description": "The session a machine started for a new session asked for on rakumux.com: its id and the name its daemon gave it. It appears in the machine's next session list.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/ulid" },
+        "name": { "type": "string", "$ref": "#/$defs/label", "maxLength": 64, "maxUtf8Bytes": 256 }
+      }
+    },
+    "newSession": {
+      "description": "A new session asked for on rakumux.com, for one of the account's machines to start in one of the folders its session list names: a login shell in the folder, with `agent` started in it when one is named. It never carries a path or a command: the machine finds the folder among its own by name (`folder_session`, a session rakumux.com listed in that folder, tells two folders of one name apart) and starts the agent as it would itself. `session` is the session it started, once `created`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "machine", "folder", "status", "created_at", "status_at"],
+      "properties": {
+        "id": {
+          "description": "The ULID rakumux.com gave the request: a machine starts at most one session for an id.",
+          "$ref": "#/$defs/ulid"
+        },
+        "machine": {
+          "description": "The machine to start it on, as its session list names it.",
+          "$ref": "#/$defs/machine"
+        },
+        "folder": {
+          "description": "The folder's last path component, as the machine's session list names it; never a path.",
+          "type": "string",
+          "$ref": "#/$defs/label",
+          "maxLength": 128,
+          "maxUtf8Bytes": 512,
+          "not": { "pattern": "/" }
+        },
+        "folder_session": {
+          "description": "A session of the machine's that rakumux.com listed in that folder, when it listed one: of the machine's folders with that name, the one this session belongs to.",
+          "$ref": "#/$defs/ulid"
+        },
+        "agent": {
+          "description": "The agent to start in the new session's shell; absent: the shell alone.",
+          "$ref": "#/$defs/agent"
+        },
+        "status": { "$ref": "#/$defs/newSessionStatus" },
+        "failure": { "$ref": "#/$defs/newSessionFailure" },
+        "session": { "$ref": "#/$defs/createdSession" },
+        "created_at": { "$ref": "#/$defs/timestampMs" },
+        "status_at": {
+          "description": "When its status last changed (`created_at` while pending).",
+          "$ref": "#/$defs/timestampMs"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": { "enum": ["pending", "expired"] },
+            "failure": false,
+            "session": false
+          }
+        },
+        {
+          "required": ["session"],
+          "properties": {
+            "status": { "const": "created" },
+            "session": { "$ref": "#/$defs/createdSession" },
+            "failure": false
+          }
+        },
+        {
+          "required": ["failure"],
+          "properties": {
+            "status": { "const": "failed" },
+            "failure": { "$ref": "#/$defs/newSessionFailure" },
+            "session": false
+          }
+        }
+      ]
     }
   }
 }

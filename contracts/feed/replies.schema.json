@@ -20,6 +20,12 @@
     "resources_wanted": {
       "description": "Someone has rtop open on rakumux.com: the reader sends what it uses now (`resources-upload`) at once and every few seconds while those uploads' answers say `wanted`. Present (true) only then; machines that don't report resources ignore it.",
       "const": true
+    },
+    "new_sessions": {
+      "description": "Only for a reader that names itself (`machine`) and whose latest session list advertises `new_sessions`: the new sessions asked of that machine on rakumux.com that are still pending, oldest first, with every read until the machine reports them or they expire, whatever `after` says (they take no seq); absent otherwise.",
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/newSession" }
     }
   }
 }

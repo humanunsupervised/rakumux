@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:new-session-answer",
+  "title": "A new session request, as stored",
+  "description": "The answer to a new session's status report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "new_session"],
+  "properties": {
+    "version": { "const": 1 },
+    "new_session": { "$ref": "urn:rakumux:feed:v1:common#/$defs/newSession" }
+  }
+}

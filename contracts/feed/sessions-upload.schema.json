@@ -17,7 +17,7 @@
     },
     "at": { "$ref": "urn:rakumux:feed:v1:common#/$defs/timestampMs" },
     "capabilities": {
-      "description": "What the machine's Rakumux handles beyond the first version of this contract, so the cloud sends it only what it can use; absent from older machines (none). Known: `reply_attachments`, it fetches a reply's attachments and gives the agent their paths. `resources`, it sends what it uses (`resources-upload`) while rakumux.com asks, for rtop. The cloud keeps the latest list with the machine's sessions and ignores names it doesn't know.",
+      "description": "What the machine's Rakumux handles beyond the first version of this contract, so the cloud sends it only what it can use; absent from older machines (none). Known: `reply_attachments`, it fetches a reply's attachments and gives the agent their paths; `resources`, it sends what it uses (`resources-upload`) while rakumux.com asks, for rtop; `new_sessions`, it reads the new sessions asked of it on rakumux.com and starts or refuses them (the replies read's `new_sessions`). The cloud keeps the latest list with the machine's sessions and ignores names it doesn't know.",
       "type": "array",
       "maxItems": 16,
       "uniqueItems": true,

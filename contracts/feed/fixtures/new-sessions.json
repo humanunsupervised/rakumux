@@ -1,0 +1,725 @@
+{
+  "newSession": {
+    "valid": [
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "folder": "rakumux",
+        "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "agent": "claude-code",
+        "status": "pending",
+        "created_at": 1761220000000,
+        "status_at": 1761220000000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "folder": "web",
+        "status": "pending",
+        "created_at": 1761220001000,
+        "status_at": 1761220001000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "folder": "rakumux",
+        "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "agent": "claude-code",
+        "status": "created",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "session": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M4",
+          "name": "brave-otter"
+        }
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "folder": "web",
+        "status": "failed",
+        "created_at": 1761220001000,
+        "status_at": 1761220003000,
+        "failure": "not_accepted"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "folder": "web",
+        "status": "expired",
+        "created_at": 1761220001000,
+        "status_at": 1761220601000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "folder": "web",
+        "status": "failed",
+        "created_at": 1761220001000,
+        "status_at": 1761220003000,
+        "failure": "folder_unknown"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "folder": "web",
+        "status": "failed",
+        "created_at": 1761220001000,
+        "status_at": 1761220003000,
+        "failure": "refused"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "folder": "web",
+        "status": "pending",
+        "created_at": 1761220001000,
+        "status_at": 1761220001000,
+        "agent": "codex"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "folder": "web",
+        "status": "pending",
+        "created_at": 1761220001000,
+        "status_at": 1761220001000,
+        "agent": "opencode"
+      }
+    ],
+    "invalid": [
+      {
+        "note": "a path for a folder",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "/home/me/web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000
+        }
+      },
+      {
+        "note": "a relative path for a folder",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "code/web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000
+        }
+      },
+      {
+        "note": "a command",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000,
+          "command": "rm -rf ~"
+        }
+      },
+      {
+        "note": "a working directory",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000,
+          "cwd": "/home/me/web"
+        }
+      },
+      {
+        "note": "an agent Rakumux doesn't name",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000,
+          "agent": "bash"
+        }
+      },
+      {
+        "note": "a prompt",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "folder": "rakumux",
+          "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "agent": "claude-code",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "prompt": "Run the tests."
+        }
+      },
+      {
+        "note": "failed without why",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "failed",
+          "created_at": 1761220001000,
+          "status_at": 1761220003000
+        }
+      },
+      {
+        "note": "pending with a failure",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000,
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "created without its session",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "folder": "rakumux",
+          "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "agent": "claude-code",
+          "status": "created",
+          "created_at": 1761220000000,
+          "status_at": 1761220002000
+        }
+      },
+      {
+        "note": "pending with a session",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000,
+          "session": {
+            "id": "01K8A2B3C4D5E6F7G8H9J0K1M4",
+            "name": "brave-otter"
+          }
+        }
+      },
+      {
+        "note": "a failure readers can't know yet is still outside this version",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "failed",
+          "created_at": 1761220001000,
+          "status_at": 1761220003000,
+          "failure": "disk_full"
+        }
+      },
+      {
+        "note": "a session's name over two lines",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "folder": "rakumux",
+          "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "agent": "claude-code",
+          "status": "created",
+          "created_at": 1761220000000,
+          "status_at": 1761220002000,
+          "session": {
+            "id": "01K8A2B3C4D5E6F7G8H9J0K1M4",
+            "name": "brave\notter"
+          }
+        }
+      },
+      {
+        "note": "a session id that isn't a ULID",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "folder": "rakumux",
+          "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "agent": "claude-code",
+          "status": "created",
+          "created_at": 1761220000000,
+          "status_at": 1761220002000,
+          "session": {
+            "id": "brave-otter",
+            "name": "brave-otter"
+          }
+        }
+      },
+      {
+        "note": "no machine",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "folder": "web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000
+        }
+      },
+      {
+        "note": "an id that isn't a ULID",
+        "value": {
+          "id": "not-a-ulid",
+          "machine": "studio",
+          "folder": "web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000
+        }
+      },
+      {
+        "note": "an unknown status",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "running",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000
+        }
+      },
+      {
+        "note": "more than asked",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "pending",
+          "created_at": 1761220001000,
+          "status_at": 1761220001000,
+          "user": "user_123"
+        }
+      }
+    ]
+  },
+  "status": {
+    "valid": [
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "created",
+        "session": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M4",
+          "name": "brave-otter"
+        }
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "not_accepted"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "folder_unknown"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "refused"
+      }
+    ],
+    "invalid": [
+      {
+        "note": "created without the session",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "created"
+        }
+      },
+      {
+        "note": "failed without why",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "status": "failed"
+        }
+      },
+      {
+        "note": "created and failed",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "created",
+          "session": {
+            "id": "01K8A2B3C4D5E6F7G8H9J0K1M4",
+            "name": "brave-otter"
+          },
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "only the cloud expires",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "status": "expired"
+        }
+      },
+      {
+        "note": "pending is no report",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "no machine",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "status": "failed",
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "a path",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "created",
+          "session": {
+            "id": "01K8A2B3C4D5E6F7G8H9J0K1M4",
+            "name": "brave-otter"
+          },
+          "cwd": "/home/me/rakumux"
+        }
+      },
+      {
+        "note": "another version",
+        "value": {
+          "version": 2,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "status": "failed",
+          "failure": "refused"
+        }
+      }
+    ]
+  },
+  "answer": {
+    "valid": [
+      {
+        "version": 1,
+        "new_session": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "folder": "rakumux",
+          "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "agent": "claude-code",
+          "status": "created",
+          "created_at": 1761220000000,
+          "status_at": 1761220002000,
+          "session": {
+            "id": "01K8A2B3C4D5E6F7G8H9J0K1M4",
+            "name": "brave-otter"
+          }
+        }
+      },
+      {
+        "version": 1,
+        "new_session": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+          "machine": "studio",
+          "folder": "web",
+          "status": "failed",
+          "created_at": 1761220001000,
+          "status_at": 1761220003000,
+          "failure": "not_accepted"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "note": "no request",
+        "value": {
+          "version": 1
+        }
+      },
+      {
+        "note": "a reply's envelope",
+        "value": {
+          "version": 1,
+          "reply": {
+            "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+            "machine": "studio",
+            "folder": "rakumux",
+            "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+            "agent": "claude-code",
+            "status": "created",
+            "created_at": 1761220000000,
+            "status_at": 1761220002000,
+            "session": {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M4",
+              "name": "brave-otter"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "replies": {
+    "valid": [
+      {
+        "version": 1,
+        "replies": [],
+        "latest_seq": 0,
+        "more": false,
+        "poll_ms": 1000,
+        "new_sessions": [
+          {
+            "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+            "machine": "studio",
+            "folder": "rakumux",
+            "folder_session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+            "agent": "claude-code",
+            "status": "pending",
+            "created_at": 1761220000000,
+            "status_at": 1761220000000
+          },
+          {
+            "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+            "machine": "studio",
+            "folder": "web",
+            "status": "pending",
+            "created_at": 1761220001000,
+            "status_at": 1761220001000
+          }
+        ]
+      },
+      {
+        "version": 1,
+        "replies": [],
+        "latest_seq": 7,
+        "more": false,
+        "new_sessions": []
+      }
+    ],
+    "invalid": [
+      {
+        "note": "a request off the contract",
+        "value": {
+          "version": 1,
+          "replies": [],
+          "latest_seq": 0,
+          "more": false,
+          "new_sessions": [
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "/home/me/web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            }
+          ]
+        }
+      },
+      {
+        "note": "more than 20 at once",
+        "value": {
+          "version": 1,
+          "replies": [],
+          "latest_seq": 0,
+          "more": false,
+          "new_sessions": [
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            },
+            {
+              "id": "01K8A2B3C4D5E6F7G8H9J0K1M3",
+              "machine": "studio",
+              "folder": "web",
+              "status": "pending",
+              "created_at": 1761220001000,
+              "status_at": 1761220001000
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

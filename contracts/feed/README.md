@@ -21,6 +21,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `GET /api/v1/feed/replies/attachments/{id}` | path only | the file's bytes, not JSON (below) |
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
 | `POST /api/v1/feed/resources` | [resources-upload](resources-upload.schema.json) | [resources-stored](resources-stored.schema.json) |
+| `POST /api/v1/feed/new-sessions/status` | [new-session-status](new-session-status.schema.json) | [new-session](new-session.schema.json) |
 | `GET /api/v1/feed/realtime` | header only | [realtime](realtime.schema.json) |
 | WebSocket at the realtime `url` | bearer `token` | [poke](poke.schema.json) messages |
 | `POST /api/v1/machines/credentials` | [machine-enrol](machine-enrol.schema.json) | [machine-credential](machine-credential.schema.json) |
@@ -134,9 +135,9 @@ conformance tests, not an HTTP server, database or local runtime.
   path. Kept while the account's Feed switch is on. The upload also says what the machine
   handles beyond the first version of this contract (`capabilities`, at most 16 unique names
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
-  fetches a reply's attachments and gives the agent their paths. `resources`, it sends what it uses
-  while rakumux.com asks (below). The cloud keeps the latest list
-  and ignores names it doesn't know.
+  fetches a reply's attachments and gives the agent their paths; `resources`, it sends what it
+  uses while rakumux.com asks (below); `new_sessions`, it takes new sessions asked of it on
+  rakumux.com (below). The cloud keeps the latest list and ignores names it doesn't know.
 - **Resources (rtop):** while someone has rtop open on rakumux.com, every machine of the account
   says what it uses now. A replies read answers `resources_wanted: true` then (and only then);
   the machine sends `resources-upload` at once and every few seconds while each answer's
@@ -151,6 +152,29 @@ conformance tests, not an HTTP server, database or local runtime.
   list leaves out). The cloud keeps only each machine's latest upload, briefly, and shows it only
   while it's fresh. A machine that sends them says `resources` in its session list's
   `capabilities`.
+- **New sessions:** on rakumux.com the user can ask one of their machines for a new session in
+  one of the folders its session list names, a login shell there with one of the agents
+  (`agent`, absent for the shell alone) started in it. The cloud stores the request (`newSession`
+  in common, under an id it makes, so a request sent again is stored once) `pending` for that
+  machine, and gives it only to a machine whose latest session list advertises `new_sessions`:
+  its replies read (naming itself with `machine`) carries `new_sessions`, the requests still
+  pending for it, oldest first, at most 20, with every read until reported or expired, whatever
+  `after` says; they take no seq, so a machine takes each by its `id`, at most once. A request
+  carries no path and no command: the machine finds the folder among the folders of the sessions
+  it lists, by name (`folder_session`, a session the website listed in that folder, picks one of
+  two folders with one name), never a private session's, and starts the agent as its own user
+  would. It reports `new-session-status` (only the request's own machine, only a pending
+  request): `created` with the session it started (`{id, name}`), which its next session list
+  shows, or `failed` with why: `not_accepted` (a setting of its own, off unless its user turned
+  it on: then every request fails so), `folder_unknown` (no listed folder of that name now, or
+  several and `folder_session` doesn't say which) or `refused` (its daemon couldn't start it).
+  Readers take a `failure` they don't know as a failure without a reason. One still pending 10
+  minutes after it was written is `expired`, so a machine that comes back later never starts
+  sessions nobody is waiting for. When the request is written the cloud pokes the account's
+  machines (and wakes an enrolled one, below), as for a reply. rakumux.com may also take a first
+  prompt with a request that names an agent; it never goes to the machine with the request: once
+  the machine reports the session `created`, the cloud writes it to that session as a session
+  message (above), which the machine types in like any other.
 - **Pokes:** instead of reading its replies every few seconds, a machine can be told when to.
   `GET /api/v1/feed/realtime` (the machine id header required, else `invalid_request`) gives a
   WebSocket `url` and a `token` that admits that machine of the account once, before
@@ -160,7 +184,7 @@ conformance tests, not an HTTP server, database or local runtime.
   it may send a text `ping` (answered `pong`) to keep it alive, at most every 30 s, and takes a
   connection silent for 90 s as gone. The server sends a `poke` when anything the account's
   machines read about replies changes (a reply or session message written, reported, expired
-  or answered) and when the account's website comes into use; it carries nothing else. On a
+  or answered, or a new session asked for) and when the account's website comes into use; it carries nothing else. On a
   poke the machine reads its replies at once. While connected, it reads at `poll_ms` only
   while that is 1000 (someone is watching, or replies are busy), and otherwise once a minute in
   case a poke was lost. The server closes with 4000 when the same machine connects again, 4001
@@ -184,9 +208,9 @@ conformance tests, not an HTTP server, database or local runtime.
   per secret (`rate_limited`). An access token reaches what a machine does and nothing else:
   the features read, AI session titles, the uploads (entries, messages, sessions, resources) as its own
   machine, and its own replies (the replies read with `machine` set to the name it holds, their
-  status and attachments) and the realtime token; the feed and turn reads, writing replies,
+  status and attachments), the status of the new sessions asked of it, and the realtime token; the feed and turn reads, writing replies,
   changing features and the credential routes are `forbidden`. When a reply or session message
-  is written to an enrolled machine with a `wake_url`, the cloud sends `GET <wake_url>/v1/health`
+  (or a new session) is written to an enrolled machine with a `wake_url`, the cloud sends `GET <wake_url>/v1/health`
   (no credential, at most every 10 s) to wake it: a paused Sprite reads nothing until something
   connects to it.
 - **[Error](error.schema.json):** `{error:{code, message, retry_after_seconds?}}`, one static
@@ -202,7 +226,9 @@ conformance tests, not an HTTP server, database or local runtime.
   doesn't list is `invalid_request` with 404, and to one that runs no agent or has ended
   `invalid_request` with 409. A repeated upload of a stored reply still
   answers with the stored reply, whatever its entry or session says now: a writer that sends a
-  reply again with the same `id` (its answer lost) stores it once. An attachment download whose file is gone is `invalid_request`
+  reply again with the same `id` (its answer lost) stores it once. A new session's status naming
+  a request the account doesn't have, or (from an enrolled machine) another machine's, is
+  `invalid_request` with 404. An attachment download whose file is gone is `invalid_request`
   with 404 (above).
 
 Every object rejects additional properties. Authorization is the terminal's Clerk OAuth
@@ -223,7 +249,8 @@ token's subject, never a body field.
 ## What is not in it
 
 No terminal output, full paths (beyond what the chat's own text holds), account ids or
-credentials. Files attached to replies travel only through the attachment download, never in a
+credentials, and no commands for a machine to run: a new session names a folder by its name and
+an agent from a fixed list. Files attached to replies travel only through the attachment download, never in a
 JSON body, and only from rakumux.com to the reply's machine. Schemas reject such fields, not
 secrets inside the text: the status service sends replies and chats only while the account's
 Feed switch is on, never a private session's, and masks keys, credential assignments and tokens
