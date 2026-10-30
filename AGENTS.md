@@ -250,7 +250,12 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    in that session in the last 10 s (`session_submit`'s `quiet_ms`, so it isn't added to what
    they're writing; tried again 2 s later), and only while the program its view showed in the
    foreground still is (`expect_foreground`, read again by the daemon; refused when its agent
-   just exited to the shell, and looked at again 2 s later). A session takes its replies and session messages
+   just exited to the shell, and looked at again 2 s later), and never into an agent that asks
+   something (`refuse_if_blocked`: the daemon refuses with `session_blocked` while its
+   lifecycle, or detection on its screen read then, says `blocked`, tried again 2 s later; and it
+   holds back the Enter if a permission prompt, question or menu opened after the paste, so the
+   Enter never answers one: the text stays in the input box and the reply fails `not_taken`
+   unless the agent takes it later; a daemon without `session.submit.blocked` submits anyway). A session takes its replies and session messages
    one at a time, in rakumux.com's order (`seq`; a later one waits behind an earlier one that
    waits; one written in this machine's TUI waits for a read that reaches it, made at once, at
    most 5 s, so one written before it on rakumux.com and not read here yet goes first): each is
@@ -695,7 +700,7 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   messages, each one line of at most 600 characters, for AI titles. A follower that starts on a
   log longer than its 256 KiB tail (a new agent process, a restart in place, another
   conversation) reads the tail's turn from its prompt when that's within 8 MiB before it. `session_submit {id, text,
-  quiet_ms?, expect_foreground?}` (paste, then Enter in a write of its own 500 ms later, nothing
+  quiet_ms?, expect_foreground?, refuse_if_blocked?}` (paste, then Enter in a write of its own 500 ms later, nothing
   written between them: Claude Code drops an Enter that comes with a paste ending in `.png`/`.jpg`/`.gif`/
   `.webp` while it checks for an image, leaving the text unsent): with `quiet_ms` (capability
   `session.submit.quiet`) it's refused with `session_in_use`, unaudited, while the session's
@@ -705,6 +710,14 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   anyway. With `expect_foreground` the Enter is never written once another process group took
   the foreground after the text (`pty_io::write_inputs`): text meant for an agent that just
   exited stays unrun at its shell's prompt (without it, the text is type-ahead, as typing is).
+  With `refuse_if_blocked` (capability `session.submit.blocked`) it's refused with
+  `session_blocked`, unaudited, while the session's agent asks something (lifecycle `blocked`:
+  a permission prompt, a question or a menu, which would take the text as its answer) as the
+  daemon has it or as detection (`detect::detect`) reads its screen and foreground process then;
+  and its Enter is written only if detection, run again on the terminal's writer thread when the
+  Enter is due (`host::EnterCheck`, asked without any lock), still sees no such prompt, so one
+  that opened during the pause never takes the Enter as its answer (the text stays unsent in the
+  input box). A daemon without it submits anyway.
   The daemon asks the terminal without its state lock.
 - `session_import {source}` (user only, capability `session.import`) restores an archive directory
   containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.
