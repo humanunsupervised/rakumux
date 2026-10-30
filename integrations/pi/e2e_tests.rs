@@ -238,10 +238,14 @@ fn sibling(name: &str) -> PathBuf {
     Path::new(PTYD).with_file_name(name)
 }
 
-/// Pi's version, when `pi` runs.
-fn pi_version() -> Option<(u32, u32)> {
+/// Pi's version, when `pi` runs. Even `--version` takes a lock in Pi's agent
+/// directory, so it runs in `home` and `agent`, never the user's.
+fn pi_version(home: &Path, agent: &Path) -> Option<(u32, u32)> {
     let out = Command::new("pi")
         .arg("--version")
+        .current_dir(home)
+        .env("HOME", home)
+        .env("PI_CODING_AGENT_DIR", agent)
         .env("PI_OFFLINE", "1")
         .stdin(Stdio::null())
         .output()
@@ -254,7 +258,14 @@ fn pi_version() -> Option<(u32, u32)> {
 /// A daemon in a temp home with an isolated Pi; `None` (skipped) without
 /// Pi 1.1 or the workspace's binaries.
 fn world() -> Option<World> {
-    match pi_version() {
+    let base = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(base.path()).unwrap();
+    let home = root.join("home");
+    let agent = root.join("agent");
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&agent).unwrap();
+    match pi_version(&home, &agent) {
         Some(version) if version >= (1, 1) => {}
         other => {
             eprintln!("skipped: needs pi 1.1 or later on PATH (found {other:?})");
@@ -267,12 +278,6 @@ fn world() -> Option<World> {
             "{binary} isn't built: run `cargo build --workspace` first"
         );
     }
-    let base = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(base.path()).unwrap();
-    let home = root.join("home");
-    let agent = root.join("agent");
-    let repo = root.join("repo");
-    std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     std::fs::write(repo.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
     std::fs::create_dir_all(agent.join("extensions")).unwrap();
