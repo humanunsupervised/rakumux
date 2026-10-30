@@ -493,3 +493,56 @@ fn any_agents_conversation_named_by_its_hooks_or_a_binding_reaches_its_resume_co
         ["opencode2", "-s", "from-cwd"]
     );
 }
+
+#[test]
+fn a_subagents_own_hooks_keep_it_counted_without_taking_the_session_over() {
+    let harness = Harness::new();
+    let session = harness.create(Some("agent"));
+    let caller = harness.session_caller(&session.id);
+    let report = |conversation: &str, event| {
+        let mut report = update("droid", event);
+        let activity = report.activity.as_mut().unwrap();
+        activity.conversation_id = conversation.into();
+        report.working_directory = Some(session_core::api::AgentWorkingDirectory {
+            agent: "droid".into(),
+            conversation_id: Some(conversation.into()),
+            path: harness.scope.path().to_path_buf(),
+        });
+        Request::SessionReport(report)
+    };
+    let phase = |phase| ActivityEvent::Phase { phase };
+    harness.handle(&caller, report("root", phase(ActivityPhase::RunningTool)));
+    harness.handle(
+        &caller,
+        report(
+            "root",
+            ActivityEvent::Subagent {
+                id: "child".into(),
+                running: true,
+            },
+        ),
+    );
+    // A hook of the subagent's own (Droid's carry its session id): counted.
+    assert_eq!(
+        harness.handle(&caller, report("child", phase(ActivityPhase::Working))),
+        Response::Ok
+    );
+    let view = harness.get(&session.id);
+    assert_eq!(view.activity.as_ref().unwrap().active_subagents, 1);
+    assert_eq!(
+        view.agent.as_ref().unwrap().agent_session_id.as_deref(),
+        Some("root"),
+        "the session's conversation stays the parent's"
+    );
+    // Its own Stop: it ended, the parent works on.
+    harness.handle(&caller, report("child", phase(ActivityPhase::Done)));
+    let view = harness.get(&session.id);
+    let activity = view.activity.unwrap();
+    assert_eq!(activity.phase, ActivityPhase::RunningTool);
+    assert_eq!(activity.active_subagents, 0);
+    assert_eq!(view.lifecycle, Lifecycle::Working, "no finished reply");
+    assert_eq!(
+        view.agent.unwrap().agent_session_id.as_deref(),
+        Some("root")
+    );
+}

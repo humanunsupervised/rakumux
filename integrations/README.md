@@ -103,7 +103,12 @@ have no heartbeat: long quiet operations may fall back to detection before they 
 Hooks fired inside a subagent (their input carries `agent_id`) never replace the parent's
 phase. Their tool and permission hooks are that subagent's heartbeat (`subagent`, running):
 a long foreground or background subagent stays counted, and its parent's activity fresh,
-while the parent itself is silent; a stopped subagent is never counted again. While
+while the parent itself is silent; a stopped subagent is never counted again. Agents whose
+subagents run hooks under their own conversation id (Droid, Grok) need no adapter rule: an
+update from the same agent whose conversation is a subagent the activity already counted
+(running or stopped) is that subagent's heartbeat, in the daemon. A busy or waiting phase
+keeps it running, `done` or `idle` stops it; it never changes the parent's phase, completion,
+conversation, the session's agent identity or its working directory. While
 hook-reported subagents run, activity stays fresh for 10 minutes without updates (one of
 their tool calls can take minutes), and so does `waiting_for_agents`; snapshots keep the
 120-second limit. The agent's own busy state (`working`, `waiting_for_response`,

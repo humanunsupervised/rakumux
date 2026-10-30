@@ -73,6 +73,14 @@ impl LifecycleTracker {
             .or(self.agent.as_deref())
     }
 
+    /// Whether `update` is the heartbeat of a subagent the activity counted:
+    /// it comes from that subagent's own conversation.
+    pub fn is_subagent_update(&self, update: &ActivityUpdate) -> bool {
+        self.activity
+            .as_ref()
+            .is_some_and(|activity| activity.is_subagent(update))
+    }
+
     /// The conversation `agent`'s hook activity is about, while it has some.
     pub fn hook_conversation(&self, agent: &str) -> Option<&str> {
         self.activity
@@ -96,7 +104,7 @@ impl LifecycleTracker {
         if self
             .activity
             .as_ref()
-            .is_some_and(|activity| !activity.is_for(update))
+            .is_some_and(|activity| !activity.accepts(update))
         {
             self.done = false;
             self.in_turn = false;

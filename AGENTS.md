@@ -444,8 +444,10 @@ See [integration boundaries and protocol](integrations/README.md). New integrati
 not in UI handlers, API/MCP transport or control policy. Optional version-1 `Report.activity`
 is self-only (`session.activity` capability). The daemon validates, timestamps and expires
 activity, and drops a busy hook state that the agent's own screen has shown idle since the
-last hook (a turn that ended without one). The TUI animates busy markers locally without
-network calls.
+last hook (a turn that ended without one). An update from a subagent's own conversation
+(one the activity already counted: Droid's and Grok's subagents hook under their own ids) is
+that subagent's heartbeat, never the parent's phase, conversation or working directory. The
+TUI animates busy markers locally without network calls.
 
 ```
 rakumux.sh                 # launcher (entry point)

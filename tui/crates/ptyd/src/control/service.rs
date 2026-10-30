@@ -1409,6 +1409,21 @@ impl Inner {
             agent,
             resume,
         } = report;
+        // A subagent's own hook (its conversation is one the activity counts)
+        // is its heartbeat: it names neither the session's agent conversation
+        // nor where the agent works.
+        let subagent = activity.as_ref().filter(|activity| {
+            state
+                .live
+                .get(&record.id)
+                .is_some_and(|live| live.tracker.is_subagent_update(activity))
+        });
+        let working_directory = working_directory.filter(|context| {
+            subagent.is_none_or(|activity| {
+                context.conversation_id.as_deref() != Some(activity.conversation_id.as_str())
+            })
+        });
+        let subagent = subagent.is_some();
         if let Some(context) = &working_directory {
             let place = self.resolve_places(vec![context.path.clone()]);
             self.note_places(state, &record.id, place);
@@ -1428,7 +1443,7 @@ impl Inner {
         let registry = registry(&state.registry)?;
         if let Some(agent) = &agent {
             registry.set_agent(&record.id, agent)?;
-        } else if let Some(activity) = &activity {
+        } else if let Some(activity) = activity.as_ref().filter(|_| !subagent) {
             let identity = AgentInfo {
                 kind: activity.agent.clone(),
                 agent_session_id: Some(activity.conversation_id.clone()),

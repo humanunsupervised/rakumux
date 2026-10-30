@@ -14,6 +14,9 @@ pub(super) const FRESH_MS: i64 = 120_000;
 /// `lifecycle`.
 pub(super) const FRESH_WITH_SUBAGENTS_MS: i64 = 600_000;
 const MAX_SUBAGENTS: usize = 64;
+/// Subagents remembered per conversation, running or not, so their own hooks
+/// are recognised as theirs.
+const MAX_KNOWN_SUBAGENTS: usize = 256;
 
 pub(super) fn validate(update: &ActivityUpdate) -> Result<(), ApiError> {
     let identifier = |value: &str| {
@@ -56,6 +59,9 @@ pub(super) struct ActivityTracker {
     phase: ActivityPhase,
     subagents: HashSet<String>,
     stopped: HashSet<String>,
+    /// Every subagent reported in this conversation, running or not: an
+    /// update about one of their conversations is its heartbeat.
+    known: HashSet<String>,
     received_ms: i64,
     /// The latest update was a delta (command hooks), which can miss the end of a turn;
     /// snapshots come from a live cache that keeps re-sending its state.
@@ -71,6 +77,7 @@ impl ActivityTracker {
             phase: ActivityPhase::Idle,
             subagents: HashSet::new(),
             stopped: HashSet::new(),
+            known: HashSet::new(),
             received_ms: now,
             delta: false,
         }
@@ -78,6 +85,10 @@ impl ActivityTracker {
 
     /// Apply metadata and return whether it announces a new completed reply.
     pub fn apply(&mut self, update: &ActivityUpdate, now: i64) -> bool {
+        if self.is_subagent(update) {
+            self.heartbeat(update, now);
+            return false;
+        }
         if !self.is_for(update) {
             *self = Self::new(update, now);
         }
@@ -112,24 +123,68 @@ impl ActivityTracker {
                 self.phase = *phase;
                 self.subagents = subagents.iter().cloned().collect();
                 self.stopped.clear();
-            }
-            ActivityEvent::Subagent { id, running } => {
-                if *running {
-                    if !self.stopped.contains(id) && self.subagents.len() < MAX_SUBAGENTS {
-                        self.subagents.insert(id.clone());
-                    }
-                } else {
-                    self.subagents.remove(id);
-                    if self.stopped.len() < MAX_SUBAGENTS {
-                        self.stopped.insert(id.clone());
-                    }
+                for id in subagents {
+                    self.remember(id);
                 }
             }
+            ActivityEvent::Subagent { id, running } => self.subagent(id, *running),
             ActivityEvent::Unknown => {}
         }
         self.received_ms = now;
         self.delta = !matches!(update.event, ActivityEvent::Snapshot { .. });
         new_completion
+    }
+
+    fn subagent(&mut self, id: &str, running: bool) {
+        self.remember(id);
+        if running {
+            if !self.stopped.contains(id) && self.subagents.len() < MAX_SUBAGENTS {
+                self.subagents.insert(id.to_owned());
+            }
+        } else {
+            self.subagents.remove(id);
+            if self.stopped.len() < MAX_SUBAGENTS {
+                self.stopped.insert(id.to_owned());
+            }
+        }
+    }
+
+    fn remember(&mut self, id: &str) {
+        if self.known.len() < MAX_KNOWN_SUBAGENTS {
+            self.known.insert(id.to_owned());
+        }
+    }
+
+    /// An update from a subagent's own conversation (Droid's and Grok's
+    /// subagents run hooks under their own ids): that subagent's heartbeat,
+    /// never the parent's phase, completion or conversation. A busy or
+    /// waiting phase (or its own subagents) keeps it running; done or idle
+    /// stops it.
+    fn heartbeat(&mut self, update: &ActivityUpdate, now: i64) {
+        let running = match &update.event {
+            ActivityEvent::Phase { phase } | ActivityEvent::Snapshot { phase, .. } => {
+                !matches!(phase, ActivityPhase::Done | ActivityPhase::Idle)
+            }
+            ActivityEvent::Subagent { .. } => true,
+            ActivityEvent::Unknown => return,
+        };
+        self.subagent(&update.conversation_id, running);
+        self.received_ms = now;
+        self.delta = true;
+    }
+
+    /// Whether `update` comes from the conversation of a subagent this
+    /// conversation reported (see [`Self::heartbeat`]).
+    pub fn is_subagent(&self, update: &ActivityUpdate) -> bool {
+        self.agent == update.agent
+            && self.conversation != update.conversation_id
+            && self.known.contains(&update.conversation_id)
+    }
+
+    /// Whether `update` belongs to this tracker: its conversation's, or one
+    /// of its subagents'.
+    pub fn accepts(&self, update: &ActivityUpdate) -> bool {
+        self.is_for(update) || self.is_subagent(update)
     }
 
     /// Whether the latest update came from command hooks, which send no heartbeat and
@@ -259,6 +314,55 @@ mod tests {
         tracker.apply(&next, 5);
         assert_eq!(tracker.view().active_subagents, 0);
         assert!(!tracker.fresh(5 + FRESH_MS));
+    }
+
+    #[test]
+    fn a_known_subagents_own_hooks_are_its_heartbeat_never_the_parents_phase() {
+        let phase = |phase| ActivityEvent::Phase { phase };
+        let from = |conversation: &str, event| ActivityUpdate {
+            conversation_id: conversation.into(),
+            ..update(event)
+        };
+        let mut tracker = ActivityTracker::new(&update(phase(ActivityPhase::Working)), 0);
+        tracker.apply(&update(phase(ActivityPhase::RunningTool)), 0);
+        // Not known yet: another conversation, as before.
+        assert!(!tracker.is_subagent(&from("child", phase(ActivityPhase::Working))));
+        tracker.apply(
+            &update(ActivityEvent::Subagent {
+                id: "child".into(),
+                running: true,
+            }),
+            1,
+        );
+        // The subagent's own hooks (Droid's and Grok's carry its id) keep it
+        // counted and the parent fresh, and change nothing else.
+        for (at, event) in [
+            (FRESH_MS / 2, phase(ActivityPhase::RunningTool)),
+            (FRESH_MS, phase(ActivityPhase::NeedsInput)),
+            (FRESH_MS * 3 / 2, phase(ActivityPhase::Working)),
+        ] {
+            let heartbeat = from("child", event);
+            assert!(tracker.accepts(&heartbeat) && !tracker.is_for(&heartbeat));
+            assert!(!tracker.apply(&heartbeat, at));
+            assert!(tracker.fresh(at + FRESH_MS));
+            assert_eq!(tracker.view().phase, ActivityPhase::RunningTool);
+            assert_eq!(tracker.view().active_subagents, 1);
+            assert_eq!(tracker.conversation(), "turn");
+        }
+        // Its Stop is its own end, never a finished reply of the parent's.
+        let mut done = from("child", phase(ActivityPhase::Done));
+        done.completion_id = Some("child-reply".into());
+        assert!(!tracker.apply(&done, FRESH_MS * 2));
+        assert_eq!(tracker.view().active_subagents, 0);
+        assert_eq!(tracker.view().phase, ActivityPhase::RunningTool);
+        // Still recognised after the parent's turn ends (a background subagent).
+        tracker.apply(&update(phase(ActivityPhase::Done)), FRESH_MS * 2 + 1);
+        let late = from("child", phase(ActivityPhase::Working));
+        assert!(tracker.is_subagent(&late));
+        // Another agent's conversation of that id is no heartbeat.
+        let mut other = late.clone();
+        other.agent = "codex".into();
+        assert!(!tracker.accepts(&other));
     }
 
     #[test]
