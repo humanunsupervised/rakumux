@@ -110,7 +110,10 @@ fn cursors_hooks_drive_its_session_and_name_its_chat() {
         harness.handle(&caller, hook(ActivityPhase::Working, None)),
         Response::Ok
     );
-    assert_eq!(harness.get(&session.id).lifecycle, Lifecycle::Working);
+    // Once the screen without the approval is read, the hook's busy state.
+    eventually("busy again", || {
+        (harness.get(&session.id).lifecycle == Lifecycle::Working).then_some(())
+    });
     assert_eq!(
         harness.handle(&caller, hook(ActivityPhase::Done, None)),
         Response::Ok

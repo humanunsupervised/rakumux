@@ -76,6 +76,8 @@ never a tool's `cwd`.
 - Without hooks, a subagent isn't counted, and the lifecycle is the screen's.
 - Cursor's IDE agents write transcripts in the same `projects/` tree; Rakumux reads one only by
   its chat id, never by recency.
+- Your Sprite doesn't ship Cursor (its ready card lists claude, codex and gh). The official
+  script installs there (Linux x64 and arm64); it needs `agent login` or `CURSOR_API_KEY`.
 
 ## Live checks (a signed-in Cursor: `agent login`, or `CURSOR_API_KEY`)
 

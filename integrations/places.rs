@@ -124,11 +124,17 @@ impl PlaceScan {
                 }
                 let from = self.cursor.as_ref().map_or(0, |cursor| cursor.offset);
                 let (cwd, home) = (&mut self.cwd, self.home.as_deref());
+                // Cursor's lines have no times: they're as old as the file.
+                let written = match agent {
+                    LogAgent::Cursor => super::cursor::modified_ms(path),
+                    _ => None,
+                };
                 let read = scan(*agent, path, from, budget, |entry, _| {
                     let at = entry
                         .get("timestamp")
                         .and_then(Value::as_str)
-                        .and_then(super::transcript::timestamp);
+                        .and_then(super::transcript::timestamp)
+                        .or(written);
                     match agent {
                         LogAgent::Claude => claude::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Codex => codex::entry(entry, cwd, home, at, &mut touches),
