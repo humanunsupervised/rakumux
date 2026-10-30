@@ -587,7 +587,9 @@ last_active_at, added_at, git}` on the wire.
   deleted by that TUI right away; one that ends in the background stays `exited`.
 - **Lifecycle**: what the program (usually an agent) is doing: `working`, `blocked` (needs the user),
   `done` (finished a turn, not yet looked at), `idle`, `unknown`, `none` (no agent). Detected by the
-  daemon from the screen and foreground process; agents can add a self-report.
+  daemon from the screen and foreground process; agents can add a self-report. Hook activity wins
+  over the screen, except an approval prompt on screen for an agent whose hooks report none
+  (Cursor: its profile's `approvals_on_screen`).
 - **Revive** starts a new terminal for a dead or exited session (same id, cwd and launch spec) and
   types its resume command (startup commands, a known agent's resume form, or one the agent
   reported). The daemon revives the sessions that were running by itself when it starts after an

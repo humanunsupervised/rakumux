@@ -90,4 +90,5 @@ pub(super) const PROFILE: Profile = Profile {
     ],
     quiet: Lifecycle::Unknown,
     output_means_working: false,
+    approvals_on_screen: false,
 };

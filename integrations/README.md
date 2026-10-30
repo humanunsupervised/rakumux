@@ -117,6 +117,10 @@ idle since after the latest hook, for 5 seconds, is dropped with its subagents: 
 ended without a hook (Claude Code's Esc fires no Stop). Waiting-for-input, waiting-for-agents
 and finished phases, and subagents still running after their parent's turn, are never
 second-guessed: the parent's screen waits for input while they work.
+An agent whose hooks report no approval prompts (Cursor: `preToolUse` fires before the prompt
+it may draw, and nothing after) sets `approvals_on_screen` in its detection profile: while its
+screen shows a prompt (`Blocked`), that wins over its hooks' busy state. Claude Code, Codex and
+OpenCode report their prompts in hooks (`needs_input`), so their hooks keep winning.
 Compaction (`SessionStart` with `source: compact`, including idle compaction) neither starts
 nor ends a turn.
 

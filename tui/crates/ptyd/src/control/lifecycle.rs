@@ -13,6 +13,10 @@
 //!   the activity is dropped. An agent waiting for its background agents, and
 //!   subagents still running after their parent's turn, look idle on its screen
 //!   by design and are never second-guessed.
+//! - For an agent whose hooks report no approval prompts (Cursor's;
+//!   `detect::approvals_on_screen`), a prompt its screen shows (`Blocked`)
+//!   wins over the hooks' busy state while it's shown. Other agents' hooks
+//!   report their prompts themselves and keep winning.
 
 use super::activity::ActivityTracker;
 use crate::detect::Detection;
@@ -204,6 +208,14 @@ impl LifecycleTracker {
             && now_ms.saturating_sub(self.detected_since) >= SCREEN_IDLE_MS
     }
 
+    /// `agent`'s screen shows an approval prompt its hooks can't report
+    /// (`detect::approvals_on_screen`: Cursor's).
+    fn approval_on_screen(&self, agent: &str) -> bool {
+        self.detected == Lifecycle::Blocked
+            && self.agent.as_deref() == Some(agent)
+            && crate::detect::approvals_on_screen(agent)
+    }
+
     fn base(&self, now_ms: i64) -> Lifecycle {
         if let Some(activity) = self
             .activity
@@ -218,12 +230,17 @@ impl LifecycleTracker {
                 }
             }
             let view = activity.view();
-            return if view.active_subagents > 0
+            let hooked = if view.active_subagents > 0
                 && view.phase != session_core::activity::ActivityPhase::NeedsInput
             {
                 Lifecycle::Working
             } else {
                 view.phase.lifecycle()
+            };
+            return if hooked == Lifecycle::Working && self.approval_on_screen(&activity.agent) {
+                Lifecycle::Blocked
+            } else {
+                hooked
             };
         }
         match self.report {
@@ -606,6 +623,56 @@ mod tests {
         assert_eq!(t.current(), Lifecycle::Working);
         t.on_activity(&phase(ActivityPhase::Done), 420_000);
         assert_eq!(t.current(), Lifecycle::Done);
+    }
+
+    #[test]
+    fn an_approval_on_screen_wins_over_busy_hooks_only_for_agents_whose_hooks_miss_it() {
+        use session_core::activity::{ActivityEvent, ActivityPhase};
+        let seen = |agent: &str, event: ActivityEvent| {
+            let on_screen = |lifecycle| Detection {
+                agent: Some(agent.into()),
+                lifecycle,
+            };
+            let mut t = LifecycleTracker::default();
+            t.on_detection(on_screen(Lifecycle::Working), 0);
+            t.on_activity(
+                &ActivityUpdate {
+                    agent: agent.into(),
+                    ..hook(event.clone())
+                },
+                1_000,
+            );
+            // Cursor's preToolUse, then the approval box it draws.
+            t.on_detection(on_screen(Lifecycle::Blocked), 1_100);
+            let blocked = t.current();
+            t.on_detection(on_screen(Lifecycle::Working), 5_000);
+            (blocked, t.current())
+        };
+        let running_tool = ActivityEvent::Phase {
+            phase: ActivityPhase::RunningTool,
+        };
+        let subagent = ActivityEvent::Subagent {
+            id: "child".into(),
+            running: true,
+        };
+        for event in [running_tool.clone(), subagent.clone()] {
+            assert_eq!(
+                seen("cursor-agent", event),
+                (Lifecycle::Blocked, Lifecycle::Working),
+                "approved: busy again"
+            );
+        }
+        // Claude Code, Codex and OpenCode report their prompts in hooks: the
+        // hooks keep winning, as before.
+        for agent in ["claude", "codex", "opencode"] {
+            for event in [running_tool.clone(), subagent.clone()] {
+                assert_eq!(
+                    seen(agent, event),
+                    (Lifecycle::Working, Lifecycle::Working),
+                    "{agent}"
+                );
+            }
+        }
     }
 
     #[test]

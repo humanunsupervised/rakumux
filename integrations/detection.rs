@@ -106,6 +106,9 @@ struct Profile {
     quiet: Lifecycle,
     /// Recent output without any marker means `Working`.
     output_means_working: bool,
+    /// Its hooks report no approval prompts (Cursor has no hook for them), so
+    /// one its screen shows (`Blocked`) overrides a hook's busy phase.
+    approvals_on_screen: bool,
 }
 
 /// Evidence for a state: a test applied to a region.
@@ -194,6 +197,7 @@ const PI: Profile = Profile {
     idle: &[marker(Region::Bottom(4), Test::Line(has_pi_context_usage))],
     quiet: Lifecycle::Unknown,
     output_means_working: false,
+    approvals_on_screen: false,
 };
 
 const GEMINI_BLOCKED: &[Marker] = &[marker(
@@ -225,6 +229,7 @@ const GEMINI: Profile = Profile {
     idle: GEMINI_IDLE,
     quiet: Lifecycle::Idle,
     output_means_working: false,
+    approvals_on_screen: false,
 };
 
 /// Qwen Code, a Gemini CLI fork with the same UI.
@@ -249,11 +254,13 @@ const AIDER: Profile = Profile {
     idle: &[marker(Region::Bottom(1), Test::Line(is_aider_prompt))],
     quiet: Lifecycle::Unknown,
     output_means_working: true,
+    approvals_on_screen: false,
 };
 
 /// Cursor's agent CLI (approval boxes "Run this command?" with `(y)` /
 /// `Skip (esc or n)`, busy hint `ctrl+c to stop`, `⬡ Generating…`). Ships a
-/// bundled node under `cursor-agent/versions/<v>/`.
+/// bundled node under `cursor-agent/versions/<v>/`. Its hooks have no
+/// approval event: `preToolUse` fires before the prompt it may draw.
 const CURSOR_AGENT: Profile = Profile {
     label: "cursor-agent",
     names: &["cursor-agent"],
@@ -277,6 +284,7 @@ const CURSOR_AGENT: Profile = Profile {
     idle: &[],
     quiet: Lifecycle::Idle,
     output_means_working: false,
+    approvals_on_screen: true,
 };
 
 const GENERIC_BLOCKED: &[Marker] = &[
@@ -323,6 +331,7 @@ const fn generic(
         idle: &[],
         quiet: Lifecycle::Unknown,
         output_means_working: true,
+        approvals_on_screen: false,
     }
 }
 
@@ -457,6 +466,14 @@ pub fn is_shell_command(argv: &[String]) -> bool {
         && argv[1..]
             .iter()
             .all(|arg| arg.starts_with('-') && arg != "-c")
+}
+
+/// Whether `agent`'s (a detected label) approval prompts show only on its
+/// screen: a detected `Blocked` then overrides its hooks' busy phase.
+pub fn approvals_on_screen(agent: &str) -> bool {
+    PROFILES
+        .iter()
+        .any(|profile| profile.label == agent && profile.approvals_on_screen)
 }
 
 /// The coding agent `process` is ("claude", "codex", …), if Rakumux knows
@@ -869,6 +886,14 @@ mod tests {
             ),
             Some("codex")
         );
+    }
+
+    #[test]
+    fn only_agents_whose_hooks_miss_approvals_let_the_screen_say_so() {
+        assert!(approvals_on_screen("cursor-agent"));
+        for agent in ["claude", "codex", "opencode", "pi", "gemini", "unknown"] {
+            assert!(!approvals_on_screen(agent), "{agent}");
+        }
     }
 
     #[test]

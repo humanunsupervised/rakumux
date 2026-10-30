@@ -53,4 +53,5 @@ pub(super) const PROFILE: Profile = Profile {
     idle: &[marker(Region::Screen, Test::Any(&["ctrl+p commands"]))],
     quiet: Lifecycle::Unknown,
     output_means_working: false,
+    approvals_on_screen: false,
 };
