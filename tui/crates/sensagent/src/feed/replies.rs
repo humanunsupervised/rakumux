@@ -1171,9 +1171,41 @@ impl ReplySync {
         }
     }
 
+    /// The daemon's answer to typing `reply` in: typed in (`true`), refused
+    /// for now (someone typing there, another program in its foreground, its
+    /// agent asking something: tried again after [`TYPING_HOLD`]), or
+    /// refused for good.
+    pub fn daemon_answered(
+        &mut self,
+        reply: String,
+        result: Result<(), ErrorCode>,
+        now: Duration,
+        now_ms: i64,
+    ) -> bool {
+        match result {
+            Err(ErrorCode::SessionInUse) => self.typing(reply, now),
+            Err(ErrorCode::ForegroundChanged) => self.foreground_changed(reply, now),
+            Err(ErrorCode::SessionBlocked) => self.asking(reply, now),
+            result => {
+                let typed = result.is_ok();
+                self.submitted(reply, result, now, now_ms);
+                return typed;
+            }
+        }
+        false
+    }
+
     /// The daemon refused it because someone was typing in its session: it
     /// stays pending, and that session is tried again after [`TYPING_HOLD`].
     pub fn typing(&mut self, reply: String, now: Duration) {
+        self.hold_back(reply, now);
+    }
+
+    /// The daemon refused it because its session's agent asks something (a
+    /// permission prompt, a question or a menu, which would take it as its
+    /// answer), though its view said otherwise: it stays pending, and that
+    /// session is tried again after [`TYPING_HOLD`], once it takes input.
+    pub fn asking(&mut self, reply: String, now: Duration) {
         self.hold_back(reply, now);
     }
 

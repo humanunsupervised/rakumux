@@ -913,19 +913,10 @@ fn own<S, A, C>(
                 );
             }
             Message::ReplySubmitted(reply, result) => {
-                match result {
-                    // Someone is typing in that session: wait for them to pause.
-                    Err(ErrorCode::SessionInUse) => replies.typing(reply, now),
-                    // Its agent left the foreground: look again shortly.
-                    Err(ErrorCode::ForegroundChanged) => replies.foreground_changed(reply, now),
-                    result => {
-                        // Typed in: stay up until the daemon holds the Sprite for
-                        // the agent's turn.
-                        if result.is_ok() {
-                            awake.hold(now);
-                        }
-                        replies.submitted(reply, result, now, wall_ms())
-                    }
+                // Typed in: stay up until the daemon holds the Sprite for the
+                // agent's turn.
+                if replies.daemon_answered(reply, result, now, wall_ms()) {
+                    awake.hold(now);
                 }
                 follow_replies(
                     &refresher,
@@ -1775,8 +1766,10 @@ where
                 }
             }
             Ok(Work::Submit(reply, session, text, foreground)) => {
+                // Never while its agent asks something: the Enter would
+                // answer it (a daemon without the check submits anyway).
                 let result = api
-                    .submit_expecting(
+                    .submit_unless_blocked(
                         &session,
                         &text,
                         crate::feed::TYPING_QUIET,

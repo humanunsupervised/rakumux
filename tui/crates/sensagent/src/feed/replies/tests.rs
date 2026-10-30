@@ -2002,3 +2002,69 @@ fn a_session_message_goes_into_an_agent_at_work_in_whatever_chat_it_shows() {
         Some("01K8A2".into())
     );
 }
+
+#[test]
+fn a_reply_the_daemon_refuses_for_now_is_tried_again_shortly_and_never_reported() {
+    let refusals = [
+        // Someone typed there.
+        ErrorCode::SessionInUse,
+        // Its agent left the foreground.
+        ErrorCode::ForegroundChanged,
+        // Its agent opened a permission prompt (or a question, or a menu)
+        // after its view said it worked: an Enter would answer it.
+        ErrorCode::SessionBlocked,
+    ];
+    for refusal in refusals {
+        for shown in [
+            running("claude", Lifecycle::Working),
+            running("codex", Lifecycle::Done),
+        ] {
+            let what = format!("{refusal:?} {:?}", shown.lifecycle);
+            let mut replies = on(std::slice::from_ref(&shown));
+            let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+            assert_eq!(submitted_reply(work).as_deref(), Some("01K8A1"), "{what}");
+            assert!(
+                !replies.daemon_answered("01K8A1".into(), Err(refusal), NOW, wall(NOW)),
+                "{what}: not typed in"
+            );
+            // Still pending, not reported, and that session left alone a while.
+            assert_eq!(next_at(&mut replies, NOW + TYPING_HOLD / 2), None, "{what}");
+            // Then tried again, as its view still takes input.
+            let again = NOW + TYPING_HOLD;
+            assert_eq!(
+                submitted_reply(next_at(&mut replies, again)).as_deref(),
+                Some("01K8A1"),
+                "{what}"
+            );
+            assert!(
+                replies.daemon_answered("01K8A1".into(), Ok(()), again, wall(again)),
+                "{what}: typed in"
+            );
+            taken(&mut replies);
+            let body = report_of(next_at(&mut replies, again));
+            assert_eq!(
+                (&body["id"], &body["status"]),
+                (&"01K8A1".into(), &"delivered".into()),
+                "{what}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_reply_the_daemon_refuses_for_good_fails_refused() {
+    let mut replies = on(&[running("claude", Lifecycle::Done)]);
+    let work = after_reading(&mut replies, vec![reply("01K8A1", 4, Some("studio"))]);
+    assert_eq!(submitted_reply(work).as_deref(), Some("01K8A1"));
+    assert!(!replies.daemon_answered(
+        "01K8A1".into(),
+        Err(ErrorCode::PermissionDenied),
+        NOW,
+        wall(NOW)
+    ));
+    let body = report_of(next_at(&mut replies, NOW));
+    assert_eq!(
+        (&body["id"], &body["failure"]),
+        (&"01K8A1".into(), &"refused".into())
+    );
+}
