@@ -101,6 +101,16 @@ its name is the generated one (`auto_named`) or exactly the title this service l
 folder has gets ` 2`, ` 3`, …; one taken meanwhile is chosen again once. A service without
 titles names nothing. A removed session's title is forgotten.
 
+Which chats had their one automatic title (`TitledChats`, `titled-chats.json`, 0600: per
+session, the agents' conversation ids) is kept as the scheduler settles each, and loaded
+into it at start (`with_titled_chats`), so a restarted service, or one following a daemon
+restarted in place (the same sessions and conversations, turns numbered afresh), doesn't
+title them again. A session keeps its newest 16 chats, the 256 most recently titled
+sessions are kept, and a session is forgotten when the daemon removes it or doesn't list it
+(the runner lists dead sessions too, `keep_only`, and follows the others). Turning sharing
+off or signing out clears it, like the scheduler's own memory. Titles asked for don't
+depend on it.
+
 ## Failures and threads
 
 - `RefreshFailure` is static and per session, shown until a refresh succeeds:

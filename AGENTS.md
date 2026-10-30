@@ -159,7 +159,13 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    followed turn is one source from its prompt to the next (`source/tracker.rs`, `Facts::same`):
    its messages and lifecycle moving on while a title is made don't discard it; a new prompt
    (or chat) does, and one asked for is then made again of the new prompt
-   (`RefreshScheduler::finished`). Nothing refreshes on
+   (`RefreshScheduler::finished`). Which chats had their automatic title is kept in
+   `sensagent/status/titled-chats.json` (0600; per session, by the agent's conversation id,
+   which a restart keeps), so neither a restarted service nor a daemon restarted in place
+   titles them again; a session's newest 16 chats and the 256 most recently titled sessions
+   are kept, a session the daemon deleted (a `removed` event, or missing from the full list,
+   dead sessions included, read at each (re)subscribe) is forgotten, and turning sharing off or
+   signing out clears it, as it always made every chat's title due again. Nothing refreshes on
    a timer. **The title names the session** (`refresh/titles.rs`): a worker renames it through
    the daemon (`session_rename`, as the user) only while its name is the generated one
    (`auto_named`) or exactly the title the service last gave it (kept per session in
@@ -727,6 +733,7 @@ accidents; they don't stop a hostile process running as the same user.
   sensagent/                     the account service (`rakumux status-service`): credentials/
                                  (the sign-in, 0600), status/ (descriptions and sharing consent,
                                  SQLite; titles.json: the title it last gave each session;
+                                 titled-chats.json: the chats whose automatic title was made;
                                  chats.json; replies.json: replies written, typed in or
                                  decided here and reports not yet taken), machine.json (this
                                  machine's feed name and id), its registration and private socket

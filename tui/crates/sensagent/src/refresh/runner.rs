@@ -12,7 +12,7 @@ use session_core::api::{
 };
 use session_core::client::SessionApi;
 use session_core::ids::{ReplyId, SessionId};
-use session_core::model::SessionView;
+use session_core::model::{SessionStatus, SessionView};
 use thiserror::Error;
 
 use super::awake::Awake;
@@ -116,6 +116,7 @@ enum Command {
 }
 
 enum Message {
+    /// A fresh list: every session the daemon has, dead ones too.
     Resync(Vec<SessionView>),
     Event(Box<EventEnvelope>),
     Disconnected,
@@ -705,6 +706,12 @@ fn own<S, A, C>(
                 }
             }
             Message::Resync(views) => {
+                // Every session the daemon has: what's kept of others goes.
+                refresher.keep_only(views.iter().map(|view| &view.id));
+                let views: Vec<SessionView> = views
+                    .into_iter()
+                    .filter(|view| view.status != SessionStatus::Dead)
+                    .collect();
                 let _ = refresher.resync(&views, now);
                 let after = feed.connected(&views);
                 chats.connected(&views);
@@ -1703,7 +1710,9 @@ fn follow(api: &dyn SessionApi, owner: &Sender<Message>, stop: &AtomicBool) {
             ..Default::default()
         };
         if let Ok(stream) = api.subscribe(request) {
-            if let Ok(views) = api.list_all(false) {
+            // Dead sessions too, for what's kept of sessions across restarts;
+            // the rest of the service follows the others.
+            if let Ok(views) = api.list_all(true) {
                 if owner.send(Message::Resync(views)).is_err() {
                     return;
                 }

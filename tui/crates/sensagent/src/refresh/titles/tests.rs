@@ -158,6 +158,9 @@ fn titles_are_remembered_in_a_private_file_and_forgotten_with_their_session() {
     let again = Titles::load(Some(path.clone()));
     assert_eq!(again.get(&id(1)), None);
     assert_eq!(again.get(&id(2)).as_deref(), Some("Write docs"));
+    let mut again = Titles::load(Some(path.clone()));
+    again.keep_only(&HashSet::from([id(3).as_str()]));
+    assert_eq!(Titles::load(Some(path.clone())).get(&id(2)), None);
 
     std::fs::write(&path, b"not json").unwrap();
     assert_eq!(Titles::load(Some(path)).get(&id(2)), None);
@@ -179,6 +182,70 @@ fn only_the_most_recent_titles_are_kept() {
         .is_some());
 }
 
+fn chats(titled: &TitledChats, session: &SessionId) -> Vec<String> {
+    let mut chats: Vec<String> = titled
+        .iter()
+        .filter(|(id, _)| id == session)
+        .map(|(_, chat)| chat.to_owned())
+        .collect();
+    chats.sort();
+    chats
+}
+
+#[test]
+fn titled_chats_are_remembered_in_a_private_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("titled-chats.json");
+    let mut titled = TitledChats::load(Some(path.clone()));
+    assert_eq!(titled.iter().count(), 0);
+    titled.add(&id(1), "synthetic-chat-a");
+    titled.add(&id(1), "synthetic-chat-a");
+    titled.add(&id(1), "");
+    titled.add(&id(2), "synthetic-chat-b");
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+
+    let mut again = TitledChats::load(Some(path.clone()));
+    assert_eq!(chats(&again, &id(1)), ["", "synthetic-chat-a"]);
+    assert_eq!(chats(&again, &id(2)), ["synthetic-chat-b"]);
+    // Deleted by the daemon, or not among the sessions it has: forgotten.
+    again.forget(&id(1));
+    let mut again = TitledChats::load(Some(path.clone()));
+    assert!(chats(&again, &id(1)).is_empty());
+    again.add(&id(3), "synthetic-chat-c");
+    again.keep_only(&HashSet::from([id(3).as_str()]));
+    let mut again = TitledChats::load(Some(path.clone()));
+    assert!(chats(&again, &id(2)).is_empty());
+    assert_eq!(chats(&again, &id(3)), ["synthetic-chat-c"]);
+    // Sharing stopped: every chat is titled again once it resumes.
+    again.clear();
+    assert_eq!(TitledChats::load(Some(path.clone())).iter().count(), 0);
+
+    std::fs::write(&path, b"not json").unwrap();
+    assert_eq!(TitledChats::load(Some(path)).iter().count(), 0);
+}
+
+#[test]
+fn a_sessions_newest_chats_and_the_most_recent_sessions_are_kept() {
+    let mut titled = TitledChats::load(None);
+    for n in 0..=MAX_CHATS {
+        titled.add(&id(1), &format!("synthetic-chat-{n:02}"));
+    }
+    let kept = chats(&titled, &id(1));
+    assert_eq!(kept.len(), MAX_CHATS);
+    assert!(!kept.contains(&"synthetic-chat-00".to_owned()));
+    assert!(kept.contains(&format!("synthetic-chat-{MAX_CHATS:02}")));
+    // An id longer than any conversation's isn't kept.
+    titled.add(&id(2), &"x".repeat(MAX_CHAT_CHARS + 1));
+    assert!(chats(&titled, &id(2)).is_empty());
+
+    for n in 0..=MAX_TITLES {
+        titled.add(&SessionId::from_string(format!("synthetic-{n}")), "chat");
+    }
+    assert_eq!(titled.sessions.len(), MAX_TITLES);
+    assert!(chats(&titled, &SessionId::from_string("synthetic-0")).is_empty());
+}
+
 #[test]
 fn diagnostics_never_show_titles() {
     let retitle = retitle("Synthetic private title", false, Some("Older title"));
@@ -186,4 +253,7 @@ fn diagnostics_never_show_titles() {
     let mut titles = Titles::load(None);
     titles.set(&id(1), "Synthetic private title".into());
     assert!(!format!("{titles:?}").contains("private"));
+    let mut titled = TitledChats::load(None);
+    titled.add(&id(1), "synthetic-private-chat");
+    assert!(!format!("{titled:?}").contains("private"));
 }

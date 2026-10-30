@@ -24,6 +24,10 @@ use crate::status::{SessionTitle, MAX_CACHE_ENTRIES};
 
 /// Sessions whose last title is remembered; the least recently titled go first.
 const MAX_TITLES: usize = MAX_CACHE_ENTRIES;
+/// A session's chats whose automatic title is remembered: its newest.
+const MAX_CHATS: usize = 16;
+/// The longest conversation id kept (the daemon's own bound).
+const MAX_CHAT_CHARS: usize = 128;
 /// The daemon's longest session name, in characters.
 const MAX_NAME_CHARS: usize = 64;
 /// The highest suffix tried for a title another session in the folder has.
@@ -204,6 +208,16 @@ impl Titles {
         }
     }
 
+    /// Forget every session but `known` (all the daemon has, dead ones too).
+    pub(crate) fn keep_only(&mut self, known: &HashSet<&str>) {
+        let before = self.entries.len();
+        self.entries
+            .retain(|session, _| known.contains(session.as_str()));
+        if self.entries.len() != before {
+            self.save();
+        }
+    }
+
     fn bound(&mut self) {
         while self.entries.len() > MAX_TITLES {
             let Some(oldest) = self
@@ -240,6 +254,162 @@ impl fmt::Debug for Titles {
         formatter
             .debug_struct("Titles")
             .field("sessions", &self.entries.len())
+            .finish()
+    }
+}
+
+/// The chats (agent conversations) of each session whose one automatic
+/// title was made, kept in a file (0600) when given one, so a restarted
+/// service, or one following a daemon restarted in place, doesn't title them
+/// again. Conversation ids are the agents' own, the same across restarts; a
+/// chat without one is `""`. A session's newest [`MAX_CHATS`] are kept, and
+/// the [`MAX_TITLES`] most recently titled sessions; a session the daemon
+/// deleted is forgotten.
+#[derive(Default)]
+pub(crate) struct TitledChats {
+    path: Option<PathBuf>,
+    sessions: HashMap<String, Chats>,
+    /// Increases with each change, for keeping the most recently titled.
+    clock: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Chats {
+    /// Oldest first.
+    chats: Vec<String>,
+    used: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChatsFile {
+    version: u8,
+    sessions: HashMap<String, Chats>,
+}
+
+impl TitledChats {
+    /// What `path` remembers (nothing when it's missing or unreadable).
+    pub(crate) fn load(path: Option<PathBuf>) -> Self {
+        let mut sessions: HashMap<String, Chats> = path
+            .as_ref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<ChatsFile>(&bytes).ok())
+            .filter(|file| file.version == 1)
+            .map(|file| file.sessions)
+            .unwrap_or_default();
+        sessions.retain(|session, entry| {
+            entry
+                .chats
+                .retain(|chat| chat.chars().count() <= MAX_CHAT_CHARS);
+            let excess = entry.chats.len().saturating_sub(MAX_CHATS);
+            entry.chats.drain(..excess);
+            !session.is_empty() && session.len() <= 256 && !entry.chats.is_empty()
+        });
+        let clock = sessions.values().map(|entry| entry.used).max().unwrap_or(0);
+        let mut titled = Self {
+            path,
+            sessions,
+            clock,
+        };
+        titled.bound();
+        titled
+    }
+
+    /// Every session's titled chats.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (SessionId, &str)> + '_ {
+        self.sessions.iter().flat_map(|(session, entry)| {
+            entry
+                .chats
+                .iter()
+                .map(move |chat| (SessionId::from_string(session.clone()), chat.as_str()))
+        })
+    }
+
+    /// `chat` of `session` has its automatic title.
+    pub(crate) fn add(&mut self, session: &SessionId, chat: &str) {
+        if chat.chars().count() > MAX_CHAT_CHARS {
+            return;
+        }
+        let entry = self
+            .sessions
+            .entry(session.as_str().to_owned())
+            .or_insert(Chats {
+                chats: Vec::new(),
+                used: 0,
+            });
+        if entry.chats.iter().any(|known| known == chat) {
+            return;
+        }
+        entry.chats.push(chat.to_owned());
+        let excess = entry.chats.len().saturating_sub(MAX_CHATS);
+        entry.chats.drain(..excess);
+        self.clock += 1;
+        entry.used = self.clock;
+        self.bound();
+        self.save();
+    }
+
+    /// The daemon deleted `session`.
+    pub(crate) fn forget(&mut self, session: &SessionId) {
+        if self.sessions.remove(session.as_str()).is_some() {
+            self.save();
+        }
+    }
+
+    /// Forget every session but `known` (all the daemon has, dead ones too).
+    pub(crate) fn keep_only(&mut self, known: &HashSet<&str>) {
+        let before = self.sessions.len();
+        self.sessions
+            .retain(|session, _| known.contains(session.as_str()));
+        if self.sessions.len() != before {
+            self.save();
+        }
+    }
+
+    /// Sharing stopped and its text was dropped: every chat gets its
+    /// automatic title again once sharing resumes.
+    pub(crate) fn clear(&mut self) {
+        if !self.sessions.is_empty() {
+            self.sessions.clear();
+            self.save();
+        }
+    }
+
+    fn bound(&mut self) {
+        while self.sessions.len() > MAX_TITLES {
+            let Some(oldest) = self
+                .sessions
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(id, _)| id.clone())
+            else {
+                break;
+            };
+            self.sessions.remove(&oldest);
+        }
+    }
+
+    fn save(&self) {
+        let Some(path) = &self.path else {
+            return;
+        };
+        let file = ChatsFile {
+            version: 1,
+            sessions: self.sessions.clone(),
+        };
+        let Ok(bytes) = serde_json::to_vec(&file) else {
+            return;
+        };
+        if crate::feed::write_private(path, &bytes).is_err() {
+            eprintln!("rakumux-status: saving titled chats failed");
+        }
+    }
+}
+
+impl fmt::Debug for TitledChats {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TitledChats")
+            .field("sessions", &self.sessions.len())
             .finish()
     }
 }

@@ -9,7 +9,7 @@ use session_core::ids::SessionId;
 use session_core::model::{ScopeRoot, SessionView};
 
 use super::schedule::{conversation, Outcome, RefreshFailure, RefreshScheduler, MAX_RUNNING};
-use super::titles::{Retitle, RetitleOutcome, Retitled, Titles};
+use super::titles::{Retitle, RetitleOutcome, Retitled, TitledChats, Titles};
 use crate::auth::{
     AccountError, AccountService, AccountSession, ApplyResult, CredentialRevision, CredentialStore,
     SystemClock, WallClock,
@@ -175,6 +175,8 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     machine: Option<crate::feed::MachineIdentity>,
     /// The name this service last gave each session (its AI title).
     titles: Titles,
+    /// The chats whose one automatic title was made, kept across restarts.
+    titled: TitledChats,
     /// An enrolled machine's tokens: they sign it in and renew it, never Clerk.
     machine_tokens: Option<std::sync::Arc<crate::enrolment::MachineTokens>>,
 }
@@ -207,6 +209,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             reply_state: None,
             machine: None,
             titles: Titles::default(),
+            titled: TitledChats::default(),
             machine_tokens: None,
         }
     }
@@ -217,6 +220,31 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     pub fn with_titles(mut self, path: std::path::PathBuf) -> Self {
         self.titles = Titles::load(Some(path));
         self
+    }
+
+    /// Remember in `path` which chats had their one automatic title, so a
+    /// restarted service doesn't title them again (memory only without it).
+    pub fn with_titled_chats(mut self, path: std::path::PathBuf) -> Self {
+        self.titled = TitledChats::load(Some(path));
+        for (session, chat) in self.titled.iter() {
+            self.scheduler.summarized(&session, chat.to_owned());
+        }
+        self
+    }
+
+    /// The daemon has these sessions and no others (dead ones included):
+    /// what's kept of the others is forgotten.
+    pub fn keep_only<'a>(&mut self, sessions: impl IntoIterator<Item = &'a SessionId>) {
+        let known: HashSet<&str> = sessions.into_iter().map(SessionId::as_str).collect();
+        self.titles.keep_only(&known);
+        self.titled.keep_only(&known);
+    }
+
+    /// The scheduler settled `chat`'s automatic title, if any: kept.
+    fn titled(&mut self, session: &SessionId, chat: Option<String>) {
+        if let Some(chat) = chat {
+            self.titled.add(session, &chat);
+        }
     }
 
     /// Type replies written on rakumux.com or other machines into this
@@ -329,8 +357,9 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 self.service.view(&candidate.session),
                 Ok(StatusView::Ready(_))
             ) {
-                self.scheduler
-                    .summarized(&candidate.session, conversation(turn));
+                let chat = conversation(turn);
+                self.scheduler.summarized(&candidate.session, chat.clone());
+                self.titled(&candidate.session, Some(chat));
             }
         }
         self.connected = true;
@@ -366,6 +395,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         if event.event == SessionEvent::Removed {
             self.scheduler.forget(session);
             self.titles.forget(session);
+            self.titled.forget(session);
         }
         result
     }
@@ -410,7 +440,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                         break;
                     }
                     _ => {
-                        self.scheduler.settle(&due);
+                        let chat = self.scheduler.settle(&due);
+                        self.titled(&due.session, chat);
                         continue;
                     }
                 },
@@ -425,7 +456,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 }
                 Err(error) => {
                     let _ = self.service.acknowledge_capture(&job);
-                    self.scheduler.finished(&due.session, outcome(&error), now);
+                    let chat = self.scheduler.finished(&due.session, outcome(&error), now);
+                    self.titled(&due.session, chat);
                 }
             }
         }
@@ -456,7 +488,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 let _ = self.service.acknowledge_capture(&job);
                 self.running.remove(&session);
                 let observed = self.observed.remove(&session);
-                self.scheduler.finished(&session, outcome(&error), now);
+                let chat = self.scheduler.finished(&session, outcome(&error), now);
+                self.titled(&session, chat);
                 if let Some(view) = refreshed.filter(|_| !observed) {
                     let _ = self.apply_view(&view, now);
                 }
@@ -481,7 +514,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             Ok((ApplyResult::Ignored, _)) => (Outcome::Interrupted, None),
             Err(error) => (outcome(&error), None),
         };
-        self.scheduler.finished(&session, result, now);
+        let chat = self.scheduler.finished(&session, result, now);
+        self.titled(&session, chat);
         let title = title?;
         Some(Retitle {
             previous: self.titles.get(&session),
@@ -690,6 +724,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     pub fn disable(&mut self, expected: ConsentRevision) -> Result<ConsentSnapshot, DispatchError> {
         let result = self.service.disable(expected);
         self.scheduler.forget_summaries();
+        self.titled.clear();
         self.reconsider();
         result
     }
@@ -711,6 +746,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         let result = self.service.sign_out();
         self.forget_features();
         self.scheduler.forget_summaries();
+        self.titled.clear();
         self.reconsider();
         result
     }

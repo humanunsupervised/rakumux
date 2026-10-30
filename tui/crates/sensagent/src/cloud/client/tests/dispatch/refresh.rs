@@ -68,6 +68,16 @@ impl Harness {
         }
     }
 
+    /// Remember titles and titled chats in `directory`, as the installed
+    /// service does in its status directory.
+    fn titling_in(self, directory: &std::path::Path) -> Self {
+        let refresher = self
+            .refresher
+            .with_titles(directory.join("titles.json"))
+            .with_titled_chats(directory.join("titled-chats.json"));
+        Self { refresher, ..self }
+    }
+
     /// Let the account's AI session summaries switch decide sharing.
     fn following(self) -> Self {
         Self {
@@ -1068,6 +1078,77 @@ fn a_title_asked_for_follows_a_prompt_typed_while_it_was_made() {
         )
     );
     assert!(!harness.status(2).refreshing);
+}
+
+#[test]
+fn a_restarted_service_doesnt_title_a_chat_with_its_automatic_title_again() {
+    let kept = tempfile::tempdir().unwrap();
+    let path = kept.path().join("titled-chats.json");
+    let api = api(&[generated(2)]);
+    let mut harness = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
+    harness.send_title(Some("Fix the CSV parser"));
+    harness.resync(&api, vec![generated(2)], 0);
+    assert_eq!(harness.round(&api, 0), 1);
+    assert_eq!(name(&api, 2), "Fix the CSV parser");
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+
+    // The service restarts, and the daemon restarted in place: its follower
+    // numbers the chat's turns afresh; the chat is the same.
+    let mut restarted = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
+    restarted.send_title(Some("Parse quoted commas"));
+    let mut view = api.get(&session(2)).unwrap();
+    view.lifecycle = Lifecycle::Done;
+    view.agent_turn = Some(AgentTurn {
+        id: 1,
+        messages: 9,
+        conversation_id: Some("synthetic-conversation-2".into()),
+    });
+    restarted.resync(&api, vec![view], 0);
+    for now in [0, 60, 600] {
+        assert_eq!(restarted.round(&api, now), 0, "{now}");
+    }
+    assert_eq!(name(&api, 2), "Fix the CSV parser");
+    // Its next chat gets its own, and a title asked for always applies.
+    next_chat(&mut restarted, &api, 2, 3, 601);
+    assert_eq!(restarted.round(&api, 601), 1);
+    assert_eq!(name(&api, 2), "Parse quoted commas");
+    restarted.send_title(Some("Quoted comma tests"));
+    restarted.refresher.request(&session(2));
+    assert_eq!(restarted.round(&api, 602), 1);
+    assert_eq!(name(&api, 2), "Quoted comma tests");
+}
+
+#[test]
+fn titled_chats_of_sessions_gone_or_of_sharing_turned_off_are_forgotten() {
+    let kept = tempfile::tempdir().unwrap();
+    let titled_again = |api: &FakeSessionApi| {
+        let mut harness = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
+        harness.resync(api, vec![api.get(&session(2)).unwrap()], 0);
+        harness.round(api, 0) == 1
+    };
+    let api = api(&[generated(2)]);
+    let mut harness = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
+    harness.resync(&api, vec![generated(2)], 0);
+    assert_eq!(harness.round(&api, 0), 1);
+    assert!(!titled_again(&api));
+
+    // The daemon doesn't have the session any more (deleted while the
+    // service wasn't running): forgotten at the next list.
+    harness.refresher.keep_only([&session(3)]);
+    assert!(titled_again(&api));
+    // Deleted while it ran.
+    let mut harness = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
+    harness.resync(&api, vec![generated(2)], 0);
+    assert!(!titled_again(&api));
+    harness.event(event(2, SessionEvent::Removed), 1);
+    assert!(titled_again(&api));
+    // Sharing turned off: every chat is titled again once it's back on.
+    let mut harness = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
+    harness.resync(&api, vec![generated(2)], 0);
+    let revision = harness.refresher.consent().unwrap().revision;
+    harness.refresher.disable(revision).unwrap();
+    assert!(titled_again(&api));
 }
 
 #[test]

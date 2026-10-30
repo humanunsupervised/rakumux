@@ -204,17 +204,24 @@ impl RefreshScheduler {
 
     /// The policy declined `due` without a job (excluded, no context, …): the
     /// request is answered, and an automatic summary isn't tried again.
-    pub fn settle(&mut self, due: &Due) {
+    /// Returns the chat whose automatic summary that settles, if any.
+    pub fn settle(&mut self, due: &Due) -> Option<String> {
         let timing = self.sessions.entry(due.session.clone()).or_default();
         timing.requested = false;
-        if let Some(conversation) = &due.auto {
-            timing.summarized.insert(conversation.clone());
-        }
+        let conversation = due.auto.clone()?;
+        timing.summarized.insert(conversation.clone());
+        Some(conversation)
     }
 
     /// An attempt ended. A session removed meanwhile is not tracked again, but a
-    /// rate limit or refusal still applies to every session.
-    pub fn finished(&mut self, session: &SessionId, outcome: Outcome, now: Duration) {
+    /// rate limit or refusal still applies to every session. Returns the chat
+    /// whose automatic summary is made now (or won't be tried again), if any.
+    pub fn finished(
+        &mut self,
+        session: &SessionId,
+        outcome: Outcome,
+        now: Duration,
+    ) -> Option<String> {
         match outcome {
             Outcome::Failed(RefreshFailure::Unauthorized) => self.unauthorized = true,
             Outcome::RateLimited(after) => {
@@ -223,16 +230,15 @@ impl RefreshScheduler {
             }
             _ => {}
         }
-        let Some(timing) = self.sessions.get_mut(session) else {
-            return;
-        };
+        let timing = self.sessions.get_mut(session)?;
         let auto = timing.auto.take();
         let asked = std::mem::take(&mut timing.asked);
         match outcome {
             Outcome::Done => {
                 timing.failure = None;
                 timing.failures = 0;
-                timing.summarized.extend(auto);
+                timing.summarized.extend(auto.clone());
+                return auto;
             }
             Outcome::Interrupted => {
                 timing.retry_at = Some(now.saturating_add(INTERRUPTED_RETRY));
@@ -243,7 +249,8 @@ impl RefreshScheduler {
             Outcome::Failed(RefreshFailure::Rejected) => {
                 // Can't be sent: not tried again unless asked.
                 timing.failure = Some(RefreshFailure::Rejected);
-                timing.summarized.extend(auto);
+                timing.summarized.extend(auto.clone());
+                return auto;
             }
             Outcome::Failed(
                 failure @ (RefreshFailure::Unreadable | RefreshFailure::Unavailable),
@@ -259,6 +266,7 @@ impl RefreshScheduler {
             Outcome::Failed(failure) => timing.failure = Some(failure),
             Outcome::RateLimited(_) => timing.failure = Some(RefreshFailure::RateLimited),
         }
+        None
     }
 
     /// Sharing stopped and its text was dropped (turned off, signed out): every

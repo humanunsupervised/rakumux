@@ -203,6 +203,7 @@ pub fn serve(
         .with_chat_cursors(layout.status_dir().join("chats.json"))
         .with_reply_state(layout.status_dir().join("replies.json"))
         .with_titles(layout.status_dir().join("titles.json"))
+        .with_titled_chats(layout.status_dir().join("titled-chats.json"))
         .with_uploads(uploads)
         .with_machine(machine);
     if let Some(tokens) = tokens {

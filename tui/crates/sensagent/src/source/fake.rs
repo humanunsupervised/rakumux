@@ -193,9 +193,12 @@ impl SessionApi for FakeSessionApi {
     }
 
     fn list_all(&self, include_dead: bool) -> Result<Vec<SessionView>> {
-        assert!(!include_dead);
         self.calls.lock().unwrap().push("list_all".into());
-        Ok(self.listed.lock().unwrap().clone())
+        let listed = self.listed.lock().unwrap().clone();
+        Ok(listed
+            .into_iter()
+            .filter(|view| include_dead || view.status != SessionStatus::Dead)
+            .collect())
     }
 
     fn create(&self, _request: CreateSession) -> Result<SessionView> {
