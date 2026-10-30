@@ -18,9 +18,10 @@ chooses a home, opens a store or credential file, or accepts connections.
   reconsidered after one. Tests drive it with fake time.
 - `RefreshRunner` gives the engine threads: an owner thread (every coordinator call
   happens there; it ticks every second), a source thread following the daemon, two
-  workers for captures and requests, and one for replies being typed in and replies and
-  session messages written in a TUI, so those never wait behind file downloads, captures or
-  chat uploads. `RefreshClient` sends controls and status queries
+  workers for captures and requests, and one for replies being typed in, replies and
+  session messages written in a TUI, and rtop's readings and their uploads (every 2 s while
+  someone has rtop open on rakumux.com), so those never wait behind file downloads,
+  captures or chat uploads. `RefreshClient` sends controls and status queries
   to the owner thread and waits for its answer.
 
 ## Scheduling

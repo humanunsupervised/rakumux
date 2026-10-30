@@ -311,6 +311,19 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    the folder itself, else its last component; branch, worktree, `edited`, `last_at`), and
    only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`); a
    list that would pass the contract's 256 KiB goes without them.
+   **rtop on rakumux.com** (`feed/resources.rs`, `ResourceSync`; contract `contracts/feed/`,
+   "Resources"): every list says `capabilities: ["resources"]`. While someone has rtop open on
+   rakumux.com, a replies read answers `resources_wanted`; then (signed in, the switch on, the
+   name confirmed) the service asks the daemon what everything uses (`resource_usage`) every 2 s
+   on the replies worker and uploads each reading after the first (`POST /api/v1/feed/resources`),
+   with rates from the last two: the machine's CPUs, CPU share, memory and network a second;
+   Rakumux's own processes added up by role (`server`, `window`, `api`, `account_service`,
+   `other`, from the clients' hello names) with how many; and each session the list has, by id,
+   its processes added up and counted. Never a process name, command line, pid or path, never a
+   private session or another machine's. It stops when an answer says `wanted: false`, when
+   neither a read nor an answer asked for 30 s, or when the switch goes off, and keeps nothing
+   but the last reading (dropped when it stops); a daemon without `resources` isn't asked again
+   until it reconnects.
    **Enrolled machines** (`rakumux_sensagent::enrolment`, contract `contracts/feed/`, "Enrolled
    machines"): a machine with no sign-in of its own (your Sprite) gets one from a signed-in
    machine of the account: `OwnerRequest::MachineEnrol {machine_id, name, wake_url}` →
@@ -323,7 +336,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    are (`TokenProvider`; at the start, else again from 10 s doubling to 10 minutes while
    rakumux.com can't be reached, never once the secret was refused: connect it again), and
    reads no feed back (no TUI runs there). Those tokens reach what a machine does (its uploads,
-   its own replies, the features read, AI titles) and nothing else; the feed masks both kinds.
+   rtop's readings among them, its own replies, the features read, AI titles) and nothing else;
+   the feed masks both kinds.
 
 11. **Other machines and Sprites** (`ptyd/src/machines/`, `tui/src/sprites.rs`): the daemon
    reaches other machines running Rakumux (`machine_add {name, url, token}`, `machine_list`,
