@@ -188,7 +188,10 @@ outside: Claude Code and Codex take prompts only from their terminal (their head
 would run a second process on the same conversation), and OpenCode's server port belongs to
 its own TUI. So nothing here is agent-specific beyond what's already read: the conversation id
 (`agent_turn.conversation_id`) the reply must still match, and the lifecycle that says the
-agent waits for input. The agent's next captured reply answers it (`reply_to`).
+agent waits for input, or works for one that takes what's typed during a turn and logs it as a
+prompt once it does (`QUEUES_INPUT` in `tui/crates/sensagent/src/feed/replies.rs`, by the
+daemon's agent names; add a new integration there once its chat shows such a prompt). The
+agent's next captured reply answers it (`reply_to`).
 
 Native input is capped at 1 MiB and never
 logged. Outside a Rakumux session hooks do nothing and never spawn a daemon. Errors emit a

@@ -219,7 +219,8 @@ stays. Press `s`, or the `↻` after a hovered name, for a new title.
 - at [rakumux.com/feed](https://rakumux.com/feed), with your sessions by status, folder and app.
 
 **Writing back:** you can answer an agent from rakumux.com or another machine. Rakumux types your
-message into the session once the agent is waiting for you.
+message into the session once the agent is waiting for you, or while it works when it's Claude
+Code, Codex or OpenCode, which take it at their next step.
 
 **New sessions from the web:** start a shell, Claude Code, Codex or OpenCode in one of a machine's
 folders from rakumux.com. The machine starts it only in a folder it already lists there, and never

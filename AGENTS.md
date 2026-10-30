@@ -238,7 +238,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    Enter; the same for Claude Code, Codex and OpenCode, which have no API for a running
    interactive session), only while it's live, not private, shows the entry's conversation
    (`agent_turn.conversation_id`) and its agent waits (`idle`/`done`; `working`, `blocked` or an
-   unknown chat waits, the cloud expires a reply after an hour), not while someone typed
+   unknown chat waits, the cloud expires a reply after an hour; `working` doesn't for an agent
+   that takes what's typed during a turn: **mid-turn**, below), not while someone typed
    in that session in the last 10 s (`session_submit`'s `quiet_ms`, so it isn't added to what
    they're writing; tried again 2 s later), and only while the program its view showed in the
    foreground still is (`expect_foreground`, read again by the daemon; refused when its agent
@@ -255,15 +256,27 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    within 30 s, or another one, it fails `not_taken` (its Enter lost, it went into a menu, or a
    draft on a line of its own went first: it may still be in the input box); the next goes in
    once the agent waits again (after being seen busy, or 5 s on). Typed in but its session
-   ended or chat changed first, it fails.
+   ended or chat changed first, it fails. **Mid-turn** (`QUEUES_INPUT` in `feed/replies.rs`,
+   the one list, by the daemon's agent names: Claude Code, Codex and OpenCode, whose input box
+   stays open while they work, Enter there queuing the text, or steering it in, for the next
+   step, and whose chat logs it as a prompt once taken; any other agent, and one whose turns
+   the daemon doesn't follow, gets replies only while it waits): a reply goes in while such an
+   agent is `working` too, never while it's `blocked` (a permission prompt, question or menu
+   would take the text as its answer), with the same quiet, foreground, chat and one-at-a-time
+   rules. It's `delivered` once its chat shows it as a new prompt, at the agent's next step
+   minutes on maybe, or as the next turn's prompt when the turn ends first; it fails
+   `not_taken` only once the agent has waited (`idle`/`done`, or left) 30 s without taking it,
+   being seen busy again starting that over. A session's next reply still waits for the agent to
+   wait again, so two replies don't share one turn's answer.
    What's typed in survives a restart of the service (`feed/replies/kept.rs`,
    `sensagent/status/replies.json`, 0600): the ids it typed in or decided (marked before the
    daemon is asked, so a reply goes in at most once), those handed to the daemon and not yet
    reported (reported `delivered` on the next start), and the reports rakumux.com hasn't taken
    (kept while the feed is off too). The agent's answer to a reply is its reply that
-   finished after the reply was typed in, and by the end of that reply's turn: so replies
-   typed in one after another each get theirs, and one whose turn ended without an answer
-   (interrupted, an API error) never takes a later one.
+   finished after the reply was typed in (typed mid-turn: after the agent took it, so the
+   turn it was typed into, ending first, doesn't answer it), and by the end of that reply's
+   turn: so replies typed in one after another each get theirs, and one whose turn ended
+   without an answer (interrupted, an API error) never takes a later one.
    It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
    `private`, `refused`, `attachment_unavailable`, `not_taken`; `not_accepted` stays in the
    contract for older releases, which send it while their own setting is off;
@@ -295,7 +308,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    session with no answer to reply to: `OwnerRequest::SessionMessage {machine, session, text, id}`
    → `POST /api/v1/feed/replies` with `session` in place of `entry`; a reply without `entry` or
    `thread`, read with `session_messages=1` so older machines never get one) is typed once an agent runs
-   there and waits, whatever chat it shows, never into a session without an agent; it never
+   there and waits (or works, mid-turn), whatever chat it shows, never into a session without an agent; it never
    reaches TUIs, and the agent's next reply answers it. The agent's next reply in that
    session and conversation is uploaded with `reply_to`, and the cloud links it (`response`,
    `thread`). Pages to TUIs carry the replies (`FeedPage.replies`), and a reply read whole in
@@ -1004,7 +1017,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   reasoning, tool calls, tools' output), uploaded the same way; a reply read whole in
   the feed shows its turn from it.
 - **Reply written back** (`FeedReply`): what the user wrote back to a feed entry, typed into
-  the entry's session on its machine once its agent waits; with the entries that answer them
+  the entry's session on its machine once its agent waits, or while it works when it takes
+  what's typed during a turn (mid-turn); with the entries that answer them
   they make a **thread**.
 - **New session from rakumux.com** (`NewSessionAsk`): a session the user asked a machine for
   on rakumux.com, in a folder it lists there (by name), a shell or one named agent; started by

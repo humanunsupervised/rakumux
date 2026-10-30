@@ -75,10 +75,12 @@ conformance tests, not an HTTP server, database or local runtime.
   account's seqs are given in the order their changes commit, so a reader that continues past
   the greatest seq it read (and past `latest_seq` once `more` is false) never misses one. It
   types each pending one into its session when the session still shows
-  that conversation and the agent waits for input, and reports `delivered` once the agent took
+  that conversation and the agent waits for input (or works, for an agent that takes what's
+  typed during a turn; never while it asks something), and reports `delivered` once the agent took
   it as a prompt or `failed` with a `failure` code (`reply-status`; only the reply's own machine,
   only a pending reply): `not_taken` when it was typed in but the agent's chat showed no new
-  prompt within 30 seconds, or another one (its Enter lost, the text in a menu). The
+  prompt within 30 seconds (typed while the agent worked: 30 seconds after the agent waited
+  again), or another one (its Enter lost, the text in a menu). The
   agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as
   the reply's `response`; page entries carry `reply_to` and `thread`. A signed-in machine takes
   replies wherever they were written; `not_accepted` comes only from older releases, which took
