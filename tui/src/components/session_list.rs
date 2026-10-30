@@ -10,7 +10,8 @@
 //! activity, else its status) at the right; then its program and state; then
 //! the folder it works in now, one line (its path, its repository's name,
 //! its branch), with `▸` when it has worked in other places, which open
-//! under it as pairs of lines a step further in (`app::places`). With AI
+//! under it as pairs of lines a step further in (`app::places`), and after
+//! its text how many places it has, that one included. With AI
 //! session titles on, a live session's name keeps two columns after it: a
 //! spinner while a new title is being made, else the ↻ under the pointer,
 //! which makes one. A row's text starts where its header's does, and the
@@ -674,7 +675,8 @@ fn git_spans(repo: String, branch: String, style: Style) -> Vec<Span<'static>> {
 /// A session's place lines, under its facts, after the gutter. First the
 /// place it works in now, one line in the row's text column: its path, then
 /// its repository's name (unless its folder has that name) and branch (`▸`
-/// in the gutter when it has worked in other places). While its places are
+/// in the gutter when it has worked in other places, and at the line's end
+/// how many places it has, this one included). While its places are
 /// open (`▾`), each of the others (where it changed files: every place is),
 /// most recent first, a pair of lines [`PLACE_INDENT`] further in: its path,
 /// then its repository's name, branch and when; a rule above each. No
@@ -743,9 +745,28 @@ fn place_content(
     } else {
         blank_slot()
     };
+    // At its end, when it has worked elsewhere too, how many places it has
+    // (this one and those its ▸ opens), while that takes at most half the
+    // line. Short of room the path and the repository's name give way
+    // first, then the count, so the branch stays; where the branch can't
+    // fit anyway, the count does.
+    let mut count = (others > 0)
+        .then(|| (others + 1).to_string())
+        .filter(|count| 2 * (str_width(PLACE_GAP) + str_width(count)) <= text);
+    let count_width = count
+        .as_ref()
+        .map_or(0, |count| str_width(PLACE_GAP) + str_width(count));
     let (repo, branch) = git_of(session.git.as_ref());
-    let (path, repo, branch) =
-        fit_place(&place_label(&session.scope, current), &repo, &branch, text);
+    let label = place_label(&session.scope, current);
+    let mut fitted = fit_place(&label, &repo, &branch, text.saturating_sub(count_width));
+    if count.is_some() && !branch.is_empty() && fitted.2.is_empty() {
+        let without = fit_place(&label, &repo, &branch, text);
+        if !without.2.is_empty() {
+            count = None;
+            fitted = without;
+        }
+    }
+    let (path, repo, branch) = fitted;
     let path_style = if hovered_current {
         marked_style
     } else {
@@ -755,6 +776,10 @@ fn place_content(
     if !repo.is_empty() || !branch.is_empty() {
         line.push(Span::raw(PLACE_GAP));
         line.extend(git_spans(repo, branch, branch_style));
+    }
+    if let Some(count) = count {
+        line.push(Span::raw(PLACE_GAP));
+        line.push(Span::styled(count, branch_style));
     }
     let mut lines = vec![line];
     let toggle = (others > 0).then_some(0..GUTTER);
@@ -1574,8 +1599,10 @@ mod tests {
         assert_eq!(text(&lines), ["  repo  ⎇ main"]);
         h.app.places_open.clear();
 
-        // Elsewhere too: ▸ in the gutter, which opens and closes the list;
-        // under the pointer, the copy mark goes left of it.
+        // Elsewhere too: ▸ in the gutter, which opens and closes the list,
+        // and after the line's text how many places it has (this one and
+        // the two it opens); under the pointer, the copy mark goes left of
+        // the ▸.
         let mut moved = with_places(&[
             ("/repo/worktrees/fix", "fix", 5, true),
             ("/repo", "main", 300, false),
@@ -1592,7 +1619,7 @@ mod tests {
             copy_beside_toggle,
             ..
         } = place_content(&h.app, &moved, 40, false, None, 1000);
-        assert_eq!(text(&lines), ["▸ worktrees/fix  ⎇ fix"]);
+        assert_eq!(text(&lines), ["▸ worktrees/fix  ⎇ fix  3"]);
         assert_eq!(toggle, Some(0..2));
         assert!(!copy_beside_toggle);
         assert_eq!(lines[0][0].style.fg, Some(p.accent_primary));
@@ -1601,20 +1628,21 @@ mod tests {
             copy_beside_toggle,
             ..
         } = place_content(&h.app, &moved, 40, false, Some(PlaceRef::Current), 1000);
-        assert_eq!(text(&lines), ["▸ worktrees/fix  ⎇ fix"]);
+        assert_eq!(text(&lines), ["▸ worktrees/fix  ⎇ fix  3"]);
         assert!(copy_beside_toggle);
-        // Narrow: the path is cut at its start first, then the branch goes.
+        // Narrow: the path is cut at its start first, then the branch goes;
+        // the count stays.
         let lines = place_content(&h.app, &moved, 20, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ …ktrees/fix  ⎇ fix"]);
+        assert_eq!(text(&lines), ["▸ …ees/fix  ⎇ fix  3"]);
         let lines = place_content(&h.app, &moved, 14, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ …rktrees/fix"]);
+        assert_eq!(text(&lines), ["▸ …rees/fix  3"]);
         // Working somewhere none of its places is (its terminal's
         // directory, outside a repository): every place is another.
         let mut away = moved.clone();
         away.git = None;
         away.cwd = "/srv/scratch".into();
         let lines = place_content(&h.app, &away, 40, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ /srv/scratch"]);
+        assert_eq!(text(&lines), ["▸ /srv/scratch  4"]);
         for width in [8, 12, 16, 24, 40, 80] {
             let lines = place_content(&h.app, &moved, width, true, None, 1000).lines;
             assert_eq!(lines.len(), 1, "{width}");
@@ -1658,7 +1686,7 @@ mod tests {
             assert_eq!(
                 text(&lines),
                 [
-                    "▾ worktrees/fix  focal-md ⎇ fix".to_string(),
+                    "▾ worktrees/fix  focal-md ⎇ fix  2".to_string(),
                     format!("    {}", "─".repeat(36)),
                     "    repo".into(),
                     format!("    ⎇ main{}5m", " ".repeat(28)),
@@ -1675,7 +1703,116 @@ mod tests {
             assert_eq!(lines[0][4].content, " ");
             assert_eq!(lines[0][5].content, "⎇ fix");
             assert_eq!(lines[0][5].style.fg, quiet);
+            // The count after them, as quiet.
+            assert_eq!(lines[0][6].content, "  ");
+            assert_eq!(lines[0][7].content, "2");
+            assert_eq!(lines[0][7].style.fg, quiet);
         }
+    }
+
+    #[test]
+    fn the_current_place_ends_with_how_many_places_the_session_has() {
+        use crate::app::testing::harness;
+        let p = theme::palette();
+        let mut h = harness(vec![]);
+        // Nowhere else (its one place is where it works now): no ▸, no
+        // count.
+        let alone = with_places(&[("/repo", "main", 5, true)]);
+        let lines = place_content(&h.app, &alone, 40, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["  repo  ⎇ main"]);
+
+        // Two other places: this one and those, after the path and the
+        // branch, in their quiet colour; the current place isn't counted
+        // twice.
+        let session = with_places(&[
+            ("/repo/worktrees/fix", "fix", 5, true),
+            ("/repo", "main", 300, true),
+            ("/srv/other", "dev", 7200, true),
+        ]);
+        for selected in [false, true] {
+            let lines = place_content(&h.app, &session, 40, selected, None, 1000).lines;
+            assert_eq!(text(&lines), ["▸ repo  ⎇ main  3"]);
+            let line = &lines[0];
+            assert_eq!(line[line.len() - 2].content, PLACE_GAP);
+            let count = line.last().unwrap();
+            assert_eq!(count.content, "3");
+            let quiet = if selected {
+                p.neutral_gray
+            } else {
+                p.text_muted
+            };
+            assert_eq!(count.style.fg, Some(quiet));
+            assert_eq!(count.style.bg, None);
+        }
+        // Open, the same on the first line only: one more than the places
+        // under it.
+        h.app.places_open.insert(session.id.clone());
+        let PlaceLines { lines, places, .. } =
+            place_content(&h.app, &session, 40, false, None, 1000);
+        assert_eq!(text(&lines)[0], "▾ repo  ⎇ main  3");
+        assert_eq!(places.len() + 1, 3);
+        for line in &text(&lines)[1..] {
+            assert!(!line.ends_with(" 3"), "{line:?}");
+        }
+        h.app.places_open.clear();
+        // Without a branch: right after the path. Two digits.
+        let mut many = session.clone();
+        many.git = None;
+        many.cwd = "/repo".into();
+        many.places = (0..11)
+            .map(|i| session_core::model::SessionPlace {
+                path: format!("/srv/w{i}").into(),
+                git: None,
+                last_at: 0,
+                edited: true,
+            })
+            .collect();
+        let lines = place_content(&h.app, &many, 40, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["▸ repo  12"]);
+
+        // Short of room the path is cut first, then the count goes before
+        // the branch would; where the branch can't fit anyway, the count
+        // stays, while it takes at most half the line.
+        for (width, line) in [
+            (18, "▸ repo  ⎇ main  3"),
+            (17, "▸ repo  ⎇ main  3"),
+            (16, "▸ repo  ⎇ main"),
+            (12, "▸ repo  3"),
+            (6, "▸ repo"),
+        ] {
+            let lines = place_content(&h.app, &session, width, false, None, 1000).lines;
+            assert_eq!(text(&lines), [line], "{width}");
+        }
+        let mut long = session.clone();
+        long.git = Some(session_core::model::GitInfo {
+            repo_root: "/repo/worktrees/fix".into(),
+            branch: Some("fix".into()),
+            repo: Some("focal-md".into()),
+            ..Default::default()
+        });
+        for width in 4..60 {
+            let lines = place_content(&h.app, &long, width, false, None, 1000).lines;
+            let line = &text(&lines)[0];
+            assert!(str_width(line) <= width.max(6), "{width}: {line:?}");
+            let count = lines[0].last().filter(|span| span.content == "3");
+            assert!(
+                count.is_none() || line.ends_with("  3"),
+                "{width}: {line:?}"
+            );
+        }
+        assert_eq!(
+            text(&place_content(&h.app, &long, 40, false, None, 1000).lines),
+            ["▸ worktrees/fix  focal-md ⎇ fix  3"]
+        );
+        // The repository's name is cut, then goes, before the count.
+        assert_eq!(
+            text(&place_content(&h.app, &long, 32, false, None, 1000).lines),
+            ["▸ worktrees/fix  focal… ⎇ fix  3"]
+        );
+        assert_eq!(
+            text(&place_content(&h.app, &long, 28, false, None, 1000).lines),
+            ["▸ worktrees/fix  ⎇ fix  3"]
+        );
     }
 
     #[test]
@@ -1861,7 +1998,7 @@ mod tests {
         assert_eq!(
             text(&lines),
             [
-                "▾ repo  ⎇ main".to_string(),
+                "▾ repo  ⎇ main  3".to_string(),
                 rule(36),
                 "    worktrees/fix".into(),
                 branch("⎇ fix", 28, "now"),
@@ -1880,7 +2017,11 @@ mod tests {
             let span = &lines[line][1];
             span.content == "  " && span.style == Style::default()
         };
-        assert_eq!(lines[0].len(), 4, "the toggle, path, gap and branch");
+        assert_eq!(
+            lines[0].len(),
+            6,
+            "the toggle, path, gap, branch, gap and count"
+        );
         for line in [2, 3, 5, 6] {
             assert!(blank_beside(&lines, line), "{line}");
         }

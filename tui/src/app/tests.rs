@@ -5338,14 +5338,14 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     // The column `needle` starts in on `line`.
     let column = |line: &str, needle: &str| line.find(needle).map(|at| line[..at].chars().count());
     // Where it works now: one line, ▸ in the gutter left of it, its path
-    // under the row's name.
+    // under the row's name, and at its end how many places it has.
     let current = |screen: &[String], mark: &str| {
         let at = screen
             .iter()
             .position(|line| line.contains(&format!("{mark} repo  ⎇ main")))
             .unwrap_or_else(|| panic!("{mark} repo: {}", screen.join("\n")));
         assert!(
-            in_list(&screen[at]).ends_with(" repo  ⎇ main"),
+            in_list(&screen[at]).ends_with(" repo  ⎇ main  2"),
             "{:?}",
             screen[at]
         );
@@ -5360,6 +5360,11 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     current(&screen, "▸");
     let text = screen.join("\n");
     assert!(!text.contains("worktrees/fix"), "closed: {text}");
+    // B, nowhere else, has neither ▸ nor a count.
+    assert!(
+        screen.iter().any(|line| in_list(line) == "   repo"),
+        "B's place: {text}"
+    );
 
     // Open, the current line stays, and under it the one other place: its
     // path, then its branch and age, with nothing left of them.
@@ -5782,13 +5787,13 @@ async fn open_places_read_as_pairs_on_a_phone() {
     };
     assert_eq!(
         places(&mut h, 60),
-        [" ▸ /work/focal-md-paper-links  focal-md ⎇ paper-links"]
+        [" ▸ /work/focal-md-paper-links  focal-md ⎇ paper-links  4"]
     );
     // Short of room, the path is cut at its start, then the repository's
-    // name goes before the branch.
+    // name goes before the branch; the count of places stays at the end.
     assert_eq!(
         places(&mut h, 40),
-        [" ▸ …focal-md-paper-links  ⎇ paper-links"]
+        [" ▸ …al-md-paper-links  ⎇ paper-links  4"]
     );
     h.app.places_open.insert(a);
     h.press(KeyCode::Char('j')).await;
@@ -5796,7 +5801,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 60),
         [
-            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
+            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links  4",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
@@ -5811,7 +5816,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 40),
         [
-            " ▾ …focal-md-paper-links  ⎇ paper-links",
+            " ▾ …al-md-paper-links  ⎇ paper-links  4",
             "     ──────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
@@ -5928,7 +5933,7 @@ async fn places_name_their_repository_before_the_branch() {
             "",
             "   Paper links                                         1h ○",
             "   claude",
-            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
+            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links  4",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
@@ -5941,7 +5946,7 @@ async fn places_name_their_repository_before_the_branch() {
             "",
             "   Citations                                          10m ○",
             "   codex",
-            " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
+            " ▸ /work/focal-md-citations  ⎇ fix/citation-format  2",
             "",
             "   Release notes                                       2m ○",
             "   claude",
@@ -5951,7 +5956,8 @@ async fn places_name_their_repository_before_the_branch() {
         ]
     );
     // Short of room, the path is cut at its start, then the repository's
-    // name goes, then the branch is cut; nothing wraps.
+    // name goes, then the branch is cut; the count of places stays at the
+    // end, and nothing wraps.
     assert_eq!(
         list(&mut h, 40),
         [
@@ -5959,7 +5965,7 @@ async fn places_name_their_repository_before_the_branch() {
             "",
             "   Paper links                     1h ○",
             "   claude",
-            " ▾ …focal-md-paper-links  ⎇ paper-links",
+            " ▾ …al-md-paper-links  ⎇ paper-links  4",
             "     ──────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
@@ -5972,7 +5978,7 @@ async fn places_name_their_repository_before_the_branch() {
             "",
             "   Citations                      10m ○",
             "   codex",
-            " ▸ …ocal-md-citations  ⎇ fix/citation-…",
+            " ▸ …al-md-citations  ⎇ fix/citation…  2",
             "",
             "   Release notes                   2m ○",
             "   claude",
@@ -6039,7 +6045,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "",
             "   Paper links                                         1h ○",
             "   claude",
-            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
+            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links  4",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
@@ -6052,7 +6058,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "",
             "   Citations                                          10m ●",
             "   codex",
-            " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
+            " ▸ /work/focal-md-citations  ⎇ fix/citation-format  2",
             "",
             " + New session                                     ☁ Sprite",
         ]
@@ -6066,7 +6072,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "",
             "   Paper links                     1h ○",
             "   claude",
-            " ▾ …focal-md-paper-links  ⎇ paper-links",
+            " ▾ …al-md-paper-links  ⎇ paper-links  4",
             "     ──────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
@@ -6079,7 +6085,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "",
             "   Citations                      10m ●",
             "   codex",
-            " ▸ …ocal-md-citations  ⎇ fix/citation-…",
+            " ▸ …al-md-citations  ⎇ fix/citation…  2",
             "",
             " + New session                 ☁ Sprite",
         ]
@@ -6120,7 +6126,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "",
             "   Citations                                          10m ●",
             "   codex",
-            " ▸ /work/focal-md-citations  focal-md ⎇ fix/citation-format",
+            " ▸ /work/focal-md-citations  ⎇ fix/citation-format  2",
             "",
             " ○ ready ──────────────────────────────────────── 1 session",
             "",
@@ -6128,7 +6134,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "",
             "    Paper links                                        1h ○",
             "    claude",
-            "  ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links",
+            "  ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links  4",
             "      ─────────────────────────────────────────────────────",
             "      /work/focal-md-pubmed-pmc-audit",
             "      focal-md ⎇ audit/pubmed-pmc-ingest-20261008       10d",

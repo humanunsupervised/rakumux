@@ -1250,7 +1250,11 @@ its repository's name (`format::repo_label`: not when its folder has that name) 
 there; short of room the path is cut at its start first (down to half the line), then the
 repository's name (to 6 columns, then gone), then the branch at its end, never wrapped
 (`fit_place`). When it has other places, `▸` sits in the gutter left
-of it, with no count; `w`, `W` or a click
+of it, and after its text, in the same quiet colour, how many places it has, this one included
+(`…  focal-md ⎇ paper-links  4`: one more than the pairs it opens; on this line only, so it
+shows while they're closed). Short of room the count outlasts the path's cut and the
+repository's name, and goes before the branch would (where the branch can't fit anyway it
+stays, while it takes at most half the line); `w`, `W` or a click
 or tap on it (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per window, not
 saved; `app::places::listed_places`, never the current one): each one, most recent first, a pair
 of lines two columns further in: its path, then its repository's name, branch and its age at the
