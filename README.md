@@ -54,7 +54,7 @@ runtime besides bash.
 
 **Update:** press `U` in Rakumux mode, or re-run the installer. Running sessions stay up.
 
-For release tarballs, uninstalling and troubleshooting, see the
+For npm (`npm install -g rakumux`), release tarballs, uninstalling and troubleshooting, see the
 [installation guide](install/INSTALL.md).
 
 ## Quick start

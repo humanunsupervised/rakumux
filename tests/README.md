@@ -17,10 +17,16 @@ This directory holds the shell-level and manual checks.
 - **`test-command-hook.sh`** - `shell/rakumux-command-hook.sh`: per-session history logging and
   `rakumux_rename_session`, in bash (and zsh when installed), against a temporary
   `RAKUMUX_HOME`.
+- **`test-release.sh`**, **`test-release-tag.sh`** - `release.sh` and the release tag's metadata,
+  offline.
+- **`test-npm-release.sh`** - `install/scripts/publish-npm.sh --from-release` against fixture
+  GitHub releases and a stubbed npm: checksums, drafts, dist-tags, skipping a version already on
+  npm, trusted publishing. Offline; publishes nothing.
 
 ```bash
 bash tests/test-repository.sh
 ./tests/test-command-hook.sh
+bash tests/test-npm-release.sh
 ```
 
 ## Manual

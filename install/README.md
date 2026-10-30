@@ -1,14 +1,16 @@
 # install/
 
 Production distribution is native release tarballs on GitHub, installed with the curl command
-below. They ship four binaries (`rakumux`, `rakumux-ptyd`, `rakumux-api`, `rakumux-mcp`), the
-`rakumux.sh` launcher, `LICENSE` and `THIRD_PARTY_NOTICES`. npm and Homebrew helpers remain for
-future channel setup; those registries are not part of the current production release.
+below, and the same packages on npm as `rakumux`. They ship four binaries (`rakumux`,
+`rakumux-ptyd`, `rakumux-api`, `rakumux-mcp`), the `rakumux.sh` launcher, `LICENSE` and
+`THIRD_PARTY_NOTICES`. Every release publishes both; Homebrew helpers remain for future channel
+setup.
 
 ## Users
 
 ```bash
 curl -fsSL https://rakumux.com/install.sh | bash
+npm install -g rakumux        # or with npm
 ```
 
 See [INSTALL.md](INSTALL.md) for every option and troubleshooting.
@@ -21,6 +23,9 @@ See [INSTALL.md](INSTALL.md) for every option and troubleshooting.
 ./release.sh --dry-run                     # validate all targets; publish nothing
 ```
 
+GitHub Actions publishes the GitHub release, then npm (trusted publishing; one-time setup and
+re-runs in [AGENTS.md](AGENTS.md#npm)).
+
 | Task | Script |
 |---|---|
 | Build packages | `scripts/build-release.sh <version> [--no-clean]` |
@@ -28,7 +33,7 @@ See [INSTALL.md](INSTALL.md) for every option and troubleshooting.
 | Third-party notices | `scripts/generate-third-party-notices.sh [output]` |
 | GitHub release | `scripts/create-github-release.sh <version>` |
 | Homebrew formula | `scripts/release-homebrew.sh <version>` (edit `homebrew/rakumux.rb.template`) |
-| npm | `scripts/publish-npm.sh <version> [--dry-run]` |
+| npm | `scripts/publish-npm.sh <version> --from-release [--dry-run]` |
 
 Details (package layout, launcher lookup, formula rules, licensing policy):
 [AGENTS.md](AGENTS.md).

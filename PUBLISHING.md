@@ -44,19 +44,33 @@ website deploys from `website/` in private `rakumux-cloud`, after separate provi
 hosting and DNS approval. Public builds/releases must not fetch private cloud source
 or credentials. Never publish private cloud source as part of this repository's release.
 
-The current production entry point is `./release.sh`: binary releases only, installed with
-`curl -fsSL https://rakumux.com/install.sh | bash`. It publishes through GitHub Actions only
-after every selected platform and isolated package-install check succeeds. Select one target or
-a comma-separated list with `--targets`; without an override, macOS Intel, macOS Apple Silicon
-and Linux x64 are all built on native GitHub-hosted runners.
+The current production entry point is `./release.sh`. It publishes through GitHub Actions only
+after every selected platform and isolated package-install check succeeds: first the GitHub
+release that `curl -fsSL https://rakumux.com/install.sh | bash` installs, then the same packages
+to npm as `rakumux` (a prerelease under the `next` dist-tag; not for a draft, nor without all
+three targets). Select one target or a comma-separated list with `--targets`; without an
+override, macOS Intel, macOS Apple Silicon and Linux x64 are all built on native GitHub-hosted
+runners.
 
-### Optional registries (not part of the binary release)
+### npm (every release)
 
-- [ ] Confirm control of npm `rakumux` and the
-  `humanunsupervised/homebrew-rakumux` tap. These names are configured, not provisioned by this
-  checkout.
+- [ ] Once: the npm organization `rakumux` owns the `rakumux` package, and the package has a
+  trusted publisher on npmjs.com (Settings → Trusted Publisher → GitHub Actions: organization or
+  user `humanunsupervised`, repository `rakumux`, workflow filename `release.yml`, no
+  environment). No npm token is stored in GitHub.
+- [ ] Keep `install/npm/package.json`'s `repository.url` on this repository; npm's provenance
+  checks it.
+- [ ] After each release, check the workflow's `npm` job. If it failed, the GitHub release is
+  already public and only npm lags: fix the cause and re-run the job (a version already on npm
+  is skipped), or publish by hand with
+  `./install/scripts/publish-npm.sh <version> --from-release`. `--dry-run` shows what npm would
+  get, without credentials.
+
+### Homebrew (optional, not part of the release)
+
+- [ ] Confirm control of the `humanunsupervised/homebrew-rakumux` tap. It is configured, not
+  provisioned by this checkout.
 - [ ] Render and verify the Homebrew formula from those fresh tarball checksums.
-- [ ] Stage npm from those tarballs and verify the packed license and contents.
 
 See [install/AGENTS.md](install/AGENTS.md) for release commands. Preparing this checkout does not
 publish packages, push source, change repository visibility, or modify DNS.

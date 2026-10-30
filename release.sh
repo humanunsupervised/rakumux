@@ -1,5 +1,5 @@
 #!/bin/bash
-# Release native binaries through GitHub Actions. No npm or Homebrew publishing.
+# Release through GitHub Actions: native binaries to GitHub, then npm. No Homebrew publishing.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,7 +18,9 @@ Usage: ./release.sh [VERSION] [--targets=LIST] [--increment=major|minor|patch] [
 
 Creates and pushes a reviewed source tag. GitHub Actions builds and tests only
 the selected native packages, verifies checksums, and
-publishes the binary release used by https://rakumux.com/install.sh.
+publishes the binary release used by https://rakumux.com/install.sh, then
+publishes those packages to npm as rakumux (when all three targets are
+selected and it isn't a draft; a prerelease under the next dist-tag).
 
   VERSION          Version without v; defaults to the next published patch
   --targets=LIST   One target or comma-separated targets (alias: --target)

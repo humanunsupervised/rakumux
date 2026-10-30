@@ -437,7 +437,7 @@ network calls.
 ```
 rakumux.sh                 # launcher (entry point)
 build.sh                     # local build
-release.sh                   # binary-only GitHub release entry point (--targets selects platforms)
+release.sh                   # release entry point: GitHub release, then npm (--targets selects platforms)
 api/                         # rakumux-api (external HTTP API), see api/README.md
   openapi.yaml               # the API contract (OpenAPI 3.1)
   src/                       # main, server, instance (flock), discovery (api.json), remote
@@ -955,7 +955,7 @@ changing the old bundle; source builds are not overwritten. Version probes use a
 environment/home. The user confirms installation; cached `UpdateState` is availability, never
 startup authorization. Success reloads only the UI through the new launcher, stripping
 `--new-server`. The daemon/API and all sessions stay running; Update has no stop/revive
-fallback. Legacy npm/Homebrew installs use their package manager. On a protocol mismatch the TUI
+fallback. npm and Homebrew installs use their package manager. On a protocol mismatch the TUI
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
 `session.working_directory`, `session.agent_output`, `session.user_prompt`, `session.turn`,

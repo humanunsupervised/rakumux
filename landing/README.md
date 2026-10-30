@@ -61,5 +61,6 @@ No production deployment, DNS change or provider provisioning is performed by th
 - `public/install.sh`: checksum-verifying installer served at <https://rakumux.com/install.sh>.
 
 Install commands and links follow `install/INSTALL.md`. The website promotes the curl installer;
-maintainer packaging also supports npm `rakumux` and the `humanunsupervised/rakumux` Homebrew tap.
+every release also goes to npm as `rakumux`, and maintainer packaging supports the
+`humanunsupervised/rakumux` Homebrew tap.
 Keep the installer, release links, and documentation consistent.

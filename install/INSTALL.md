@@ -13,8 +13,17 @@ The installer checks the archive against the release's `checksums.txt`, then run
 Use `PREFIX="$HOME/.local" bash` in place of `bash` for a user-local installation.
 It automatically selects the package for your operating system and architecture.
 
-Re-run the same installer to upgrade. npm and Homebrew publishing are not enabled; use the
-binary installer or a release tarball.
+Re-run the same installer to upgrade.
+
+## npm
+
+```bash
+npm install -g rakumux
+```
+
+The npm package carries the same binaries as that version's GitHub release; prereleases install
+with `npm install -g rakumux@next`. Upgrade with the same command, or press `U` in Rakumux.
+Homebrew publishing is not enabled.
 
 ## Release tarball
 

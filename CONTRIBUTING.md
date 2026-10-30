@@ -31,6 +31,7 @@ bash tests/test-repository.sh
 bash tests/test-command-hook.sh
 bash tests/test-release.sh
 bash tests/test-release-tag.sh
+bash tests/test-npm-release.sh
 node tests/public-source-boundary.mjs
 node --test tests/public-source-boundary.test.mjs
 ```

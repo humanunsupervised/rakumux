@@ -1,7 +1,8 @@
 # install/ - Open-source distribution of Rakumux
 
 Rakumux ships as four native binaries plus a small bash launcher, through three channels (npm,
-Homebrew, release tarballs) that all behave the same way. The source and releases live together
+Homebrew, release tarballs) that all behave the same way. Every release publishes the tarballs
+(GitHub) and npm; Homebrew isn't published. The source and releases live together
 in `humanunsupervised/rakumux`. The website is <https://rakumux.com>.
 
 ## Repositories
@@ -11,7 +12,7 @@ in `humanunsupervised/rakumux`. The website is <https://rakumux.com>.
 | `humanunsupervised/rakumux` | public | Source, docs, build scripts, Apache-2.0 `LICENSE`, GitHub Releases |
 | `humanunsupervised/rakumux-mobile` | separate, proprietary | Mobile app; never stage its source here |
 | `humanunsupervised/homebrew-rakumux` | public | `Formula/rakumux.rb` (the tap) |
-| npm `rakumux` | public | Package staged from the release tarballs |
+| npm `rakumux` | public | Owned by the npm organization `rakumux`; every release publishes the GitHub release's tarballs to it |
 
 ## What ships
 
@@ -93,13 +94,13 @@ install/
     ├── generate-release-notes.sh  # Release notes from commit subjects (fallback)
     ├── release-homebrew.sh        # Render, verify (brew), push the formula
     ├── stage-npm-package.sh       # Fill install/npm from the tarballs
-    ├── publish-npm.sh             # Stage, check packed files, npm publish
+    ├── publish-npm.sh             # Stage (a GitHub release, or release/), check packed files, npm publish
     └── check-github-auth.sh
 ```
 
 ## Release process
 
-The binary-only entry point is `release.sh` at the repository root. Run from a clean,
+The entry point is `release.sh` at the repository root. Run from a clean,
 reviewed public checkout after pushing its source commit to `main`:
 
 ```bash
@@ -118,12 +119,14 @@ Every selected package passes `test-install.sh` with an isolated install prefix.
 job verifies the complete selected asset set and combines its checksums before uploading a draft,
 then makes the complete release
 public. `--draft` leaves it unpublished; `--prerelease` does not replace the latest stable release.
-Nothing publishes to npm or Homebrew. The public installer downloads these GitHub release assets.
+The public installer downloads these GitHub release assets. Then the `npm` job publishes the same
+assets to npm (see [npm](#npm)): every release with all three targets that isn't a draft, a
+prerelease under the `next` dist-tag. Homebrew isn't published.
 `v0.1.3` publishes all three platforms after their native checks and isolated package installs pass.
 
 Local prerequisites: git push access to the public repository; curl for automatic version
 selection. No local GitHub CLI, npm or Homebrew login is needed. Actions uses its scoped
-`GITHUB_TOKEN`. For manual package builds, install Rust and cargo-about; cross-building Linux
+`GITHUB_TOKEN`, and npm trusts the workflow (trusted publishing, no npm secret). For manual package builds, install Rust and cargo-about; cross-building Linux
 from macOS also needs cargo-zigbuild and zig. Follow `PUBLISHING.md` before publishing source.
 
 ### build-release.sh
@@ -165,12 +168,52 @@ Formula rules:
 
 ### npm
 
-`stage-npm-package.sh <version> [--allow-partial]` sets `package.json` `version`, extracts each
-tarball into `resources/prebuilt/<platform>/{rakumux,rakumux-ptyd,rakumux-api,rakumux-mcp}`,
-copies the root `LICENSE` and the launcher
-(`rakumux.sh`, `rakumux-local.sh`, `shell/`) from one tarball into `resources/scripts/`, and
-`release/THIRD_PARTY_NOTICES` into `install/npm/`. `publish-npm.sh <version> [--dry-run]` stages,
-checks `npm pack --dry-run --json` for every required file and for removed ones, then publishes.
+Every release goes to npm as `rakumux`, made of the packages `install.sh` installs: after
+`publish` makes the GitHub release public, `release.yml`'s `npm` job (`contents: read`,
+`id-token: write`; Node 24 with `npm@11.21.1`) runs
+`publish-npm.sh <version> --from-release --tag=<latest|next>` from the tag's source. One path for
+CI and by hand:
+
+- `publish-npm.sh <version> [--from-release] [--tag=TAG] [--dry-run]`. `--from-release` reads the
+  published GitHub release `v<version>` (a draft, or one without all three tarballs, is refused),
+  downloads its tarballs and `checksums.txt` into a temporary directory, checks each tarball's
+  SHA-256, takes `THIRD_PARTY_NOTICES` from `rakumux-linux-x64.tar.gz`, writes `RELEASE_NOTES.md`
+  (`# Rakumux v<version>`, then `release-notes/<version>.md` after its first line) and stages from
+  there. Without it, it stages a local build in `release/`. Then it checks
+  `npm pack --dry-run --json` for every required file and for removed ones, and runs
+  `npm publish --access public --tag <tag>` in `install/npm`.
+- Dist-tags: `latest`, or `next` for a prerelease (a version with a `-`, or a GitHub release marked
+  as one); a prerelease never goes to `latest`. The updater and `--check-updates` read `latest`.
+- A version already on npm is left alone (exit 0, a notice in the run), so re-runs are safe.
+- `--dry-run` needs no credentials and publishes nothing; with `--from-release` it shows exactly
+  what npm would get. `GH_TOKEN`/`GITHUB_TOKEN`, when set, reads the release's metadata (handed to
+  curl on stdin, never printed).
+- Auth: in GitHub Actions with `id-token: write`, **trusted publishing** (OIDC): npm trades the
+  job's token for a short-lived publish token and adds provenance; no npm token is stored anywhere.
+  It needs npm 11.5.1 or newer, and `package.json`'s `repository.url` must stay this repository.
+  By hand: an `npm login` session with publish rights in the `rakumux` organization (or
+  `NPM_TOKEN`, and `NPM_OTP`).
+- The job skips npm, with a notice or warning in the run, for a `--draft` release and for one
+  without all three targets (the npm package carries every platform).
+
+**One-time setup** (after the first version, 0.1.33, was published by hand to create the
+package): on npmjs.com, package `rakumux` → Settings → Trusted Publisher → GitHub Actions:
+organization or user `humanunsupervised`, repository `rakumux`, workflow filename `release.yml`,
+environment name empty. npm then recommends Publishing access → "Require two-factor
+authentication and disallow tokens"; trusted publishing keeps working.
+
+**When the npm job fails**, the GitHub release is already public and `install.sh` serves it; only
+npm lags. Fix the cause (most often the trusted publisher's fields) and re-run the failed `npm` job
+from the workflow run. By hand instead, from a checkout of the tag and logged in to npm:
+`./install/scripts/publish-npm.sh <version> --from-release`. A draft made public later on GitHub
+goes to npm the same way.
+
+`stage-npm-package.sh <version> [--allow-partial] [--release-dir=DIR]` sets `package.json`
+`version`, extracts each tarball into
+`resources/prebuilt/<platform>/{rakumux,rakumux-ptyd,rakumux-api,rakumux-mcp}`, copies the root
+`LICENSE` and the launcher (`rakumux.sh`, `rakumux-local.sh`, `shell/`) from one tarball into
+`resources/scripts/`, and `THIRD_PARTY_NOTICES` into `install/npm/`, reading from `release/` or
+`DIR`.
 
 `install.js` (postinstall) copies the scripts and this platform's four binaries into `dist/`;
 `bin/rakumux.js` runs `node install.js --invoke=rakumux <args>`, which execs
@@ -204,6 +247,8 @@ fails there with a clear message.
 ./install/scripts/build-release.sh 0.1.0 --no-clean        # Linux: linux-x64 only
 SKIP_BUILD=1 ./install/scripts/test-install.sh 0.1.0
 ./install/scripts/publish-npm.sh 0.1.0 --dry-run           # changes install/npm/package.json
+./install/scripts/publish-npm.sh 0.1.33 --from-release --dry-run   # what npm gets from that release
+bash tests/test-npm-release.sh                             # offline: fixture releases, stub npm
 ./install/scripts/release-homebrew.sh 0.1.0 --render-only --output /tmp/rakumux.rb   # needs all 3 tarballs
 ```
 
