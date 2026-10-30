@@ -332,11 +332,7 @@ mod tests {
     fn another_bound_thread_is_read_from_its_start() {
         let directory = tempfile::tempdir().unwrap();
         let other = "T-11111111-2222-3333-4444-555555555555";
-        std::fs::write(
-            directory.path().join(format!("{THREAD}.jsonl")),
-            format!("{FIXTURE}"),
-        )
-        .unwrap();
+        std::fs::write(directory.path().join(format!("{THREAD}.jsonl")), FIXTURE).unwrap();
         std::fs::write(
             directory.path().join(format!("{other}.jsonl")),
             "{\"v\":1,\"kind\":\"message\",\"id\":1,\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Another thread\"}]}\n",
