@@ -241,8 +241,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    is asked again in half an hour), and a `poke` makes `ReplySync` read at once) and types each
    pending one addressed to
    this machine into the entry's session with `session_submit` (a bracketed paste, then
-   Enter; the same for Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor and Grok Build,
-   which have no API for a running interactive session), only while it's live, not private, shows the entry's conversation
+   Enter; the same for Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor, Grok Build and
+   Kimi Code, which have no API for a running interactive session), only while it's live, not private, shows the entry's conversation
    (`agent_turn.conversation_id`) and its agent waits (`idle`/`done`; `working`, `blocked` or an
    unknown chat waits, the cloud expires a reply after an hour; `working` doesn't for an agent
    that takes what's typed during a turn: **mid-turn**, below), not while someone typed
@@ -445,8 +445,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 
 ## File structure
 
-Agent-specific hooks, detection profiles, resume code, the OpenCode plugin and the Pi extension
-(each with its installer) live under `integrations/{open-code,claude-code,codex,pi,copilot,cursor-agent,grok}/`. Shared engines live in `integrations/`.
+Agent-specific hooks, detection profiles, resume code, the OpenCode and Kimi Code plugins and the
+Pi extension (each with its installer) live under
+`integrations/{open-code,claude-code,codex,pi,copilot,cursor-agent,grok,kimi}/`. Shared engines live in `integrations/`.
 See [integration boundaries and protocol](integrations/README.md). New integrations go there,
 not in UI handlers, API/MCP transport or control policy. Optional version-1 `Report.activity`
 is self-only (`session.activity` capability). The daemon validates, timestamps and expires
@@ -554,7 +555,7 @@ newest the daemon's follower of `agent_output` saw, kept after the agent exits a
 registry; the session row's age shows it, else `last_active_at`), `pinned`, `git` (`GitInfo {repo_root, branch, detached_at, worktree, repo}` of
 the current cwd; `repo`: the `origin` remote URL's last path component without `.git`, from the
 common git dir's `config`, else the main working tree's folder name (a bare repository's own,
-`x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor or Grok Build session's latest reasoning,
+`x.git` → `x`); a submodule names itself), `agent_output` (a live Claude Code, Codex, OpenCode, Pi, GitHub Copilot, Cursor, Grok Build or Kimi Code session's latest reasoning,
 tool call or reply as one line, from its conversation log or database: `integrations/output.rs`),
 `user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
 messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
@@ -571,7 +572,8 @@ last_active_at, added_at, git}` on the wire.
   or edited with its file tools (Claude Code's `Write`, `Edit`, `MultiEdit`, `NotebookEdit`;
   OpenCode's `write`, `edit`, `multiedit`; Pi's `write`, `edit`, from a codemode script too;
   what GitHub Copilot's file tools wrote, its `fileEdits`; Cursor's `Write`, `StrReplace`,
-  `Delete`, `EditNotebook`; Grok Build's finished edits' diffs) or patched (`apply_patch` however
+  `Delete`, `EditNotebook`; Grok Build's finished edits' diffs; Kimi Code's `Write`, `Edit` and
+  the files it tracks before changing them, its subagents' too) or patched (`apply_patch` however
   Codex calls it, OpenCode's `patch`). Working trees it only worked in (started in, `cd`'d into, searched, read
   from) are kept in memory and the registry, never listed, so one becomes a place, at its latest
   touch's time, once files there change: a session started in a main checkout that made a
@@ -587,12 +589,13 @@ last_active_at, added_at, git}` on the wire.
   resumes and `/cd`s, its tools' paths and shell commands, and its `fileEdits`; Cursor's tools'
   paths and Shell calls' `working_directory` and commands (relative to its workspace, its
   transcript having no directory of its own); Grok Build's reads, searches, shell calls'
-  `current_dir` and commands, and finished edits, its finished subagents' own logs included. Its agent's working-directory reports and its terminal's directories count
+  `current_dir` and commands, and finished edits, its finished subagents' own logs included;
+  Kimi Code's tools' resolved paths and Bash working directories and commands. Its agent's working-directory reports and its terminal's directories count
   as worked in. Times are the conversation's own, so reading it again changes nothing, and a
   working tree's moves on a minute at a time; each session keeps 32 of each kind (changed, only
   worked in). Working trees in the agents' own data directories
   (`~/.claude`, `~/.codex`, `~/.copilot`, OpenCode's, `~/.cursor` and `~/.grok` but their
-  worktrees, Claude Code's `/tmp/claude-<uid>`, Pi's `~/.pi/agent`) and
+  worktrees, `~/.kimi-code`, Claude Code's `/tmp/claude-<uid>`, Pi's `~/.pi/agent`) and
   in `/proc`, `/sys`, `/dev` are never places. Kept in the registry, so ended sessions keep
   theirs; only paths are read. They stay on this machine (not in `rakumux-api`), except their
   names in the feed's session list (below).
@@ -642,7 +645,9 @@ written last → `grok <flags> --resume <id>`, also when started as `agent`); ea
 flags that shape an interactive session (permissions, model, …). Pi (the conversation its
 extension bound, else the folder's newest file under `~/.pi/agent/sessions/` → `pi --session
 <file>`) hides its arguments, so only what its conversation keeps (model, thinking level) comes
-back. Any other program gives
+back; Kimi Code (the conversation its plugin's hooks named, else the one the process holds a
+lock on during a turn, else the folder's newest under `~/.kimi-code/sessions` → `kimi -r <id>`)
+wipes its, and the conversation keeps its mode and model. Any other program gives
 `LastCommand`: its command line is typed at the prompt on revive but not run. A shell back at its
 prompt for 15 s clears it. An agent's own report (`ReportedByAgent`) wins while an agent runs.
 Startup commands always run on revive.
@@ -722,11 +727,12 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
 - Agent replies (user only, capability `session.replies`; `control/replies.rs`,
   `integrations/output.rs`): `reply_capture {enabled}` turns capture on or off (off at every
   daemon start and restart; off forgets what was kept). While it's on, a live Claude Code, Codex,
-  GitHub Copilot or Cursor session whose lifecycle turns `Done` after it was seen working has its reply
+  GitHub Copilot, Cursor or Kimi Code session whose lifecycle turns `Done` after it was seen working has its reply
   read from the conversation log the daemon already follows for `agent_output` (Claude Code and
   GitHub Copilot: the main conversation's text after its last tool call; Codex:
   `task_complete`'s `last_agent_message`; Cursor: its transcript's text after its last tool
-  call, the reasoning Cursor writes after it included), within 10 s, never twice and never for a private session:
+  call, the reasoning Cursor writes after it included; Kimi Code: the main agent's text after
+  its last tool call, in a turn that completed), within 10 s, never twice and never for a private session:
   `AgentReply {id, session_id, agent, conversation_id?, text (≤ 32 KiB), truncated,
   finished_at}`. Replies are kept in daemon memory only (the last 200, 2 MiB of text, an
   hour), listed by `reply_list {after?}` and delivered as `reply` events only to
@@ -745,7 +751,9 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   error?}`, each cut at 64 KiB (`truncated`). Claude Code and Codex: one message per log line at
   its byte offset (the cursor is the next offset; prompts without the agents' insertions,
   subagents' and meta entries left out; Claude Code's human `queued_command` attachments, what
-  was typed while a turn ran, are prompts, its other queued input isn't). GitHub Copilot: one
+  was typed while a turn ran, are prompts, its other queued input isn't). Kimi Code: the same,
+  one message per record of the main agent's `wire.jsonl` (what the user typed, steers too;
+  Kimi's reminders left out). GitHub Copilot: one
   message per event of its main agent at its byte offset, with the event's id; it rewrites its
   log when a turn is taken back, so the cursor names the file read (`key`) and another file is
   read from its start. Grok Build: one message per `updates.jsonl` line at its byte offset, a

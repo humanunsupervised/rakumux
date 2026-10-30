@@ -31,15 +31,14 @@ pub(super) fn switch(
     let Some(home) = crate::resume::kimi_home() else {
         return false;
     };
-    let current = match (bound, crate::resume::kimi_locked_session(&home, pid)) {
-        (Some(bound), _) => Some(bound.to_owned()),
-        (None, Some(locked)) => Some(locked),
-        (None, None) => match conversation {
-            Some(followed) => Some(followed.clone()),
-            None => crate::procinfo::cwd_of(pid)
-                .and_then(|cwd| crate::resume::kimi_recent_session(&home, &cwd)),
-        },
-    };
+    let current = bound
+        .map(str::to_owned)
+        .or_else(|| crate::resume::kimi_locked_session(&home, pid))
+        .or_else(|| conversation.clone())
+        .or_else(|| {
+            let cwd = crate::procinfo::cwd_of(pid)?;
+            crate::resume::kimi_recent_session(&home, &cwd)
+        });
     let Some(current) = current.filter(|id| crate::resume::is_conversation_id(id)) else {
         return false;
     };

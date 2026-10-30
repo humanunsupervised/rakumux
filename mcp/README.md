@@ -1,8 +1,8 @@
 # rakumux-mcp
 
 Agent-specific adapters now live in root [`integrations/`](../integrations/README.md),
-including OpenCode's CLI plugin/installer, Pi's extension/installer and the optional Claude
-Code/Codex activity hooks.
+including OpenCode's and Kimi Code's plugins/installers, Pi's extension/installer and the
+optional Claude Code/Codex activity hooks.
 Activity does not depend on MCP; it uses the daemon's authenticated self-report protocol.
 
 An [MCP](https://modelcontextprotocol.io) server (stdio) that lets coding agents (Claude Code,
@@ -85,7 +85,8 @@ Cursor gives a server only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`
 environment, so both go in its `env` too;
 OpenCode 1.x starts MCP servers inside each TUI, so they do; Pi starts its stdio servers in its
 own process with its environment, so they do; Grok Build starts them with its own environment,
-so both reach them (checked with 1.0.70); OpenCode 2.x runs MCP servers in a
+so both reach them (checked with 1.0.70); Kimi Code starts them with its whole environment, so
+both reach it (verified); OpenCode 2.x runs MCP servers in a
 background service shared by every conversation, so they don't.
 
 **OpenCode 2.x** tags every tool call with its conversation (`_meta["ai.opencode/sessionID"]`). The
@@ -251,6 +252,25 @@ in [`integrations/pi`](../integrations/pi/README.md)).
 
 Pi's activity, conversation and folder reach Rakumux through its Rakumux extension, which needs
 no MCP: `rakumux-mcp pi-plugin --install` (see [Pi integration](../integrations/pi/README.md)).
+
+### Kimi Code
+
+Install the Rakumux plugin, which holds this server and Kimi's hooks:
+
+```bash
+rakumux-mcp kimi-plugin --install   # into $KIMI_CODE_HOME, else ~/.kimi-code (--dir overrides)
+```
+
+Then restart Kimi Code (or `/plugins reload`). Kimi starts a plugin's server only from `PATH`
+(`"command": "rakumux-mcp"`), with its whole environment: `RAKUMUX_SESSION_ID` and
+`RAKUMUX_SESSION_TOKEN` both reach it, and an `env` entry must never set only one of them.
+`rakumux-mcp kimi-plugin` prints the manifest instead (save it as `kimi.plugin.json` in a folder
+and run `/plugins install <folder>`). Without the plugin, `~/.kimi-code/mcp.json` (or a
+project's `.kimi-code/mcp.json`) takes `{"mcpServers": {"rakumux": {"command": "rakumux-mcp"}}}`.
+Kimi names the tools `mcp__plugin-rakumux_rakumux__<tool>`; in Always Ask mode it asks before
+each call ("Approve for this session" stops asking for that tool). Verified with Kimi Code
+2.4.0 in a Rakumux session (offline, against a mock model): the six tools, and `list_sessions`
+naming its own session "this is you". See [Kimi Code integration](../integrations/kimi/README.md).
 
 ## Environment
 

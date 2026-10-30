@@ -9,6 +9,7 @@ integrations/
   copilot/       # GitHub Copilot CLI: command hooks (a file of its own), detection, recovery
   cursor-agent/  # Cursor's agent CLI: command hooks, its chat transcript, recovery
   grok/          # Grok Build: native command hooks, detection, recovery, output, places
+  kimi/          # Kimi Code: plugin (hooks + MCP) and installer, detection, its log
   detection.rs   # Shared process/screen engine and retained older profiles
   recovery.rs    # Shared resume dispatch and safe argument/file helpers
   hooks.rs       # Adapter dispatch and metadata-only normalization
@@ -32,6 +33,8 @@ Older detection profiles remain supported; new hooks start with these three agen
 - [GitHub Copilot](copilot/README.md)
 - [Cursor](cursor-agent/README.md)
 - [Grok Build](grok/README.md)
+- [Kimi Code](kimi/README.md): `rakumux-mcp kimi-plugin --install` (its hooks name the
+  conversation and folder; lifecycle comes from OSC 7501 with nothing installed)
 
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
@@ -195,6 +198,10 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
   - Grok Build: `$GROK_HOME/sessions/<folder>/<session>/updates.jsonl`, for the session the
     process shows: of those `active_sessions.json` lists for it, the one its hooks named,
     else the one written last (`/new` and the Agent Dashboard keep several in one process).
+  - Kimi Code: `$KIMI_CODE_HOME/sessions/<folder>/<session>/agents/main/wire.jsonl`, for the
+    conversation its plugin's hooks named, else the one the process holds a lock on during a
+    turn, else the one followed (the folder's newest at first); checked on every read, so
+    `/new` and `/sessions` move it. Kimi writes a step's text when the step ends.
 - **What's taken:** the last entry the main conversation's assistant wrote (its reasoning, a
   tool call as `Tool: description` or a short path, or its reply), and the user's last typed
   message (a slash command as `/name args`; the agents' own insertions such as reminders,
@@ -234,7 +241,9 @@ its turn's final response: an assistant entry that stopped (`stop`, or cut at `l
 tool to call, keyed by the entry's `id`; one that failed or was aborted is none. For Cursor, the
 text after its last tool call (keyed by the chat and the line's offset); Cursor writes a
 message's reasoning after its text, so a reply can end with it. For Grok Build, its text blocks
-since the last prompt or tool call, keyed by the turn's `promptId`. Each
+since the last prompt or tool call, keyed by the turn's `promptId`. For Kimi Code, the main
+agent's text after its last tool call, keyed by the part's `uuid`, in a turn that completed
+(`turn.ended`; a cancelled or failed turn has none). Each
 reply also says where its turn ends in the conversation (`position`, as below).
 
 ## Whole conversations
@@ -260,6 +269,9 @@ reasoning, its tool calls with their input, and the tools' output (the `tool` ro
   `eventId`. A tool's result is its update with a `status` (`failed` an error), as its model
   read it. Prompts Grok wakes itself with and bookkeeping (hooks, turn ends, rewind markers)
   are left out; a subagent's work is in its own session's log.
+- **Kimi Code:** one message per record of the main agent's log, at its byte offset: what the
+  user typed (prompts and steers; Kimi's reminders and hook results left out), the agent's
+  reasoning, text and tool calls, and the tools' results. Subagents' logs are left out.
 - **OpenCode:** the conversation's rows changed since a watermark: each OpenCode 2 prompt, and
   each block of a reply (`seq × 1024 + block`; a tool block holds its call and, once it ran, its
   result), or each 1.x piece (`time_created × 1024 + its place`). Bookkeeping pieces (steps,
@@ -285,7 +297,9 @@ headless modes would run a second process on the same conversation), OpenCode's 
 belongs to its own TUI, Pi's RPC mode is a process of its own, and Cursor's takes a bracketed
 paste in its input box like typing (its `--print` mode is a second process). Grok Build is the
 same: its headless and agent modes are processes of their own, and it takes a bracketed paste
-and Enter as one prompt. So nothing here is
+and Enter as one prompt. Kimi Code too (`kimi acp`, `kimi web` and `kimi rc` run processes of
+their own); typed during a turn, it queues the reply and logs it as a prompt when the turn
+ends. So nothing here is
 agent-specific beyond what's already read: the conversation id
 (`agent_turn.conversation_id`) the reply must still match, and the lifecycle that says the
 agent waits for input, or works for one that takes what's typed during a turn and logs it as a
@@ -333,6 +347,8 @@ cargo test -p rakumux-ptyd --test control_copilot --locked
 cargo test -p rakumux-ptyd --test runtime_copilot --locked -- --ignored
 cargo test -p rakumux-mcp --test opencode_plugin --locked
 cargo test -p rakumux-ptyd --test control_cursor_agent --test cursor_agent_e2e --locked
+cargo test -p rakumux-ptyd --test control_kimi --locked
+cargo test -p rakumux-mcp kimi --locked
 node --test '../integrations/open-code/activity.test.mjs'
 cargo test -p rakumux-ptyd --lib pi:: --locked
 cargo test -p rakumux-mcp --test pi_extension --locked
