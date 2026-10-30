@@ -1,0 +1,18 @@
+# Droid after a turn: its reply, the empty input box and the autonomy
+# footer. Hand-written from the 1.0.0 bundle's strings.
+agent: droid
+expect: idle
+process: droid
+cmdline: droid
+title: ⛬ Fix the flaky login test
+ms_since_output: 30000
+---
+> Fix the flaky login test
+
+⛬ Fixed: the form now waits for the field to settle before submitting, and a
+  regression test covers the double submit. The suite passes.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ >                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Auto (Off) · all actions require approval                           ? for help

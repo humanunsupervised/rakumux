@@ -40,6 +40,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/detection.rs"]
 mod cursor;
+#[path = "droid/detection.rs"]
+mod droid;
 #[path = "grok/detection.rs"]
 mod grok;
 #[path = "kimi/detection.rs"]
@@ -56,6 +58,7 @@ use copilot::PROFILE as COPILOT;
 #[cfg(test)]
 use cursor::is_cursor_activity_line;
 use cursor::PROFILE as CURSOR_AGENT;
+use droid::PROFILE as DROID;
 use grok::PROFILE as GROK;
 use kimi::PROFILE as KIMI;
 #[cfg(test)]
@@ -185,7 +188,7 @@ static PROFILES: &[Profile] = &[
     GROK,
     KIMI,
     generic("amp", &["amp"], &[&["@sourcegraph", "amp"]]),
-    generic("droid", &["droid"], &[]),
+    DROID,
     generic("crush", &["crush"], &[&["@charmland", "crush"]]),
     generic("kiro", &["kiro-cli"], &[]),
     generic("cline", &["cline"], &[]),
@@ -1428,6 +1431,7 @@ mod tests {
             ("copilot", &[Working, Blocked, Idle]),
             ("grok", &[Working, Blocked, Idle]),
             ("kimi", &[Working, Blocked, Idle]),
+            ("droid", &[Working, Blocked, Idle]),
         ];
         for (agent, states) in required {
             for state in *states {

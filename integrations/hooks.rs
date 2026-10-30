@@ -13,6 +13,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/hooks.rs"]
 mod cursor;
+#[path = "droid/hooks.rs"]
+mod droid;
 #[path = "grok/hooks.rs"]
 mod grok;
 #[path = "kimi/hooks.rs"]
@@ -28,6 +30,7 @@ pub fn normalize(agent: &str, input: &Value) -> Result<Option<ActivityUpdate>, S
         "cursor-agent" => cursor::normalize(input),
         "grok" => grok::normalize(input),
         "kimi" => kimi::normalize(input),
+        "droid" => droid::normalize(input),
         "opencode" => {
             let update: ActivityUpdate = serde_json::from_value(input.clone())
                 .map_err(|_| "invalid OpenCode activity update")?;
@@ -59,7 +62,8 @@ pub fn report(agent: &str, input: &Value) -> Result<Option<Report>, String> {
         .get("agent_id")
         .and_then(Value::as_str)
         .is_some_and(|id| !(agent == "kimi" && id == "main"))
-        || (agent == "grok" && input.get("subagentType").is_some());
+        || (agent == "grok" && input.get("subagentType").is_some())
+        || (agent == "droid" && droid::is_child(input));
     let working_directory = if child || input["hook_event_name"] == "SessionEnd" {
         None
     } else if agent == "cursor-agent" {
@@ -158,6 +162,7 @@ pub fn config(agent: &str) -> Option<&'static str> {
         "codex" => Some(include_str!("codex/hooks.json")),
         "copilot" => Some(include_str!("copilot/hooks.json")),
         "cursor-agent" => Some(include_str!("cursor-agent/hooks.json")),
+        "droid" => Some(include_str!("droid/hooks.json")),
         "grok" => Some(include_str!("grok/hooks.json")),
         _ => None,
     }
@@ -173,6 +178,15 @@ pub fn install_path(agent: &str, var: impl Fn(&str) -> Option<String>) -> Option
         "copilot" => copilot::install_path(var),
         "grok" => grok::install_path(var),
         _ => None,
+    }
+}
+
+/// What `rakumux session hook` prints for `agent`: `{}`, which changes
+/// nothing, unless the agent reads that as more (Droid's).
+pub fn stdout(agent: &str) -> &'static str {
+    match agent {
+        "droid" => droid::STDOUT,
+        _ => "{}",
     }
 }
 

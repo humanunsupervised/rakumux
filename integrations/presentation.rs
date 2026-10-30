@@ -8,6 +8,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/presentation.rs"]
 mod cursor;
+#[path = "droid/presentation.rs"]
+mod droid;
 #[path = "grok/presentation.rs"]
 mod grok;
 #[path = "kimi/presentation.rs"]
@@ -23,6 +25,7 @@ pub(super) fn color(agent: &str) -> Option<Color> {
         "codex" => Some(codex::color()),
         "copilot" => Some(copilot::color()),
         "cursor-agent" => Some(cursor::color()),
+        "droid" => Some(droid::color()),
         "opencode" => Some(opencode::color()),
         "pi" => Some(pi::color()),
         "grok" => Some(grok::color()),

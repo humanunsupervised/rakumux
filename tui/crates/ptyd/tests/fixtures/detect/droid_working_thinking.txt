@@ -1,0 +1,23 @@
+# Droid thinking: the braille status line with its "(Press ESC to stop)"
+# hint above the input box; the autonomy footer stays while it works.
+# Hand-written from the 1.0.0 bundle's strings (status and footer).
+agent: droid
+expect: working
+process: droid
+cmdline: droid
+title: ⛬ Fix the flaky login test
+ms_since_output: 1200
+---
+> Fix the flaky login test
+
+⛬ I'll start by reading the test and the form it drives.
+
+● Read (tests/login.spec.ts)
+  ⎿ 48 lines
+
+⠙ Thinking...  (Press ESC to stop)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ >                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Auto (Off) · all actions require approval                           ? for help

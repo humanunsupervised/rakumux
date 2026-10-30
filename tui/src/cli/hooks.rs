@@ -78,8 +78,9 @@ pub(super) fn run(
         eprintln!("rakumux activity unavailable: {error}");
     }
     // Native hooks may interpret stdout or exit 2 as an instruction/denial.
-    // Empty JSON has no effect on the agent's normal permission decisions.
-    writeln!(out, "{{}}").map_err(output_error)?;
+    // Empty JSON has no effect on the agent's normal permission decisions
+    // (Droid's answer, which it doesn't add to the chat, has none either).
+    writeln!(out, "{}", adapters::stdout(agent.name())).map_err(output_error)?;
     Ok(0)
 }
 

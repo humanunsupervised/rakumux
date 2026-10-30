@@ -1,0 +1,26 @@
+# Droid asking to run a command at Auto (Off): the approval panel replaces
+# the input box; its status line says it waits for the confirmation.
+# Hand-written from the 1.0.0 bundle's strings (batchConfirmation).
+agent: droid
+expect: blocked
+process: droid
+cmdline: droid
+title: ⛬ Fix the flaky login test
+ms_since_output: 4000
+---
+⛬ I'll run the login tests to reproduce it.
+
+⠸ Waiting for tool confirmation...
+
+Command to approve medium risk
+Run: npm test -- tests/login.spec.ts
+Why this needs approval:
+  Runs project scripts
+
+> Yes, allow
+  Yes, and always allow medium
+  No, cancel
+
+↑↓ navigate · Enter select · Esc cancel
+Alt/Option+E to inspect approval details
+Auto (Off) · all actions require approval

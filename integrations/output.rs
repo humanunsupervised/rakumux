@@ -26,6 +26,9 @@
 //!   the conversation being the one its plugin's hooks named, else the one
 //!   the process holds a lock on, else the one followed (or the folder's
 //!   newest); checked on every read.
+//! - **Droid**: `~/.factory/sessions/<folder>/<conversation>.jsonl`, the
+//!   conversation its hooks report, else the folder's newest one; positions
+//!   count from the end of its first line, which Droid rewrites.
 //!
 //! For the agent feed, the follower also keeps the current turn's reply
 //! whole ([`Reply`]): what the agent said after its last tool call, or the
@@ -50,6 +53,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/output.rs"]
 mod cursor;
+#[path = "droid/output.rs"]
+mod droid;
 #[path = "grok/output.rs"]
 mod grok;
 #[path = "kimi/output.rs"]
@@ -147,6 +152,9 @@ pub enum LogAgent {
     Cursor,
     Grok,
     Kimi,
+    /// Droid's session file, whose first line is rewritten in place: its
+    /// offsets and positions count from the end of that line.
+    Droid,
 }
 
 /// Where an agent's output is read from.
@@ -226,6 +234,8 @@ impl Follower {
             }
             // Its conversation is found on every read (`kimi::switch`).
             "kimi" => log(LogAgent::Kimi, None, PathBuf::new()),
+            // Found on the first read, from its hooks or its folder.
+            "droid" => log(LogAgent::Droid, None, PathBuf::new()),
             "opencode" | "opencode2" => Source::OpenCode {
                 database: crate::resume::opencode_database()?,
                 cwd: crate::procinfo::cwd_of(process.pid),
@@ -251,7 +261,8 @@ impl Follower {
     }
 
     /// The agent as replies and turns name it: `claude-code`, `codex`,
-    /// `opencode`, `pi`, `copilot`, `cursor-agent`, `grok` or `kimi`.
+    /// `opencode`, `pi`, `copilot`, `cursor-agent`, `grok`, `kimi` or
+    /// `droid`.
     pub fn agent(&self) -> &'static str {
         match &self.source {
             Source::Log {
@@ -282,6 +293,10 @@ impl Follower {
                 agent: LogAgent::Grok,
                 ..
             } => "grok",
+            Source::Log {
+                agent: LogAgent::Droid,
+                ..
+            } => "droid",
             Source::OpenCode { .. } => "opencode",
         }
     }
@@ -296,7 +311,8 @@ impl Follower {
                     | LogAgent::Pi
                     | LogAgent::Copilot
                     | LogAgent::Cursor
-                    | LogAgent::Kimi,
+                    | LogAgent::Kimi
+                    | LogAgent::Droid,
                 conversation,
                 ..
             } => conversation.clone()?,
@@ -417,6 +433,9 @@ impl Follower {
                     LogAgent::Kimi => {
                         kimi::switch(self.pid, bound, conversation, path, offset, partial)
                     }
+                    LogAgent::Droid => {
+                        droid::switch(self.pid, bound, conversation, path, offset, partial)
+                    }
                     LogAgent::Codex => false,
                 };
                 if switched {
@@ -433,6 +452,7 @@ impl Follower {
                         LogAgent::Cursor => cursor::may_be_typed(line),
                         LogAgent::Grok => grok::may_be_typed(line),
                         LogAgent::Kimi => kimi::may_be_typed(line),
+                        LogAgent::Droid => droid::may_be_typed(line),
                     };
                     candidate
                         && serde_json::from_slice::<Value>(line)
@@ -445,10 +465,15 @@ impl Follower {
                                 LogAgent::Cursor => cursor::typed(&entry),
                                 LogAgent::Grok => grok::typed(&entry),
                                 LogAgent::Kimi => kimi::typed(&entry),
+                                LogAgent::Droid => droid::typed(&entry),
                             })
                             .is_some_and(|typed| prompt_line(&typed).is_some())
                 };
-                let Some(lines) = read(path, offset, partial, &typed) else {
+                let lines = match agent {
+                    LogAgent::Droid => droid::read(path, offset, partial, &typed),
+                    _ => read(path, offset, partial, &typed),
+                };
+                let Some(lines) = lines else {
                     return false;
                 };
                 // Cursor's lines have no times: what a read finds is as new
@@ -474,6 +499,7 @@ impl Follower {
                         LogAgent::Cursor => (cursor::typed(entry), cursor::messages(entry)),
                         LogAgent::Grok => (grok::typed(entry), grok::messages(entry)),
                         LogAgent::Kimi => (kimi::typed(entry), kimi::messages(entry)),
+                        LogAgent::Droid => (droid::typed(entry), droid::messages(entry)),
                     };
                     let typed = typed.filter(|typed| prompt_line(typed).is_some());
                     if typed.is_some() || !messages.is_empty() {
@@ -496,6 +522,7 @@ impl Follower {
                         }
                         LogAgent::Grok => grok::reply_step(entry),
                         LogAgent::Kimi => kimi::reply_step(entry),
+                        LogAgent::Droid => droid::reply_step(entry),
                     };
                     self.reply = next_reply(self.reply.take(), step, *position);
                 }
@@ -510,6 +537,7 @@ impl Follower {
                     LogAgent::Cursor => (newest(cursor::line), newest(cursor::prompt)),
                     LogAgent::Grok => (newest(grok::line), newest(grok::prompt)),
                     LogAgent::Kimi => (newest(kimi::line), newest(kimi::prompt)),
+                    LogAgent::Droid => (newest(droid::line), newest(droid::prompt)),
                 }
             }
             Source::OpenCode {

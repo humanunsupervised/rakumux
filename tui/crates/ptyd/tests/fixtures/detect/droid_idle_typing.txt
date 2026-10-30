@@ -1,0 +1,24 @@
+# Droid with the user typing the next prompt; the reply above quotes the
+# stop hint, far from the status line. Hand-written.
+agent: droid
+expect: idle
+process: droid
+cmdline: node /usr/lib/node_modules/droid/bin/droid
+title: ⛬ Fix the flaky login test
+ms_since_output: 40
+---
+⛬ Long runs show "(Press ESC to stop)" while they work; nothing is running.
+  1. The test waits for the field.
+  2. The fixture no longer races.
+  3. CI is green.
+  4. The flake is gone from the last 50 runs.
+  5. The docs mention the new helper.
+  6. The changelog has an entry.
+  7. Nothing else changed.
+  8. Ready to merge.
+  9. Ask if you want a follow-up.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ > Now update the docs                                                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Auto (Med) · allow reversible commands                              ? for help

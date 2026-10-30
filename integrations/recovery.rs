@@ -47,6 +47,9 @@
 //!   turn), else the folder's newest under `$KIMI_CODE_HOME/sessions`:
 //!   `kimi -r <id>` (its arguments are wiped; the conversation keeps its
 //!   mode and model).
+//! - **Droid**: the conversation its hooks report; otherwise the newest
+//!   top-level session file of the folder in `~/.factory/sessions`: `droid
+//!   <flags> --resume <id>`. Its other commands (`droid exec`, …) are typed.
 //!
 //! Any agent's bound conversation reaches its resume plan
 //! ([`Context::bound_conversation`]): the newest the session bound for that
@@ -71,6 +74,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/recovery.rs"]
 mod cursor;
+#[path = "droid/recovery.rs"]
+mod droid;
 #[path = "grok/recovery.rs"]
 mod grok;
 #[path = "kimi/recovery.rs"]
@@ -92,6 +97,10 @@ pub(crate) use copilot::{
 };
 use cursor::cursor_plan;
 pub(crate) use cursor::{cursor_chat, cursor_config_dir, cursor_data_dir};
+#[cfg(test)]
+pub(crate) use droid::droid_project_key;
+pub(crate) use droid::{droid_home, droid_recent_session, droid_session_file};
+use droid::{droid_is_interactive, droid_resume};
 use grok::grok_resume;
 pub(crate) use grok::{grok_conversation, grok_home, grok_log};
 use kimi::kimi_resume;
@@ -140,6 +149,10 @@ pub fn plan(ctx: &Context<'_>) -> Plan {
             Some(grok_home().and_then(|home| grok_resume(process, &home, ctx.bound_conversation)))
         }
         Some("kimi") => Some(kimi_resume(process, ctx.cwd, ctx.bound_conversation)),
+        // `droid exec`, `droid mcp …`: typed, never run.
+        Some("droid") if droid_is_interactive(process) => {
+            Some(droid_resume(process, ctx.cwd, ctx.bound_conversation))
+        }
         _ => None,
     };
     match resumed {

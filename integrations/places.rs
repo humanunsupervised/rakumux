@@ -29,6 +29,9 @@
 //! - **Kimi Code**: its tool calls' files, search roots and commands with
 //!   their working directories, and the files it tracks before changing
 //!   them (its subagents' too).
+//! - **Droid**: its session's directories (the summary's `cwd` and
+//!   `lastCwd`), and its tool calls' file paths, search roots, patches and
+//!   `Execute` commands.
 
 use super::transcript::{scan, TranscriptSource};
 use super::LogAgent;
@@ -44,6 +47,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/places.rs"]
 mod cursor;
+#[path = "droid/places.rs"]
+mod droid;
 #[path = "grok/places.rs"]
 mod grok;
 #[path = "kimi/places.rs"]
@@ -148,6 +153,7 @@ impl PlaceScan {
                         LogAgent::Cursor => cursor::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Grok => grok::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Kimi => kimi::entry(entry, cwd, home, at, &mut touches),
+                        LogAgent::Droid => droid::entry(entry, cwd, home, at, &mut touches),
                     }
                 });
                 let Some((offset, more)) = read else {
@@ -200,6 +206,8 @@ pub fn agent_data_dirs() -> Vec<PathBuf> {
         // Grok's worktrees there are the user's working trees.
         crate::resume::grok_home(),
         crate::resume::kimi_home(),
+        // Its worktrees (`droid -w`, `~/.factory/worktrees`) are the user's.
+        crate::resume::droid_home(),
     ]
     .into_iter()
     .flatten()

@@ -1,0 +1,20 @@
+# Droid running a command it was allowed to: "Executing..." with the stop
+# hint. Hand-written from the 1.0.0 bundle's strings.
+agent: droid
+expect: working
+process: droid
+cmdline: droid --auto high
+title: ⛬ Fix the flaky login test
+ms_since_output: 800
+---
+⛬ The form submits before the field settles. Running the suite again.
+
+● Execute (Run the login tests)
+  npm test -- tests/login.spec.ts
+
+⣀ Executing...  (Press ESC to stop)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ >                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Auto (High) · allow all commands                                    ? for help

@@ -7,6 +7,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/environment.rs"]
 mod cursor;
+#[path = "droid/environment.rs"]
+mod droid;
 #[path = "grok/environment.rs"]
 mod grok;
 #[path = "kimi/environment.rs"]
@@ -29,6 +31,7 @@ pub(crate) fn inherited_marker(name: &str) -> bool {
         || cursor::VARIABLES.contains(&name)
         || grok::VARIABLES.contains(&name)
         || kimi::VARIABLES.contains(&name)
+        || droid::VARIABLES.contains(&name)
         || HOOK_HOSTS.contains(&name)
 }
 

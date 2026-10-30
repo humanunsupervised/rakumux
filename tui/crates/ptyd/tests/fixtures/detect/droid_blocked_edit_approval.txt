@@ -1,0 +1,22 @@
+# Droid asking to edit a file: the diff, then Yes/No options. Hand-written
+# from the 1.0.0 bundle's strings.
+agent: droid
+expect: blocked
+process: droid
+cmdline: droid --auto low
+title: ⛬ Fix the flaky login test
+ms_since_output: 6000
+---
+● Edit (src/login.ts)
+
+Edit login.ts
+  12   -  form.submit();
+  12   +  await field.settled();
+  13   +  form.submit();
+
+> Yes, allow
+  Yes, and always allow low
+  No, cancel
+
+↑↓ navigate · Enter select · Esc cancel · Ctrl+O expand diff
+Auto (Low) · edits and read-only commands

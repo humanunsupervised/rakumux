@@ -1,0 +1,18 @@
+# Droid's AskUser questionnaire: options, a free answer, "ESC stop agent".
+# Hand-written from the 1.0.0 bundle's strings.
+agent: droid
+expect: blocked
+process: droid
+cmdline: droid
+title: ⛬ Pick a test runner
+ms_since_output: 9000
+---
+ASK USER
+
+Which runner should the new tests use?
+
+> 1. Vitest
+  2. Jest
+  Or type your own answer...
+
+Enter Submit answer • ⇧Enter newline • ↑ back to options • ESC stop agent

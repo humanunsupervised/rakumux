@@ -22,6 +22,9 @@
 //! - **Kimi Code**: one message per record of the main agent's log, at its
 //!   byte offset: what the user typed, the agent's parts and tool calls, and
 //!   the tools' results.
+//! - **Droid**: one message per session-file line, at its offset past the
+//!   file's first line (which Droid rewrites); tool results are the `tool`
+//!   role's.
 //!
 //! Text is cut at [`MAX_PART_BYTES`] per part and otherwise left as the
 //! agent wrote it: the caller cleans it before it leaves the machine.
@@ -44,6 +47,8 @@ mod codex;
 mod copilot;
 #[path = "cursor-agent/transcript.rs"]
 mod cursor;
+#[path = "droid/transcript.rs"]
+mod droid;
 #[path = "grok/transcript.rs"]
 mod grok;
 #[path = "kimi/transcript.rs"]
@@ -77,7 +82,7 @@ pub enum TranscriptSource {
 
 impl TranscriptSource {
     /// `claude-code`, `codex`, `opencode`, `pi`, `copilot`, `cursor-agent`,
-    /// `grok` or `kimi`.
+    /// `grok`, `kimi` or `droid`.
     pub fn agent(&self) -> &'static str {
         match self {
             TranscriptSource::Log {
@@ -108,6 +113,10 @@ impl TranscriptSource {
                 agent: LogAgent::Grok,
                 ..
             } => "grok",
+            TranscriptSource::Log {
+                agent: LogAgent::Droid,
+                ..
+            } => "droid",
             TranscriptSource::OpenCode { .. } => "opencode",
         }
     }
@@ -189,6 +198,7 @@ fn read_log(
             LogAgent::Cursor => cursor::message(entry, start),
             LogAgent::Grok => grok::message(entry, start),
             LogAgent::Kimi => kimi::message(entry, start),
+            LogAgent::Droid => droid::message(entry, start),
         };
         messages.extend(message);
     })?;
@@ -206,16 +216,18 @@ fn file_key(agent: LogAgent, path: &Path) -> Option<String> {
 }
 
 /// [`scan_log`] as `agent`'s log is read: Cursor's is written whole now and
-/// then (`cursor::scan`).
+/// then (`cursor::scan`); Droid rewrites its first line in place, so its
+/// offsets count from the end of that line (`droid::scan`).
 pub(super) fn scan(
     agent: LogAgent,
     path: &Path,
     from: u64,
     budget: usize,
-    each: impl FnMut(&Value, u64),
+    mut each: impl FnMut(&Value, u64),
 ) -> Option<(u64, bool)> {
     match agent {
         LogAgent::Cursor => cursor::scan(path, from, budget, each),
+        LogAgent::Droid => super::droid::scan(path, from, budget, &mut each),
         _ => scan_log(path, from, budget, each),
     }
 }

@@ -1,0 +1,17 @@
+# Droid in spec mode proposing its plan. Hand-written from the 1.0.0
+# bundle's strings (exitSpecMode, confirmation).
+agent: droid
+expect: blocked
+process: droid
+cmdline: droid --use-spec
+title: ⛬ Plan the login fix
+ms_since_output: 5000
+---
+Specification for approval
+
+  1. Wait for the field to settle before submitting.
+  2. Add a regression test for the double submit.
+
+> Proceed with implementation
+  Proceed, and allow file edits and read-only commands (Low)
+  No, keep iterating on spec

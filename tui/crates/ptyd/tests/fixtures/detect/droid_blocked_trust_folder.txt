@@ -1,0 +1,19 @@
+# Droid in a folder it hasn't been trusted in. Hand-written from the 1.0.0
+# bundle's strings (folderTrust).
+agent: droid
+expect: blocked
+process: droid
+cmdline: droid
+title: ⛬ Droid
+ms_since_output: 2000
+---
+Trust this folder?
+
+Droid will read, edit, and run files in this folder, and load any project
+configuration it defines, including hooks and MCP servers that can execute
+commands on your machine.
+
+> 1. Trust this folder
+  2. Exit without trusting
+
+Enter to confirm · Esc to exit
