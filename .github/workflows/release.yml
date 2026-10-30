@@ -125,3 +125,61 @@ jobs:
             prerelease) gh release edit "$tag" --draft=false --prerelease --latest=false ;;
             draft) echo 'All binary assets uploaded; release remains a draft.' ;;
           esac
+
+  # The published GitHub release's packages, as install.sh downloads them, go
+  # to npm as `rakumux`. Trusted publishing (OIDC): no npm secret; npmjs.com
+  # trusts this repository's release.yml. The GitHub release is already out
+  # when this runs: if it fails, re-run this job; a version on npm is skipped.
+  npm:
+    needs: [prepare, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check that npm takes this release
+        id: release
+        env:
+          RELEASE_MODE: ${{ needs.prepare.outputs.mode }}
+          RELEASE_TARGETS: ${{ needs.prepare.outputs.targets }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          publish=true
+          dist_tag=""
+          case "$RELEASE_MODE" in
+            stable) dist_tag=latest ;;
+            prerelease) dist_tag=next ;;
+            draft)
+              echo "::notice::v$version stays a draft, so npm doesn't get it. Once it's published on GitHub: ./install/scripts/publish-npm.sh $version --from-release"
+              publish=false
+              ;;
+            *) echo '::error::Missing release-mode annotation'; exit 1 ;;
+          esac
+          for platform in macos-intel macos-arm64 linux-x64; do
+            if [[ "$publish" == true && ",$RELEASE_TARGETS," != *",$platform,"* ]]; then
+              echo "::warning::v$version has no $platform package and npm needs all three platforms, so npm doesn't get this release"
+              publish=false
+            fi
+          done
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: steps.release.outputs.publish == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.release.outputs.publish == 'true'
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Install npm with trusted publishing
+        if: steps.release.outputs.publish == 'true'
+        run: |
+          npm install --global npm@11.21.1
+          npm --version
+      - name: Publish to npm
+        if: steps.release.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NPM_DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+        shell: bash
+        run: ./install/scripts/publish-npm.sh "${GITHUB_REF_NAME#v}" --from-release "--tag=$NPM_DIST_TAG"

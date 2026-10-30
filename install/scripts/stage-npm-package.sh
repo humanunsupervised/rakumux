@@ -10,8 +10,11 @@
 #   THIRD_PARTY_NOTICES                                         from release/
 # and sets package.json "version". LICENSE is copied from the repository root.
 #
-# Usage: stage-npm-package.sh <version> [--allow-partial]
-#   --allow-partial   Don't require all three platforms (local dry runs)
+# Usage: stage-npm-package.sh <version> [--allow-partial] [--release-dir=DIR]
+#   --allow-partial     Don't require all three platforms (local dry runs)
+#   --release-dir=DIR   Read the tarballs, RELEASE_NOTES.md and
+#                       THIRD_PARTY_NOTICES from DIR rather than release/
+#                       (publish-npm.sh --from-release: a GitHub release)
 ###############################################################################
 
 set -euo pipefail
@@ -32,6 +35,7 @@ ALLOW_PARTIAL=false
 for arg in "$@"; do
     case "$arg" in
         --allow-partial) ALLOW_PARTIAL=true ;;
+        --release-dir=?*) RELEASE_DIR="${arg#--release-dir=}" ;;
         -*)
             error "Unknown option: $arg"
             exit 2
@@ -40,12 +44,12 @@ for arg in "$@"; do
     esac
 done
 if [[ -z "$VERSION" ]]; then
-    error "Usage: $0 <version> [--allow-partial]"
+    error "Usage: $0 <version> [--allow-partial] [--release-dir=DIR]"
     exit 2
 fi
 
 if ! grep -q "^# Rakumux v$VERSION\$" "$RELEASE_DIR/RELEASE_NOTES.md" 2>/dev/null; then
-    error "release/ was not built for v$VERSION; run ./install/scripts/build-release.sh $VERSION"
+    error "$RELEASE_DIR was not built for v$VERSION; run ./install/scripts/build-release.sh $VERSION"
     exit 1
 fi
 if [[ ! -f "$RELEASE_DIR/THIRD_PARTY_NOTICES" ]]; then

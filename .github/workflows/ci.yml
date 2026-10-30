@@ -82,6 +82,7 @@ jobs:
       - run: bash tests/test-command-hook.sh
       - run: bash tests/test-release.sh
       - run: bash tests/test-release-tag.sh
+      - run: bash tests/test-npm-release.sh
 
   website:
     runs-on: ubuntu-latest
