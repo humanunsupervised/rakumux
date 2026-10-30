@@ -332,7 +332,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    the folder itself, else its last component; branch, worktree, `edited`, `last_at`), and
    only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`); a
    list that would pass the contract's 256 KiB goes without them. The list says
-   `capabilities: ["reply_attachments", "new_sessions"]`, and `resources` as below.
+   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents"]`, and `resources`
+   as below.
    **rtop on rakumux.com** (`feed/resources.rs`, `ResourceSync`; contract `contracts/feed/`,
    "Resources"): the list says `capabilities: ["resources"]` only while the daemon announces
    `resources` (read at each connect; an `unsupported` answer drops it too), so rakumux.com tells
@@ -351,7 +352,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    **New sessions from rakumux.com** (`feed/new_sessions.rs`, `NewSessionSync`; contract
    `contracts/feed/`, "New sessions"): on rakumux.com the user can ask one of their machines
    for a new session in a folder its session list names, a login shell or one agent (any of the
-   feed contract's agents). Because its list says `new_sessions`, the machine's replies read
+   feed contract's agents; GitHub Copilot, Cursor, Pi, Grok, Kimi Code, Droid and Amp only of a
+   machine whose list also says `new_session_agents`, as this one's does). Because its list says
+   `new_sessions`, the machine's replies read
    brings the requests pending for it (`new_sessions`, with every read until reported, so
    pokes and the replies read's pace serve them too), while the feed is on and once its name
    is confirmed. The service starts each through the daemon as the user (`session_create`):

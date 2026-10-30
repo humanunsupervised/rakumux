@@ -35,6 +35,13 @@ test("a session list may say the machine takes new sessions", () => {
   assert.equal(validators.sessionsUpload(list), true);
 });
 
+test("a session list may say the machine starts every agent in new sessions", () => {
+  const list = { version: 1, machine: "studio", sessions: [], at: 1761220000000, capabilities: ["new_sessions", "new_session_agents"] };
+  assert.equal(validators.sessionsUpload(list), true);
+  assert.match(schemas["sessions-upload"].properties.capabilities.description, /`new_session_agents`/);
+  assert.match(schemas.common.$defs.newSession.properties.agent.description, /`new_session_agents`/);
+});
+
 test("new session body caps are annotated for the transport", () => {
   assert.equal(schemas["new-session-status"]["x-maxBodyBytes"], 4096);
 });

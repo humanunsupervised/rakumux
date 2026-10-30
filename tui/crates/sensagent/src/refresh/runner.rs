@@ -618,8 +618,9 @@ fn own<S, A, C>(
     let mut replies = ReplySync::new(machine.clone(), refresher.reply_state());
     let mut new_sessions = NewSessionSync::new(machine.clone(), refresher.new_session_state());
     let uploads = refresher.uploads().map(Uploads::new);
-    let mut sessions =
-        SessionSync::new(machine.clone(), uploads.is_some()).handling(crate::feed::NEW_SESSIONS);
+    let mut sessions = SessionSync::new(machine.clone(), uploads.is_some())
+        .handling(crate::feed::NEW_SESSIONS)
+        .handling(crate::feed::NEW_SESSION_AGENTS);
     let mut resources = ResourceSync::new();
     let mut pokes = PokeSync::new();
     // The running realtime connection's stop, if one runs.

@@ -389,6 +389,14 @@ fn the_session_list_says_this_machine_takes_new_sessions() {
     );
     let alone = SessionSync::new("studio".into(), false).handling(NEW_SESSIONS);
     assert_eq!(capabilities(alone), serde_json::json!(["new_sessions"]));
+    // As the service sends it: every agent too, in rakumux.com's spelling.
+    let every = SessionSync::new("studio".into(), true)
+        .handling(NEW_SESSIONS)
+        .handling(NEW_SESSION_AGENTS);
+    assert_eq!(
+        capabilities(every),
+        serde_json::json!(["reply_attachments", "new_sessions", "new_session_agents"])
+    );
 }
 
 #[test]

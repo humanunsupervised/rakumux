@@ -482,7 +482,7 @@
           "$ref": "#/$defs/ulid"
         },
         "agent": {
-          "description": "The agent to start in the new session's shell; absent: the shell alone.",
+          "description": "The agent to start in the new session's shell; absent: the shell alone. Other than `claude-code`, `codex` and `opencode`, only for a machine whose latest session list advertises `new_session_agents`.",
           "$ref": "#/$defs/agent"
         },
         "status": { "$ref": "#/$defs/newSessionStatus" },

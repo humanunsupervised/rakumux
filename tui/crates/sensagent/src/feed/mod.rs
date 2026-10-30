@@ -36,7 +36,7 @@ pub(crate) use chats::{write_private, ChatSync, ChatWork, READ_BYTES};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
 pub(crate) use machine::MachineIdentity;
-pub(crate) use new_sessions::{NewSessionSync, NewSessionWork, NEW_SESSIONS};
+pub(crate) use new_sessions::{NewSessionSync, NewSessionWork, NEW_SESSIONS, NEW_SESSION_AGENTS};
 pub(crate) use poke::{listen, PokeEvent, PokeSync};
 pub(crate) use replies::{Fetch, Fetched, ReplySync, ReplyWork, TYPING_QUIET};
 pub use replies::{ReplyWrite, ReplyWriteStatus};

@@ -39,6 +39,10 @@ use kept::Kept;
 /// What this machine says with its session list when it takes new sessions
 /// asked for on rakumux.com (`capabilities`), so the cloud sends it those.
 pub(crate) const NEW_SESSIONS: &str = "new_sessions";
+/// What it says too when it starts every agent the contract names
+/// ([`Agent`]), not only Claude Code, Codex and OpenCode: rakumux.com asks a
+/// machine without it for none of the others, which it would leave pending.
+pub(crate) const NEW_SESSION_AGENTS: &str = "new_session_agents";
 /// The most requests one read carries (contract).
 const MAX_ASKED: usize = 20;
 /// The first and longest waits after a failed report.

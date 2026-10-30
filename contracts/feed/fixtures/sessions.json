@@ -105,6 +105,7 @@
       ["reply_attachments"],
       [],
       ["reply_attachments", "later.feature_2", "a"],
+      ["reply_attachments", "resources", "new_sessions", "new_session_agents"],
       ["reply_attachments_and_more_thing"]
     ]
   },

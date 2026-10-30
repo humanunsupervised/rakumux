@@ -143,7 +143,9 @@ conformance tests, not an HTTP server, database or local runtime.
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
   fetches a reply's attachments and gives the agent their paths; `resources`, it sends what it
   uses while rakumux.com asks (below); `new_sessions`, it takes new sessions asked of it on
-  rakumux.com (below). The cloud keeps the latest list and ignores names it doesn't know.
+  rakumux.com (below); `new_session_agents`, it starts every agent in them, not only Claude
+  Code, Codex and OpenCode (below). The cloud keeps the latest list and ignores names it doesn't
+  know.
 - **Resources (rtop):** while someone has rtop open on rakumux.com, every machine of the account
   says what it uses now. A replies read answers `resources_wanted: true` then (and only then);
   the machine sends `resources-upload` at once and every few seconds while each answer's
@@ -162,7 +164,9 @@ conformance tests, not an HTTP server, database or local runtime.
   one of the folders its session list names, a login shell there with one of the agents
   (`agent`, absent for the shell alone) started in it. The cloud stores the request (`newSession`
   in common, under an id it makes, so a request sent again is stored once) `pending` for that
-  machine, and gives it only to a machine whose latest session list advertises `new_sessions`:
+  machine, and gives it only to a machine whose latest session list advertises `new_sessions`
+  (and, for an agent other than `claude-code`, `codex` and `opencode`, `new_session_agents`
+  too, so an older Rakumux is never asked for one it would leave pending):
   its replies read (naming itself with `machine`) carries `new_sessions`, the requests still
   pending for it, oldest first, at most 20, with every read until reported or expired, whatever
   `after` says; they take no seq, so a machine takes each by its `id`, at most once. A request
