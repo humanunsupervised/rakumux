@@ -25,6 +25,10 @@
 //! - **OpenCode**: the conversation its Rakumux plugin bound to the
 //!   session (`session_bind`); otherwise the newest top-level session of the
 //!   folder in `opencode.db`: `opencode <flags> -s <id>`.
+//! - **Pi**: the conversation its Rakumux extension bound, else the folder's
+//!   newest file under `<agent dir>/sessions/`: `pi --session <file>` (Pi
+//!   hides its arguments, so only the model and thinking level, which the
+//!   conversation keeps, come back).
 //!
 //! Any agent's bound conversation reaches its resume plan
 //! ([`Context::bound_conversation`]): the newest the session bound for that
@@ -47,6 +51,8 @@ mod claude;
 mod codex;
 #[path = "open-code/recovery.rs"]
 mod opencode;
+#[path = "pi/recovery.rs"]
+mod pi;
 pub(crate) use claude::claude_config_dir;
 #[cfg(test)]
 use claude::claude_flags;
@@ -55,6 +61,8 @@ use codex::codex_resume;
 pub(crate) use codex::{codex_home, codex_open_rollout};
 use opencode::opencode_resume;
 pub(crate) use opencode::{opencode_database, opencode_recent_session};
+use pi::pi_resume;
+pub(crate) use pi::{pi_agent_dir, pi_conversation};
 
 /// What to record for a session's foreground process.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +96,7 @@ pub fn plan(ctx: &Context<'_>) -> Plan {
         Some("claude") => Some(claude_config_dir().and_then(|dir| claude_resume(process, &dir))),
         Some("codex") => Some(codex_resume(process, ctx.cwd)),
         Some("opencode") => Some(opencode_resume(process, ctx.cwd, ctx.bound_conversation)),
+        Some("pi") => Some(pi_resume(ctx.cwd, ctx.bound_conversation)),
         _ => None,
     };
     match resumed {

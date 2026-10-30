@@ -21,6 +21,8 @@ mod tests {
         }
         // Pi's own configuration is the user's, not a marker.
         assert!(!super::super::inherited_marker("PI_CODING_AGENT_DIR"));
-        assert!(!super::super::inherited_marker("PI_CODING_AGENT_SESSION_DIR"));
+        assert!(!super::super::inherited_marker(
+            "PI_CODING_AGENT_SESSION_DIR"
+        ));
     }
 }

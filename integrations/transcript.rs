@@ -10,6 +10,8 @@
 //!   messages from their events, everything else from the response items.
 //! - **OpenCode**: OpenCode 2's `session_message` rows (one message per
 //!   block of a reply), else 1.x's `part` rows, changed since the cursor.
+//! - **Pi**: one message per entry of its conversation file, at its byte
+//!   offset; tool results are the `tool` role's.
 //!
 //! Text is cut at [`MAX_PART_BYTES`] per part and otherwise left as the
 //! agent wrote it: the caller cleans it before it leaves the machine.
@@ -30,6 +32,8 @@ mod claude;
 mod codex;
 #[path = "open-code/transcript.rs"]
 mod opencode;
+#[path = "pi/transcript.rs"]
+mod pi;
 
 /// The longest log line read; a longer one (an image, a huge tool output)
 /// is passed over.
@@ -54,7 +58,7 @@ pub enum TranscriptSource {
 }
 
 impl TranscriptSource {
-    /// `claude-code`, `codex` or `opencode`.
+    /// `claude-code`, `codex`, `opencode` or `pi`.
     pub fn agent(&self) -> &'static str {
         match self {
             TranscriptSource::Log {
@@ -65,6 +69,10 @@ impl TranscriptSource {
                 agent: LogAgent::Codex,
                 ..
             } => "codex",
+            TranscriptSource::Log {
+                agent: LogAgent::Pi,
+                ..
+            } => "pi",
             TranscriptSource::OpenCode { .. } => "opencode",
         }
     }
@@ -137,6 +145,7 @@ fn read_log(
         let message = match agent {
             LogAgent::Claude => claude::message(entry, start),
             LogAgent::Codex => codex::message(entry, start),
+            LogAgent::Pi => pi::message(entry, start),
         };
         messages.extend(message);
     })?;

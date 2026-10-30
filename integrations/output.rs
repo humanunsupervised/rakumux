@@ -11,6 +11,9 @@
 //! - **Codex**: the `rollout-…-<thread>.jsonl` file the process keeps open.
 //! - **OpenCode**: its database (`opencode.db`), for the conversation its
 //!   Rakumux plugin bound to the session, else the folder's newest one.
+//! - **Pi**: `<agent dir>/sessions/--<folder>--/<time>_<id>.jsonl`, for the
+//!   conversation its Rakumux extension bound to the session, else the
+//!   folder's newest one.
 //!
 //! For the agent feed, the follower also keeps the current turn's reply
 //! whole ([`Reply`]): what the agent said after its last tool call, or the
@@ -33,6 +36,8 @@ mod claude;
 mod codex;
 #[path = "open-code/output.rs"]
 mod opencode;
+#[path = "pi/output.rs"]
+mod pi;
 #[path = "places.rs"]
 pub mod places;
 #[path = "transcript.rs"]
@@ -117,6 +122,7 @@ enum Step {
 pub enum LogAgent {
     Claude,
     Codex,
+    Pi,
 }
 
 /// Where an agent's output is read from.
@@ -126,7 +132,9 @@ enum Source {
     Log {
         agent: LogAgent,
         /// Claude Code's conversation, checked on every read: the process
-        /// can clear it, resume another or park it in a background job.
+        /// can clear it, resume another or park it in a background job. Pi's,
+        /// found again whenever the conversation bound to the session changes
+        /// (or, unbound, its folder's newest does); none until its file exists.
         conversation: Option<String>,
         path: PathBuf,
         /// How far the log has been read.
@@ -177,6 +185,8 @@ impl Follower {
                 log(LogAgent::Claude, Some(id), path)
             }
             "codex" => log(LogAgent::Codex, None, codex::log(process)?),
+            // Its file is found on the first read.
+            "pi" => log(LogAgent::Pi, None, PathBuf::new()),
             "opencode" | "opencode2" => Source::OpenCode {
                 database: crate::resume::opencode_database()?,
                 cwd: crate::procinfo::cwd_of(process.pid),
@@ -195,8 +205,8 @@ impl Follower {
         })
     }
 
-    /// The agent as replies and turns name it: `claude-code`, `codex` or
-    /// `opencode`.
+    /// The agent as replies and turns name it: `claude-code`, `codex`,
+    /// `opencode` or `pi`.
     pub fn agent(&self) -> &'static str {
         match &self.source {
             Source::Log {
@@ -207,16 +217,20 @@ impl Follower {
                 agent: LogAgent::Codex,
                 ..
             } => "codex",
+            Source::Log {
+                agent: LogAgent::Pi,
+                ..
+            } => "pi",
             Source::OpenCode { .. } => "opencode",
         }
     }
 
-    /// The conversation followed: Claude Code's, Codex's thread from its
-    /// `rollout-<time>-<thread>.jsonl`, or the OpenCode session last read.
+    /// The conversation followed: Claude Code's or Pi's, Codex's thread from
+    /// its `rollout-<time>-<thread>.jsonl`, or the OpenCode session last read.
     pub fn conversation(&self) -> Option<String> {
         let id = match &self.source {
             Source::Log {
-                agent: LogAgent::Claude,
+                agent: LogAgent::Claude | LogAgent::Pi,
                 conversation,
                 ..
             } => conversation.clone()?,
@@ -301,9 +315,16 @@ impl Follower {
                 partial,
             } => {
                 let agent = *agent;
-                if agent == LogAgent::Claude
-                    && switch_conversation(self.pid, conversation, path, offset, partial)
-                {
+                let switched = match agent {
+                    LogAgent::Claude => {
+                        switch_conversation(self.pid, conversation, path, offset, partial)
+                    }
+                    LogAgent::Pi => {
+                        pi::switch(self.pid, bound, conversation, path, offset, partial)
+                    }
+                    LogAgent::Codex => false,
+                };
+                if switched {
                     self.turn.begin(None);
                     self.reply = None;
                 }
@@ -312,6 +333,7 @@ impl Follower {
                     let candidate = match agent {
                         LogAgent::Claude => claude::may_be_typed(line),
                         LogAgent::Codex => codex::may_be_typed(line),
+                        LogAgent::Pi => pi::may_be_typed(line),
                     };
                     candidate
                         && serde_json::from_slice::<Value>(line)
@@ -319,6 +341,7 @@ impl Follower {
                             .and_then(|entry| match agent {
                                 LogAgent::Claude => claude::typed(&entry),
                                 LogAgent::Codex => codex::typed(&entry),
+                                LogAgent::Pi => pi::typed(&entry),
                             })
                             .is_some_and(|typed| prompt_line(&typed).is_some())
                 };
@@ -334,6 +357,7 @@ impl Follower {
                     let (typed, messages) = match agent {
                         LogAgent::Claude => (claude::typed(entry), claude::messages(entry)),
                         LogAgent::Codex => (codex::typed(entry), codex::messages(entry)),
+                        LogAgent::Pi => (pi::typed(entry), pi::messages(entry)),
                     };
                     let typed = typed.filter(|typed| prompt_line(typed).is_some());
                     if typed.is_some() || !messages.is_empty() {
@@ -352,6 +376,7 @@ impl Follower {
                     let step = match agent {
                         LogAgent::Claude => claude::reply_step(entry),
                         LogAgent::Codex => codex::reply_step(entry),
+                        LogAgent::Pi => pi::reply_step(entry),
                     };
                     self.reply = next_reply(self.reply.take(), step, *position);
                 }
@@ -361,6 +386,7 @@ impl Follower {
                 match agent {
                     LogAgent::Claude => (newest(claude::line), newest(claude::prompt)),
                     LogAgent::Codex => (newest(codex::line), newest(codex::prompt)),
+                    LogAgent::Pi => (newest(pi::line), newest(pi::prompt)),
                 }
             }
             Source::OpenCode {

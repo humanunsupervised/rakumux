@@ -17,6 +17,8 @@
 //!   `workdir` and commands, and `apply_patch`'s files.
 //! - **OpenCode**: its tool calls' file paths, search roots and commands,
 //!   from the conversation [`super::transcript`] reads.
+//! - **Pi**: its conversation's folder (the header's `cwd`), its tool calls'
+//!   paths and commands, and the calls codemode scripts made.
 
 use super::transcript::{scan_log, TranscriptSource};
 use super::LogAgent;
@@ -30,6 +32,8 @@ mod claude;
 mod codex;
 #[path = "open-code/places.rs"]
 mod opencode;
+#[path = "pi/places.rs"]
+mod pi;
 
 /// The longest path taken, in bytes.
 const MAX_PATH_BYTES: usize = 4096;
@@ -105,6 +109,7 @@ impl PlaceScan {
                     match agent {
                         LogAgent::Claude => claude::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Codex => codex::entry(entry, cwd, home, at, &mut touches),
+                        LogAgent::Pi => pi::entry(entry, cwd, home, at, &mut touches),
                     }
                 });
                 let Some((offset, more)) = read else {
@@ -150,6 +155,7 @@ pub fn agent_data_dirs() -> Vec<PathBuf> {
         crate::resume::claude_config_dir(),
         crate::resume::codex_home(),
         crate::resume::opencode_database().and_then(|db| db.parent().map(Path::to_path_buf)),
+        crate::resume::pi_agent_dir(),
     ]
     .into_iter()
     .flatten()
