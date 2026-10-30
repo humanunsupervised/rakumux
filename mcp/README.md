@@ -86,7 +86,8 @@ environment, so both go in its `env` too;
 OpenCode 1.x starts MCP servers inside each TUI, so they do; Pi starts its stdio servers in its
 own process with its environment, so they do; Grok Build starts them with its own environment,
 so both reach them (checked with 1.0.70); Kimi Code starts them with its whole environment, so
-both reach it (verified); OpenCode 2.x runs MCP servers in a
+both reach it (verified); Droid starts stdio servers with its own environment, so both do (read
+in Droid 1.0.0's code, not verified in a running Droid); OpenCode 2.x runs MCP servers in a
 background service shared by every conversation, so they don't.
 
 **OpenCode 2.x** tags every tool call with its conversation (`_meta["ai.opencode/sessionID"]`). The
@@ -199,6 +200,19 @@ It writes `[mcp_servers.rakumux]` to `~/.grok/config.toml` (`--scope project`: t
 also loads the servers Claude Code has (`~/.claude.json`, `.mcp.json`), so one added there
 reaches Grok too. `grok mcp list` and `/mcps` show it. See
 [Grok Build integration](../integrations/grok/README.md).
+
+### Droid
+
+```bash
+droid mcp add rakumux rakumux-mcp   # absolute path recommended
+```
+
+It writes `{"mcpServers": {"rakumux": {"type": "stdio", "command": "rakumux-mcp", "args": []}}}`
+to `~/.factory/mcp.json` (`/mcp` in Droid does the same), and Droid reloads it. Droid passes its
+environment to the server, so both `RAKUMUX_SESSION_ID` and `RAKUMUX_SESSION_TOKEN` reach it from
+the Rakumux session it runs in; don't set either in the server's `env` (with one, calls are
+refused). Syntax checked against `droid mcp add --help` (Droid 1.0.0); not tried with a signed-in
+Droid. See [Droid integration](../integrations/droid/README.md).
 
 ### OpenCode
 

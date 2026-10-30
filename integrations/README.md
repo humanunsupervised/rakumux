@@ -10,6 +10,7 @@ integrations/
   cursor-agent/  # Cursor's agent CLI: command hooks, its chat transcript, recovery
   grok/          # Grok Build: native command hooks, detection, recovery, output, places
   kimi/          # Kimi Code: plugin (hooks + MCP) and installer, detection, its log
+  droid/         # Native command hooks, detection, recovery, output, offline e2e
   detection.rs   # Shared process/screen engine and retained older profiles
   recovery.rs    # Shared resume dispatch and safe argument/file helpers
   hooks.rs       # Adapter dispatch and metadata-only normalization
@@ -35,6 +36,7 @@ Older detection profiles remain supported; new hooks start with these three agen
 - [Grok Build](grok/README.md)
 - [Kimi Code](kimi/README.md): `rakumux-mcp kimi-plugin --install` (its hooks name the
   conversation and folder; lifecycle comes from OSC 7501 with nothing installed)
+- [Droid](droid/README.md)
 
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
@@ -67,7 +69,8 @@ fallback; Rakumux does not guess from another conversation's most-recent directo
 ## Hook transport
 
 `rakumux session hook --agent <agent> [--event <name>]` reads one hook's JSON on stdin and
-always answers `{}` with exit 0. Agents: `claude`, `codex`, `opencode`, `copilot`,
+always answers `{}` with exit 0 (Droid: `{"suppressOutput":true}`, since Droid adds any other
+stdout to the conversation as context and shows the hook's row in its chat). Agents: `claude`, `codex`, `opencode`, `copilot`,
 `cursor-agent`, `pi`, `grok`, `kimi`, `droid`, `amp`; one without an adapter yet reports
 nothing. `--event` names the hook's event for agents whose input doesn't (GitHub Copilot's
 camelCase hooks); adapters read it as `hookEventName`.
@@ -202,6 +205,10 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
     conversation its plugin's hooks named, else the one the process holds a lock on during a
     turn, else the one followed (the folder's newest at first); checked on every read, so
     `/new` and `/sessions` move it. Kimi writes a step's text when the step ends.
+  - Droid: `~/.factory/sessions/<folder>/<conversation>.jsonl` (`$FACTORY_HOME_OVERRIDE`
+    moves it), for the conversation its hooks report, else the folder's newest top-level one.
+    Droid rewrites the file's first line in place when it names the session, so offsets and
+    positions count from that line's end. Its hook rows and notices aren't messages.
 - **What's taken:** the last entry the main conversation's assistant wrote (its reasoning, a
   tool call as `Tool: description` or a short path, or its reply), and the user's last typed
   message (a slash command as `/name args`; the agents' own insertions such as reminders,
@@ -231,7 +238,9 @@ Claude Code, the main conversation's text after its last tool call (a prompt or 
 starts it over; one text block per log entry, keyed by the entry's `uuid`); for Codex, the
 `task_complete` event's `last_agent_message` (keyed by its `turn_id`; a `user_message` or
 `task_started` starts it over); for GitHub Copilot, the main agent's message text after its last
-tool call (keyed by its `messageId`; a typed prompt or a message with tool calls starts it over). The control layer takes it only while reply capture is on (the
+tool call (keyed by its `messageId`; a typed prompt or a message with tool calls starts it over);
+for Droid, the text after its last tool call (keyed by its message's `id`; its hook rows after
+the reply leave it be). The control layer takes it only while reply capture is on (the
 status service turns it on for an account whose feed is on), when the session turns
 `Done` after it was seen working, from a read of the log made after that; a key already
 captured is never captured again. See the protocol section of `AGENTS.md` (`reply_capture`,
@@ -272,6 +281,10 @@ reasoning, its tool calls with their input, and the tools' output (the `tool` ro
 - **Kimi Code:** one message per record of the main agent's log, at its byte offset: what the
   user typed (prompts and steers; Kimi's reminders and hook results left out), the agent's
   reasoning, text and tool calls, and the tools' results. Subagents' logs are left out.
+- **Droid:** one message per session-file line, at its offset past the first line. Tool results
+  (which Droid writes as the user's) are the `tool` role's; hook rows, notices for the model or
+  the user only, other agents' messages and turn outcomes are left out; a GPT model's
+  reasoning summary is reasoning.
 - **OpenCode:** the conversation's rows changed since a watermark: each OpenCode 2 prompt, and
   each block of a reply (`seq × 1024 + block`; a tool block holds its call and, once it ran, its
   result), or each 1.x piece (`time_created × 1024 + its place`). Bookkeeping pieces (steps,
@@ -292,14 +305,14 @@ as written: the status service cleans it before it leaves the machine.
 A reply the user writes back to a feed entry goes into the agent the same way for every
 integration: the status service types it into the session with `session_submit` (a bracketed
 paste, then Enter), as if the user typed it. None of them has a supported way in from
-outside: Claude Code, Codex and GitHub Copilot take prompts only from their terminal (their
-headless modes would run a second process on the same conversation), OpenCode's server port
-belongs to its own TUI, Pi's RPC mode is a process of its own, and Cursor's takes a bracketed
-paste in its input box like typing (its `--print` mode is a second process). Grok Build is the
-same: its headless and agent modes are processes of their own, and it takes a bracketed paste
-and Enter as one prompt. Kimi Code too (`kimi acp`, `kimi web` and `kimi rc` run processes of
-their own); typed during a turn, it queues the reply and logs it as a prompt when the turn
-ends. So nothing here is
+outside: Claude Code, Codex, GitHub Copilot and Droid take prompts only from their terminal
+(their headless modes would run a second process on the same conversation), OpenCode's server
+port belongs to its own TUI, Pi's RPC mode is a process of its own, and Cursor's takes a
+bracketed paste in its input box like typing (its `--print` mode is a second process). Grok
+Build is the same: its headless and agent modes are processes of their own, and it takes a
+bracketed paste and Enter as one prompt. Kimi Code too (`kimi acp`, `kimi web` and `kimi rc` run
+processes of their own); typed during a turn, it queues the reply and logs it as a prompt when
+the turn ends. So nothing here is
 agent-specific beyond what's already read: the conversation id
 (`agent_turn.conversation_id`) the reply must still match, and the lifecycle that says the
 agent waits for input, or works for one that takes what's typed during a turn and logs it as a
@@ -345,6 +358,8 @@ cargo test -p rakumux-ptyd copilot --locked
 cargo test -p rakumux-ptyd --test control_copilot --locked
 # The real GitHub Copilot CLI, offline against a scripted model (needs `copilot` and the workspace built)
 cargo test -p rakumux-ptyd --test runtime_copilot --locked -- --ignored
+cargo test -p rakumux-ptyd droid --locked
+python3 -I ../integrations/droid/e2e/run.py   # offline: a stand-in Droid, a throwaway daemon
 cargo test -p rakumux-mcp --test opencode_plugin --locked
 cargo test -p rakumux-ptyd --test control_cursor_agent --test cursor_agent_e2e --locked
 cargo test -p rakumux-ptyd --test control_kimi --locked
