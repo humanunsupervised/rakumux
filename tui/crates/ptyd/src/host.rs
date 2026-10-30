@@ -186,6 +186,12 @@ pub enum HostEvent {
     },
 }
 
+/// Asked just before a submit's Enter is written, once its pause is over,
+/// on the terminal's writer thread with no lock held (so it may ask the
+/// host about the terminal): `false` holds the Enter back
+/// ([`TerminalHost::submit_checked`]).
+pub type EnterCheck = Box<dyn FnOnce() -> bool + Send>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostError {
     NotFound,
@@ -336,6 +342,21 @@ pub trait TerminalHost: Send + Sync + 'static {
             Some(quiet) => self.submit_when_quiet(id, text, quiet),
             None => self.submit(id, text),
         }
+    }
+    /// [`submit_expecting`](Self::submit_expecting), its Enter written only
+    /// if `enter` says so when it's due (after the pause): else the text
+    /// stays unsent where it was typed. A host that can't hold an Enter
+    /// back submits as `submit_expecting` does.
+    fn submit_checked(
+        &self,
+        id: TerminalId,
+        text: &str,
+        quiet: Option<std::time::Duration>,
+        foreground: Option<&str>,
+        enter: EnterCheck,
+    ) -> Result<(), HostError> {
+        let _ = enter;
+        self.submit_expecting(id, text, quiet, foreground)
     }
     /// Named keys (`enter`, `esc`, `tab`, `backspace`, `up`/`down`/`left`/
     /// `right`, `home`, `end`, `pageup`, `pagedown`, `ctrl+<c>`, `alt+<c>`)

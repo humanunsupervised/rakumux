@@ -910,3 +910,109 @@ fn sessions_come_back_after_a_crash_but_not_after_a_stop() {
     assert_eq!(client.request(&Request::DaemonShutdown), Response::Ok);
     assert_eq!(wait_exit(&mut daemon), Some(0));
 }
+
+/// The screen part of a detection fixture (`tests/fixtures/detect/`).
+fn fixture_screen(name: &str) -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/detect")
+        .join(format!("{name}.txt"));
+    let text = std::fs::read_to_string(path).unwrap();
+    text.split_once("\n---\n").unwrap().1.to_string()
+}
+
+#[test]
+fn a_reply_never_answers_a_prompt_its_agent_opened_after_the_paste() {
+    let home = TestHome::new();
+    // A stand-in for Claude Code at work: it shows Claude's screen while
+    // working, reads what's typed (the paste, then whatever follows within
+    // three seconds) and shows the bytes. With `ask`, it opens Claude's
+    // permission prompt as soon as the paste is in, before its Enter is due.
+    let bin = home.dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let screens = home.dir.path().join("screens");
+    std::fs::create_dir_all(&screens).unwrap();
+    for (file, fixture) in [
+        ("working.txt", "claude_working_model_turn"),
+        ("asking.txt", "claude_blocked_bash_permission"),
+    ] {
+        std::fs::write(screens.join(file), fixture_screen(fixture)).unwrap();
+    }
+    let script = bin.join("claude");
+    let hex = "od -An -tx1 | tr -d ' \\n'";
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/bash\n\
+             stty -icanon -icrnl -echo min 1 time 0\n\
+             printf '\\033[?2004h'\n\
+             cat {screens}/working.txt\n\
+             first=$(dd bs=65536 count=1 2>/dev/null | {hex})\n\
+             if [ \"$1\" = ask ]; then printf '\\033[2J\\033[H'; cat {screens}/asking.txt; fi\n\
+             stty min 0 time 30\n\
+             second=$(dd bs=65536 count=1 2>/dev/null | {hex})\n\
+             printf '\\033[2J\\033[H'\n\
+             echo \"FIRST=$first.\"\n\
+             echo \"SECOND=$second.\"\n\
+             sleep 60\n",
+            screens = screens.display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let (mut daemon, registration) = start_daemon(&home, "/opt/rakumux/bin/rakumux");
+    let mut client = TestClient::connect(&registration.socket);
+    assert!(matches!(
+        client.hello(&registration.token),
+        Response::Hello(_)
+    ));
+    let mut run = |name: &str, mode: &str| -> String {
+        let created = match client.request(&Request::SessionCreate(CreateSession {
+            scope: Some(ScopeRoot::resolve(&home.work).unwrap()),
+            name: Some(name.into()),
+            cwd: None,
+            argv: Some(vec![script.display().to_string(), mode.into()]),
+            startup_cmds: Vec::new(),
+            env: home.env(),
+            cols: 100,
+            rows: 30,
+            machine: None,
+            prefill: None,
+        })) {
+            Response::Session { session } => session,
+            other => panic!("create failed: {other:?}"),
+        };
+        // As the account service sees it: Claude Code, working.
+        let view = wait_session(&mut client, &created.id, "working", |view| {
+            view.agent
+                .as_ref()
+                .is_some_and(|agent| agent.kind == "claude")
+                && view.lifecycle == session_core::model::Lifecycle::Working
+        });
+        let program = view.terminal.unwrap().foreground_process.unwrap();
+        let reply = Request::SessionSubmit {
+            id: created.id.clone(),
+            text: "also update the docs".into(),
+            quiet_ms: Some(10_000),
+            expect_foreground: Some(program),
+            refuse_if_blocked: true,
+        };
+        assert_eq!(client.request(&reply), Response::Ok, "{name}");
+        wait_read(&mut client, &created.id, "SECOND=");
+        read(&mut client, &created.id)
+    };
+    let paste = "FIRST=1b5b3230307e";
+    // Still working when its Enter is due: the Enter goes.
+    let working = run("working", "work");
+    assert!(working.contains(paste), "{working}");
+    assert!(working.contains("SECOND=0d."), "{working}");
+    // Asking by then: the Enter is held back, the prompt left unanswered.
+    let asking = run("asking", "ask");
+    assert!(asking.contains(paste), "{asking}");
+    assert!(asking.contains("SECOND=."), "{asking}");
+
+    assert_eq!(client.request(&Request::DaemonShutdown), Response::Ok);
+    assert_eq!(wait_exit(&mut daemon), Some(0));
+}

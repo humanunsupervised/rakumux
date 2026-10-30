@@ -163,6 +163,16 @@ pub enum Request {
         /// without it submits anyway.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expect_foreground: Option<String>,
+        /// Refuse with `session_blocked` while the session's agent asks
+        /// something (lifecycle `blocked`: a permission prompt, a question or
+        /// a menu, which would take the text as its answer), as the daemon
+        /// has it and as its screen and foreground process show now; its
+        /// Enter then goes only if the screen still shows no such prompt
+        /// when it's due, so it never answers one that opened after the
+        /// paste (capability `session.submit.blocked`). A daemon without it
+        /// submits anyway.
+        #[serde(default, skip_serializing_if = "is_false")]
+        refuse_if_blocked: bool,
     },
     /// Mark a session as just used (list ordering, `done` → `idle`).
     SessionTouch {
@@ -602,6 +612,11 @@ pub const CAPABILITY_SUBMIT_QUIET: &str = "session.submit.quiet";
 /// process group took the foreground after the text.
 pub const CAPABILITY_SUBMIT_EXPECT: &str = "session.submit.expect";
 
+/// `session_submit`'s `refuse_if_blocked`: refused with `session_blocked`
+/// while the session's agent asks something; and then its Enter is never
+/// written once the screen shows the agent asking something.
+pub const CAPABILITY_SUBMIT_BLOCKED: &str = "session.submit.blocked";
+
 /// `resource_usage`: what the machine and Rakumux's processes use.
 pub const CAPABILITY_RESOURCES: &str = "resources";
 
@@ -988,6 +1003,8 @@ pub enum ErrorCode {
     /// An approval is needed but no user client is attached to decide it.
     ApprovalUnavailable,
     LimitExceeded,
+    /// The session's agent asks something: a permission prompt, a question
+    /// or a menu (`session_submit`'s `refuse_if_blocked`).
     SessionBlocked,
     /// A human holds controller focus on the target.
     SessionInUse,
@@ -1266,6 +1283,35 @@ mod tests {
         assert!(!old.all);
         let old: Request = serde_json::from_str(r#"{"op":"session_list","scope":"/r"}"#).unwrap();
         assert!(matches!(old, Request::SessionList { all: false, .. }));
+    }
+
+    #[test]
+    fn refuse_if_blocked_is_sent_only_when_set_and_defaults_to_off() {
+        let submit = |refuse_if_blocked| Request::SessionSubmit {
+            id: SessionId::generate(),
+            text: "hi".into(),
+            quiet_ms: Some(10_000),
+            expect_foreground: Some("claude".into()),
+            refuse_if_blocked,
+        };
+        let json = serde_json::to_value(submit(true)).unwrap();
+        assert_eq!(json["op"], "session_submit");
+        assert_eq!(json["refuse_if_blocked"], true);
+        let plain = serde_json::to_value(submit(false)).unwrap();
+        assert!(plain.get("refuse_if_blocked").is_none());
+        // Older clients never send it.
+        let mut old = plain;
+        old["id"] = serde_json::json!(SessionId::generate().as_str());
+        let old: Request = serde_json::from_value(old).unwrap();
+        assert!(matches!(
+            old,
+            Request::SessionSubmit {
+                refuse_if_blocked: false,
+                ..
+            }
+        ));
+        let code: ErrorCode = serde_json::from_str(r#""session_blocked""#).unwrap();
+        assert_eq!(code, ErrorCode::SessionBlocked);
     }
 
     #[test]

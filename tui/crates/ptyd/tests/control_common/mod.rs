@@ -6,8 +6,8 @@ use ptyd::control::{ControlConfig, ControlService, Detector, Limits};
 use ptyd::control_api::{Caller, Control};
 use ptyd::detect::{DetectInput, Detection};
 use ptyd::host::{
-    AttachControl, HostAttachment, HostError, HostEvent, SpawnSpec, TerminalHost, TerminalInfo,
-    TerminalState,
+    AttachControl, EnterCheck, HostAttachment, HostError, HostEvent, SpawnSpec, TerminalHost,
+    TerminalInfo, TerminalState,
 };
 use session_core::api::{
     ApiError, Auth, CreateSession, ReadResult, ReadSource, Request, Response, Role, TextFormat,
@@ -36,6 +36,9 @@ pub struct FakeTerminal {
     pub forgotten: bool,
     /// Someone is typing in it: a quiet submit is refused.
     pub typing: bool,
+    /// For each checked submit whose Enter came due ([`FakeHost::enter_due`]),
+    /// whether its check let the Enter go.
+    pub enters: Vec<bool>,
 }
 
 #[derive(Default)]
@@ -43,6 +46,8 @@ struct FakeState {
     next_id: u64,
     terminals: BTreeMap<TerminalId, FakeTerminal>,
     fail_next_spawn: Option<String>,
+    /// Checked submits whose text is in and whose Enter isn't due yet.
+    pending_enters: Vec<(TerminalId, EnterCheck)>,
 }
 
 /// Terminals that exist only in memory. Tests drive output, exits and
@@ -110,6 +115,62 @@ impl FakeHost {
         });
     }
 
+    /// Show a detection fixture (`tests/fixtures/detect/<name>.txt`): its
+    /// screen, foreground process, title, alternate screen and output age,
+    /// then announce output. Returns the lifecycle the fixture expects.
+    pub fn show_fixture(&self, session: &SessionId, name: &str) -> Lifecycle {
+        let expected = self.put_fixture(session, name);
+        self.emit(HostEvent::Output {
+            id: self.terminal_of(session),
+            session_id: session.clone(),
+        });
+        expected
+    }
+
+    /// [`show_fixture`](Self::show_fixture) without announcing it: the
+    /// terminal shows it, the control layer hasn't looked yet.
+    pub fn put_fixture(&self, session: &SessionId, name: &str) -> Lifecycle {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/detect")
+            .join(format!("{name}.txt"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        let (header, screen) = text.split_once("\n---\n").unwrap();
+        let field = |key: &str| {
+            header.lines().find_map(|line| {
+                let (k, v) = line.split_once(':')?;
+                (k == key).then(|| v.trim().to_string())
+            })
+        };
+        let process = field("process").map(|name| ptyd::host::ProcessInfo {
+            pid: 4242,
+            cmdline: field("cmdline")
+                .map(|c| c.split_whitespace().map(String::from).collect())
+                .unwrap_or_else(|| vec![name.clone()]),
+            name,
+            exe: field("exe").map(PathBuf::from),
+        });
+        let expected = match field("expect").as_deref() {
+            Some("working") => Lifecycle::Working,
+            Some("blocked") => Lifecycle::Blocked,
+            Some("idle") => Lifecycle::Idle,
+            Some("unknown") => Lifecycle::Unknown,
+            _ => Lifecycle::None,
+        };
+        let id = self.terminal_of(session);
+        {
+            let mut state = self.state.lock().unwrap();
+            let terminal = state.terminals.get_mut(&id).unwrap();
+            terminal.screen = screen.to_string();
+            terminal.info.foreground = process;
+            terminal.info.title = field("title").unwrap_or_default();
+            terminal.info.alternate_screen = field("alternate_screen").as_deref() == Some("true");
+            terminal.info.output_offset += screen.len() as u64;
+            let age: i64 = field("ms_since_output").map_or(0, |ms| ms.parse().unwrap());
+            terminal.info.last_output_ms = Some(now_ms() - age);
+        }
+        expected
+    }
+
     /// The session's process exits with `code`.
     pub fn exit(&self, session: &SessionId, code: Option<i32>) {
         let id = self.terminal_of(session);
@@ -128,6 +189,32 @@ impl FakeHost {
             session_id,
             code,
         });
+    }
+
+    /// The pause after the session's checked submits is over: ask each
+    /// one's Enter check (without the host's lock, as the real writer thread
+    /// asks it) and note in `enters` whether the Enter went.
+    pub fn enter_due(&self, session: &SessionId) {
+        let id = self.terminal_of(session);
+        let due: Vec<EnterCheck> = {
+            let mut state = self.state.lock().unwrap();
+            let (due, kept) = std::mem::take(&mut state.pending_enters)
+                .into_iter()
+                .partition(|(terminal, _)| *terminal == id);
+            state.pending_enters = kept;
+            due.into_iter().map(|(_, check)| check).collect()
+        };
+        for check in due {
+            let went = check();
+            self.state
+                .lock()
+                .unwrap()
+                .terminals
+                .get_mut(&id)
+                .unwrap()
+                .enters
+                .push(went);
+        }
     }
 
     pub fn fail_next_spawn(&self, message: &str) {
@@ -243,6 +330,7 @@ impl TerminalHost for FakeHost {
                 terminated: false,
                 forgotten: false,
                 typing: false,
+                enters: Vec::new(),
             },
         );
         Ok(info)
@@ -339,6 +427,20 @@ impl TerminalHost for FakeHost {
             Some(quiet) => self.submit_when_quiet(id, text, quiet),
             None => self.submit(id, text),
         }
+    }
+
+    fn submit_checked(
+        &self,
+        id: TerminalId,
+        text: &str,
+        quiet: Option<Duration>,
+        foreground: Option<&str>,
+        enter: EnterCheck,
+    ) -> Result<(), HostError> {
+        self.submit_expecting(id, text, quiet, foreground)?;
+        // The text is in; its Enter waits for `enter_due`.
+        self.state.lock().unwrap().pending_enters.push((id, enter));
+        Ok(())
     }
 
     fn send_keys(

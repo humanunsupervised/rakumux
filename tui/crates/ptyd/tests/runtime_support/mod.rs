@@ -499,6 +499,7 @@ impl TestClient {
             text: text.into(),
             quiet_ms: None,
             expect_foreground: None,
+            refuse_if_blocked: false,
         });
         assert_eq!(response, Response::Ok, "submit {text:?}");
     }

@@ -31,7 +31,7 @@ use crate::control_api::Caller;
 use crate::detect::{DetectInput, Detection};
 use crate::git;
 use crate::handoff::{BindingHandoff, ControlHandoff};
-use crate::host::{HostError, HostEvent, SpawnSpec, TerminalHost, TerminalState};
+use crate::host::{EnterCheck, HostError, HostEvent, SpawnSpec, TerminalHost, TerminalState};
 use crate::persist::ScrollbackStore;
 use session_core::api::{
     AgentReply, ApiError, AttachRequest, CallerInfo, CreateSession, ErrorCode, EventEnvelope,
@@ -531,12 +531,16 @@ impl Inner {
                 text,
                 quiet_ms,
                 expect_foreground,
+                refuse_if_blocked,
             } => self.submit(
                 caller,
                 &id,
                 &text,
-                quiet_ms.map(Duration::from_millis),
-                expect_foreground.as_deref(),
+                Submit {
+                    quiet: quiet_ms.map(Duration::from_millis),
+                    foreground: expect_foreground.as_deref(),
+                    refuse_if_blocked,
+                },
             ),
             Request::SessionTouch { id } => self.touch(caller, &id),
             Request::SessionTurn { id } => self.turn(caller, &id),
@@ -1664,26 +1668,52 @@ impl Inner {
     }
 
     /// `session_submit`; with `quiet`, refused while someone typed in the
-    /// session that recently, and with `foreground`, unless that program is
-    /// in its foreground now (neither audited: the caller tries again). The
-    /// terminal is asked without the state lock, as it may wait for its
-    /// input queue or its actor.
+    /// session that recently, with `foreground`, unless that program is in
+    /// its foreground now, and with `refuse_if_blocked`, while its agent asks
+    /// something (none audited: the caller tries again). The terminal is
+    /// asked without the state lock, as it may wait for its input queue or
+    /// its actor.
     fn submit(
         &self,
         caller: &Caller,
         id: &SessionId,
         text: &str,
-        quiet: Option<Duration>,
-        foreground: Option<&str>,
+        submit: Submit<'_>,
     ) -> Result<Response, ApiError> {
-        let (record, terminal) = {
+        let Submit {
+            quiet,
+            foreground,
+            refuse_if_blocked,
+        } = submit;
+        let (record, terminal, lifecycle) = {
             let state = self.lock();
             let record = self.target(&state, caller, Op::Submit, id)?;
-            (record, self.running_terminal(&state, id))
+            let lifecycle = state.live.get(id).map(|live| live.tracker.current());
+            (record, self.running_terminal(&state, id), lifecycle)
         };
-        let written = terminal.map(|terminal| {
-            self.host
-                .submit_expecting(terminal, text, quiet, foreground)
+        if let (true, Some(terminal)) = (refuse_if_blocked, terminal) {
+            // As the daemon has it (hooks, OSC 7501, reports) or as its
+            // screen shows it now: an Enter would answer what it asks.
+            if lifecycle == Some(Lifecycle::Blocked)
+                || asks_now(&*self.host, self.detector, terminal)
+            {
+                return Err(ApiError::new(
+                    ErrorCode::SessionBlocked,
+                    "the session's agent is asking something",
+                ));
+            }
+        }
+        let written = terminal.map(|terminal| match refuse_if_blocked {
+            true => self.host.submit_checked(
+                terminal,
+                text,
+                quiet,
+                foreground,
+                self.unless_asking(terminal),
+            ),
+            false => self
+                .host
+                .submit_expecting(terminal, text, quiet, foreground),
         });
         if let Some(Err(error @ (HostError::Typing | HostError::ForegroundChanged))) = written {
             return Err(host_error(error));
@@ -2649,22 +2679,21 @@ impl Inner {
     /// Run detection on the terminal's visible screen and foreground
     /// process. Called without the state lock held.
     fn detect(&self, terminal: TerminalId) -> Option<Detection> {
-        let info = self.host.info(terminal)?;
-        let screen = self
-            .host
-            .read(terminal, ReadSource::Visible, None, TextFormat::Text)
-            .map(|r| r.text)
-            .unwrap_or_default();
-        let ms_since_output = info
-            .last_output_ms
-            .map(|at| u64::try_from(now_ms().saturating_sub(at)).unwrap_or(0));
-        Some((self.detector)(&DetectInput {
-            screen: &screen,
-            foreground: info.foreground.as_ref(),
-            alternate_screen: info.alternate_screen,
-            title: &info.title,
-            ms_since_output,
-        }))
+        detect_on(&*self.host, self.detector, terminal)
+    }
+
+    /// A submit's Enter check: the Enter goes only while the terminal's
+    /// screen, read when it's due, shows its agent asking nothing. The
+    /// control state isn't consulted: the check runs on the terminal's
+    /// writer thread, which must not wait for the state lock. A host gone
+    /// by then holds the Enter back.
+    fn unless_asking(&self, terminal: TerminalId) -> EnterCheck {
+        let host = Arc::downgrade(&self.host);
+        let detector = self.detector;
+        Box::new(move || {
+            host.upgrade()
+                .is_some_and(|host| !asks_now(&*host, detector, terminal))
+        })
     }
 
     // ------------------------------------------------------------ helpers
@@ -3542,6 +3571,44 @@ fn report_detail(report: &Report) -> Option<String> {
         parts.push(format!("text={text}"));
     }
     (!parts.is_empty()).then(|| audit::clip(&parts.join(" ")))
+}
+
+/// Detection on `terminal`'s visible screen and foreground process, read
+/// now. Takes no control lock.
+fn detect_on(
+    host: &dyn TerminalHost,
+    detector: Detector,
+    terminal: TerminalId,
+) -> Option<Detection> {
+    let info = host.info(terminal)?;
+    let screen = host
+        .read(terminal, ReadSource::Visible, None, TextFormat::Text)
+        .map(|r| r.text)
+        .unwrap_or_default();
+    let ms_since_output = info
+        .last_output_ms
+        .map(|at| u64::try_from(now_ms().saturating_sub(at)).unwrap_or(0));
+    Some(detector(&DetectInput {
+        screen: &screen,
+        foreground: info.foreground.as_ref(),
+        alternate_screen: info.alternate_screen,
+        title: &info.title,
+        ms_since_output,
+    }))
+}
+
+/// `terminal`'s agent asks something (a permission prompt, a question or a
+/// menu) as its screen and foreground process show now.
+fn asks_now(host: &dyn TerminalHost, detector: Detector, terminal: TerminalId) -> bool {
+    detect_on(host, detector, terminal)
+        .is_some_and(|detection| detection.lifecycle == Lifecycle::Blocked)
+}
+
+/// `session_submit`'s conditions.
+struct Submit<'a> {
+    quiet: Option<Duration>,
+    foreground: Option<&'a str>,
+    refuse_if_blocked: bool,
 }
 
 fn host_error(error: HostError) -> ApiError {

@@ -169,6 +169,7 @@ fn submit(client: &mut TestClient, id: &session_core::ids::SessionId, text: &str
         text: text.into(),
         quiet_ms: Some(10_000),
         expect_foreground: Some("cursor-agent".into()),
+        refuse_if_blocked: false,
     });
     assert_eq!(response, Response::Ok, "submit {text:?}");
 }

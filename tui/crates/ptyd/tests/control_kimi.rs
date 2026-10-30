@@ -397,6 +397,7 @@ fn a_reply_typed_in_is_a_new_turn_and_a_cancelled_turn_has_no_reply() {
         text: "Now the docs".into(),
         quiet_ms: Some(10_000),
         expect_foreground: Some("kimi-code".into()),
+        refuse_if_blocked: false,
     };
     assert_eq!(h.handle(&h.user, submit), Response::Ok);
     let terminal = h.host.terminal_of(id);

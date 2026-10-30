@@ -75,6 +75,20 @@ pub trait SessionApi: Send + Sync {
         let _ = foreground;
         self.submit_when_quiet(id, text, quiet)
     }
+    /// [`submit_expecting`](Self::submit_expecting), also refused with
+    /// `session_blocked` while the session's agent asks something (a
+    /// permission prompt, a question or a menu), and its Enter held back if
+    /// the screen shows the agent asking something when it's due (capability
+    /// `session.submit.blocked`; a daemon without it submits anyway).
+    fn submit_unless_blocked(
+        &self,
+        id: &SessionId,
+        text: &str,
+        quiet: Duration,
+        foreground: Option<&str>,
+    ) -> Result<()> {
+        self.submit_expecting(id, text, quiet, foreground)
+    }
     fn touch(&self, id: &SessionId) -> Result<()>;
     fn status(&self) -> Result<DaemonStatusInfo>;
     fn shutdown(&self) -> Result<()>;
@@ -627,6 +641,7 @@ impl SessionApi for Client {
             text: text.to_owned(),
             quiet_ms: None,
             expect_foreground: None,
+            refuse_if_blocked: false,
         })
     }
 
@@ -646,6 +661,23 @@ impl SessionApi for Client {
             text: text.to_owned(),
             quiet_ms: Some(u64::try_from(quiet.as_millis()).unwrap_or(u64::MAX)),
             expect_foreground: foreground.map(str::to_owned),
+            refuse_if_blocked: false,
+        })
+    }
+
+    fn submit_unless_blocked(
+        &self,
+        id: &SessionId,
+        text: &str,
+        quiet: Duration,
+        foreground: Option<&str>,
+    ) -> Result<()> {
+        self.expect_ok(&Request::SessionSubmit {
+            id: id.clone(),
+            text: text.to_owned(),
+            quiet_ms: Some(u64::try_from(quiet.as_millis()).unwrap_or(u64::MAX)),
+            expect_foreground: foreground.map(str::to_owned),
+            refuse_if_blocked: true,
         })
     }
 
@@ -2258,6 +2290,7 @@ mod tests {
                     text: "echo hi".into(),
                     quiet_ms: None,
                     expect_foreground: None,
+                    refuse_if_blocked: false,
                 },
                 Request::SessionTouch { id: s1.clone() },
                 Request::DaemonStatus,

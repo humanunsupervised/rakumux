@@ -3,6 +3,7 @@
 //! master handle the actor resizes through.
 
 use super::actor::ActorMsg;
+use crate::host::EnterCheck;
 use crate::log_debug;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -80,6 +81,8 @@ pub(crate) struct PtyInput {
     /// `then` goes only while the process group that had the foreground when
     /// `bytes` were written still has it.
     pub(crate) same_foreground: bool,
+    /// `then` goes only if this says so when it's due (after the pause).
+    pub(crate) then_if: Option<EnterCheck>,
 }
 
 impl From<Vec<u8>> for PtyInput {
@@ -88,6 +91,7 @@ impl From<Vec<u8>> for PtyInput {
             bytes,
             then: None,
             same_foreground: false,
+            then_if: None,
         }
     }
 }
@@ -111,7 +115,9 @@ pub(crate) fn run_writer(pty: File, rx: Receiver<PtyInput>) {
 /// when the text before it was written still has it: had that program
 /// exited meanwhile, the Enter would run the text in the shell it left (the
 /// shell's readline keeps a paste unrun until then). Without it the text is
-/// type-ahead for whatever reads next, as typing is.
+/// type-ahead for whatever reads next, as typing is. With `then_if`, it is
+/// written only if that says so then (an agent that came to ask something
+/// meanwhile would take the Enter as its answer).
 fn write_inputs(mut pty: impl Write, rx: Receiver<PtyInput>, foreground: impl Fn() -> Option<i32>) {
     for input in rx {
         let guarded = input.then.is_some() && input.same_foreground;
@@ -124,6 +130,10 @@ fn write_inputs(mut pty: impl Write, rx: Receiver<PtyInput>, foreground: impl Fn
             std::thread::sleep(pause);
             if guarded && foreground() != before {
                 log_debug!("the foreground changed after a submit's text; its Enter is dropped");
+                continue;
+            }
+            if input.then_if.is_some_and(|check| !check()) {
+                log_debug!("a submit's Enter is held back: its check refused it");
                 continue;
             }
             if let Err(e) = pty.write_all(&bytes) {
@@ -246,6 +256,7 @@ mod tests {
             bytes: text.as_bytes().to_vec(),
             then: Some((Duration::from_millis(1), b"\r".to_vec())),
             same_foreground: true,
+            then_if: None,
         }
     }
 
@@ -294,5 +305,37 @@ mod tests {
             ..submit("echo next")
         };
         assert_eq!(written_by(vec![ahead], foreground), b"echo next\r");
+    }
+
+    #[test]
+    fn a_submits_enter_goes_only_if_its_check_says_so_once_the_text_is_in() {
+        // Asked after the text was written: whatever opened meanwhile shows.
+        let written = Written::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let check = |answer: bool| -> EnterCheck {
+            let (written, seen) = (written.clone(), seen.clone());
+            Box::new(move || {
+                seen.lock().unwrap().push(written.0.lock().unwrap().clone());
+                answer
+            })
+        };
+        let (tx, rx) = mpsc::channel();
+        for (text, answer) in [("approve?", false), ("hi", true)] {
+            tx.send(PtyInput {
+                then_if: Some(check(answer)),
+                ..submit(text)
+            })
+            .unwrap();
+        }
+        tx.send(PtyInput::from(b"x".to_vec())).unwrap();
+        drop(tx);
+        write_inputs(written.clone(), rx, || Some(42));
+        // The first Enter is held back (its text stays unsent); what follows
+        // is written as usual.
+        assert_eq!(*written.0.lock().unwrap(), b"approve?hi\rx");
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [b"approve?".to_vec(), b"approve?hi".to_vec()]
+        );
     }
 }

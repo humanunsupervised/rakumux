@@ -25,8 +25,8 @@ mod sink;
 
 use crate::handoff::{PaneHandoff, ProcessHandoff, TerminalHandoff};
 use crate::host::{
-    AttachControl, HostAttachment, HostError, HostEvent, PaneAttachment, PaneSpawnSpec, SpawnSpec,
-    TerminalHost, TerminalInfo, TerminalProcessInfo, TerminalProgram, TerminalState,
+    AttachControl, EnterCheck, HostAttachment, HostError, HostEvent, PaneAttachment, PaneSpawnSpec,
+    SpawnSpec, TerminalHost, TerminalInfo, TerminalProcessInfo, TerminalProgram, TerminalState,
 };
 use crate::persist::ScrollbackStore;
 use crate::{log_debug, log_error, log_info, log_warn};
@@ -525,12 +525,14 @@ fn kill_group(pid: u32) {
 impl Host {
     /// Paste `text`, then Enter in a write of its own once the program took
     /// the paste in; with `same_foreground`, the Enter only while the process
-    /// group that had the foreground at the paste still has it.
+    /// group that had the foreground at the paste still has it, and with
+    /// `enter`, only if it says so then.
     fn queue_submit(
         &self,
         id: TerminalId,
         text: &str,
         same_foreground: bool,
+        enter: Option<EnterCheck>,
     ) -> Result<(), HostError> {
         let shared = self.inner.get(id)?;
         if !shared.is_running() {
@@ -543,7 +545,34 @@ impl Host {
             bytes: vt::input::encode_paste(&text, &modes),
             then: Some((SUBMIT_ENTER_AFTER, b"\r".to_vec())),
             same_foreground,
+            then_if: enter,
         })
+    }
+
+    /// `submit_expecting`, with `enter` asked before its Enter.
+    fn submit_guarded(
+        &self,
+        id: TerminalId,
+        text: &str,
+        quiet: Option<Duration>,
+        foreground: Option<&str>,
+        enter: Option<EnterCheck>,
+    ) -> Result<(), HostError> {
+        if let Some(expected) = foreground {
+            // Read now, not the last poll's: the agent may have just exited.
+            let now = self
+                .inner
+                .get(id)?
+                .request(|reply| ActorMsg::Foreground { reply })?;
+            if now.as_deref() != Some(expected) {
+                return Err(HostError::ForegroundChanged);
+            }
+        }
+        if let Some(quiet) = quiet {
+            self.refuse_typing(id, quiet)?;
+        }
+        // Expecting a program, its Enter goes only to it.
+        self.queue_submit(id, text, foreground.is_some(), enter)
     }
 
     /// [`HostError::Typing`] while the controller sent input within `quiet`.
@@ -754,7 +783,7 @@ impl TerminalHost for Host {
     }
 
     fn submit(&self, id: TerminalId, text: &str) -> Result<(), HostError> {
-        self.queue_submit(id, text, false)
+        self.queue_submit(id, text, false, None)
     }
 
     fn submit_when_quiet(
@@ -774,21 +803,18 @@ impl TerminalHost for Host {
         quiet: Option<Duration>,
         foreground: Option<&str>,
     ) -> Result<(), HostError> {
-        if let Some(expected) = foreground {
-            // Read now, not the last poll's: the agent may have just exited.
-            let now = self
-                .inner
-                .get(id)?
-                .request(|reply| ActorMsg::Foreground { reply })?;
-            if now.as_deref() != Some(expected) {
-                return Err(HostError::ForegroundChanged);
-            }
-        }
-        if let Some(quiet) = quiet {
-            self.refuse_typing(id, quiet)?;
-        }
-        // Expecting a program, its Enter goes only to it.
-        self.queue_submit(id, text, foreground.is_some())
+        self.submit_guarded(id, text, quiet, foreground, None)
+    }
+
+    fn submit_checked(
+        &self,
+        id: TerminalId,
+        text: &str,
+        quiet: Option<Duration>,
+        foreground: Option<&str>,
+        enter: EnterCheck,
+    ) -> Result<(), HostError> {
+        self.submit_guarded(id, text, quiet, foreground, Some(enter))
     }
 
     fn send_keys(
