@@ -186,6 +186,44 @@ fn only_folders_this_machine_lists_and_never_by_path() {
 }
 
 #[test]
+fn a_folder_is_matched_by_its_name_exactly_as_listed() {
+    // Folder names keep their spaces: the session list sends them as they are.
+    let mut sync = on(
+        &[view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/ notes")],
+        true,
+    );
+    let page = serde_json::json!({
+        "version": 1, "replies": [], "latest_seq": 0, "more": false,
+        "new_sessions": [{"id": ASK, "machine": "studio", "folder": " notes", "status": "pending",
+                          "created_at": 1761220000000_i64, "status_at": 1761220000000_i64}],
+    });
+    let reply = FeedHttpReply {
+        status: 200,
+        retry_after: None,
+        body: serde_json::to_vec(&page).unwrap(),
+    };
+    sync.read(true, wire::replies(&reply).unwrap().new_sessions);
+    let Some(NewSessionWork::Create { request, .. }) = sync.next_work(NOW) else {
+        panic!("expected a create");
+    };
+    assert_eq!(
+        request.scope,
+        Some(ScopeRoot::from_canonical("/home/me/ notes".into()))
+    );
+    // Without the space it's another name.
+    sync.read(true, vec![ask(OTHER, "notes", None)]);
+    sync.created(ASK, Err(ErrorCode::NotFound));
+    let reports: Vec<_> = std::iter::from_fn(|| {
+        let report = body(sync.next_work(NOW));
+        sync.reported(true, Ok(()), NOW);
+        Some(report)
+    })
+    .take(2)
+    .collect();
+    assert_eq!(reports[1]["failure"], "folder_unknown");
+}
+
+#[test]
 fn two_folders_of_one_name_need_the_session_that_says_which() {
     let a = view("01K89ZQ4D2F6H8J0K2M4N6P8R0", "/home/me/work/api");
     let b = view("01K89ZQ4D2F6H8J0K2M4N6P8R1", "/home/me/play/api");

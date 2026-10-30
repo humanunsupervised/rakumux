@@ -108,14 +108,16 @@ struct WireAsk {
 
 impl WireAsk {
     fn checked(self) -> Option<NewSessionAsk> {
-        let folder = wire::label(&self.folder, 128).filter(|folder| {
-            *folder == self.folder
-                && self.folder.len() <= 512
-                && !folder.contains('/')
-                && folder != "."
-                && folder != ".."
-        })?;
-        let machine = wire::label(&self.machine, 64).filter(|machine| *machine == self.machine)?;
+        // Kept as sent, to compare with this machine's own names, once they're
+        // one visible line within the contract's bounds; never used as a path.
+        let folder = self.folder;
+        let fits = one_line(&folder, 128, 512)
+            && !folder.contains('/')
+            && !matches!(folder.trim(), "." | "..");
+        let machine = self.machine;
+        if !fits || !one_line(&machine, 64, 256) {
+            return None;
+        }
         let agent = match self.agent {
             Some(name) => Some(Agent::of(&name)?),
             None => None,
@@ -133,6 +135,14 @@ impl WireAsk {
             agent,
         })
     }
+}
+
+/// `text` is one visible line (the contract's `label`) of at most
+/// `characters` characters and `bytes` UTF-8 bytes.
+fn one_line(text: &str, characters: usize, bytes: usize) -> bool {
+    text.len() <= bytes
+        && text.chars().count() <= characters
+        && wire::label(text, characters).is_some_and(|clean| clean == text.trim())
 }
 
 /// The replies read's `new_sessions`: those within the contract, at most
