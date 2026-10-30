@@ -147,8 +147,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    on demand: by `rakumux account login` or the TUI's sign-in, or when the home has a saved
    account; it then runs until SIGTERM. Clients talk to it over a private Unix socket
    (`rakumux_sensagent::owner`). It shares sessions only while the account's AI session titles
-   switch (`ai_session_summaries` in `GET /api/v1/features`, read every 2 minutes) is on: then
-   it consents for the folders of live sessions (never private ones), and off it stops. **One
+   are on (`ai_session_summaries` in `GET /api/v1/features`, read every 2 minutes; rakumux.com
+   answers on for every signed-in account): then it consents for the folders of live sessions
+   (never private ones), and off it stops. **One
    title per chat**: an agent conversation the daemon follows (`session_turn`) is titled once,
    when its agent has written 5 messages (`sessions.ai_summary.every_messages`) or its turn
    finishes sooner; after that only when asked: `OwnerRequest::Summarize` (the ↻ after a
@@ -174,11 +175,12 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    session counts as AI-titled again. A title another session of the folder has gets ` 2`,
    ` 3`, … (names are unique within a folder). A service answer without `title` renames
    nothing. Settings → Account signs in (a code, link and QR code); while a title is being made
-   a spinner sits right after the session's name; Settings → Available on sign-in turns the
-   account's AI session titles and Agent feed on and off (greyed out when signed out;
-   `OwnerRequest::SetFeatures`, applied at once and saved to the account with
-   `PATCH /api/v1/features`, as the website's Features page saves them), and `rakumux account
-   status` lists them and each live session's AI description. Its stderr, static failure codes only, goes to
+   a spinner sits right after the session's name; `rakumux account status` says who is signed
+   in and each live session's AI description. **No switches**: AI session titles, the agent
+   feed, replies and new sessions from rakumux.com, and rtop there are on for every signed-in
+   account, Free or Pro; being signed in is the gate. The TUI has no switch for them; the
+   service still takes `OwnerRequest::SetFeatures` from an older TUI and sends it as
+   `PATCH /api/v1/features`, which rakumux.com accepts and ignores. Its stderr, static failure codes only, goes to
    `~/.rakumux/logs/status-service.log`. Clerk has no custom scopes, so production names
    `profile` as the AI status scope (`DeviceAuthConfig::with_status_scope`), matching the
    website's check. Clerk's access tokens last 24 hours: the service renews them with the
@@ -187,7 +189,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    asks it to stop (`Shutdown`) and starts its own; a newer one is used as it is. Overrides for development: `RAKUMUX_CLERK_ISSUER`,
    `RAKUMUX_CLERK_CLIENT_ID`, `RAKUMUX_CLERK_DEVICE_PAGE`, `RAKUMUX_CLOUD_ORIGIN`.
    **Agent feed** (`rakumux_sensagent::feed`, contract `contracts/feed/`): while the account's
-   Feed switch (off by default, same features read) is on, the service has the daemon capture
+   feed is on (`feed` in the same features read), the service has the daemon capture
    replies (`reply_capture`), takes them from its `replies` subscription (and `reply_list` after
    reconnecting or starting late), leaves out private sessions, masks keys, credential
    assignments and tokens, and uploads them with the session's name, folder name and git
@@ -197,9 +199,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    answers, `open`, kept whole and passed to TUIs when they change) every 10 s while a TUI shows it (an owner `feed` request in the last 30 s; one marked
    `background`, from a TUI that only keeps the feed to count what's new, doesn't count), else
    every 2 minutes. Cache (the newest 500) and upload queue are memory only; the TUI asks the
-   owner for the entries changed since its revision (`OwnerRequest::Feed`). Signing out or turning the
-   switch off empties both. **Whole chats** (`feed/chats.rs`, `ChatSync`): under the same
-   switch, each live, non-private session's agent conversation is read from the daemon
+   owner for the entries changed since its revision (`OwnerRequest::Feed`). Signing out (or the
+   features read saying the feed is off) empties both. **Whole chats** (`feed/chats.rs`,
+   `ChatSync`): while the feed is on, each live, non-private session's agent conversation is read from the daemon
    (`session_transcript`) after where it was last uploaded, at most every 5 s while it changes
    (every second while the replies read asks for 1 s: rakumux.com open, a reply waiting here, or
    the half minute after reply activity; `ReplySync::watched`),
@@ -218,7 +220,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    its answer was lost isn't stored, or typed in, twice). Replies being typed in and those
    written in a TUI have a worker of their own (`rakumux-status-reply`), apart from the two that
    fetch files, make AI titles and upload chats, so a TUI's write doesn't wait behind them past
-   the 30 s it waits for its answer. Under the same switch the service reads the account's replies as they change
+   the 30 s it waits for its answer. While the feed is on the service reads the account's replies as they change
    (`GET /api/v1/feed/replies?after=SEQ&machine=NAME`, as soon as the answer's `poll_ms` says:
    every second while a reply this machine hasn't read yet waits for it or the user has the
    website open, and for
@@ -258,12 +260,13 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `sensagent/status/replies.json`, 0600): the ids it typed in or decided (marked before the
    daemon is asked, so a reply goes in at most once), those handed to the daemon and not yet
    reported (reported `delivered` on the next start), and the reports rakumux.com hasn't taken
-   (kept while the switch is off too). The agent's answer to a reply is its reply that
+   (kept while the feed is off too). The agent's answer to a reply is its reply that
    finished after the reply was typed in, and by the end of that reply's turn: so replies
    typed in one after another each get theirs, and one whose turn ended without an answer
    (interrupted, an API error) never takes a later one.
    It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
-   `private`, `not_accepted`, `refused`, `attachment_unavailable`, `not_taken`;
+   `private`, `refused`, `attachment_unavailable`, `not_taken`; `not_accepted` stays in the
+   contract for older releases, which send it while their own setting is off;
    `POST /api/v1/feed/replies/status`). **Files attached** on rakumux.com (`attachments`, at
    most 5 of 4 MiB each; `feed/uploads.rs`): once a reply could otherwise be typed in, the
    service fetches its files one at a time (`GET /api/v1/feed/replies/attachments/{id}`, the
@@ -276,12 +279,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    tries again with backoff; the text never goes in without its files. A reply that won't be
    typed in has its files removed; typed in, they're kept 7 days (cleaned at the service's
    start and daily). Replies with files reach this machine only because its session list says
-   `capabilities: ["reply_attachments"]`. A reply written
-   on rakumux.com or another machine is typed only when this machine's
-   `sessions.remote_replies` is on (Settings → Replies from rakumux.com, local, off by default,
-   read every 10 s); one written in this machine's TUI always is: one whose id this machine
-   made (`ReplySync::wrote`, kept in `replies.json`), never one that only names it in `from`,
-   which any machine of the account can say. **This machine** goes by a name and an id it keeps
+   `capabilities: ["reply_attachments"]`. A reply is typed in wherever it was written: on
+   rakumux.com, on another machine or in this machine's TUI (older releases typed one from
+   elsewhere only while their `sessions.remote_replies` was on; that key is now ignored and
+   dropped from `config.json`). **This machine** goes by a name and an id it keeps
    (`feed/machine.rs`, `sensagent/machine.json`, 0600): the hostname when the file was made
    (a hostname that changes later leaves it), and a ULID sent with every feed request
    (`X-Rakumux-Machine-Id`). The first of the account's machines to send its session list under
@@ -299,7 +300,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    session and conversation is uploaded with `reply_to`, and the cloud links it (`response`,
    `thread`). Pages to TUIs carry the replies (`FeedPage.replies`), and a reply read whole in
    the TUI's feed shows its thread under its turn.
-   **Session list** (`feed/sessions.rs`, `SessionSync`): under the same switch the service
+   **Session list** (`feed/sessions.rs`, `SessionSync`): while the feed is on the service
    uploads the machine's whole list of sessions (`POST /api/v1/feed/sessions`, at most 200, never
    private or dead ones): what the TUI's Status, Folders and App tabs group by (name, folder
    name, branch, agent, or without a named one the `program` the App tab files it under (its
@@ -316,7 +317,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    "Resources"): the list says `capabilities: ["resources"]` only while the daemon announces
    `resources` (read at each connect; an `unsupported` answer drops it too), so rakumux.com tells
    a machine whose daemon is too old from one still reading. While someone has rtop open on
-   rakumux.com, a replies read answers `resources_wanted`; then (signed in, the switch on, the
+   rakumux.com, a replies read answers `resources_wanted`; then (signed in, the feed on, the
    name confirmed) the service asks the daemon what everything uses (`resource_usage`) every 2 s
    on the replies worker and uploads each reading after the first (`POST /api/v1/feed/resources`),
    with rates from the last two: the machine's CPUs, CPU share, memory and network a second;
@@ -324,7 +325,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `other`, from the clients' hello names) with how many; and each session the list has, by id,
    its processes added up and counted. Never a process name, command line, pid or path, never a
    private session or another machine's. It stops when an answer says `wanted: false`, when
-   neither a read nor an answer asked for 30 s, or when the switch goes off, and keeps nothing
+   neither a read nor an answer asked for 30 s, or when the feed goes off, and keeps nothing
    but the last reading (dropped when it stops); a daemon without `resources` isn't asked again
    until it reconnects.
    **New sessions from rakumux.com** (`feed/new_sessions.rs`, `NewSessionSync`; contract
@@ -332,7 +333,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    for a new session in a folder its session list names, a login shell or one agent (Claude
    Code, Codex, OpenCode). Because its list says `new_sessions`, the machine's replies read
    brings the requests pending for it (`new_sessions`, with every read until reported, so
-   pokes and the replies read's pace serve them too), under the same switch and once its name
+   pokes and the replies read's pace serve them too), while the feed is on and once its name
    is confirmed. The service starts each through the daemon as the user (`session_create`):
    in the folder of the sessions it lists (live or exited, never a private one or another
    machine's) whose name (`folder_of`, the last path component) is the request's, the one of
@@ -341,18 +342,17 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    a generated name, the daemon's environment and default size, and for an agent its own
    command (`claude`, `codex`, `opencode`) typed in as a startup command, as `rakumux new
    --cmd` would. It reports `created` with the session's id and name
-   (`POST /api/v1/feed/new-sessions/status`), or `failed`: `not_accepted` while this machine's
-   `sessions.remote_sessions` is off (Settings → New sessions from rakumux.com, local, off by
-   default, read every 10 s), `folder_unknown` (no listed folder of that name, or several
-   without `folder_session` saying which), `refused` (the daemon's error). One at a time; each
+   (`POST /api/v1/feed/new-sessions/status`), or `failed`: `folder_unknown` (no listed folder
+   of that name, or several without `folder_session` saying which), `refused` (the daemon's
+   error); `not_accepted` stays in the contract for older releases, which send it while their
+   `sessions.remote_sessions` is off (now ignored and dropped from `config.json`). One at a time; each
    id is marked handled before the daemon is asked and kept with the reports not yet taken in
    `sensagent/status/new-sessions.json` (0600, an hour), so a request is started at most once
    whatever happens to the service (one it stopped starting before the daemon answered isn't
    reported; rakumux.com expires it after 10 minutes). The new session is followed at once
    (before its `created` event) and, on a Sprite, held up 20 s. A first prompt asked for with
    it never reaches the machine with the request: rakumux.com writes it to the new session as
-   a session message once it's `created`, typed in like any (so it needs `remote_replies`
-   too).
+   a session message once it's `created`, typed in like any.
    **Enrolled machines** (`rakumux_sensagent::enrolment`, contract `contracts/feed/`, "Enrolled
    machines"): a machine with no sign-in of its own (your Sprite) gets one from a signed-in
    machine of the account: `OwnerRequest::MachineEnrol {machine_id, name, wake_url}` →
@@ -399,9 +399,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    (a development build then uploads its own `rakumux-ptyd` and `rakumux-api` and restarts the
    daemon in place), `rakumux-ptyd serve` and `rakumux-api` as Sprite services behind its public
    URL on port 8080, a remote token of its own in its `remote.json`, then `machine_add`. Signed
-   in, it then enrols the Sprite for the feed (component 10): asked once whether replies from
-   rakumux.com are typed into its agents (its `sessions.remote_replies`; `--replies`,
-   `--no-replies`), it writes the credential and `machine.json` (the daemon's machine id for it,
+   in, it then enrols the Sprite for the feed (component 10): it writes the credential and `machine.json` (the daemon's machine id for it,
    and its name) into the Sprite's `~/.rakumux/sensagent` (0700) and runs `rakumux
    status-service` as the Sprite service `rakumux-status`, so the Sprite's agents' replies reach
    the feed and yours reach them, laptop open or not; `rakumux sprite disconnect` revokes it.
@@ -777,8 +775,8 @@ accidents; they don't stop a hostile process running as the same user.
                                  (the sign-in, 0600), status/ (descriptions and sharing consent,
                                  SQLite; titles.json: the title it last gave each session;
                                  titled-chats.json: the chats whose automatic title was made;
-                                 chats.json; replies.json: replies written, typed in or
-                                 decided here and reports not yet taken; new-sessions.json:
+                                 chats.json; replies.json: replies typed in or decided
+                                 here and reports not yet taken; new-sessions.json:
                                  new sessions from rakumux.com started or decided here and
                                  reports not yet taken), machine.json (this
                                  machine's feed name and id), its registration and private socket
@@ -807,10 +805,6 @@ accidents; they don't stop a hostile process running as the same user.
   the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
-  remote_replies (false: replies written to the feed on rakumux.com or other machines are typed
-  into this machine's sessions; Settings → Replies from rakumux.com), remote_sessions (false:
-  new sessions asked for on rakumux.com are started in this machine's folders; Settings → New
-  sessions from rakumux.com),
   sidebar_width (dragged divider),
   feed_width (the docked feed pane's width, set by dragging the line left of it; left out until
   dragged), sprite_folders (folders whose new sessions run on your Sprite), sprite_env_copy
@@ -820,7 +814,8 @@ accidents; they don't stop a hostile process running as the same user.
   left out until dragged), session_order ({folder path: [session ids]}: the list order set by
   dragging or `J`/`K`; left out when empty), section_order ({"app:<name>" | "status:<status>":
   [session ids]}: the same under the App and Status tabs, each its own; left out when empty)}`. The folder filter isn't saved; the
-  `selected_projects` of 0.6 previews is ignored and dropped on the next save.
+  `selected_projects` of 0.6 previews, and the `remote_replies` and `remote_sessions` switches of
+  0.1.32 and earlier, are ignored and dropped on the next save.
 - **Environment** injected into every session: `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN`,
   `RAKUMUX_SOCKET`, `RAKUMUX_BIN`, `TERM=xterm-256color`, `COLORTERM=truecolor`. Other variables:
   `RAKUMUX_HOME` (isolated data dir; tests), `RAKUMUX_PTYD_BIN` (daemon binary),
@@ -1004,16 +999,16 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   changed files, as its conversation shows; listed under the session's row (`w`).
 - **Reply** (agent reply): what an agent said when it finished a turn, captured by the daemon
   only while the status service has reply capture on, for the **feed**: the replies of the
-  account's machines, kept on rakumux.com for 30 days while the account's Feed switch is on.
+  account's machines, kept on rakumux.com 7 days (90 with Pro) for every signed-in account.
 - **Chat** (transcript): an agent conversation's messages in order (prompts, text,
-  reasoning, tool calls, tools' output), uploaded under the same switch; a reply read whole in
+  reasoning, tool calls, tools' output), uploaded the same way; a reply read whole in
   the feed shows its turn from it.
 - **Reply written back** (`FeedReply`): what the user wrote back to a feed entry, typed into
   the entry's session on its machine once its agent waits; with the entries that answer them
   they make a **thread**.
 - **New session from rakumux.com** (`NewSessionAsk`): a session the user asked a machine for
   on rakumux.com, in a folder it lists there (by name), a shell or one named agent; started by
-  that machine's account service only while its `sessions.remote_sessions` is on.
+  that machine's account service, signed in.
 - **Daemon** (`rakumux-ptyd`): the single per-user server owning every session.
 - **Client**: anything connected to the daemon (TUI, CLI call, agent, `rakumux-api`).
 - **External API**: `rakumux-api`, HTTP on 127.0.0.1 over the daemon; found through `api.json`.
@@ -1073,10 +1068,10 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
 | `rakumux daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
-| `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in, whether AI session titles are on (rakumux.com/features) and each live session's AI description (`--json`: `ai_session_titles`, and `ai_session_summaries` as before) |
+| `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in and each live session's AI description (`--json` still carries `ai_session_titles`, `ai_session_summaries` and `feed` for scripts) |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux machine add NAME URL --token T \| ls [--json] \| rm NAME` | Other machines whose sessions are listed and used here (their `rakumux-api` URL and remote token) |
-| `rakumux sprite connect [--token T] [--sprite NAME] [--replies \| --no-replies] \| status \| disconnect` | Your own Fly.io Sprite for sessions (signed in, its replies in your feed); `rakumux new --sprite` (or `--machine NAME`) runs a session there; `disconnect` revokes its feed credential |
+| `rakumux sprite connect [--token T] [--sprite NAME] \| status \| disconnect` | Your own Fly.io Sprite for sessions (signed in, its replies in your feed and yours typed into its agents); `rakumux new --sprite` (or `--machine NAME`) runs a session there; `disconnect` revokes its feed credential; `--replies`/`--no-replies` of 0.1.32 and earlier are accepted and ignored |
 | `rakumux-api [--port N] [--detach] [--remote-listen ADDR:PORT]...` | External HTTP API on 127.0.0.1, plus the remote listener when remote access is on (`api/README.md`) |
 | `rakumux-mcp` | MCP server for agents, e.g. `claude mcp add --scope user rakumux -- rakumux-mcp` (`mcp/README.md`) |
 
@@ -1176,7 +1171,7 @@ MODE`), centred while it clears both sides, else between them. On the right butt
 (a darker shade of the orange bar; dark chips on the blue one): in Rakumux mode `f ≡ Feed`
 (with `●N`, `●99+` beyond 99, for the feed entries that finished during this run and arrived
 since the feed was last on screen: memory only, `FeedStore::unseen`, counted while the account's
-Feed switch is on; it does what `f` does), `? Help` and `, Settings`, then the
+feed is on; it does what `f` does), `? Help` and `, Settings`, then the
 Rakumux account at the bottom right: `a Sign in` while signed out (a tap asks for a sign-in code
 at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\` alone in
 session mode (the label names the mode). To count while the feed is hidden the TUI asks the account service for
@@ -1406,11 +1401,11 @@ Settings is one scrolling page without tabs (`help::ModalTab::Settings`) under a
 typing narrows it to the settings and actions whose section or name has every word typed
 (`Backspace` deletes, `Esc` clears, then closes; `Space` changes the selected row while nothing
 is typed), and the dialog keeps its size meanwhile. The settings come first (Account, where you
-sign in, then Available on sign-in, then Appearance, Keyboard and App), then under a `Keys`
+sign in, then Appearance, Keyboard and App), then under a `Keys`
 rule every action and its keys, which `Enter` runs; `↑`/`↓` select among the rows shown; `→`
 shows the selected row's note in a popover over the page (`←`, `Esc`, moving or `Enter` close
 it), so the rows never shift; the wheel moves the selection. A setting that can't be changed
-now (Available on sign-in, signed out) is greyed out. Labels sit on the left and values and keys are
+now is greyed out. Labels sit on the left and values and keys are
 pinned to the right. It's sized from its rows: centred, its widest row plus 20 columns (48–100),
 capped by screen width with a side margin, and as tall as its rows, up to 80% of the screen's
 height, scrolling only as far as the selected row needs. Help retains its wider reading area

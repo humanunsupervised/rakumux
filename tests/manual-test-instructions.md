@@ -161,12 +161,12 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
       `~/.zshrc`. In a new session, run a few commands: they appear as `<timestamp>\t<command>`
       lines in `$RAKUMUX_HOME/history/<session id>.log`. Outside sessions nothing is logged.
 - [ ] `rakumux_rename_session my new name` inside a session renames it.
-- [ ] Signed out (or with AI session titles off), configure an Anthropic or OpenAI key in
+- [ ] Signed out, configure an Anthropic or OpenAI key in
       `config.json` (or export `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). Create a session with a
       blank name, run something meaningful (e.g. `cargo test`), and let it go idle: the session
       gets a descriptive name (`running_cargo_tests`-style, underscores only).
 - [ ] With no key configured, sessions keep their generated names and nothing errors.
-- [ ] Signed in with AI session titles on (Settings → Available on sign-in), start an agent
+- [ ] Signed in (Settings → Account; AI session titles are always on then), start an agent
       in a new session: after its fifth message (or when its turn ends) the session is renamed
       with a short AI title, and the local key isn't used. Rename it with `r`: the agent's next
       chat leaves that name alone. Hover the row: `↻` shows right after the name; a click (or

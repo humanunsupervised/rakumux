@@ -207,8 +207,8 @@ For Codex, OpenCode and session identity, see the [MCP guide](mcp/README.md).
 
 Everything above works without an account.
 
-**Sign in** with `a` in Rakumux mode, or `rakumux account login`. Then turn features on under
-**Settings → Available on sign-in**.
+**Sign in** with `a` in Rakumux mode, or `rakumux account login`. Everything below is then on,
+with nothing to turn on.
 
 **AI session titles** name each agent session after what it's doing. A name you give (`r`)
 stays. Press `s`, or the `↻` after a hovered name, for a new title.
@@ -218,19 +218,23 @@ stays. Press `s`, or the `↻` after a hovered name, for a new title.
 - in Rakumux's Feed (`f`);
 - at [rakumux.com/feed](https://rakumux.com/feed), with your sessions by status, folder and app.
 
-**Writing back:** you can answer an agent from the web. Rakumux types your message into the
-session once the agent is waiting for you. Each machine takes replies written elsewhere only with
-**Replies from rakumux.com** turned on in its Settings.
+**Writing back:** you can answer an agent from rakumux.com or another machine. Rakumux types your
+message into the session once the agent is waiting for you.
 
 **New sessions from the web:** start a shell, Claude Code, Codex or OpenCode in one of a machine's
-folders from rakumux.com. The machine starts it only with **New sessions from rakumux.com**
-turned on in its Settings, and only in a folder it already lists there.
+folders from rakumux.com. The machine starts it only in a folder it already lists there, and never
+runs a path or command from the website.
+
+**rtop on the web:** while you have it open on rakumux.com, each machine reports what it and its
+sessions use.
 
 **Privacy:** your machine only ever calls out to rakumux.com. Nothing calls in. Before uploading,
-Rakumux masks text that looks like a key, a credential or a token.
+Rakumux masks text that looks like a key, a credential or a token. Private sessions are never
+sent. Being signed in is what lets rakumux.com reach a machine's sessions:
+`rakumux account logout` stops it.
 
-The free plan covers all of this. See [pricing](https://rakumux.com/pricing) and the
-[privacy policy](https://rakumux.com/privacy).
+The free plan covers all of this and keeps 7 days of history; Pro keeps 90. See
+[pricing](https://rakumux.com/pricing) and the [privacy policy](https://rakumux.com/privacy).
 
 ## From your phone
 
@@ -247,7 +251,7 @@ The free plan covers all of this. See [pricing](https://rakumux.com/pricing) and
 - **Data:** sessions, saved output, logs and `config.json` live in `~/.rakumux`.
 - **Separate instance:** set `RAKUMUX_HOME` to another directory to run a fully separate
   instance, with its own server and sessions.
-- **Settings** (`,`): layout, icons, session-switching keys, your account and its features.
+- **Settings** (`,`): layout, icons, session-switching keys and your account.
 - **Session names:** Rakumux names sessions with AI if you provide your own Anthropic or OpenAI
   key, through `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `config.json`.
 - **Logs:** `rakumux daemon logs` shows the server's log.

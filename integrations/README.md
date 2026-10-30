@@ -150,7 +150,7 @@ Claude Code, the main conversation's text after its last tool call (a prompt or 
 starts it over; one text block per log entry, keyed by the entry's `uuid`); for Codex, the
 `task_complete` event's `last_agent_message` (keyed by its `turn_id`; a `user_message` or
 `task_started` starts it over). The control layer takes it only while reply capture is on (the
-status service turns it on for an account whose Feed switch is on), when the session turns
+status service turns it on for an account whose feed is on), when the session turns
 `Done` after it was seen working, from a read of the log made after that; a key already
 captured is never captured again. See the protocol section of `AGENTS.md` (`reply_capture`,
 `reply_list`, `replies` subscriptions). The hook adapters still forward metadata only.
