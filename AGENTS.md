@@ -136,7 +136,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `get_session`, `create_session`, `read_session`, `rename_session`; a `folder` argument (alias
    `project`, deprecated) narrows names or places new sessions. Finds the API through
    `api.json` and starts `rakumux-api --detach` when needed; forwards `RAKUMUX_SESSION_ID`/
-   `RAKUMUX_SESSION_TOKEN` as identity headers; returns terminal text sanitized, capped and inside
+   `RAKUMUX_SESSION_TOKEN` as identity headers (with only one of them, an agent that strips
+   `*TOKEN*` variables or forwards only those it's told, it refuses every call rather than act as
+   the user: `EnvIdentity::Incomplete`); returns terminal text sanitized, capped and inside
    a nonce-delimited untrusted block. See `mcp/README.md`.
 10. **Account and AI session titles** (`tui/crates/sensagent`, `tui/src/account.rs`): a
    per-home service, the hidden `rakumux status-service` (`rakumux_sensagent::service::serve`),
@@ -192,8 +194,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    **Agent feed** (`rakumux_sensagent::feed`, contract `contracts/feed/`): while the account's
    feed is on (`feed` in the same features read), the service has the daemon capture
    replies (`reply_capture`), takes them from its `replies` subscription (and `reply_list` after
-   reconnecting or starting late), leaves out private sessions, masks keys, credential
-   assignments and tokens, and uploads them with the session's name, folder name and git
+   reconnecting or starting late), leaves out private sessions and agents rakumux.com doesn't
+   take (the feed contract's agent list, `feed/agents.rs`: `claude-code`, `codex`, `opencode`,
+   `copilot`, `cursor-agent`, `pi`, `grok`, `kimi`, `droid`, `amp`; never queued, so one can't
+   hold back a batch; the same goes for chats, and the session list names such a session's
+   `program`), masks keys, credential assignments and tokens, and uploads them with the session's name, folder name and git
    branch (`POST /api/v1/feed/entries`, batches of up to 50,
    idempotent on the reply id). It reads the account's feed back (`GET /api/v1/feed?after=SEQ`;
    entries carry their turn's `prompt`, and every page the account's prompts still waiting for
@@ -344,8 +349,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    until it reconnects.
    **New sessions from rakumux.com** (`feed/new_sessions.rs`, `NewSessionSync`; contract
    `contracts/feed/`, "New sessions"): on rakumux.com the user can ask one of their machines
-   for a new session in a folder its session list names, a login shell or one agent (Claude
-   Code, Codex, OpenCode). Because its list says `new_sessions`, the machine's replies read
+   for a new session in a folder its session list names, a login shell or one agent (any of the
+   feed contract's agents). Because its list says `new_sessions`, the machine's replies read
    brings the requests pending for it (`new_sessions`, with every read until reported, so
    pokes and the replies read's pace serve them too), while the feed is on and once its name
    is confirmed. The service starts each through the daemon as the user (`session_create`):
@@ -354,8 +359,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `folder_session` (a session rakumux.com listed there) when two folders share the name;
    never a path or a command from the cloud. The session is a login shell in that folder with
    a generated name, the daemon's environment and default size, and for an agent its own
-   command (`claude`, `codex`, `opencode`) typed in as a startup command, as `rakumux new
-   --cmd` would. It reports `created` with the session's id and name
+   command (`claude`, `codex`, `opencode`, `copilot`, `cursor-agent` (never `agent`, which Grok
+   installs too), `pi`, `grok`, `kimi`, `droid`, `amp`) typed in as a startup command, as
+   `rakumux new --cmd` would. It reports `created` with the session's id and name
    (`POST /api/v1/feed/new-sessions/status`), or `failed`: `folder_unknown` (no listed folder
    of that name, or several without `folder_session` saying which), `refused` (the daemon's
    error); `not_accepted` stays in the contract for older releases, which send it while their
@@ -1096,6 +1102,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
 | `rakumux daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
 | `rakumux session list\|get\|read\|wait\|report` | JSON commands for agents and scripts |
+| `rakumux session hook --agent A [--event NAME]` / `hook-config --agent A` | An agent's hook (JSON on stdin, always `{}` and exit 0; `--event` for input that doesn't name its event) / print its hook configuration (`integrations/README.md`) |
 | `rakumux account login \| logout \| status [--json]` | The Rakumux account for AI session titles and the agent feed (also Settings → Account): `login` prints a link, a code and (on a terminal) a QR code and waits for approval in any browser; `status` shows who is signed in and each live session's AI description (`--json` still carries `ai_session_titles`, `ai_session_summaries` and `feed` for scripts) |
 | `rakumux remote on [--port N] \| off \| pair \| status [--json] \| token [--rotate]` | Remote access for the phone app over Tailscale (the TUI offers it once): `on` saves it in `remote.json` (stays on), restarts the API and prints the URLs, the token, an `rakumux://connect` link and (on a terminal) its QR code; `pair` shows them again; `off` turns it off; `token --rotate` makes a new token (re-pair the app) |
 | `rakumux machine add NAME URL --token T \| ls [--json] \| rm NAME` | Other machines whose sessions are listed and used here (their `rakumux-api` URL and remote token) |
