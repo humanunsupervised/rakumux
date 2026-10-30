@@ -364,11 +364,11 @@ pub enum SessionCommand {
         #[arg(long, value_name = "NAME")]
         event: Option<String>,
     },
-    /// Print hook configuration to merge into the agent's settings.
+    /// Print an agent's hook configuration, to merge into its settings.
     HookConfig {
         #[arg(long, value_enum)]
         agent: HookAgent,
-        /// Write it as a file of Rakumux's own the agent loads (GitHub Copilot, Grok)
+        /// Write it as a file of Rakumux's own the agent loads instead (GitHub Copilot, Grok)
         #[arg(long)]
         install: bool,
     },

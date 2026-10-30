@@ -154,8 +154,9 @@ or a phone.
 
 - **Restart:** `rakumux daemon restart` swaps in a new version without stopping your programs.
 - **Recovery:** after a crash or a reboot, the sessions that were running come back by
-  themselves. Claude Code, Codex, OpenCode and Grok Build return in the same conversation. Other programs
-  have their command typed at the prompt.
+  themselves. Claude Code, Codex, OpenCode, GitHub Copilot, Cursor, Pi, Grok Build, Kimi Code,
+  Droid and Amp return in the same conversation. Other programs have their command typed at the
+  prompt.
 
 ## Command line
 
@@ -186,11 +187,16 @@ The hooks report exactly when an agent is working, needs input or is done. They 
 subagents and the worktree it's working in.
 
 ```bash
-rakumux session hook-config --agent claude  # merge the printed hooks into ~/.claude/settings.json
-rakumux session hook-config --agent codex   # merge into ~/.codex/hooks.json, then trust them in /hooks
-rakumux session hook-config --agent copilot --install  # writes ~/.copilot/hooks/rakumux.json for GitHub Copilot
-rakumux-mcp opencode-plugin --install       # OpenCode
-rakumux session hook-config --agent grok --install  # Grok Build: writes ~/.grok/hooks/rakumux.json
+rakumux session hook-config --agent claude             # merge the printed hooks into ~/.claude/settings.json
+rakumux session hook-config --agent codex              # merge into ~/.codex/hooks.json, then trust them in /hooks
+rakumux session hook-config --agent cursor-agent       # Cursor: merge into ~/.cursor/hooks.json
+rakumux session hook-config --agent droid              # Droid: merge into ~/.factory/hooks.json
+rakumux session hook-config --agent copilot --install  # GitHub Copilot: writes ~/.copilot/hooks/rakumux.json
+rakumux session hook-config --agent grok --install     # Grok Build: writes ~/.grok/hooks/rakumux.json
+rakumux-mcp opencode-plugin --install                  # OpenCode
+rakumux-mcp pi-plugin --install                        # Pi
+rakumux-mcp kimi-plugin --install                      # Kimi Code
+rakumux-mcp amp-plugin --install                       # Amp
 ```
 
 For details, see the [agent integrations guide](integrations/README.md).
@@ -203,7 +209,7 @@ The MCP server lets an agent list, create, read and rename sessions in its own f
 claude mcp add --scope user rakumux -- rakumux-mcp
 ```
 
-For Codex, OpenCode, GitHub Copilot, Grok Build and session identity, see the [MCP guide](mcp/README.md).
+For the other agents and session identity, see the [MCP guide](mcp/README.md).
 
 ## Rakumux account (optional)
 

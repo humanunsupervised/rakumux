@@ -162,38 +162,6 @@ mod tests {
     use session_core::activity::{ActivityEvent, ActivityPhase, ActivityUpdate, ACTIVITY_VERSION};
 
     #[test]
-    fn groks_hooks_install_as_a_file_of_rakumuxs_own() {
-        let home = tempfile::tempdir().unwrap();
-        let grok = home.path().join("grok-home");
-        let var = |name: &str| match name {
-            "GROK_HOME" => Some(grok.to_string_lossy().into_owned()),
-            "HOME" => Some(home.path().to_string_lossy().into_owned()),
-            _ => None,
-        };
-        let path = install_file(HookAgent::Grok, "{\"hooks\": {}}", var).unwrap();
-        assert_eq!(path, grok.join("hooks/rakumux.json"));
-        install_file(HookAgent::Grok, adapters::config("grok").unwrap(), var).unwrap();
-        let written: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert!(
-            written["hooks"]["Stop"].is_array(),
-            "an older one is replaced"
-        );
-        // Without GROK_HOME: ~/.grok/hooks.
-        let default = install_file(HookAgent::Grok, "{}", |name| {
-            (name == "HOME").then(|| home.path().to_string_lossy().into_owned())
-        })
-        .unwrap();
-        assert_eq!(default, home.path().join(".grok/hooks/rakumux.json"));
-        // Agents without a hooks folder of their own print it to be merged.
-        let mut out = Vec::new();
-        assert!(configuration(HookAgent::Claude, true, &mut out).is_err());
-        assert!(out.is_empty());
-        configuration(HookAgent::Grok, false, &mut out).unwrap();
-        assert!(String::from_utf8(out).unwrap().contains("--agent grok"));
-    }
-
-    #[test]
     fn hook_transport_is_session_only_and_requires_daemon_support() {
         let update = ActivityUpdate {
             version: ACTIVITY_VERSION,
@@ -219,51 +187,95 @@ mod tests {
     }
 
     #[test]
-    fn copilots_hooks_install_as_a_file_of_rakumuxs_own() {
+    fn install_writes_a_file_of_rakumuxs_own_for_agents_that_load_one() {
         let home = tempfile::tempdir().unwrap();
-        let copilot = home.path().join("copilot-home");
-        std::fs::create_dir_all(copilot.join("hooks")).unwrap();
-        // The user's own hooks are left alone.
-        std::fs::write(copilot.join("hooks/mine.json"), "{\"version\":1}").unwrap();
-        let config = adapters::config("copilot").unwrap();
-        let var = |name: &str| match name {
-            "COPILOT_HOME" => Some(copilot.to_string_lossy().into_owned()),
-            "HOME" => Some(home.path().to_string_lossy().into_owned()),
-            _ => None,
-        };
-        let path = install_file(HookAgent::Copilot, config, var).unwrap();
-        assert_eq!(path, copilot.join("hooks/rakumux.json"));
-        let written: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(written["version"], 1);
-        // Again: replaced, not added to.
-        std::fs::write(&path, "old").unwrap();
-        install_file(HookAgent::Copilot, config, var).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            format!("{}\n", config.trim_end())
-        );
-        let mut names: Vec<_> = std::fs::read_dir(copilot.join("hooks"))
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        names.sort();
-        assert_eq!(names, ["mine.json", "rakumux.json"]);
-        // Without COPILOT_HOME: ~/.copilot/hooks, made when missing.
-        let default = install_file(HookAgent::Copilot, config, |name| {
-            (name == "HOME").then(|| home.path().to_string_lossy().into_owned())
-        })
-        .unwrap();
-        assert_eq!(default, home.path().join(".copilot/hooks/rakumux.json"));
-        // Agents whose hooks are merged into their settings aren't installed.
-        let codex = adapters::config("codex").unwrap();
-        assert!(matches!(
-            install_file(HookAgent::Codex, codex, var),
-            Err(CliError::Usage(_))
-        ));
-        let mut out = Vec::new();
-        assert!(configuration(HookAgent::Copilot, false, &mut out).is_ok());
-        assert_eq!(String::from_utf8(out).unwrap(), format!("{config}\n"));
+        let homes = home.path().join("agent-homes");
+        for (agent, home_var, default) in [
+            (HookAgent::Copilot, "COPILOT_HOME", ".copilot"),
+            (HookAgent::Grok, "GROK_HOME", ".grok"),
+        ] {
+            let own = homes.join(agent.name());
+            std::fs::create_dir_all(own.join("hooks")).unwrap();
+            // The user's own hooks are left alone.
+            std::fs::write(own.join("hooks/mine.json"), "{}").unwrap();
+            let config = adapters::config(agent.name()).unwrap();
+            let var = |name: &str| match name {
+                _ if name == home_var => Some(own.to_string_lossy().into_owned()),
+                "HOME" => Some(home.path().to_string_lossy().into_owned()),
+                _ => None,
+            };
+            let path = install_file(agent, config, var).unwrap();
+            assert_eq!(path, own.join("hooks/rakumux.json"), "{}", agent.name());
+            let written: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert!(written["hooks"].is_object(), "{}", agent.name());
+            // Again: replaced, not added to.
+            std::fs::write(&path, "old").unwrap();
+            install_file(agent, config, var).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                format!("{}\n", config.trim_end())
+            );
+            let mut names: Vec<_> = std::fs::read_dir(own.join("hooks"))
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect();
+            names.sort();
+            assert_eq!(names, ["mine.json", "rakumux.json"], "{}", agent.name());
+            // Without its own home variable: under HOME, made when missing.
+            let path = install_file(agent, config, |name| {
+                (name == "HOME").then(|| home.path().to_string_lossy().into_owned())
+            })
+            .unwrap();
+            assert_eq!(path, home.path().join(default).join("hooks/rakumux.json"));
+            // Printed without --install.
+            let mut out = Vec::new();
+            configuration(agent, false, &mut out).unwrap();
+            assert_eq!(String::from_utf8(out).unwrap(), format!("{config}\n"));
+        }
+    }
+
+    #[test]
+    fn other_agents_print_their_hooks_to_merge_or_name_their_plugin() {
+        let home = tempfile::tempdir().unwrap();
+        let var = |name: &str| (name == "HOME").then(|| home.path().to_string_lossy().into_owned());
+        // Merged into the agent's own settings: printed, never installed.
+        for agent in [
+            HookAgent::Claude,
+            HookAgent::Codex,
+            HookAgent::CursorAgent,
+            HookAgent::Droid,
+        ] {
+            let config = adapters::config(agent.name()).unwrap();
+            let mut out = Vec::new();
+            configuration(agent, false, &mut out).unwrap();
+            assert!(String::from_utf8(out)
+                .unwrap()
+                .contains(&format!("--agent {}", agent.name())));
+            assert!(matches!(
+                install_file(agent, config, var),
+                Err(CliError::Usage(_))
+            ));
+            let mut out = Vec::new();
+            assert!(configuration(agent, true, &mut out).is_err());
+            assert!(out.is_empty());
+        }
+        assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+        // A plugin or extension of their own instead.
+        for (agent, plugin) in [
+            (HookAgent::Opencode, "opencode-plugin"),
+            (HookAgent::Pi, "pi-plugin"),
+            (HookAgent::Kimi, "kimi-plugin"),
+            (HookAgent::Amp, "amp-plugin"),
+        ] {
+            for install in [false, true] {
+                let Err(CliError::Usage(message)) = configuration(agent, install, &mut Vec::new())
+                else {
+                    panic!("{} has a hook configuration", agent.name());
+                };
+                assert!(message.contains(plugin), "{message}");
+            }
+        }
     }
 
     #[test]

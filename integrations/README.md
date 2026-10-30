@@ -24,21 +24,30 @@ detection/recovery into the daemon, hook adapters into the CLI, and the OpenCode
 into MCP. Existing public Rust module paths are unchanged; there are no new cross-layer
 dependencies. Policy stays in `tui/crates/ptyd/src/control/`; wire types stay in
 `tui/crates/session-core/src/activity.rs`. Clients never parse provider-specific events.
-Older detection profiles remain supported; new hooks start with these three agents.
+Older detection profiles remain supported.
 
 ## Setup
 
-- [OpenCode](open-code/README.md)
-- [Claude Code](claude-code/README.md)
-- [Codex](codex/README.md)
-- [Pi](pi/README.md)
-- [GitHub Copilot](copilot/README.md)
-- [Cursor](cursor-agent/README.md)
-- [Grok Build](grok/README.md)
+- [OpenCode](open-code/README.md): `rakumux-mcp opencode-plugin --install`
+- [Claude Code](claude-code/README.md): `rakumux session hook-config --agent claude`, merged
+  into its settings
+- [Codex](codex/README.md): `rakumux session hook-config --agent codex`, merged into
+  `~/.codex/hooks.json`
+- [Pi](pi/README.md): `rakumux-mcp pi-plugin --install`
+- [GitHub Copilot](copilot/README.md): `rakumux session hook-config --agent copilot --install`
+- [Cursor](cursor-agent/README.md): `rakumux session hook-config --agent cursor-agent`, merged
+  into `~/.cursor/hooks.json`
+- [Grok Build](grok/README.md): `rakumux session hook-config --agent grok --install`
 - [Kimi Code](kimi/README.md): `rakumux-mcp kimi-plugin --install` (its hooks name the
   conversation and folder; lifecycle comes from OSC 7501 with nothing installed)
-- [Droid](droid/README.md)
-- [Amp](amp/README.md)
+- [Droid](droid/README.md): `rakumux session hook-config --agent droid`, merged into
+  `~/.factory/hooks.json`
+- [Amp](amp/README.md): `rakumux-mcp amp-plugin --install`
+
+`hook-config` prints an agent's hook configuration. With `--install` it writes it as a file of
+Rakumux's own, replacing only an earlier copy, for the agents that load every file in their
+hooks folder (GitHub Copilot, Grok Build); the others' hooks are merged into their own settings
+by hand, so `--install` refuses them.
 
 Hooks require a daemon advertising `session.activity`. They are opt-in and are not installed
 automatically. No API key, hosted service or model request is involved.
