@@ -289,7 +289,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    reported (reported `delivered` on the next start), and the reports rakumux.com hasn't taken
    (kept while the feed is off too). The agent's answer to a reply is its reply that
    finished after the reply was typed in (typed mid-turn: after the agent took it, so the
-   turn it was typed into, ending first, doesn't answer it), and by the end of that reply's
+   turn it was typed into, ending first, doesn't answer it; that turn keeps its own reply as a
+   feed entry of its own, which the daemon captures even when the reply starts the next turn
+   at once, said before the take), and by the end of that reply's
    turn: so replies typed in one after another each get theirs, and one whose turn ended
    without an answer (interrupted, an API error) never takes a later one.
    It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
@@ -774,7 +776,23 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   without a tool to call), keyed by its entry's `id`; Grok Build's, its text blocks since the
   last prompt or tool call (keyed by the turn's `promptId`); Amp's, its thread copy's text after
   the last tool call, keyed by the message's id. A reply's optional `position` is its turn's last
-  message's in the conversation (below).
+  message's in the conversation (below). **A turn that ends with the next one's start** before
+  its session is seen `Done` (a prompt the agent queued or steered in during it, starting at
+  once: Grok Build, Kimi Code, GitHub Copilot, Pi, Claude Code's `queued_command`; Codex's next
+  task) keeps its own reply too: as the follower reads the next prompt (Codex: what resets a
+  `task_complete`; Kimi Code: after a completed `turn.ended`), the reply the turn had then is
+  its finished reply (`agent_output::Finished`, with when it was said and when the next turn
+  began, by the log's clock), captured as that's read with `finished_at` when it was said, so
+  it never answers the prompt that ended it. Only a turn read as the log grew (never one from a
+  follower's first read, a conversation it switched to, or a log read again from its start or
+  past a gap), and only the turn's own reply: an interrupted or failed one, or one that went on
+  with a tool call (a prompt steered in between tool steps), has none, and never takes the next
+  turn's. One whose end was seen (`Done` after its last message, by the time the next began, or
+  within 500 ms after: `DONE_LAG_MS`) is the `Done` capture's: taken as the due reply (at
+  `Done`'s time) when one is due, else left (capture was off, or its wait ran out), so turning
+  capture on never captures an earlier turn late. OpenCode, read from its database, gives a
+  turn the next prompt ended its last text block with no tool block after it, once two reads
+  agree (`opencode::turn_reply`). Never twice: a session's last 16 captured keys are kept.
 - Agent conversations (user only, capability `session.transcript`;
   `integrations/transcript.rs`): `session_transcript {id, after?, max_bytes?}` reads a live
   session's agent conversation on demand, nothing kept in memory, from the log or database the
