@@ -39,8 +39,14 @@ pub(super) const PROFILE: Profile = Profile {
             "trust this folder?",
         ]),
     )],
-    working: &[marker(Region::Bottom(12), Test::Line(is_kimi_activity_line))],
-    idle: &[marker(Region::Bottom(2), Test::Line(has_kimi_context_usage))],
+    working: &[marker(
+        Region::Bottom(12),
+        Test::Line(is_kimi_activity_line),
+    )],
+    idle: &[marker(
+        Region::Bottom(2),
+        Test::Line(has_kimi_context_usage),
+    )],
     quiet: Lifecycle::Unknown,
     output_means_working: false,
     approvals_on_screen: false,

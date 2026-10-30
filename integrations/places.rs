@@ -26,6 +26,9 @@
 //!   directories and commands, relative to the workspace.
 //! - **Grok Build**: its finished edits' files, its reads and searches, its
 //!   shell calls' folders and commands, and its finished subagents' own logs.
+//! - **Kimi Code**: its tool calls' files, search roots and commands with
+//!   their working directories, and the files it tracks before changing
+//!   them (its subagents' too).
 
 use super::transcript::{scan, TranscriptSource};
 use super::LogAgent;
@@ -43,6 +46,8 @@ mod copilot;
 mod cursor;
 #[path = "grok/places.rs"]
 mod grok;
+#[path = "kimi/places.rs"]
+mod kimi;
 #[path = "open-code/places.rs"]
 mod opencode;
 #[path = "pi/places.rs"]
@@ -142,6 +147,7 @@ impl PlaceScan {
                         LogAgent::Copilot => copilot::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Cursor => cursor::entry(entry, cwd, home, at, &mut touches),
                         LogAgent::Grok => grok::entry(entry, cwd, home, at, &mut touches),
+                        LogAgent::Kimi => kimi::entry(entry, cwd, home, at, &mut touches),
                     }
                 });
                 let Some((offset, more)) = read else {
@@ -193,6 +199,7 @@ pub fn agent_data_dirs() -> Vec<PathBuf> {
         crate::resume::cursor_data_dir(),
         // Grok's worktrees there are the user's working trees.
         crate::resume::grok_home(),
+        crate::resume::kimi_home(),
     ]
     .into_iter()
     .flatten()

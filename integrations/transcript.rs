@@ -19,6 +19,9 @@
 //!   the user typed, the agent's text and tool calls (it writes no output).
 //! - **Grok Build**: one message per `updates.jsonl` line, at its byte
 //!   offset; a tool's result is its update with a `status`.
+//! - **Kimi Code**: one message per record of the main agent's log, at its
+//!   byte offset: what the user typed, the agent's parts and tool calls, and
+//!   the tools' results.
 //!
 //! Text is cut at [`MAX_PART_BYTES`] per part and otherwise left as the
 //! agent wrote it: the caller cleans it before it leaves the machine.
@@ -43,6 +46,8 @@ mod copilot;
 mod cursor;
 #[path = "grok/transcript.rs"]
 mod grok;
+#[path = "kimi/transcript.rs"]
+mod kimi;
 #[path = "open-code/transcript.rs"]
 mod opencode;
 #[path = "pi/transcript.rs"]
@@ -71,10 +76,14 @@ pub enum TranscriptSource {
 }
 
 impl TranscriptSource {
-    /// `claude-code`, `codex`, `opencode`, `pi`, `copilot`, `cursor-agent` or
-    /// `grok`.
+    /// `claude-code`, `codex`, `opencode`, `pi`, `copilot`, `cursor-agent`,
+    /// `grok` or `kimi`.
     pub fn agent(&self) -> &'static str {
         match self {
+            TranscriptSource::Log {
+                agent: LogAgent::Kimi,
+                ..
+            } => "kimi",
             TranscriptSource::Log {
                 agent: LogAgent::Claude,
                 ..
@@ -179,6 +188,7 @@ fn read_log(
             LogAgent::Copilot => copilot_reading.message(entry, start),
             LogAgent::Cursor => cursor::message(entry, start),
             LogAgent::Grok => grok::message(entry, start),
+            LogAgent::Kimi => kimi::message(entry, start),
         };
         messages.extend(message);
     })?;

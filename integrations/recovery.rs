@@ -42,6 +42,11 @@
 //! - **Grok Build** lists the sessions each process holds in
 //!   `$GROK_HOME/active_sessions.json`: the one its hooks named, else the one
 //!   whose log changed last: `grok <flags> --resume <id>`.
+//! - **Kimi Code**: the conversation its plugin's hooks reported, else the
+//!   one the process holds a lock on (`locks/sessions/<id>.lock`, during a
+//!   turn), else the folder's newest under `$KIMI_CODE_HOME/sessions`:
+//!   `kimi -r <id>` (its arguments are wiped; the conversation keeps its
+//!   mode and model).
 //!
 //! Any agent's bound conversation reaches its resume plan
 //! ([`Context::bound_conversation`]): the newest the session bound for that
@@ -68,6 +73,8 @@ mod copilot;
 mod cursor;
 #[path = "grok/recovery.rs"]
 mod grok;
+#[path = "kimi/recovery.rs"]
+mod kimi;
 #[path = "open-code/recovery.rs"]
 mod opencode;
 #[path = "pi/recovery.rs"]
@@ -87,6 +94,8 @@ use cursor::cursor_plan;
 pub(crate) use cursor::{cursor_chat, cursor_config_dir, cursor_data_dir};
 use grok::grok_resume;
 pub(crate) use grok::{grok_conversation, grok_home, grok_log};
+use kimi::kimi_resume;
+pub(crate) use kimi::{kimi_home, kimi_locked_session, kimi_recent_session, kimi_wire_log};
 use opencode::opencode_resume;
 pub(crate) use opencode::{opencode_database, opencode_recent_session};
 use pi::pi_resume;
@@ -130,6 +139,7 @@ pub fn plan(ctx: &Context<'_>) -> Plan {
         Some("grok") => {
             Some(grok_home().and_then(|home| grok_resume(process, &home, ctx.bound_conversation)))
         }
+        Some("kimi") => Some(kimi_resume(process, ctx.cwd, ctx.bound_conversation)),
         _ => None,
     };
     match resumed {
