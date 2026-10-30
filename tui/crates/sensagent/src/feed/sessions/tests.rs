@@ -349,13 +349,37 @@ fn the_list_says_this_machine_takes_replies_with_files_when_it_saves_them() {
     let upload = body(sessions.next_request(NOW, WALL));
     assert_eq!(
         upload["capabilities"],
-        serde_json::json!(["reply_attachments", "resources"])
+        serde_json::json!(["reply_attachments"])
     );
 
     let mut sessions = SessionSync::new("studio".into(), false);
     sessions.set_enabled(true, NOW);
     let upload = body(sessions.next_request(NOW, WALL));
-    assert_eq!(upload["capabilities"], serde_json::json!(["resources"]));
+    assert!(upload.get("capabilities").is_none(), "{upload}");
+}
+
+#[test]
+fn the_list_says_resources_only_while_the_daemon_tells_them() {
+    let mut sessions = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0")]);
+    sessions.set_resources(true);
+    let upload = body(sessions.next_request(NOW, WALL));
+    assert_eq!(
+        upload["capabilities"],
+        serde_json::json!(["reply_attachments", "resources"])
+    );
+    sessions.done(true, Ok(stored(true)), NOW);
+    assert!(sessions.next_request(NOW + SETTLE, WALL).is_none());
+
+    // An older daemon (reconnected, or refusing): the same sessions go again
+    // once settled, without it.
+    sessions.set_resources(false);
+    sessions.set_resources(false);
+    assert!(sessions.next_request(NOW + SETTLE / 2, WALL).is_none());
+    let upload = body(sessions.next_request(NOW + SETTLE, WALL));
+    assert_eq!(
+        upload["capabilities"],
+        serde_json::json!(["reply_attachments"])
+    );
 }
 
 #[test]

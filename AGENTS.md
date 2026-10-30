@@ -312,7 +312,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`); a
    list that would pass the contract's 256 KiB goes without them.
    **rtop on rakumux.com** (`feed/resources.rs`, `ResourceSync`; contract `contracts/feed/`,
-   "Resources"): every list says `capabilities: ["resources"]`. While someone has rtop open on
+   "Resources"): the list says `capabilities: ["resources"]` only while the daemon announces
+   `resources` (read at each connect; an `unsupported` answer drops it too), so rakumux.com tells
+   a machine whose daemon is too old from one still reading. While someone has rtop open on
    rakumux.com, a replies read answers `resources_wanted`; then (signed in, the switch on, the
    name confirmed) the service asks the daemon what everything uses (`resource_usage`) every 2 s
    on the replies worker and uploads each reading after the first (`POST /api/v1/feed/resources`),

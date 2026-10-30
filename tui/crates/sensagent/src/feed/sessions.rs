@@ -259,14 +259,14 @@ pub(crate) struct SessionSync {
 impl SessionSync {
     /// The list for `machine`; `reply_attachments` says it saves replies'
     /// files for their agents (`capabilities`), so rakumux.com sends it those.
-    /// Every list says it sends what it uses for rtop (`resources`).
+    /// It says it sends what it uses for rtop (`resources`) only once the
+    /// daemon is known to tell it ([`set_resources`](Self::set_resources)).
     pub fn new(machine: String, reply_attachments: bool) -> Self {
-        let mut capabilities = if reply_attachments {
+        let capabilities = if reply_attachments {
             vec![wire::REPLY_ATTACHMENTS]
         } else {
             Vec::new()
         };
-        capabilities.push(wire::RESOURCES);
         Self {
             machine,
             capabilities,
@@ -296,6 +296,24 @@ impl SessionSync {
         self.retry = RETRY_MIN;
         self.retry_at = now;
         self.next_send = now;
+    }
+
+    /// Whether the daemon answers `resource_usage` (capability `resources`),
+    /// so this machine can send what it uses for rtop: the list says
+    /// `resources` only then, so rakumux.com tells a machine whose daemon is
+    /// too old from one still reading. A change goes with the next upload.
+    pub fn set_resources(&mut self, supported: bool) {
+        let has = self.capabilities.contains(&wire::RESOURCES);
+        if supported == has {
+            return;
+        }
+        if supported {
+            self.capabilities.push(wire::RESOURCES);
+        } else {
+            self.capabilities.retain(|name| *name != wire::RESOURCES);
+        }
+        // The same sessions, said again with what this machine handles now.
+        self.sent = None;
     }
 
     /// Whether rakumux.com took a list under this machine's name (see

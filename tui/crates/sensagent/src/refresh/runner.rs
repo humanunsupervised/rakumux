@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use session_core::api::{
     AgentReply, CallerInfo, ErrorCode, EventEnvelope, ResourceSample, SessionEvent,
-    SubscribeRequest, TranscriptCursor, TranscriptPage,
+    SubscribeRequest, TranscriptCursor, TranscriptPage, CAPABILITY_RESOURCES,
 };
 use session_core::client::SessionApi;
 use session_core::ids::{ReplyId, SessionId};
@@ -116,8 +116,9 @@ enum Command {
 }
 
 enum Message {
-    /// A fresh list: every session the daemon has, dead ones too.
-    Resync(Vec<SessionView>),
+    /// A fresh list: every session the daemon has, dead ones too, and
+    /// whether it answers `resource_usage` (capability `resources`) for rtop.
+    Resync(Vec<SessionView>, bool),
     Event(Box<EventEnvelope>),
     Disconnected,
     Captured(Box<Captured>),
@@ -718,7 +719,8 @@ fn own<S, A, C>(
                     );
                 }
             }
-            Message::Resync(views) => {
+            Message::Resync(views, reports) => {
+                sessions.set_resources(reports);
                 // Every session the daemon has: what's kept of others goes.
                 refresher.keep_only(views.iter().map(|view| &view.id));
                 let views: Vec<SessionView> = views
@@ -787,6 +789,10 @@ fn own<S, A, C>(
                 }
             }
             Message::Resources(result) => {
+                // An older daemon after all: the session list stops saying it reports.
+                if result.as_ref().err() == Some(&ErrorCode::Unsupported) {
+                    sessions.set_resources(false);
+                }
                 let listed = |id: &SessionId| sessions.lists(id);
                 resources.read_done(result, &machine, &listed, now);
                 follow_resources(&refresher, &mut resources, &sessions, work, now);
@@ -1793,7 +1799,11 @@ fn follow(api: &dyn SessionApi, owner: &Sender<Message>, stop: &AtomicBool) {
             // Dead sessions too, for what's kept of sessions across restarts;
             // the rest of the service follows the others.
             if let Ok(views) = api.list_all(true) {
-                if owner.send(Message::Resync(views)).is_err() {
+                // Only a daemon that says so answers `resource_usage`.
+                let reports = api
+                    .daemon_capabilities()
+                    .is_some_and(|names| names.iter().any(|name| name == CAPABILITY_RESOURCES));
+                if owner.send(Message::Resync(views, reports)).is_err() {
                     return;
                 }
                 delay = RECONNECT_MIN;
