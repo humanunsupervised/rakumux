@@ -122,6 +122,30 @@
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:|-]*$"
     },
+    "subagentId": {
+      "description": "A subagent's id, unique in its chat: Claude Code's agent id, OpenCode's child session id, GitHub Copilot's agent id.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "subagent": {
+      "description": "The subagent a message is from: an agent the chat's agent started with a tool call (Claude Code's `Agent`, OpenCode's and GitHub Copilot's `task`), working in a conversation of its own. A subagent's messages sort among themselves by `position` (its own log's) and belong under the call that started it (`call_id`, in the main conversation or in another subagent's), which has its result once the subagent ended. Any of its messages may leave out `call_id` and `label` once one gave them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/subagentId" },
+        "call_id": { "description": "The tool call that started it.", "$ref": "#/$defs/callId" },
+        "label": {
+          "description": "What it was asked to do: its description, else its agent type.",
+          "type": "string",
+          "$ref": "#/$defs/label",
+          "maxLength": 120,
+          "maxUtf8Bytes": 480
+        }
+      }
+    },
     "toolName": {
       "type": "string",
       "$ref": "#/$defs/label",
@@ -197,7 +221,7 @@
       ]
     },
     "message": {
-      "description": "One message of a chat: one entry of the agent's conversation. `user` is what the user typed, `assistant` the agent's text, reasoning and tool calls, `tool` tools' output. Uploading an id again replaces the message (OpenCode changes its messages as they stream).",
+      "description": "One message of a chat: one entry of the agent's conversation, or of one of its subagents' (`subagent`). `user` is what the user typed (or, in a subagent's, what it was asked), `assistant` the agent's text, reasoning and tool calls, `tool` tools' output. Uploading an id again replaces the message (OpenCode changes its messages as they stream).",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "position", "role", "parts"],
@@ -214,6 +238,10 @@
           "minItems": 1,
           "maxItems": 64,
           "items": { "$ref": "#/$defs/part" }
+        },
+        "subagent": {
+          "description": "The subagent whose conversation it is from; absent from the main conversation's messages (and from older machines'). Only to a cloud whose `sessions-stored` `accepts` has `subagents`.",
+          "$ref": "#/$defs/subagent"
         }
       }
     },

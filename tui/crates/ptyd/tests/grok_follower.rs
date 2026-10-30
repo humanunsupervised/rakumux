@@ -220,7 +220,7 @@ fn a_grok_conversation_is_followed_where_the_process_shows_it() {
     // The whole conversation.
     let source = follower.transcript_source().unwrap();
     assert_eq!(source.agent(), "grok");
-    let page = source.read(None, None).unwrap();
+    let page = source.read(None, None, false).unwrap();
     assert_eq!(page.conversation_id, A);
     assert!(!page.more);
     let roles: Vec<(TranscriptRole, &str)> = page
@@ -255,7 +255,7 @@ fn a_grok_conversation_is_followed_where_the_process_shows_it() {
     assert_eq!(reply_message.position, reply_at);
     // Read on from its cursor: nothing new.
     assert!(source
-        .read(Some(&page.cursor), None)
+        .read(Some(&page.cursor), None, false)
         .unwrap()
         .messages
         .is_empty());

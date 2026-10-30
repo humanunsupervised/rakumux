@@ -778,6 +778,7 @@ fn said(position: u64, role: TranscriptRole, parts: Vec<TranscriptPart>) -> Tran
         role,
         at: None,
         parts,
+        subagent: None,
     }
 }
 

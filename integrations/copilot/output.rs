@@ -658,14 +658,21 @@ mod tests {
         // The transcript reads the new file from its start, whatever the
         // old cursor said.
         let source = follower.transcript_source().unwrap();
-        let page = source.read(None, None).unwrap();
+        let page = source.read(None, None, false).unwrap();
         let stale = session_core::api::TranscriptCursor {
             key: Some("1:1".into()),
             ..page.cursor.clone()
         };
-        assert_eq!(source.read(Some(&stale), None).unwrap().messages.len(), 4);
+        assert_eq!(
+            source
+                .read(Some(&stale), None, false)
+                .unwrap()
+                .messages
+                .len(),
+            4
+        );
         assert!(source
-            .read(Some(&page.cursor), None)
+            .read(Some(&page.cursor), None, false)
             .unwrap()
             .messages
             .is_empty());

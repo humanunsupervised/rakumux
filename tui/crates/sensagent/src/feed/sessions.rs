@@ -235,6 +235,8 @@ pub(crate) struct SessionSync {
     enabled: bool,
     /// The cloud's last answer said it takes places.
     places: bool,
+    /// The cloud's last answer said it takes subagents' messages in chats.
+    subagents: bool,
     /// rakumux.com answered a list under this name with anything but
     /// `machine_taken` (or a failure for now) since the switch was turned on:
     /// the name is this machine's, and its replies may be read.
@@ -267,6 +269,7 @@ impl SessionSync {
             capabilities,
             enabled: false,
             places: false,
+            subagents: false,
             confirmed: false,
             sessions: BTreeMap::new(),
             sent: None,
@@ -294,6 +297,7 @@ impl SessionSync {
         }
         self.enabled = enabled;
         self.places = false;
+        self.subagents = false;
         self.confirmed = false;
         self.sent = None;
         self.retry = RETRY_MIN;
@@ -324,6 +328,12 @@ impl SessionSync {
     /// another's name never takes (and fails) that one's replies.
     pub fn confirmed(&self) -> bool {
         self.confirmed
+    }
+
+    /// Whether rakumux.com's last answer said it takes subagents' messages
+    /// in chats (`accepts` has `subagents`): until then, chats go without.
+    pub fn subagents(&self) -> bool {
+        self.subagents
     }
 
     /// Another machine held this one's name: it goes by `machine` now, and
@@ -428,6 +438,7 @@ impl SessionSync {
         match outcome {
             Ok(stored) => {
                 self.places = stored.places;
+                self.subagents = stored.subagents;
                 self.sent = sent;
                 self.retry = RETRY_MIN;
                 self.next_send = now + SETTLE;

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:rakumux:feed:v1:sessions-stored",
   "title": "POST /api/v1/feed/sessions success",
-  "description": "How many sessions are stored for the machine now, and what more the cloud takes in a session list (`accepts`).",
+  "description": "How many sessions are stored for the machine now, and what more the cloud takes in a session list and in chats (`accepts`).",
   "x-maxBodyBytes": 1024,
   "type": "object",
   "additionalProperties": false,
@@ -11,7 +11,7 @@
     "version": { "const": 1 },
     "stored": { "type": "integer", "minimum": 0, "maximum": 200 },
     "accepts": {
-      "description": "What the cloud takes in `sessions-upload` beyond its first version, so a machine sends it only once the cloud said so; absent from a cloud that takes nothing more. Known: `places` (`sessionState` `places`). Machines ignore names they don't know.",
+      "description": "What the cloud takes beyond the first version of `sessions-upload` and `chat-upload`, so a machine sends it only once the cloud said so; absent from a cloud that takes nothing more. Known: `places` (`sessionState` `places`), `subagents` (`message` `subagent`, in chat uploads). Machines ignore names they don't know.",
       "type": "array",
       "maxItems": 16,
       "uniqueItems": true,

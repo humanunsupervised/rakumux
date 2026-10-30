@@ -6,17 +6,49 @@
 //! while a turn ran is logged as a queued prompt, also the `user` role's.
 //! Subagents' entries, meta entries and compaction summaries are left out, as
 //! Claude Code's own view does.
-use super::{assemble, call, compact, reasoning, result, text, timestamp};
+//!
+//! Read with its subagents (`subagents`), each subagent's own transcript
+//! (`<conversation>/subagents/agent-<id>.jsonl`, its entries a sidechain) is
+//! read the same way, and a subagent started in the background
+//! (`run_in_background`) finishes as its call's result: the notice Claude Code
+//! gives the agent when it ends (`<task-notification>`, failed unless
+//! `completed`), not the acknowledgement it got when the subagent started.
+use super::{assemble, call, compact, reasoning, result, text, timestamp, Reading};
 use serde_json::Value;
 use session_core::api::{TranscriptMessage, TranscriptPart, TranscriptRole};
+use std::collections::HashMap;
+use std::path::Path;
 
 /// The message of the transcript entry at `position`, if it is one.
+#[cfg(test)]
 pub(super) fn message(entry: &Value, position: u64) -> Option<TranscriptMessage> {
+    read(entry, position, &Reading::default())
+}
+
+/// The message of the transcript entry at `position`, if it is one, as
+/// `reading` takes them.
+pub(super) fn read(entry: &Value, position: u64, reading: &Reading) -> Option<TranscriptMessage> {
     let flagged = |key: &str| entry.get(key).and_then(Value::as_bool) == Some(true);
-    if flagged("isSidechain") || flagged("isMeta") || flagged("isCompactSummary") {
+    if (flagged("isSidechain") && !reading.subagent)
+        || flagged("isMeta")
+        || flagged("isCompactSummary")
+    {
         return None;
     }
-    let (role, parts) = match entry.get("type")?.as_str()? {
+    let at = entry
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(timestamp);
+    let id = entry.get("uuid").and_then(Value::as_str);
+    if let Some(started) = reading.subagents {
+        if let Some((task, part)) = finished(entry, started) {
+            // Claude Code may log the notice twice, queued while the agent
+            // worked and then as its prompt: one id, so the later replaces it.
+            let id = format!("{task}.finished");
+            return assemble(Some(&id), position, TranscriptRole::Tool, at, vec![part]);
+        }
+    }
+    let (role, mut parts) = match entry.get("type")?.as_str()? {
         // Typed while a turn ran.
         "attachment" => {
             let typed = super::super::claude::queued(entry)?;
@@ -29,17 +61,93 @@ pub(super) fn message(entry: &Value, position: u64) -> Option<TranscriptMessage>
         ),
         _ => return None,
     };
-    let at = entry
-        .get("timestamp")
+    if reading.subagents.is_some() && launched(entry) {
+        // Its result comes when it finishes.
+        parts.retain(|part| !matches!(part, TranscriptPart::ToolResult { .. }));
+    }
+    assemble(id, position, role, at, parts)
+}
+
+/// Whether `entry` is the acknowledgement of a subagent started in the
+/// background, rather than its result.
+fn launched(entry: &Value) -> bool {
+    entry
+        .get("toolUseResult")
+        .and_then(|result| result.get("status"))
         .and_then(Value::as_str)
-        .and_then(timestamp);
-    assemble(
-        entry.get("uuid").and_then(Value::as_str),
-        position,
-        role,
-        at,
-        parts,
-    )
+        == Some("async_launched")
+}
+
+/// The subagent a `<task-notification>` entry says ended, when it names one
+/// of `started` (by its agent id, with the call that started it), and its
+/// call's result: what it answered (or the notice's summary), failed unless
+/// it `completed`. Claude Code logs the notice as a prompt, or as a
+/// `queued_command` while the agent works.
+fn finished<'a>(
+    entry: &'a Value,
+    started: &HashMap<String, Option<String>>,
+) -> Option<(&'a str, TranscriptPart)> {
+    let notice = match entry.get("type")?.as_str()? {
+        "user" => match entry.get("message")?.get("content")? {
+            Value::String(text) => text.as_str(),
+            Value::Array(blocks) => blocks
+                .iter()
+                .find_map(|block| block.get("text")?.as_str())?,
+            _ => return None,
+        },
+        "attachment" => {
+            let attachment = entry.get("attachment")?;
+            if attachment.get("type")?.as_str()? != "queued_command" {
+                return None;
+            }
+            attachment.get("prompt")?.as_str()?
+        }
+        _ => return None,
+    };
+    let notice = notice.trim_start().strip_prefix("<task-notification>")?;
+    let task = tag(notice, "task-id", false)?.trim();
+    let call = started.get(task)?;
+    let call_id = tag(notice, "tool-use-id", false)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .or(call.as_deref())?;
+    let status = tag(notice, "status", false).map(str::trim);
+    let output = tag(notice, "result", true)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .or_else(|| tag(notice, "summary", false).map(str::trim))
+        .unwrap_or_default();
+    let part = result(Some(call_id), output, status != Some("completed"));
+    Some((task, part))
+}
+
+/// The text of `<name>…</name>` in a notice, to its first closing (its last,
+/// for one whose text can hold tags of its own).
+fn tag<'a>(notice: &'a str, name: &str, last: bool) -> Option<&'a str> {
+    let start = notice.find(&format!("<{name}>"))? + name.len() + 2;
+    let rest = notice.get(start..)?;
+    let close = format!("</{name}>");
+    let end = if last {
+        rest.rfind(&close)?
+    } else {
+        rest.find(&close)?
+    };
+    rest.get(..end)
+}
+
+/// A subagent's description, agent type and the call that started it, from
+/// the `.meta.json` Claude Code keeps beside its transcript.
+pub(super) fn subagent_meta(path: &Path) -> Option<(Option<String>, Option<String>)> {
+    let meta: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let field = |key: &str| {
+        meta.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(String::from)
+    };
+    let label = field("description").or_else(|| field("agentType"));
+    Some((field("toolUseId"), label))
 }
 
 /// A user entry's parts: what was typed, or tools' results (the `tool` role).

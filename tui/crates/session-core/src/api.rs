@@ -285,13 +285,19 @@ pub enum Request {
     /// database: prompts, the agent's text, reasoning and tool calls, and
     /// the tools' output. At most about `max_bytes` (default
     /// [`TRANSCRIPT_BYTES`], at most [`MAX_TRANSCRIPT_BYTES`]) of the log is
-    /// read at once. Answered with `Transcript`.
+    /// read at once. With `subagents` (capability
+    /// `session.transcript.subagents`), the conversation's subagents'
+    /// messages come too, each marked with its [`TranscriptSubagent`]; a
+    /// daemon without it ignores the flag and reads the main conversation
+    /// alone. Answered with `Transcript`.
     SessionTranscript {
         id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after: Option<TranscriptCursor>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max_bytes: Option<u32>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        subagents: bool,
     },
     /// User only (capability `resources`): what the machine, the daemon,
     /// its clients' processes and every live session's processes use now.
@@ -601,6 +607,10 @@ pub const CAPABILITY_TURN: &str = "session.turn";
 /// `session_transcript`: a running agent's whole conversation.
 pub const CAPABILITY_TRANSCRIPT: &str = "session.transcript";
 
+/// `session_transcript`'s `subagents`: the conversation's subagents' messages
+/// too, each marked with its [`TranscriptSubagent`].
+pub const CAPABILITY_TRANSCRIPT_SUBAGENTS: &str = "session.transcript.subagents";
+
 /// `SessionView::places`: where a session has worked.
 pub const CAPABILITY_PLACES: &str = "session.places";
 
@@ -646,6 +656,16 @@ pub const MAX_TRANSCRIPT_BYTES: u32 = 2 * 1024 * 1024;
 pub const MAX_PART_BYTES: usize = 64 * 1024;
 /// The most parts a [`TranscriptMessage`] has; further ones are left out.
 pub const MAX_PARTS: usize = 64;
+/// The longest text of a subagent's [`TranscriptPart`], in UTF-8 bytes: a
+/// subagent's messages are shown quieter, nested under the call that
+/// started it, and cut sooner.
+pub const MAX_SUBAGENT_PART_BYTES: usize = 16 * 1024;
+/// The most text a subagent's messages give over a conversation's reads, in
+/// UTF-8 bytes; once a subagent gave this much, its later messages are left
+/// out, so one that runs away can't flood what's read.
+pub const MAX_SUBAGENT_BYTES: u64 = 2 * 1024 * 1024;
+/// The most subagents of a conversation read: the most recently changed.
+pub const MAX_SUBAGENTS: usize = 128;
 
 /// Where a `session_transcript` read stopped; pass it back to read on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -660,6 +680,27 @@ pub struct TranscriptCursor {
     /// the log file read (it rewrites its log when a turn is taken back).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    /// Where each of the conversation's subagents was read to, by reads with
+    /// `subagents`; a subagent without one is read from its start. Kept as
+    /// it was by reads without `subagents`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<SubagentCursor>,
+}
+
+/// Where a subagent's conversation was read to ([`TranscriptCursor::subagents`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentCursor {
+    /// The subagent ([`TranscriptSubagent::id`]).
+    pub id: String,
+    /// As [`TranscriptCursor::offset`], in the subagent's own log or rows.
+    pub offset: u64,
+    /// As [`TranscriptCursor::key`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// The text its messages gave so far; past [`MAX_SUBAGENT_BYTES`] no
+    /// more are given.
+    #[serde(default)]
+    pub bytes: u64,
 }
 
 /// The answer to `session_transcript`.
@@ -696,6 +737,29 @@ pub struct TranscriptMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<i64>,
     pub parts: Vec<TranscriptPart>,
+    /// The subagent whose conversation it's from; `None` for the main
+    /// conversation's. A subagent's messages sort among themselves by
+    /// `position` (its own log's), and their ids are unique in the
+    /// conversation, the subagent's id before the agent's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<TranscriptSubagent>,
+}
+
+/// A subagent: an agent the conversation's agent started with a tool call
+/// (Claude Code's `Agent`/`Task`, OpenCode's `task`), working in a
+/// conversation of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TranscriptSubagent {
+    /// Unique in the conversation: Claude Code's agent id, OpenCode's child
+    /// session id.
+    pub id: String,
+    /// The tool call that started it (in the main conversation or in
+    /// another subagent's), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    /// What it was asked to do: its description, else its agent type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// Who a [`TranscriptMessage`] is from.

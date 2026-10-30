@@ -63,6 +63,21 @@ conformance tests, not an HTTP server, database or local runtime.
   UTF-8 bytes**, plain text (tab, LF, CR), and a tool's input or output may be empty. Messages sort
   by `position`, then `id`: Claude Code's and Codex's are byte offsets into their logs, OpenCode's
   its own order times 1024 plus a block's index. The session is the one that last showed the chat.
+- **Subagents:** a chat's messages may come from its subagents, the agents its agent started with
+  a tool call (Claude Code's `Agent`, OpenCode's and GitHub Copilot's `task`), each working in a
+  conversation of its own. Such a message carries `subagent: {id, call_id?, label?}` (`subagent`
+  in common): `id` is the subagent's (at most 64 characters, unique in the chat), `call_id` the
+  call that started it, in the main conversation or in another subagent's, and `label` what it
+  was asked to do (its description, else its agent type; one visible line of at most 120
+  characters). A message may leave out `call_id` and `label` once an earlier one gave them.
+  Message ids stay unique in the chat (a subagent's start with its id), and a subagent's
+  messages sort among themselves by their `position`, which is its own log's, never compared
+  with the main conversation's. Its call ends, and the subagent with it, when the call has its
+  result (failed with `error`); a subagent started in the background gets that result when it
+  ends, not when it starts. A machine sends subagents' messages only once a `sessions-stored`
+  answer `accepts` `subagents`, and gives each subagent at most 2 MiB of text, its parts cut at
+  16 KiB. Readers that don't know `subagent` show the main conversation; the cloud keeps
+  subagents' messages out of turns and prompts (`turn`, `open`).
 - **Turn:** `GET /api/v1/feed/turn?entry=ID` gives the messages of the turn a feed entry finished:
   from the chat's last `user` message at or before the entry's `position` up to that position,
   increasing; `more` says it continues, and `after=POSITION` asks for the rest. An entry without
@@ -138,7 +153,7 @@ conformance tests, not an HTTP server, database or local runtime.
   working tree where it changed files; no `branch` while its HEAD is detached), most recent first, each `{name, inside,
   branch?, worktree?, edited, last_at}`: `name` is its path in the session's folder when it's
   there (`inside`; `.` for the folder itself), else its last path component, never an absolute
-  path. The upload also says what the machine
+  path; and **`subagents`**, subagents' messages in chat uploads (below). The upload also says what the machine
   handles beyond the first version of this contract (`capabilities`, at most 16 unique names
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
   fetches a reply's attachments and gives the agent their paths; `resources`, it sends what it

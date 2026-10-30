@@ -360,6 +360,7 @@ fn a_running_agents_whole_chat_is_read_on_from_a_cursor() {
                 id: id.clone(),
                 after,
                 max_bytes: None,
+                subagents: false,
             },
         )
     };
@@ -406,6 +407,7 @@ fn a_running_agents_whole_chat_is_read_on_from_a_cursor() {
         id: id.clone(),
         after: None,
         max_bytes: None,
+        subagents: false,
     };
     match h.handle(&agent, request) {
         Response::Error { error } => assert_eq!(error.code, ErrorCode::PermissionDenied),
@@ -416,6 +418,7 @@ fn a_running_agents_whole_chat_is_read_on_from_a_cursor() {
         id: shell.id,
         after: None,
         max_bytes: None,
+        subagents: false,
     };
     match h.handle(&h.user, request) {
         Response::Error { error } => assert_eq!(error.code, ErrorCode::NotFound),

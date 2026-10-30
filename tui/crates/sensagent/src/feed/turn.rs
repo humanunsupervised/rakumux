@@ -174,6 +174,7 @@ mod tests {
                 error: false,
                 truncated: false,
             }],
+            subagent: None,
         }
     }
 

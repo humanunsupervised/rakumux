@@ -229,7 +229,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    its texts cleaned (escape sequences and controls removed, keys, credential assignments and
    tokens masked) and uploaded as messages (`POST /api/v1/feed/messages`, ≤ 100 and ~2 MiB a
    request); where each session's chat is up to is kept in `sensagent/status/chats.json`
-   (0600), so a restart carries on. Entries carry their turn's last `position`. The TUI reads an
+   (0600), so a restart carries on. Once a `sessions-stored` answer `accepts` `subagents`, chats
+   are read with their subagents' messages (`session_transcript`'s `subagents`), each marked
+   with its subagent (id, the call that started it, a label cleaned and masked as the text is),
+   so rakumux.com shows them under that call. Entries carry their turn's last `position`. The TUI reads an
    entry's whole turn with `OwnerRequest::FeedTurn {entry, after?}` (`GET /api/v1/feed/turn`),
    each part cut to what a reply read whole shows and the answer within one owner message (`next`
    continues).
@@ -866,7 +869,19 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   Amp: one message per line of its plugin's thread copy, at its byte offset (Amp's notices and
   turn ends left out).
   About 512 KiB of log is read per request (at most 2 MiB); `more` says ask again. A cursor of
-  another conversation reads the current one from its start.
+  another conversation reads the current one from its start. With `subagents: true` (capability
+  `session.transcript.subagents`; a daemon without it ignores the flag) the conversation's
+  subagents come too, after the main conversation and within what's left of the budget, each
+  message marked `subagent: {id, call_id?, label?}` (`integrations/subagents.rs`): Claude Code's
+  `<conversation>/subagents/agent-<id>.jsonl` (sidechain entries; the call, description and
+  agent type from `agent-<id>.meta.json`), OpenCode's child sessions (and theirs, linked to the
+  `task` call that names them) and GitHub Copilot's subagent events in its own log (by
+  `agentId`, linked by `parentToolCallId`). Their ids start with the subagent's, their parts are
+  cut at 16 KiB, at most 128 subagents are read (the most recently changed), and each gives at
+  most 2 MiB of text over the conversation's reads (`SubagentCursor.bytes`); the cursor keeps
+  where each was read to (`TranscriptCursor.subagents`). Read so, a Claude Code subagent started
+  in the background ends with its call's result: its `<task-notification>` (failed unless
+  `completed`), not the acknowledgement it got when it started.
 - Resource use (user only, capability `resources`; `resources.rs`, `procinfo/`):
   `resource_usage` answers a `ResourceSample {at_ms, machine, daemon, clients, sessions}` read
   when asked, nothing kept between requests: the machine's counters (`MachineUsage`: CPUs, busy

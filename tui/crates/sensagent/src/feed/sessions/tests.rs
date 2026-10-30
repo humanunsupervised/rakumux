@@ -36,7 +36,11 @@ fn agent(mut view: SessionView) -> SessionView {
 /// rakumux.com's answer to an upload: it holds one session, and takes
 /// places when `places`.
 fn stored(places: bool) -> wire::SessionsStored {
-    wire::SessionsStored { stored: 1, places }
+    wire::SessionsStored {
+        stored: 1,
+        places,
+        subagents: false,
+    }
 }
 
 fn on(views: &[SessionView]) -> SessionSync {
@@ -169,7 +173,8 @@ fn rakumux_com_says_how_many_it_holds() {
         wire::sessions_stored(&reply(200, r#"{"version":1,"stored":2}"#)),
         Ok(wire::SessionsStored {
             stored: 2,
-            places: false
+            places: false,
+            subagents: false,
         })
     );
     // A cloud that takes places says so; names it doesn't know are ignored.
@@ -180,7 +185,20 @@ fn rakumux_com_says_how_many_it_holds() {
         )),
         Ok(wire::SessionsStored {
             stored: 2,
-            places: true
+            places: true,
+            subagents: false,
+        })
+    );
+    // One that takes subagents' messages in chats says that too.
+    assert_eq!(
+        wire::sessions_stored(&reply(
+            200,
+            r#"{"version":1,"stored":2,"accepts":["places","subagents"]}"#
+        )),
+        Ok(wire::SessionsStored {
+            stored: 2,
+            places: true,
+            subagents: true,
         })
     );
     assert_eq!(

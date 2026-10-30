@@ -66,6 +66,69 @@
             }
           ]
         }
+      },
+      {
+        "note": "a Claude Code subagent's messages, marked, beside the call that started it; a later one without its label",
+        "value": {
+          "version": 1,
+          "machine": "studio",
+          "chat": {
+            "agent": "claude-code",
+            "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+            "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" }
+          },
+          "messages": [
+            {
+              "id": "7d1e8b63-0c2f-4a4b-9e3d-2f6a8b0c4d5f",
+              "position": 3100,
+              "role": "assistant",
+              "parts": [{ "type": "tool_call", "call_id": "toolu_01AGENT", "name": "Agent", "input": "{\"description\":\"Find the flaky test\",\"subagent_type\":\"Explore\"}" }]
+            },
+            {
+              "id": "a1b2c3d4e5f60718:2c9e6a8b-0d4f-4e23-9b1e-6c0d7a529b1e",
+              "position": 0,
+              "role": "user",
+              "at": 1761220002000,
+              "parts": [{ "type": "text", "text": "Find the test that fails one run in ten." }],
+              "subagent": { "id": "a1b2c3d4e5f60718", "call_id": "toolu_01AGENT", "label": "Find the flaky test" }
+            },
+            {
+              "id": "a1b2c3d4e5f60718:3d0f7b9c-1e5a-4f34-8c2f-7d1e8b630c2f",
+              "position": 940,
+              "role": "assistant",
+              "at": 1761220009000,
+              "parts": [{ "type": "text", "text": "It's the map order in parser.rs." }],
+              "subagent": { "id": "a1b2c3d4e5f60718", "call_id": "toolu_01AGENT" }
+            },
+            {
+              "id": "a1b2c3d4e5f60718.finished",
+              "position": 3900,
+              "role": "tool",
+              "parts": [{ "type": "tool_result", "call_id": "toolu_01AGENT", "output": "It's the map order in parser.rs." }]
+            }
+          ]
+        }
+      },
+      {
+        "note": "an OpenCode child session's message, without a call it could name",
+        "value": {
+          "version": 1,
+          "machine": "build-box",
+          "chat": {
+            "agent": "opencode",
+            "conversation_id": "ses_3c2b1a0f9e8d7c6b5a4",
+            "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R1", "name": "opencode 2" }
+          },
+          "messages": [
+            {
+              "id": "ses_4d3c2b1a0f9e:msg_5e4d3c2b1a0f:0",
+              "position": 2048,
+              "role": "assistant",
+              "parts": [{ "type": "text", "text": "Found it." }],
+              "subagent": { "id": "ses_4d3c2b1a0f9e" }
+            }
+          ]
+        }
       }
     ],
     "invalid": [
@@ -85,7 +148,15 @@
       { "note": "a result with text instead of output", "message": { "parts": [{ "type": "tool_result", "text": "ok" }] } },
       { "note": "an extra field on a part", "message": { "parts": [{ "type": "text", "text": "hi", "html": "<b>hi</b>" }] } },
       { "note": "an escape sequence in tool output", "message": { "parts": [{ "type": "tool_result", "output": "\u001b[31mred" }] } },
-      { "note": "a bidi override in text", "message": { "parts": [{ "type": "text", "text": "abc\u202edef" }] } }
+      { "note": "a bidi override in text", "message": { "parts": [{ "type": "text", "text": "abc\u202edef" }] } },
+      { "note": "a subagent without an id", "message": { "subagent": { "label": "Find it" } } },
+      { "note": "a subagent id with a slash", "message": { "subagent": { "id": "a/b" } } },
+      { "note": "a subagent id too long", "message": { "subagent": { "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } } },
+      { "note": "a subagent's call id with a space", "message": { "subagent": { "id": "a1", "call_id": "toolu 1" } } },
+      { "note": "a subagent label on two lines", "message": { "subagent": { "id": "a1", "label": "Find\nit" } } },
+      { "note": "an empty subagent label", "message": { "subagent": { "id": "a1", "label": "" } } },
+      { "note": "an extra field on a subagent", "message": { "subagent": { "id": "a1", "status": "done" } } },
+      { "note": "a subagent that isn't an object", "message": { "subagent": "a1" } }
     ],
     "bounds": [
       { "note": "64 KiB of ASCII text fits", "text": "a", "count": 65536, "valid": true },

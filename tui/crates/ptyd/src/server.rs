@@ -61,6 +61,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_USER_PROMPT,
     session_core::api::CAPABILITY_TURN,
     session_core::api::CAPABILITY_TRANSCRIPT,
+    session_core::api::CAPABILITY_TRANSCRIPT_SUBAGENTS,
     session_core::api::CAPABILITY_TERMINAL_PANE,
     session_core::api::CAPABILITY_ACTIVITY,
     session_core::api::CAPABILITY_REPLIES,
@@ -2006,6 +2007,7 @@ mod tests {
                 id: id.clone(),
                 after: None,
                 max_bytes: None,
+                subagents: false,
             },
             Request::SessionPin {
                 id: id.clone(),

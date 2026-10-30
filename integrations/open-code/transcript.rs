@@ -23,12 +23,33 @@ pub(super) type Watermark = (u64, Option<String>);
 /// The messages of `conversation` changed after `after`, reading about
 /// `budget` bytes of rows. Returns them, the new watermark, and whether more
 /// rows were there.
+#[cfg(test)]
 pub(super) fn read(
     database: &Path,
     conversation: &str,
     after: Option<Watermark>,
     budget: usize,
 ) -> Option<(Vec<TranscriptMessage>, Watermark, bool)> {
+    let read = read_counted(database, conversation, after, budget)?;
+    Some((read.messages, read.watermark, read.more))
+}
+
+/// What a read gave: the messages, the new watermark, whether more rows were
+/// there, and how many bytes of rows were read.
+pub(super) struct Counted {
+    pub messages: Vec<TranscriptMessage>,
+    pub watermark: Watermark,
+    pub more: bool,
+    pub bytes: usize,
+}
+
+/// [`read`], counting the bytes of rows read.
+pub(super) fn read_counted(
+    database: &Path,
+    conversation: &str,
+    after: Option<Watermark>,
+    budget: usize,
+) -> Option<Counted> {
     let connection = crate::resume::open_read_only(database)?;
     let newer = after.is_some();
     let (updated, key) = after.unwrap_or((0, None));
@@ -61,7 +82,173 @@ pub(super) fn read(
             break;
         }
     }
-    Some((messages, last, more))
+    Some(Counted {
+        messages,
+        watermark: last,
+        more,
+        bytes: read,
+    })
+}
+
+/// A child session (a subagent's conversation), with the task call that
+/// started it and what it was asked to do, when its parent's rows say.
+pub(super) struct Child {
+    pub id: String,
+    pub call_id: Option<String>,
+    pub label: Option<String>,
+    /// When it last changed (Unix milliseconds).
+    pub updated: u64,
+}
+
+/// The child sessions of `conversation` and of theirs, down to `depth`
+/// levels, at most `limit` of the most recently changed: OpenCode 2's
+/// `session_v2` rows (1.x's `session`) whose `parent_id` is one of them.
+/// Each is linked to the `task` call whose `metadata.sessionId` names it.
+pub(super) fn children(
+    database: &Path,
+    conversation: &str,
+    depth: usize,
+    limit: usize,
+) -> Vec<Child> {
+    let Some(connection) = crate::resume::open_read_only(database) else {
+        return Vec::new();
+    };
+    let table = if has_table(&connection, "session_v2") {
+        "session_v2"
+    } else {
+        "session"
+    };
+    let mut found: Vec<Child> = Vec::new();
+    let mut parents = vec![conversation.to_owned()];
+    for _ in 0..depth {
+        let mut next = Vec::new();
+        for parent in &parents {
+            let listed = child_rows(&connection, table, parent, limit);
+            if listed.is_empty() {
+                continue;
+            }
+            let calls = task_calls(&connection, parent);
+            for (id, title, updated) in listed {
+                let (call_id, label) = match calls.get(&id) {
+                    Some((call, label)) => (Some(call.clone()), label.clone()),
+                    None => (None, None),
+                };
+                next.push(id.clone());
+                found.push(Child {
+                    label: label.or(title),
+                    id,
+                    call_id,
+                    updated,
+                });
+            }
+        }
+        if next.is_empty() || found.len() >= limit * 4 {
+            break;
+        }
+        parents = next;
+    }
+    found.sort_by(|a, b| b.updated.cmp(&a.updated));
+    found.truncate(limit);
+    found
+}
+
+fn has_table(connection: &rusqlite::Connection, name: &str) -> bool {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [name],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap_or(false)
+}
+
+/// The child sessions of `parent` in `table`: id, title and `time_updated`.
+fn child_rows(
+    connection: &rusqlite::Connection,
+    table: &str,
+    parent: &str,
+    limit: usize,
+) -> Vec<(String, Option<String>, u64)> {
+    let query = format!(
+        "SELECT id, title, time_updated FROM {table} WHERE parent_id = ?1 \
+         ORDER BY time_updated DESC LIMIT ?2"
+    );
+    let Ok(mut statement) = connection.prepare(&query) else {
+        return Vec::new();
+    };
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let Ok(rows) = statement.query_map(rusqlite::params![parent, limit], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    }) else {
+        return Vec::new();
+    };
+    rows.filter_map(Result::ok)
+        .map(|(id, title, updated)| (id, title, u64::try_from(updated).unwrap_or(0)))
+        .collect()
+}
+
+/// `parent`'s `task` calls that started a child session: by the child's id,
+/// the call's id and its description (else its agent type).
+fn task_calls(
+    connection: &rusqlite::Connection,
+    parent: &str,
+) -> std::collections::HashMap<String, (String, Option<String>)> {
+    let mut calls = std::collections::HashMap::new();
+    // OpenCode 2 keeps a reply's blocks in its row; 1.x a tool per piece.
+    for query in [
+        "SELECT data FROM session_message WHERE session_id = ?1 AND type = 'assistant' \
+         AND data LIKE '%\"sessionId\"%'",
+        "SELECT data FROM part WHERE session_id = ?1 AND data LIKE '%\"sessionId\"%'",
+    ] {
+        let Ok(mut statement) = connection.prepare(query) else {
+            continue;
+        };
+        let Ok(rows) = statement.query_map([parent], |row| row.get::<_, String>(0)) else {
+            continue;
+        };
+        for data in rows.filter_map(Result::ok) {
+            let Ok(data) = serde_json::from_str::<Value>(&data) else {
+                continue;
+            };
+            let blocks = match data.get("content").and_then(Value::as_array) {
+                Some(blocks) => blocks.iter().collect(),
+                None => vec![&data],
+            };
+            for block in blocks {
+                let field = |key: &str| block.get(key).and_then(Value::as_str);
+                let (call_id, name) = match field("type") {
+                    Some("tool") => (
+                        field("id").or_else(|| field("callID")),
+                        field("name").or_else(|| field("tool")),
+                    ),
+                    _ => continue,
+                };
+                let state = block.get("state");
+                let child = state
+                    .and_then(|state| state.get("metadata"))
+                    .and_then(|metadata| metadata.get("sessionId"))
+                    .and_then(Value::as_str);
+                let (Some(call_id), Some("task"), Some(child)) = (call_id, name, child) else {
+                    continue;
+                };
+                let input = state.and_then(|state| state.get("input"));
+                let label = ["description", "subagent_type"].iter().find_map(|key| {
+                    input
+                        .and_then(|input| input.get(*key))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                        .map(String::from)
+                });
+                calls.insert(child.to_owned(), (call_id.to_owned(), label));
+            }
+        }
+    }
+    calls
 }
 
 /// A row read, as messages, and where it is in the order of changes.

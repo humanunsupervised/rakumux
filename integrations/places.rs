@@ -169,12 +169,13 @@ impl PlaceScan {
                     conversation: conversation.clone(),
                     offset,
                     key: None,
+                    subagents: Vec::new(),
                 });
                 self.behind = more;
             }
             TranscriptSource::OpenCode { .. } => {
                 let budget = u32::try_from(budget).unwrap_or(u32::MAX);
-                let Some(page) = self.source.read(self.cursor.as_ref(), Some(budget)) else {
+                let Some(page) = self.source.read(self.cursor.as_ref(), Some(budget), false) else {
                     return Vec::new();
                 };
                 for message in &page.messages {

@@ -406,6 +406,7 @@ fn serve_runs_sessions_with_the_real_control_layer() {
         id: session.id.clone(),
         after: None,
         max_bytes: None,
+        subagents: false,
     }) {
         Response::Error { error } => {
             assert_eq!(

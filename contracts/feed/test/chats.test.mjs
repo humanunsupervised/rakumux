@@ -64,6 +64,18 @@ test("a reply names its turn's last position, which older machines leave out", (
   assert.equal(validators.upload(entry), false);
 });
 
+test("a message's subagent is optional, its id and label bounded", () => {
+  const marked = (subagent) => variant({ message: { subagent } });
+  assert.equal(validators.chatUpload(variant({})), true, "older machines send none");
+  assert.equal(validators.chatUpload(marked({ id: "a1b2c3d4e5f60718" })), true, "an id alone");
+  assert.equal(validators.chatUpload(marked({ id: "a".repeat(64) })), true, "a 64-character id");
+  assert.equal(validators.chatUpload(marked({ id: "a1", call_id: "call_9|fc_1" })), true, "OpenCode's call ids");
+  assert.equal(validators.chatUpload(marked({ id: "a1", label: "é".repeat(120) })), true, "120 characters of label");
+  assert.equal(validators.chatUpload(marked({ id: "a1", label: "é".repeat(121) })), false, "121 don't fit");
+  assert.equal(validators.chatUpload(marked({ id: "a1", label: "😀".repeat(120) })), true, "120 four-byte characters");
+  assert.equal(validators.chatUpload(marked({ id: "a1", label: "😀".repeat(121) })), false);
+});
+
 test("chat body caps are annotated for the transport", () => {
   assert.equal(schemas["chat-upload"]["x-maxBodyBytes"], 4194304);
   assert.equal(schemas.turn["x-maxBodyBytes"], 4194304);

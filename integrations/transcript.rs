@@ -28,6 +28,10 @@
 //! - **Amp**: one message per line of the copy of the thread its Rakumux
 //!   plugin keeps, at its byte offset; tool results are the `tool` role's.
 //!
+//! With `subagents`, the conversation's subagents' own conversations come
+//! too, each message marked with its subagent (`subagents.rs`): Claude Code's
+//! subagent transcripts and OpenCode's child sessions.
+//!
 //! Text is cut at [`MAX_PART_BYTES`] per part and otherwise left as the
 //! agent wrote it: the caller cleans it before it leaves the machine.
 
@@ -37,6 +41,7 @@ use session_core::api::{
     TranscriptCursor, TranscriptMessage, TranscriptPage, TranscriptPart, TranscriptRole, MAX_PARTS,
     MAX_PART_BYTES, MAX_TRANSCRIPT_BYTES, TRANSCRIPT_BYTES,
 };
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -61,6 +66,8 @@ mod kimi;
 mod opencode;
 #[path = "pi/transcript.rs"]
 mod pi;
+#[path = "subagents.rs"]
+mod subagents;
 
 /// The longest log line read; a longer one (an image, a huge tool output)
 /// is passed over.
@@ -136,45 +143,86 @@ impl TranscriptSource {
         }
     }
 
+    /// The main conversation's messages after `after`, with where they stop,
+    /// whether more is there, and about how many bytes were read.
+    fn read_main(
+        &self,
+        conversation: &str,
+        after: Option<&TranscriptCursor>,
+        budget: usize,
+        reading: &Reading,
+    ) -> Option<(Vec<TranscriptMessage>, TranscriptCursor, bool, usize)> {
+        match self {
+            TranscriptSource::Log { agent, path, .. } => {
+                let key = file_key(*agent, path);
+                let from = after
+                    .filter(|cursor| cursor.key == key)
+                    .map_or(0, |cursor| cursor.offset);
+                let (messages, offset, more) = read_log(*agent, path, from, budget, reading)?;
+                let cursor = TranscriptCursor {
+                    conversation: conversation.to_owned(),
+                    offset,
+                    key,
+                    subagents: Vec::new(),
+                };
+                Some((messages, cursor, more, consumed(from, offset)))
+            }
+            TranscriptSource::OpenCode { database, .. } => {
+                let watermark = after.map(|cursor| (cursor.offset, cursor.key.clone()));
+                let read = opencode::read_counted(database, conversation, watermark, budget)?;
+                let (offset, key) = read.watermark;
+                let cursor = TranscriptCursor {
+                    conversation: conversation.to_owned(),
+                    offset,
+                    key,
+                    subagents: Vec::new(),
+                };
+                Some((read.messages, cursor, read.more, read.bytes))
+            }
+        }
+    }
+
     /// The messages after `after` (from the start when it's another
-    /// conversation's), reading about `max_bytes` at most. `None` when the
-    /// log or database can't be read.
+    /// conversation's), reading about `max_bytes` at most; with `subagents`,
+    /// its subagents' too, once the main conversation's are read. `None`
+    /// when the log or database can't be read.
     pub fn read(
         &self,
         after: Option<&TranscriptCursor>,
         max_bytes: Option<u32>,
+        subagents: bool,
     ) -> Option<TranscriptPage> {
         let budget = max_bytes
             .unwrap_or(TRANSCRIPT_BYTES)
             .clamp(1, MAX_TRANSCRIPT_BYTES) as usize;
         let conversation = self.conversation();
         let after = after.filter(|cursor| cursor.conversation == conversation);
-        let (messages, cursor, more) = match self {
-            TranscriptSource::Log { agent, path, .. } => {
-                let key = file_key(*agent, path);
-                let from = after
-                    .filter(|cursor| cursor.key == key)
-                    .map_or(0, |cursor| cursor.offset);
-                let (messages, offset, more) = read_log(*agent, path, from, budget)?;
-                let cursor = TranscriptCursor {
-                    conversation: conversation.to_owned(),
-                    offset,
-                    key,
-                };
-                (messages, cursor, more)
-            }
-            TranscriptSource::OpenCode { database, .. } => {
-                let watermark = after.map(|cursor| (cursor.offset, cursor.key.clone()));
-                let (messages, (offset, key), more) =
-                    opencode::read(database, conversation, watermark, budget)?;
-                let cursor = TranscriptCursor {
-                    conversation: conversation.to_owned(),
-                    offset,
-                    key,
-                };
-                (messages, cursor, more)
-            }
+        let listed = if subagents {
+            subagents::list(self)
+        } else {
+            Vec::new()
         };
+        let started = subagents.then(|| subagents::started(&listed));
+        let reading = Reading {
+            subagent: false,
+            subagents: started.as_ref(),
+        };
+        let (mut messages, mut cursor, mut more, used) =
+            self.read_main(conversation, after, budget, &reading)?;
+        cursor.subagents = after
+            .map(|after| after.subagents.clone())
+            .unwrap_or_default();
+        if subagents {
+            let read = subagents::read(
+                &listed,
+                &cursor.subagents,
+                budget.saturating_sub(used),
+                &reading,
+            );
+            messages.extend(read.messages);
+            cursor.subagents = read.cursors;
+            more |= read.more;
+        }
         Some(TranscriptPage {
             agent: self.agent().to_owned(),
             conversation_id: conversation.to_owned(),
@@ -183,6 +231,24 @@ impl TranscriptSource {
             more,
         })
     }
+}
+
+/// How a log's entries are taken as messages.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Reading<'a> {
+    /// A subagent's own log (Claude Code marks its entries as a sidechain).
+    pub subagent: bool,
+    /// Read with subagents: the conversation's, by the id their agent's
+    /// notices name them with (Claude Code's agent id), each with the call
+    /// that started it, when known. A subagent's end is that call's result.
+    pub subagents: Option<&'a HashMap<String, Option<String>>>,
+}
+
+/// About how many bytes a read from `from` to `to` took: all of `to` when it
+/// started over.
+fn consumed(from: u64, to: u64) -> usize {
+    let read = if to >= from { to - from } else { to };
+    usize::try_from(read).unwrap_or(usize::MAX)
 }
 
 /// The messages of the complete lines of `path` from `from` (its start
@@ -194,15 +260,16 @@ fn read_log(
     path: &Path,
     from: u64,
     budget: usize,
+    reading: &Reading,
 ) -> Option<(Vec<TranscriptMessage>, u64, bool)> {
     let mut messages = Vec::new();
     let mut copilot_reading = copilot::Reading::default();
     let (next, more) = scan(agent, path, from, budget, |entry, start| {
         let message = match agent {
-            LogAgent::Claude => claude::message(entry, start),
+            LogAgent::Claude => claude::read(entry, start, reading),
             LogAgent::Codex => codex::message(entry, start),
             LogAgent::Pi => pi::message(entry, start),
-            LogAgent::Copilot => copilot_reading.message(entry, start),
+            LogAgent::Copilot => copilot_reading.message(entry, start, reading.subagents.is_some()),
             LogAgent::Cursor => cursor::message(entry, start),
             LogAgent::Grok => grok::message(entry, start),
             LogAgent::Kimi => kimi::message(entry, start),
@@ -323,6 +390,7 @@ fn assemble(
         role,
         at,
         parts,
+        subagent: None,
     })
 }
 
@@ -538,7 +606,7 @@ mod tests {
             .map(|n| typed(&format!("u{n}"), &format!("prompt {n}")))
             .collect();
         let (directory, source) = claude_log(&lines);
-        let page = source.read(None, None).unwrap();
+        let page = source.read(None, None, false).unwrap();
         assert_eq!(page.agent, "claude-code");
         assert_eq!(page.conversation_id, "c1");
         assert_eq!(page.messages.len(), 5);
@@ -547,15 +615,15 @@ mod tests {
         let second = lines[0].to_string().len() as u64 + 1;
         assert_eq!(page.messages[1].position, second);
         // Nothing new: nothing read.
-        let again = source.read(Some(&page.cursor), None).unwrap();
+        let again = source.read(Some(&page.cursor), None, false).unwrap();
         assert!(again.messages.is_empty());
         assert_eq!(again.cursor, page.cursor);
         // A small budget reads a line or two at a time, and says there's more.
-        let first = source.read(None, Some(1)).unwrap();
+        let first = source.read(None, Some(1), false).unwrap();
         assert_eq!(first.messages.len(), 1);
         assert!(first.more);
         assert_eq!(first.cursor.offset, second);
-        let next = source.read(Some(&first.cursor), Some(1)).unwrap();
+        let next = source.read(Some(&first.cursor), Some(1), false).unwrap();
         assert_eq!(next.messages[0].id, "u1");
         // A line still being written waits; another conversation's cursor
         // reads this one from the start.
@@ -568,14 +636,21 @@ mod tests {
             .open(&path)
             .unwrap();
         write!(file, "{{\"type\": \"user\"").unwrap();
-        let end = source.read(Some(&page.cursor), None).unwrap();
+        let end = source.read(Some(&page.cursor), None, false).unwrap();
         assert!(end.messages.is_empty());
         assert_eq!(end.cursor.offset, page.cursor.offset);
         let other = TranscriptCursor {
             conversation: "c0".into(),
             ..page.cursor.clone()
         };
-        assert_eq!(source.read(Some(&other), None).unwrap().messages.len(), 5);
+        assert_eq!(
+            source
+                .read(Some(&other), None, false)
+                .unwrap()
+                .messages
+                .len(),
+            5
+        );
         drop(directory);
     }
 
@@ -601,7 +676,7 @@ mod tests {
         let mut messages = Vec::new();
         for _ in 0..100 {
             let page = source
-                .read(cursor.as_ref(), Some(MAX_TRANSCRIPT_BYTES))
+                .read(cursor.as_ref(), Some(MAX_TRANSCRIPT_BYTES), false)
                 .unwrap();
             messages.extend(page.messages);
             cursor = Some(page.cursor);

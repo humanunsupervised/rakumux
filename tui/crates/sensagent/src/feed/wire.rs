@@ -332,12 +332,14 @@ struct SessionsStoredWire {
 }
 
 /// What rakumux.com holds for this machine now, and what more it takes in
-/// a session list (`sessions-stored`).
+/// a session list and in chats (`sessions-stored`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SessionsStored {
     pub stored: u32,
     /// It takes each session's places (`accepts` has `places`).
     pub places: bool,
+    /// It takes subagents' messages in chats (`accepts` has `subagents`).
+    pub subagents: bool,
 }
 
 /// How many sessions rakumux.com holds for this machine now, and whether it
@@ -354,6 +356,7 @@ pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<SessionsStored, F
     Ok(SessionsStored {
         stored: stored.stored,
         places: stored.accepts.iter().any(|name| name == "places"),
+        subagents: stored.accepts.iter().any(|name| name == "subagents"),
     })
 }
 
@@ -481,6 +484,12 @@ pub(crate) fn message_id(id: &str) -> bool {
 /// The contract's tool call id: as a conversation id, `|` too.
 pub(crate) fn call_id(id: &str) -> bool {
     conversation_id(&id.replace('|', ":"))
+}
+
+/// The contract's subagent id (`subagentId`): as a conversation id, at most
+/// 64 characters.
+pub(crate) fn subagent_id(id: &str) -> bool {
+    id.len() <= 64 && conversation_id(id)
 }
 
 /// The contract's attached file name (`fileName`): one visible line of at
@@ -1415,6 +1424,7 @@ mod tests {
                 error: false,
                 truncated: false,
             }],
+            subagent: None,
         };
         let big = "z".repeat(600 * 1024);
         let messages: VecDeque<_> = (0..5).map(|n| message(n, &big)).collect();

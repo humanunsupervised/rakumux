@@ -170,6 +170,18 @@ pub trait SessionApi: Send + Sync {
         let _ = (id, after, max_bytes);
         Err(unsupported("reading an agent's conversation"))
     }
+    /// [`Self::transcript`] with the conversation's subagents' messages too,
+    /// each marked (capability `session.transcript.subagents`; a daemon
+    /// without it reads the main conversation alone). By default, the main
+    /// conversation alone.
+    fn transcript_with_subagents(
+        &self,
+        id: &SessionId,
+        after: Option<&crate::api::TranscriptCursor>,
+        max_bytes: Option<u32>,
+    ) -> Result<crate::api::TranscriptPage> {
+        self.transcript(id, after, max_bytes)
+    }
     /// The optional features the daemon announced in its hello (the latest
     /// one's: a daemon restarted since, in place or replaced, may announce
     /// more); `None` when the implementation can't tell (adapters, fakes).
@@ -388,6 +400,26 @@ impl Client {
         }
     }
 
+    /// `session_transcript`, with the subagents' messages when `subagents`.
+    fn read_transcript(
+        &self,
+        id: &SessionId,
+        after: Option<&crate::api::TranscriptCursor>,
+        max_bytes: Option<u32>,
+        subagents: bool,
+    ) -> Result<crate::api::TranscriptPage> {
+        let request = Request::SessionTranscript {
+            id: id.clone(),
+            after: after.cloned(),
+            max_bytes,
+            subagents,
+        };
+        match self.request(&request)? {
+            Response::Transcript { transcript } => Ok(transcript),
+            other => Err(unexpected(&other)),
+        }
+    }
+
     fn expect_ok(&self, request: &Request) -> Result<()> {
         match self.request(request)? {
             Response::Ok => Ok(()),
@@ -550,15 +582,16 @@ impl SessionApi for Client {
         after: Option<&crate::api::TranscriptCursor>,
         max_bytes: Option<u32>,
     ) -> Result<crate::api::TranscriptPage> {
-        let request = Request::SessionTranscript {
-            id: id.clone(),
-            after: after.cloned(),
-            max_bytes,
-        };
-        match self.request(&request)? {
-            Response::Transcript { transcript } => Ok(transcript),
-            other => Err(unexpected(&other)),
-        }
+        self.read_transcript(id, after, max_bytes, false)
+    }
+
+    fn transcript_with_subagents(
+        &self,
+        id: &SessionId,
+        after: Option<&crate::api::TranscriptCursor>,
+        max_bytes: Option<u32>,
+    ) -> Result<crate::api::TranscriptPage> {
+        self.read_transcript(id, after, max_bytes, true)
     }
 
     fn bind(&self, agent: &str, conversations: &[String]) -> Result<()> {
@@ -1842,11 +1875,13 @@ mod tests {
                                 text: "go".into(),
                                 truncated: false,
                             }],
+                            subagent: None,
                         }],
                         cursor: crate::api::TranscriptCursor {
                             conversation: format!("chat-of-{id}"),
                             offset: after.map_or(0, |cursor| cursor.offset) + 10,
                             key: None,
+                            subagents: Vec::new(),
                         },
                         more: false,
                     },
@@ -2297,12 +2332,14 @@ mod tests {
                 Request::SessionTranscript {
                     id: s1.clone(),
                     after: None,
-                    max_bytes: Some(4096)
+                    max_bytes: Some(4096),
+                    subagents: false,
                 },
                 Request::SessionTranscript {
                     id: s1.clone(),
                     after: Some(chat.cursor.clone()),
-                    max_bytes: None
+                    max_bytes: None,
+                    subagents: false,
                 },
                 Request::SessionWait(wait),
                 Request::SessionSend(send),

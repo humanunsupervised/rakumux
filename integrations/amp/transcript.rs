@@ -97,7 +97,7 @@ mod tests {
     fn a_thread_reads_as_prompts_replies_tool_calls_and_their_results() {
         let directory = tempfile::tempdir().unwrap();
         let source = source(directory.path());
-        let page = source.read(None, None).unwrap();
+        let page = source.read(None, None, false).unwrap();
         assert_eq!(page.agent, "amp");
         assert_eq!(
             page.conversation_id,
@@ -165,13 +165,13 @@ mod tests {
             ]
         );
         // The cursor reads on from the next line.
-        let again = source.read(Some(&page.cursor), None).unwrap();
+        let again = source.read(Some(&page.cursor), None, false).unwrap();
         assert!(again.messages.is_empty());
         assert_eq!(page.cursor.offset, FIXTURE.len() as u64);
-        let one = source.read(None, Some(1)).unwrap();
+        let one = source.read(None, Some(1), false).unwrap();
         assert_eq!(one.messages.len(), 1);
         assert!(one.more);
-        let next = source.read(Some(&one.cursor), Some(1)).unwrap();
+        let next = source.read(Some(&one.cursor), Some(1), false).unwrap();
         assert_eq!(next.messages[0].id, "msg-2");
     }
 

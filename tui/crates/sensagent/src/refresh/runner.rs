@@ -210,7 +210,8 @@ enum Work<A, C> {
     Features(FeaturesJob<A, C>),
     Feed(FeedJob<A, C>),
     /// Read a session's chat after a cursor.
-    Transcript(SessionId, Option<TranscriptCursor>),
+    /// Read a chat after a cursor, with its subagents' messages when asked.
+    Transcript(SessionId, Option<TranscriptCursor>, bool),
     /// Upload a chat's messages.
     ChatUpload(FeedJob<A, C>),
     /// Read a turn for a TUI, answered straight to it.
@@ -815,6 +816,7 @@ fn own<S, A, C>(
                     _ => Err(FeedFailure::Invalid),
                 });
                 sessions.done(current, outcome, now);
+                chats.set_subagents(sessions.subagents(), now);
                 if taken && renamed_at.is_none_or(|at| now.saturating_sub(at) >= RENAME_EVERY) {
                     renamed_at = Some(now);
                     machine = identity.rename();
@@ -1416,8 +1418,12 @@ fn follow_chats<S, A, C>(
     chats.set_enabled(enabled, now);
     chats.set_watched(watched, now);
     match chats.next_work(now) {
-        Some(ChatWork::Read { session, after }) => {
-            let _ = work.send(Work::Transcript(session, after));
+        Some(ChatWork::Read {
+            session,
+            after,
+            subagents,
+        }) => {
+            let _ = work.send(Work::Transcript(session, after, subagents));
         }
         Some(ChatWork::Upload(request)) => match refresher.feed_job(request) {
             Some(job) => {
@@ -1731,10 +1737,14 @@ where
                 Ok(completion) => Message::FeedDone(completion),
                 Err(_) => continue,
             },
-            Ok(Work::Transcript(session, after)) => {
-                let result = api
-                    .transcript(&session, after.as_ref(), Some(crate::feed::READ_BYTES))
-                    .map_err(|error| error.code);
+            Ok(Work::Transcript(session, after, subagents)) => {
+                let bytes = Some(crate::feed::READ_BYTES);
+                let result = if subagents {
+                    api.transcript_with_subagents(&session, after.as_ref(), bytes)
+                } else {
+                    api.transcript(&session, after.as_ref(), bytes)
+                }
+                .map_err(|error| error.code);
                 Message::Transcript(session, result)
             }
             Ok(Work::ChatUpload(job)) => {

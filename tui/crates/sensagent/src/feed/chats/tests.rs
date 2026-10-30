@@ -23,6 +23,7 @@ fn message(position: u64, parts: Vec<TranscriptPart>) -> TranscriptMessage {
         role: TranscriptRole::Assistant,
         at: Some(1_761_220_000_000),
         parts,
+        subagent: None,
     }
 }
 
@@ -41,6 +42,7 @@ fn cursor(offset: u64) -> TranscriptCursor {
         conversation: "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23".into(),
         offset,
         key: None,
+        subagents: Vec::new(),
     }
 }
 
@@ -53,7 +55,7 @@ fn on(cursors: Option<PathBuf>) -> ChatSync {
 
 fn read_of(work: Option<ChatWork>) -> (SessionId, Option<TranscriptCursor>) {
     match work {
-        Some(ChatWork::Read { session, after }) => (session, after),
+        Some(ChatWork::Read { session, after, .. }) => (session, after),
         other => panic!("expected a read, got {other:?}"),
     }
 }
@@ -318,4 +320,72 @@ fn messages_are_cleaned_before_they_leave_the_machine() {
         })
         .sum();
     assert!(total <= MESSAGE_TEXT);
+}
+
+#[test]
+fn subagents_are_read_only_once_rakumux_com_takes_them() {
+    let mut chats = on(None);
+    let subagents = |work: Option<ChatWork>| match work {
+        Some(ChatWork::Read { subagents, .. }) => subagents,
+        other => panic!("expected a read, got {other:?}"),
+    };
+    assert!(!subagents(chats.next_work(NOW)));
+    chats.read_done(
+        SessionId::from_string("S"),
+        Ok(page(vec![], 120, false)),
+        NOW,
+    );
+    // Taken now: the chat is read again at once, with them.
+    chats.set_subagents(true, NOW);
+    assert!(subagents(chats.next_work(NOW)));
+}
+
+#[test]
+fn a_subagents_messages_go_up_marked_cleaned_and_masked() {
+    let mut chats = on(None);
+    chats.set_subagents(true, NOW);
+    let (session, _) = read_of(chats.next_work(NOW));
+    let marked = |id: &str, label: Option<&str>, call: Option<&str>| {
+        let mut message = message(9, vec![text("Searching.")]);
+        message.id = format!("{id}:m9");
+        message.subagent = Some(TranscriptSubagent {
+            id: id.into(),
+            call_id: call.map(String::from),
+            label: label.map(String::from),
+        });
+        message
+    };
+    let key = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    chats.read_done(
+        session,
+        Ok(page(
+            vec![
+                message(0, vec![text("Fix it.")]),
+                marked(
+                    "a1b2c3d4e5f60718",
+                    Some(&format!("Find it\u{1b}[31m with {key}\nand more")),
+                    Some("toolu_01AGENT"),
+                ),
+                // An id that isn't one: the message stays here.
+                marked(&"a".repeat(65), None, None),
+                // A call id that isn't one is left out.
+                marked("a0", None, Some("bad call")),
+            ],
+            120,
+            false,
+        )),
+        NOW,
+    );
+    let body = upload_of(chats.next_work(NOW));
+    let messages = body["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 3);
+    assert!(messages[0].get("subagent").is_none());
+    let subagent = &messages[1]["subagent"];
+    assert_eq!(subagent["id"], "a1b2c3d4e5f60718");
+    assert_eq!(subagent["call_id"], "toolu_01AGENT");
+    let label = subagent["label"].as_str().unwrap();
+    assert!(label.starts_with("Find it with "), "{label}");
+    assert!(!label.contains(key), "{label}");
+    assert!(!label.contains('\n'));
+    assert_eq!(messages[2]["subagent"], serde_json::json!({"id": "a0"}));
 }

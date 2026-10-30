@@ -113,7 +113,7 @@ mod tests {
             json!({"role": "assistant", "message": {"content": [{"type": "text", "text": "Fixed."}]}}),
             json!({"type": "turn_ended", "status": "success"}),
         ]);
-        let page = source.read(None, None).unwrap();
+        let page = source.read(None, None, false).unwrap();
         assert_eq!(page.agent, "cursor-agent");
         let messages = page.messages;
         assert_eq!(messages.len(), 3);
@@ -155,7 +155,7 @@ mod tests {
         let mut lines = first.to_vec();
         lines.push(json!({"type": "turn_ended", "status": "success"}));
         let (_directory, source) = source(&lines);
-        let page = source.read(None, None).unwrap();
+        let page = source.read(None, None, false).unwrap();
         assert_eq!(page.messages.len(), 2);
         let path = match &source {
             TranscriptSource::Log { path, .. } => path.clone(),
@@ -165,7 +165,7 @@ mod tests {
         let before: usize = first.iter().map(|line| line.to_string().len() + 1).sum();
         assert_eq!(held, before as u64, "at the turn end's start");
         // Read again unchanged: nothing new, the same cursor.
-        let again = source.read(Some(&page.cursor), None).unwrap();
+        let again = source.read(Some(&page.cursor), None, false).unwrap();
         assert!(again.messages.is_empty());
         assert_eq!(again.cursor.offset, held);
         // Cursor writes the file whole for the next turn: the turn end is
@@ -174,7 +174,7 @@ mod tests {
         for line in first.iter().chain([&user("two")]) {
             writeln!(file, "{line}").unwrap();
         }
-        let next = source.read(Some(&page.cursor), None).unwrap();
+        let next = source.read(Some(&page.cursor), None, false).unwrap();
         assert_eq!(next.messages.len(), 1);
         assert_eq!(next.messages[0].role, TranscriptRole::User);
         assert_eq!(next.messages[0].position, held);
@@ -182,7 +182,7 @@ mod tests {
         let mut file = std::fs::File::create(&path).unwrap();
         writeln!(file, "{}", user("a much longer first prompt than before")).unwrap();
         writeln!(file, "{}", user("three")).unwrap();
-        let rewound = source.read(Some(&next.cursor), None).unwrap();
+        let rewound = source.read(Some(&next.cursor), None, false).unwrap();
         assert_eq!(rewound.messages.len(), 2);
     }
 }

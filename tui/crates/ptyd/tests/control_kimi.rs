@@ -332,6 +332,7 @@ fn the_conversation_its_hooks_name_gives_the_lines_turn_reply_chat_places_and_re
             id: id.clone(),
             after: None,
             max_bytes: None,
+            subagents: false,
         },
     ) {
         Response::Transcript { transcript } => transcript,

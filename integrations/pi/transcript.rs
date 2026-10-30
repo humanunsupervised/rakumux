@@ -305,13 +305,13 @@ mod tests {
             conversation: "c1".into(),
             path,
         };
-        let page = source.read(None, None).unwrap();
+        let page = source.read(None, None, false).unwrap();
         assert_eq!(page.agent, "pi");
         assert_eq!(page.conversation_id, "c1");
         assert_eq!(page.messages.len(), 7);
         assert!(!page.more);
         // Small reads go a line at a time and say there's more.
-        let first = source.read(None, Some(1)).unwrap();
+        let first = source.read(None, Some(1), false).unwrap();
         assert!(first.messages.is_empty(), "the header is no message");
         assert!(first.more);
         writeln!(
@@ -323,7 +323,7 @@ mod tests {
             )
         )
         .unwrap();
-        let next = source.read(Some(&page.cursor), None).unwrap();
+        let next = source.read(Some(&page.cursor), None, false).unwrap();
         assert_eq!(next.messages.len(), 1);
         assert_eq!(next.messages[0].id, "u3");
     }

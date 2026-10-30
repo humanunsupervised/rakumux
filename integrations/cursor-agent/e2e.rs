@@ -183,6 +183,7 @@ fn transcript(
         id: id.clone(),
         after,
         max_bytes: None,
+        subagents: false,
     }) {
         Response::Transcript { transcript } => transcript,
         other => panic!("transcript failed: {other:?}"),

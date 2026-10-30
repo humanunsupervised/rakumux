@@ -284,8 +284,8 @@ line), the agent's text and visible
 reasoning, its tool calls with their input, and the tools' output (the `tool` role), in order.
 
 - **Claude Code:** one message per entry of the main conversation's transcript, at its byte
-  offset, with its `uuid`. Subagents' entries, meta entries, compaction summaries and
-  interruption notices are left out; redacted thinking says nothing.
+  offset, with its `uuid`. Subagents' entries (unless read with them, below), meta entries,
+  compaction summaries and interruption notices are left out; redacted thinking says nothing.
 - **Codex:** one message per rollout line, at its byte offset. The user's messages come from
   `user_message` events; replies, reasoning summaries (encrypted reasoning is left out), tool
   calls and their output from response items. A shell call's output is its `output`, failed
@@ -323,6 +323,27 @@ reasoning, its tool calls with their input, and the tools' output (the `tool` ro
 
 A log line longer than 8 MiB is passed over. Text is cut at 64 KiB per part and otherwise left
 as written: the status service cleans it before it leaves the machine.
+
+**Subagents** (`subagents.rs`, read only when asked: `session_transcript`'s `subagents`): each
+subagent's own conversation comes after the main one, its messages marked with the subagent's
+id, the call that started it and a label (its description, else its agent type), their ids
+starting with the subagent's, their parts cut at 16 KiB, at most 2 MiB of text per subagent.
+
+- **Claude Code:** `<conversation>/subagents/agent-<id>.jsonl` beside the transcript (its
+  entries are a sidechain), with `agent-<id>.meta.json` (`toolUseId`, `description`,
+  `agentType`); a subagent's own subagents are there too. A subagent started in the background
+  is acknowledged at once (`toolUseResult.status: async_launched`): that acknowledgement is left
+  out, and its call's result is the `<task-notification>` Claude Code gives the agent when it
+  ends (logged as a prompt or a queued command, one id for both), failed unless `completed`.
+- **OpenCode:** the conversation's child sessions (`parent_id`, three levels down), each read as
+  a conversation of its own and linked to the `task` call whose `metadata.sessionId` names it.
+- **GitHub Copilot:** its subagents' events are in its own log, by `agentId`: their prompt (the
+  `user.message` Copilot sends), messages and tools' results, linked to the `task` call by
+  `parentToolCallId` (or the call `subagent.started` names), named as that event names them.
+- Not yet: Kimi Code (links in the main log's `subagent.spawned` records, read only once), Grok
+  Build (its spawn record names no call), Droid (a subagent's session is found only by reading
+  the first line of every session file in its folder), Codex, Pi, Cursor and Amp (no subagent
+  logs Rakumux reads).
 
 ## Replies written back
 

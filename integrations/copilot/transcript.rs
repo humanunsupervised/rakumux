@@ -3,30 +3,90 @@
 //! the user typed (`user.message` without a `source`) is the `user` role's;
 //! the assistant's messages (their reasoning, text and tool calls) and its
 //! reasoning events the `assistant` role's; tools' results the `tool`
-//! role's. Subagents' events, hooks' records, system prompts and
-//! bookkeeping are left out, as Copilot's own timeline does. Reasoning
-//! Copilot logged both as an event and on its message counts once.
+//! role's. Hooks' records, system prompts and bookkeeping are left out, as
+//! Copilot's own timeline does. Reasoning Copilot logged both as an event and
+//! on its message counts once.
+//!
+//! Subagents' events (those with an `agentId`, interleaved with the main
+//! agent's) are left out too, unless read with subagents: then each is its
+//! subagent's message, marked with the `task` call that started it (its
+//! events' `parentToolCallId`, or the call its `subagent.started` names) and
+//! the name that event gives it; its prompt is the `user.message` Copilot
+//! sends it.
 use super::{assemble, call, compact, reasoning, result, text, timestamp};
 use serde_json::Value;
-use session_core::api::{TranscriptMessage, TranscriptRole};
-use std::collections::HashSet;
+use session_core::api::{TranscriptMessage, TranscriptRole, TranscriptSubagent};
+use std::collections::{HashMap, HashSet};
 
 /// Reads a log's messages in order, remembering the reasoning already
-/// taken from its events.
+/// taken from its events, and the subagents started in what was read.
 #[derive(Default)]
 pub(super) struct Reading {
     reasoning: HashSet<String>,
+    /// By agent id: the call that started it and its name.
+    subagents: HashMap<String, (Option<String>, Option<String>)>,
 }
 
 impl Reading {
-    /// The message of the event at `position`, if it is one.
-    pub(super) fn message(&mut self, entry: &Value, position: u64) -> Option<TranscriptMessage> {
+    /// The message of the event at `position`, if it is one: a subagent's
+    /// only `with_subagents`.
+    pub(super) fn message(
+        &mut self,
+        entry: &Value,
+        position: u64,
+        with_subagents: bool,
+    ) -> Option<TranscriptMessage> {
+        let agent = entry
+            .get("agentId")
+            .and_then(Value::as_str)
+            .filter(|agent| !agent.is_empty());
         if entry.get("agentId").is_some_and(|agent| !agent.is_null()) {
-            return None;
+            let agent = agent?;
+            if !with_subagents {
+                return None;
+            }
+            let message = self.main(entry, position, true)?;
+            let data = entry.get("data");
+            let field = |key: &str| {
+                data.and_then(|data| data.get(key))
+                    .and_then(Value::as_str)
+                    .map(String::from)
+            };
+            let known = self.subagents.get(agent);
+            let marker = TranscriptSubagent {
+                id: agent.to_owned(),
+                call_id: field("parentToolCallId")
+                    .or_else(|| known.and_then(|(call, _)| call.clone()))
+                    .filter(|id| super::is_call_id(id)),
+                label: known.and_then(|(_, label)| label.clone()),
+            };
+            return super::subagents::mark(message, &marker);
         }
+        self.main(entry, position, false)
+    }
+
+    /// The message of a main agent's event (or, `subagent`, a subagent's).
+    fn main(&mut self, entry: &Value, position: u64, subagent: bool) -> Option<TranscriptMessage> {
         let data = entry.get("data")?;
         let field = |key: &str| data.get(key).and_then(Value::as_str);
         let (role, parts) = match entry.get("type")?.as_str()? {
+            "subagent.started" if subagent => {
+                let agent = entry.get("agentId").and_then(Value::as_str)?;
+                let label = ["agentDisplayName", "agentName", "agentType"]
+                    .iter()
+                    .find_map(|key| field(key).map(str::trim).filter(|name| !name.is_empty()))
+                    .map(|name| name.chars().take(120).collect());
+                self.subagents.insert(
+                    agent.to_owned(),
+                    (field("toolCallId").map(String::from), label),
+                );
+                return None;
+            }
+            // What Copilot sent the subagent to do.
+            "user.message" if subagent => {
+                let parts = field("content").and_then(text).into_iter().collect();
+                (TranscriptRole::User, parts)
+            }
             "user.message" => {
                 let typed = super::super::copilot::typed(entry)?;
                 let parts = super::super::typed_text(&typed)
@@ -130,6 +190,7 @@ mod tests {
                     json!({"content": "Run the tests", "transformedContent": "<current_datetime>x</current_datetime>\n\nRun the tests"}),
                 ),
                 120,
+                false,
             )
             .unwrap();
         assert_eq!(typed.role, TranscriptRole::User);
@@ -164,7 +225,7 @@ mod tests {
                 json!({"sessionId": "s", "version": 1}),
             ),
         ] {
-            assert_eq!(reading.message(&entry, 0), None, "{entry}");
+            assert_eq!(reading.message(&entry, 0, false), None, "{entry}");
         }
     }
 
@@ -181,6 +242,7 @@ mod tests {
                             "arguments": {"path": "/home/me/project/todo.txt", "file_text": "x"}}]}),
                 ),
                 0,
+                false,
             )
             .unwrap();
         assert_eq!(message.role, TranscriptRole::Assistant);
@@ -213,6 +275,7 @@ mod tests {
                         "fileEdits": [{"path": "/home/me/project/todo.txt", "kind": "create"}]}),
                 ),
                 0,
+                false,
             )
             .unwrap();
         assert_eq!(done.role, TranscriptRole::Tool);
@@ -234,6 +297,7 @@ mod tests {
                         "error": {"message": "Parent directory does not exist", "code": "failure"}}),
                 ),
                 0,
+                false,
             )
             .unwrap();
         assert_eq!(
@@ -258,6 +322,7 @@ mod tests {
                     json!({"reasoningId": "r1", "content": "Think it through"}),
                 ),
                 0,
+                false,
             )
             .unwrap();
         assert_eq!(
@@ -275,6 +340,7 @@ mod tests {
                     json!({"messageId": "m1", "content": "Answer", "reasoningText": "Think it through", "toolRequests": []}),
                 ),
                 0,
+                false,
             )
             .unwrap();
         assert_eq!(
@@ -292,9 +358,50 @@ mod tests {
                     "assistant.message",
                     json!({"messageId": "m2", "content": "", "toolRequests": []})
                 ),
-                0
+                0,
+                false
             ),
             None
         );
+    }
+
+    #[test]
+    fn a_subagents_events_are_its_messages_when_read_with_subagents() {
+        let child = "8b1c0f2e-4d3a-4e5f-9a6b-7c8d9e0f1a2b";
+        let events = [
+            json!({"type": "subagent.started", "agentId": child, "id": "e1",
+                "data": {"toolCallId": "call_task", "agentName": "explore",
+                    "agentDisplayName": "looker", "agentType": "explore"}}),
+            json!({"type": "user.message", "agentId": child, "id": "e2",
+                "data": {"content": "Find the flaky test", "source": "agent-root"}}),
+            json!({"type": "assistant.message", "agentId": child, "id": "e3",
+                "data": {"messageId": "m", "content": "Found it.", "toolRequests": [],
+                    "parentToolCallId": "call_task"}}),
+            json!({"type": "hook.start", "agentId": child, "id": "e4",
+                "data": {"input": {}, "parentToolCallId": "call_task"}}),
+        ];
+        let mut reading = Reading::default();
+        let messages: Vec<TranscriptMessage> = events
+            .iter()
+            .enumerate()
+            .filter_map(|(n, entry)| reading.message(entry, n as u64 * 100, true))
+            .collect();
+        let ids: Vec<&str> = messages.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, [format!("{child}:e2"), format!("{child}:e3")]);
+        let marker = TranscriptSubagent {
+            id: child.into(),
+            call_id: Some("call_task".into()),
+            label: Some("looker".into()),
+        };
+        assert!(messages
+            .iter()
+            .all(|m| m.subagent.as_ref() == Some(&marker)));
+        assert_eq!(messages[0].role, TranscriptRole::User);
+        assert_eq!(messages[1].role, TranscriptRole::Assistant);
+        // Without subagents, none of them.
+        let mut plain = Reading::default();
+        assert!(events
+            .iter()
+            .all(|entry| plain.message(entry, 0, false).is_none()));
     }
 }

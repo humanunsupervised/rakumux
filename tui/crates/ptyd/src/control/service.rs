@@ -551,7 +551,8 @@ impl Inner {
                 id,
                 after,
                 max_bytes,
-            } => self.transcript(caller, &id, after.as_ref(), max_bytes),
+                subagents,
+            } => self.transcript(caller, &id, after.as_ref(), max_bytes, subagents),
             Request::SessionPin { id, pinned } => self.pin(caller, &id, pinned),
             Request::SessionBind {
                 agent,
@@ -1758,14 +1759,15 @@ impl Inner {
     }
 
     /// `session_transcript`: the live agent's conversation after `after`, for
-    /// user callers. Reads files of other programs, so it reads without the
-    /// state lock.
+    /// user callers, with its subagents' when `subagents`. Reads files of
+    /// other programs, so it reads without the state lock.
     fn transcript(
         &self,
         caller: &Caller,
         id: &SessionId,
         after: Option<&session_core::api::TranscriptCursor>,
         max_bytes: Option<u32>,
+        subagents: bool,
     ) -> Result<Response, ApiError> {
         let source = {
             let state = self.lock();
@@ -1783,7 +1785,7 @@ impl Inner {
                 "no agent conversation is known in this session",
             )
         })?;
-        let transcript = source.read(after, max_bytes).ok_or_else(|| {
+        let transcript = source.read(after, max_bytes, subagents).ok_or_else(|| {
             ApiError::new(
                 ErrorCode::Internal,
                 "the agent's conversation couldn't be read",

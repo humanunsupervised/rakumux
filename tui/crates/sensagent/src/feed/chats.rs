@@ -7,6 +7,10 @@
 //! while replies are (`ReplySync::watched`). Where each session's chat is up
 //! to is kept in the status directory, so a restarted service carries on
 //! rather than starting over. Driven by the owner thread with its own clock.
+//!
+//! Once rakumux.com says it takes them (its session list's answer `accepts`
+//! `subagents`), chats are read with their subagents' messages, each marked
+//! with its subagent, cleaned and masked the same way.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -15,7 +19,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use session_core::api::{
     ErrorCode, TranscriptCursor, TranscriptMessage, TranscriptPage, TranscriptPart, TranscriptRole,
-    MAX_PART_BYTES,
+    TranscriptSubagent, MAX_PART_BYTES,
 };
 use session_core::ids::SessionId;
 use session_core::model::{SessionStatus, SessionView};
@@ -42,14 +46,18 @@ const LONGEST_WAIT: Duration = Duration::from_secs(86_400);
 const MESSAGE_TEXT: usize = 512 * 1024;
 /// Sessions whose place is remembered, the most recently used kept.
 const MAX_CURSORS: usize = 512;
+/// The longest subagent label uploaded, in characters (the contract's).
+const LABEL_CHARS: usize = 120;
 
 /// What to do next for chats.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ChatWork {
-    /// Read `session`'s chat from the daemon after `after`.
+    /// Read `session`'s chat from the daemon after `after`, with its
+    /// subagents' messages when `subagents`.
     Read {
         session: SessionId,
         after: Option<TranscriptCursor>,
+        subagents: bool,
     },
     /// Upload messages.
     Upload(FeedRequest),
@@ -74,6 +82,20 @@ pub(crate) struct UploadMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub at: Option<i64>,
     pub parts: Vec<TranscriptPart>,
+    /// The subagent whose conversation it's from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<UploadSubagent>,
+}
+
+/// A subagent as the feed names it (`subagent`): its id, the call that
+/// started it and a label, both when known and valid.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct UploadSubagent {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// A session the daemon shows.
@@ -110,6 +132,8 @@ pub(crate) struct ChatSync {
     /// Replies are read every second (`ReplySync::watched`): chats are read
     /// every [`READ_EVERY_WATCHED`].
     watched: bool,
+    /// rakumux.com takes subagents' messages: chats are read with them.
+    subagents: bool,
     busy: bool,
     pending: Option<Pending>,
     retry_at: Duration,
@@ -127,6 +151,7 @@ impl ChatSync {
             sessions: HashMap::new(),
             cursors: Cursors::load(cursors),
             watched: false,
+            subagents: false,
             busy: false,
             pending: None,
             retry_at: Duration::ZERO,
@@ -174,6 +199,19 @@ impl ChatSync {
             }
         }
         self.watched = watched;
+    }
+
+    /// Whether rakumux.com takes subagents' messages (`SessionSync::subagents`):
+    /// once it does, every chat is read again soon, with its subagents from
+    /// their start.
+    pub fn set_subagents(&mut self, subagents: bool, now: Duration) {
+        if subagents && !self.subagents {
+            for session in self.sessions.values_mut() {
+                session.due = true;
+                session.next = session.next.min(now);
+            }
+        }
+        self.subagents = subagents;
     }
 
     /// The daemon (re)connected: these are its sessions, each read again.
@@ -256,6 +294,7 @@ impl ChatSync {
         Some(ChatWork::Read {
             after: self.cursors.get(&session),
             session,
+            subagents: self.subagents,
         })
     }
 
@@ -442,6 +481,10 @@ pub(crate) fn upload_message(message: TranscriptMessage) -> Option<UploadMessage
     if parts.is_empty() || !wire::message_id(&message.id) {
         return None;
     }
+    let subagent = match message.subagent {
+        Some(subagent) => Some(upload_subagent(subagent)?),
+        None => None,
+    };
     parts.truncate(64);
     Some(UploadMessage {
         id: message.id,
@@ -451,6 +494,25 @@ pub(crate) fn upload_message(message: TranscriptMessage) -> Option<UploadMessage
             .at
             .filter(|at| (EARLIEST_MS..=LATEST_MS).contains(at)),
         parts,
+        subagent,
+    })
+}
+
+/// A subagent as the feed takes it: `None` when its id isn't one (so its
+/// message isn't sent); a call id that isn't one left out, its label
+/// cleaned and masked as the chat's text is, one line.
+fn upload_subagent(subagent: TranscriptSubagent) -> Option<UploadSubagent> {
+    if !wire::subagent_id(&subagent.id) {
+        return None;
+    }
+    Some(UploadSubagent {
+        id: subagent.id,
+        call_id: subagent.call_id.filter(|id| wire::call_id(id)),
+        label: subagent
+            .label
+            .as_deref()
+            .and_then(crate::cloud::chat_text)
+            .and_then(|label| wire::label(&label, LABEL_CHARS)),
     })
 }
 

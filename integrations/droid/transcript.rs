@@ -280,7 +280,7 @@ mod tests {
             conversation: ID.into(),
             path: path.clone(),
         };
-        let page = source.read(None, None).unwrap();
+        let page = source.read(None, None, false).unwrap();
         assert_eq!(page.agent, "droid");
         assert_eq!(page.conversation_id, ID);
         let ids: Vec<(&str, u64)> = page
@@ -292,7 +292,7 @@ mod tests {
         assert!(!page.more);
         retitle(&path, "Fix the flaky login test in the browser suite");
         append(&path, &line("m3", "user", json!("Now the docs")));
-        let next = source.read(Some(&page.cursor), None).unwrap();
+        let next = source.read(Some(&page.cursor), None, false).unwrap();
         let ids: Vec<(&str, u64)> = next
             .messages
             .iter()
@@ -300,7 +300,7 @@ mod tests {
             .collect();
         assert_eq!(ids, [("m3", body_position(&path, "\"m3\""))]);
         // A small budget reads a line or two at a time, and says there's more.
-        let first = source.read(None, Some(1)).unwrap();
+        let first = source.read(None, Some(1), false).unwrap();
         assert!(first.more);
         assert_eq!(first.messages.len(), 1);
         // Another conversation's cursor reads this one from its start.
@@ -308,6 +308,13 @@ mod tests {
             conversation: "11111111-1111-4111-8111-111111111111".into(),
             ..next.cursor.clone()
         };
-        assert_eq!(source.read(Some(&other), None).unwrap().messages.len(), 3);
+        assert_eq!(
+            source
+                .read(Some(&other), None, false)
+                .unwrap()
+                .messages
+                .len(),
+            3
+        );
     }
 }
