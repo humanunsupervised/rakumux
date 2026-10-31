@@ -282,7 +282,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    foreground still is (`expect_foreground`, read again by the daemon; refused when its agent
    just exited to the shell, and looked at again 2 s later), and never into an agent that asks
    something (`refuse_if_blocked`: the daemon refuses with `session_blocked` while its
-   lifecycle, or detection on its screen read then, says `blocked`, tried again 2 s later; and it
+   lifecycle, or detection on its screen read then, says `blocked`, tried again 2 s later; or
+   isn't at its prompt yet: the same refusal while detection reads no prompt on the screen of an
+   agent whose screen has one to show, `detect::knows_its_prompt`, though its hooks may say idle,
+   as Claude Code's SessionStart does before it draws anything; and it
    holds back the Enter if a permission prompt, question or menu opened after the paste, so the
    Enter never answers one: the text stays in the input box and the reply fails `not_taken`
    unless the agent takes it later; a daemon without `session.submit.blocked` submits anyway,
@@ -296,7 +299,12 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    draft on the same line; without a `user_prompt`, from an older daemon, any new turn in its
    chat; Claude Code logs what's typed while a turn runs as a `queued_command` attachment once
    it takes it, which the daemon reads as a prompt too, and a paste of several lines, a reply
-   with files among them, as a `<pasted_content id="…">` block, read as what was typed), or, for an agent whose turns the daemon doesn't follow, once seen `working`/`blocked`
+   with files among them, as a `<pasted_content id="…">` block, read as what was typed), also
+   when it had no chat before (an agent just started: one of the feed's agents, whose turns a
+   daemon with `session.submit.blocked` follows, `follows_turns`; its being busy as it starts
+   proves nothing), or, for an agent whose turns the daemon doesn't follow (any other, or every
+   agent of a daemon without `session.submit.blocked`, which followed only Claude Code, Codex
+   and OpenCode), once seen `working`/`blocked`
    (a view still showing it waiting proves nothing, as the lifecycle lags); with no new prompt
    within 30 s, or another one, it fails `not_taken` (its Enter lost, it went into a menu, or a
    draft on a line of its own went first: it may still be in the input box); the next goes in
@@ -395,7 +403,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    session with no answer to reply to: `OwnerRequest::SessionMessage {machine, session, text, id}`
    → `POST /api/v1/feed/replies` with `session` in place of `entry`; a reply without `entry` or
    `thread`, read with `session_messages=1` so older machines never get one) is typed once an agent runs
-   there and waits (or works, mid-turn), whatever chat it shows, never into a session without an agent; it never
+   there and waits (or works, mid-turn), whatever chat it shows, never into a session without an agent
+   nor into one still starting (a new session's first prompt waits for its agent's prompt on
+   screen, as `refuse_if_blocked` above); it never
    reaches TUIs, and the agent's next reply answers it. The agent's next reply in that
    session and conversation is uploaded with `reply_to`, and the cloud links it (`response`,
    `thread`). Pages to TUIs carry the replies (`FeedPage.replies`), and a reply read whole in
@@ -803,7 +813,11 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   With `refuse_if_blocked` (capability `session.submit.blocked`) it's refused with
   `session_blocked`, unaudited, while the session's agent asks something (lifecycle `blocked`:
   a permission prompt, a question or a menu, which would take the text as its answer) as the
-  daemon has it or as detection (`detect::detect`) reads its screen and foreground process then;
+  daemon has it or as detection (`detect::detect`) reads its screen and foreground process then,
+  and the same while detection reads `unknown` for an agent whose profile knows its prompt and
+  doesn't take a screen without markers for idle (`detect::knows_its_prompt`: Claude Code, Codex,
+  OpenCode, Pi, GitHub Copilot, Grok Build, Kimi Code, Aider): it's starting, though its hooks
+  may say idle, and would lose the Enter, or shows a screen of its own;
   and its Enter is written only if detection, run again on the terminal's writer thread when the
   Enter is due (`host::EnterCheck`, asked without any lock), still sees no such prompt, so one
   that opened during the pause never takes the Enter as its answer (the text stays unsent in the

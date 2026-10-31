@@ -369,7 +369,11 @@ agent-specific beyond what's already read: the conversation id
 agent waits for input, or works for one that takes what's typed during a turn and logs it as a
 prompt once it does (`QUEUES_INPUT` in `tui/crates/sensagent/src/feed/replies.rs`, by the
 daemon's agent names; add a new integration there once its chat shows such a prompt). The
-agent's next captured reply answers it (`reply_to`).
+daemon types nothing into an agent whose detection profile has idle markers and `quiet:
+Unknown` while its screen shows none of them (`detect::knows_its_prompt`): it's still
+starting, though a start hook may say idle, and would lose the Enter. A profile that falls back
+to idle (Cursor, Droid, Amp) can't tell its startup screen from its prompt. The agent's next
+captured reply answers it (`reply_to`).
 
 Native input is capped at 1 MiB and never
 logged. Outside a Rakumux session hooks do nothing and never spawn a daemon. Errors emit a
