@@ -1,0 +1,49 @@
+# Claude Code 2.1.316 as it starts (captured 120x40, 2026-10-31): its
+# SessionStart hook has reported it idle, and nothing is drawn yet. A
+# reply typed now can lose its Enter.
+agent: claude
+expect: unknown
+process: claude
+cmdline: claude
+alternate_screen: false
+ms_since_output: 30
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

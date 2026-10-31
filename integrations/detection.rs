@@ -419,6 +419,18 @@ pub fn approvals_on_screen(agent: &str) -> bool {
         .any(|profile| profile.label == agent && profile.approvals_on_screen)
 }
 
+/// Whether `agent`'s (a detected label) screen tells its waiting for input
+/// from anything else: its profile knows its prompt, and a screen without any
+/// of its markers isn't taken for waiting (`quiet` is `Unknown`). Detection
+/// reading `Unknown` for it then means its screen shows no prompt: it's still
+/// starting (its hooks may say idle already), or shows a view or menu of its
+/// own, where what's typed doesn't go in as a prompt.
+pub fn knows_its_prompt(agent: &str) -> bool {
+    PROFILES.iter().any(|profile| {
+        profile.label == agent && !profile.idle.is_empty() && profile.quiet == Lifecycle::Unknown
+    })
+}
+
 /// The coding agent `process` is ("claude", "codex", …), if Rakumux knows
 /// it.
 pub fn agent_label(process: &ProcessInfo) -> Option<&'static str> {
@@ -1417,6 +1429,29 @@ mod tests {
             })
             .collect();
         assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn agents_whose_screens_show_their_prompt_are_known_by_label() {
+        for agent in [
+            "claude", "codex", "opencode", "pi", "copilot", "grok", "kimi", "aider",
+        ] {
+            assert!(knows_its_prompt(agent), "{agent}");
+        }
+        // A screen without markers reads idle for these, and generic
+        // profiles know no prompt: their screen can't say it isn't drawn.
+        for agent in [
+            "amp",
+            "droid",
+            "cursor-agent",
+            "gemini",
+            "qwen",
+            "devin",
+            "",
+            "bash",
+        ] {
+            assert!(!knows_its_prompt(agent), "{agent}");
+        }
     }
 
     #[test]

@@ -1705,7 +1705,8 @@ impl Inner {
     /// `session_submit`; with `quiet`, refused while someone typed in the
     /// session that recently, with `foreground`, unless that program is in
     /// its foreground now, and with `refuse_if_blocked`, while its agent asks
-    /// something (none audited: the caller tries again). The terminal is
+    /// something or its screen shows no prompt yet (none audited: the caller
+    /// tries again). The terminal is
     /// asked without the state lock, as it may wait for its input queue or
     /// its actor.
     fn submit(
@@ -1748,6 +1749,16 @@ impl Inner {
                 return Err(ApiError::new(
                     ErrorCode::SessionBlocked,
                     "the session's agent is asking something",
+                ));
+            }
+            // Its screen shows no prompt, though its agent's screen has one
+            // to show: it's still starting (a start hook may say idle before
+            // it takes keys, and its Enter would be lost) or shows a menu of
+            // its own. Refused the same way, so the caller tries again.
+            if detection.as_ref().is_some_and(shows_no_prompt) {
+                return Err(ApiError::new(
+                    ErrorCode::SessionBlocked,
+                    "the session's agent isn't at its prompt yet",
                 ));
             }
             checked = Some((info, detection));
@@ -3880,6 +3891,17 @@ fn detect_on(
         title: &info.title,
         ms_since_output,
     }))
+}
+
+/// `detection` names an agent whose screen has a prompt to show
+/// ([`crate::detect::knows_its_prompt`]) and reads neither it nor the agent
+/// at work or asking something: the agent isn't ready to take a prompt.
+fn shows_no_prompt(detection: &Detection) -> bool {
+    detection.lifecycle == Lifecycle::Unknown
+        && detection
+            .agent
+            .as_deref()
+            .is_some_and(crate::detect::knows_its_prompt)
 }
 
 /// `terminal`'s agent asks something (a permission prompt, a question or a

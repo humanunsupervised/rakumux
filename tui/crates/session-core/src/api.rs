@@ -166,11 +166,14 @@ pub enum Request {
         /// Refuse with `session_blocked` while the session's agent asks
         /// something (lifecycle `blocked`: a permission prompt, a question or
         /// a menu, which would take the text as its answer), as the daemon
-        /// has it and as its screen and foreground process show now; its
-        /// Enter then goes only if the screen still shows no such prompt
-        /// when it's due, so it never answers one that opened after the
-        /// paste (capability `session.submit.blocked`). A daemon without it
-        /// submits anyway.
+        /// has it and as its screen and foreground process show now, and
+        /// likewise while its agent's screen shows no prompt yet, though the
+        /// agent has one to show (still starting, its hooks maybe saying idle
+        /// already, or in a screen of its own), where its Enter would be lost
+        /// or pick something; its Enter then goes only if the screen still
+        /// shows no such prompt when it's due, so it never answers one that
+        /// opened after the paste (capability `session.submit.blocked`). A
+        /// daemon without it submits anyway.
         #[serde(default, skip_serializing_if = "is_false")]
         refuse_if_blocked: bool,
     },
@@ -645,8 +648,9 @@ pub const CAPABILITY_SUBMIT_QUIET: &str = "session.submit.quiet";
 pub const CAPABILITY_SUBMIT_EXPECT: &str = "session.submit.expect";
 
 /// `session_submit`'s `refuse_if_blocked`: refused with `session_blocked`
-/// while the session's agent asks something; and then its Enter is never
-/// written once the screen shows the agent asking something.
+/// while the session's agent asks something, or its screen shows no prompt
+/// yet; and then its Enter is never written once the screen shows the agent
+/// asking something.
 pub const CAPABILITY_SUBMIT_BLOCKED: &str = "session.submit.blocked";
 
 /// `session_answer`: answer the question an agent asks in its own dialog.
@@ -1111,7 +1115,8 @@ pub enum ErrorCode {
     ApprovalUnavailable,
     LimitExceeded,
     /// The session's agent asks something: a permission prompt, a question
-    /// or a menu (`session_submit`'s `refuse_if_blocked`).
+    /// or a menu; or its screen shows no prompt yet, as it starts
+    /// (`session_submit`'s `refuse_if_blocked`). Worth trying again.
     SessionBlocked,
     /// A human holds controller focus on the target.
     SessionInUse,

@@ -77,7 +77,8 @@ pub trait SessionApi: Send + Sync {
     }
     /// [`submit_expecting`](Self::submit_expecting), also refused with
     /// `session_blocked` while the session's agent asks something (a
-    /// permission prompt, a question or a menu), and its Enter held back if
+    /// permission prompt, a question or a menu) or its screen shows no prompt
+    /// yet (it's starting), and its Enter held back if
     /// the screen shows the agent asking something when it's due (capability
     /// `session.submit.blocked`; a daemon without it submits anyway).
     fn submit_unless_blocked(

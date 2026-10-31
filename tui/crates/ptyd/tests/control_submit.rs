@@ -1,11 +1,13 @@
 //! `session_submit`'s `refuse_if_blocked`, with the daemon's own detection
 //! on screens captured from the agents: nothing is typed into an agent that
 //! asks something (a permission prompt, a question, a menu), an Enter is
-//! held back from one that came to ask something after the paste, and
-//! Claude Code, Codex and OpenCode still take a reply, Enter and all, while
-//! they wait or work.
+//! held back from one that came to ask something after the paste, nothing
+//! is typed into an agent whose screen shows no prompt yet (still starting,
+//! though its hooks say idle), and Claude Code, Codex and OpenCode still
+//! take a reply, Enter and all, while they wait or work.
 mod control_common;
 use control_common::*;
+use session_core::activity::{ActivityEvent, ActivityPhase, ActivityUpdate, ACTIVITY_VERSION};
 use session_core::api::{ErrorCode, Report, Request, Response};
 use session_core::ids::SessionId;
 use session_core::model::Lifecycle;
@@ -231,4 +233,66 @@ fn an_enter_is_held_back_from_an_agent_that_came_to_ask_something_after_the_past
         );
         assert_eq!(typed.enters, [false, true], "{}", agent.name);
     }
+}
+
+#[test]
+fn nothing_is_typed_into_an_agent_whose_screen_shows_no_prompt_yet() {
+    // 2026-10-31: a session message from rakumux.com typed into Claude Code
+    // as it started, its SessionStart hook having said idle before anything
+    // was drawn. The paste went in, its Enter was lost.
+    let h = Harness::new();
+    let s = h.create(Some("claude"));
+    let terminal = h.host.terminal_of(&s.id);
+    shows(&h, &s.id, "claude_unknown_starting");
+    let started = Report {
+        activity: Some(ActivityUpdate {
+            version: ACTIVITY_VERSION,
+            agent: "claude".into(),
+            conversation_id: "0d2a1c8e-5b7f-4e3a-9c6d-1f2e3a4b5c6d".into(),
+            completion_id: None,
+            event: ActivityEvent::Phase {
+                phase: ActivityPhase::Idle,
+            },
+        }),
+        ..Report::default()
+    };
+    let inside = h.session_caller(&s.id);
+    assert_eq!(
+        h.handle(&inside, Request::SessionReport(started)),
+        Response::Ok
+    );
+    assert_eq!(h.get(&s.id).lifecycle, Lifecycle::Idle, "as its hook says");
+    let program = foreground(&h, &s.id);
+    let audited = h.audit().len();
+    // Starting, then a first-run screen of its own: no prompt either time.
+    for screen in ["claude_unknown_starting", "claude_unknown_onboarding"] {
+        assert_eq!(h.host.put_fixture(&s.id, screen), Lifecycle::Unknown);
+        let refused = error(h.handle(&h.user, reply(&s.id, "Start on the parser.", &program)));
+        assert_eq!(refused.code, ErrorCode::SessionBlocked, "{screen}");
+    }
+    assert!(h.host.terminal(terminal).submits.is_empty());
+    assert_eq!(h.audit().len(), audited, "each try isn't audited");
+    // Not asked to look, a submit goes in as before.
+    let plain = Request::SessionSubmit {
+        id: s.id.clone(),
+        text: "hello".into(),
+        quiet_ms: None,
+        expect_foreground: None,
+        refuse_if_blocked: false,
+    };
+    assert_eq!(h.handle(&h.user, plain), Response::Ok);
+
+    // Its prompt drawn, the message goes in, Enter and all.
+    assert_eq!(
+        h.host.put_fixture(&s.id, "claude_idle_prompt"),
+        Lifecycle::Idle
+    );
+    assert_eq!(
+        h.handle(&h.user, reply(&s.id, "Start on the parser.", &program)),
+        Response::Ok
+    );
+    h.host.enter_due(&s.id);
+    let typed = h.host.terminal(terminal);
+    assert_eq!(typed.submits, ["hello", "Start on the parser."]);
+    assert_eq!(typed.enters.last(), Some(&true));
 }
