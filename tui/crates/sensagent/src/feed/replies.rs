@@ -99,7 +99,8 @@ pub(crate) const TYPING_HOLD: Duration = Duration::from_secs(2);
 /// taken at the agent's next step, minutes on maybe, or once the turn ends:
 /// it fails only once its agent has waited this long without taking it. An
 /// agent whose turns the daemon doesn't follow takes it once seen busy, or
-/// after this all the same.
+/// after this all the same; one whose turns it follows, even with no chat
+/// yet (a fresh start), only once its chat shows it.
 pub(crate) const TAKE_WITHIN: Duration = Duration::from_secs(30);
 /// A new prompt is a reply's when its letters and digits begin the reply's,
 /// or hold the reply's first this many (the reply typed after a draft on
@@ -157,6 +158,17 @@ const QUEUES_INPUT: &[&str] = &[
     "grok",
     "kimi",
 ];
+
+/// Whether the daemon follows the turns of the agent it names `kind`, as a
+/// daemon that refuses to type into an agent asking something does
+/// (`session.submit.blocked`, 0.1.34 on): the agents rakumux.com takes, whose
+/// feed entries are those turns. Its chat then says whether a reply went in,
+/// even one typed before it had a chat at all (a fresh start, its log not
+/// written yet). An older daemon followed fewer, and any other agent's turns
+/// aren't followed: there, only its being busy says it took the reply.
+fn follows_turns(kind: &str) -> bool {
+    super::agents::feed_agent(kind).is_some()
+}
 
 /// What became of a reply a TUI wrote.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -337,6 +349,9 @@ struct Seen {
     foreground: Option<String>,
     /// Its agent takes what's typed while it works ([`QUEUES_INPUT`]).
     queues: bool,
+    /// Its agent is one whose turns a current daemon follows, chat or not yet
+    /// (see [`follows_turns`]).
+    follows: bool,
 }
 
 impl Seen {
@@ -346,6 +361,10 @@ impl Seen {
                 .agent
                 .as_ref()
                 .is_some_and(|agent| QUEUES_INPUT.contains(&agent.kind.as_str())),
+            follows: view
+                .agent
+                .as_ref()
+                .is_some_and(|agent| follows_turns(&agent.kind)),
             live: view.status == SessionStatus::Live,
             private: crate::shared_elsewhere(view),
             lifecycle: view.lifecycle,
@@ -465,8 +484,10 @@ impl Pending {
 /// take it and work on (`free`): the next goes in mid-turn, and this one is
 /// followed until its agent waits again, which ends its turn for its answer
 /// (see [`Awaiting`]). Taken means its chat shows a new prompt that is this
-/// reply (its first line, [`Delivery::matches`]), or, for an agent whose
-/// turns the daemon doesn't follow, that it works or asks something. Taken,
+/// reply (its first line, [`Delivery::matches`]), also when it had no chat
+/// before (a fresh start: it works as it starts up), or, for an agent whose
+/// turns the daemon doesn't follow ([`follows_turns`]), that it works or asks
+/// something. Taken,
 /// it's reported delivered; its session ended, its chat changed, another prompt
 /// went in or none within [`TAKE_WITHIN`], failed. The agent's lifecycle can
 /// lag what it does, so a view that still shows it waiting proves nothing.
@@ -485,6 +506,9 @@ struct Delivery {
     typed: bool,
     /// The agent's turn and chat just before: another turn after is a new prompt.
     turn: (Option<u64>, Option<String>),
+    /// The daemon follows its agent's turns ([`follows_turns`], the daemon
+    /// guarding): only its chat says it took it, chat or none before.
+    follows: bool,
     /// The agent was seen working or asking something since (typed mid-turn:
     /// since it took it).
     busy: bool,
@@ -533,9 +557,11 @@ impl Delivery {
             // Another prompt went in: this one wasn't taken as typed.
             return Taking::Failed(ReplyFailure::NotTaken);
         }
-        // Its chat's turns say whether the agent took it; without them, its
-        // being busy does.
-        let turns = seen.turn.is_some() || self.turn.0.is_some();
+        // Its chat's turns say whether the agent took it, also for an agent
+        // whose turns the daemon follows that had no chat yet (a fresh start:
+        // its being busy then is its starting up); without them, its being
+        // busy does.
+        let turns = self.follows || seen.turn.is_some() || self.turn.0.is_some();
         if !turns && self.busy {
             return Taking::Taken;
         }
@@ -1086,6 +1112,7 @@ impl ReplySync {
                     seen.and_then(|seen| seen.conversation.clone()),
                 );
                 let mid_turn = seen.is_some_and(|seen| seen.works_taking_input(self.guarded));
+                let follows = self.guarded && seen.is_some_and(|seen| seen.follows);
                 // Never typed again from now on, even if this service stops
                 // before the daemon answers; followed where it went after a
                 // restart.
@@ -1106,6 +1133,7 @@ impl ReplySync {
                     since: now,
                     typed: false,
                     turn,
+                    follows,
                     busy: false,
                     took: false,
                     taken: None,
@@ -1253,6 +1281,7 @@ impl ReplySync {
                 continue;
             };
             let session = SessionId::from_string(into.session);
+            let seen = self.sessions.get(&session);
             let mut delivery = Delivery {
                 reply: id,
                 target: reply.target.clone(),
@@ -1260,6 +1289,7 @@ impl ReplySync {
                 since: now,
                 typed: true,
                 turn: (into.turn, into.conversation),
+                follows: self.guarded && seen.is_some_and(|seen| seen.follows),
                 busy: false,
                 took: false,
                 taken: None,
@@ -1268,7 +1298,7 @@ impl ReplySync {
                 free: false,
             };
             // What its session shows now, as if just observed.
-            if let Some(seen) = self.sessions.get(&session) {
+            if let Some(seen) = seen {
                 delivery.took = delivery.prompted(seen) == Some(true);
                 delivery.busy = (delivery.took || !delivery.mid_turn) && seen.busy();
             }
@@ -1491,7 +1521,8 @@ impl ReplySync {
 
     /// The daemon's answer to typing `reply` in: typed in (`true`), refused
     /// for now (someone typing there, another program in its foreground, its
-    /// agent asking something: tried again after [`TYPING_HOLD`]), or
+    /// agent asking something or not at its prompt yet: tried again after
+    /// [`TYPING_HOLD`]), or
     /// refused for good.
     pub fn daemon_answered(
         &mut self,
@@ -1521,8 +1552,10 @@ impl ReplySync {
 
     /// The daemon refused it because its session's agent asks something (a
     /// permission prompt, a question or a menu, which would take it as its
-    /// answer), though its view said otherwise: it stays pending, and that
-    /// session is tried again after [`TYPING_HOLD`], once it takes input.
+    /// answer), or its screen shows no prompt yet (it's starting, though its
+    /// hooks say it waits, and would lose its Enter), whatever its view said:
+    /// it stays pending, and that session is tried again after
+    /// [`TYPING_HOLD`], once it takes input.
     pub fn asking(&mut self, reply: String, now: Duration) {
         self.hold_back(reply, now);
     }

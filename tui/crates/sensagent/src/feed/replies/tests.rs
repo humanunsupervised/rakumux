@@ -1208,11 +1208,26 @@ fn a_new_prompt_is_the_replys_only_when_it_begins_it_or_holds_its_start() {
             );
         }
     }
-    // An agent whose turns the daemon doesn't follow takes a session message
-    // once seen busy, as before.
-    let mut unfollowed = view("S", Lifecycle::Idle, None);
-    unfollowed.agent_turn = None;
-    let mut replies = on(&[unfollowed.clone()]);
+}
+
+/// Session S running `agent` as it starts: waiting, with no chat yet (its
+/// log isn't written until its first prompt).
+fn chatless(agent: Option<&str>, lifecycle: Lifecycle) -> SessionView {
+    let mut view = view("S", lifecycle, None);
+    view.agent_turn = None;
+    view.agent = agent.map(|kind| AgentInfo {
+        kind: kind.into(),
+        ..AgentInfo::default()
+    });
+    view
+}
+
+/// A session message typed into `start` (S, read with `guarded`), whose
+/// agent is then seen working with no chat.
+fn typed_then_busy(start: SessionView, guarded: bool) -> ReplySync {
+    let mut replies = ReplySync::new("studio".into(), None);
+    replies.set_enabled(true, NOW);
+    replies.connected(std::slice::from_ref(&start), guarded);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(true, read_messages(vec![message("01K8A2", 6, None)]), NOW);
     assert_eq!(
@@ -1220,8 +1235,58 @@ fn a_new_prompt_is_the_replys_only_when_it_begins_it_or_holds_its_start() {
         Some("01K8A2")
     );
     replies.submitted("01K8A2".into(), Ok(()), NOW, 2_000);
-    unfollowed.lifecycle = Lifecycle::Working;
-    replies.observe(&unfollowed);
+    let mut busy = start;
+    busy.lifecycle = Lifecycle::Working;
+    replies.observe(&busy);
+    replies
+}
+
+#[test]
+fn an_agent_whose_turns_the_daemon_doesnt_follow_takes_a_session_message_once_seen_busy() {
+    // No agent named, one the daemon doesn't follow, or a daemon from before
+    // it followed them all (no `session.submit.blocked`): its being busy is
+    // all there is to go on, as before.
+    for (agent, guarded) in [
+        (None, GUARDED),
+        (Some("gemini"), GUARDED),
+        (Some("claude"), UNGUARDED),
+    ] {
+        let mut replies = typed_then_busy(chatless(agent, Lifecycle::Idle), guarded);
+        assert_eq!(
+            report_of(replies.next_work(NOW))["status"],
+            "delivered",
+            "{agent:?}"
+        );
+    }
+}
+
+#[test]
+fn a_session_message_to_an_agent_just_started_is_delivered_only_once_its_chat_shows_it() {
+    // A new session from rakumux.com (2026-10-31): its first prompt typed
+    // into Claude Code as it started, the Enter lost. It went busy starting
+    // up, and no chat ever showed the prompt: not delivered.
+    for agent in ["claude", "codex", "kimi", "amp"] {
+        let mut replies = typed_then_busy(chatless(Some(agent), Lifecycle::Idle), GUARDED);
+        let before = NOW + TAKE_WITHIN - Duration::from_secs(1);
+        assert_eq!(
+            next_at(&mut replies, before),
+            None,
+            "{agent}: busy proves nothing"
+        );
+        replies.observe(&chatless(Some(agent), Lifecycle::Idle));
+        let body = report_of(next_at(&mut replies, NOW + TAKE_WITHIN));
+        assert_eq!(
+            (&body["status"], &body["failure"]),
+            (&"failed".into(), &"not_taken".into()),
+            "{agent}"
+        );
+    }
+    // Its first chat shows it as the prompt: delivered.
+    let mut replies = typed_then_busy(chatless(Some("claude"), Lifecycle::Idle), GUARDED);
+    assert_eq!(replies.next_work(NOW), None);
+    let mut started = prompted(Lifecycle::Working, Some(CHAT), "Start on the parser.");
+    started.agent = chatless(Some("claude"), Lifecycle::Idle).agent;
+    replies.observe(&started);
     assert_eq!(report_of(replies.next_work(NOW))["status"], "delivered");
 }
 
@@ -2721,12 +2786,13 @@ fn an_agent_that_doesnt_take_input_mid_turn_gets_the_next_reply_only_once_it_wai
     replies.observe(&shown);
     assert_eq!(worked_at(&mut replies, later).0, ["01K8A2"]);
 
-    // Claude Code without its turns followed (an older daemon): its take
-    // can't be seen, only its working, so its session messages wait for it
-    // to wait as before.
+    // Claude Code without its turns followed (an older daemon, without the
+    // guard): its take can't be seen, only its working, so its session
+    // messages wait for it to wait as before.
     let mut shown = running("claude", Lifecycle::Done);
     shown.agent_turn = None;
     let mut replies = on(std::slice::from_ref(&shown));
+    replies.connected(std::slice::from_ref(&shown), UNGUARDED);
     assert_eq!(read_after(replies.next_work(NOW)), 0);
     replies.request_done(
         true,
