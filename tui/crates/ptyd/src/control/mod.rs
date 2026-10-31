@@ -14,6 +14,7 @@
 //! - `host_events`: threads feeding host events into the service.
 
 mod activity;
+mod answers;
 mod audit;
 mod auth;
 mod env;
@@ -270,6 +271,7 @@ fn remote_target(request: &Request) -> Option<&SessionId> {
         | Request::SessionKill { id, .. }
         | Request::SessionDelete { id }
         | Request::SessionSubmit { id, .. }
+        | Request::SessionAnswer { id, .. }
         | Request::SessionTouch { id }
         | Request::SessionTurn { id }
         | Request::SessionPin { id, .. }

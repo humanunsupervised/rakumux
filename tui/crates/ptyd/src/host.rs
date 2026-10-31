@@ -368,6 +368,19 @@ pub trait TerminalHost: Send + Sync + 'static {
         keys: &[String],
         text: Option<&str>,
     ) -> Result<(), HostError>;
+    /// [`send_keys`](Self::send_keys), unless its controller sent input
+    /// within `quiet`: then [`HostError::Typing`] and nothing is written. A
+    /// host that can't tell sends them.
+    fn send_keys_when_quiet(
+        &self,
+        id: TerminalId,
+        keys: &[String],
+        text: Option<&str>,
+        quiet: std::time::Duration,
+    ) -> Result<(), HostError> {
+        let _ = quiet;
+        self.send_keys(id, keys, text)
+    }
     /// SIGHUP the process group, SIGKILL after 3 s.
     fn terminate(&self, id: TerminalId) -> Result<(), HostError>;
     /// Drop an exited terminal (after its scrollback was persisted).

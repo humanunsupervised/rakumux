@@ -34,6 +34,7 @@ pub(crate) enum Op {
     Wait,
     Send,
     Submit,
+    Answer,
     Touch,
     Pin,
     Bind,
@@ -68,6 +69,7 @@ impl Op {
             Op::Wait => "session.wait",
             Op::Send => "session.send",
             Op::Submit => "session.submit",
+            Op::Answer => "session.answer",
             Op::Touch => "session.touch",
             Op::Pin => "session.pin",
             Op::Bind => "session.bind",
@@ -99,6 +101,7 @@ impl Op {
                 | Op::Report
                 | Op::Send
                 | Op::Submit
+                | Op::Answer
                 | Op::Touch
                 | Op::Pin
                 | Op::Bind
@@ -148,6 +151,10 @@ pub(crate) fn authorize(
         },
         Op::Import => Err(denied(op, "importing saved sessions is for user clients")),
         Op::Turn | Op::Transcript => Err(denied(op, "an agent's conversation is for user clients")),
+        Op::Answer => Err(denied(
+            op,
+            "answering an agent's question is for user clients",
+        )),
         Op::TerminalOpen | Op::TerminalAttach => {
             Err(denied(op, "temporary terminals are for user clients"))
         }
@@ -215,7 +222,7 @@ mod tests {
         }
     }
 
-    const ALL: [Op; 24] = [
+    const ALL: [Op; 25] = [
         Op::TerminalOpen,
         Op::TerminalAttach,
         Op::List,
@@ -231,6 +238,7 @@ mod tests {
         Op::Wait,
         Op::Send,
         Op::Submit,
+        Op::Answer,
         Op::Touch,
         Op::Pin,
         Op::Bind,

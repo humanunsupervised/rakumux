@@ -132,6 +132,9 @@ struct LiveSession {
     /// (`SessionView::places`), and when it last was.
     places_scan: Option<crate::agent_output::places::PlaceScan>,
     places_checked_ms: i64,
+    /// What the agent's conversation showed of its questions, as of its last
+    /// read (`session_answer`).
+    questions: crate::agent_output::questions::Asked,
 }
 
 impl LiveSession {
@@ -159,6 +162,7 @@ impl LiveSession {
             turn: None,
             places_scan: None,
             places_checked_ms: 0,
+            questions: Default::default(),
         }
     }
 }
@@ -559,6 +563,18 @@ impl Inner {
                     foreground: expect_foreground.as_deref(),
                     refuse_if_blocked,
                 },
+            ),
+            Request::SessionAnswer {
+                id,
+                call_id,
+                answers,
+                quiet_ms,
+            } => self.answer(
+                caller,
+                &id,
+                &call_id,
+                &answers,
+                quiet_ms.map(Duration::from_millis),
             ),
             Request::SessionTouch { id } => self.touch(caller, &id),
             Request::SessionTurn { id } => self.turn(caller, &id),
@@ -1798,6 +1814,99 @@ impl Inner {
         result.map(|()| Response::Ok)
     }
 
+    /// `session_answer`: answer the question `call_id` the session's agent
+    /// asks in its own dialog, for user callers. Only when the conversation
+    /// followed has it as its newest question without a result, the screen
+    /// shows its dialog and the agent asks something (nothing typed
+    /// otherwise: `question_gone`); worked a step at a time from the screen
+    /// (`answers`), and `ok` once the conversation shows the question's
+    /// result. Answers are never audited or logged, only how many there were.
+    /// Works without the state lock: it waits for the screen and the log.
+    fn answer(
+        &self,
+        caller: &Caller,
+        id: &SessionId,
+        call_id: &str,
+        given: &[session_core::api::QuestionAnswer],
+        quiet: Option<Duration>,
+    ) -> Result<Response, ApiError> {
+        use crate::agent_output::questions::{self, Dialog};
+        let (record, terminal, open, agent) = {
+            let state = self.lock();
+            let record = self.target(&state, caller, Op::Answer, id)?;
+            let terminal = self.running_terminal(&state, id);
+            let live = state.live.get(id);
+            let open = live.and_then(|live| live.questions.open().cloned());
+            let agent = live.and_then(|live| live.tracker.detected_agent().map(String::from));
+            (record, terminal, open, agent)
+        };
+        let result = (|| {
+            let terminal = terminal.ok_or_else(|| not_live(id))?;
+            let open = open
+                .filter(|open| open.call_id == call_id)
+                .ok_or_else(|| question_gone("the conversation has no such question open"))?;
+            let answers = questions::check_answers(&open, given).map_err(invalid)?;
+            let mut dialog = agent
+                .as_deref()
+                .and_then(|agent| Dialog::new(agent, &open, answers))
+                .ok_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::Unsupported,
+                        "Rakumux doesn't answer this agent's questions",
+                    )
+                })?;
+            let worked = super::answers::work(
+                &mut dialog,
+                &AnswerTerminal {
+                    control: self,
+                    id,
+                    terminal,
+                    quiet,
+                },
+            );
+            crate::log_info!("control: answering {id}'s question {call_id}: {worked:?}");
+            match worked {
+                super::answers::Worked::Done => {}
+                super::answers::Worked::NotShown(why) => return Err(question_gone(why)),
+                super::answers::Worked::Typing => {
+                    return Err(host_error(HostError::Typing));
+                }
+                super::answers::Worked::Stopped(why) => {
+                    return Err(ApiError::new(ErrorCode::NotTaken, why));
+                }
+            }
+            // The dialog closed: its result is in the log once it's read.
+            let start = Instant::now();
+            while start.elapsed() < ANSWER_RESULT_WAIT {
+                let answered = self
+                    .lock()
+                    .live
+                    .get(id)
+                    .filter(|live| live.terminal == terminal)
+                    .is_some_and(|live| live.questions.answered(call_id));
+                if answered {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(ApiError::new(
+                ErrorCode::NotTaken,
+                "the dialog closed, but the question got no result",
+            ))
+        })();
+        let state = self.lock();
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::Answer,
+            Some(&record.scope),
+            Some(id),
+            Some(audit::clip(&format!("{call_id}: {} answers", given.len()))),
+            &result,
+        );
+        result.map(|()| Response::Ok)
+    }
+
     /// Mark a session as just used: list ordering, and `done` → `idle`.
     /// `session_turn`: the live agent's current turn, for user callers.
     fn turn(&self, caller: &Caller, id: &SessionId) -> Result<Response, ApiError> {
@@ -2424,6 +2533,10 @@ impl Inner {
                 .as_ref()
                 .map(|follower| follower.turn().clone())
                 .filter(|turn| turn.prompt.is_some() || turn.total > 0);
+            live.questions = follower
+                .as_ref()
+                .map(|follower| follower.questions().clone())
+                .unwrap_or_default();
             live.output = follower;
             if let Some(left) = left {
                 live.tracker.on_conversation_left(&left, now);
@@ -3777,6 +3890,60 @@ fn asks_now(host: &dyn TerminalHost, detector: Detector, terminal: TerminalId) -
 }
 
 /// `session_submit`'s conditions.
+/// How long `session_answer` waits, once the dialog closed, for its
+/// question's result in the agent's log (read at most every second).
+const ANSWER_RESULT_WAIT: Duration = Duration::from_secs(10);
+
+/// A session's terminal as `session_answer` works it.
+struct AnswerTerminal<'a> {
+    control: &'a Inner,
+    id: &'a SessionId,
+    terminal: TerminalId,
+    /// Nothing is sent while someone typed there this recently.
+    quiet: Option<Duration>,
+}
+
+impl super::answers::Terminal for AnswerTerminal<'_> {
+    fn screen(&self) -> Option<String> {
+        self.control
+            .host
+            .read(self.terminal, ReadSource::Visible, None, TextFormat::Text)
+            .ok()
+            .map(|read| read.text)
+    }
+
+    fn asking(&self) -> bool {
+        let blocked = self
+            .control
+            .lock()
+            .live
+            .get(self.id)
+            .filter(|live| live.terminal == self.terminal)
+            .is_some_and(|live| live.tracker.current() == Lifecycle::Blocked);
+        blocked || asks_now(&*self.control.host, self.control.detector, self.terminal)
+    }
+
+    fn send(&self, step: &crate::agent_output::questions::Next) -> Result<(), HostError> {
+        use crate::agent_output::questions::Next;
+        let (keys, text): (Vec<String>, Option<&str>) = match step {
+            Next::Keys(keys) => (keys.iter().map(|key| key.to_string()).collect(), None),
+            Next::Type(text) => (Vec::new(), Some(text)),
+            Next::Done | Next::Stop(_) => return Ok(()),
+        };
+        let host = &self.control.host;
+        match self.quiet {
+            Some(quiet) => host.send_keys_when_quiet(self.terminal, &keys, text, quiet),
+            None => host.send_keys(self.terminal, &keys, text),
+        }
+    }
+}
+
+/// `session_answer`'s refusal when nothing was typed: no such question, or
+/// no dialog showing it.
+fn question_gone(why: &str) -> ApiError {
+    ApiError::new(ErrorCode::QuestionGone, why)
+}
+
 struct Submit<'a> {
     quiet: Option<Duration>,
     foreground: Option<&'a str>,

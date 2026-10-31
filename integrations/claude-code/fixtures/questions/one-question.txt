@@ -1,0 +1,29 @@
+
+ ▐▛███▛█   Claude Code v2.1.314
+▝▜██████▀  Opus 5.5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   /home/me/project
+
+
+❯ This is a test of a dialog. Call the AskUserQuestion tool exactly once, right now, with exactly this input JSON,
+  unchanged. Do nothing else and read no files. Once it is answered, reply with one line repeating the answers exactly
+  as you received them, and stop.
+
+  {"questions": [{"question": "Which colour do you prefer?", "header": "Colour", "multiSelect": false, "options":
+  [{"label": "Red", "description": "Warm"}, {"label": "Green", "description": "Calm"}, {"label": "Blue", "description":
+  "Cool"}]}]}
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Colour
+
+Which colour do you prefer?
+
+❯ 1. Red
+     Warm
+  2. Green
+     Calm
+  3. Blue
+     Cool
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

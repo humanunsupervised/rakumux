@@ -1,0 +1,40 @@
+  columns and an index; safe under the live site),
+  deploying rakumux.com, and a Rakumux release for machines
+  to start sending subagents.", "header": "Subagents",
+  "multiSelect": false, "options": [{"label": "Ship web
+  now, Rakumux in 0.1.35 (Recommended)", "description":
+  "Migrate and deploy rakumux.com now (it shows subagents
+  once machines send them); Rakumux's part goes out in
+  0.1.35 together with the first audit fixes."}, {"label":
+  "Ship everything now", "description": "Migrate, deploy
+  and release right away."}, {"label": "Hold",
+  "description": "Keep it on its branches for now."}]},
+  {"question": "Which audit fixes should I start now, in
+  parallel, on branches, for the next release? Pick every
+  one you want.", "header": "Audit fixes", "multiSelect":
+  true, "options": [{"label": "The mid-turn guard check for
+  older servers, plus a long tail of words to wrap",
+  "description": "Medium 1"}, {"label": "Revoking the
+  terminal token", "description": "High 3"}, {"label":
+  "Honest wording", "description": "Medium 2"}]}]}
+────────────────────────────────────────────────────────────
+←  ☒ Subagents  ☒ Audit fixes  ✔ Submit  →
+
+│ Which audit fixes should I start now, in parallel, on
+│ branches, for the next release? Pick every one you want.
+
+  1. [✔] The mid-turn guard check for older servers, plus a
+         long tail of words to wrap
+         Medium 1
+  2. [ ] Revoking the terminal token
+         High 3
+  3. [ ] Honest wording
+         Medium 2
+❯ 4. [✔] Also the FIFO freeze fix, the long one that wraps
+         across the narrow screen
+     Submit
+────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · ctrl+g to
+edit in Vim · Esc to cancel

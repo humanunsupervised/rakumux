@@ -1,0 +1,40 @@
+  to start sending subagents.", "header": "Subagents",
+  "multiSelect": false, "options": [{"label": "Ship web
+  now, Rakumux in 0.1.35 (Recommended)", "description":
+  "Migrate and deploy rakumux.com now (it shows subagents
+  once machines send them); Rakumux's part goes out in
+  0.1.35 together with the first audit fixes."}, {"label":
+  "Ship everything now", "description": "Migrate, deploy
+  and release right away."}, {"label": "Hold",
+  "description": "Keep it on its branches for now."}]},
+  {"question": "Which audit fixes should I start now, in
+  parallel, on branches, for the next release? Pick every
+  one you want.", "header": "Audit fixes", "multiSelect":
+  true, "options": [{"label": "The mid-turn guard check for
+  older servers, plus a long tail of words to wrap",
+  "description": "Medium 1"}, {"label": "Revoking the
+  terminal token", "description": "High 3"}, {"label":
+  "Honest wording", "description": "Medium 2"}]}]}
+
+────────────────────────────────────────────────────────────
+←  ☒ Subagents  ☒ Audit fixes  ✔ Submit  →
+
+Review your answers
+
+ │ ● Ship subagent activity? It needs: migration 0024 on
+ │   production (adds nullable columns and an index; safe
+ │   under the live site), deploying rakumux.com, and a
+ │   Rakumux release for machines to start sending
+ │   subagents.
+   → Hold
+ │ ● Which audit fixes should I start now, in parallel, on
+ │   branches, for the next release? Pick every one you
+ │   want.
+   → "The mid-turn guard check for older servers, plus a
+   long tail of words to wrap", "Also the FIFO freeze fix,
+   the long one that wraps across the narrow screen"
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel

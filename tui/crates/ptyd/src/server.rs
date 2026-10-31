@@ -68,6 +68,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_SUBMIT_QUIET,
     session_core::api::CAPABILITY_SUBMIT_EXPECT,
     session_core::api::CAPABILITY_SUBMIT_BLOCKED,
+    session_core::api::CAPABILITY_ANSWER,
     session_core::api::CAPABILITY_PLACES,
     session_core::api::CAPABILITY_RESOURCES,
     session_core::api::CAPABILITY_PREFILL,
@@ -119,6 +120,7 @@ const KNOWN_OPS: &[&str] = &[
     "session_wait",
     "session_send",
     "session_submit",
+    "session_answer",
     "session_touch",
     "session_turn",
     "session_transcript",
@@ -2001,6 +2003,12 @@ mod tests {
                 expect_foreground: None,
                 refuse_if_blocked: false,
             },
+            Request::SessionAnswer {
+                id: id.clone(),
+                call_id: "toolu_1".into(),
+                answers: vec![],
+                quiet_ms: None,
+            },
             Request::SessionTouch { id: id.clone() },
             Request::SessionTurn { id: id.clone() },
             Request::SessionTranscript {
@@ -2084,6 +2092,7 @@ mod tests {
                 | Request::SessionWait(_)
                 | Request::SessionSend(_)
                 | Request::SessionSubmit { .. }
+                | Request::SessionAnswer { .. }
                 | Request::SessionTouch { .. }
                 | Request::SessionTurn { .. }
                 | Request::SessionTranscript { .. }

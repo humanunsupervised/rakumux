@@ -1,0 +1,38 @@
+
+ ▐▛███▛█   Claude Code v2.1.314
+▝▜██████▀  Opus 5.5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   /home/me/project
+
+
+❯ This is a test of a dialog. Call the AskUserQuestion tool exactly
+  once, right now, with exactly this input JSON, unchanged. Do nothing
+  else and read no files. Once it is answered, reply with one line
+  repeating the answers exactly as you received them, and stop.
+
+  {"questions": [{"question": "Which colour do you prefer?", "header":
+  "Colour", "multiSelect": false, "options": [{"label": "Red",
+  "description": "Warm"}, {"label": "Green", "description": "Calm"},
+  {"label": "Blue", "description": "Cool"}]}, {"question": "Which
+  fruits do you like?", "header": "Fruits", "multiSelect": true,
+  "options": [{"label": "Apple", "description": "Crisp"}, {"label":
+  "Banana", "description": "Soft"}, {"label": "Cherry", "description":
+  "Small"}]}, {"question": "Which pet would you keep?", "header":
+  "Pet", "multiSelect": false, "options": [{"label": "Cat",
+  "description": "Aloof"}, {"label": "Dog", "description": "Loyal"}]}]}
+
+────────────────────────────────────────────────────────────────────────
+←  ☒ Colour  ☒ Fruits  ☒ Pet  ✔ Submit  →
+
+Review your answers
+
+ ● Which colour do you prefer?
+   → Green
+ ● Which fruits do you like?
+   → Apple
+ ● Which pet would you keep?
+   → Cat
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel

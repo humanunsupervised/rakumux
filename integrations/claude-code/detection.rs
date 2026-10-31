@@ -1,4 +1,5 @@
-//! Claude Code screen profile (captured 2.1.296; older inline prompts retained).
+//! Claude Code screen profile (captured 2.1.296, a question's review page
+//! 2.1.314; older inline prompts retained).
 use super::*;
 
 const ACTIVITY_GLYPHS: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '*'];
@@ -70,6 +71,12 @@ pub(super) const PROFILE: Profile = Profile {
             ),
         ),
         marker(Region::Bottom(12), Test::Any(&["waiting for permission"])),
+        // A question's review page (captured 2.1.314): its answers over
+        // "1. Submit answers", with no footer.
+        marker(
+            Region::Bottom(6),
+            Test::All(&["ready to submit your answers?", "submit answers"]),
+        ),
     ],
     working: &[
         marker(Region::Title, Test::Line(starts_with_claude_title_spinner)),

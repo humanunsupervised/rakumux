@@ -89,6 +89,20 @@ pub trait SessionApi: Send + Sync {
     ) -> Result<()> {
         self.submit_expecting(id, text, quiet, foreground)
     }
+    /// Answer the question `call_id` that the session's agent asks in its
+    /// own dialog, refused with `session_in_use` (nothing typed) while
+    /// someone typed in the session within `quiet` (user only, capability
+    /// `session.answer`; see [`Request::SessionAnswer`]).
+    fn answer(
+        &self,
+        id: &SessionId,
+        call_id: &str,
+        answers: &[crate::api::QuestionAnswer],
+        quiet: Duration,
+    ) -> Result<()> {
+        let _ = (id, call_id, answers, quiet);
+        Err(unsupported("answering an agent's question"))
+    }
     fn touch(&self, id: &SessionId) -> Result<()>;
     fn status(&self) -> Result<DaemonStatusInfo>;
     fn shutdown(&self) -> Result<()>;
@@ -729,6 +743,21 @@ impl SessionApi for Client {
             quiet_ms: Some(u64::try_from(quiet.as_millis()).unwrap_or(u64::MAX)),
             expect_foreground: foreground.map(str::to_owned),
             refuse_if_blocked: true,
+        })
+    }
+
+    fn answer(
+        &self,
+        id: &SessionId,
+        call_id: &str,
+        answers: &[crate::api::QuestionAnswer],
+        quiet: Duration,
+    ) -> Result<()> {
+        self.expect_ok(&Request::SessionAnswer {
+            id: id.clone(),
+            call_id: call_id.to_owned(),
+            answers: answers.to_vec(),
+            quiet_ms: Some(u64::try_from(quiet.as_millis()).unwrap_or(u64::MAX)),
         })
     }
 
@@ -1850,6 +1879,7 @@ mod tests {
                 | Request::SessionReport(_)
                 | Request::SessionSend(_)
                 | Request::SessionSubmit { .. }
+                | Request::SessionAnswer { .. }
                 | Request::SessionTouch { .. } => Response::Ok,
                 Request::SessionRevive(revive) => Response::Session {
                     session: named(revive.id.as_str(), "revived"),

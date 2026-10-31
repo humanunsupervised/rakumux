@@ -174,6 +174,28 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "is_false")]
         refuse_if_blocked: bool,
     },
+    /// User only (capability `session.answer`): answer the question the
+    /// session's agent asks in its own dialog (Claude Code's
+    /// `AskUserQuestion`), never a prompt for permission. The daemon checks
+    /// that the conversation it follows has `call_id` as its newest question
+    /// without a result and that the screen shows that dialog, then works
+    /// it key by key, reading the screen between steps and stopping as soon
+    /// as it shows anything else. Answered `ok` once the conversation shows
+    /// the question's result; `question_gone` when nothing was typed (no
+    /// such question open, or its dialog isn't on screen), `not_taken` when
+    /// keys went in but the dialog didn't take the answers as given,
+    /// `session_in_use` (nothing typed) while someone typed in the session
+    /// within `quiet_ms`, `invalid_argument` when `answers` don't fit the
+    /// questions, `unsupported` for an agent Rakumux doesn't answer for.
+    SessionAnswer {
+        id: SessionId,
+        /// The question's tool call, as the agent's conversation names it.
+        call_id: String,
+        /// One per question asked, by its text.
+        answers: Vec<QuestionAnswer>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quiet_ms: Option<u64>,
+    },
     /// Mark a session as just used (list ordering, `done` → `idle`).
     SessionTouch {
         id: SessionId,
@@ -627,6 +649,27 @@ pub const CAPABILITY_SUBMIT_EXPECT: &str = "session.submit.expect";
 /// written once the screen shows the agent asking something.
 pub const CAPABILITY_SUBMIT_BLOCKED: &str = "session.submit.blocked";
 
+/// `session_answer`: answer the question an agent asks in its own dialog.
+pub const CAPABILITY_ANSWER: &str = "session.answer";
+
+/// The answer to one question of an agent's dialog (`session_answer`): the
+/// labels of the options chosen (one for a question that takes one), and
+/// what's typed as the dialog's own free answer ("Type something."), if
+/// anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionAnswer {
+    /// The question as the agent asked it.
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+    /// One line of at most [`MAX_ANSWER_TEXT_CHARS`] characters, no controls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// The longest free answer [`QuestionAnswer::text`] typed into a dialog.
+pub const MAX_ANSWER_TEXT_CHARS: usize = 2_000;
+
 /// `resource_usage`: what the machine and Rakumux's processes use.
 pub const CAPABILITY_RESOURCES: &str = "resources";
 
@@ -1076,6 +1119,13 @@ pub enum ErrorCode {
     /// (`session_submit`'s `expect_foreground`).
     ForegroundChanged,
     SessionNotLive,
+    /// `session_answer`: the conversation followed has no such question
+    /// open, or the screen doesn't show its dialog. Nothing was typed.
+    QuestionGone,
+    /// `session_answer`: keys went into the dialog, but it didn't take the
+    /// answers as given (the screen showed something else, or the question
+    /// got no result): it may be partly answered on screen.
+    NotTaken,
     PromptStalled,
     Timeout,
     InvalidArgument,
@@ -1376,6 +1426,44 @@ mod tests {
         ));
         let code: ErrorCode = serde_json::from_str(r#""session_blocked""#).unwrap();
         assert_eq!(code, ErrorCode::SessionBlocked);
+    }
+
+    #[test]
+    fn session_answer_round_trips_and_its_refusals_parse() {
+        let answer = Request::SessionAnswer {
+            id: SessionId::from_string("A"),
+            call_id: "toolu_1".into(),
+            answers: vec![
+                QuestionAnswer {
+                    question: "Which colour?".into(),
+                    choices: vec!["Red".into()],
+                    text: None,
+                },
+                QuestionAnswer {
+                    question: "Anything else?".into(),
+                    choices: Vec::new(),
+                    text: Some("No".into()),
+                },
+            ],
+            quiet_ms: Some(10_000),
+        };
+        let json = serde_json::to_value(&answer).unwrap();
+        assert_eq!(json["op"], "session_answer");
+        assert_eq!(
+            json["answers"],
+            serde_json::json!([
+                {"question": "Which colour?", "choices": ["Red"]},
+                {"question": "Anything else?", "text": "No"},
+            ])
+        );
+        assert_eq!(serde_json::from_value::<Request>(json).unwrap(), answer);
+        for (wire, code) in [
+            ("question_gone", ErrorCode::QuestionGone),
+            ("not_taken", ErrorCode::NotTaken),
+        ] {
+            let parsed: ErrorCode = serde_json::from_str(&format!("\"{wire}\"")).unwrap();
+            assert_eq!(parsed, code);
+        }
     }
 
     #[test]

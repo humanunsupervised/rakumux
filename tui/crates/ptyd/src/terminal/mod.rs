@@ -832,6 +832,17 @@ impl TerminalHost for Host {
         shared.send_input(bytes)
     }
 
+    fn send_keys_when_quiet(
+        &self,
+        id: TerminalId,
+        keys: &[String],
+        text: Option<&str>,
+        quiet: Duration,
+    ) -> Result<(), HostError> {
+        self.refuse_typing(id, quiet)?;
+        self.send_keys(id, keys, text)
+    }
+
     fn terminate(&self, id: TerminalId) -> Result<(), HostError> {
         let shared = self.inner.get(id)?;
         shared.request(|reply| ActorMsg::Terminate { reply })?

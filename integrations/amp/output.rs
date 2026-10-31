@@ -247,6 +247,7 @@ mod tests {
             reply_state: Default::default(),
             last_at: None,
             moved_at: None,
+            questions: Default::default(),
             foreground: None,
         }
     }

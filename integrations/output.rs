@@ -72,6 +72,8 @@ mod opencode;
 mod pi;
 #[path = "places.rs"]
 pub mod places;
+#[path = "questions.rs"]
+pub mod questions;
 #[path = "transcript.rs"]
 pub mod transcript;
 
@@ -276,6 +278,8 @@ pub struct Follower {
     /// GitHub Copilot: which of the conversations its process holds open is
     /// on screen.
     foreground: Option<copilot::Foreground>,
+    /// What the log showed of the conversation's questions.
+    questions: questions::Asked,
 }
 
 impl Follower {
@@ -336,6 +340,7 @@ impl Follower {
             last_at: None,
             moved_at: None,
             foreground,
+            questions: Default::default(),
         })
     }
 
@@ -495,6 +500,12 @@ impl Follower {
         self.moved_at
     }
 
+    /// What the log showed of the conversation's questions: the newest one
+    /// without a result yet, and the results read lately.
+    pub fn questions(&self) -> &questions::Asked {
+        &self.questions
+    }
+
     /// Read what the conversation gained since the last time (a log from its
     /// tail the first time). `bound` is the conversation the session named
     /// for this agent (bound with `session_bind`, else its hooks'), if any;
@@ -544,6 +555,7 @@ impl Follower {
                 };
                 if switched {
                     self.turn.begin(None);
+                    self.questions.switched();
                     self.reply = None;
                     self.reply_state.live = false;
                     self.reply_state.complete = false;
@@ -626,6 +638,7 @@ impl Follower {
                     if typed.is_some() || !messages.is_empty() {
                         self.last_at = self.last_at.max(at);
                     }
+                    self.questions.note(agent, entry);
                     let step = match agent {
                         LogAgent::Claude => claude::reply_step(entry),
                         LogAgent::Codex => codex::reply_step(entry),
@@ -1205,6 +1218,7 @@ mod tests {
             last_at: None,
             moved_at: None,
             foreground: None,
+            questions: Default::default(),
         }
     }
 
@@ -1403,6 +1417,7 @@ mod tests {
             last_at: None,
             moved_at: None,
             foreground: None,
+            questions: Default::default(),
         };
         row("u1", "user", 1, 100, json!({"text": "Fix the parser"}));
         follower.follow(Some("ses_a"));
@@ -1656,6 +1671,7 @@ mod tests {
             last_at: None,
             moved_at: None,
             foreground: None,
+            questions: Default::default(),
         }
     }
 

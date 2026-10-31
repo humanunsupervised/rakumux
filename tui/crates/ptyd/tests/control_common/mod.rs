@@ -58,7 +58,9 @@ pub struct FakeHost {
     subscribers: Mutex<Vec<Sender<HostEvent>>>,
 }
 
-const KNOWN_KEYS: &[&str] = &["enter", "esc", "tab", "up", "down", "ctrl+c"];
+const KNOWN_KEYS: &[&str] = &[
+    "enter", "esc", "tab", "up", "down", "left", "right", "space", "ctrl+c",
+];
 
 impl FakeHost {
     pub fn new() -> Arc<Self> {
@@ -455,6 +457,26 @@ impl TerminalHost for FakeHost {
         self.with_running(id, |t| {
             t.keys.push((keys.to_vec(), text.map(str::to_string)))
         })
+    }
+
+    fn send_keys_when_quiet(
+        &self,
+        id: TerminalId,
+        keys: &[String],
+        text: Option<&str>,
+        _quiet: Duration,
+    ) -> Result<(), HostError> {
+        if self
+            .state
+            .lock()
+            .unwrap()
+            .terminals
+            .get(&id)
+            .is_some_and(|t| t.typing)
+        {
+            return Err(HostError::Typing);
+        }
+        self.send_keys(id, keys, text)
     }
 
     fn terminate(&self, id: TerminalId) -> Result<(), HostError> {

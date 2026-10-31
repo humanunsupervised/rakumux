@@ -1,0 +1,29 @@
+# Claude Code's question review page after the last of several questions:
+# each answer, then "Ready to submit your answers?" over "1. Submit answers",
+# with no footer. Captured from 2.1.314.
+agent: claude
+expect: blocked
+process: claude
+cmdline: claude
+alternate_screen: false
+ms_since_output: 5000
+---
+  "Pet", "multiSelect": false, "options": [{"label": "Cat",
+  "description": "Aloof"}, {"label": "Dog", "description": "Loyal"}]}]}
+
+────────────────────────────────────────────────────────────────────────
+←  ☒ Colour  ☒ Fruits  ☒ Pet  ✔ Submit  →
+
+Review your answers
+
+ ● Which colour do you prefer?
+   → Green
+ ● Which fruits do you like?
+   → Apple
+ ● Which pet would you keep?
+   → Cat
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel

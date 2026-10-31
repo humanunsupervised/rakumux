@@ -1,0 +1,45 @@
+
+ ▐▛███▛█   Claude Code v2.1.314
+▝▜██████▀  Opus 5.5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   /home/me/project
+
+
+❯ This is a test of a dialog. Call the AskUserQuestion tool exactly once, right now, with exactly this input JSON,
+  unchanged. Do nothing else and read no files. Once it is answered, reply with one line repeating the answers exactly
+  as you received them, and stop.
+
+  {"questions": [{"question": "Which colour do you prefer?", "header": "Colour", "multiSelect": false, "options":
+  [{"label": "Red", "description": "Warm"}, {"label": "Green", "description": "Calm"}, {"label": "Blue", "description":
+  "Cool"}]}]}
+
+● User answered Claude's questions:
+  ⎿  · Which colour do you prefer? → Purple, 2 shades
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+· Unfurling… (4s · ↓ 147 tokens)
+                                                                                                     ◉ xhigh · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← 1 agent
