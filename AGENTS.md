@@ -711,7 +711,7 @@ What survives what (`ptyd/src/handoff.rs` and `integrations/recovery.rs`):
 
 | Event | Running programs | How sessions come back |
 |---|---|---|
-| Restart in place (`rakumux daemon restart`, `rakumux --new-server`, the TUI's restart offer, SIGUSR2) | keep running (same pids) | nothing to do: the new image adopts the PTYs, screens, history, tokens and bindings; clients reconnect, a TUI in session mode goes back in |
+| Restart in place (`rakumux daemon restart`, `rakumux --new-server`, the TUI's restart offer, SIGUSR2) | keep running (same pids) | nothing to do: the new image adopts the PTYs, screens, history, tokens and bindings, and reads each session's screen and agent conversation at its first tick, a quiet one too; clients reconnect, a TUI in session mode goes back in |
 | Crash, `kill -9`, reboot, SIGTERM | end | the next daemon start revives every session listed in `~/.rakumux/running.json`, with its resume command (not a use: `last_active_at` stays) |
 | `rakumux daemon stop` (`daemon_shutdown`) | end | not revived (the user ended them); Enter revives one |
 

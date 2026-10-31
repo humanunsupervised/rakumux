@@ -195,6 +195,10 @@ struct State {
     binding_seq: u64,
     /// Reply capture and the replies captured (memory only).
     replies: ReplyRing,
+    /// Sessions a restart in place carried over, not looked at yet: the first
+    /// tick reads each one's screen and agent conversation as output would,
+    /// since a quiet one (an agent waiting for a prompt) shows none.
+    adopted: Vec<(SessionId, TerminalId)>,
 }
 
 struct Binding {
@@ -309,6 +313,7 @@ impl Inner {
                 bindings: HashMap::new(),
                 binding_seq: 0,
                 replies: ReplyRing::default(),
+                adopted: Vec::new(),
                 views: HashMap::new(),
                 git: GitContexts::default(),
                 places: Places::new(saved_places),
@@ -361,6 +366,7 @@ impl Inner {
                             info.session_id
                         );
                     }
+                    state.adopted.push((record.id.clone(), info.id));
                     state
                         .live
                         .insert(record.id.clone(), LiveSession::new(info.id, record.scope));
@@ -2178,6 +2184,23 @@ impl Inner {
     /// Re-evaluate lifecycles whose self-report went stale, and re-read git
     /// contexts when their poll is due.
     pub(super) fn on_tick(&self) {
+        let adopted = std::mem::take(&mut self.lock().adopted);
+        for (id, terminal) in adopted {
+            // Its log is found for the agent the screen showed before, so the
+            // screen is read first.
+            if let Some(detection) = self.detect(terminal) {
+                let now = self.now();
+                if let Some(live) = self
+                    .lock()
+                    .live
+                    .get_mut(&id)
+                    .filter(|live| live.terminal == terminal)
+                {
+                    live.tracker.on_detection(detection, now);
+                }
+            }
+            self.on_output(terminal, &id);
+        }
         let now = self.now();
         let mut state = self.lock();
         let changed: Vec<SessionId> = state
