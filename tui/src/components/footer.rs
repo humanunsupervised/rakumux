@@ -12,10 +12,13 @@
 //! (`,`), then the Rakumux account: Sign in while signed out, `✓ Signed in`
 //! (the account dialog) while signed in. In session mode the Rakumux key
 //! alone, the way out (the label already names the mode). Settings lists
-//! every key.
+//! every key. Last, at the far right, quieter, this Rakumux's version
+//! (`v0.1.37`; a local build's says `v0.1.0`).
 //!
-//! The footer never wraps or grows: when the row is short the session
-//! gives way first (to its mark and name, then nothing), then the message is
+//! The footer never wraps or grows: when the row is short the version goes
+//! first (it shows only while everything else keeps its place: every button,
+//! the session and the message whole, the label centred), the session
+//! gives way next (to its mark and name, then nothing), then the message is
 //! cut (down to [`MIN_MESSAGE`] columns), then buttons are dropped from the
 //! right (the account, Settings, Help, then the Feed's: it carries the
 //! count and is the one tap that shows the feed). The label always shows:
@@ -441,7 +444,40 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
     let mode_width = str_width(&mode.content);
     let message = message(app);
     let buttons = buttons(app);
-    let (kept, room) = keep_buttons(width, mode_width, spans_width(&message), &buttons);
+    // The version at the far right, while everything else keeps its place:
+    // every button, the session and the message whole, the label centred.
+    let version = format!("v{}", crate::app::app_version());
+    let wanted = {
+        let session = named_session(app).map_or(0, |session| {
+            spans_width(&session_label(session, usize::MAX, app.focus))
+        });
+        let message = spans_width(&message);
+        let separator = if session > 0 && message > 0 {
+            str_width(SEPARATOR)
+        } else {
+            0
+        };
+        session + separator + message
+    };
+    let with_version = width.checked_sub(str_width(&version) + 1).filter(|&rest| {
+        let (kept, room) = keep_buttons(rest, mode_width, spans_width(&message), &buttons);
+        let right = match buttons_width(&buttons) {
+            0 => rest,
+            used => rest.saturating_sub(used + 1),
+        };
+        let centre = width.saturating_sub(mode_width) / 2;
+        let left = match wanted {
+            0 => 0,
+            wanted => MARGIN + wanted + CLEAR,
+        };
+        kept == buttons.len()
+            && room >= wanted
+            && left <= centre
+            && centre + mode_width + CLEAR <= right
+    });
+    // The row but the version.
+    let width_left = with_version.unwrap_or(width);
+    let (kept, room) = keep_buttons(width_left, mode_width, spans_width(&message), &buttons);
     let buttons = &buttons[..kept];
     let message = fit(message, room);
     let mut left = match named_session(app) {
@@ -464,10 +500,10 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
         spans.extend(left);
     }
     let left = spans_width(&spans);
-    // Where the buttons start, or the row's end.
+    // Where the buttons start, or the row's end (the version's start).
     let right = match buttons_width(buttons) {
-        0 => width,
-        used => width.saturating_sub(used + 1),
+        0 => width_left,
+        used => width_left.saturating_sub(used + 1),
     };
     // The label: centred on the row, else as near it as it gets while
     // clear of the left and the buttons.
@@ -504,6 +540,17 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
         spans.push(Span::raw(" ".repeat(right.saturating_sub(used))));
         let x = spans_width(&spans);
         targets.extend(push_buttons(&mut spans, buttons, x, app.focus));
+        spans.push(Span::raw(" "));
+    }
+    if with_version.is_some() {
+        let used = spans_width(&spans);
+        spans.push(Span::raw(" ".repeat(width_left.saturating_sub(used))));
+        let p = theme::palette();
+        let style = match app.focus {
+            Focus::List => Style::default().fg(p.background).bg(p.accent_orange),
+            Focus::Session | Focus::Terminal => Style::default().fg(p.neutral_gray).bg(p.selection),
+        };
+        spans.push(Span::styled(version, style));
         spans.push(Span::raw(" "));
     }
     (Line::from(spans), targets)
@@ -544,6 +591,18 @@ pub fn draw_footer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
             hits.push((target, hit));
         }
     }
+}
+
+/// The version as the footer shows it at the far right, a space after.
+#[cfg(test)]
+pub(crate) fn version_text() -> String {
+    format!("v{} ", crate::app::app_version())
+}
+
+/// `line` without the version at its end, when it shows.
+#[cfg(test)]
+pub(crate) fn without_version(line: &str) -> &str {
+    line.strip_suffix(version_text().as_str()).unwrap_or(line)
 }
 
 #[cfg(test)]
@@ -615,19 +674,35 @@ mod tests {
     /// The way out of session mode: 9 columns with the space after.
     const WAY_OUT: &str = " Ctrl-\\  ";
 
+    /// The version at the far right, as tests build it: 7 columns with the
+    /// space after.
+    const VERSION: &str = "v0.1.0 ";
+
     #[tokio::test]
     async fn desktop_narrow_and_phone_rows_in_every_mode() {
         let mut h = harness(vec![view("A", "api", 10)]);
         let line = |h: &crate::app::testing::Harness, width| text(&footer_line(&h.app, width));
+        assert_eq!(
+            version_text(),
+            VERSION,
+            "the positions below are for its width"
+        );
         // Rakumux mode: the session at the left, the label in the centre
-        // until the buttons reach it, then just before them; a phone keeps
-        // the mark and name, the Feed and Help.
+        // until the buttons reach it, then just before them, and the version
+        // last; a phone keeps the mark and name, the Feed and Help, and no
+        // version.
         let session = " session: ● api";
         let label = " RAKUMUX MODE ";
         assert_eq!(
             line(&h, 160),
-            row(&[(0, session), (73, label), (111, ALL_BUTTONS)])
+            row(&[
+                (0, session),
+                (73, label),
+                (104, ALL_BUTTONS),
+                (153, VERSION)
+            ])
         );
+        // The label is off centre already: no version.
         assert_eq!(
             line(&h, 100),
             row(&[(0, session), (36, label), (51, ALL_BUTTONS)])
@@ -644,12 +719,13 @@ mod tests {
         let label = " SESSION MODE ";
         assert_eq!(
             line(&h, 160),
-            row(&[(0, session), (73, label), (151, WAY_OUT)])
+            row(&[(0, session), (73, label), (144, WAY_OUT), (153, VERSION)])
         );
         assert_eq!(
             line(&h, 100),
-            row(&[(0, session), (43, label), (91, WAY_OUT)])
+            row(&[(0, session), (43, label), (84, WAY_OUT), (93, VERSION)])
         );
+        // The version would cut the session's name: it goes first.
         assert_eq!(
             line(&h, 45),
             row(&[(0, session), (16, label), (36, WAY_OUT)])
@@ -657,8 +733,14 @@ mod tests {
         // The terminal panel names no session.
         h.app.focus = Focus::Terminal;
         let label = " TERMINAL MODE ";
-        assert_eq!(line(&h, 160), row(&[(72, label), (151, WAY_OUT)]));
-        assert_eq!(line(&h, 100), row(&[(42, label), (91, WAY_OUT)]));
+        assert_eq!(
+            line(&h, 160),
+            row(&[(72, label), (144, WAY_OUT), (153, VERSION)])
+        );
+        assert_eq!(
+            line(&h, 100),
+            row(&[(42, label), (84, WAY_OUT), (93, VERSION)])
+        );
         assert_eq!(line(&h, 45), row(&[(15, label), (36, WAY_OUT)]));
     }
 
@@ -759,7 +841,10 @@ mod tests {
         let shown = text(&line);
         assert!(shown.starts_with(" session: ● api "), "{shown:?}");
         assert!(centred(&shown, " SESSION MODE "), "{shown:?}");
-        assert!(shown.ends_with(" Ctrl-\\  "), "{shown:?}");
+        assert!(
+            shown.ends_with(&format!(" Ctrl-\\  {}", version_text())),
+            "{shown:?}"
+        );
         for gone in ["Help", "Settings", "Rakumux"] {
             assert!(!shown.contains(gone), "{shown:?}");
         }

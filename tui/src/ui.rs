@@ -291,7 +291,10 @@ mod tests {
             let footer = screen.lines().last().unwrap();
             assert!(footer.contains(" SESSION MODE "), "{footer:?}");
             // The way to Rakumux mode is the only button.
-            assert!(footer.ends_with(" Ctrl-\\  "), "{footer:?}");
+            assert!(
+                crate::components::footer::without_version(footer).ends_with(" Ctrl-\\  "),
+                "{footer:?}"
+            );
             assert!(!footer.contains("Settings"), "{footer:?}");
         }
     }
@@ -443,7 +446,11 @@ mod tests {
             let footer = rows[rows.len() - 1];
             assert!(footer.starts_with(" session: ● api "), "{footer:?}");
             assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
-            assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
+            assert!(
+                crate::components::footer::without_version(footer)
+                    .ends_with(" ? Help   , Settings  "),
+                "{footer:?}"
+            );
             // No key hints above it: the panes reach the footer.
             for hint in ["select", "new", "rename", "switch pane"] {
                 assert!(!footer.contains(hint), "{footer:?}");
@@ -459,7 +466,10 @@ mod tests {
             "{footer:?}"
         );
         assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
-        assert!(footer.ends_with(" ? Help   , Settings  "), "{footer:?}");
+        assert!(
+            crate::components::footer::without_version(footer).ends_with(" ? Help   , Settings  "),
+            "{footer:?}"
+        );
     }
 
     /// Mode switches, selection moves and messages coming and going never
@@ -912,7 +922,10 @@ mod tests {
             let footer = screen.lines().last().unwrap();
             assert!(footer.starts_with(" session: ● api  zoomed "), "{footer:?}");
             assert!(footer.contains(" SESSION MODE "), "{footer:?}");
-            assert!(footer.ends_with(" Ctrl-\\  "), "{footer:?}");
+            assert!(
+                crate::components::footer::without_version(footer).ends_with(" Ctrl-\\  "),
+                "{footer:?}"
+            );
         }
         // Back in Rakumux mode the list returns, and the label says so.
         h.rakumux().await;
@@ -1028,7 +1041,10 @@ mod tests {
             let after_spinner: String = footer.chars().skip(2).collect();
             assert!(after_spinner.starts_with(" connecting "), "{footer:?}");
             assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
-            assert!(footer.ends_with(" , Settings  "), "{footer:?}");
+            assert!(
+                crate::components::footer::without_version(footer).ends_with(" , Settings  "),
+                "{footer:?}"
+            );
         }
     }
 

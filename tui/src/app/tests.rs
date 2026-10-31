@@ -5005,12 +5005,14 @@ async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
             .collect()
     };
     let (mut h, account) = account_harness(testing::FakeAccount::default());
+    let version = crate::components::footer::version_text();
     assert!(
-        footer(&h).ends_with(" , Settings   a Sign in  "),
+        footer(&h).ends_with(&format!(" , Settings   a Sign in  {version}")),
         "{:?}",
         footer(&h)
     );
-    // Drawn at the bottom right, and a tap there asks for a code at once.
+    // Drawn at the bottom right, just before the version, and a tap there
+    // asks for a code at once.
     screen_rows(&mut h, 160, 48);
     let (area, _) = *h
         .app
@@ -5019,7 +5021,10 @@ async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
         .find(|(_, hit)| *hit == Hit::FooterKey(FooterKey::SignIn))
         .expect("the Sign in button");
     assert_eq!(area.y, 47);
-    assert_eq!(area.x + area.width, 159);
+    assert_eq!(
+        usize::from(area.x + area.width),
+        159 - crate::layout::str_width(&version)
+    );
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
         MouseEventKind::Up(MouseButton::Left),
@@ -5051,7 +5056,10 @@ async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
         .iter()
         .find(|(_, hit)| *hit == Hit::FooterKey(FooterKey::Account))
         .expect("the Signed in button");
-    assert_eq!(area.x + area.width, 159);
+    assert_eq!(
+        usize::from(area.x + area.width),
+        159 - crate::layout::str_width(&version)
+    );
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
         MouseEventKind::Up(MouseButton::Left),

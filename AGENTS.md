@@ -1394,11 +1394,13 @@ MODE`), centred while it clears both sides, else between them. On the right butt
 (with `●N`, `●99+` beyond 99, for the feed entries that finished during this run and arrived
 since the feed was last on screen: memory only, `FeedStore::unseen`, counted while the account's
 feed is on; it does what `f` does), `? Help` and `, Settings`, then the
-Rakumux account at the bottom right: `a Sign in` while signed out (a tap asks for a sign-in code
+Rakumux account: `a Sign in` while signed out (a tap asks for a sign-in code
 at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\` alone in
-session mode (the label names the mode). To count while the feed is hidden the TUI asks the account service for
+session mode (the label names the mode); and last, quieter, this Rakumux's version (`v0.1.37`, a
+local build's `v0.1.0`). To count while the feed is hidden the TUI asks the account service for
 it every 10 s as a `background` read (every 2 s while it shows). When the row is short the
-session gives way first (to its name alone, then nothing), then the message is cut, then
+version goes first (it shows only while every button, the session and the message keep their
+room and the label stays centred), then the session gives way (to its name alone, then nothing), then the message is cut, then
 buttons go from the right (the account, Settings, Help, then the Feed's, which carries the
 count: a 40-column phone keeps it and Help, Settings from 48); the label never goes, its short
 word (`RAKUMUX`) under 14 columns.
