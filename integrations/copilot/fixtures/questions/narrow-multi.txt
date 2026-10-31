@@ -1,0 +1,30 @@
+  Current   Sessions   Issues  →
+
+   └ User cancelled the request.                 ┃
+                                                 ┃
+ ● Got: User cancelled the request.              ┃
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ┃
+  ❯ Decide the release (QASK:cpd)        07:16   ┃
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ┃
+ ● Asked user Before I start the migration, I n… ┃
+   └ User cancelled the request.                 ┃
+                                                 ┃
+ ● Got: User cancelled the request.              ┃
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ┃
+  ❯ QASK:cpm                             07:16   ┃
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ┃
+ ○ Asking user Waiting for response              ┃
+                                                 ┃
+──────────────────────────────────────────────────
+ Copilot needs information.
+ Which fruits do you like?
+
+ Fruits:
+ ❯ • apple
+   • banana
+   • cherry
+   • Other (type your answer)
+
+ ↑/↓ select · space toggle · enter accept ·
+ ctrl+d decline · esc cancel
+──────────────────────────────────────────────────

@@ -2,8 +2,10 @@
 //! status `⠙ Thinking...  (Press ESC to stop)` (or `(Please wait)`); tool
 //! approvals with "Yes, allow" / "No, cancel" and the hint "Alt/Option+E to
 //! inspect approval details", while the status says "Waiting for tool
-//! confirmation..."; AskUser, spec approval, folder trust, Droid-Shield and
-//! the signed-out login menu wait for the user too. Idle shows the autonomy
+//! confirmation..."; AskUser (its free answer's placeholder, or its hints:
+//! `1–9 Select`, `1–9 Toggle`, `↑ back to options`), spec
+//! approval, folder trust, Droid-Shield and the signed-out login menu wait
+//! for the user too. Idle shows the autonomy
 //! footer (`Auto (Off) · all actions require approval`, `Auto (High) · …`),
 //! which stays while it works, so it only counts after the others. Strings
 //! from the 1.0.0 bundle; the login screen captured signed out.
@@ -33,6 +35,10 @@ pub(super) const PROFILE: Profile = Profile {
                 "alt/option+e to inspect approval details",
                 "waiting for tool confirmation",
                 "or type your own answer",
+                // AskUser's hints, once its free answer holds text.
+                "1–9 select",
+                "1–9 toggle",
+                "↑ back to options",
                 "droid-shield approval required",
                 "please login with your factory account",
             ]),

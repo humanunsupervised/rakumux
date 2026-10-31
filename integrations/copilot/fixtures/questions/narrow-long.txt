@@ -1,0 +1,30 @@
+  Current   Sessions   Issues  →
+
+  ╭─╮╭─╮
+  ╰─╯╰─╯  Copilot v1.0.105 uses AI.
+  █ ▘▝ █  Check for mistakes.
+   ▔▔▔▔
+
+ ● Tip: /skills
+   └ Manage skills for enhanced capabilities
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  ❯ Should we ship? (QASK:cplong)        07:16
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ ○ Asking user Waiting for response
+
+──────────────────────────────────────────────────
+ Copilot needs information.
+ Ship subagent activity? It needs migration 0024
+ on production, deploying rakumux.com, and a
+ Rakumux release.
+
+ Plan:
+ ❯ Ship web now, Rakumux in 0.1.35 (Recommended)
+   Ship everything now, the long way round with
+ every single check
+   Hold
+   Other (type your answer)
+
+ ↑/↓ select · enter accept · ctrl+d decline · esc
+  cancel
+──────────────────────────────────────────────────

@@ -59,10 +59,16 @@ pub(super) const PROFILE: Profile = Profile {
                 &Test::Line(is_boxed_yes_option),
             ),
         ),
-        // `ask_user`: `Copilot needs information.` and its own hints.
+        // `ask_user`: `Copilot needs information.` and its own hints (a
+        // form's every field ends them `ctrl+d decline · esc cancel`, its
+        // title further up than the bottom lines).
         marker(
             Region::Bottom(12),
-            Test::Any(&["copilot needs information", "enter accept · ctrl+d decline"]),
+            Test::Any(&[
+                "copilot needs information",
+                "enter accept · ctrl+d decline",
+                "ctrl+d decline · esc cancel",
+            ]),
         ),
     ],
     // The footer, under the input box.

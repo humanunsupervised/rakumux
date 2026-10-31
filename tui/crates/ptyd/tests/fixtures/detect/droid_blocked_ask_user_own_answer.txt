@@ -1,0 +1,42 @@
+# Droid 1.0.0 AskUser, a multi question with its free answer typed: the
+# placeholder is gone, the hint says the free answer has the keys. Captured
+# offline (100x34) against a local model.
+agent: droid
+expect: blocked
+process: droid
+cmdline: droid
+title: ⛬ Which fruits do I like?
+ms_since_output: 3000
+---
+
+   Which colour should the button be? Ask me (QASK:dr1)                                             
+
+   Ask User
+    Which colour should the button be?
+      Green
+
+⛬  Got: 1. [question] Which colour should the button be?
+   [answer] Green
+
+   Ask me the colour again (QASK:dr1)                                                               
+
+   Ask User
+    Which colour should the button be?
+      Purple, 2 shades
+
+⛬  Got: 1. [question] Which colour should the button be?
+   [answer] Purple, 2 shades
+
+   Which fruits do I like? Ask me (QASK:drm)                                                        
+
+   Ask User
+   Which fruits do you like?
+
+   1. [x] Apple
+   2. [ ] Banana
+   3. [x] Cherry
+   [x] Mango 2 
+
+   Submit
+
+   Enter Add answer • ⇧Enter newline • ↑ back to options • ESC stop agent

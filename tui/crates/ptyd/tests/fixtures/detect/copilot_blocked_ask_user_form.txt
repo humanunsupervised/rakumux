@@ -1,0 +1,41 @@
+# GitHub Copilot CLI 1.0.105 ask_user, a form of four fields on a narrow
+# screen (50x30): its title far from the bottom, the hint wrapped. Captured
+# offline against a local mock model; paths sanitised.
+agent: copilot
+expect: blocked
+process: node
+cmdline: node /home/me/.nvm/versions/node/v22.20.0/bin/copilot
+title: GitHub Copilot
+alternate_screen: true
+ms_since_output: 1500
+---
+  Current   Sessions   Issues  →
+
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ┃
+ ● Asked user Ship subagent activity? It needs … ┃
+   └ User cancelled the request.                 ┃
+                                                 ┃
+ ● Got: User cancelled the request.              ┃
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ┃
+  ❯ Decide the release (QASK:cpd)        07:16   ┃
+ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ┃
+ ○ Asking user Waiting for response              ┃
+                                                 ┃
+──────────────────────────────────────────────────
+ Copilot needs information.
+ Before I start the migration, I need a few
+ decisions about how the release should go out to
+  production, which database the tests use, and
+ what to call it.
+
+  db   Targets   Release name   Retries
+
+ db:
+ The database the integration tests run against.
+ ❯ SQLite (in memory)
+   Postgres 16
+   Other (type your answer)
+
+ ↑/↓ select · enter accept · tab next · ctrl+d
+ decline · esc cancel
+──────────────────────────────────────────────────

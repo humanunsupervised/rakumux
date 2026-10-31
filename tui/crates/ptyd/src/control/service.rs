@@ -3926,10 +3926,15 @@ struct AnswerTerminal<'a> {
 }
 
 impl super::answers::Terminal for AnswerTerminal<'_> {
-    fn screen(&self) -> Option<String> {
+    fn screen(&self, styled: bool) -> Option<String> {
+        let format = if styled {
+            TextFormat::Ansi
+        } else {
+            TextFormat::Text
+        };
         self.control
             .host
-            .read(self.terminal, ReadSource::Visible, None, TextFormat::Text)
+            .read(self.terminal, ReadSource::Visible, None, format)
             .ok()
             .map(|read| read.text)
     }

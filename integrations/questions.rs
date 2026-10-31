@@ -13,6 +13,14 @@
 //! - **Claude Code**: `AskUserQuestion` (one to four questions, each with two
 //!   to four options, several of them for a `multiSelect` one, and a free
 //!   answer, "Type something."), see `claude-code/questions.rs`.
+//! - **GitHub Copilot**: `ask_user`, a form (`requestedSchema`) of one or
+//!   more fields, each a choice, several choices, yes or no, or text, every
+//!   choice with a free answer ("Other"), see `copilot/questions.rs`.
+//! - **Droid**: `AskUser`, a questionnaire of one to four questions, each
+//!   with two to four options, several of them for a `(multi)` one, and a
+//!   free answer ("Or type your own answer..."), see `droid/questions.rs`.
+//!   Its cursor is only drawn bold: its driver reads the screen with its
+//!   styles ([`Dialog::styled`], [`StyledLine`]).
 //!
 //! Another agent is added with its log's question calls and results in
 //! [`logged`] and a driver for its dialog in [`Dialog`].
@@ -24,6 +32,10 @@ use std::collections::VecDeque;
 
 #[path = "claude-code/questions.rs"]
 mod claude;
+#[path = "copilot/questions.rs"]
+mod copilot;
+#[path = "droid/questions.rs"]
+mod droid;
 
 /// One question of an agent's dialog, as its conversation logged the call.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,6 +70,8 @@ pub enum Logged {
 pub fn logged(agent: LogAgent, entry: &Value) -> Vec<Logged> {
     match agent {
         LogAgent::Claude => claude::logged(entry),
+        LogAgent::Copilot => copilot::logged(entry),
+        LogAgent::Droid => droid::logged(entry),
         _ => Vec::new(),
     }
 }
@@ -234,26 +248,38 @@ pub struct Dialog(Driver);
 #[derive(Debug)]
 enum Driver {
     Claude(claude::Dialog),
+    Copilot(copilot::Dialog),
+    Droid(droid::Dialog),
 }
 
 impl Dialog {
-    /// A driver for `agent`'s dialog (`claude`, as detected or named by its
-    /// hooks) asking `open`, to answer it with `answers`; none for an agent
-    /// Rakumux doesn't answer for.
+    /// A driver for `agent`'s dialog (`claude`, `copilot` or `droid`, as
+    /// detected or named by its hooks) asking `open`, to answer it with
+    /// `answers`; none for an agent Rakumux doesn't answer for.
     pub fn new(agent: &str, open: &OpenQuestion, answers: Vec<Answer>) -> Option<Self> {
-        match agent {
-            "claude" | "claude-code" => Some(Self(Driver::Claude(claude::Dialog::new(
-                open.questions.clone(),
-                answers,
-            )))),
-            _ => None,
-        }
+        let questions = open.questions.clone();
+        let driver = match agent {
+            "claude" | "claude-code" => Driver::Claude(claude::Dialog::new(questions, answers)),
+            "copilot" => Driver::Copilot(copilot::Dialog::new(questions, answers)),
+            "droid" => Driver::Droid(droid::Dialog::new(questions, answers)),
+            _ => return None,
+        };
+        Some(Self(driver))
+    }
+
+    /// Whether the screens this driver reads carry their styles: SGR, as a
+    /// read with `TextFormat::Ansi` gives them (rows joined with `\r\n`),
+    /// for a dialog whose cursor is only a style ([`StyledLine`]).
+    pub fn styled(&self) -> bool {
+        matches!(self.0, Driver::Droid(_))
     }
 
     /// Whether `screen` shows this dialog, on any of its pages.
     pub fn shown(&self, screen: &str) -> bool {
         match &self.0 {
             Driver::Claude(dialog) => dialog.shown(screen),
+            Driver::Copilot(dialog) => dialog.shown(screen),
+            Driver::Droid(dialog) => dialog.shown(screen),
         }
     }
 
@@ -261,6 +287,8 @@ impl Dialog {
     pub fn next(&mut self, screen: &str) -> Next {
         match &mut self.0 {
             Driver::Claude(dialog) => dialog.next(screen),
+            Driver::Copilot(dialog) => dialog.next(screen),
+            Driver::Droid(dialog) => dialog.next(screen),
         }
     }
 
@@ -269,8 +297,93 @@ impl Dialog {
     pub fn moved(&self, before: &str, after: &str) -> bool {
         match &self.0 {
             Driver::Claude(dialog) => dialog.moved(before, after),
+            Driver::Copilot(dialog) => dialog.moved(before, after),
+            Driver::Droid(dialog) => dialog.moved(before, after),
         }
     }
+}
+
+/// One row of a screen read with its styles (`TextFormat::Ansi`): its text,
+/// and for each of its characters whether it's drawn bold.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct StyledLine {
+    pub(crate) text: String,
+    /// Per character of `text`: bold.
+    bold: Vec<bool>,
+}
+
+impl StyledLine {
+    /// Whether its first character that isn't a space is bold.
+    pub(crate) fn starts_bold(&self) -> bool {
+        self.text
+            .chars()
+            .zip(&self.bold)
+            .find(|(c, _)| *c != ' ')
+            .is_some_and(|(_, bold)| *bold)
+    }
+}
+
+/// `screen`, read with its styles (rows of text and SGR only, as the
+/// daemon's `Ansi` reads give them), as lines with each character's bold.
+/// Other escape sequences are skipped; the text keeps its spaces.
+pub(crate) fn styled_lines(screen: &str) -> Vec<StyledLine> {
+    screen
+        .split('\n')
+        .map(|row| {
+            let mut line = StyledLine::default();
+            let mut bold = false;
+            let mut chars = row.trim_end_matches('\r').chars().peekable();
+            while let Some(c) = chars.next() {
+                if c != '\u{1b}' {
+                    if !c.is_control() {
+                        line.text.push(c);
+                        line.bold.push(bold);
+                    }
+                    continue;
+                }
+                if chars.peek() != Some(&'[') {
+                    chars.next();
+                    continue;
+                }
+                chars.next();
+                let mut params = String::new();
+                let mut last = None;
+                for c in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&c) {
+                        last = Some(c);
+                        break;
+                    }
+                    params.push(c);
+                }
+                if last != Some('m') {
+                    continue;
+                }
+                let mut codes = params
+                    .split([';', ':'])
+                    .map(|code| code.parse::<u16>().unwrap_or(0));
+                while let Some(code) = codes.next() {
+                    match code {
+                        0 | 22 => bold = false,
+                        1 => bold = true,
+                        // An extended colour: its own parameters follow.
+                        38 | 48 | 58 => match codes.next() {
+                            Some(5) => {
+                                codes.next();
+                            }
+                            Some(2) => {
+                                codes.next();
+                                codes.next();
+                                codes.next();
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    }
+                }
+            }
+            line
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -303,6 +416,23 @@ mod tests {
             choices: choices.iter().map(|c| c.to_string()).collect(),
             text: text.map(String::from),
         }
+    }
+
+    #[test]
+    fn a_styled_screen_reads_as_lines_with_bold() {
+        let screen = "   \u{1b}[0;1;38;2;238;238;238m1. Red\u{1b}[m\r\n   \u{1b}[0;38;2;118;118;118m2. Green\u{1b}[m\r\n   \u{1b}[0;7mO\u{1b}[0;90mr type\u{1b}[m";
+        let lines = styled_lines(screen);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].text, "   1. Red");
+        assert!(lines[0].starts_bold());
+        assert_eq!(lines[1].text, "   2. Green");
+        assert!(!lines[1].starts_bold());
+        assert_eq!(lines[2].text, "   Or type");
+        assert!(!lines[2].starts_bold());
+        // Plain text is plain.
+        let plain = styled_lines("  a\nb");
+        assert_eq!(plain[0].text, "  a");
+        assert!(!plain[0].starts_bold() && !plain[1].starts_bold());
     }
 
     #[test]

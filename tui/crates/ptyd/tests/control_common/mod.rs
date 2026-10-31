@@ -59,7 +59,8 @@ pub struct FakeHost {
 }
 
 const KNOWN_KEYS: &[&str] = &[
-    "enter", "esc", "tab", "up", "down", "left", "right", "space", "ctrl+c",
+    "enter", "esc", "tab", "up", "down", "left", "right", "space", "ctrl+c", "1", "2", "3", "4",
+    "5", "6", "7", "8", "9",
 ];
 
 impl FakeHost {

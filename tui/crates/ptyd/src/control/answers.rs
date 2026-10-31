@@ -21,8 +21,9 @@ const MAX_STEPS: usize = 80;
 
 /// The session's terminal, as answering sees it.
 pub(super) trait Terminal {
-    /// Its visible screen now.
-    fn screen(&self) -> Option<String>;
+    /// Its visible screen now: with its styles (SGR, rows joined with
+    /// `\r\n`) when `styled`, for a dialog whose cursor is only a style.
+    fn screen(&self, styled: bool) -> Option<String>;
     /// Its agent asks something now (a question, a prompt for permission),
     /// as the daemon has it or as detection reads the screen.
     fn asking(&self) -> bool;
@@ -48,7 +49,7 @@ pub(super) enum Worked {
 
 /// Answer `dialog` on `terminal`, a step at a time.
 pub(super) fn work(dialog: &mut Dialog, terminal: &dyn Terminal) -> Worked {
-    let Some(mut screen) = terminal.screen() else {
+    let Some(mut screen) = terminal.screen(dialog.styled()) else {
         return Worked::NotShown("the session's screen can't be read");
     };
     if !dialog.shown(&screen) {
@@ -93,7 +94,7 @@ fn drawn(dialog: &Dialog, terminal: &dyn Terminal, before: &str) -> Option<Strin
     let mut moved: Option<(String, Instant)> = None;
     while start.elapsed() < STEP_WAIT {
         std::thread::sleep(STEP_POLL);
-        let now = terminal.screen()?;
+        let now = terminal.screen(dialog.styled())?;
         if !dialog.moved(before, &now) {
             moved = None;
             continue;
