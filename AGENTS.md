@@ -347,9 +347,27 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    taken before it was said, and the others get none (`reply_to` names one reply); no answer
    goes to a reply taken after it was said.
    It reports `delivered` or `failed` with why (`session_gone`, `conversation_changed`,
-   `private`, `refused`, `attachment_unavailable`, `not_taken`; `not_accepted` stays in the
-   contract for older releases, which send it while their own setting is off;
-   `POST /api/v1/feed/replies/status`). **Files attached** on rakumux.com (`attachments`, at
+   `private`, `refused`, `attachment_unavailable`, `not_taken`, `question_gone`; `not_accepted`
+   stays in the contract for older releases, which send it while their own setting is off;
+   `POST /api/v1/feed/replies/status`). **Answers to questions** (`feed/replies.rs`,
+   `ReplySync::answer_next`): while the daemon says `session.answer` (read at each connect), the
+   session list says `capabilities: ["question_answers"]` and replies are read with
+   `question_answers=1`, so rakumux.com sends this machine the answers the user picks there for
+   the question an agent asks in its own dialog (Claude Code's `AskUserQuestion`): a session
+   message with `answer` (`{call_id, answers: [{question, choices?, text?}]}`), in a chat. One is
+   given to the daemon (`session_answer`, the 10 s `quiet_ms` of a reply), one at a time, while
+   its session is live, not private, shows that chat and its agent asks something (`blocked`);
+   a session asking nothing for 10 s after it's read is asked all the same, and the daemon says
+   whether the question is still open. Never typed as text, never to a daemon without the op
+   (it stays pending until rakumux.com expires it). It doesn't wait behind replies (which wait
+   while the agent asks something), and the session's replies wait while one is being given. It's
+   marked handled before the daemon is asked (`replies.json`'s `answering`; a restart meanwhile
+   reports it `not_taken`, as whether the dialog took it isn't known), and reported `delivered`
+   once the daemon answers `ok`, or failed: `question_gone` (nothing was typed: answered or
+   dismissed in the session first, another question asked, its dialog not on screen),
+   `not_taken` (keys went in but the dialog didn't take them as given), `session_gone`,
+   `private`, `conversation_changed` or `refused`; the daemon refusing because someone typed
+   there holds it 2 s, as a reply. No reply names it (`reply_to`). **Files attached** on rakumux.com (`attachments`, at
    most 5 of 4 MiB each; `feed/uploads.rs`): once a reply could otherwise be typed in, the
    service fetches its files one at a time (`GET /api/v1/feed/replies/attachments/{id}`, the
    body read as bytes up to its declared `size`, 60 s a file), each once, into
@@ -759,7 +777,7 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `subscribe`.
 - Requests (`op`): `ping`, `session_list`, `session_get`, `session_create`, `session_rename`,
   `session_kill`, `session_delete`, `session_revive`, `session_report`, `session_read`,
-  `session_wait`, `session_send`, `session_submit`, `session_touch`, `session_pin`,
+  `session_wait`, `session_send`, `session_submit`, `session_answer`, `session_touch`, `session_pin`,
   `session_bind`, `project_list`, `project_add`, `project_remove`, `attach`, `subscribe`,
   `daemon_status`, `daemon_shutdown`, `daemon_restart` (user only, capability `daemon.restart`:
   `{binary?}`; the daemon checks that `binary handoff-versions` reads its state, answers `ok`,
@@ -794,6 +812,27 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   then and of which agent, the foreground process and the terminal size, never the text; an
   Enter held back writes another.
   The daemon asks the terminal without its state lock.
+- `session_answer {id, call_id, answers: [{question, choices?, text?}], quiet_ms?}` (user only,
+  capability `session.answer`; `control/answers.rs`, `integrations/questions.rs`): answers the
+  question the session's agent asks in a dialog of its own, never a prompt for permission. Only
+  Claude Code's `AskUserQuestion` (`integrations/claude-code/questions.rs`); other agents get
+  `unsupported`. The daemon follows the conversation's questions as it reads the log
+  (`agent_output::questions::Asked`: the newest question call without a result, and the question
+  calls whose results it read lately), and before any key checks: that `call_id` is that open
+  question (else `question_gone`), that `answers` fit its questions in order, by their text, with
+  options they offer, one for a question that takes one (else `invalid_argument`), that its screen
+  shows that question's dialog (its text, its options in order, under its tab bar, above `Chat
+  about this`) and that the agent asks something (lifecycle `blocked`, or detection reading its
+  screen so: else `question_gone`), and that nobody typed there within `quiet_ms` (else
+  `session_in_use`). It then works the dialog a step at a time (`host::TerminalHost::
+  send_keys_when_quiet`, one key or the text per write), each planned from the screen just read
+  and counted as taken once the dialog moved on and stayed so for 150 ms (3 s at most): `up`/
+  `down` to the row, `enter` for one choice, `space` for each box of a question that takes
+  several, the free answer typed on its row, `Next`/`Submit` and `enter`, the review page's
+  answers checked against the answers given, then `enter` on `Submit answers`. Anything else on
+  screen stops it, nothing more sent (`not_taken` once keys went in). `ok` once the log shows the
+  question's result (10 s at most after the dialog closed, else `not_taken`). Audited with the
+  call and how many answers, never their text; one `ptyd.log` line each, the same.
 - `session_import {source}` (user only, capability `session.import`) restores an archive directory
   containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.
   The daemon preserves ids and metadata, refuses existing ids or names, stages files privately,
@@ -990,8 +1029,9 @@ accidents; they don't stop a hostile process running as the same user.
                                  titled-chats.json: the sessions whose one automatic title
                                  was made, by chat;
                                  chats.json; replies.json: replies typed in or decided
-                                 here, where each still going in went, and reports not
-                                 yet taken; new-sessions.json:
+                                 here, where each still going in went, answers to questions
+                                 handed to the daemon, and reports not yet taken;
+                                 new-sessions.json:
                                  new sessions from rakumux.com started or decided here and
                                  reports not yet taken), machine.json (this
                                  machine's feed name and id), its registration and private socket

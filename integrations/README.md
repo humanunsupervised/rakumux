@@ -375,6 +375,27 @@ Native input is capped at 1 MiB and never
 logged. Outside a Rakumux session hooks do nothing and never spawn a daemon. Errors emit a
 generic diagnostic and empty JSON with success; activity cannot approve/deny/continue work.
 
+## Answering an agent's question
+
+An agent that asks the user something in a dialog of its own (Claude Code's `AskUserQuestion`)
+can be answered from rakumux.com: the status service hands the answer to the daemon
+(`session_answer`), which works the dialog key by key from the screen. Never a prompt for
+permission. Shared code is `questions.rs`; each agent adds, in its own folder:
+
+- **The log's questions:** `logged`, which entries call its question tool (with the questions,
+  their options and whether one takes several) and which give a call's result, read as the log
+  grows (`agent_output::questions::Asked`: the newest call without a result is the open one).
+- **Its dialog:** a driver (`Dialog` in `questions.rs`) that reads the screen into the dialog's
+  page (which question, its rows and checks, the cursor, the review), says whether the screen
+  shows that question's dialog at all, plans the next key from it, and stops at anything it
+  doesn't expect. Its keys are checked against the real agent first and listed in its file, with
+  its screens kept as fixtures (`claude-code/fixtures/questions/`).
+- **Its tool name** for rakumux.com, which offers the picker only for agents it knows
+  (`ANSWERED_QUESTION_TOOLS` in the website's `lib/feed/view.ts`).
+
+An agent without a driver gets `unsupported` from the daemon, and rakumux.com never offers its
+questions to answer.
+
 ## Session badges
 
 Live agents have a right-side activity mark in the list, tabs and Grid. In the list it
