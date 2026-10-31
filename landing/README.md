@@ -58,7 +58,7 @@ No production deployment, DNS change or provider provisioning is performed by th
   Descriptions put the colour-coded app first, then its branch and state. App colours and status
   marks match `tui/src/components/format.rs`; previews stay full-colour in both modes.
 - `components/CopyCommand.tsx`: install commands with copy buttons.
-- `public/install.sh`: checksum-verifying installer served at <https://rakumux.com/install.sh>.
+- `public/install.sh`: signature- and checksum-verifying installer served at <https://rakumux.com/install.sh>.
 
 Install commands and links follow `install/INSTALL.md`. The website promotes the curl installer;
 every release also goes to npm as `rakumux`, and maintainer packaging supports the

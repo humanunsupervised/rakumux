@@ -31,7 +31,8 @@ bash tests/test-repository.sh
 bash tests/test-command-hook.sh
 bash tests/test-release.sh
 bash tests/test-release-tag.sh
-bash tests/test-npm-release.sh
+bash tests/test-npm-release.sh          # needs minisign
+bash tests/test-release-signatures.sh   # needs minisign
 node tests/public-source-boundary.mjs
 node --test tests/public-source-boundary.test.mjs
 ```

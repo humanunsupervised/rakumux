@@ -78,11 +78,21 @@ jobs:
           cargo build --workspace --locked --target x86_64-unknown-linux-musl
           cargo test -p tui updater::binary --locked --target x86_64-unknown-linux-musl
       - run: node --test 'integrations/open-code/activity.test.mjs'
+      # The release-signature tests make their throwaway signatures with minisign.
+      - name: Install minisign
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update && sudo apt-get install --yes minisign
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install minisign
+          fi
+          minisign -v
       - run: bash tests/test-repository.sh
       - run: bash tests/test-command-hook.sh
       - run: bash tests/test-release.sh
       - run: bash tests/test-release-tag.sh
       - run: bash tests/test-npm-release.sh
+      - run: bash tests/test-release-signatures.sh
 
   website:
     runs-on: ubuntu-latest

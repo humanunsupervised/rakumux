@@ -42,6 +42,9 @@ tar = "0.4"
 sha2 = "0.10"
 semver = "1.0"
 tempfile = "3.8"
+# Release signatures (updater/signature.rs): a small verifier with no
+# dependencies, from minisign's author.
+minisign-verify = "=0.3.0"
 
 [[bin]]
 name = "tui"
@@ -52,3 +55,5 @@ path = "src/main.rs"
 # it makes for it (the versions reqwest already builds).
 rustls = "0.21"
 ring = "0.17"
+# updater/signature.rs's test keys: minisign hashes a file with BLAKE2b-512.
+blake2 = "0.10"

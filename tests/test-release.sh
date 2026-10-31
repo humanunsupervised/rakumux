@@ -8,6 +8,9 @@ mkdir "$TEMP/bin"
 export RELEASE_TEST_LOG="$TEMP/operations.log"
 export RELEASE_TEST_SHA=0123456789012345678901234567890123456789
 export PATH="$TEMP/bin:$PATH"
+# Release keys in the right form (release.sh checks only that it lists some).
+printf '# fixture\nRWQ%s main\nRWQ%s backup\n' "$(printf 'A%.0s' {1..53})" "$(printf 'B%.0s' {1..53})" >"$TEMP/keys.pub"
+export RAKUMUX_RELEASE_KEYS="$TEMP/keys.pub"
 
 cat >"$TEMP/bin/git" <<'EOF'
 #!/bin/bash
@@ -67,12 +70,20 @@ expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=unsupported
 expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=
 expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=linux-x64,linux-x64
 expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=linux-x64,
+# No release keys yet: no release, as its updates couldn't be checked.
+printf '# none yet\n' >"$TEMP/no-keys.pub"
+expect_failure env RAKUMUX_RELEASE_KEYS="$TEMP/no-keys.pub" bash "$ROOT/release.sh" 0.1.0
+grep -q 'release signing keys' "$TEMP/output"
+printf 'RWQnot-a-key\n' >"$TEMP/bad-keys.pub"
+expect_failure env RAKUMUX_RELEASE_KEYS="$TEMP/bad-keys.pub" bash "$ROOT/release.sh" 0.1.0
 [[ ! -e "$RELEASE_TEST_LOG" ]]
 
 bash "$ROOT/release.sh" 0.1.0 --draft >"$TEMP/output"
 grep -q 'Release-Mode: draft' "$RELEASE_TEST_LOG"
 grep -q 'Release-Targets: macos-intel,macos-arm64,linux-x64' "$RELEASE_TEST_LOG"
 grep -q 'push origin refs/tags/v0.1.0' "$RELEASE_TEST_LOG"
+# CI leaves a draft; signing on the Mac publishes it.
+grep -q 'sign-release.sh v0.1.0' "$TEMP/output"
 
 bash "$ROOT/release.sh" 0.1.1 --target=linux-x64 --dry-run >"$TEMP/output"
 grep -q 'Targets: linux-x64' "$TEMP/output"

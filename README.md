@@ -33,7 +33,8 @@ curl -fsSL https://rakumux.com/install.sh | bash
 The installer:
 
 - picks the build for your machine (macOS Apple Silicon, macOS Intel or Linux x64);
-- checks the download against the release's SHA-256 checksums;
+- checks the release's signature (with `minisign` or OpenSSL 3, if you have one) and the download
+  against its SHA-256 checksums;
 - installs into `/usr/local`, asking for `sudo` if it needs to.
 
 To install into your home directory without `sudo`, run the following, then make sure
@@ -52,7 +53,8 @@ This gives you three commands:
 The session server, `rakumux-ptyd`, is installed alongside them. Rakumux needs nothing else at
 runtime besides bash.
 
-**Update:** press `U` in Rakumux mode, or re-run the installer. Running sessions stay up.
+**Update:** press `U` in Rakumux mode, or re-run the installer. Only signed releases install.
+Running sessions stay up.
 
 For npm (`npm install -g rakumux`), release tarballs, uninstalling and troubleshooting, see the
 [installation guide](install/INSTALL.md).

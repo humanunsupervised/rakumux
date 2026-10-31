@@ -1,8 +1,15 @@
 name: Binary release
 
+# A pushed v* tag builds the release and leaves it a draft, unsigned. The
+# maintainer signs it on their Mac (install/scripts/sign-release.sh), which
+# uploads checksums.txt.minisig and publishes it: that `published` event runs
+# the npm job, which checks the signature first. The signing key is never in
+# GitHub. npm's trusted publisher names this file, so npm stays in it.
 on:
   push:
     tags: ['v*']
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -13,6 +20,7 @@ concurrency:
 
 jobs:
   prepare:
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.targets.outputs.matrix }}
@@ -27,6 +35,9 @@ jobs:
         shell: bash
         run: |
           ./install/scripts/release-tag.sh "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+      # A build without release keys refuses every update it is offered.
+      - name: Check the release signing keys
+        run: ./install/scripts/release-keys.sh check
   build:
     needs: prepare
     strategy:
@@ -105,7 +116,8 @@ jobs:
             cat "$directory/checksums.txt" >> release-upload/checksums.txt
           done
           (cd release-upload && sha256sum -c checksums.txt)
-      - name: Publish binary-only release
+      # Never published from here: only a signed release is (sign-release.sh).
+      - name: Upload the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_MODE: ${{ needs.prepare.outputs.mode }}
@@ -120,52 +132,42 @@ jobs:
           else
             gh release create "$tag" --verify-tag --draft --title "Rakumux $tag" --generate-notes release-upload/*
           fi
-          case "$mode" in
-            stable) gh release edit "$tag" --draft=false --latest ;;
-            prerelease) gh release edit "$tag" --draft=false --prerelease --latest=false ;;
-            draft) echo 'All binary assets uploaded; release remains a draft.' ;;
-          esac
+          echo "::notice::$tag is a draft ($mode). Sign and publish it on your Mac: ./install/scripts/sign-release.sh $tag"
 
-  # The published GitHub release's packages, as install.sh downloads them, go
-  # to npm as `rakumux`. Trusted publishing (OIDC): no npm secret; npmjs.com
-  # trusts this repository's release.yml. The GitHub release is already out
-  # when this runs: if it fails, re-run this job; a version on npm is skipped.
+  # The published, signed GitHub release's packages, as install.sh downloads
+  # them, go to npm as `rakumux`. Trusted publishing (OIDC): no npm secret;
+  # npmjs.com trusts this repository's release.yml. Runs when sign-release.sh
+  # publishes the release; publish-npm.sh checks its signature against
+  # install/release-keys.pub first. If it fails, re-run this job; a version
+  # on npm is skipped.
   npm:
-    needs: [prepare, publish]
+    if: github.event_name == 'release'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v4
       - name: Check that npm takes this release
         id: release
         env:
-          RELEASE_MODE: ${{ needs.prepare.outputs.mode }}
-          RELEASE_TARGETS: ${{ needs.prepare.outputs.targets }}
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
           publish=true
-          dist_tag=""
-          case "$RELEASE_MODE" in
-            stable) dist_tag=latest ;;
-            prerelease) dist_tag=next ;;
-            draft)
-              echo "::notice::v$version stays a draft, so npm doesn't get it. Once it's published on GitHub: ./install/scripts/publish-npm.sh $version --from-release"
-              publish=false
-              ;;
-            *) echo '::error::Missing release-mode annotation'; exit 1 ;;
-          esac
+          dist_tag=latest
+          if [[ "$PRERELEASE" == true ]]; then dist_tag=next; fi
+          assets="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           for platform in macos-intel macos-arm64 linux-x64; do
-            if [[ "$publish" == true && ",$RELEASE_TARGETS," != *",$platform,"* ]]; then
+            if [[ "$publish" == true ]] && ! grep -qx "rakumux-$platform.tar.gz" <<<"$assets"; then
               echo "::warning::v$version has no $platform package and npm needs all three platforms, so npm doesn't get this release"
               publish=false
             fi
           done
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        if: steps.release.outputs.publish == 'true'
       - uses: actions/setup-node@v4
         if: steps.release.outputs.publish == 'true'
         with:

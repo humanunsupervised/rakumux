@@ -37,6 +37,14 @@ privacy. Previously public Apache-2.0 marketing/contracts retain their license.
 - [ ] Generate `THIRD_PARTY_NOTICES` and run the isolated package-install checks.
 - [ ] Create the release against the exact reviewed source commit; package scripts verify its
   `v<version>` tag rather than letting GitHub select a default-branch commit.
+- [ ] Once (done for the main key): the release signing keys, made on the Mac with the secret in
+  1Password, are listed in `install/release-keys.pub` and copied into `landing/public/install.sh`
+  (`install/scripts/release-keys.sh check` and `sync`). Only public keys go in the repository.
+  See "Signed releases" in [install/AGENTS.md](install/AGENTS.md).
+- [ ] Each release: once CI has uploaded the draft, sign and publish it on the Mac with
+  `./install/scripts/sign-release.sh v<version>`, after reading the checksums it shows. Never
+  publish a draft from GitHub's page: installers and the updater refuse an unsigned release, and
+  the npm job fails on it.
 - [ ] For marketing-only deployment, verify hosting and DNS, then deploy static `landing/`.
 
 `landing/` is the public static marketing deployment only. The account-capable
@@ -44,11 +52,11 @@ website deploys from `website/` in private `rakumux-cloud`, after separate provi
 hosting and DNS approval. Public builds/releases must not fetch private cloud source
 or credentials. Never publish private cloud source as part of this repository's release.
 
-The current production entry point is `./release.sh`. It publishes through GitHub Actions only
-after every selected platform and isolated package-install check succeeds: first the GitHub
-release that `curl -fsSL https://rakumux.com/install.sh | bash` installs, then the same packages
-to npm as `rakumux` (a prerelease under the `next` dist-tag; not for a draft, nor without all
-three targets). Select one target or a comma-separated list with `--targets`; without an
+The current production entry point is `./release.sh`. GitHub Actions builds a draft release
+only after every selected platform and isolated package-install check succeeds; the maintainer
+signs and publishes it on their Mac (`install/scripts/sign-release.sh`): the GitHub release that
+`curl -fsSL https://rakumux.com/install.sh | bash` installs, after which the same packages go to
+npm as `rakumux` (a prerelease under the `next` dist-tag; not without all three targets). Select one target or a comma-separated list with `--targets`; without an
 override, macOS Intel, macOS Apple Silicon and Linux x64 are all built on native GitHub-hosted
 runners.
 
@@ -60,8 +68,8 @@ runners.
   environment). No npm token is stored in GitHub.
 - [ ] Keep `install/npm/package.json`'s `repository.url` on this repository; npm's provenance
   checks it.
-- [ ] After each release, check the workflow's `npm` job. If it failed, the GitHub release is
-  already public and only npm lags: fix the cause and re-run the job (a version already on npm
+- [ ] After each release, check the workflow's `npm` job (it runs when the signed release is
+  published). If it failed, the GitHub release is already public and only npm lags: fix the cause and re-run the job (a version already on npm
   is skipped), or publish by hand with
   `./install/scripts/publish-npm.sh <version> --from-release`. `--dry-run` shows what npm would
   get, without credentials.

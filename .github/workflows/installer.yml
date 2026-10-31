@@ -51,6 +51,19 @@ jobs:
             curl -fsSL "$INSTALLER_URL" -o "$RUNNER_TEMP/public-install.sh"
             echo "INSTALLER_SCRIPT=$RUNNER_TEMP/public-install.sh" >> "$GITHUB_ENV"
           fi
+      # Whether install.sh can check a release signature with no minisign
+      # installed: macOS's own openssl is LibreSSL.
+      - name: Report whether the system openssl checks Ed25519 signatures
+        shell: /bin/bash --noprofile --norc -e {0}
+        run: |
+          openssl version
+          sed -n '/^# BEGIN release signature check/,/^# END release signature check/p' landing/public/install.sh > "$RUNNER_TEMP/check.sh"
+          source "$RUNNER_TEMP/check.sh"
+          if rakumux_openssl_works; then
+            echo "This openssl checks Ed25519 signatures."
+          else
+            echo "This openssl can't check Ed25519 signatures: install.sh needs minisign here."
+          fi
       - name: Test piped installer and native installed binaries
         shell: /bin/bash --noprofile --norc -e {0}
         run: /bin/bash tests/test-public-installer.sh

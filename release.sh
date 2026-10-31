@@ -1,5 +1,7 @@
 #!/bin/bash
-# Release through GitHub Actions: native binaries to GitHub, then npm. No Homebrew publishing.
+# Release through GitHub Actions: native binaries to a draft GitHub release,
+# signed and published on the maintainer's Mac (sign-release.sh), then npm.
+# No Homebrew publishing.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,16 +19,18 @@ usage() {
 Usage: ./release.sh [VERSION] [--targets=LIST] [--increment=major|minor|patch] [--draft|--prerelease] [--dry-run]
 
 Creates and pushes a reviewed source tag. GitHub Actions builds and tests only
-the selected native packages, verifies checksums, and
-publishes the binary release used by https://rakumux.com/install.sh, then
-publishes those packages to npm as rakumux (when all three targets are
-selected and it isn't a draft; a prerelease under the next dist-tag).
+the selected native packages, verifies checksums and uploads them as a draft
+release. Then, on your Mac, install/scripts/sign-release.sh vVERSION signs its
+checksums.txt with the release key and publishes it: the release used by
+https://rakumux.com/install.sh and the in-app updater, which refuse unsigned
+releases. Publishing sends those packages to npm as rakumux (when all three
+targets are selected; a prerelease under the next dist-tag).
 
   VERSION          Version without v; defaults to the next published patch
   --targets=LIST   One target or comma-separated targets (alias: --target)
                    Defaults: macos-intel,macos-arm64,linux-x64 (native CI runners)
   --increment=TYPE Auto-version increment (default: patch)
-  --draft          Upload all assets but leave the GitHub release unpublished
+  --draft          sign-release.sh signs it but leaves the GitHub release unpublished
   --prerelease     Publish a prerelease, without changing the latest stable release
   --dry-run        Validate and show the tag operation; push and publish nothing
 
@@ -58,6 +62,8 @@ done
 
 case "$INCREMENT" in major|minor|patch) ;; *) fail "invalid increment: $INCREMENT" ;; esac
 "$ROOT/install/scripts/release-targets.sh" "$TARGETS" >/dev/null
+# Every release carries the keys its own updates must be signed by.
+"$ROOT/install/scripts/release-keys.sh" check >/dev/null || fail "add the release signing keys to install/release-keys.pub first"
 cd "$ROOT"
 command -v git >/dev/null 2>&1 || fail "git is required"
 [[ -f .github/workflows/release.yml ]] || fail "binary release workflow is missing"
@@ -90,4 +96,5 @@ fi
 git tag -a "$tag" -m "Rakumux $tag" -m "Release-Mode: $MODE" -m "Release-Targets: $TARGETS"
 git push origin "refs/tags/$tag"
 printf 'Binary release started: https://github.com/%s/actions/workflows/release.yml\n' "$REPO"
-printf 'The release becomes public only after every selected target and package check succeeds.\n'
+printf 'CI builds a draft once every selected target and package check succeeds.\n'
+printf 'Then, on your Mac: ./install/scripts/sign-release.sh %s (signs and publishes it; npm follows)\n' "$tag"

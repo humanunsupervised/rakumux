@@ -1,5 +1,6 @@
 //! Verify and atomically replace a complete binary installation; never touch sessions.
 use super::releases::{stable_version, ReleaseSource, RELEASES};
+use super::signature::{self, SIGNATURE_ASSET};
 use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
@@ -46,8 +47,11 @@ pub(super) fn install_root(executable: &Path) -> Option<PathBuf> {
     .then(|| root.to_path_buf())
 }
 
+/// Install release `version` over the installation at `root`, once its
+/// `checksums.txt` is signed by one of `keys` and the package matches it.
 pub(super) fn install(
     source: &dyn ReleaseSource,
+    keys: &[minisign_verify::PublicKey],
     root: &Path,
     version: &str,
     platform: &str,
@@ -73,6 +77,11 @@ pub(super) fn install(
     let asset = format!("rakumux-{platform}.tar.gz");
     let base = format!("{RELEASES}/v{version}");
     let checksums = source.fetch(&format!("{base}/checksums.txt"), 64 * 1024)?;
+    // Every release since signing began has one; without it nothing is trusted.
+    let signed = source
+        .fetch(&format!("{base}/{SIGNATURE_ASSET}"), signature::MAX_SIGNATURE)
+        .with_context(|| format!("release v{version} has no signature that could be downloaded ({SIGNATURE_ASSET}); update was not installed"))?;
+    signature::verify(&checksums, &signed, &version, keys)?;
     let archive = source.fetch(&format!("{base}/{asset}"), MAX_ARCHIVE)?;
     verify_checksum(&checksums, &asset, &archive)?;
     let package = unpack(&archive, staging.path(), &format!("rakumux-{platform}"))?;

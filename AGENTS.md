@@ -1250,7 +1250,10 @@ and renames the session if a name comes back.
 
 `rakumux.sh` runs `shell/gwr/check-updates.sh` silently in the background (at most daily);
 `U` (Shift+U) and Settings → Update use `UpdateService` off the UI thread. Binary
-installs fetch the official GitHub release, verify SHA-256 and binary versions, reject unsafe
+installs fetch the official GitHub release, verify its signature (`updater/signature.rs`:
+`checksums.txt.minisig`, minisign, by a key built in from `install/release-keys.pub`, its trusted
+comment naming that version; missing or invalid refuses the update, changing nothing; see
+"Signed releases" in `install/AGENTS.md`), then SHA-256 and binary versions, reject unsafe
 archive paths/links and custom install files, and atomically exchange staged/installed folders
 (`renameat2` on Linux, `renamex_np` on macOS). Unwritable or unsupported installs fail without
 changing the old bundle; source builds are not overwritten. Version probes use an isolated

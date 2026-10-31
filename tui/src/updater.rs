@@ -1,6 +1,7 @@
 //! Release checks and verified updates. Never starts, stops or restarts the daemon.
 mod binary;
 mod releases;
+mod signature;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -61,8 +62,14 @@ impl UpdateService for SystemUpdateService {
             let root = binary::install_root(&executable()?)
                 .context("binary installation layout is not recognized")?;
             let platform = binary::platform(std::env::consts::OS, std::env::consts::ARCH)?;
-            return binary::install(&releases::GithubReleases::new()?, &root, &version, platform)
-                .map(Some);
+            return binary::install(
+                &releases::GithubReleases::new()?,
+                &signature::release_keys()?,
+                &root,
+                &version,
+                platform,
+            )
+            .map(Some);
         }
         let output = match method {
             InstallMethod::Npm => Command::new("npm").args(["install", "-g", &format!("rakumux@{version}")]).stdin(Stdio::null()).output()?,

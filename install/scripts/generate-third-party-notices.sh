@@ -28,7 +28,9 @@ MANIFEST="$PROJECT_ROOT/tui/Cargo.toml"
 # Crates that must appear: one dependency of each shipped binary, so a change
 # that drops a binary from the scan fails loudly.
 # rakumux-api links only crates the others link too (hyper, tokio, serde).
-REQUIRED_CRATES=("ratatui" "portable-pty" "rmcp")
+# minisign-verify (MIT): the updater's release-signature check, which must
+# carry its notice like any crate linked in.
+REQUIRED_CRATES=("ratatui" "portable-pty" "rmcp" "minisign-verify")
 
 error() { printf '\033[0;31m[NOTICES]\033[0m %s\n' "$*" >&2; }
 info() { printf '\033[0;34m[NOTICES]\033[0m %s\n' "$*" >&2; }

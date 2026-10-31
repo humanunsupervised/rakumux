@@ -401,7 +401,7 @@ export default function Home() {
               <div className="install">
                 <CopyCommand command="curl -fsSL https://rakumux.com/install.sh | bash" />
                 <p className="install-note">
-                  Downloads the latest release from GitHub, verifies its checksum and installs to{" "}
+                  Downloads the latest release from GitHub, verifies its signature and checksum and installs to{" "}
                   <code>/usr/local</code>. Another prefix:{" "}
                   <code>curl -fsSL https://rakumux.com/install.sh | PREFIX=&quot;$HOME/.local&quot; bash</code>. Read the{" "}
                   <a href="/install.sh">script</a> first if you like.

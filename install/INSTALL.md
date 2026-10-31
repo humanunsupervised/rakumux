@@ -9,7 +9,9 @@ The installed app needs only bash: no git, tmux or other tools.
 curl -fsSL https://rakumux.com/install.sh | bash
 ```
 
-The installer checks the archive against the release's `checksums.txt`, then runs its installer.
+The installer checks the release's signature (with `minisign`, or OpenSSL 3, when installed:
+`brew install minisign` on a Mac) and the archive against the release's `checksums.txt`, then runs
+its installer. Without either tool it says the signature wasn't checked.
 Use `PREFIX="$HOME/.local" bash` in place of `bash` for a user-local installation.
 It automatically selects the package for your operating system and architecture.
 
@@ -44,7 +46,10 @@ PREFIX="$HOME/.local" ./install.sh    # or any other prefix
 ```
 
 `install.sh` puts the package in `$PREFIX/libexec/rakumux` and the `rakumux` and
-`rakumux-local` commands in `$PREFIX/bin`. Checksums are in `checksums.txt` on the release.
+`rakumux-local` commands in `$PREFIX/bin`. Checksums are in `checksums.txt` on the release, signed
+in `checksums.txt.minisig`; check it with
+`minisign -V -m checksums.txt -P <key>`, a key from
+[`install/release-keys.pub`](release-keys.pub).
 
 ## From source
 
@@ -106,10 +111,12 @@ see their own folder and rename themselves.
 Press `Shift+U` in Rakumux mode (`Ctrl-\` first when working in a session), or open
 Settings → Update. Rakumux checks the installed release channel. `Enter` confirms
 installation and automatically restarts **only this UI**. `Esc` cancels before installation
-starts. A failed download, checksum, package, version or permission check leaves the UI running.
+starts. A failed download, signature, checksum, package, version or permission check leaves the
+UI running.
 
-Binary installs download the official native release and its published SHA-256 checksums over
-HTTPS. All four binaries and launcher files are staged and checked, then the complete install
+Binary installs download the official native release, its published SHA-256 checksums and their
+signature over HTTPS. The signature must be one of Rakumux's release keys' for that version, or
+nothing is installed. All four binaries and launcher files are staged and checked, then the complete install
 is swapped atomically. Running programs keep their old mapped images. Unknown/custom files
 cause a refusal rather than being discarded. Settings and session data are not replaced.
 

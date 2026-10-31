@@ -1,11 +1,16 @@
 use super::super::releases;
+use super::super::signature::testing::TestKey;
+use super::super::signature::{parse_keys, trusted_comment};
 use super::*;
 use flate2::{write::GzEncoder, Compression};
+use std::cell::RefCell;
 use std::collections::HashMap;
 
-struct Source(HashMap<String, Vec<u8>>);
+/// A fake GitHub release: its files by URL, and the URLs fetched.
+struct Source(HashMap<String, Vec<u8>>, RefCell<Vec<String>>);
 impl ReleaseSource for Source {
     fn fetch(&self, url: &str, limit: usize) -> Result<Vec<u8>> {
+        self.1.borrow_mut().push(url.to_string());
         let bytes = self.0.get(url).context("unexpected download URL")?.clone();
         if bytes.len() > limit {
             bail!("fixture exceeds download limit");
@@ -50,17 +55,54 @@ fn package(version: &str) -> Vec<u8> {
     builder.into_inner().unwrap().finish().unwrap()
 }
 
+thread_local! {
+    /// The release key tests sign with, and the one install() is given.
+    static KEY: TestKey = TestKey::generate();
+}
+
+fn keys() -> Vec<minisign_verify::PublicKey> {
+    KEY.with(|key| parse_keys(&key.public()).unwrap())
+}
+
+fn install(
+    source: &dyn ReleaseSource,
+    root: &Path,
+    version: &str,
+    platform: &str,
+) -> Result<PathBuf> {
+    super::install(source, &keys(), root, version, platform)
+}
+
+/// Release v0.1.5 with `bytes` as its Linux package, signed by [`KEY`].
 fn source(bytes: Vec<u8>, checksum: Option<&str>) -> Source {
+    let source = unsigned(bytes, checksum);
+    let checksums = &source.0[&format!("{RELEASES}/v0.1.5/checksums.txt")];
+    let signed = KEY.with(|key| key.sign(checksums, &trusted_comment("v0.1.5")));
+    with_signature(source, signed)
+}
+
+fn unsigned(bytes: Vec<u8>, checksum: Option<&str>) -> Source {
     let hash = checksum
         .map(str::to_owned)
         .unwrap_or_else(|| format!("{:x}", Sha256::digest(&bytes)));
-    Source(HashMap::from([
-        (
-            format!("{RELEASES}/v0.1.5/checksums.txt"),
-            format!("{hash}  rakumux-linux-x64.tar.gz\n").into_bytes(),
-        ),
-        (format!("{RELEASES}/v0.1.5/rakumux-linux-x64.tar.gz"), bytes),
-    ]))
+    Source(
+        HashMap::from([
+            (
+                format!("{RELEASES}/v0.1.5/checksums.txt"),
+                format!("{hash}  rakumux-linux-x64.tar.gz\n").into_bytes(),
+            ),
+            (format!("{RELEASES}/v0.1.5/rakumux-linux-x64.tar.gz"), bytes),
+        ]),
+        RefCell::default(),
+    )
+}
+
+fn with_signature(mut source: Source, signature: Vec<u8>) -> Source {
+    source.0.insert(
+        format!("{RELEASES}/v0.1.5/checksums.txt.minisig"),
+        signature,
+    );
+    source
 }
 
 fn installed(directory: &Path) -> PathBuf {
@@ -230,13 +272,106 @@ fn native_platform_names_and_stable_release_metadata_are_validated() {
     assert_eq!(platform("linux", "x86_64").unwrap(), "linux-x64");
     assert!(platform("linux", "aarch64").is_err());
     for prerelease in [false, true] {
-        let source = Source(HashMap::from([(
-            "https://api.github.com/repos/humanunsupervised/rakumux/releases/latest".into(),
-            serde_json::to_vec(
-                &serde_json::json!({"tag_name":"v0.1.5", "draft":false, "prerelease":prerelease}),
-            )
-            .unwrap(),
-        )]));
+        let source = Source(
+            HashMap::from([(
+                "https://api.github.com/repos/humanunsupervised/rakumux/releases/latest".into(),
+                serde_json::to_vec(
+                    &serde_json::json!({"tag_name":"v0.1.5", "draft":false, "prerelease":prerelease}),
+                )
+                .unwrap(),
+            )]),
+            RefCell::default(),
+        );
         assert_eq!(releases::latest(&source).is_ok(), !prerelease);
     }
+}
+
+#[test]
+fn an_unsigned_or_wrongly_signed_release_is_refused_before_its_package_is_downloaded() {
+    let package_url = format!("{RELEASES}/v0.1.5/rakumux-linux-x64.tar.gz");
+    let checksums =
+        unsigned(package("0.1.5"), None).0[&format!("{RELEASES}/v0.1.5/checksums.txt")].clone();
+    let stranger = TestKey::generate();
+    for (case, source, says) in [
+        ("unsigned", unsigned(package("0.1.5"), None), "no signature"),
+        (
+            "another key",
+            with_signature(
+                unsigned(package("0.1.5"), None),
+                stranger.sign(&checksums, &trusted_comment("v0.1.5")),
+            ),
+            "isn't signed by a Rakumux release key",
+        ),
+        (
+            "another release's signature",
+            with_signature(
+                unsigned(package("0.1.5"), None),
+                KEY.with(|key| key.sign(&checksums, &trusted_comment("v0.1.4"))),
+            ),
+            "for another release",
+        ),
+        (
+            "tampered checksums",
+            with_signature(
+                unsigned(package("0.1.5"), Some(&"0".repeat(64))),
+                KEY.with(|key| key.sign(&checksums, &trusted_comment("v0.1.5"))),
+            ),
+            "isn't signed",
+        ),
+        (
+            "garbage",
+            with_signature(unsigned(package("0.1.5"), None), b"garbage".to_vec()),
+            "malformed",
+        ),
+    ] {
+        // An installation each: another test's fork briefly holds a lock it inherits.
+        let directory = tempfile::tempdir().unwrap();
+        let root = installed(directory.path());
+        let error = install(&source, &root, "0.1.5", "linux-x64").unwrap_err();
+        assert!(format!("{error:#}").contains(says), "{case}: {error:#}");
+        assert!(
+            format!("{error:#}").contains("not installed"),
+            "{case}: {error:#}"
+        );
+        assert!(!source.1.borrow().contains(&package_url), "{case}");
+        assert_eq!(fs::read(root.join("rakumux")).unwrap(), b"old", "{case}");
+    }
+    // Without release keys (a build before the real ones were added), nothing installs.
+    let directory = tempfile::tempdir().unwrap();
+    let root = installed(directory.path());
+    let error = super::install(
+        &source(package("0.1.5"), None),
+        &[],
+        &root,
+        "0.1.5",
+        "linux-x64",
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("no release signing keys"),
+        "{error:#}"
+    );
+    assert_eq!(fs::read(root.join("rakumux")).unwrap(), b"old");
+    // Signed properly, it installs.
+    install(&source(package("0.1.5"), None), &root, "0.1.5", "linux-x64").unwrap();
+    assert!(fs::read_to_string(root.join("rakumux"))
+        .unwrap()
+        .contains("0.1.5"));
+}
+
+#[test]
+fn the_backup_key_signs_releases_too() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = installed(directory.path());
+    let backup = TestKey::generate();
+    let source = unsigned(package("0.1.5"), None);
+    let checksums = source.0[&format!("{RELEASES}/v0.1.5/checksums.txt")].clone();
+    let source = with_signature(source, backup.sign(&checksums, &trusted_comment("v0.1.5")));
+    let keys =
+        parse_keys(&KEY.with(|key| format!("{} main\n{} backup\n", key.public(), backup.public())))
+            .unwrap();
+    super::install(&source, &keys, &root, "0.1.5", "linux-x64").unwrap();
+    assert!(fs::read_to_string(root.join("rakumux"))
+        .unwrap()
+        .contains("0.1.5"));
 }

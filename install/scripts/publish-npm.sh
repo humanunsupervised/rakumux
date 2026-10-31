@@ -9,8 +9,10 @@
 #
 # Usage: publish-npm.sh <version> [--from-release] [--tag=TAG] [--dry-run]
 #   --from-release  Stage from the published GitHub release v<version>, the
-#                   one install.sh installs: its three tarballs, checked
-#                   against its checksums.txt. Without it, from a local build
+#                   one install.sh installs: its checksums.txt, checked against
+#                   its signature (checksums.txt.minisig, by a key in
+#                   install/release-keys.pub), and its three tarballs, checked
+#                   against checksums.txt. Without it, from a local build
 #                   in release/. The release workflow uses it, and so should
 #                   a publish by hand.
 #   --tag=TAG       npm dist-tag. Default: latest, or next for a prerelease
@@ -75,7 +77,7 @@ NPM_OTP_VALUE="${NPM_OTP:-${NPM_PUBLISH_OTP:-}}"
 GITHUB_REPO="humanunsupervised/rakumux"
 NPM_REGISTRY="https://registry.npmjs.org"
 PLATFORMS=(macos-intel macos-arm64 linux-x64)
-RELEASE_ASSETS=(checksums.txt rakumux-macos-intel.tar.gz rakumux-macos-arm64.tar.gz rakumux-linux-x64.tar.gz)
+RELEASE_ASSETS=(checksums.txt checksums.txt.minisig rakumux-macos-intel.tar.gz rakumux-macos-arm64.tar.gz rakumux-linux-x64.tar.gz)
 # npm trusted publishing (OIDC) needs at least this npm.
 TRUSTED_PUBLISHING_NPM="11.5.1"
 PACKAGE="$(node -p 'require(process.argv[1]).name' "$NPM_DIR/package.json")"
@@ -167,7 +169,11 @@ for (const asset of release.assets || []) console.log("asset " + asset.name);
 
     for name in "${RELEASE_ASSETS[@]}"; do
         if ! grep -qxF "asset $name" <<<"$facts"; then
-            error "Release $tag has no $name; npm needs all of: ${PLATFORMS[*]}"
+            if [[ "$name" == checksums.txt.minisig ]]; then
+                error "Release $tag isn't signed (no checksums.txt.minisig); sign it with install/scripts/sign-release.sh"
+            else
+                error "Release $tag has no $name; npm needs all of: ${PLATFORMS[*]}"
+            fi
             exit 1
         fi
     done
@@ -186,6 +192,11 @@ download_release() {
             exit 1
         }
     done
+    # Only a release its maintainer signed goes to npm.
+    "$SCRIPT_DIR/release-keys.sh" verify "$dir/checksums.txt" "$dir/checksums.txt.minisig" "$tag" || {
+        error "Release $tag isn't signed by a Rakumux release key"
+        exit 1
+    }
     for platform in "${PLATFORMS[@]}"; do
         name="rakumux-$platform.tar.gz"
         expected="$(awk -v f="$name" '$2 == f { print $1 }' "$dir/checksums.txt")"
@@ -198,7 +209,7 @@ download_release() {
             exit 1
         fi
     done
-    success "Release $tag: all ${#PLATFORMS[@]} tarballs match checksums.txt"
+    success "Release $tag: signed, and all ${#PLATFORMS[@]} tarballs match checksums.txt"
 
     mkdir "$WORK_DIR/notices"
     if ! tar -xzf "$dir/rakumux-linux-x64.tar.gz" -C "$WORK_DIR/notices" \

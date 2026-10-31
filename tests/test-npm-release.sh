@@ -5,6 +5,15 @@
 # network, the checkout's install/npm or a registry.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Releases are signed (sign-release.sh); minisign makes the fixtures' signatures.
+if ! command -v minisign >/dev/null 2>&1; then
+    if [[ -n "${CI:-}" ]]; then
+        echo 'minisign is needed to test npm release staging' >&2
+        exit 1
+    fi
+    echo 'npm release tests skipped: minisign is not installed.'
+    exit 0
+fi
 TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
 
@@ -24,6 +33,14 @@ rm -rf "$WORK/install/npm/resources" "$WORK/install/npm/dist" \
     "$WORK/install/npm/LICENSE" "$WORK/install/npm/THIRD_PARTY_NOTICES"
 printf '# Rakumux 1.2.3\n\nFixture notes.\n' > "$WORK/install/release-notes/1.2.3.md"
 PUBLISH="$WORK/install/scripts/publish-npm.sh"
+
+# Throwaway release keys: "main" is a release key, "stranger" isn't.
+mkdir "$TEMP/keys"
+for name in main stranger; do
+    minisign -G -W -f -p "$TEMP/keys/$name.pub" -s "$TEMP/keys/$name.key" >/dev/null
+done
+tail -1 "$TEMP/keys/main.pub" >"$TEMP/keys/release-keys.pub"
+export RAKUMUX_RELEASE_KEYS="$TEMP/keys/release-keys.pub"
 
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
@@ -45,7 +62,8 @@ for platform in macos-intel macos-arm64 linux-x64; do
 done
 
 # release VERSION STATE [ASSET...]: a GitHub release with those assets
-# (default: all), STATE published, prerelease or draft.
+# (default: all), STATE published, prerelease or draft; signed by the key
+# $SIGNER names (default main; none: unsigned).
 release() {
     local version="$1" state="$2" dir="$FIXTURE/assets/v$1" assets name
     shift 2
@@ -59,6 +77,11 @@ release() {
         cp "$TEMP/packages/$name" "$dir/"
         printf '%s  %s\n' "$(sha256_of "$dir/$name")" "$name" >> "$dir/checksums.txt"
     done
+    if [[ "${SIGNER:-main}" != none ]]; then
+        minisign -S -s "$TEMP/keys/${SIGNER:-main}.key" -m "$dir/checksums.txt" \
+            -t "rakumux-release tag:v$version file:checksums.txt timestamp:1" >/dev/null
+        set -- "$@" checksums.txt.minisig
+    fi
     for name in "$@"; do assets="$assets{\"name\":\"$name\"},"; done
     printf '{"tag_name":"v%s","draft":%s,"prerelease":%s,"assets":[%s]}\n' "$version" \
         "$([[ "$state" == draft ]] && echo true || echo false)" \
@@ -144,6 +167,8 @@ release 1.2.5 published checksums.txt rakumux-macos-arm64.tar.gz rakumux-linux-x
 release 1.2.6 draft
 release 1.3.0 prerelease
 release 2.0.0-rc.1 published
+SIGNER=none release 1.2.7 published
+SIGNER=stranger release 1.2.8 published
 
 # A dry run stages the release's packages: no credentials, no registry.
 reset_logs
@@ -155,7 +180,7 @@ for platform in macos-intel macos-arm64 linux-x64; do
 done
 grep -qx 'Fixture notices for linux-x64' "$WORK/install/npm/THIRD_PARTY_NOTICES"
 cmp -s "$ROOT/LICENSE" "$WORK/install/npm/LICENSE"
-[[ "$(wc -l < "$TEST_LOG/downloads")" -eq 4 ]]
+[[ "$(wc -l < "$TEST_LOG/downloads")" -eq 5 ]]
 absent 'registry.npmjs.org' "$TEST_LOG/curl-argv"
 absent 'Authorization' "$TEST_LOG/curl-config"
 no_publish
@@ -169,6 +194,9 @@ absent 'fixture-secret-token' "$TEST_LOG/curl-argv" "$TEMP/output"
 expect_failure 'Checksum mismatch for rakumux-macos-arm64.tar.gz' bash "$PUBLISH" 1.2.4 --from-release --dry-run
 expect_failure 'has no rakumux-macos-intel.tar.gz' bash "$PUBLISH" 1.2.5 --from-release --dry-run
 expect_failure 'still a draft' bash "$PUBLISH" 1.2.6 --from-release --dry-run
+# Only a release signed by a release key goes to npm.
+expect_failure "isn't signed (no checksums.txt.minisig)" bash "$PUBLISH" 1.2.7 --from-release --dry-run
+expect_failure "isn't signed by a Rakumux release key" bash "$PUBLISH" 1.2.8 --from-release --dry-run
 expect_failure 'no published release v9.9.9' bash "$PUBLISH" 9.9.9 --from-release --dry-run
 expect_failure 'Invalid version' bash "$PUBLISH" v1.2.3 --from-release --dry-run
 
