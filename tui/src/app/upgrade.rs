@@ -1,4 +1,5 @@
 //! Update (`Shift+U`): check, explicitly confirm installation, then reload only the UI.
+//! Automatic updates are `auto_update.rs`.
 use super::runtime::AppEvent;
 use super::types::{AppMode, UpgradeDialog, UpgradeMessage};
 use super::{app_version, App};
@@ -15,25 +16,17 @@ pub fn install_method_display(method: InstallMethod) -> &'static str {
 }
 
 impl App {
-    /// Cached availability is a hint, never authorization to install on startup.
+    /// A newer release on record, for the footer and Settings from the
+    /// first paint. Whether it installs is the first tick's to decide
+    /// (`auto_update.rs`).
     pub fn load_update_state(&mut self) {
         let Some(path) = self.update_state_path() else {
             return;
         };
         match UpdateState::load_from(&path) {
-            Ok(state) if state.pending_upgrade => {
-                if let Some(version) = state.latest_version.filter(|version| {
-                    crate::updater::compare_versions(app_version(), version)
-                        .is_ok_and(|order| order.is_lt())
-                }) {
-                    self.pending_update_version = Some(version);
-                    self.update_install_method = state
-                        .install_method
-                        .as_deref()
-                        .map(InstallMethod::from_string);
-                }
+            Ok(state) => {
+                self.note_available(&state);
             }
-            Ok(_) => {}
             Err(error) => self.set_status(format!("Could not read update status: {error}")),
         }
     }
@@ -90,11 +83,28 @@ impl App {
         match message {
             UpgradeMessage::CheckAvailable {
                 latest_version,
+                method: InstallMethod::Source,
+            } => {
+                // Released, but a source build is never overwritten.
+                self.save_update_state(Some((&latest_version, InstallMethod::Source)));
+                if let AppMode::Upgrade(dialog) = &mut self.mode {
+                    dialog.checking = false;
+                    dialog.update_available = false;
+                    dialog.latest_version = Some(latest_version.clone());
+                    dialog.install_method = Some(InstallMethod::Source);
+                    dialog.error_message = None;
+                    dialog.info_message = Some(format!(
+                        "Version {latest_version} is out. Rebuild your checkout with ./build.sh, then press R."
+                    ));
+                }
+            }
+            UpgradeMessage::CheckAvailable {
+                latest_version,
                 method,
             } => {
                 self.pending_update_version = Some(latest_version.clone());
                 self.update_install_method = Some(method);
-                self.save_update_state();
+                self.save_update_state(Some((&latest_version, method)));
                 if let AppMode::Upgrade(dialog) = &mut self.mode {
                     dialog.checking = false;
                     dialog.update_available = true;
@@ -111,7 +121,7 @@ impl App {
             UpgradeMessage::CheckNoUpdate => {
                 self.pending_update_version = None;
                 self.update_install_method = None;
-                self.save_update_state();
+                self.save_update_state(None);
                 if let AppMode::Upgrade(dialog) = &mut self.mode {
                     dialog.checking = false;
                     dialog.update_available = false;
@@ -128,9 +138,10 @@ impl App {
                 self.set_status(format!("Update check failed: {error}"));
             }
             UpgradeMessage::InstallSuccess { launcher } => {
+                // The shared state keeps the release, so windows still on the
+                // older one learn of it.
                 self.pending_update_version = None;
                 self.update_install_method = None;
-                self.save_update_state();
                 self.restart_launcher = launcher;
                 self.restart_requested = true;
                 self.set_status("Update installed. Restarting only the UI; sessions keep running.");
@@ -151,21 +162,22 @@ impl App {
         }
     }
 
-    fn update_state_path(&self) -> Option<std::path::PathBuf> {
+    pub(super) fn update_state_path(&self) -> Option<std::path::PathBuf> {
         self.paths
             .as_ref()
             .map(|paths| paths.home.join("update_state.json"))
     }
 
-    fn save_update_state(&mut self) {
+    /// A check made with `U`, in the shared state: what the user was told
+    /// and which install failed stay as they were.
+    fn save_update_state(&mut self, found: Option<(&str, InstallMethod)>) {
         let Some(path) = self.update_state_path() else {
             return;
         };
-        let mut state = UpdateState::default();
-        if let (Some(version), Some(method)) =
-            (&self.pending_update_version, self.update_install_method)
-        {
-            state.mark_update_available(version.clone(), method);
+        let mut state = UpdateState::load_from(&path).unwrap_or_default();
+        match found {
+            Some((version, method)) => state.mark_update_available(version.into(), method),
+            None => state.no_update_for(app_version()),
         }
         state.update_last_check();
         if let Err(error) = state.save_to(&path) {

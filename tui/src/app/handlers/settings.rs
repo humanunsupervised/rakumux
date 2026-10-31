@@ -235,6 +235,14 @@ fn open_item(app: &mut App, item: SettingsItem) {
             app.place_terminal_panel(next);
             app.set_status(format!("Terminal panel: {}", next.label().to_lowercase()));
         }
+        SettingsItem::AutoUpdate => {
+            let on = !app.settings.sessions.auto_update;
+            app.settings.sessions.auto_update = on;
+            // Turned on, a release already known installs now.
+            app.look_for_update_soon();
+            let state = if on { "on" } else { "off" };
+            save_config(app, format!("Update automatically: {state}"));
+        }
         SettingsItem::CycleInSessions => {
             let on = !app.settings.sessions.cycle_keys_in_session;
             app.settings.sessions.cycle_keys_in_session = on;

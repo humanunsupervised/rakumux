@@ -644,9 +644,11 @@ impl KeyAction {
                 .into(),
             KeyAction::CheckForUpdate => {
                 "Shift+U checks the installed release channel. Enter confirms installation and \
-                 restarts only this UI; Esc cancels before installation starts. Binary installs \
-                 verify the release SHA-256 checksum. Source builds and admin-owned install \
-                 directories may need a manual update. No daemon stop or session revival."
+                 restarts only this UI; Esc cancels before installation starts. With Update \
+                 automatically on, binary installs do this by themselves. Binary installs \
+                 install only a signed release, and verify its SHA-256 checksums. Source \
+                 builds and admin-owned install directories may need a manual update. No \
+                 daemon stop or session revival."
                     .into()
             }
             KeyAction::Zoom => {

@@ -1980,14 +1980,17 @@ async fn shift_u_updates_after_confirmation_and_restarts_only_the_ui() {
 }
 
 #[tokio::test]
-async fn update_cancel_errors_and_cached_availability_never_install_implicitly() {
+async fn with_automatic_updates_off_cancel_errors_and_cached_availability_never_install() {
     let mut h = harness(vec![view("A", "a", 20)]);
+    h.app.settings.sessions.auto_update = false;
     let updater = Arc::new(testing::FakeUpdater::default());
     *updater.latest.lock().unwrap() = Some("99.1.0".into());
     h.app.updater = updater.clone();
     h.press(KeyCode::Char('U')).await;
     h.press(KeyCode::Esc).await;
     h.app.load_update_state();
+    h.app.on_tick(std::time::Instant::now());
+    h.app.process_pending();
     assert_eq!(*updater.calls.lock().unwrap(), ["check"]);
     assert!(!h.app.restart_requested);
     *updater.install_error.lock().unwrap() =
@@ -2005,6 +2008,28 @@ async fn update_cancel_errors_and_cached_availability_never_install_implicitly()
         matches!(&h.app.mode, AppMode::Upgrade(dialog) if !dialog.update_available && dialog.error_message.as_ref().unwrap().contains("Source build"))
     );
     assert!(!h.app.restart_requested);
+}
+
+#[tokio::test]
+async fn shift_u_on_a_source_build_says_a_release_is_out_and_installs_nothing() {
+    let mut h = harness(vec![view("A", "a", 20)]);
+    let updater = Arc::new(testing::FakeUpdater::default());
+    *updater.latest.lock().unwrap() = Some("99.1.0".into());
+    *updater.method.lock().unwrap() = Some(crate::updater::InstallMethod::Source);
+    h.app.updater = updater.clone();
+    h.press(KeyCode::Char('U')).await;
+    let AppMode::Upgrade(dialog) = &h.app.mode else {
+        panic!("no update dialog");
+    };
+    assert!(!dialog.update_available);
+    assert!(dialog
+        .info_message
+        .as_deref()
+        .is_some_and(|info| info.contains("99.1.0") && info.contains("./build.sh")));
+    h.press(KeyCode::Enter).await;
+    assert_eq!(updater.calls(), ["check"]);
+    assert!(!h.app.restart_requested);
+    assert_eq!(h.app.pending_update_version, None);
 }
 
 #[tokio::test]

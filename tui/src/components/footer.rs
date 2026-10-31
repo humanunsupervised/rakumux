@@ -327,8 +327,8 @@ fn session_label(session: &SessionView, room: usize, focus: Focus) -> Vec<Span<'
 
 /// What follows the session at the left: the connection state while not
 /// connected, then a status message, or why the daemon is unreachable,
-/// debug details, zoom or a pending upgrade. Empty when there's nothing to
-/// say.
+/// debug details, zoom, or an update (installed and waiting to reload, or
+/// available). Empty when there's nothing to say.
 fn message(app: &App) -> Vec<Span<'static>> {
     let p = theme::palette();
     // Readable on the blue bar; the orange one recolours everything.
@@ -372,11 +372,8 @@ fn message(app: &App) -> Vec<Span<'static>> {
     } else if app.zoomed && app.focus == Focus::Session {
         // The session itself is named before it.
         vec![Span::styled("zoomed", muted)]
-    } else if let Some(version) = &app.pending_update_version {
-        vec![Span::styled(
-            format!("Update {version} available · U to install"),
-            Style::default().fg(p.accent_gold),
-        )]
+    } else if let Some(hint) = app.update_hint() {
+        vec![Span::styled(hint, Style::default().fg(p.accent_gold))]
     } else {
         Vec::new()
     };

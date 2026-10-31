@@ -62,21 +62,6 @@ fn restart_current_process(launcher: Option<&std::path::Path>) -> Result<()> {
     restart::current_process(launcher).map_err(Into::into)
 }
 
-/// Note a newer release for the next start (runs in the background).
-async fn check_for_updates_background() -> Result<()> {
-    let mut state = updater::UpdateState::load().unwrap_or_default();
-    if !state.should_check_for_updates() {
-        return Ok(());
-    }
-    if let Some((latest_version, method)) = updater::check_for_updates(app_version()).await? {
-        state.mark_update_available(latest_version, method);
-    } else {
-        state.clear_pending_upgrade();
-    }
-    state.update_last_check();
-    state.save()
-}
-
 fn print_cli_help() {
     println!("rakumux - terminal sessions for your folders");
     println!();
@@ -563,11 +548,9 @@ async fn run_app<B: ratatui::backend::Backend + Write>(
     let size = terminal.size()?;
     app.resize(size.width, size.height);
     draw(terminal, app)?;
-    // Connect after the first paint so the screen shows at once.
+    // Connect after the first paint so the screen shows at once. The daily
+    // update check is the app's (`app/auto_update.rs`), from the first tick.
     app.start();
-    tokio::spawn(async {
-        let _ = check_for_updates_background().await;
-    });
 
     let mut background = app
         .take_receiver()

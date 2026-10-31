@@ -1061,7 +1061,9 @@ accidents; they don't stop a hostile process running as the same user.
   config.json.lock               serializes private configuration writes
   running.json                   {"sessions": [ids]}: sessions running now, revived by the next start
                                  after a crash or reboot; removed by `daemon stop`
-  update_state.json              UpdateState {last_check, latest_version, pending_upgrade, install_method}
+  update_state.json              UpdateState {last_check, latest_version, pending_upgrade, install_method,
+                                 notified_version, failed_version}: shared by the home's windows
+                                 (see "Updates")
   session.json                   auth SessionRecord {session_id, token, email} (Clerk; deferred, unrelated to Rakumux sessions)
   sensagent/                     the account service (`rakumux status-service`): credentials/
                                  (the sign-in, 0600), status/ (descriptions and sharing consent,
@@ -1101,7 +1103,8 @@ accidents; they don't stop a hostile process running as the same user.
   the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
-  sidebar_width (dragged divider),
+  auto_update (true: new releases install by themselves and the UI reloads once idle, see
+  "Updates"; Settings → Update automatically; only false is written), sidebar_width (dragged divider),
   feed_width (the docked feed pane's width, set by dragging the line left of it; left out until
   dragged), sprite_folders (folders whose new sessions run on your Sprite), sprite_env_copy
   ({folder path: bool}: whether its `.env` files are copied to your Sprite; asked once),
@@ -1248,19 +1251,42 @@ and renames the session if a name comes back.
 
 ### Updates
 
-`rakumux.sh` runs `shell/gwr/check-updates.sh` silently in the background (at most daily);
-`U` (Shift+U) and Settings → Update use `UpdateService` off the UI thread. Binary
-installs fetch the official GitHub release, verify its signature (`updater/signature.rs`:
-`checksums.txt.minisig`, minisign, by a key built in from `install/release-keys.pub`, its trusted
-comment naming that version; missing or invalid refuses the update, changing nothing; see
+`rakumux.sh` runs `shell/gwr/check-updates.sh` silently in the background (at most daily). The
+TUI checks for itself (`app/auto_update.rs`): every minute each window reads the home's
+`update_state.json`; once its `last_check` is a day old, one window asks `UpdateService::check`
+off the UI thread (the GitHub release, or the npm or Homebrew channel; a source build asks
+GitHub too, only to say a release is out; never a prerelease) and records a newer release
+there, where the other windows find it. A recorded release stays after a window installs it, so
+windows still on the older one learn of it; each compares it with its own version and ignores
+one that isn't newer, and goes by its own installation (`UpdateService::method`), never by the
+one that found it. A check that can't be made (offline) is quiet and tried again an hour later.
+**Automatic updates** (`sessions.auto_update`, on by default; Settings → Update automatically):
+a binary install (`install.sh`) installs a newer stable release without asking, through the same
+path as `U`, so only a signed release: binary installs fetch the official GitHub release,
+verify its signature (`updater/signature.rs`: `checksums.txt.minisig`, minisign, by a key built
+in from `install/release-keys.pub`, its trusted comment naming that version; missing or invalid
+refuses the update, changing nothing, and an automatic one counts as a failed install; see
 "Signed releases" in `install/AGENTS.md`), then SHA-256 and binary versions, reject unsafe
-archive paths/links and custom install files, and atomically exchange staged/installed folders
-(`renameat2` on Linux, `renamex_np` on macOS). Unwritable or unsupported installs fail without
-changing the old bundle; source builds are not overwritten. Version probes use an isolated
-environment/home. The user confirms installation; cached `UpdateState` is availability, never
-startup authorization. Success reloads only the UI through the new launcher, stripping
-`--new-server`. The daemon/API and all sessions stay running; Update has no stop/revive
-fallback. npm and Homebrew installs use their package manager. On a protocol mismatch the TUI
+archive paths/links and custom install files, and atomically exchange
+staged/installed folders (`renameat2` on Linux, `renamex_np` on macOS) under the install's lock
+(`.rakumux-update.lock`): another window finding it held (`UpdateBusy`) says nothing and tries
+a minute later, when its install finds every binary already at that version and changes
+nothing. Unwritable or unsupported installs fail without changing the old bundle; the window
+says so once (`Couldn't update to X: …`) and doesn't try that version (`failed_version`) again
+until the next daily check finds it. Installed, the window reloads only its UI through the new
+launcher (stripping `--new-server`) at a safe moment: Rakumux mode, no dialog, half-typed filter
+or pending key, no terminal panel shell (a reload ends it), and no key, click, paste or focus
+for 60 s. Until then the footer says `Updated to X · reloads when idle (R now)`; `R` reloads at
+once. The daemon/API and all sessions stay running, and the server is never restarted
+automatically: after the reload the capability check below offers `S` as ever. Otherwise (the
+setting off, a failed install, npm, Homebrew, a source build) a newer release is told once per
+version (`notified_version`, shared by the windows), as a footer message, then as the footer's
+quiet line while it has nothing else to say: `Update X available · U to install`, `…: npm
+install -g rakumux@latest`, `…: brew upgrade rakumux` (their package manager is never run by
+itself), or, for a source build, the message alone, `…: rebuild your checkout` (its version
+says nothing). `U` (Shift+U) and Settings → Update still check and install after the user
+confirms (npm and Homebrew through their package manager); success reloads at once. Source
+builds are never overwritten. Version probes use an isolated environment/home. On a protocol mismatch the TUI
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
 `session.working_directory`, `session.agent_output`, `session.user_prompt`, `session.turn`,
@@ -1742,7 +1768,8 @@ Settings is one scrolling page without tabs (`help::ModalTab::Settings`) under a
 typing narrows it to the settings and actions whose section or name has every word typed
 (`Backspace` deletes, `Esc` clears, then closes; `Space` changes the selected row while nothing
 is typed), and the dialog keeps its size meanwhile. The settings come first (Account, where you
-sign in, then Appearance (Layout, Icons, Tips in the footer), Keyboard and App), then under a `Keys`
+sign in, then Appearance (Layout, Icons, Tips in the footer), Keyboard and App, whose Update
+automatically turns automatic updates on and off), then under a `Keys`
 rule every action and its keys, which `Enter` runs; `↑`/`↓` select among the rows shown; `→`
 shows the selected row's note in a popover over the page (`←`, `Esc`, moving or `Enter` close
 it), so the rows never shift; the wheel moves the selection. A setting that can't be changed

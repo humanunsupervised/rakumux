@@ -1121,16 +1121,40 @@ pub struct Harness {
     pub home: tempfile::TempDir,
 }
 
+/// Releases and installs in memory: never the network or an installation.
 #[derive(Default)]
 pub struct FakeUpdater {
     pub latest: Mutex<Option<String>>,
     pub check_error: Mutex<Option<String>>,
     pub install_error: Mutex<Option<String>>,
+    /// Another window holds the installation's lock.
+    pub busy: Mutex<bool>,
+    /// How this app is installed; `None`: a binary installation.
+    pub method: Mutex<Option<crate::updater::InstallMethod>>,
     pub launcher: Mutex<Option<std::path::PathBuf>>,
     pub calls: Mutex<Vec<String>>,
 }
 
+impl FakeUpdater {
+    /// A binary installation whose newest release is `latest`.
+    pub fn with_latest(latest: &str) -> Arc<Self> {
+        let updater = Self::default();
+        *updater.latest.lock().unwrap() = Some(latest.into());
+        Arc::new(updater)
+    }
+
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
 impl crate::updater::UpdateService for FakeUpdater {
+    fn method(&self) -> crate::updater::InstallMethod {
+        self.method
+            .lock()
+            .unwrap()
+            .unwrap_or(crate::updater::InstallMethod::Binary)
+    }
     fn check(
         &self,
         _current: &str,
@@ -1139,12 +1163,13 @@ impl crate::updater::UpdateService for FakeUpdater {
         if let Some(error) = self.check_error.lock().unwrap().as_ref() {
             anyhow::bail!("{error}");
         }
+        let method = crate::updater::UpdateService::method(self);
         Ok(self
             .latest
             .lock()
             .unwrap()
             .clone()
-            .map(|version| (version, crate::updater::InstallMethod::Binary)))
+            .map(|version| (version, method)))
     }
     fn install(
         &self,
@@ -1155,6 +1180,9 @@ impl crate::updater::UpdateService for FakeUpdater {
             .lock()
             .unwrap()
             .push(format!("install {version}"));
+        if *self.busy.lock().unwrap() {
+            return Err(crate::updater::UpdateBusy.into());
+        }
         if let Some(error) = self.install_error.lock().unwrap().as_ref() {
             anyhow::bail!("{error}");
         }

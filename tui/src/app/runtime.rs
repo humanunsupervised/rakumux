@@ -17,7 +17,7 @@ use session_core::model::{ProjectView, SessionView};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::folders::SyncResult;
-use super::types::UpgradeMessage;
+use super::types::{AutoUpdateMessage, UpgradeMessage};
 
 /// How long pump threads block before checking for cancellation.
 const PUMP_POLL: Duration = Duration::from_millis(100);
@@ -149,6 +149,8 @@ pub enum AppEvent {
         generation: u64,
         message: UpgradeMessage,
     },
+    /// A check or install of the automatic update finished.
+    AutoUpdate(AutoUpdateMessage),
     /// Phone access checked at startup: whether it's on, and whether to
     /// offer it.
     PhoneChecked {

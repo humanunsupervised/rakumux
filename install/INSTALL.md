@@ -23,8 +23,11 @@ Re-run the same installer to upgrade.
 npm install -g rakumux
 ```
 
-The npm package carries the same binaries as that version's GitHub release; prereleases install
-with `npm install -g rakumux@next`. Upgrade with the same command, or press `U` in Rakumux.
+The npm package carries the same binaries as that version's GitHub release, published only once
+that release's signature checked out; prereleases install with `npm install -g rakumux@next`.
+npm signs every version it serves and records where it was built (`npm audit signatures` checks
+both). Upgrade with the same command, or press `U` in Rakumux; npm installs don't update by
+themselves.
 Homebrew publishing is not enabled.
 
 ## Release tarball
@@ -108,7 +111,13 @@ see their own folder and rename themselves.
 
 ## Upgrading
 
-Press `Shift+U` in Rakumux mode (`Ctrl-\` first when working in a session), or open
+Binary installs update themselves: once a day Rakumux checks for a stable release, installs a
+newer one in the background (the same verified path as below), and reloads each window into it
+once it has been left alone for a minute in Rakumux mode. Sessions, the daemon and the API keep
+running. Turn this off in Settings → Update automatically. npm, Homebrew and source builds are
+only told, once per release, how to update.
+
+To update by hand, press `Shift+U` in Rakumux mode (`Ctrl-\` first when working in a session), or open
 Settings → Update. Rakumux checks the installed release channel. `Enter` confirms
 installation and automatically restarts **only this UI**. `Esc` cancels before installation
 starts. A failed download, signature, checksum, package, version or permission check leaves the
@@ -125,7 +134,7 @@ installs (`PREFIX="$HOME/.local"`) normally support this. Admin-owned installs n
 outside Rakumux with the original `PREFIX`; there is no hidden `sudo` prompt. Source builds are
 never overwritten: rebuild the checkout, then press `R` to reload the UI.
 
-Cached availability never authorizes installation on startup. The launcher `--update` option
+With automatic updates off, nothing installs without your confirmation. The launcher `--update` option
 is a check, not this in-app installation workflow. The daemon and API are not restarted by
 Update. To apply a new daemon later, use `rakumux daemon restart` for a supported restart in
 place. Decline any warning that it would end sessions. Update has no stop/revive fallback.

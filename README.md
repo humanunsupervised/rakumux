@@ -53,8 +53,9 @@ This gives you three commands:
 The session server, `rakumux-ptyd`, is installed alongside them. Rakumux needs nothing else at
 runtime besides bash.
 
-**Update:** press `U` in Rakumux mode, or re-run the installer. Only signed releases install.
-Running sessions stay up.
+**Update:** binary installs update themselves (Settings → Update automatically); press `U` in
+Rakumux mode to update now, or re-run the installer. Only signed releases install. Running
+sessions stay up.
 
 For npm (`npm install -g rakumux`), release tarballs, uninstalling and troubleshooting, see the
 [installation guide](install/INSTALL.md).

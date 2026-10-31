@@ -1,6 +1,7 @@
 //! Verify and atomically replace a complete binary installation; never touch sessions.
 use super::releases::{stable_version, ReleaseSource, RELEASES};
 use super::signature::{self, SIGNATURE_ASSET};
+use super::UpdateBusy;
 use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
@@ -64,6 +65,12 @@ pub(super) fn install(
     let _lock = lock(parent)?;
     let staging = tempfile::Builder::new().prefix(".rakumux-update-").tempdir_in(parent)
         .with_context(|| format!("Cannot write {}. Update with the installer using your original PREFIX outside Rakumux; administrator permission may be required.", parent.display()))?;
+    // Another window installed it while this one waited its turn.
+    if BINARIES.iter().all(|binary| {
+        verify_version(&root.join(binary), &version.to_string(), staging.path()).is_ok()
+    }) {
+        return Ok(root.join("rakumux.sh"));
+    }
     // Do not discard files somebody added to the installation directory.
     for entry in fs::read_dir(&root)? {
         let entry = entry?;
@@ -125,7 +132,11 @@ fn lock(parent: &Path) -> Result<File> {
         .context("installation is not writable; run the installer outside Rakumux with your original PREFIX")?;
     // SAFETY: `file` owns this valid descriptor and is kept alive throughout installation.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err(io::Error::last_os_error()).context("another update may already be running");
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::WouldBlock {
+            return Err(UpdateBusy.into());
+        }
+        return Err(error).context("cannot lock the installation for the update");
     }
     Ok(file)
 }

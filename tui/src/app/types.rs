@@ -370,6 +370,8 @@ pub enum SettingsItem {
     Tips,
     /// Option/Alt+↑/↓ also switch sessions inside a session.
     CycleInSessions,
+    /// New releases install by themselves; the UI reloads once idle.
+    AutoUpdate,
     /// Install a new release and restart only this UI.
     Update,
     /// Reload this UI with the latest build (`R`).
@@ -389,12 +391,13 @@ pub enum SettingsItem {
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then the rest.
-    pub const ALL: [SettingsItem; 11] = [
+    pub const ALL: [SettingsItem; 12] = [
         SettingsItem::Account,
         SettingsItem::Layout,
         SettingsItem::Icons,
         SettingsItem::Tips,
         SettingsItem::CycleInSessions,
+        SettingsItem::AutoUpdate,
         SettingsItem::Update,
         SettingsItem::RestartUi,
         SettingsItem::RestartServer,
@@ -408,7 +411,8 @@ impl SettingsItem {
         match self {
             SettingsItem::Layout | SettingsItem::Icons | SettingsItem::Tips => "Appearance",
             SettingsItem::CycleInSessions => "Keyboard",
-            SettingsItem::Update
+            SettingsItem::AutoUpdate
+            | SettingsItem::Update
             | SettingsItem::RestartUi
             | SettingsItem::RestartServer
             | SettingsItem::Rtop
@@ -450,6 +454,28 @@ pub enum UpgradeMessage {
         launcher: Option<std::path::PathBuf>,
     },
     InstallError(String),
+}
+
+/// The automatic update's background work, done (`app/auto_update.rs`).
+#[derive(Debug, Clone)]
+pub enum AutoUpdateMessage {
+    /// The daily check: a newer release and how this app installs it, or
+    /// none; an error when the check couldn't be made (offline).
+    Checked(Result<Option<(String, InstallMethod)>, String>),
+    /// Installing `version` without asking: the launcher to reload through.
+    Installed {
+        version: String,
+        result: Result<Option<std::path::PathBuf>, InstallFailure>,
+    },
+}
+
+/// Why an automatic install didn't happen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallFailure {
+    /// Another window installs it now (the installation's lock is held).
+    Busy,
+    /// It failed; the installation is as it was.
+    Failed(String),
 }
 
 #[derive(Debug, Clone)]

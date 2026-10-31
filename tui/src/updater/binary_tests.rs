@@ -183,9 +183,44 @@ fn replacing_an_installation_does_not_end_a_running_program_from_the_old_bundle(
 fn simultaneous_updates_fail_without_replacing_any_files() {
     let directory = tempfile::tempdir().unwrap();
     let root = installed(directory.path());
-    let _held = lock(directory.path()).unwrap();
-    assert!(install(&source(package("0.1.5"), None), &root, "0.1.5", "linux-x64").is_err());
+    let held = lock(directory.path()).unwrap();
+    let error = install(&source(package("0.1.5"), None), &root, "0.1.5", "linux-x64").unwrap_err();
+    // Another window's install, not a failure of this one.
+    assert!(UpdateBusy::is(&error), "{error:#}");
     assert_eq!(fs::read(root.join("rakumux")).unwrap(), b"old");
+    drop(held);
+    install(&source(package("0.1.5"), None), &root, "0.1.5", "linux-x64").unwrap();
+}
+
+#[test]
+fn installing_the_version_already_installed_downloads_and_changes_nothing() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = installed(directory.path());
+    install(&source(package("0.1.5"), None), &root, "0.1.5", "linux-x64").unwrap();
+    let before = fs::read(root.join("rakumux")).unwrap();
+    let marker = root.join("rakumux").metadata().unwrap().modified().unwrap();
+    // No release to download: another window already installed it.
+    let launcher = install(
+        &Source(HashMap::new(), RefCell::default()),
+        &root,
+        "0.1.5",
+        "linux-x64",
+    )
+    .unwrap();
+    assert_eq!(launcher, root.canonicalize().unwrap().join("rakumux.sh"));
+    assert_eq!(fs::read(root.join("rakumux")).unwrap(), before);
+    assert_eq!(
+        root.join("rakumux").metadata().unwrap().modified().unwrap(),
+        marker
+    );
+    // A different version still downloads (and fails here without one).
+    assert!(install(
+        &Source(HashMap::new(), RefCell::default()),
+        &root,
+        "0.1.6",
+        "linux-x64"
+    )
+    .is_err());
 }
 
 #[test]

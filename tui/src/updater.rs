@@ -30,27 +30,44 @@ impl InstallMethod {
             Self::Unknown => "unknown",
         }
     }
-    pub fn from_string(value: &str) -> Self {
-        match value {
-            "binary" => Self::Binary,
-            "npm" => Self::Npm,
-            "homebrew" => Self::Homebrew,
-            "source" => Self::Source,
-            _ => Self::Unknown,
-        }
+}
+
+/// Another window is installing an update now: the installation's lock is
+/// held. It isn't a failure; that window's install is the one that counts.
+#[derive(Debug)]
+pub struct UpdateBusy;
+
+impl std::fmt::Display for UpdateBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("another update is already running")
+    }
+}
+
+impl std::error::Error for UpdateBusy {}
+
+impl UpdateBusy {
+    /// Whether `error` (or what it wraps) says another update runs.
+    pub fn is(error: &anyhow::Error) -> bool {
+        error.chain().any(|cause| cause.is::<UpdateBusy>())
     }
 }
 
 /// Application port: tests cannot download or replace the user's installed app.
 pub trait UpdateService: Send + Sync {
+    /// How this app was installed, which decides how it updates.
+    fn method(&self) -> InstallMethod;
     fn check(&self, current: &str) -> Result<Option<(String, InstallMethod)>>;
     /// The replacement launcher, when installation changed the running executable's path.
+    /// Installing the version the installation already has changes nothing and succeeds.
     fn install(&self, version: &str, method: InstallMethod) -> Result<Option<PathBuf>>;
 }
 
 pub struct SystemUpdateService;
 
 impl UpdateService for SystemUpdateService {
+    fn method(&self) -> InstallMethod {
+        detect_install_method()
+    }
     fn check(&self, current: &str) -> Result<Option<(String, InstallMethod)>> {
         let method = detect_install_method();
         let latest = get_latest_version(method)?;
@@ -83,34 +100,37 @@ impl UpdateService for SystemUpdateService {
     }
 }
 
+/// `update_state.json`, shared by every window of a Rakumux home.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct UpdateState {
     pub last_check: Option<u64>,
     pub latest_version: Option<String>,
-    /// An available update, never permission to install automatically on startup.
+    /// A newer release is out. Kept after a window installs it, so the
+    /// other windows still running the older one learn of it; each compares
+    /// it with its own version. Installed without asking only by a binary
+    /// installation with `sessions.auto_update` on.
     pub pending_upgrade: bool,
+    /// How the window that found it is installed. Not read: each window
+    /// goes by its own installation (`UpdateService::method`).
     pub install_method: Option<String>,
+    /// The newest version the user was told about, so neither another window
+    /// nor a restart tells them again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notified_version: Option<String>,
+    /// An automatic install of this version failed: not tried again until
+    /// the next daily check finds it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_version: Option<String>,
 }
 
 impl UpdateState {
-    fn path() -> Result<PathBuf> {
-        Ok(session_core::paths::Layout::from_env()?
-            .home
-            .join("update_state.json"))
-    }
-    pub fn load() -> Result<Self> {
-        Self::load_from(&Self::path()?)
-    }
     pub fn load_from(path: &Path) -> Result<Self> {
         match fs::read(path) {
             Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error.into()),
         }
-    }
-    pub fn save(&self) -> Result<()> {
-        self.save_to(&Self::path()?)
     }
     pub fn save_to(&self, path: &Path) -> Result<()> {
         use std::io::Write;
@@ -128,10 +148,19 @@ impl UpdateState {
         self.pending_upgrade = true;
         self.install_method = Some(method.as_str().into());
     }
-    pub fn clear_pending_upgrade(&mut self) {
-        self.pending_upgrade = false;
-        self.latest_version = None;
-        self.install_method = None;
+    /// A check found nothing newer than `current`. A newer version on record
+    /// is stale (withdrawn) and goes; one `current` already has stays for
+    /// the windows still running an older one, which install it too.
+    pub fn no_update_for(&mut self, current: &str) {
+        if self
+            .latest_version
+            .as_deref()
+            .is_none_or(|latest| is_newer(current, latest))
+        {
+            self.pending_upgrade = false;
+            self.latest_version = None;
+            self.install_method = None;
+        }
     }
     pub fn update_last_check(&mut self) {
         self.last_check = Some(now());
@@ -207,7 +236,8 @@ pub fn get_latest_version(method: InstallMethod) -> Result<String> {
                 else { serde_json::from_slice::<serde_json::Value>(&output.stdout)?["formulae"][0]["versions"]["stable"].as_str().context("Homebrew returned no stable version")?.to_string() };
             Ok(releases::stable_version(&version)?.to_string())
         }
-        InstallMethod::Source => bail!("Source build: rebuild your checkout with ./build.sh, then press R to reload the UI. Update will not overwrite local source builds."),
+        // Only to say a release is out: a source build is never overwritten.
+        InstallMethod::Source => releases::latest(&releases::GithubReleases::new()?),
         InstallMethod::Unknown => bail!("Installation not recognized. Update by rerunning https://rakumux.com/install.sh with your original PREFIX."),
     }
 }
@@ -218,9 +248,10 @@ pub fn compare_versions(current: &str, latest: &str) -> Result<Ordering> {
     Ok(current.cmp(&latest))
 }
 
-pub async fn check_for_updates(current: &str) -> Result<Option<(String, InstallMethod)>> {
-    let current = current.to_string();
-    tokio::task::spawn_blocking(move || SystemUpdateService.check(&current)).await?
+/// `candidate` is a stable release newer than `current`: never a
+/// prerelease, the same version or an older one.
+pub fn is_newer(current: &str, candidate: &str) -> bool {
+    compare_versions(current, candidate).is_ok_and(Ordering::is_lt)
 }
 
 #[cfg(test)]
@@ -267,9 +298,13 @@ mod tests {
         assert_eq!(compare_versions("0.1.5", "0.1.5").unwrap(), Ordering::Equal);
         assert!(compare_versions("garbage", "0.1.5").is_err());
         assert!(compare_versions("0.1.4", "../../bad").is_err());
+        assert!(is_newer("0.1.4", "0.1.5"));
+        for candidate in ["0.1.4", "0.1.3", "0.1.6-rc.1", "0.1.6+build", "garbage"] {
+            assert!(!is_newer("0.1.4", candidate), "{candidate}");
+        }
     }
     #[test]
-    fn available_updates_are_not_startup_install_authorization() {
+    fn update_state_is_private_and_checked_at_most_daily() {
         use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("update_state.json");
@@ -283,5 +318,31 @@ mod tests {
         assert!(UpdateState::load_from(&path).unwrap().pending_upgrade);
         state.last_check = Some(u64::MAX);
         assert!(!state.should_check_for_updates());
+    }
+    #[test]
+    fn a_release_this_version_has_stays_on_record_for_older_windows() {
+        let mut state = UpdateState::default();
+        state.mark_update_available("0.1.5".into(), InstallMethod::Binary);
+        state.no_update_for("0.1.5");
+        assert!(state.pending_upgrade);
+        assert_eq!(state.latest_version.as_deref(), Some("0.1.5"));
+        // Newer than the version that found nothing: withdrawn.
+        state.no_update_for("0.1.4");
+        assert!(!state.pending_upgrade);
+        assert_eq!(state.latest_version, None);
+    }
+    #[test]
+    fn notified_and_failed_versions_are_kept_and_older_files_still_read() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("update_state.json");
+        fs::write(&path, br#"{"last_check":1,"latest_version":"0.1.5","pending_upgrade":true,"install_method":"binary"}"#).unwrap();
+        let mut state = UpdateState::load_from(&path).unwrap();
+        assert_eq!(state.notified_version, None);
+        state.notified_version = Some("0.1.5".into());
+        state.failed_version = Some("0.1.5".into());
+        state.save_to(&path).unwrap();
+        let read = UpdateState::load_from(&path).unwrap();
+        assert_eq!(read.notified_version.as_deref(), Some("0.1.5"));
+        assert_eq!(read.failed_version.as_deref(), Some("0.1.5"));
     }
 }

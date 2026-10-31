@@ -60,7 +60,7 @@ pub struct Settings {
 
 /// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
-/// `phone_offer_seen`, `tips`, `icons`, `sidebar_width`,
+/// `phone_offer_seen`, `tips`, `auto_update`, `icons`, `sidebar_width`,
 /// `stacked_list_percent`, `feed_width`, `session_order`, `section_order`
 /// and `terminal_panel`;
 /// other keys in the section (daemon tuning such as `scrollback_rows`) are kept as they are
@@ -96,6 +96,11 @@ pub struct SessionsConfig {
     /// when turned off.
     #[serde(skip_serializing_if = "is_true")]
     pub tips: bool,
+    /// New releases install by themselves (binary installs; npm, Homebrew
+    /// and source builds are told), then the UI reloads once idle. On by
+    /// default; only `false` is written. Settings → Update automatically.
+    #[serde(skip_serializing_if = "is_true")]
+    pub auto_update: bool,
     /// The layout this window shows: Master detail, Grid or Tabs. Not saved:
     /// every start opens Master detail (an older file's `layout` is dropped).
     #[serde(skip)]
@@ -183,6 +188,7 @@ impl Default for SessionsConfig {
             welcome_seen: false,
             phone_offer_seen: false,
             tips: true,
+            auto_update: true,
             layout: SessionLayout::default(),
             icons: Icons::default(),
             ai_summary: AiSummaryConfig::default(),
@@ -683,6 +689,12 @@ mod tests {
         assert!(json.get("cycle_keys_in_session").is_none());
         assert!(json.get("rakumux_key").is_none());
         assert!(json.get("icons").is_none());
+        // Automatic updates are on unless the file says off.
+        assert!(read("{}").auto_update);
+        assert!(json.get("auto_update").is_none());
+        let off = read(r#"{"auto_update":false}"#);
+        assert!(!off.auto_update);
+        assert_eq!(serde_json::to_value(off).unwrap()["auto_update"], false);
         // An older file's session description choice is kept as it was.
         let older = read(r#"{"description_content":"agent_message"}"#);
         assert_eq!(

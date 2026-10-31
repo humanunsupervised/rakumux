@@ -27,6 +27,7 @@ use crate::remote_access::PhoneAccess;
 
 mod account;
 mod auto_name;
+mod auto_update;
 pub mod config;
 mod connection;
 mod detail;
@@ -294,6 +295,8 @@ pub struct App {
     phone: Arc<dyn PhoneAccess>,
     updater: Arc<dyn crate::updater::UpdateService>,
     update_generation: u64,
+    /// The daily check, installing without asking and reloading once idle.
+    auto_update: auto_update::AutoUpdate,
     /// Phone access is on; `None` until checked at startup.
     pub phone_enabled: Option<bool>,
     /// The one-time phone access offer waits for nothing else to be on
@@ -448,6 +451,7 @@ impl App {
             phone: options.phone,
             updater: options.updater,
             update_generation: 0,
+            auto_update: auto_update::AutoUpdate::new(Instant::now()),
             phone_enabled: None,
             phone_offer_pending: false,
             account_access: options.account,
@@ -894,10 +898,31 @@ impl App {
                     disabled: false,
                 };
             }
+            SettingsItem::AutoUpdate => {
+                let value = if self.settings.sessions.auto_update {
+                    "[On] Off"
+                } else {
+                    "On [Off]"
+                };
+                return SettingRow {
+                    section: item.section(),
+                    label: "Update automatically".into(),
+                    value: value.into(),
+                    note: "On: a new release installs in the background, and this window \
+                           reloads into it after a minute unused in Rakumux mode. The server \
+                           and every session keep running. npm, Homebrew and source builds \
+                           are told how to update. Off: U installs after you confirm."
+                        .into(),
+                    disabled: false,
+                };
+            }
             SettingsItem::Update => (
                 "Update",
-                self.pending_update_version.as_ref().map(|version| format!("{version} available · U"))
-                    .unwrap_or_else(|| format!("{} · U", app_version())),
+                match (self.update_ready(), &self.pending_update_version) {
+                    (Some(version), _) => format!("{version} installed · R"),
+                    (None, Some(version)) => format!("{version} available · U"),
+                    (None, None) => format!("{} · U", app_version()),
+                },
                 "Check for a new release, confirm installation, then restart only this UI. The daemon and all running sessions stay up. Source builds and admin-owned installations may need a manual update.",
             ),
             SettingsItem::RestartUi => (
@@ -1025,6 +1050,7 @@ impl App {
         self.account_timers(now);
         self.feed_timers(now);
         self.rtop_timers(now);
+        changed |= self.update_timers(now);
         changed
     }
 
@@ -1114,6 +1140,7 @@ impl App {
                     self.handle_upgrade_message(message);
                 }
             }
+            AppEvent::AutoUpdate(message) => self.on_auto_update(message),
             AppEvent::PhoneChecked { enabled, offer } => self.on_phone_checked(enabled, offer),
             AppEvent::PhonePairing(result) => self.on_phone_pairing(result),
             AppEvent::PhoneOff(result) => self.on_phone_off(result),
@@ -1199,6 +1226,7 @@ impl App {
             }
         };
         if used {
+            self.note_input(Instant::now());
             self.window_focused = true;
             if !panel_pointer {
                 self.claim_terminal_size();

@@ -30,10 +30,17 @@ new-session flow, and code boundaries.
   Jobs run off the UI thread; a generation drops cancelled/stale results. Installation needs
   Enter and cannot be started twice. Success reloads only the UI through the updated launcher.
   Cache writes use `App::paths`, never the real user's home in tests.
+- `auto_update.rs`: automatic updates (`sessions.auto_update`): `update_timers` reads the shared
+  `update_state.json` every minute, runs the daily check, installs a binary install's newer
+  release (`AppEvent::AutoUpdate`; `InstallFailure::Busy` when another window holds the lock),
+  tells other installs once per version (`notified_version`), and reloads once
+  `safe_to_reload` (Rakumux mode, nothing open, no panel shell, 60 s without input:
+  `note_input`). `update_hint` is the footer's quiet line. Tests: `auto_update_tests.rs`
+  (`FakeUpdater`: `method`, `busy`).
 - `config.rs`: `~/.rakumux/config.json` load/save: API keys, AI provider and model (edited in the
   file; Settings doesn't show them), and
   `sessions { rakumux_key (prefix_key read for older configs), cycle_keys,
-  cycle_keys_in_session, welcome_seen, phone_offer_seen, layout, icons, sidebar_width,
+  cycle_keys_in_session, welcome_seen, phone_offer_seen, auto_update, layout, icons, sidebar_width,
   stacked_list_percent, feed_width,
   session_order }`. Retired
   keys (`selected_projects`) are dropped on load, so the next save leaves them out.
