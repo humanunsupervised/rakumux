@@ -1,0 +1,41 @@
+{
+  "reply": {
+    "seq": 9,
+    "id": "01K8A3C4D5E6F7G8H9J0K1M2NP",
+    "machine": "studio",
+    "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" },
+    "agent": "claude-code",
+    "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+    "text": "Which colour do you prefer? Blue\nWhich fruits do you like? Apple, Cherry, Mango",
+    "answer": {
+      "call_id": "toolu_01NBNJBVVfXXKCxoxCkSsnLm",
+      "answers": [
+        { "question": "Which colour do you prefer?", "choices": ["Blue"] },
+        { "question": "Which fruits do you like?", "choices": ["Apple", "Cherry"], "text": "Mango" }
+      ]
+    },
+    "status": "pending",
+    "created_at": 1761220100000,
+    "status_at": 1761220100000
+  },
+  "invalidAnswers": [
+    { "note": "no call", "answer": { "answers": [{ "question": "Q?", "choices": ["A"] }] } },
+    { "note": "a call id off the contract", "answer": { "call_id": "toolu 1", "answers": [{ "question": "Q?", "choices": ["A"] }] } },
+    { "note": "no answers", "answer": { "call_id": "toolu_1", "answers": [] } },
+    { "note": "a question answered with nothing", "answer": { "call_id": "toolu_1", "answers": [{ "question": "Q?" }] } },
+    { "note": "no choice in the list", "answer": { "call_id": "toolu_1", "answers": [{ "question": "Q?", "choices": [] }] } },
+    { "note": "a choice twice", "answer": { "call_id": "toolu_1", "answers": [{ "question": "Q?", "choices": ["A", "A"] }] } },
+    { "note": "a free answer on two lines", "answer": { "call_id": "toolu_1", "answers": [{ "question": "Q?", "text": "a\nb" }] } },
+    { "note": "a terminal control in a choice", "answer": { "call_id": "toolu_1", "answers": [{ "question": "Q?", "choices": ["\u001b[2J"] }] } },
+    { "note": "a carriage return in the question", "answer": { "call_id": "toolu_1", "answers": [{ "question": "Q?\r", "choices": ["A"] }] } },
+    { "note": "more than its answers", "answer": { "call_id": "toolu_1", "answers": [{ "question": "Q?", "choices": ["A"], "index": 0 }] } },
+    { "note": "more than its call and answers", "answer": { "call_id": "toolu_1", "answers": [{ "question": "Q?", "choices": ["A"] }], "keys": ["enter"] } }
+  ],
+  "replyStatus": {
+    "version": 1,
+    "id": "01K8A3C4D5E6F7G8H9J0K1M2NP",
+    "machine": "studio",
+    "status": "failed",
+    "failure": "question_gone"
+  }
+}

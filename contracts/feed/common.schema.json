@@ -303,16 +303,69 @@
       "enum": ["pending", "delivered", "failed", "expired"]
     },
     "replyFailure": {
-      "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`: only from older releases, while a setting of theirs is off), the session refused the text (`refused`), a file attached to it couldn't be fetched or wasn't what the reply said (`attachment_unavailable`), or it was typed in but its agent didn't take it as a prompt (`not_taken`: its chat showed no new prompt within 30 seconds, or another one; it may still be in the session's input box). Readers take a value they don't know as a failure without a reason.",
+      "description": "Why a reply wasn't delivered: the session isn't running on its machine (`session_gone`), shows another conversation now (`conversation_changed`), is private (`private`), the machine doesn't take replies from rakumux.com or other machines (`not_accepted`: only from older releases, while a setting of theirs is off), the session refused the text (`refused`), a file attached to it couldn't be fetched or wasn't what the reply said (`attachment_unavailable`), or it was typed in but its agent didn't take it as a prompt (`not_taken`: its chat showed no new prompt within 30 seconds, or another one; it may still be in the session's input box; for an answer, keys went into its dialog but it didn't take them as given, and it may be partly answered there), or an answer's question isn't asked any more (`question_gone`: answered or dismissed in the session first, another question asked, or its dialog not on the session's screen; nothing was typed). Readers take a value they don't know as a failure without a reason.",
       "type": "string",
-      "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused", "attachment_unavailable", "not_taken"]
+      "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused", "attachment_unavailable", "not_taken", "question_gone"]
+    },
+    "questionAnswer": {
+      "description": "What a session message answers instead of saying something: the question an agent asks in its own dialog (Claude Code's `AskUserQuestion`), by the tool call that asked it (`call_id`, as the chat's `tool_call` names it), and the answer to each of its questions, in the order asked: the labels of the options chosen (one for a question that takes one) and what's typed as the dialog's own free answer, if anything. Its machine gives it to that dialog, never as typed text, and only while the session shows that chat and its agent asks something; never to a prompt for permission.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["call_id", "answers"],
+      "properties": {
+        "call_id": { "$ref": "#/$defs/callId" },
+        "answers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["question"],
+            "anyOf": [
+              { "required": ["choices"], "properties": { "choices": true } },
+              { "required": ["text"], "properties": { "text": true } }
+            ],
+            "properties": {
+              "question": {
+                "description": "The question as the agent asked it: plain text, tab and LF allowed.",
+                "type": "string",
+                "minLength": 1,
+                "maxUtf8Bytes": 4096,
+                "pattern": "[\\p{L}\\p{N}\\p{P}\\p{S}]",
+                "not": {
+                  "pattern": "[\u0000-\u0008\u000b-\u001f\u007f-\u009f\\p{Cf}\\p{Cs}\\p{Default_Ignorable_Code_Point}]"
+                }
+              },
+              "choices": {
+                "description": "The labels of the options chosen, as the agent offered them.",
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": { "type": "string", "$ref": "#/$defs/label", "maxLength": 200, "maxUtf8Bytes": 800 }
+              },
+              "text": {
+                "description": "The free answer: one visible line.",
+                "type": "string",
+                "$ref": "#/$defs/label",
+                "maxLength": 2000,
+                "maxUtf8Bytes": 8192
+              }
+            }
+          }
+        }
+      }
     },
     "reply": {
-      "description": "What the user wrote back to a feed entry, for its machine to type into the entry's session, and where it is up to; or, without `entry` and `thread`, a session message: what the user wrote to a session itself, which has no answer to reply to yet. The agent's next reply there names it as `reply_to`.",
+      "description": "What the user wrote back to a feed entry, for its machine to type into the entry's session, and where it is up to; or, without `entry` and `thread`, a session message: what the user wrote to a session itself, which has no answer to reply to yet. The agent's next reply there names it as `reply_to`. A session message with `answer` answers the question its agent asks in its own dialog instead; no reply names it.",
       "type": "object",
       "additionalProperties": false,
       "required": ["seq", "id", "machine", "session", "agent", "text", "status", "created_at", "status_at"],
-      "dependentRequired": { "entry": ["thread", "conversation_id"], "thread": ["entry"] },
+      "dependentRequired": { "entry": ["thread", "conversation_id"], "thread": ["entry"], "answer": ["conversation_id"] },
+      "dependentSchemas": {
+        "answer": { "properties": { "entry": false, "thread": false, "attachments": false, "response": false } }
+      },
       "properties": {
         "seq": {
           "description": "The account's order of reply changes: a reply takes a new seq whenever its status changes.",
@@ -334,6 +387,10 @@
           "items": { "$ref": "#/$defs/attachment" }
         },
         "from": { "description": "The machine it was written on; absent when written on rakumux.com.", "$ref": "#/$defs/machine" },
+        "answer": {
+          "description": "On a session message, in the chat `conversation_id`: the answer to the question its agent asks in its own dialog, given to that dialog in place of typing `text` (which says the answer, for showing). Sent only to a reader that asks with `question_answers=1` and whose machine advertises `question_answers` in its session list, so older machines never see one.",
+          "$ref": "#/$defs/questionAnswer"
+        },
         "status": { "$ref": "#/$defs/replyStatus" },
         "failure": { "$ref": "#/$defs/replyFailure" },
         "response": { "description": "The entry that answered it, once one did.", "$ref": "#/$defs/ulid" },
