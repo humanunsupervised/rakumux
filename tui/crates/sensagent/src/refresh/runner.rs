@@ -7,9 +7,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
 use session_core::api::{
-    AgentReply, CallerInfo, CreateSession, ErrorCode, EventEnvelope, ResourceSample, SessionEvent,
-    SubscribeRequest, TranscriptCursor, TranscriptPage, CAPABILITY_RESOURCES,
-    CAPABILITY_SUBMIT_BLOCKED,
+    AgentReply, CallerInfo, CreateSession, ErrorCode, EventEnvelope, QuestionAnswer,
+    ResourceSample, SessionEvent, SubscribeRequest, TranscriptCursor, TranscriptPage,
+    CAPABILITY_ANSWER, CAPABILITY_RESOURCES, CAPABILITY_SUBMIT_BLOCKED,
 };
 use session_core::client::SessionApi;
 use session_core::ids::{ReplyId, SessionId};
@@ -127,6 +127,9 @@ struct DaemonFeatures {
     /// It refuses to type into an agent that asks something (capability
     /// `session.submit.blocked`): replies go in mid-turn only then.
     guards_prompts: bool,
+    /// It answers agents' questions in their own dialogs (capability
+    /// `session.answer`): answers from rakumux.com are taken only then.
+    answers: bool,
 }
 
 impl DaemonFeatures {
@@ -138,6 +141,7 @@ impl DaemonFeatures {
         Self {
             resources: has(CAPABILITY_RESOURCES),
             guards_prompts: has(CAPABILITY_SUBMIT_BLOCKED),
+            answers: has(CAPABILITY_ANSWER),
         }
     }
 }
@@ -172,6 +176,8 @@ enum Message {
     ReplyDone(FeedCompletion),
     /// A reply was typed into its session, or the daemon refused it.
     ReplySubmitted(String, Result<(), ErrorCode>),
+    /// The daemon gave an answer (its reply's id) to its agent's question, or didn't.
+    AnswerGiven(String, Result<(), ErrorCode>),
     /// One of a reply's files was fetched and saved (or wasn't), for the
     /// account of that revision.
     Fetched(CredentialRevision, String, Fetched),
@@ -229,6 +235,9 @@ enum Work<A, C> {
     /// Type a reply (its id) into a session while the program seen in its
     /// foreground is still there.
     Submit(String, SessionId, String, Option<String>),
+    /// Give a reply's answers (its id) to the question (its call) a session's
+    /// agent asks in its own dialog.
+    Answer(String, SessionId, String, Vec<QuestionAnswer>),
     /// Fetch one of a reply's files and save it.
     Fetch(FeedJob<A, C>, Fetch, Uploads),
     /// Remove a reply's saved files.
@@ -273,6 +282,7 @@ impl<A, C> Workers<A, C> {
     fn send(&self, work: Work<A, C>) -> Result<(), SendError<Work<A, C>>> {
         match work {
             Work::Submit(..)
+            | Work::Answer(..)
             | Work::WriteReply(..)
             | Work::WriteMessage(..)
             | Work::Enrol(..)
@@ -759,6 +769,8 @@ fn own<S, A, C>(
             }
             Message::Resync(views, daemon) => {
                 sessions.set_resources(daemon.resources);
+                sessions.set_answers(daemon.answers);
+                replies.set_answers(daemon.answers);
                 // Every session the daemon has: what's kept of others goes.
                 refresher.keep_only(views.iter().map(|view| &view.id));
                 let views: Vec<SessionView> = views
@@ -946,6 +958,21 @@ fn own<S, A, C>(
                 if replies.daemon_answered(reply, result, now, wall_ms()) {
                     awake.hold(now);
                 }
+                follow_replies(
+                    &refresher,
+                    &mut replies,
+                    sessions.confirmed(),
+                    uploads,
+                    work,
+                    now,
+                );
+            }
+            Message::AnswerGiven(reply, result) => {
+                // Given: stay up while the agent works on.
+                if result.is_ok() {
+                    awake.hold(now);
+                }
+                replies.answer_done(reply, result, now);
                 follow_replies(
                     &refresher,
                     &mut replies,
@@ -1474,6 +1501,14 @@ fn follow_replies<S, A, C>(
             }) => {
                 let _ = work.send(Work::Submit(reply, session, text, foreground));
             }
+            Some(ReplyWork::Answer {
+                reply,
+                session,
+                call_id,
+                answers,
+            }) => {
+                let _ = work.send(Work::Answer(reply, session, call_id, answers));
+            }
             Some(ReplyWork::Fetch(fetch)) => {
                 // Nowhere to save files: a reply never goes in without them.
                 let Some(uploads) = uploads else {
@@ -1815,6 +1850,14 @@ where
                     )
                     .map_err(|error| error.code);
                 Message::ReplySubmitted(reply, result)
+            }
+            Ok(Work::Answer(reply, session, call_id, answers)) => {
+                // Only while nobody typed there lately: the daemon checks the
+                // question is open and shows before any key.
+                let result = api
+                    .answer(&session, &call_id, &answers, crate::feed::TYPING_QUIET)
+                    .map_err(|error| error.code);
+                Message::AnswerGiven(reply, result)
             }
             Ok(Work::Fetch(job, fetch, uploads)) => {
                 let revision = job.revision;

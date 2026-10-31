@@ -82,7 +82,7 @@ fn on(views: &[SessionView]) -> ReplySync {
 
 fn read_after(work: Option<ReplyWork>) -> u64 {
     match work {
-        Some(ReplyWork::Request(FeedRequest::Replies { after, machine })) => {
+        Some(ReplyWork::Request(FeedRequest::Replies { after, machine, .. })) => {
             assert_eq!(machine, "studio", "the read names this machine");
             after
         }
@@ -580,6 +580,7 @@ fn message(id: &str, seq: u64, conversation: Option<&str>) -> SessionMessage {
         attachments: Vec::new(),
         from: None,
         status: ReplyStatus::Pending,
+        answer: None,
     }
 }
 
@@ -1492,7 +1493,7 @@ fn a_renamed_machine_reads_its_replies_from_the_start_under_its_new_name() {
     replies.request_done(true, read(vec![old]), NOW);
     replies.rename("studio-6m8b".into(), NOW);
     match replies.next_work(NOW) {
-        Some(ReplyWork::Request(FeedRequest::Replies { after, machine })) => {
+        Some(ReplyWork::Request(FeedRequest::Replies { after, machine, .. })) => {
             assert_eq!((after, machine.as_str()), (0, "studio-6m8b"));
         }
         other => panic!("expected a read, got {other:?}"),
@@ -2840,4 +2841,234 @@ fn a_reply_the_daemon_refuses_for_good_fails_refused() {
         (&body["id"], &body["failure"]),
         (&"01K8A1".into(), &"refused".into())
     );
+}
+
+/// Session S's agent's question, call `toolu_1`, answered: Blue.
+fn answer_message(id: &str, seq: u64, conversation: &str) -> SessionMessage {
+    SessionMessage {
+        text: "Which colour do you prefer? Blue".into(),
+        answer: Some(QuestionReply {
+            call_id: "toolu_1".into(),
+            answers: vec![session_core::api::QuestionAnswer {
+                question: "Which colour do you prefer?".into(),
+                choices: vec!["Blue".into()],
+                text: None,
+            }],
+        }),
+        ..message(id, seq, Some(conversation))
+    }
+}
+
+/// Replies for studio with a daemon that answers questions, `views` its sessions.
+fn answering(views: &[SessionView]) -> ReplySync {
+    let mut replies = on(views);
+    replies.set_answers(true);
+    replies
+}
+
+/// Read `pending` messages, then return what comes next.
+fn after_reading_messages(
+    replies: &mut ReplySync,
+    pending: Vec<SessionMessage>,
+) -> Option<ReplyWork> {
+    let after = match replies.next_work(NOW) {
+        Some(ReplyWork::Request(FeedRequest::Replies { after, answers, .. })) => {
+            assert!(answers, "the read asks for answers");
+            after
+        }
+        other => panic!("expected a read, got {other:?}"),
+    };
+    assert_eq!(after, 0);
+    replies.request_done(true, read_messages(pending), NOW);
+    replies.next_work(NOW)
+}
+
+fn given(work: Option<ReplyWork>) -> Option<String> {
+    match work {
+        Some(ReplyWork::Answer {
+            reply,
+            session,
+            call_id,
+            answers,
+        }) => {
+            assert_eq!(session, SessionId::from_string("S"));
+            assert_eq!(call_id, "toolu_1");
+            assert_eq!(answers[0].choices, ["Blue"]);
+            Some(reply)
+        }
+        _ => None,
+    }
+}
+
+#[test]
+fn an_answer_goes_to_the_daemon_while_its_agent_asks_and_is_reported_delivered() {
+    let mut replies = answering(&[view("S", Lifecycle::Blocked, Some(CHAT))]);
+    let work = after_reading_messages(&mut replies, vec![answer_message("01K8A3", 6, CHAT)]);
+    assert_eq!(given(work).as_deref(), Some("01K8A3"));
+    // Given once: nothing more for it while the daemon works the dialog.
+    assert!(given(replies.next_work(NOW)).is_none());
+    replies.answer_done("01K8A3".into(), Ok(()), NOW);
+    let body = report_of(next_at(&mut replies, NOW));
+    assert_eq!(
+        (&body["id"], &body["status"]),
+        (&"01K8A3".into(), &"delivered".into())
+    );
+    assert!(body.get("failure").is_none());
+}
+
+#[test]
+fn without_a_daemon_that_answers_no_answer_is_asked_for_or_given() {
+    let mut replies = on(&[view("S", Lifecycle::Blocked, Some(CHAT))]);
+    match replies.next_work(NOW) {
+        Some(ReplyWork::Request(FeedRequest::Replies { answers, .. })) => assert!(!answers),
+        other => panic!("expected a read, got {other:?}"),
+    }
+    // One read all the same (a cloud off the contract) stays pending, never given.
+    replies.request_done(
+        true,
+        read_messages(vec![answer_message("01K8A3", 6, CHAT)]),
+        NOW,
+    );
+    for at in [NOW, NOW + ANSWER_GONE_AFTER * 2] {
+        let work = replies.next_work(at);
+        assert!(
+            !matches!(
+                work,
+                Some(ReplyWork::Answer { .. } | ReplyWork::Submit { .. })
+                    | Some(ReplyWork::Request(FeedRequest::ReplyStatus { .. }))
+            ),
+            "{work:?}"
+        );
+        replies.request_done(true, read_messages(vec![]), at);
+    }
+}
+
+#[test]
+fn an_answer_waits_while_its_agent_asks_nothing_then_the_daemon_decides() {
+    let mut replies = answering(&[view("S", Lifecycle::Working, Some(CHAT))]);
+    let work = after_reading_messages(&mut replies, vec![answer_message("01K8A3", 6, CHAT)]);
+    assert!(given(work).is_none(), "its agent asks nothing yet");
+    // Still asking nothing a while on (answered in the terminal, say): the
+    // daemon says whether the question is open, and types nothing if not.
+    replies.request_done(true, read_messages(vec![]), NOW);
+    assert_eq!(
+        given(replies.next_work(NOW + ANSWER_GONE_AFTER)).as_deref(),
+        Some("01K8A3")
+    );
+    replies.answer_done(
+        "01K8A3".into(),
+        Err(ErrorCode::QuestionGone),
+        NOW + ANSWER_GONE_AFTER,
+    );
+    let body = report_of(next_at(&mut replies, NOW + ANSWER_GONE_AFTER));
+    assert_eq!(
+        (&body["id"], &body["failure"]),
+        (&"01K8A3".into(), &"question_gone".into())
+    );
+}
+
+#[test]
+fn an_answer_fails_when_its_session_ended_is_private_or_shows_another_chat() {
+    let mut ended = view("S", Lifecycle::Blocked, Some(CHAT));
+    ended.status = SessionStatus::Exited;
+    let mut private = view("S", Lifecycle::Blocked, Some(CHAT));
+    private.private = true;
+    for (seen, failure) in [
+        (ended, "session_gone"),
+        (private, "private"),
+        (
+            view("S", Lifecycle::Blocked, Some("another")),
+            "conversation_changed",
+        ),
+        (view("S", Lifecycle::None, None), "conversation_changed"),
+    ] {
+        let mut replies = answering(&[seen]);
+        let work = after_reading_messages(&mut replies, vec![answer_message("01K8A3", 6, CHAT)]);
+        let body = report_of(work);
+        assert_eq!(body["failure"], failure);
+    }
+}
+
+#[test]
+fn the_daemons_refusals_are_reported_or_tried_again() {
+    for (code, failure) in [
+        (ErrorCode::QuestionGone, Some("question_gone")),
+        (ErrorCode::NotTaken, Some("not_taken")),
+        (ErrorCode::SessionNotLive, Some("session_gone")),
+        (ErrorCode::InvalidArgument, Some("refused")),
+        (ErrorCode::SessionInUse, None),
+    ] {
+        let mut replies = answering(&[view("S", Lifecycle::Blocked, Some(CHAT))]);
+        let work = after_reading_messages(&mut replies, vec![answer_message("01K8A3", 6, CHAT)]);
+        assert_eq!(given(work).as_deref(), Some("01K8A3"));
+        replies.answer_done("01K8A3".into(), Err(code), NOW);
+        match failure {
+            Some(failure) => {
+                let body = report_of(next_at(&mut replies, NOW));
+                assert_eq!(body["failure"], failure, "{code:?}");
+            }
+            // Someone typed there: given again once they paused.
+            None => {
+                assert!(given(next_at(&mut replies, NOW)).is_none());
+                assert_eq!(
+                    given(next_at(&mut replies, NOW + TYPING_HOLD)).as_deref(),
+                    Some("01K8A3")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn answers_dont_wait_behind_replies_and_replies_wait_while_one_is_given() {
+    let mut replies = answering(&[view("S", Lifecycle::Blocked, Some(CHAT))]);
+    assert_eq!(read_after(replies.next_work(NOW)), 0);
+    // A reply written before the answer waits: its agent asks something.
+    let mut page = read(vec![reply("01K8A1", 4, Some("studio"))]);
+    if let Ok(FeedResult::Replies(read)) = &mut page {
+        read.messages.push(answer_message("01K8A3", 6, CHAT));
+        read.page_seq = 6;
+        read.latest_seq = 6;
+    }
+    replies.request_done(true, page, NOW);
+    assert_eq!(given(replies.next_work(NOW)).as_deref(), Some("01K8A3"));
+    // Answered on screen, its agent waits again: the reply still waits for
+    // the daemon to finish the answer.
+    replies.observe(&view("S", Lifecycle::Idle, Some(CHAT)));
+    assert!(submitted_reply(next_at(&mut replies, NOW)).is_none());
+    replies.answer_done("01K8A3".into(), Ok(()), NOW);
+    assert_eq!(
+        submitted_reply(next_at(&mut replies, NOW)).as_deref(),
+        Some("01K8A1")
+    );
+    let body = report_of(next_at(&mut replies, NOW));
+    assert_eq!(
+        (&body["id"], &body["status"]),
+        (&"01K8A3".into(), &"delivered".into())
+    );
+}
+
+#[test]
+fn an_answer_handed_to_the_daemon_is_never_given_again_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replies.json");
+    let views = [view("S", Lifecycle::Blocked, Some(CHAT))];
+    {
+        let mut replies = kept_at(&path, &views);
+        replies.set_answers(true);
+        let work = after_reading_messages(&mut replies, vec![answer_message("01K8A3", 6, CHAT)]);
+        assert_eq!(given(work).as_deref(), Some("01K8A3"));
+        // The service stops before the daemon answered.
+    }
+    let mut replies = kept_at(&path, &views);
+    replies.set_answers(true);
+    // Whether the dialog took it isn't known: reported not taken, never given again.
+    let body = report_of(replies.next_work(NOW));
+    assert_eq!(
+        (&body["id"], &body["failure"]),
+        (&"01K8A3".into(), &"not_taken".into())
+    );
+    replies.request_done(true, Ok(FeedResult::Reply(reply("01K8A3", 7, None))), NOW);
+    let work = after_reading_messages(&mut replies, vec![answer_message("01K8A3", 6, CHAT)]);
+    assert!(given(work).is_none());
 }

@@ -54,7 +54,7 @@ use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
 use super::cache::{FeedReply, ReplyAttachment, ReplyFailure, ReplyStatus};
 use super::job::FeedResult;
-use super::wire::{self, FeedFailure, FeedRequest, RepliesRead, SessionMessage};
+use super::wire::{self, FeedFailure, FeedRequest, QuestionReply, RepliesRead, SessionMessage};
 
 mod kept;
 use kept::{Kept, TypedInto};
@@ -113,6 +113,13 @@ pub(crate) const SETTLE: Duration = Duration::from_secs(5);
 /// (one normally back within a second) at most this long, then goes in all
 /// the same: reads failing, or slow behind other work, don't hold it back.
 const ORDER_WAIT: Duration = Duration::from_secs(5);
+/// An answer to an agent's question goes to the daemon while its session's
+/// agent asks something (`blocked`); one whose session has shown it asking
+/// nothing this long goes all the same, and the daemon says whether the
+/// question is still open (it types nothing unless it shows it): so an
+/// answer to a question answered in the terminal is reported soon, not left
+/// pending for the hour.
+const ANSWER_GONE_AFTER: Duration = Duration::from_secs(10);
 
 /// The agents a reply is typed into while they work (`working`, never
 /// `blocked`), by the daemon's names for them (`SessionView::agent`'s
@@ -219,6 +226,14 @@ pub(crate) enum ReplyWork {
         session: SessionId,
         text: String,
         foreground: Option<String>,
+    },
+    /// Give `answers` to the question `call_id` that `session`'s agent asks in
+    /// its own dialog (`session_answer`).
+    Answer {
+        reply: String,
+        session: SessionId,
+        call_id: String,
+        answers: Vec<session_core::api::QuestionAnswer>,
     },
     /// Fetch one of a reply's files from rakumux.com and save it.
     Fetch(Fetch),
@@ -382,6 +397,12 @@ enum Target {
     Chat(String),
     /// A session message: into the session's agent, whatever chat it shows.
     Session,
+    /// An answer to the question the session's agent asks in its own dialog,
+    /// in this chat: given to the dialog by the daemon, never typed as text.
+    Answer {
+        conversation: String,
+        answer: QuestionReply,
+    },
 }
 
 /// A reply (or session message) pending for this machine.
@@ -411,10 +432,17 @@ impl Pending {
     }
 
     fn message(message: &SessionMessage) -> Self {
+        let target = match (&message.answer, &message.conversation_id) {
+            (Some(answer), Some(conversation)) => Target::Answer {
+                conversation: conversation.clone(),
+                answer: answer.clone(),
+            },
+            _ => Target::Session,
+        };
         Self {
             seq: message.seq,
             session_id: message.session_id.clone(),
-            target: Target::Session,
+            target,
             text: message.text.clone(),
             attachments: message.attachments.clone(),
             written: None,
@@ -711,6 +739,14 @@ pub(crate) struct ReplySync {
     /// each again (still pending) and it's followed as a [`Delivery`], or
     /// says it's no longer pending.
     restored: HashMap<String, TypedInto>,
+    /// The daemon answers agents' questions in their own dialogs
+    /// (`session.answer`): answers are read, and given, only then.
+    answers: bool,
+    /// The answer the daemon is giving now, and its session: one at a time,
+    /// and its session takes no reply meanwhile.
+    answering: Option<(String, SessionId)>,
+    /// Since when each pending answer's session was seen asking nothing.
+    answer_waits: HashMap<String, Duration>,
 }
 
 impl ReplySync {
@@ -745,7 +781,19 @@ impl ReplySync {
             fetch_retry: Backoff::new(Duration::ZERO),
             discards: VecDeque::new(),
             restored,
+            answers: false,
+            answering: None,
+            answer_waits: HashMap::new(),
         }
+    }
+
+    /// Whether the daemon answers agents' questions in their own dialogs
+    /// (capability `session.answer`, read at each connect): reads ask for
+    /// answers only then, and an answer read while it does is given only
+    /// while it still does. A daemon without it never gets one, which stays
+    /// pending until rakumux.com expires it.
+    pub fn set_answers(&mut self, answers: bool) {
+        self.answers = answers;
     }
 
     /// Follow the account: signed in with its feed on. Off, replies are
@@ -905,6 +953,7 @@ impl ReplySync {
             return Some(ReplyWork::Request(FeedRequest::Replies {
                 after: self.cursor,
                 machine: self.machine.clone(),
+                answers: self.answers,
             }));
         }
         None
@@ -915,6 +964,9 @@ impl ReplySync {
         self.held.retain(|_, until| *until > now);
         self.resume_restored(now);
         self.follow_deliveries(now);
+        if let Some(work) = self.answer_next(now) {
+            return Some(work);
+        }
         // A session a reply is going into (or whose reply's file is being
         // fetched) takes nothing else until its agent took it and waits
         // again or works on taking input, and one someone is typing in
@@ -931,12 +983,16 @@ impl ReplySync {
                     .map(|reply| reply.session_id.as_str()),
             )
             .chain(self.restored.values().map(|into| into.session.as_str()))
+            .chain(self.answering.iter().map(|(_, session)| session.as_str()))
             .collect();
         let mut ids: Vec<(u64, &String)> = self
             .pending
             .iter()
             .filter(|(id, reply)| {
-                !self.kept.handled(id)
+                // Answers go apart (`answer_next`): only while their agent
+                // asks something, when nothing else goes in.
+                !matches!(reply.target, Target::Answer { .. })
+                    && !self.kept.handled(id)
                     && !being_typed.contains(reply.session_id.as_str())
                     && !self.held.contains_key(&reply.session_id)
                     && !reply.unread(self.cursor, now)
@@ -980,6 +1036,8 @@ impl ReplySync {
                     // Typed only to an agent that takes input; a session
                     // without one (a shell) is waited for, never typed into.
                     Target::Session => Ok(takes(seen)),
+                    // Given apart (`answer_next`).
+                    Target::Answer { .. } => Ok(false),
                 },
             };
             match outcome {
@@ -1072,6 +1130,110 @@ impl ReplySync {
                 self.deliver(now)
             }
         }
+    }
+
+    /// The first pending answer to an agent's question that can be decided
+    /// now: given to the daemon while its session's agent asks something in
+    /// that chat (or, asking nothing, after [`ANSWER_GONE_AFTER`], for the
+    /// daemon to say whether the question is still open), or failed. One at a
+    /// time; answers don't wait behind replies (which wait while the agent
+    /// asks something), and replies don't wait for answers but while one is
+    /// being given.
+    fn answer_next(&mut self, now: Duration) -> Option<ReplyWork> {
+        let pending = &self.pending;
+        self.answer_waits.retain(|id, _| pending.contains_key(id));
+        if !self.answers || self.answering.is_some() {
+            return None;
+        }
+        let mut ids: Vec<(u64, String)> = self
+            .pending
+            .iter()
+            .filter(|(id, reply)| {
+                matches!(reply.target, Target::Answer { .. })
+                    && !self.kept.handled(id)
+                    && !self.held.contains_key(&reply.session_id)
+            })
+            .map(|(id, reply)| (reply.seq, id.clone()))
+            .collect();
+        ids.sort();
+        for (_, id) in ids {
+            let Some(reply) = self.pending.get(&id) else {
+                continue;
+            };
+            let Target::Answer {
+                conversation,
+                answer,
+            } = &reply.target
+            else {
+                continue;
+            };
+            let session = SessionId::from_string(reply.session_id.clone());
+            let outcome = match self.sessions.get(&session) {
+                None => Err(ReplyFailure::SessionGone),
+                Some(seen) if !seen.live => Err(ReplyFailure::SessionGone),
+                Some(seen) if seen.private => Err(ReplyFailure::Private),
+                // No agent there any more: nothing asks.
+                Some(seen) if seen.lifecycle == Lifecycle::None => {
+                    Err(ReplyFailure::ConversationChanged)
+                }
+                Some(seen) => match &seen.conversation {
+                    Some(shown) if shown != conversation => Err(ReplyFailure::ConversationChanged),
+                    Some(_) if seen.lifecycle == Lifecycle::Blocked => Ok(true),
+                    // Asking nothing (yet, or any more), or its chat not known yet.
+                    _ => {
+                        let since = *self.answer_waits.entry(id.clone()).or_insert(now);
+                        Ok(now.saturating_sub(since) >= ANSWER_GONE_AFTER)
+                    }
+                },
+            };
+            match outcome {
+                Ok(false) => continue,
+                Ok(true) => {
+                    let (call_id, answers) = (answer.call_id.clone(), answer.answers.clone());
+                    self.answer_waits.remove(&id);
+                    // Never given again, even if this service stops before
+                    // the daemon answers.
+                    self.kept.answering(&id);
+                    self.answering = Some((id.clone(), session.clone()));
+                    return Some(ReplyWork::Answer {
+                        reply: id,
+                        session,
+                        call_id,
+                        answers,
+                    });
+                }
+                Err(failure) => {
+                    self.answer_waits.remove(&id);
+                    self.handle(&id, Some(failure));
+                }
+            }
+        }
+        None
+    }
+
+    /// The daemon's answer to giving `reply`'s answers to its agent's
+    /// question: given (`delivered`), not given as nothing showed the
+    /// question (`question_gone`), keys went in but the dialog didn't take
+    /// them (`not_taken`), or refused for now while someone typed there
+    /// (tried again after [`TYPING_HOLD`]).
+    pub fn answer_done(&mut self, reply: String, result: Result<(), ErrorCode>, now: Duration) {
+        let Some((id, session)) = self.answering.take_if(|(id, _)| *id == reply) else {
+            return;
+        };
+        let failure = match result {
+            Ok(()) => None,
+            Err(ErrorCode::SessionInUse) => {
+                self.kept.untyped(&id);
+                self.held
+                    .insert(session.as_str().to_owned(), now + TYPING_HOLD);
+                return;
+            }
+            Err(ErrorCode::QuestionGone) => Some(ReplyFailure::QuestionGone),
+            Err(ErrorCode::NotTaken) => Some(ReplyFailure::NotTaken),
+            Err(ErrorCode::SessionNotLive | ErrorCode::NotFound) => Some(ReplyFailure::SessionGone),
+            Err(_) => Some(ReplyFailure::Refused),
+        };
+        self.settle(&id, failure, failure.is_none());
     }
 
     /// Follow again each reply handed to the daemon before this service
@@ -1295,7 +1457,9 @@ impl ReplySync {
                 // A reply is answered in its chat; a session message in the
                 // chat the session shows now, or any when it doesn't say.
                 let conversation = match &delivery.target {
-                    Target::Chat(conversation) => Some(conversation.clone()),
+                    Target::Chat(conversation) | Target::Answer { conversation, .. } => {
+                        Some(conversation.clone())
+                    }
                     Target::Session => self
                         .sessions
                         .get(&session)

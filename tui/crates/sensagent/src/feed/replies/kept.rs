@@ -6,7 +6,9 @@
 //! is ignored when read and dropped when saved.) A reply handed to the daemon
 //! is followed again after a restart, its session taking nothing else until
 //! its agent takes it or it's decided `not_taken`; one from a file without
-//! where it went (an older release's) is reported delivered on load.
+//! where it went (an older release's) is reported delivered on load. An
+//! answer to an agent's question handed to the daemon (`answering`) is
+//! reported `not_taken` on load: whether its dialog took it isn't known.
 //! Without it a restarted service read its pending replies from the start and
 //! typed one again that it had typed but not yet reported (the report waits
 //! for the agent to take it, and backs off while rakumux.com can't be
@@ -65,6 +67,11 @@ struct KeptFile {
     /// Where each of `typing` went (left out by older releases).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     typed_into: BTreeMap<String, TypedInto>,
+    /// Answers to agents' questions handed to the daemon whose report isn't
+    /// queued yet: a service that stopped meanwhile never learnt whether
+    /// the dialog took them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    answering: BTreeMap<String, i64>,
     /// Reports not yet taken by rakumux.com, oldest first.
     #[serde(default)]
     reports: VecDeque<Report>,
@@ -106,6 +113,19 @@ impl Kept {
             }
             kept.file.handled.insert(id, now);
         }
+        // An answer handed to the daemon before the stop: it may have gone
+        // in, or partly; never given again, and reported not taken (the chat
+        // shows the question answered when it was).
+        for (id, _) in std::mem::take(&mut kept.file.answering) {
+            if !kept.file.reports.iter().any(|report| report.id == id) {
+                kept.file.reports.push_back(Report {
+                    id: id.clone(),
+                    failure: Some(ReplyFailure::NotTaken),
+                    at: now,
+                });
+            }
+            kept.file.handled.insert(id, now);
+        }
         kept.save();
         kept
     }
@@ -132,11 +152,22 @@ impl Kept {
         self.save();
     }
 
+    /// The answer `id` to an agent's question is about to be handed to the
+    /// daemon: from now on it's never given again, whatever happens to this
+    /// service.
+    pub fn answering(&mut self, id: &str) {
+        let now = now_ms();
+        self.file.answering.insert(id.to_owned(), now);
+        self.file.handled.insert(id.to_owned(), now);
+        self.save();
+    }
+
     /// The daemon didn't type it (someone was typing, or another program
     /// had the foreground): it may be typed later.
     pub fn untyped(&mut self, id: &str) {
         self.file.typing.remove(id);
         self.file.typed_into.remove(id);
+        self.file.answering.remove(id);
         self.file.handled.remove(id);
         self.save();
     }
@@ -155,6 +186,7 @@ impl Kept {
         let now = now_ms();
         self.file.typing.remove(id);
         self.file.typed_into.remove(id);
+        self.file.answering.remove(id);
         self.file.handled.insert(id.to_owned(), now);
         self.file.reports.push_back(Report {
             id: id.to_owned(),
@@ -182,7 +214,11 @@ impl Kept {
 
     fn save(&mut self) {
         let now = now_ms();
-        for ids in [&mut self.file.handled, &mut self.file.typing] {
+        for ids in [
+            &mut self.file.handled,
+            &mut self.file.typing,
+            &mut self.file.answering,
+        ] {
             ids.retain(|_, at| now.saturating_sub(*at) < KEEP_MS);
             while ids.len() > MAX_IDS {
                 let Some(oldest) = ids

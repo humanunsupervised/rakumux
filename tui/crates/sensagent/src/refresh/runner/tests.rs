@@ -28,7 +28,11 @@ fn the_daemons_features_are_read_again_at_each_resubscribe() {
         let before = next_resync(&inbox);
         // Restarted in place on this build: its stream ends, and the hello
         // of the connection that subscribes again announces the guard.
-        api.set_capabilities(&[CAPABILITY_RESOURCES, CAPABILITY_SUBMIT_BLOCKED]);
+        api.set_capabilities(&[
+            CAPABILITY_RESOURCES,
+            CAPABILITY_SUBMIT_BLOCKED,
+            CAPABILITY_ANSWER,
+        ]);
         let _second = api.stream();
         drop(first);
         let after = next_resync(&inbox);
@@ -41,6 +45,7 @@ fn the_daemons_features_are_read_again_at_each_resubscribe() {
         Some(DaemonFeatures {
             resources: true,
             guards_prompts: false,
+            answers: false,
         })
     );
     assert_eq!(
@@ -48,6 +53,7 @@ fn the_daemons_features_are_read_again_at_each_resubscribe() {
         Some(DaemonFeatures {
             resources: true,
             guards_prompts: true,
+            answers: true,
         })
     );
     // Capabilities not known (an adapter, a fake): neither.

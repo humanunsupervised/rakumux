@@ -310,14 +310,26 @@ impl SessionSync {
     /// `resources` only then, so rakumux.com tells a machine whose daemon is
     /// too old from one still reading. A change goes with the next upload.
     pub fn set_resources(&mut self, supported: bool) {
-        let has = self.capabilities.contains(&wire::RESOURCES);
+        self.set_capability(wire::RESOURCES, supported);
+    }
+
+    /// Whether the daemon answers agents' questions in their own dialogs
+    /// (capability `session.answer`): the list says `question_answers` only
+    /// then, so rakumux.com offers to answer a question only of a machine
+    /// that gives the answer. A change goes with the next upload.
+    pub fn set_answers(&mut self, supported: bool) {
+        self.set_capability(wire::QUESTION_ANSWERS, supported);
+    }
+
+    fn set_capability(&mut self, capability: &'static str, supported: bool) {
+        let has = self.capabilities.contains(&capability);
         if supported == has {
             return;
         }
         if supported {
-            self.capabilities.push(wire::RESOURCES);
+            self.capabilities.push(capability);
         } else {
-            self.capabilities.retain(|name| *name != wire::RESOURCES);
+            self.capabilities.retain(|name| *name != capability);
         }
         // The same sessions, said again with what this machine handles now.
         self.sent = None;

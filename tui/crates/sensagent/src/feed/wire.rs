@@ -44,6 +44,16 @@ pub(crate) const REPLY_ATTACHMENTS: &str = "reply_attachments";
 /// Said with every session list: this machine sends what it uses while
 /// rakumux.com asks, for rtop there (`resources-upload`).
 pub(crate) const RESOURCES: &str = "resources";
+/// Said with the session list while the daemon answers agents' questions
+/// (`session.answer`): rakumux.com takes answers to them for this machine.
+pub(crate) const QUESTION_ANSWERS: &str = "question_answers";
+/// Questions answered at once, options chosen per question, and the longest
+/// question, option and free answer an answer carries (contract).
+const MAX_ANSWERS: usize = 8;
+const MAX_CHOICES: usize = 16;
+const MAX_QUESTION_BYTES: usize = 4096;
+const MAX_CHOICE_BYTES: usize = 800;
+const MAX_ANSWER_TEXT_BYTES: usize = 8192;
 /// The largest resources upload the contract takes (`x-maxBodyBytes`).
 const MAX_RESOURCES_BODY_BYTES: usize = 65_536;
 
@@ -78,8 +88,13 @@ pub(crate) enum FeedRequest {
     Turn { entry: String, after: Option<u64> },
     /// Store a reply written here, as `body`.
     ReplyUpload { body: Vec<u8> },
-    /// Read the account's replies changed after a seq, as `machine`.
-    Replies { after: u64, machine: String },
+    /// Read the account's replies changed after a seq, as `machine`; with
+    /// `answers`, the answers to agents' questions too.
+    Replies {
+        after: u64,
+        machine: String,
+        answers: bool,
+    },
     /// Say whether a reply was typed into its session, as `body`.
     ReplyStatus { body: Vec<u8> },
     /// Upload this machine's whole session list, as `body`.
@@ -109,11 +124,14 @@ impl FeedRequest {
 
     /// `GET /api/v1/feed/replies`' query, naming the asking machine so the
     /// answer's `poll_ms` knows whether a reply waits for it, and asking for
-    /// session messages too (replies to a session itself, without an entry).
-    pub fn replies_query(after: u64, machine: &str) -> String {
+    /// session messages too (replies to a session itself, without an entry),
+    /// and with `answers` for answers to agents' questions (while the daemon
+    /// gives them).
+    pub fn replies_query(after: u64, machine: &str, answers: bool) -> String {
         format!(
-            "after={after}&limit={REPLIES_LIMIT}&machine={}&session_messages=1",
-            percent_encoded(machine)
+            "after={after}&limit={REPLIES_LIMIT}&machine={}&session_messages=1{}",
+            percent_encoded(machine),
+            if answers { "&question_answers=1" } else { "" }
         )
     }
 
@@ -671,6 +689,10 @@ struct WireReply {
     attachments: Option<serde_json::Value>,
     #[serde(default)]
     from: Option<String>,
+    /// Read as any JSON, so an answer off the contract leaves out this row
+    /// only (see [`question_answer`]).
+    #[serde(default)]
+    answer: Option<serde_json::Value>,
     status: ReplyStatus,
     #[serde(default)]
     failure: Option<ReplyFailure>,
@@ -678,6 +700,74 @@ struct WireReply {
     response: Option<String>,
     created_at: i64,
     status_at: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireAnswer {
+    call_id: String,
+    answers: Vec<WireQuestionAnswer>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireQuestionAnswer {
+    question: String,
+    #[serde(default)]
+    choices: Vec<String>,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+/// What a session message answers instead of saying something
+/// (`contracts/feed/` `questionAnswer`): the question an agent asks in its
+/// own dialog, by its tool call, and the answer to each of its questions,
+/// for the daemon to give that dialog (`session_answer`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct QuestionReply {
+    pub call_id: String,
+    pub answers: Vec<session_core::api::QuestionAnswer>,
+}
+
+/// A reply's answer to an agent's question, within the contract's bounds;
+/// `Err` when it isn't, and the row is then left out like any off the
+/// contract: an answer is given whole or not at all.
+fn question_answer(value: Option<serde_json::Value>) -> Result<Option<QuestionReply>, ()> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let answer: WireAnswer = serde_json::from_value(value).map_err(|_| ())?;
+    let text = |text: &str, bytes: usize| within(text, bytes) && plain(text) == text;
+    let fits = call_id(&answer.call_id)
+        && (1..=MAX_ANSWERS).contains(&answer.answers.len())
+        && answer.answers.iter().all(|given| {
+            text(&given.question, MAX_QUESTION_BYTES)
+                && given.choices.len() <= MAX_CHOICES
+                && given
+                    .choices
+                    .iter()
+                    .all(|choice| text(choice, MAX_CHOICE_BYTES) && line(choice) == *choice)
+                && given
+                    .text
+                    .as_deref()
+                    .is_none_or(|said| text(said, MAX_ANSWER_TEXT_BYTES) && line(said) == said)
+                && (!given.choices.is_empty() || given.text.is_some())
+        });
+    if !fits {
+        return Err(());
+    }
+    Ok(Some(QuestionReply {
+        call_id: answer.call_id,
+        answers: answer
+            .answers
+            .into_iter()
+            .map(|given| session_core::api::QuestionAnswer {
+                question: given.question,
+                choices: given.choices,
+                text: given.text,
+            })
+            .collect(),
+    }))
 }
 
 #[derive(Deserialize)]
@@ -732,6 +822,9 @@ pub(crate) struct SessionMessage {
     pub attachments: Vec<ReplyAttachment>,
     pub from: Option<String>,
     pub status: ReplyStatus,
+    /// An answer to the question its agent asks in its own dialog, given to
+    /// that dialog in place of typing `text`; only with `conversation_id`.
+    pub answer: Option<QuestionReply>,
 }
 
 /// A reply as read: one to an entry, or a session message.
@@ -745,6 +838,7 @@ impl WireReply {
     /// Within the contract's bounds, stripped of anything a terminal would act on.
     fn checked(mut self) -> Option<Received> {
         let attachments = attachments(self.attachments.take())?;
+        let answer = question_answer(self.answer.take()).ok()?;
         let ids = [&self.id, &self.session.id];
         let fits = self.seq > 0
             && ids.iter().all(|id| crate::feed::is_entry_id(id))
@@ -764,6 +858,12 @@ impl WireReply {
                 .as_deref()
                 .is_none_or(crate::feed::is_entry_id);
         if !fits {
+            return None;
+        }
+        // An answer is to a session's chat, with no files.
+        if answer.is_some()
+            && (self.entry.is_some() || self.conversation_id.is_none() || !attachments.is_empty())
+        {
             return None;
         }
         match (self.entry, self.thread, self.conversation_id) {
@@ -801,6 +901,7 @@ impl WireReply {
                 attachments,
                 from: self.from.map(|from| line(&from)),
                 status: self.status,
+                answer,
             })),
             // Half a reply: outside the contract.
             _ => None,
@@ -1748,6 +1849,96 @@ mod tests {
     }
 
     #[test]
+    fn answers_to_questions_are_read_whole_or_left_out() {
+        let message = REPLY
+            .replace(r#""entry":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","#, "")
+            .replace(r#""thread":"01K8A0RZ0V3X5Q2N9T7W4Y6M8B","#, "")
+            .replace(r#","response":"01K8A1Z9Y8X7W6V5T4S3R2Q1P0""#, "");
+        let with = |seq: u64, answer: &str| {
+            message
+                .replace(r#""seq":3"#, &format!(r#""seq":{seq}"#))
+                .replace(r#""status":"#, &format!(r#""answer":{answer},"status":"#))
+        };
+        let good = with(
+            4,
+            r#"{"call_id":"toolu_01A","answers":[
+                {"question":"Which colour?\nPick one.","choices":["Red"]},
+                {"question":"Fruits?","choices":["Apple","Cherry"],"text":"Mango"}]}"#,
+        );
+        let rows = [
+            good,
+            // No answers, a question answered with nothing, a free answer on
+            // two lines, a choice with a terminal control, a member off the
+            // contract: each row left out.
+            with(5, r#"{"call_id":"toolu_01A","answers":[]}"#),
+            with(
+                6,
+                r#"{"call_id":"toolu_01A","answers":[{"question":"Q?"}]}"#,
+            ),
+            with(
+                7,
+                r#"{"call_id":"toolu_01A","answers":[{"question":"Q?","text":"a\nb"}]}"#,
+            ),
+            with(
+                8,
+                r#"{"call_id":"toolu_01A","answers":[{"question":"Q?","choices":["\u001b[2J"]}]}"#,
+            ),
+            with(
+                9,
+                r#"{"call_id":"toolu_01A","answers":[{"question":"Q?","choices":["A"]}],"x":1}"#,
+            ),
+            with(
+                10,
+                r#"{"call_id":"no spaces","answers":[{"question":"Q?","choices":["A"]}]}"#,
+            ),
+        ];
+        let page = format!(
+            r#"{{"version":1,"replies":[{}],"latest_seq":10,"more":false}}"#,
+            rows.join(",")
+        );
+        let read = replies(&reply(200, &page)).unwrap();
+        assert_eq!(read.messages.len(), 1, "{:?}", read.messages);
+        let answer = read.messages[0].answer.as_ref().unwrap();
+        assert_eq!(answer.call_id, "toolu_01A");
+        assert_eq!(
+            answer.answers,
+            [
+                session_core::api::QuestionAnswer {
+                    question: "Which colour?\nPick one.".into(),
+                    choices: vec!["Red".into()],
+                    text: None,
+                },
+                session_core::api::QuestionAnswer {
+                    question: "Fruits?".into(),
+                    choices: vec!["Apple".into(), "Cherry".into()],
+                    text: Some("Mango".into()),
+                },
+            ]
+        );
+        // Every row read, those left out too.
+        assert_eq!(read.read_to(), 10);
+        // An answer to an entry, or without the chat it answers in: left out.
+        let to_entry = REPLY.replace(
+            r#""status":"#,
+            r#""answer":{"call_id":"t1","answers":[{"question":"Q?","choices":["A"]}]},"status":"#,
+        );
+        let chatless = with(
+            11,
+            r#"{"call_id":"t1","answers":[{"question":"Q?","choices":["A"]}]}"#,
+        )
+        .replace(
+            r#""conversation_id":"5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23","#,
+            "",
+        );
+        assert!(!chatless.contains("conversation_id"), "{chatless}");
+        let page = format!(
+            r#"{{"version":1,"replies":[{to_entry},{chatless}],"latest_seq":11,"more":false}}"#
+        );
+        let read = replies(&reply(200, &page)).unwrap();
+        assert!(read.replies.is_empty() && read.messages.is_empty());
+    }
+
+    #[test]
     fn reads_go_past_rows_left_out_but_not_past_pages_still_to_read() {
         // Only rows off the contract: none kept, but the page was read.
         let off = REPLY
@@ -1938,8 +2129,13 @@ mod tests {
     #[test]
     fn replies_name_the_machine_and_say_when_to_read_again_within_bounds() {
         assert_eq!(
-            FeedRequest::replies_query(7, "Studio Mac é"),
+            FeedRequest::replies_query(7, "Studio Mac é", false),
             "after=7&limit=100&machine=Studio%20Mac%20%C3%A9&session_messages=1"
+        );
+        // Answers to agents' questions only while the daemon gives them.
+        assert_eq!(
+            FeedRequest::replies_query(7, "studio", true),
+            "after=7&limit=100&machine=studio&session_messages=1&question_answers=1"
         );
         let paced = |poll: &str| {
             replies(&reply(

@@ -177,6 +177,10 @@ pub enum ReplyFailure {
     /// lost, or it went into a menu or after a draft on another line): it
     /// may still be in the session's input box.
     NotTaken,
+    /// An answer to an agent's question that its dialog no longer asks
+    /// (answered or dismissed there first, or another question showing),
+    /// or that the session's screen doesn't show: nothing was typed.
+    QuestionGone,
     #[serde(other)]
     Unknown,
 }

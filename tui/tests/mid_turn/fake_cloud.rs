@@ -3,8 +3,10 @@
 //! connection). It signs the machine in for its secret, says the feed is on,
 //! keeps the machine's session list, serves the replies the test writes
 //! (`poll_ms` 1000, attachments only once the session list says
-//! `reply_attachments`) and their files while they're pending, and records
-//! every status report, uploaded entry and request.
+//! `reply_attachments`, answers to agents' questions only to a reader that
+//! asks for them and whose list says `question_answers`) and their files
+//! while they're pending, and records every status report, uploaded entry,
+//! chat message and request.
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -35,6 +37,9 @@ pub struct Reply {
     pub text: String,
     /// `{id, name, media_type, size}` each.
     pub attachments: Vec<Value>,
+    /// An answer to the agent's question (`questionAnswer`): a session
+    /// message, without an entry.
+    pub answer: Option<Value>,
     pub status: String,
     pub failure: Option<String>,
     pub created_at: u64,
@@ -60,6 +65,11 @@ impl Reply {
         });
         if !self.attachments.is_empty() {
             reply["attachments"] = Value::Array(self.attachments.clone());
+        }
+        if let (Some(answer), Some(fields)) = (&self.answer, reply.as_object_mut()) {
+            fields.remove("entry");
+            fields.remove("thread");
+            fields.insert("answer".into(), answer.clone());
         }
         if let Some(failure) = &self.failure {
             reply["failure"] = json!(failure);
@@ -88,6 +98,8 @@ pub struct State {
     pub reports: Vec<Report>,
     /// Feed entries uploaded (`POST /api/v1/feed/entries`), as sent.
     pub entries: Vec<Value>,
+    /// Chat messages uploaded (`POST /api/v1/feed/messages`), as sent.
+    pub messages: Vec<Value>,
     /// The latest session list, as sent.
     pub sessions: Option<Value>,
     /// Replies reads, Unix ms each.
@@ -110,10 +122,15 @@ impl State {
 
     /// Whether the latest session list says the machine fetches attachments.
     fn takes_attachments(&self) -> bool {
+        self.says("reply_attachments")
+    }
+
+    /// Whether the latest session list says `capability`.
+    pub fn says(&self, capability: &str) -> bool {
         self.sessions.as_ref().is_some_and(|list| {
             list["capabilities"]
                 .as_array()
-                .is_some_and(|names| names.iter().any(|name| name == "reply_attachments"))
+                .is_some_and(|names| names.iter().any(|name| name == capability))
         })
     }
 }
@@ -211,6 +228,7 @@ impl FakeCloud {
             entry: ulid(),
             text: text.into(),
             attachments,
+            answer: None,
             status: "pending".into(),
             failure: None,
             created_at: now,
@@ -218,6 +236,31 @@ impl FakeCloud {
         };
         let id = reply.id.clone();
         state.replies.push(reply);
+        id
+    }
+}
+
+impl FakeCloud {
+    /// Write an answer to the question `call_id` that `session`'s agent asks
+    /// in chat `conversation`, as the user does on rakumux.com: `answers`
+    /// as `questionAnswer`'s, `text` saying them. (`question_answers.rs`'s.)
+    #[allow(dead_code)]
+    pub fn write_answer(
+        &self,
+        session: (&str, &str),
+        conversation: &str,
+        call_id: &str,
+        answers: Value,
+        text: &str,
+    ) -> String {
+        let id = self.write_reply(session, conversation, text, &[]);
+        let mut state = self.state();
+        let reply = state
+            .replies
+            .iter_mut()
+            .find(|reply| reply.id == id)
+            .unwrap();
+        reply.answer = Some(json!({"call_id": call_id, "answers": answers}));
         id
     }
 }
@@ -345,11 +388,14 @@ impl Served {
                     .unwrap_or(0);
                 state.reads.push(now_ms());
                 let attachments = state.takes_attachments();
+                let answers = state.says("question_answers")
+                    && request.query.get("question_answers").map(String::as_str) == Some("1");
                 let mut replies: Vec<&Reply> = state
                     .replies
                     .iter()
                     .filter(|reply| reply.seq > after)
                     .filter(|reply| attachments || reply.attachments.is_empty())
+                    .filter(|reply| answers || reply.answer.is_none())
                     .collect();
                 replies.sort_by_key(|reply| reply.seq);
                 let replies: Vec<Value> = replies
@@ -404,7 +450,9 @@ impl Served {
                 answer(200, json!({"version": 1, "accepted": accepted}))
             }
             ("POST", "/api/v1/feed/messages") => {
-                let count = body["messages"].as_array().map_or(0, Vec::len);
+                let messages = body["messages"].as_array().cloned().unwrap_or_default();
+                let count = messages.len();
+                state.messages.extend(messages);
                 answer(200, json!({"version": 1, "accepted": count}))
             }
             ("GET", path) if path.starts_with("/api/v1/feed/replies/attachments/") => {
