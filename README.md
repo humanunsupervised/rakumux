@@ -2,7 +2,7 @@
 
 **A terminal multiplexer for coding agents.**
 
-[rakumux.com](https://rakumux.com) · [Docs](https://docs.rakumux.com) · [Releases](https://github.com/humanunsupervised/rakumux/releases) · [Pricing](https://rakumux.com/pricing)
+[rakumux.com](https://rakumux.com) · [Docs](https://docs.rakumux.com) · [Sign up](https://rakumux.com/sign-up) · [Releases](https://github.com/humanunsupervised/rakumux/releases) · [Pricing](https://rakumux.com/pricing)
 
 楽 (*raku*) means easy, and read *gaku* it means music: tmux, made easy.
 
@@ -18,7 +18,7 @@ sessions keep running when you close the window, lose SSH or reboot.
   `Ctrl-\`, switches to Rakumux.
 - **Sessions outlive the UI.** One background server owns every terminal. After a crash or a
   reboot, agents resume their conversation.
-- **Answer from anywhere** (optional free account). Read your agents' replies on rakumux.com in
+- **Answer from anywhere** (optional [free account](https://rakumux.com/sign-up)). Read your agents' replies on rakumux.com in
   any browser, including your phone's, and write back. No VPN or open port.
 - **Scriptable.** A CLI, a local HTTP API and an MCP server, so agents can drive sessions too.
 
@@ -215,7 +215,8 @@ For the other agents and session identity, see the [MCP guide](mcp/README.md).
 
 Everything above works without an account.
 
-**Sign in** with `a` in Rakumux mode, or `rakumux account login`. Everything below is then on,
+**Sign up** at [rakumux.com/sign-up](https://rakumux.com/sign-up) (early access, through a
+waitlist for now), then **sign in** with `a` in Rakumux mode, or `rakumux account login`. Everything below is then on,
 with nothing to turn on.
 
 **AI session titles** name each agent session after what it's doing. A name you give (`r`)
@@ -301,6 +302,7 @@ architecture.
 
 ## More
 
+- [Documentation](https://docs.rakumux.com): guides to every feature, the CLI and the account
 - [Installation guide](install/INSTALL.md): tarballs, upgrading, uninstalling, troubleshooting
 - [Agent integrations](integrations/README.md): hooks, status, worktrees
 - [MCP server](mcp/README.md): tools for coding agents
