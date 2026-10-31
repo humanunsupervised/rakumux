@@ -382,7 +382,8 @@ generic diagnostic and empty JSON with success; activity cannot approve/deny/con
 ## Answering an agent's question
 
 An agent that asks the user something in a dialog of its own (Claude Code's `AskUserQuestion`,
-GitHub Copilot's `ask_user`, Droid's `AskUser`) can be answered from rakumux.com: the status
+GitHub Copilot's `ask_user`, Droid's `AskUser`, OpenCode's `question`, Grok Build's
+`ask_user_question`, Kimi Code's `AskUserQuestion`) can be answered from rakumux.com: the status
 service hands the answer to the daemon (`session_answer`), which works the dialog key by key from
 the screen. Never a prompt for permission. Shared code is `questions.rs`; each agent adds, in its
 own folder:
@@ -392,18 +393,28 @@ own folder:
   grows (`agent_output::questions::Asked`: the newest call without a result is the open one). A
   call whose questions the driver can't answer (a shape it doesn't know) is still the newest
   question, with none to answer. The questions are as rakumux.com reads them from the chat (the
-  same text, options and order), since answers name them by text, in order.
+  same text, options and order), since answers name them by text, in order. `questions::listed`
+  reads the common shape (`questions`, each a `question` with `options` of `label`s);
+  OpenCode's come from its database on each read (`open-code/questions.rs`: the newest
+  `question` tool block or piece and its `status`).
 - **Its dialog:** a driver (`Dialog` in `questions.rs`) that reads the screen into the dialog's
   page (which question, its rows and checks, the cursor, the review), says whether the screen
   shows that question's dialog at all, plans the next key from it, and stops at anything it
   doesn't expect. A dialog whose cursor is only a style (Droid's, bold) reads the screen with its
   styles (`Dialog::styled`, `StyledLine`). Its keys are checked against the real agent first and
   listed in its file, with its screens kept as fixtures (`<agent>/fixtures/questions/`; `.ansi`
-  for a styled one).
+  for a styled one). A dialog that picks an option by its number (OpenCode, Grok Build, Kimi
+  Code) needs only a reader of its screen and its keys (`numbered::Style`): the shared driver
+  (`numbered.rs`) plans every step.
 - **Detection** that reads every page of the dialog as `blocked`, also once its free answer
   holds text (answering checks the agent asks something before each key).
+- **Its capability:** the daemon says `session.answer.<agent>` for it (Claude Code's is
+  `session.answer` alone), and the status service's session list then says
+  `question_answers.<agent>` (`AGENT_ANSWERS` in `sensagent`'s `feed/wire.rs`), so rakumux.com
+  never sends one to a Rakumux that can't give it (0.1.39 answered Copilot's and Droid's under
+  `question_answers` alone: rakumux.com no longer sends it theirs).
 - **Its tool name** for rakumux.com, which offers the picker only for agents it knows and shapes
-  their machines answer (`ANSWERED_QUESTION_TOOLS` and `answerableQuestions` in the website's
+  their machines answer (`ANSWERED_QUESTION_TOOLS`, `answerableQuestions` and `machineAnswers` in the website's
   `lib/feed/view.ts`).
 
 | Agent | Tool | Keys |
@@ -411,6 +422,9 @@ own folder:
 | Claude Code | `AskUserQuestion` | `up`/`down`, `enter`; `space` ticks; the free answer typed on its row; `Next`/`Submit`, then the review's `Submit answers` |
 | GitHub Copilot | `ask_user` (a form) | a page per field: `up`/`down`, `enter`; `space` ticks; the free answer typed with the cursor on `Other`; text typed; `enter` on the last field gives the answers |
 | Droid | `AskUser` (a questionnaire) | an option's number picks (or ticks) it; `down` to the free answer to type it, and to `Submit`/`Next`, `enter` |
+| OpenCode (1.x, 2) | `question` | an option's digit picks (or ticks) it; the number after the options, the text and `enter` for its own answer; `tab` leaves a page of boxes; `enter` on the review |
+| Grok Build | `ask_user_question` | an option's digit picks (or ticks) it; `z`, the text and `enter` for its own answer; `enter` leaves a page of boxes; no review |
+| Kimi Code | `AskUserQuestion` | an option's digit picks (or ticks) it; the number after the options (`Other`), the text and `enter`; `tab` leaves a page of boxes; `1` on the review |
 
 Not answered yet: Cursor's `AskQuestion` (its transcript keeps no call ids or results, which
 answering goes by), Codex's `request_user_input` (in Plan mode) and Amp's `ask_user_choice`; Pi
@@ -419,6 +433,15 @@ terminal.
 
 An agent without a driver gets `unsupported` from the daemon, and rakumux.com never offers its
 questions to answer.
+
+The newer agents' dialogs were checked with the real OpenCode 1.18.16 and 2.2.0, Grok Build 1.0.70
+and Kimi Code 2.4.0, each in a throwaway daemon (`RAKUMUX_HOME`) and a home of its own, offline (a
+network namespace with only loopback) against a scripted OpenAI-compatible model that calls the
+agent's own question tool as its request names it: one question, several, one taking several,
+long questions and labels, free answers, a narrow screen, and a question dismissed in the terminal
+(`question_gone`, nothing typed). `session_answer` worked each dialog and the agent's log or
+database showed the result. A long question on a narrow screen can make Grok hide options below
+its list: that screen isn't the question as asked, so nothing is typed (`question_gone`).
 
 ## Session badges
 

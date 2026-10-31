@@ -56,6 +56,12 @@ report.
   one prompt (`expect_foreground: grok`); a draft left in its input box gets the reply
   appended. Typed while Grok works (never while it asks something), it's queued and becomes the
   next turn's prompt as soon as the turn ends.
+- **Questions answered from rakumux.com** (`questions.rs`): its `ask_user_question` call is
+  followed in the log (`tool_call`, then the `tool_call_update` with a `status` as its result),
+  and `session_answer` works its dialog by number: an option's digit, `z` and the text and Enter
+  for its own answer, Enter to leave a page of boxes. Grok has no review: the last question's
+  answer submits them all. A long question on a narrow screen can hide options below the list;
+  nothing is typed then.
 
 ## MCP
 

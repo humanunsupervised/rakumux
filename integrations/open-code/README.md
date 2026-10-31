@@ -33,6 +33,13 @@ The daemon recognises OpenCode V2 run as `opencode` or as `opencode2` (the secon
 `@opencode/cli` package installs); resuming keeps `opencode2`, since `opencode` may be a 1.x
 install. An unrecognised process name would count as "no agent" and drop the plugin's activity.
 
+Questions its `question` tool asks (1.x and 2) are answered from rakumux.com (`questions.rs`):
+the newest `question` call is read from the database with its `status` (`completed` once
+answered, `error` once dismissed), and `session_answer` works the dialog by number: an option's
+digit, the number after the options (`Type your own answer`) and the text and Enter, Tab to leave a
+page of boxes, then Enter on the review once it lists the answers given (one question taking one
+choice has none).
+
 - `rakumux-session/`: plugin and pure activity projection.
 - `install.rs`: installer compiled into MCP.
 - `detection.rs` / `recovery.rs`: terminal fallback and conversation resume.

@@ -361,8 +361,13 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `ReplySync::answer_next`): while the daemon says `session.answer` (read at each connect), the
    session list says `capabilities: ["question_answers"]` and replies are read with
    `question_answers=1`, so rakumux.com sends this machine the answers the user picks there for
-   the question an agent asks in its own dialog (Claude Code's `AskUserQuestion`, GitHub
-   Copilot's `ask_user`, Droid's `AskUser`): a session
+   the question an agent asks in its own dialog (Claude Code's `AskUserQuestion`; GitHub
+   Copilot's `ask_user`, Droid's `AskUser`, OpenCode's `question`, Grok Build's
+   `ask_user_question` and Kimi Code's `AskUserQuestion` only while the daemon also says
+   `session.answer.<agent>` for that agent, and the list then says `question_answers.<agent>`:
+   `wire::AGENT_ANSWERS`, so a release that answers fewer agents is never sent one it can't
+   give; 0.1.39, which said `question_answers` alone for Copilot and Droid too, gets none of
+   theirs): a session
    message with `answer` (`{call_id, answers: [{question, choices?, text?}]}`), in a chat. One is
    given to the daemon (`session_answer`, the 10 s `quiet_ms` of a reply), one at a time, while
    its session is live, not private, shows that chat and its agent asks something (`blocked`);
@@ -831,9 +836,13 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
 - `session_answer {id, call_id, answers: [{question, choices?, text?}], quiet_ms?}` (user only,
   capability `session.answer`; `control/answers.rs`, `integrations/questions.rs`): answers the
   question the session's agent asks in a dialog of its own, never a prompt for permission. Claude
-  Code's `AskUserQuestion` (`integrations/claude-code/questions.rs`), GitHub Copilot's `ask_user`
-  (a form; `integrations/copilot/questions.rs`) and Droid's `AskUser` (a questionnaire;
-  `integrations/droid/questions.rs`); other agents get `unsupported`. The daemon follows the
+  Code's `AskUserQuestion` (`integrations/claude-code/questions.rs`), and, each with a capability
+  of its own (`session.answer.copilot`, `.droid`, `.opencode`, `.grok`, `.kimi`), GitHub
+  Copilot's `ask_user` (a form; `integrations/copilot/questions.rs`), Droid's `AskUser` (a
+  questionnaire; `integrations/droid/questions.rs`), OpenCode's `question` (1.x and 2, read from
+  its database), Grok Build's `ask_user_question` and Kimi Code's `AskUserQuestion`, whose dialogs
+  pick an option by its number (`integrations/numbered.rs`, a reader of each one's screen in its
+  folder); other agents get `unsupported`. The daemon follows the
   conversation's questions as it reads the log (`agent_output::questions::Asked`: the newest
   question call of the main conversation without a result, and the question calls whose results
   it read lately), and before any key checks: that `call_id` is that open question (else
@@ -855,7 +864,11 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   field typed, `enter` on each page and the last one's giving the answers; a form with a text
   field shown filled in already (a `default`) isn't answered. Droid: an option's number picks it
   (or, for a `(multi)` question, ticks it), `down` to the free answer's row to type it, and to
-  `Submit`/`Next`; the last question's answer gives them all. Anything else on screen stops it,
+  `Submit`/`Next`; the last question's answer gives them all. OpenCode, Grok Build, Kimi Code: an
+  option's digit (picks it and moves on, or ticks its box), the free answer's key (Grok's `z`,
+  else the number after the options), its text and `enter`, `tab` (Grok: `enter`) to leave a page
+  of boxes, `left` back to the question due, and the review (OpenCode `enter`, Kimi `1`; Grok has
+  none) once it shows the answers given. Anything else on screen stops it,
   nothing more sent (`not_taken` once keys went in). `ok` once the log shows the question's result
   (10 s at most after the dialog closed, else `not_taken`). Audited with the call and how many
   answers, never their text; one `ptyd.log` line each, the same. The drivers read the agents'

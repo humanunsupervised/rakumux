@@ -65,6 +65,11 @@ Kimi needs `kimi` on `PATH` for a revive to resume it: the official script insta
 - **Replies written back** are pasted and entered (`session_submit`, expecting `kimi`,
   `kimi-code` or the cut title the session shows), while Kimi waits or works, never while it asks
   something. Typed during a turn, Kimi queues it and logs it as a prompt when that turn ends.
+- **Questions answered from rakumux.com** (`questions.rs`): its `AskUserQuestion` call is
+  followed in the log (`tool.call`, then `tool.result`), and `session_answer` works its dialog by
+  number: an option's digit, the number after the options (`Other`) and the text and Enter for
+  its own answer, Tab to leave a page of boxes, then `1` on the review once it lists the answers
+  given.
 - **Environment** (`environment.rs`): sessions never inherit `KIMI_PLUGIN_ROOT`, which Kimi sets
   for its plugins' hooks and MCP servers.
 
