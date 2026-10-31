@@ -308,7 +308,7 @@
       "enum": ["session_gone", "conversation_changed", "private", "not_accepted", "refused", "attachment_unavailable", "not_taken", "question_gone"]
     },
     "questionAnswer": {
-      "description": "What a session message answers instead of saying something: the question an agent asks in its own dialog (Claude Code's `AskUserQuestion`), by the tool call that asked it (`call_id`, as the chat's `tool_call` names it), and the answer to each of its questions, in the order asked: the labels of the options chosen (one for a question that takes one) and what's typed as the dialog's own free answer, if anything. Its machine gives it to that dialog, never as typed text, and only while the session shows that chat and its agent asks something; never to a prompt for permission.",
+      "description": "What a session message answers instead of saying something: the question an agent asks in its own dialog (Claude Code's `AskUserQuestion`, OpenCode's `question`, Grok Build's `ask_user_question`, Kimi Code's `AskUserQuestion`), by the tool call that asked it (`call_id`, as the chat's `tool_call` names it), and the answer to each of its questions, in the order asked: the labels of the options chosen (one for a question that takes one) and what's typed as the dialog's own free answer, if anything. Its machine gives it to that dialog, never as typed text, and only while the session shows that chat and its agent asks something; never to a prompt for permission.",
       "type": "object",
       "additionalProperties": false,
       "required": ["call_id", "answers"],
