@@ -1,0 +1,35 @@
+
+  master ~/project                                               20 / 256K │ [Dashboard]
+
+
+     ❯ ASK1 again                                                                        6:51 AM
+
+
+     ◆ Thought for 0.0s
+     ◆ Ask Which colour do you prefer?
+
+
+
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+
+    ◆ Waiting on answers for Which colour do you prefer?                           0.0s ⇣20 [stop]
+
+  ┃
+  ┃  Which colour do you prefer?
+  ┃
+  ┃
+  ┃  1 (○) Red    Warm                                                                           █
+  ┃  2 (○) Green  green                                                                          █
+  ┃  3 (○) Blue   Cool                                                                           █
+  ┃  z (●) ❯
+  ┃
+  ┃  ↑/↓ navigate · y copy                                                          Enter:edit
+  ┃
+
+  Enter:submit  │  Esc:back

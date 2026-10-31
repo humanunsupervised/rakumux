@@ -1,0 +1,36 @@
+ │  Directory: ~/project
+ │  Session:   session_3cf29039-5c52-4f2e-96bc-67073d453aa4                                       │
+ │  Model:     mock-model                                                                         │
+ │  Version:   2.4.0                                                                              │
+ │                                                                                                │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+   No session yet — one will be created on your first message.
+
+ ❯ ASK1 please
+
+ ● Thinking.
+
+ ● Hello from the mock model.
+
+ ❯ ASK1 please
+
+ ● I should ask.
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  question
+
+   Colour    Submit
+
+  ? Which colour do you prefer?
+
+   → [1] Red
+         Warm
+     [2] Green
+     [3] Blue
+         Cool
+     [4] Other
+
+   ↑↓ select  1-4 / ↵ choose  ←/→/tab switch  esc cancel
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ mock-model thinking  ~/project                                          ctrl+c: cancel
+                                                                              context: 1% (20/256k)

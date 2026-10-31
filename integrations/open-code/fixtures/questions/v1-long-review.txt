@@ -1,0 +1,35 @@
+  ┃  # Questions
+  ┃
+  ┃  Which colour do you prefer?
+  ┃  Purple, 2 shades
+  ┃
+
+     + Thought: 1ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Purple, 2 shades".
+      You can now continue with the user's answers in mind.
+
+     ▣  Build · Mock Model · 7.7s
+
+  ┃
+  ┃  ASKLONG now
+  ┃
+
+     + Thought: 0ms
+
+     → Asked 2 questions
+
+     ▣  Build · Mock Model
+
+  ┃
+  ┃   Subagents   Audit fixes   Confirm
+  ┃
+  ┃  Review
+  ┃
+  ┃  Subagents: Hold
+  ┃
+  ┃  Audit fixes: The mid-turn guard check for older servers, plus a long tail of words to
+  ┃  wrap, Also the FIFO freeze fix
+  ┃
+  ┃  ⇆ tab  enter submit  esc dismiss
+  ┃

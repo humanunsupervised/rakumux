@@ -1,0 +1,35 @@
+   No question tool among:       ! New session                   +
+
+  ┃
+  ┃  ASK3 now
+  ┃
+
+     + Thought · 3ms
+
+  ┃
+  ┃  # Questions
+  ┃
+  ┃  Which colour do you prefer?
+  ┃  Green
+  ┃
+  ┃  Which fruits do you like?
+  ┃  Apple, Mango, ripe
+  ┃
+  ┃  Which pet would you keep?
+  ┃  Cat
+  ┃
+
+     + Thought · 49ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Green", "Which
+     fruits do you like?"="Apple, Mango, ripe", "Which pet would you keep?"="Cat". You can now
+     continue with the user's answers in mind.
+
+     Build · Mock Model · 12.1s · 294.1 tok/s
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Mock Model Mock
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/project  20 (0%)  ctrl+p commands

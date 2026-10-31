@@ -1,0 +1,35 @@
+
+  master ~/project                                               20 / 256K │ [Dashboard]
+
+
+     ❯ ASK3 now                                                                          6:50 AM
+
+
+     ◆ Thought for 0.0s
+     ◆ Ask 3 questions
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+
+    ◆ Waiting on answers for 3 questions                                           0.0s ⇣20 [stop]
+
+  ┃
+  ┃  Which fruits do you like?
+  ┃
+  ┃
+  ┃  1 [ ] Apple   apple                                                                         █
+  ┃  2 [ ] Banana  banana                                                                        █
+  ┃  3 [ ] Cherry  cherry                                                                        █
+  ┃  z [ ] Type your answer here
+  ┃
+  ┃  [2/3] ↑/↓ navigate · ←/→ question · y copy                                   Enter:select
+  ┃
+
+  Tab:next answer  │  Esc:scrollback  │  Shift+x:dismiss

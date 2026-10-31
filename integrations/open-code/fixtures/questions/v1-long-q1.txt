@@ -1,0 +1,35 @@
+
+     + Thought: 1ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Purple, 2 shades".
+      You can now continue with the user's answers in mind.
+
+     ▣  Build · Mock Model · 7.7s
+
+  ┃
+  ┃  ASKLONG now
+  ┃
+
+     + Thought: 0ms
+
+     → Asked 2 questions
+
+     ▣  Build · Mock Model
+
+  ┃
+  ┃   Subagents   Audit fixes   Confirm
+  ┃
+  ┃  Ship subagent activity? It needs: migration 0024 on production (adds nullable columns and
+  ┃  an index; safe under the live site), deploying rakumux.com, and a Rakumux release for
+  ┃  machines to start sending subagents.
+  ┃
+  ┃  1. Ship web now, Rakumux in 0.1.35 (Recommended)
+  ┃     The web part is ready
+  ┃  2. Ship everything now
+  ┃     ship everything now
+  ┃  3. Hold
+  ┃     hold
+  ┃  4. Type your own answer
+  ┃
+  ┃  ⇆ tab  ↑↓ select  enter confirm  esc dismiss
+  ┃

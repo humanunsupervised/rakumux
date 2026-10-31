@@ -1,0 +1,35 @@
+  ┃
+  ┃  Which colour do you prefer?
+  ┃  Green
+  ┃
+
+     + Thought: 2ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Green". You can
+     now continue with the user's answers in mind.
+
+     ▣  Build · Mock Model · 10.2s
+
+  ┃
+  ┃  ASK3 now
+  ┃
+
+     + Thought: 1ms
+
+     → Asked 3 questions
+
+     ▣  Build · Mock Model
+
+  ┃
+  ┃   Colour   Fruits   Pet   Confirm
+  ┃
+  ┃  Review
+  ┃
+  ┃  Colour: Green
+  ┃
+  ┃  Fruits: Apple, Mango, ripe
+  ┃
+  ┃  Pet: Cat
+  ┃
+  ┃  ⇆ tab  enter submit  esc dismiss
+  ┃

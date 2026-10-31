@@ -1,0 +1,35 @@
+ ? No question tool among:       +
+     + Thought · 70ms
+
+     Answered: User has answered your questions: "Ship subagent activity? It needs: migration 0024
+     on production (adds nullable columns and an index; safe under the live site), deploying
+     rakumux.com, and a Rakumux release for machines to start sending subagents."="Hold", "Which
+     audit fixes should I start now, in p
+
+     Build · Mock Model · 54.8s · 241.0 tok/s
+
+  ┃
+  ┃  ASKM now
+  ┃
+
+     + Thought · 2ms
+
+     → Asked 1 question
+
+  ┃
+  ┃  Questions
+  ┃
+  ┃  Fruits  Submit
+  ┃
+  ┃  Which fruits do you like?
+  ┃
+  ┃  1. [ ] Apple
+  ┃         apple
+  ┃  2. [ ] Banana
+  ┃         banana
+  ┃  3. [ ] Cherry
+  ┃         cherry
+  ┃  4. [ ] Type your own answer
+  ┃
+  ┃  ⇆ tab  ↑↓ select  enter toggle  esc dismiss
+  ┃

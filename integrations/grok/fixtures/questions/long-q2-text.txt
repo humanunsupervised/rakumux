@@ -1,0 +1,35 @@
+
+  master ~/project                                               20 / 256K │ [Dashboard]
+
+
+     ❯ ASKLONG now                                                                       6:58 AM
+
+
+     ◆ Thought for 0.0s
+     ◆ Ask 2 questions
+
+
+
+
+
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+
+    ◆ Waiting on answers for 2 questions                                           0.4s ⇣20 [stop]
+
+  ┃
+  ┃  Which audit fixes should I start now, in parallel, on branches, for the next release? Pick
+  ┃  every one you want.
+  ┃
+  ┃
+  ┃  1 [x] The mid-turn guard check for older servers, plus a lo…  the mid-turn guard check for… █
+  ┃  2 [ ] Revoking the terminal token                             revoking the terminal token   █
+  ┃  3 [ ] Honest wording                                          honest wording                █
+  ┃  z [x] ❯ Also the FIFO freeze fix
+  ┃
+  ┃  [2/2] ↑/↓ navigate · ←/→ question · y copy                                     Enter:edit
+  ┃
+
+  Enter:submit  │  Esc:back

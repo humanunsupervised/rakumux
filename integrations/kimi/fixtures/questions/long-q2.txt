@@ -1,0 +1,34 @@
+   Mango, ripe","Which pet would you keep?":"Cat"}}
+
+ ❯ ASK1 free
+
+ ● I should ask.
+
+ ● Collected your answers
+   Q  Which colour do you prefer?
+   →  Purple, 2 shades
+
+ ● The user answered.
+
+ ● Answered: {"answers":{"Which colour do you prefer?":"Purple, 2 shades"}}
+
+ ❯ ASKLONG now
+
+ ● I should ask.
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  question
+
+  (✓) Subagents   Audit fixes    Submit
+
+  ? Which audit fixes should I start now, in parallel, on branches, for the next release? Pick
+    every one you want.
+
+   [ ] The mid-turn guard check for older servers, plus a long tail of words to wrap
+   [ ] Revoking the terminal token
+   [ ] Honest wording
+   [ ] Other
+
+   ↑↓ select  1-4 / ↵ toggle  ←/→/tab switch  esc cancel
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ mock-model thinking  ~/project                                          ctrl+c: cancel
+                                                                              context: 1% (20/256k)

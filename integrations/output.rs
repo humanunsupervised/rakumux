@@ -724,11 +724,14 @@ impl Follower {
                     self.reply = None;
                     self.reply_state.primed = false;
                     self.reply_state.opencode_previous = None;
+                    self.questions.switched();
                 }
                 let live = self.reply_state.primed;
                 self.reply_state.primed = true;
                 match conversation {
                     Some(id) => {
+                        self.questions
+                            .apply(questions::opencode::logged(database, &id));
                         let last_at = opencode::last_at(database, &id);
                         self.last_at = self.last_at.max(last_at);
                         self.moved_at = self.moved_at.max(last_at);

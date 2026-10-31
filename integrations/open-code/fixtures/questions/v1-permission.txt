@@ -1,0 +1,35 @@
+
+  ┃
+  ┃  BASH now
+  ┃
+
+     + Thought: 9ms
+
+     $ touch made-by-mock.txt
+
+     ▣  Build · Mock Model
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃  △ Permission required
+  ┃    # Shell command
+  ┃
+  ┃  $ touch made-by-mock.txt
+  ┃
+  ┃
+  ┃   Allow once   Allow always   Reject             ctrl+f fullscreen  ⇆ select  enter confirm
+  ┃

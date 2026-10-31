@@ -1,0 +1,35 @@
+
+ ● Hello from the mock model.
+
+ ❯ ASK1 please
+
+ ● I should ask.
+
+ ● Collected your answers
+   Q  Which colour do you prefer?
+   →  Green
+
+ ● The user answered.
+
+ ● Answered: {"answers":{"Which colour do you prefer?":"Green"}}
+
+ ❯ ASK3 now
+
+ ● I should ask.
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  question
+
+  (✓) Colour   Fruits   (○) Pet   Submit
+
+  ? Which fruits do you like?
+    Type your answer, then press Enter to save.
+
+   [✓] Apple
+   [ ] Banana
+   [ ] Cherry
+   [ ] Other: Mango, ripe
+
+   type answer  ↵ save  tab switch  esc cancel
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ mock-model thinking  ~/project
+                                                                              context: 1% (20/256k)

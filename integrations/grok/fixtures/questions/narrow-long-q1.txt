@@ -1,0 +1,39 @@
+
+  master ~/project   20 / 256K │ [Dashboard]
+
+
+     ❯ ASKLONG go                            7:21 AM
+
+
+     ◆ Thought for 0.0s
+     ◆ Ask 2 questions
+
+
+
+
+                                                       █
+                                                       █
+                                                       █
+                                                       █
+                                                       █
+
+    ◆ Waiting on answers for 2 ques…   0.0s ⇣20 [stop]
+
+  ┃
+  ┃  Ship subagent activity? It needs: migration
+  ┃  0024 on production (adds nullable columns and
+  ┃  an index; safe under the live site), deploying
+  ┃  rakumux.com, and a Rakumux release for machines
+  ┃  to start sending subagents.
+  ┃
+  ┃
+  ┃  1 (○) Ship web now, Rakumux in 0.1.35           █
+  ┃        (Recommended)                             █
+  ┃        The web part is ready                     █
+  ┃  2 (○) Ship everything now           ship…       █
+  ┃  z (○) Type your answer here
+  ┃
+  ┃  [1/2] ↑/↓ navigate · ←/→ questio Enter:select
+  ┃
+
+  Tab:next answer  │  Esc:scrollback  │  Shift+x:

@@ -1,0 +1,36 @@
+ ● Collected your answers
+   Q  Ship subagent activity? It needs: migration 0024 on production (adds nullable columns and an
+ index; safe under the live site), deploying rakumux.com, and a Rakumux release for machines to
+ start sending subagents.
+   →  Hold
+   Q  Which audit fixes should I start now, in parallel, on branches, for the next release? Pick
+ every one you want.
+   →  The mid-turn guard check for older servers, plus a long tail of words to wrap, Also the FIFO
+ freeze fix
+
+ ● The user answered.
+
+ ● Answered: {"answers":{"Ship subagent activity? It needs: migration 0024 on production (adds
+   nullable columns and an index; safe under the live site), deploying rakumux.com, and a Rakumux
+   release for machines to start sending subagents.":"Hold","Which audit fixes should I start now,
+   in parallel, on branches, f
+
+ ❯ ASKM now
+
+ ● I should ask.
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  question
+
+   Fruits    Submit
+
+  ? Which fruits do you like?
+
+   [ ] Apple
+   [ ] Banana
+   [ ] Cherry
+   [ ] Other
+
+   ↑↓ select  1-4 / ↵ toggle  ←/→/tab switch  esc cancel
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ mock-model thinking  ~/project
+                                                                              context: 1% (20/256k)

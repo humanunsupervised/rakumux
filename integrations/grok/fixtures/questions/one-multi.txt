@@ -1,0 +1,35 @@
+
+  master ~/project                                               20 / 256K │ [Dashboard]
+
+
+     ❯ ASKM now                                                                          7:01 AM
+
+
+     ◆ Thought for 0.0s
+     ◆ Ask Which fruits do you like?
+
+
+
+
+
+
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+
+    ◆ Waiting on answers for Which fruits do you like?                             0.0s ⇣20 [stop]
+
+  ┃
+  ┃  Which fruits do you like?
+  ┃
+  ┃
+  ┃  1 [ ] Apple   apple                                                                         █
+  ┃  2 [ ] Banana  banana                                                                        █
+  ┃  3 [ ] Cherry  cherry                                                                        █
+  ┃  z [ ] Type your answer here
+  ┃
+  ┃  ↑/↓ navigate · y copy                                                        Enter:submit
+  ┃
+
+  Tab:next answer  │  Esc:scrollback  │  Shift+x:dismiss

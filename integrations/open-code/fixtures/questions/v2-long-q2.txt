@@ -1,0 +1,35 @@
+ ? No question tool among:       +
+
+     + Thought · 34ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Purple, 2 shades".
+     You can now continue with the user's answers in mind.
+
+     Build · Mock Model · 8.1s · 384.6 tok/s
+
+  ┃
+  ┃  ASKLONG now
+  ┃
+
+     + Thought · 2ms
+
+     → Asked 2 questions
+
+  ┃
+  ┃  Questions
+  ┃
+  ┃  Subagents  Audit fixes  Submit
+  ┃
+  ┃  Which audit fixes should I start now, in parallel, on branches, for the next release? Pick
+  ┃  every one you want.
+  ┃
+  ┃  1. [ ] The mid-turn guard check for older servers, plus a long tail of words to wrap
+  ┃         the mid-turn guard check for older servers, plus a long tail of words to wrap
+  ┃  2. [ ] Revoking the terminal token
+  ┃         revoking the terminal token
+  ┃  3. [ ] Honest wording
+  ┃         honest wording
+  ┃  4. [ ] Type your own answer
+  ┃
+  ┃  ⇆ tab  ↑↓ select  enter toggle  esc dismiss
+  ┃

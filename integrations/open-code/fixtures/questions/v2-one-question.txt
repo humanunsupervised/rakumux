@@ -1,0 +1,35 @@
+ ? No question tool among:       +
+
+  ┃
+  ┃  ASK1 please
+  ┃
+
+     + Thought · 3ms
+
+     → Asked 1 question
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃  Questions
+  ┃
+  ┃  Which colour do you prefer?
+  ┃
+  ┃  1. Red
+  ┃     Warm
+  ┃  2. Green
+  ┃     green
+  ┃  3. Blue
+  ┃     Cool
+  ┃  4. Type your own answer
+  ┃
+  ┃  ↑↓ select  enter submit  esc dismiss
+  ┃

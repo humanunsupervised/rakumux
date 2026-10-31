@@ -1,0 +1,35 @@
+     Answered: User has answered your questions: "Which fruits do you like?"="Apple, Cherry". You
+     can now continue with the user's answers in mind.
+
+     ▣  Build · Mock Model · 19.4s
+
+  ┃
+  ┃  ASK2 now
+  ┃
+
+     + Thought: 1ms
+
+  ┃
+  ┃  # Questions
+  ┃
+  ┃  Which colour do you prefer?
+  ┃  Green
+  ┃
+  ┃  Which pet would you keep?
+  ┃  Cat
+  ┃
+
+     + Thought: 0ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Green", "Which
+     pet would you keep?"="Cat". You can now continue with the user's answers in mind.
+
+     ▣  Build · Mock Model · 26.8s
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Mock Model Mock
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ~/project         20 ctrl+p
+   ~/project                                                  commands

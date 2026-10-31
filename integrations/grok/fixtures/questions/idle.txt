@@ -1,0 +1,35 @@
+
+  master ~/project                                               20 / 256K │ [Dashboard]
+
+
+     ❯ ASK3 now                                                                          6:50 AM
+
+
+     ◈ Called 1 tool
+
+     Answered: User has answered your questions: "Which colour do you                    6:51 AM
+     prefer?"="Green", "Which fruits do you like?"="Apple, Cherry" user notes: Mango,              █
+     ripe, "Which pet would you keep?"="Cat". You can now continue with the user's                 █
+     answers in mind.                                                                              █
+                                                                                                   █
+     Worked for 0.1s                                                                               █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯ No question tool among:                                                                    │
+  ╰───────────────────────────────────────────────────────────────────────────────── mock-model ─╯
+
+  Tab/→:accept suggestion  │  Shift+Tab:mode  │  Ctrl+x:shortcuts

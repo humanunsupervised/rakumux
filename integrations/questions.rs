@@ -21,6 +21,16 @@
 //!   free answer ("Or type your own answer..."), see `droid/questions.rs`.
 //!   Its cursor is only drawn bold: its driver reads the screen with its
 //!   styles ([`Dialog::styled`], [`StyledLine`]).
+//! - **OpenCode** (1.x and 2): `question` (questions with options, several
+//!   for a `multiple` one, and "Type your own answer"), read from its
+//!   database, see `open-code/questions.rs`.
+//! - **Grok Build**: `ask_user_question` (`multi_select`; "Type your answer
+//!   here"), see `grok/questions.rs`.
+//! - **Kimi Code**: `AskUserQuestion` (`multi_select`; "Other"), see
+//!   `kimi/questions.rs`.
+//!
+//! OpenCode's, Grok's and Kimi's dialogs pick an option by its number, and
+//! share one driver (`numbered.rs`) with a reader of each one's screen.
 //!
 //! Another agent is added with its log's question calls and results in
 //! [`logged`] and a driver for its dialog in [`Dialog`].
@@ -36,6 +46,14 @@ mod claude;
 mod copilot;
 #[path = "droid/questions.rs"]
 mod droid;
+#[path = "grok/questions.rs"]
+mod grok;
+#[path = "kimi/questions.rs"]
+mod kimi;
+#[path = "numbered.rs"]
+mod numbered;
+#[path = "open-code/questions.rs"]
+pub(crate) mod opencode;
 
 /// One question of an agent's dialog, as its conversation logged the call.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,8 +90,45 @@ pub fn logged(agent: LogAgent, entry: &Value) -> Vec<Logged> {
         LogAgent::Claude => claude::logged(entry),
         LogAgent::Copilot => copilot::logged(entry),
         LogAgent::Droid => droid::logged(entry),
+        LogAgent::Grok => grok::logged(entry),
+        LogAgent::Kimi => kimi::logged(entry),
         _ => Vec::new(),
     }
+}
+
+/// A question tool's `questions`, each a `question` with `options` of
+/// `label`s (and `header`, and a flag for several choices as the agent
+/// spells it: `multiSelect`, `multi_select`, `multiple`); none when one
+/// isn't.
+pub(crate) fn listed(value: &Value) -> Option<Vec<Question>> {
+    let text = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .filter(|text| !squash(text).is_empty())
+            .map(str::to_owned)
+    };
+    let questions: Option<Vec<Question>> = value
+        .as_array()?
+        .iter()
+        .map(|item| {
+            let options: Option<Vec<String>> = item
+                .get("options")?
+                .as_array()?
+                .iter()
+                .map(|option| text(option.get("label")))
+                .collect();
+            let multi_select = ["multiSelect", "multi_select", "multiple"]
+                .iter()
+                .any(|flag| item.get(flag).and_then(Value::as_bool) == Some(true));
+            Some(Question {
+                question: text(item.get("question"))?,
+                header: text(item.get("header")),
+                options: options.filter(|options| !options.is_empty())?,
+                multi_select,
+            })
+        })
+        .collect();
+    questions.filter(|questions| !questions.is_empty())
 }
 
 /// The most question calls whose results are remembered.
@@ -91,7 +146,12 @@ pub struct Asked {
 impl Asked {
     /// Note what `entry` of `agent`'s log says.
     pub fn note(&mut self, agent: LogAgent, entry: &Value) {
-        for logged in logged(agent, entry) {
+        self.apply(logged(agent, entry));
+    }
+
+    /// Note what a conversation's log (or OpenCode's database) says, in order.
+    pub fn apply(&mut self, said: Vec<Logged>) {
+        for logged in said {
             match logged {
                 Logged::Asked(open) => self.open = Some(open),
                 Logged::Answered(call_id)
@@ -101,6 +161,9 @@ impl Asked {
                         .is_some_and(|open| open.call_id == call_id) =>
                 {
                     self.open = None;
+                    if self.answered.contains(&call_id) {
+                        continue;
+                    }
                     if self.answered.len() == MAX_ANSWERED {
                         self.answered.pop_front();
                     }
@@ -250,18 +313,32 @@ enum Driver {
     Claude(claude::Dialog),
     Copilot(copilot::Dialog),
     Droid(droid::Dialog),
+    /// OpenCode's, Grok Build's or Kimi Code's.
+    Numbered(numbered::Dialog),
 }
-
 impl Dialog {
-    /// A driver for `agent`'s dialog (`claude`, `copilot` or `droid`, as
-    /// detected or named by its hooks) asking `open`, to answer it with
-    /// `answers`; none for an agent Rakumux doesn't answer for.
+    /// A driver for `agent`'s dialog (`claude`, `copilot`, `droid`,
+    /// `opencode`, `grok` or `kimi`, as detected or named by its hooks)
+    /// asking `open`, to answer it with `answers`; none for an agent Rakumux
+    /// doesn't answer for.
     pub fn new(agent: &str, open: &OpenQuestion, answers: Vec<Answer>) -> Option<Self> {
         let questions = open.questions.clone();
+        let numbered = |style| {
+            Driver::Numbered(numbered::Dialog::new(
+                style,
+                questions.clone(),
+                answers.clone(),
+            ))
+        };
         let driver = match agent {
-            "claude" | "claude-code" => Driver::Claude(claude::Dialog::new(questions, answers)),
-            "copilot" => Driver::Copilot(copilot::Dialog::new(questions, answers)),
-            "droid" => Driver::Droid(droid::Dialog::new(questions, answers)),
+            "claude" | "claude-code" => {
+                Driver::Claude(claude::Dialog::new(questions.clone(), answers.clone()))
+            }
+            "copilot" => Driver::Copilot(copilot::Dialog::new(questions.clone(), answers.clone())),
+            "droid" => Driver::Droid(droid::Dialog::new(questions.clone(), answers.clone())),
+            "opencode" | "opencode2" => numbered(&opencode::STYLE),
+            "grok" => numbered(&grok::STYLE),
+            "kimi" | "kimi-code" => numbered(&kimi::STYLE),
             _ => return None,
         };
         Some(Self(driver))
@@ -280,6 +357,7 @@ impl Dialog {
             Driver::Claude(dialog) => dialog.shown(screen),
             Driver::Copilot(dialog) => dialog.shown(screen),
             Driver::Droid(dialog) => dialog.shown(screen),
+            Driver::Numbered(dialog) => dialog.shown(screen),
         }
     }
 
@@ -289,6 +367,7 @@ impl Dialog {
             Driver::Claude(dialog) => dialog.next(screen),
             Driver::Copilot(dialog) => dialog.next(screen),
             Driver::Droid(dialog) => dialog.next(screen),
+            Driver::Numbered(dialog) => dialog.next(screen),
         }
     }
 
@@ -299,6 +378,7 @@ impl Dialog {
             Driver::Claude(dialog) => dialog.moved(before, after),
             Driver::Copilot(dialog) => dialog.moved(before, after),
             Driver::Droid(dialog) => dialog.moved(before, after),
+            Driver::Numbered(dialog) => dialog.moved(before, after),
         }
     }
 }

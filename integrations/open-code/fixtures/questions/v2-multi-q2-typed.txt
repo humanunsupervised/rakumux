@@ -1,0 +1,35 @@
+ ? No question tool among:       ! New session                   +
+  ┃
+
+     + Thought · 39ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Green", "Which pet
+     would you keep?"="Cat". You can now continue with the user's answers in mind.
+
+     Build · Mock Model · 28.3s · 357.1 tok/s
+
+  ┃
+  ┃  ASK3 now
+  ┃
+
+     + Thought · 3ms
+
+     → Asked 3 questions
+
+  ┃
+  ┃  Questions
+  ┃
+  ┃  Colour  Fruits  Pet  Submit
+  ┃
+  ┃  Which fruits do you like?
+  ┃
+  ┃  1. [✓] Apple
+  ┃         apple
+  ┃  2. [ ] Banana
+  ┃         banana
+  ┃  3. [ ] Cherry
+  ┃         cherry
+  ┃  4. [✓] Mango, ripe
+  ┃
+  ┃  ⇆ tab  enter done  esc close
+  ┃

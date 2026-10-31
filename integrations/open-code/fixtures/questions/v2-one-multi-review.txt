@@ -1,0 +1,35 @@
+ ? No question tool among:       +
+  ┃  Hold
+  ┃
+  ┃  Which audit fixes should I start now, in parallel, on branches, for the next release? Pick
+  ┃  every one you want.
+  ┃  The mid-turn guard check for older servers, plus a long tail of words to wrap, Also the FIFO
+  ┃  freeze fix
+  ┃
+
+     + Thought · 70ms
+
+     Answered: User has answered your questions: "Ship subagent activity? It needs: migration 0024
+     on production (adds nullable columns and an index; safe under the live site), deploying
+     rakumux.com, and a Rakumux release for machines to start sending subagents."="Hold", "Which
+     audit fixes should I start now, in p
+
+     Build · Mock Model · 54.8s · 241.0 tok/s
+
+  ┃
+  ┃  ASKM now
+  ┃
+
+     + Thought · 2ms
+
+     → Asked 1 question
+
+  ┃
+  ┃  Questions
+  ┃
+  ┃  Fruits  Submit
+  ┃
+  ┃  Fruits: Apple, Cherry
+  ┃
+  ┃  ⇆ tab  enter submit  esc dismiss
+  ┃

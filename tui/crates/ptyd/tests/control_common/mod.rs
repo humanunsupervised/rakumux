@@ -452,7 +452,10 @@ impl TerminalHost for FakeHost {
         keys: &[String],
         text: Option<&str>,
     ) -> Result<(), HostError> {
-        if let Some(bad) = keys.iter().find(|k| !KNOWN_KEYS.contains(&k.as_str())) {
+        // A named key, or one character (a digit, a letter), as the real
+        // host takes them.
+        let known = |k: &String| KNOWN_KEYS.contains(&k.as_str()) || k.chars().count() == 1;
+        if let Some(bad) = keys.iter().find(|k| !known(k)) {
             return Err(HostError::InvalidKey(bad.clone()));
         }
         self.with_running(id, |t| {

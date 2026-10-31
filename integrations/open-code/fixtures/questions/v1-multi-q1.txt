@@ -1,0 +1,35 @@
+  ┃  Green
+  ┃
+
+     + Thought: 2ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Green". You can
+     now continue with the user's answers in mind.
+
+     ▣  Build · Mock Model · 10.2s
+
+  ┃
+  ┃  ASK3 now
+  ┃
+
+     + Thought: 1ms
+
+     → Asked 3 questions
+
+     ▣  Build · Mock Model
+
+  ┃
+  ┃   Colour   Fruits   Pet   Confirm
+  ┃
+  ┃  Which colour do you prefer?
+  ┃
+  ┃  1. Red
+  ┃     Warm
+  ┃  2. Green
+  ┃     green
+  ┃  3. Blue
+  ┃     Cool
+  ┃  4. Type your own answer
+  ┃
+  ┃  ⇆ tab  ↑↓ select  enter confirm  esc dismiss
+  ┃

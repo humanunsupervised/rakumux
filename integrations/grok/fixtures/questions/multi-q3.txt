@@ -1,0 +1,35 @@
+
+  master ~/project                                               20 / 256K │ [Dashboard]
+
+
+     ❯ ASK3 now                                                                          6:50 AM
+
+
+     ◆ Thought for 0.0s
+     ◆ Ask 3 questions
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+                                                                                                   █
+
+    ◆ Waiting on answers for 3 questions                                           0.0s ⇣20 [stop]
+
+  ┃
+  ┃  Which pet would you keep?
+  ┃
+  ┃
+  ┃  1 (○) Cat  cat                                                                              █
+  ┃  2 (○) Dog  dog                                                                              █
+  ┃  z (○) Type your answer here
+  ┃
+  ┃  [3/3] ↑/↓ navigate · ←/→ question · y copy                                   Enter:submit
+  ┃
+
+  Tab:next answer  │  Esc:scrollback  │  Shift+x:dismiss

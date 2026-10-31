@@ -1,0 +1,35 @@
+ ? No question tool among:       +
+
+  ┃
+  ┃  # Questions
+  ┃
+  ┃  Which colour do you prefer?
+  ┃  Green
+  ┃
+
+     + Thought · 30ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Green". You can
+     now continue with the user's answers in mind.
+
+     Build · Mock Model · 16.7s · 416.7 tok/s
+
+  ┃
+  ┃  ASK3 now
+  ┃
+
+     + Thought · 2ms
+
+     → Asked 3 questions
+
+  ┃
+  ┃  Questions
+  ┃
+  ┃  Colour  Fruits  Pet  Submit
+  ┃
+  ┃  Colour: Green
+  ┃  Fruits: Apple, Mango, ripe
+  ┃  Pet: Cat
+  ┃
+  ┃  ⇆ tab  enter submit  esc dismiss
+  ┃

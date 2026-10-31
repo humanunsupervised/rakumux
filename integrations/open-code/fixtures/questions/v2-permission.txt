@@ -1,0 +1,35 @@
+   No question tool among:       ! New session                   +
+
+  ┃
+  ┃  BASH now
+  ┃
+
+     + Thought · 45ms
+
+  ┃
+  ┃  ⠹ touch made-by-mock.txt
+  ┃
+
+     Press ctrl+b to move running work to the background
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃  △ Permission required
+  ┃
+  ┃  $ touch made-by-mock.txt
+  ┃
+  ┃
+  ┃   Allow once   Always allow   Reject             ctrl+f fullscreen  ⇆ select  enter confirm
+  ┃

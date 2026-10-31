@@ -1,6 +1,16 @@
 //! OpenCode's screen fallback. Hooks use the V2 CLI plugin instead.
 use super::*;
 
+/// The hint under OpenCode 2's question while its own answer is typed:
+/// `enter submit  esc close` (one choice) or `⇆ tab  enter done  esc close`.
+fn is_question_typing_hint(line: &str) -> bool {
+    let hint = line.trim_start_matches('┃').trim();
+    matches!(
+        hint,
+        "enter submit  esc close" | "⇆ tab  enter done  esc close"
+    )
+}
+
 pub(super) fn has_opencode_progress_bar(line: &str) -> bool {
     let mut run = 0;
     for character in line.chars() {
@@ -38,6 +48,8 @@ pub(super) const PROFILE: Profile = Profile {
                 &Test::Any(&["enter confirm", "enter submit", "enter toggle"]),
             ),
         ),
+        // OpenCode 2's question while its own answer is typed (captured 2.2.0).
+        marker(Region::Bottom(12), Test::Line(is_question_typing_hint)),
         marker(
             Region::Screen,
             Test::All(&["update available", "would you like to update"]),

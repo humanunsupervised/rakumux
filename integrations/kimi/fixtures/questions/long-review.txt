@@ -1,0 +1,36 @@
+ ● Collected your answers
+   Q  Which colour do you prefer?
+   →  Purple, 2 shades
+
+ ● The user answered.
+
+ ● Answered: {"answers":{"Which colour do you prefer?":"Purple, 2 shades"}}
+
+ ❯ ASKLONG now
+
+ ● I should ask.
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  question
+
+  (✓) Subagents  (✓) Audit fixes   Submit
+
+  Review your answer before submit
+
+   Q  Ship subagent activity? It needs: migration 0024 on production (adds nullable columns and
+        an index; safe under the live site), deploying rakumux.com, and a Rakumux release for
+        machines to start sending subagents.
+   →  Hold
+   Q  Which audit fixes should I start now, in parallel, on branches, for the next release? Pick
+        every one you want.
+   →  The mid-turn guard check for older servers, plus a long tail of words to wrap, Also the
+        FIFO freeze fix
+
+  Ready to submit your answers?
+
+   → [1] Submit
+     [2] Cancel
+
+   ↑↓ select  1/2 choose  ↵ confirm  ←/→/tab switch  esc cancel
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ mock-model thinking  ~/project     ask Kimi to schedule tasks, e.g. "remind me at 5pm"
+                                                                              context: 1% (20/256k)

@@ -1,0 +1,45 @@
+# OpenCode 1.x asking a question (its question tool): options numbered,
+# "Type your own answer", the hint "enter submit  esc dismiss". Captured from 1.18.16.
+agent: opencode
+expect: blocked
+process: opencode
+cmdline: opencode
+title: OpenCode
+alternate_screen: true
+ms_since_output: 3000
+---
+
+  ┃
+  ┃  ASK1 please
+  ┃
+
+     + Thought: 2ms
+
+     → Asked 1 question
+
+     ▣  Build · Mock Model
+
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃  Which colour do you prefer?
+  ┃
+  ┃  1. Red
+  ┃     Warm
+  ┃  2. Green
+  ┃     green
+  ┃  3. Blue
+  ┃     Cool
+  ┃  4. Type your own answer
+  ┃
+  ┃  ↑↓ select  enter submit  esc dismiss
+  ┃

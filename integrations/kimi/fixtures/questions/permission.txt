@@ -1,0 +1,36 @@
+   release for machines to start sending subagents.":"Hold","Which audit fixes should I start now,
+   in parallel, on branches, f
+
+ ❯ ASKM now
+
+ ● I should ask.
+
+ ● Collected your answers
+   Q  Which fruits do you like?
+   →  Apple, Cherry
+
+ ● The user answered.
+
+ ● Answered: {"answers":{"Which fruits do you like?":"Apple, Cherry"}}
+
+ ❯ BASH now
+
+ ● Running it.
+
+ ● Running a command · $ touch made-by-mock.txt
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+   ▶ Run this command?
+
+   cwd: ~/project
+   $ touch made-by-mock.txt
+     Make a file
+
+   ▶ 1. Approve once
+     2. Approve for this session
+     3. Reject
+     4. Reject with feedback
+
+   ↑/↓ select · 1/2/3/4 choose · ↵ confirm
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ mock-model thinking  ~/project                                           ctrl+o expand
+                                                                              context: 1% (20/256k)

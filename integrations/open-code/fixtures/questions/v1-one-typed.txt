@@ -1,0 +1,35 @@
+  ┃  Cat
+  ┃
+
+     + Thought: 1ms
+
+     Answered: User has answered your questions: "Which colour do you prefer?"="Green", "Which
+     fruits do you like?"="Apple, Mango, ripe", "Which pet would you keep?"="Cat". You can now
+     continue with the user's answers in mind.
+
+     ▣  Build · Mock Model · 34.4s
+
+  ┃
+  ┃  ASK1 free
+  ┃
+
+     + Thought: 1ms
+
+     → Asked 1 question
+
+     ▣  Build · Mock Model
+
+  ┃
+  ┃  Which colour do you prefer?
+  ┃
+  ┃  1. Red
+  ┃     Warm
+  ┃  2. Green
+  ┃     green
+  ┃  3. Blue
+  ┃     Cool
+  ┃  4. Type your own answer
+  ┃     Purple, 2 shades
+  ┃
+  ┃  ↑↓ select  enter submit  esc dismiss
+  ┃

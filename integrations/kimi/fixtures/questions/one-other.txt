@@ -1,0 +1,36 @@
+
+ ● Collected your answers
+   Q  Which colour do you prefer?
+   →  Green
+   Q  Which fruits do you like?
+   →  Apple, Mango, ripe
+   Q  Which pet would you keep?
+   →  Cat
+
+ ● The user answered.
+
+ ● Answered: {"answers":{"Which colour do you prefer?":"Green","Which fruits do you like?":"Apple,
+   Mango, ripe","Which pet would you keep?":"Cat"}}
+
+ ❯ ASK1 free
+
+ ● I should ask.
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  question
+
+   Colour    Submit
+
+  ? Which colour do you prefer?
+    Type your answer, then press Enter to save.
+
+     [1] Red
+         Warm
+     [2] Green
+     [3] Blue
+         Cool
+   → [4] Other:
+
+   type answer  ↵ save  tab switch  esc cancel
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ mock-model thinking  ~/project
+                                                                              context: 1% (20/256k)
