@@ -361,7 +361,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `ReplySync::answer_next`): while the daemon says `session.answer` (read at each connect), the
    session list says `capabilities: ["question_answers"]` and replies are read with
    `question_answers=1`, so rakumux.com sends this machine the answers the user picks there for
-   the question an agent asks in its own dialog (Claude Code's `AskUserQuestion`): a session
+   the question an agent asks in its own dialog (Claude Code's `AskUserQuestion`, GitHub
+   Copilot's `ask_user`, Droid's `AskUser`): a session
    message with `answer` (`{call_id, answers: [{question, choices?, text?}]}`), in a chat. One is
    given to the daemon (`session_answer`, the 10 s `quiet_ms` of a reply), one at a time, while
    its session is live, not private, shows that chat and its agent asks something (`blocked`);
@@ -539,8 +540,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 
 ## File structure
 
-Agent-specific hooks, detection profiles, resume code, the OpenCode, Kimi Code and Amp plugins
-and the Pi extension (each with its installer) live under
+Agent-specific hooks, detection profiles, resume code, question dialogs' drivers
+(`questions.rs`), the OpenCode, Kimi Code and Amp plugins and the Pi extension (each with its
+installer) live under
 `integrations/{open-code,claude-code,codex,pi,copilot,cursor-agent,grok,kimi,droid,amp}/`. Shared engines live in `integrations/`.
 See [integration boundaries and protocol](integrations/README.md). New integrations go there,
 not in UI handlers, API/MCP transport or control policy. Optional version-1 `Report.activity`
@@ -828,25 +830,36 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   The daemon asks the terminal without its state lock.
 - `session_answer {id, call_id, answers: [{question, choices?, text?}], quiet_ms?}` (user only,
   capability `session.answer`; `control/answers.rs`, `integrations/questions.rs`): answers the
-  question the session's agent asks in a dialog of its own, never a prompt for permission. Only
-  Claude Code's `AskUserQuestion` (`integrations/claude-code/questions.rs`); other agents get
-  `unsupported`. The daemon follows the conversation's questions as it reads the log
-  (`agent_output::questions::Asked`: the newest question call without a result, and the question
-  calls whose results it read lately), and before any key checks: that `call_id` is that open
-  question (else `question_gone`), that `answers` fit its questions in order, by their text, with
-  options they offer, one for a question that takes one (else `invalid_argument`), that its screen
-  shows that question's dialog (its text, its options in order, under its tab bar, above `Chat
-  about this`) and that the agent asks something (lifecycle `blocked`, or detection reading its
-  screen so: else `question_gone`), and that nobody typed there within `quiet_ms` (else
-  `session_in_use`). It then works the dialog a step at a time (`host::TerminalHost::
-  send_keys_when_quiet`, one key or the text per write), each planned from the screen just read
-  and counted as taken once the dialog moved on and stayed so for 150 ms (3 s at most): `up`/
-  `down` to the row, `enter` for one choice, `space` for each box of a question that takes
-  several, the free answer typed on its row, `Next`/`Submit` and `enter`, the review page's
-  answers checked against the answers given, then `enter` on `Submit answers`. Anything else on
-  screen stops it, nothing more sent (`not_taken` once keys went in). `ok` once the log shows the
-  question's result (10 s at most after the dialog closed, else `not_taken`). Audited with the
-  call and how many answers, never their text; one `ptyd.log` line each, the same.
+  question the session's agent asks in a dialog of its own, never a prompt for permission. Claude
+  Code's `AskUserQuestion` (`integrations/claude-code/questions.rs`), GitHub Copilot's `ask_user`
+  (a form; `integrations/copilot/questions.rs`) and Droid's `AskUser` (a questionnaire;
+  `integrations/droid/questions.rs`); other agents get `unsupported`. The daemon follows the
+  conversation's questions as it reads the log (`agent_output::questions::Asked`: the newest
+  question call of the main conversation without a result, and the question calls whose results
+  it read lately), and before any key checks: that `call_id` is that open question (else
+  `question_gone`), that `answers` fit its questions in order, by their text, with options they
+  offer, one for a question that takes one (else `invalid_argument`; a call whose questions the
+  driver can't answer has none), that its screen shows that question's dialog (its text and its
+  options in order, where the agent draws them) and that the agent asks something (lifecycle
+  `blocked`, or detection reading its screen so: else `question_gone`), and that nobody typed
+  there within `quiet_ms` (else `session_in_use`). It then works the dialog a step at a time
+  (`host::TerminalHost::send_keys_when_quiet`, one key or the text per write), each planned from
+  the screen just read (with its styles, `TextFormat::Ansi`, for Droid, whose cursor is only
+  bold: `Dialog::styled`) and counted as taken once the dialog moved on and stayed so for 150 ms
+  (3 s at most). Claude Code: `up`/`down` to the row, `enter` for one choice, `space` for each box
+  of a question that takes several, the free answer typed on its row, `Next`/`Submit` and
+  `enter`, the review page's answers checked against the answers given, then `enter` on `Submit
+  answers`. Copilot: a page per field in the dialog's order (the log's, by field name, may
+  differ), `up`/`down` and `enter` for a choice (yes or no too), `space` for each box of several,
+  the free answer typed with the cursor on `Other` (in the box drawn under the dialog), a text
+  field typed, `enter` on each page and the last one's giving the answers; a form with a text
+  field shown filled in already (a `default`) isn't answered. Droid: an option's number picks it
+  (or, for a `(multi)` question, ticks it), `down` to the free answer's row to type it, and to
+  `Submit`/`Next`; the last question's answer gives them all. Anything else on screen stops it,
+  nothing more sent (`not_taken` once keys went in). `ok` once the log shows the question's result
+  (10 s at most after the dialog closed, else `not_taken`). Audited with the call and how many
+  answers, never their text; one `ptyd.log` line each, the same. The drivers read the agents'
+  English screens.
 - `session_import {source}` (user only, capability `session.import`) restores an archive directory
   containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.
   The daemon preserves ids and metadata, refuses existing ids or names, stages files privately,

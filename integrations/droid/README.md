@@ -62,6 +62,17 @@ position. A rewind or a compaction starts another session.
   `~/.factory` is Droid's own, never a place, but its worktrees (`droid -w`) are.
 - Replies written back are typed in (a bracketed paste, then Enter) and show up as the next
   prompt.
+- Questions answered from rakumux.com (`questions.rs`, the daemon's `session_answer`): `AskUser`
+  asks with a questionnaire (`1. [question] … (multi)`, `[topic]`, `[option]` lines), answered
+  `[question] …` / `[answer] …`. The daemon checks that the newest `AskUser` call without a result
+  is the one answered and that the screen shows its dialog (under `Ask User`: the question, its
+  numbered options, `Or type your own answer...`), then works it question by question. Its cursor
+  is only drawn bold, so the screen is read with its styles. An option's number picks it, or
+  ticks its box for a `(multi)` question (the cursor stays); the free answer is typed on its row
+  (`down` to it); a `(multi)` question then takes `down` to `Submit` (`Next` before the last) and
+  `enter`. The last question's answer gives them all; there's no review. Its English screens
+  only (Droid can show others). Checked against Droid 1.0.0 with a custom model; its screens are
+  `fixtures/questions/` (`.ansi`, with their styles).
 
 ## Resume
 
@@ -89,6 +100,7 @@ and `-w`/`--worktree` are dropped: resuming never makes a worktree. `droid exec`
 - `recovery.rs`: conversation lookup and resume flags. `output.rs`: the session file, its first
   line and the lines. `transcript.rs`, `places.rs`: whole chat and places.
 - `environment.rs`, `presentation.rs`: `FACTORY_SESSION_ID`, the label colour.
+- `questions.rs`, `fixtures/questions/`: `AskUser`'s calls and results, and its dialog.
 - `e2e/`: an offline end-to-end check with a stand-in Droid (below).
 
 ## Verification
@@ -107,7 +119,12 @@ temporary directory) and runs `e2e/fake_droid.py` as `droid`: it writes Droid's 
 screens. It checks the lifecycle, `agent_output`, `user_prompt`, `agent_turn`, `session_turn`,
 `session_transcript`, reply capture, places, a counted subagent, a reply typed in as a new turn,
 the resume command and revival after a crash. No network, account or real Droid. Real model
-turns need a Factory sign-in (`droid` → Login, or `FACTORY_API_KEY`); check those live.
+turns need a Factory sign-in (`droid` → Login, or `FACTORY_API_KEY`), or airgap mode with a custom
+model: `FACTORY_AIRGAP_ENABLED=true` and a `customModels` entry in `.factory/settings.json` (the
+`generic-chat-completion-api` provider at a local model). `tui/crates/ptyd/tests/runtime_answers.rs`
+(ignored) runs the real `droid` so against a scripted model and answers its `AskUser` dialog
+through `session_answer`; `--test control_answer_agents` covers the daemon's side with its
+screens.
 
 References: <https://docs.factory.com/harness/hooks>, <https://docs.factory.com/droid-cli/cli-reference>,
 <https://docs.factory.com/harness/mcp>.

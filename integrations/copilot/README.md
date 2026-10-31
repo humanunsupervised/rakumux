@@ -64,6 +64,19 @@ To let Copilot drive sessions through MCP, see [mcp/README.md](../../mcp/README.
   out of new sessions, and from a session started by Copilot's shell tool its git settings too
   (`GIT_EDITOR=true`, no credential prompts, its `GIT_CONFIG_*` entries).
 
+- **Questions answered from rakumux.com** (`questions.rs`, the daemon's `session_answer`):
+  `ask_user` asks with a form (`message`, `requestedSchema`), each field a question: a choice
+  (`enum`, `oneOf`), several (`array`), yes or no (`boolean`) or text (`string`, `number`,
+  `integer`), every choice with `Other (type your answer)`. The daemon checks that the main
+  agent's newest `ask_user` call without a result (`tool.execution_complete`) is the one
+  answered and that the screen shows its dialog (`Copilot needs information.`, the message, the
+  field's label and options), then works it a field at a time in the dialog's order: `down`/`up`
+  and `enter` for a choice; `space` on each option of several, then `enter`; the free answer
+  typed with the cursor on `Other`, in the box drawn under the dialog; a text field typed and
+  `enter`. The last field's `enter` gives the answers (`User responded: …`). A form whose text
+  field shows a `default` typed in already isn't answered. Checked against Copilot 1.0.105 with
+  the scripted model; its screens are `fixtures/questions/`.
+
 ## Limits
 
 - Copilot rewrites its event log when a turn is taken back (`/undo`, or Esc Esc on a prompt it
@@ -84,6 +97,7 @@ To let Copilot drive sessions through MCP, see [mcp/README.md](../../mcp/README.
 - `hooks.rs` / `hooks.json`: hook adapter and Rakumux's hook file.
 - `recovery.rs`: which conversation is on screen, and resume flags.
 - `output.rs`, `transcript.rs`, `places.rs`: the event log.
+- `questions.rs`, `fixtures/questions/`: `ask_user`'s calls and results, and its dialog.
 - `environment.rs`, `presentation.rs`: markers kept out of new sessions, and its colour.
 
 ## Tests
@@ -92,6 +106,7 @@ To let Copilot drive sessions through MCP, see [mcp/README.md](../../mcp/README.
 cd tui
 cargo test -p rakumux-ptyd copilot --locked              # detection, resume, output, places, transcript
 cargo test -p rakumux-ptyd --test control_copilot --locked
+cargo test -p rakumux-ptyd --test control_answer_agents --locked   # ask_user answered
 cargo test -p tui copilot --locked                        # hooks and the installer
 cargo test -p rakumux-sensagent copilot --locked          # a reply written back
 ```
@@ -113,3 +128,6 @@ Set `COPILOT_CACHE_HOME` to reuse Copilot's unpacked package between runs (about
 References: <https://docs.github.com/en/copilot/reference/hooks-reference>,
 <https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference>,
 <https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference>.
+
+`runtime_answers.rs` (also ignored) answers `ask_user` dialogs of the real `copilot` the same way,
+through `session_answer`: one choice, a free answer under `Other`, and a form of four fields.

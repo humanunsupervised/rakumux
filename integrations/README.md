@@ -381,21 +381,41 @@ generic diagnostic and empty JSON with success; activity cannot approve/deny/con
 
 ## Answering an agent's question
 
-An agent that asks the user something in a dialog of its own (Claude Code's `AskUserQuestion`)
-can be answered from rakumux.com: the status service hands the answer to the daemon
-(`session_answer`), which works the dialog key by key from the screen. Never a prompt for
-permission. Shared code is `questions.rs`; each agent adds, in its own folder:
+An agent that asks the user something in a dialog of its own (Claude Code's `AskUserQuestion`,
+GitHub Copilot's `ask_user`, Droid's `AskUser`) can be answered from rakumux.com: the status
+service hands the answer to the daemon (`session_answer`), which works the dialog key by key from
+the screen. Never a prompt for permission. Shared code is `questions.rs`; each agent adds, in its
+own folder:
 
 - **The log's questions:** `logged`, which entries call its question tool (with the questions,
   their options and whether one takes several) and which give a call's result, read as the log
-  grows (`agent_output::questions::Asked`: the newest call without a result is the open one).
+  grows (`agent_output::questions::Asked`: the newest call without a result is the open one). A
+  call whose questions the driver can't answer (a shape it doesn't know) is still the newest
+  question, with none to answer. The questions are as rakumux.com reads them from the chat (the
+  same text, options and order), since answers name them by text, in order.
 - **Its dialog:** a driver (`Dialog` in `questions.rs`) that reads the screen into the dialog's
   page (which question, its rows and checks, the cursor, the review), says whether the screen
   shows that question's dialog at all, plans the next key from it, and stops at anything it
-  doesn't expect. Its keys are checked against the real agent first and listed in its file, with
-  its screens kept as fixtures (`claude-code/fixtures/questions/`).
-- **Its tool name** for rakumux.com, which offers the picker only for agents it knows
-  (`ANSWERED_QUESTION_TOOLS` in the website's `lib/feed/view.ts`).
+  doesn't expect. A dialog whose cursor is only a style (Droid's, bold) reads the screen with its
+  styles (`Dialog::styled`, `StyledLine`). Its keys are checked against the real agent first and
+  listed in its file, with its screens kept as fixtures (`<agent>/fixtures/questions/`; `.ansi`
+  for a styled one).
+- **Detection** that reads every page of the dialog as `blocked`, also once its free answer
+  holds text (answering checks the agent asks something before each key).
+- **Its tool name** for rakumux.com, which offers the picker only for agents it knows and shapes
+  their machines answer (`ANSWERED_QUESTION_TOOLS` and `answerableQuestions` in the website's
+  `lib/feed/view.ts`).
+
+| Agent | Tool | Keys |
+|---|---|---|
+| Claude Code | `AskUserQuestion` | `up`/`down`, `enter`; `space` ticks; the free answer typed on its row; `Next`/`Submit`, then the review's `Submit answers` |
+| GitHub Copilot | `ask_user` (a form) | a page per field: `up`/`down`, `enter`; `space` ticks; the free answer typed with the cursor on `Other`; text typed; `enter` on the last field gives the answers |
+| Droid | `AskUser` (a questionnaire) | an option's number picks (or ticks) it; `down` to the free answer to type it, and to `Submit`/`Next`, `enter` |
+
+Not answered yet: Cursor's `AskQuestion` (its transcript keeps no call ids or results, which
+answering goes by), Codex's `request_user_input` (in Plan mode) and Amp's `ask_user_choice`; Pi
+has no question tool of its own. Their questions show on rakumux.com, and are answered in the
+terminal.
 
 An agent without a driver gets `unsupported` from the daemon, and rakumux.com never offers its
 questions to answer.
