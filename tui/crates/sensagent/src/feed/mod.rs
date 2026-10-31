@@ -58,5 +58,5 @@ pub fn is_entry_id(id: &str) -> bool {
 pub use wire::TurnRead;
 pub(crate) use wire::{
     failure as refused, reply_upload, session_message_upload, FeedRequest, RealtimeToken,
-    SessionMessage,
+    SessionMessage, AGENT_ANSWERS,
 };

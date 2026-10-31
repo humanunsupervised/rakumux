@@ -45,8 +45,27 @@ pub(crate) const REPLY_ATTACHMENTS: &str = "reply_attachments";
 /// rakumux.com asks, for rtop there (`resources-upload`).
 pub(crate) const RESOURCES: &str = "resources";
 /// Said with the session list while the daemon answers agents' questions
-/// (`session.answer`): rakumux.com takes answers to them for this machine.
+/// (`session.answer`): rakumux.com takes answers to them for this machine
+/// (Claude Code's; the agents below each say so too).
 pub(crate) const QUESTION_ANSWERS: &str = "question_answers";
+/// The agents beyond Claude Code whose questions the daemon answers: the
+/// daemon's capability for each, and what the session list says beside
+/// `question_answers` while it does, so rakumux.com offers to answer that
+/// agent's questions only of a machine that gives the answers.
+pub(crate) const AGENT_ANSWERS: [(&str, &str); 3] = [
+    (
+        session_core::api::CAPABILITY_ANSWER_OPENCODE,
+        "question_answers.opencode",
+    ),
+    (
+        session_core::api::CAPABILITY_ANSWER_GROK,
+        "question_answers.grok",
+    ),
+    (
+        session_core::api::CAPABILITY_ANSWER_KIMI,
+        "question_answers.kimi",
+    ),
+];
 /// Questions answered at once, options chosen per question, and the longest
 /// question, option and free answer an answer carries (contract).
 const MAX_ANSWERS: usize = 8;

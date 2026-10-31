@@ -130,6 +130,9 @@ struct DaemonFeatures {
     /// It answers agents' questions in their own dialogs (capability
     /// `session.answer`): answers from rakumux.com are taken only then.
     answers: bool,
+    /// Which agents beyond Claude Code it answers the questions of
+    /// (`wire::AGENT_ANSWERS`, in order).
+    agent_answers: [bool; crate::feed::AGENT_ANSWERS.len()],
 }
 
 impl DaemonFeatures {
@@ -142,6 +145,8 @@ impl DaemonFeatures {
             resources: has(CAPABILITY_RESOURCES),
             guards_prompts: has(CAPABILITY_SUBMIT_BLOCKED),
             answers: has(CAPABILITY_ANSWER),
+            agent_answers: crate::feed::AGENT_ANSWERS
+                .map(|(daemon, _)| has(CAPABILITY_ANSWER) && has(daemon)),
         }
     }
 }
@@ -770,6 +775,7 @@ fn own<S, A, C>(
             Message::Resync(views, daemon) => {
                 sessions.set_resources(daemon.resources);
                 sessions.set_answers(daemon.answers);
+                sessions.set_agent_answers(&daemon.agent_answers);
                 replies.set_answers(daemon.answers);
                 // Every session the daemon has: what's kept of others goes.
                 refresher.keep_only(views.iter().map(|view| &view.id));

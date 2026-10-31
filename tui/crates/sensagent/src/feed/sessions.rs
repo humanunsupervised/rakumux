@@ -321,6 +321,15 @@ impl SessionSync {
         self.set_capability(wire::QUESTION_ANSWERS, supported);
     }
 
+    /// Which agents beyond Claude Code the daemon answers the questions of
+    /// (`wire::AGENT_ANSWERS`, in order): the list says each one's
+    /// `question_answers.<agent>` only then.
+    pub fn set_agent_answers(&mut self, supported: &[bool]) {
+        for ((_, capability), supported) in wire::AGENT_ANSWERS.iter().zip(supported) {
+            self.set_capability(capability, *supported);
+        }
+    }
+
     fn set_capability(&mut self, capability: &'static str, supported: bool) {
         let has = self.capabilities.contains(&capability);
         if supported == has {
