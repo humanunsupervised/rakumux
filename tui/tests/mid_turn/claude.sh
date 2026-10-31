@@ -226,13 +226,14 @@ next_frame=0
 next_step=$((now + step_ms))
 event started $$
 
+# `read -t 0` only asks whether input waits, and a byte is then read without a
+# timeout: a `read -t` that times out as a byte arrives can drop it.
 while :; do
-  IFS= read -r -N 1 -t 0.05 c
-  status=$?
-  if ((status == 0)); then
+  if IFS= read -r -t 0; then
+    IFS= read -r -N 1 c || exit 0
     on_input "$c"
-  elif ((status <= 128)); then
-    exit 0
+  else
+    sleep 0.05
   fi
   clock
   # Never outlive a test that lost track of it.
