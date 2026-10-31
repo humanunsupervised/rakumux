@@ -28,8 +28,8 @@ Each change is applied to the policy at once and cancels affected jobs.
   lifecycle (working, blocked, its final reply) are not, so a summary started or asked
   for during the turn still applies, title included, when it arrives, and its text stays
   until the next prompt. Output and activity phases mark nothing dirty. The scheduler
-  reads the turn's messages and lifecycle from `candidates` (a chat's automatic summary at
-  `every` (5) messages or its final reply).
+  reads the turn's messages and lifecycle from `candidates` (a session's one automatic
+  summary at `every` (5) messages or its final reply).
 - **Coalesced revision** for output (`activity` events, throttled by the daemon) and
   activity-phase changes. They only mark the session dirty (`is_dirty`); the owner
   calls `advance` when its refresh budget allows another generation. Cached text stays

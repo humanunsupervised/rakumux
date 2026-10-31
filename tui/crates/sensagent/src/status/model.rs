@@ -130,8 +130,8 @@ impl ConsentPolicy {
     /// Whether this policy only adds to `earlier`: the same account (a renewed
     /// sign-in has a new credential revision), every earlier folder still shared,
     /// none with less data. Cached text survives such a change (a renewal, a
-    /// session started in a new folder), since summaries are made once per chat
-    /// and on request, not on every change.
+    /// session started in a new folder), since summaries are made once per
+    /// session and on request, not on every change.
     pub fn extends(&self, earlier: &ConsentPolicy) -> bool {
         match (self, earlier) {
             (

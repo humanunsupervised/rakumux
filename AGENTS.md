@@ -155,23 +155,34 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    are on (`ai_session_summaries` in `GET /api/v1/features`, read every 2 minutes; rakumux.com
    answers on for every signed-in account): then it consents for the folders of live sessions
    (never private ones), and off it stops. **One
-   title per chat**: an agent conversation the daemon follows (`session_turn`) is titled once,
-   when its agent has written 5 messages (`sessions.ai_summary.every_messages`) or its turn
-   finishes sooner; after that only when asked: `OwnerRequest::Summarize` (the ↻ after a
-   hovered session's name, or `s`). **A title is made from the latest prompt** and what the
+   automatic title per session**: a session is titled by itself once in its life, in the first
+   agent conversation the daemon follows there (`session_turn`) whose agent has written 5
+   messages (`sessions.ai_summary.every_messages`) or whose turn finishes sooner; its later
+   turns and chats get none, nor does a program whose turns the daemon doesn't follow
+   (`RefreshScheduler::plan`). After that only when asked: `OwnerRequest::Summarize` (the ↻
+   after a hovered session's name, or `s`), which always applies; a title asked for and made
+   counts as the session's one, so none comes by itself after it either. A first automatic
+   attempt that won't be tried again (its input can't be sent or holds nothing to describe, or
+   the policy declined it) counts too. The AI description comes with the title, so it is made
+   as often. **A title is made from the latest prompt** and what the
    agent wrote since (the newest 10 messages while it works, as many as fit once it finished),
    or the prompt alone while it has written nothing yet; never from an earlier turn's messages,
    never the screen (only for other programs, whose turns the daemon doesn't follow). A
    followed turn is one source from its prompt to the next (`source/tracker.rs`, `Facts::same`):
    its messages and lifecycle moving on while a title is made don't discard it; a new prompt
    (or chat) does, and one asked for is then made again of the new prompt
-   (`RefreshScheduler::finished`). Which chats had their automatic title is kept in
-   `sensagent/status/titled-chats.json` (0600; per session, by the agent's conversation id,
-   which a restart keeps), so neither a restarted service nor a daemon restarted in place
+   (`RefreshScheduler::finished`). Which sessions had their title is kept in
+   `sensagent/status/titled-chats.json` (0600; per session, the agents' conversation ids it and
+   titles asked for were made in, `""` without one, which a restart keeps; a session with any
+   listed has had it, so the file of a release that titled each chat reads the same, and that
+   release reads this one's), so neither a restarted service nor a daemon restarted in place
    titles them again; a session's newest 16 chats and the 256 most recently titled sessions
    are kept, a session the daemon deleted (a `removed` event, or missing from the full list,
    dead sessions included, read at each (re)subscribe) is forgotten, and turning sharing off or
-   signing out clears it, as it always made every chat's title due again. Nothing refreshes on
+   signing out clears it, as it always made every session's title due again: signed in again,
+   a session gets one more automatic title (as soon as its agent's current turn has 5 messages
+   or has finished), which renames it only while its name is still the generated one or the
+   title the service last gave it. Nothing refreshes on
    a timer. **The title names the session** (`refresh/titles.rs`): a worker renames it through
    the daemon (`session_rename`, as the user) only while its name is the generated one
    (`auto_named`) or exactly the title the service last gave it (kept per session in
@@ -976,7 +987,8 @@ accidents; they don't stop a hostile process running as the same user.
   sensagent/                     the account service (`rakumux status-service`): credentials/
                                  (the sign-in, 0600), status/ (descriptions and sharing consent,
                                  SQLite; titles.json: the title it last gave each session;
-                                 titled-chats.json: the chats whose automatic title was made;
+                                 titled-chats.json: the sessions whose one automatic title
+                                 was made, by chat;
                                  chats.json; replies.json: replies typed in or decided
                                  here, where each still going in went, and reports not
                                  yet taken; new-sessions.json:
@@ -1201,7 +1213,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   not part of the registry.
 - **Git context**: a session's branch, linked worktree and repository name, read from `.git` files
   (never `git`).
-- **AI title**: a session's name when the account service gave it (once per agent chat, or when
+- **AI title**: a session's name when the account service gave it (once per session, or when
   asked with `s`/↻); a name the user gave is never replaced automatically.
 - **Place**: a git working tree (main checkout or linked worktree) where a session's agent
   changed files, as its conversation shows; listed under the session's row (`w`).

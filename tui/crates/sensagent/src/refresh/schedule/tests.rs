@@ -38,12 +38,13 @@ fn plan(scheduler: &mut RefreshScheduler, now: Duration, candidates: Vec<Candida
 fn auto(number: u8, conversation: &str) -> Due {
     Due {
         session: session(number),
-        auto: Some(conversation.into()),
+        chat: conversation.into(),
+        auto: true,
     }
 }
 
 #[test]
-fn a_chat_is_summarised_once_at_its_fifth_output() {
+fn a_session_is_summarised_once_at_its_first_chats_fifth_output() {
     let mut scheduler = RefreshScheduler::new();
     assert!(plan(&mut scheduler, secs(0), vec![candidate(1, None, false)]).is_empty());
     assert!(plan(
@@ -59,21 +60,108 @@ fn a_chat_is_summarised_once_at_its_fifth_output() {
     );
     assert_eq!(due, [auto(1, "c1")]);
     scheduler.started(&due[0], secs(1));
-    scheduler.finished(&session(1), Outcome::Done, secs(2));
-    // The same chat never again; a new chat in the same session once.
-    assert!(plan(
-        &mut scheduler,
-        secs(3),
-        vec![candidate(1, turn("c1", 40), true)]
-    )
-    .is_empty());
+    assert_eq!(
+        scheduler
+            .finished(&session(1), Outcome::Done, secs(2))
+            .as_deref(),
+        Some("c1")
+    );
+    // Never again: not the same chat, nor a new chat in the same session.
+    for later in [turn("c1", 40), turn("c2", 5), turn("c3", 9)] {
+        assert!(plan(&mut scheduler, secs(3), vec![candidate(1, later, true)]).is_empty());
+    }
+    // Another session has its own.
     assert_eq!(
         plan(
             &mut scheduler,
             secs(3),
+            vec![candidate(2, turn("c4", 5), false)]
+        ),
+        [auto(2, "c4")]
+    );
+    // Sharing stopped and resumed: due again.
+    scheduler.forget_summaries();
+    assert_eq!(
+        plan(
+            &mut scheduler,
+            secs(4),
             vec![candidate(1, turn("c2", 5), false)]
         ),
         [auto(1, "c2")]
+    );
+}
+
+#[test]
+fn a_summary_asked_for_and_made_is_the_sessions_one() {
+    let mut scheduler = RefreshScheduler::new();
+    // Asked for before its chat's fifth output: not the automatic one, but
+    // made, it counts as the session's.
+    scheduler.request(&session(1));
+    let due = plan(
+        &mut scheduler,
+        secs(0),
+        vec![candidate(1, turn("c1", 2), false)],
+    );
+    assert_eq!(
+        due,
+        [Due {
+            session: session(1),
+            chat: "c1".into(),
+            auto: false,
+        }]
+    );
+    scheduler.started(&due[0], secs(0));
+    assert_eq!(
+        scheduler
+            .finished(&session(1), Outcome::Done, secs(1))
+            .as_deref(),
+        Some("c1")
+    );
+    for later in [turn("c1", 5), turn("c2", 5)] {
+        assert!(plan(&mut scheduler, secs(2), vec![candidate(1, later, true)]).is_empty());
+    }
+
+    // Of a program whose turns the daemon doesn't follow (from its screen):
+    // its agent, started later, gets none either.
+    scheduler.request(&session(2));
+    let due = plan(&mut scheduler, secs(0), vec![candidate(2, None, false)]);
+    scheduler.started(&due[0], secs(0));
+    assert_eq!(
+        scheduler
+            .finished(&session(2), Outcome::Done, secs(1))
+            .as_deref(),
+        Some("")
+    );
+    assert!(plan(
+        &mut scheduler,
+        secs(2),
+        vec![candidate(2, turn("c2", 5), false)]
+    )
+    .is_empty());
+
+    // One asked for that couldn't be sent isn't: the automatic one still comes.
+    scheduler.request(&session(3));
+    let due = plan(
+        &mut scheduler,
+        secs(0),
+        vec![candidate(3, turn("c3", 1), false)],
+    );
+    scheduler.started(&due[0], secs(0));
+    assert_eq!(
+        scheduler.finished(
+            &session(3),
+            Outcome::Failed(RefreshFailure::Rejected),
+            secs(1)
+        ),
+        None
+    );
+    assert_eq!(
+        plan(
+            &mut scheduler,
+            secs(2),
+            vec![candidate(3, turn("c3", 5), false)]
+        ),
+        [auto(3, "c3")]
     );
 }
 
@@ -101,14 +189,14 @@ fn a_chat_that_finishes_sooner_is_summarised_when_it_finishes() {
 #[test]
 fn asking_summarises_any_session_at_once_and_first() {
     let mut scheduler = RefreshScheduler::new();
-    scheduler.summarized(&session(1), "c1".into());
+    scheduler.summarized(&session(1));
     scheduler.request(&session(2));
     assert!(scheduler.requested(&session(2)));
     let due = plan(
         &mut scheduler,
         secs(0),
         vec![
-            candidate(1, turn("c1", 9), true),
+            candidate(1, turn("c9", 9), true),
             candidate(2, None, false),
             candidate(3, turn("c3", 5), false),
         ],
@@ -117,7 +205,7 @@ fn asking_summarises_any_session_at_once_and_first() {
     assert_eq!(
         sessions,
         [session(2), session(3)],
-        "asked first; c1 already summarised"
+        "asked first; session 1 already summarised, in any chat"
     );
     scheduler.started(&due[0], secs(0));
     assert!(!scheduler.requested(&session(2)));
@@ -212,13 +300,10 @@ fn a_rejected_or_declined_automatic_summary_is_not_retried() {
         secs(0),
         vec![candidate(2, turn("c2", 5), false)],
     );
-    scheduler.settle(&due[0]);
-    assert!(plan(
-        &mut scheduler,
-        secs(1),
-        vec![candidate(2, turn("c2", 5), false)]
-    )
-    .is_empty());
+    assert_eq!(scheduler.settle(&due[0]).as_deref(), Some("c2"));
+    for later in [turn("c2", 5), turn("c5", 5)] {
+        assert!(plan(&mut scheduler, secs(1), vec![candidate(2, later, false)]).is_empty());
+    }
 }
 
 #[test]
@@ -251,7 +336,7 @@ fn an_interrupted_summary_is_tried_again_shortly() {
 #[test]
 fn an_interrupted_summary_asked_for_is_still_asked_for() {
     let mut scheduler = RefreshScheduler::new();
-    scheduler.summarized(&session(1), "c1".into());
+    scheduler.summarized(&session(1));
     scheduler.request(&session(1));
     let due = plan(
         &mut scheduler,
@@ -331,7 +416,8 @@ fn the_global_budget_bounds_starts_per_window() {
         scheduler.started(
             &Due {
                 session: session(number),
-                auto: None,
+                chat: String::new(),
+                auto: false,
             },
             secs(0),
         );

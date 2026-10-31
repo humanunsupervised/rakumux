@@ -482,7 +482,7 @@ impl<S: StatusStore, A: AccountGate, C: StatusClock> AISessionStatusService<S, A
     /// What a session shows, or (`exact`) whether its current source is
     /// described already. Shown text stays while the same terminal process
     /// runs, through lifecycle and report changes: summaries are made once per
-    /// chat and when asked for, not on every change. Only `exact` text keeps a
+    /// session and when asked for, not on every change. Only `exact` text keeps a
     /// new summary from being made.
     fn eligible_view(
         &mut self,

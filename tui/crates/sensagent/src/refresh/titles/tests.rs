@@ -217,7 +217,7 @@ fn titled_chats_are_remembered_in_a_private_file() {
     let mut again = TitledChats::load(Some(path.clone()));
     assert!(chats(&again, &id(2)).is_empty());
     assert_eq!(chats(&again, &id(3)), ["synthetic-chat-c"]);
-    // Sharing stopped: every chat is titled again once it resumes.
+    // Sharing stopped: every session is titled again once it resumes.
     again.clear();
     assert_eq!(TitledChats::load(Some(path.clone())).iter().count(), 0);
 

@@ -175,7 +175,8 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     machine: Option<crate::feed::MachineIdentity>,
     /// The name this service last gave each session (its AI title).
     titles: Titles,
-    /// The chats whose one automatic title was made, kept across restarts.
+    /// The sessions whose one automatic title was made (by the chats it, and
+    /// titles asked for, were made in), kept across restarts.
     titled: TitledChats,
     /// An enrolled machine's tokens: they sign it in and renew it, never Clerk.
     machine_tokens: Option<std::sync::Arc<crate::enrolment::MachineTokens>>,
@@ -226,12 +227,14 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         self
     }
 
-    /// Remember in `path` which chats had their one automatic title, so a
+    /// Remember in `path` which sessions had their one automatic title, so a
     /// restarted service doesn't title them again (memory only without it).
+    /// A session with any titled chat there has had it: an older release's
+    /// file, which listed each chat it titled, reads the same.
     pub fn with_titled_chats(mut self, path: std::path::PathBuf) -> Self {
         self.titled = TitledChats::load(Some(path));
-        for (session, chat) in self.titled.iter() {
-            self.scheduler.summarized(&session, chat.to_owned());
+        for (session, _) in self.titled.iter() {
+            self.scheduler.summarized(&session);
         }
         self
     }
@@ -244,7 +247,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         self.titled.keep_only(&known);
     }
 
-    /// The scheduler settled `chat`'s automatic title, if any: kept.
+    /// The scheduler settled the session's title, in `chat`, if any: kept.
     fn titled(&mut self, session: &SessionId, chat: Option<String>) {
         if let Some(chat) = chat {
             self.titled.add(session, &chat);
@@ -359,8 +362,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     }
 
     /// Apply a fresh daemon `list` after (re)subscribing; refreshing may start.
-    /// A chat whose session shows a summary already (this service restarted)
-    /// gets no automatic one.
+    /// A session that shows a summary already (this service restarted) gets
+    /// no automatic one.
     pub fn resync(&mut self, views: &[SessionView], _now: Duration) -> Result<(), DispatchError> {
         let result = self.service.resync(views);
         self.observed.extend(self.running.iter().cloned());
@@ -372,9 +375,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 self.service.view(&candidate.session),
                 Ok(StatusView::Ready(_))
             ) {
-                let chat = conversation(turn);
-                self.scheduler.summarized(&candidate.session, chat.clone());
-                self.titled(&candidate.session, Some(chat));
+                self.scheduler.summarized(&candidate.session);
+                self.titled(&candidate.session, Some(conversation(turn)));
             }
         }
         self.connected = true;

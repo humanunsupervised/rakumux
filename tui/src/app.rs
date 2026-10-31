@@ -1496,7 +1496,7 @@ const DAEMON_FEATURES: [(&str, &str); 13] = [
     ),
     (
         session_core::api::CAPABILITY_TURN,
-        "AI titles of each agent's chat",
+        "AI titles from agents' chats",
     ),
     (session_core::api::CAPABILITY_REPLIES, "the agent feed"),
     (

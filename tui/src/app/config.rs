@@ -99,10 +99,10 @@ pub struct SessionsConfig {
     /// this version doesn't know reads as plain.
     #[serde(deserialize_with = "lenient_icons", skip_serializing_if = "is_plain")]
     pub icons: Icons,
-    /// When an agent's chat gets its AI title (and description): once it has
-    /// written `every_messages` messages (5) or its turn finishes sooner, from
-    /// your prompt and its newest `recent_messages` (10). Read by the status
-    /// service each minute.
+    /// When a session gets its one automatic AI title (and description): once
+    /// its agent has written `every_messages` messages (5) or its turn finishes
+    /// sooner, from your prompt and its newest `recent_messages` (10). Read by
+    /// the status service each minute.
     #[serde(
         deserialize_with = "lenient_ai_summary",
         skip_serializing_if = "AiSummaryConfig::is_default"
@@ -225,12 +225,12 @@ fn is_plain(icons: &Icons) -> bool {
     *icons == Icons::Plain
 }
 
-/// `sessions.ai_summary`: when agents' chats get AI titles.
+/// `sessions.ai_summary`: when sessions get their automatic AI title.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiSummaryConfig {
-    /// A chat's title is made once its agent has written this many messages
-    /// since your prompt.
+    /// A session's title is made once its agent has written this many
+    /// messages since your prompt.
     pub every_messages: u32,
     /// The newest of its messages a title is made from, after your prompt.
     pub recent_messages: u32,

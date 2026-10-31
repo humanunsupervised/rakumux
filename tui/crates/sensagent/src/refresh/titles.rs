@@ -24,7 +24,7 @@ use crate::status::{SessionTitle, MAX_CACHE_ENTRIES};
 
 /// Sessions whose last title is remembered; the least recently titled go first.
 const MAX_TITLES: usize = MAX_CACHE_ENTRIES;
-/// A session's chats whose automatic title is remembered: its newest.
+/// A session's titled chats remembered: its newest.
 const MAX_CHATS: usize = 16;
 /// The longest conversation id kept (the daemon's own bound).
 const MAX_CHAT_CHARS: usize = 128;
@@ -258,13 +258,16 @@ impl fmt::Debug for Titles {
     }
 }
 
-/// The chats (agent conversations) of each session whose one automatic
-/// title was made, kept in a file (0600) when given one, so a restarted
-/// service, or one following a daemon restarted in place, doesn't title them
-/// again. Conversation ids are the agents' own, the same across restarts; a
-/// chat without one is `""`. A session's newest [`MAX_CHATS`] are kept, and
-/// the [`MAX_TITLES`] most recently titled sessions; a session the daemon
-/// deleted is forgotten.
+/// The sessions whose one automatic title was made, each with the chats
+/// (agent conversations) it and titles asked for were made in, kept in a file
+/// (0600) when given one, so a restarted service, or one following a daemon
+/// restarted in place, doesn't title them again. A session with any chat
+/// listed has had its title: a file an older release wrote, which listed every
+/// chat it titled, reads the same, and that release reads this one's as
+/// before. Conversation ids are the agents' own, the same across restarts; a
+/// chat without one, or a program whose turns the daemon doesn't follow, is
+/// `""`. A session's newest [`MAX_CHATS`] are kept, and the [`MAX_TITLES`]
+/// most recently titled sessions; a session the daemon deleted is forgotten.
 #[derive(Default)]
 pub(crate) struct TitledChats {
     path: Option<PathBuf>,
@@ -324,7 +327,7 @@ impl TitledChats {
         })
     }
 
-    /// `chat` of `session` has its automatic title.
+    /// `session` has its title, made in `chat`.
     pub(crate) fn add(&mut self, session: &SessionId, chat: &str) {
         if chat.chars().count() > MAX_CHAT_CHARS {
             return;
@@ -365,7 +368,7 @@ impl TitledChats {
         }
     }
 
-    /// Sharing stopped and its text was dropped: every chat gets its
+    /// Sharing stopped and its text was dropped: every session gets its
     /// automatic title again once sharing resumes.
     pub(crate) fn clear(&mut self) {
         if !self.sessions.is_empty() {

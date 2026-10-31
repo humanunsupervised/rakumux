@@ -53,12 +53,13 @@ instead of sent.
   interval of continuous output, and never inside the interval. The stamp is advanced
   only when the refresh starts.
 - **Followed turns.** A session whose agent turn the daemon follows is summarised once
-  per chat (at its agent's `every` (5) messages or its final reply, whichever comes
-  first) and when asked, never for terminal output; backoff, the budget and the two
-  slots still apply. A summary is of the latest prompt and what the agent wrote about
-  it, and stays the prompt's while the agent goes on, so its title still names the
-  session when it arrives. The turn settings are read again every minute
-  (`with_turn_settings`).
+  in its life (in the first chat that reaches its agent's `every` (5) messages or its
+  final reply, whichever comes first; a summary asked for that was made, or a first
+  automatic one that won't be tried again, counts as that one) and when asked, never for
+  terminal output; backoff, the budget and the two slots still apply. A summary is of the
+  latest prompt and what the agent wrote about it, and stays the prompt's while the agent
+  goes on, so its title still names the session when it arrives. The turn settings are
+  read again every minute (`with_turn_settings`).
 - **Asked for.** A summary asked for (`request`) whose attempt was interrupted (a new
   prompt or another change of the session meanwhile, a rate limit) stays asked for and
   is tried again after `INTERRUPTED_RETRY` (5 s), of what the session shows then.
@@ -102,15 +103,18 @@ its name is the generated one (`auto_named`) or exactly the title this service l
 folder has gets ` 2`, ` 3`, …; one taken meanwhile is chosen again once. A service without
 titles names nothing. A removed session's title is forgotten.
 
-Which chats had their one automatic title (`TitledChats`, `titled-chats.json`, 0600: per
-session, the agents' conversation ids) is kept as the scheduler settles each, and loaded
-into it at start (`with_titled_chats`), so a restarted service, or one following a daemon
-restarted in place (the same sessions and conversations, turns numbered afresh), doesn't
-title them again. A session keeps its newest 16 chats, the 256 most recently titled
-sessions are kept, and a session is forgotten when the daemon removes it or doesn't list it
-(the runner lists dead sessions too, `keep_only`, and follows the others). Turning sharing
-off or signing out clears it, like the scheduler's own memory. Titles asked for don't
-depend on it.
+Which sessions had their one automatic title (`TitledChats`, `titled-chats.json`, 0600: per
+session, the agents' conversation ids it and titles asked for were made in, `""` without
+one) is kept as the scheduler settles each, and loaded into it at start
+(`with_titled_chats`), so a restarted service, or one following a daemon restarted in place
+(the same sessions and conversations, turns numbered afresh), doesn't title them again. A
+session with any chat listed has had its title: the file is the one a release that titled
+each chat wrote and reads, unchanged. A session keeps its newest 16 chats, the 256 most
+recently titled sessions are kept, and a session is forgotten when the daemon removes it or
+doesn't list it (the runner lists dead sessions too, `keep_only`, and follows the others).
+Turning sharing off or signing out clears it, like the scheduler's own memory, so a session
+signed in again gets one more automatic title. Titles asked for don't depend on it; one
+that's made is added to it.
 
 ## Failures and threads
 

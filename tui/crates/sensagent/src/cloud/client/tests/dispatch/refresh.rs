@@ -152,7 +152,8 @@ pub(super) fn ready(status: &AIStatus) -> bool {
     matches!(&status.view, StatusView::Ready(entry) if entry.text.as_str() == STATUS)
 }
 
-/// An agent chat at its fifth message: due for its one automatic summary.
+/// An agent chat at its fifth message: due for its session's one automatic
+/// summary.
 pub(super) fn tracked_view(number: u8) -> SessionView {
     let mut view = plain_view(number);
     view.agent_turn = Some(AgentTurn {
@@ -950,7 +951,7 @@ fn renamed(api: &FakeSessionApi) -> bool {
 }
 
 #[test]
-fn a_chats_title_names_its_session_and_the_next_chats_title_replaces_it() {
+fn a_session_is_titled_once_and_its_next_chats_are_not() {
     let api = api(&[generated(2)]);
     let mut harness = Harness::enabled(ReplyMode::Success);
     harness.send_title(Some("Fix the CSV parser"));
@@ -963,10 +964,20 @@ fn a_chats_title_names_its_session_and_the_next_chats_title_replaces_it() {
         Some("Fix the CSV parser")
     );
 
-    // The name is the service's own: the next chat's title replaces it.
+    // The name is still the service's own, but the session had its title:
+    // its next chats get none, however long they run.
     harness.send_title(Some("Write the release notes"));
-    next_chat(&mut harness, &api, 2, 2, 1);
-    assert_eq!(harness.round(&api, 1), 1);
+    for (chat, now) in [(2, 1), (3, 601)] {
+        next_chat(&mut harness, &api, 2, chat, now);
+        for now in [now, now + 599] {
+            assert_eq!(harness.round(&api, now), 0, "chat {chat} at {now}");
+        }
+    }
+    assert_eq!(name(&api, 2), "Fix the CSV parser");
+    assert_eq!(harness.calls(), 1);
+    // A title asked for still applies.
+    harness.refresher.request(&session(2));
+    assert_eq!(harness.round(&api, 2000), 1);
     assert_eq!(name(&api, 2), "Write the release notes");
 }
 
@@ -982,8 +993,7 @@ fn a_name_the_user_gave_stays_until_a_title_is_asked_for() {
 
     harness.send_title(Some("Write the release notes"));
     next_chat(&mut harness, &api, 2, 2, 1);
-    assert_eq!(harness.round(&api, 1), 1);
-    assert!(ready(&harness.status(2)));
+    assert_eq!(harness.round(&api, 1), 0);
     assert_eq!(name(&api, 2), "csv work");
 
     // Asking (`s`, the ↻) always applies, and the name is the service's again.
@@ -991,10 +1001,11 @@ fn a_name_the_user_gave_stays_until_a_title_is_asked_for() {
     harness.refresher.request(&session(2));
     assert_eq!(harness.round(&api, 2), 1);
     assert_eq!(name(&api, 2), "Release notes");
+    // Still no automatic title after it.
     harness.send_title(Some("Ship the release"));
     next_chat(&mut harness, &api, 2, 3, 3);
-    assert_eq!(harness.round(&api, 3), 1);
-    assert_eq!(name(&api, 2), "Ship the release");
+    assert_eq!(harness.round(&api, 3), 0);
+    assert_eq!(name(&api, 2), "Release notes");
 }
 
 /// The session `api` holds now, its agent on turn `turn` of the same chat
@@ -1119,7 +1130,7 @@ fn a_title_asked_for_follows_a_prompt_typed_while_it_was_made() {
 }
 
 #[test]
-fn a_restarted_service_doesnt_title_a_chat_with_its_automatic_title_again() {
+fn a_restarted_service_doesnt_title_a_session_with_its_automatic_title_again() {
     let kept = tempfile::tempdir().unwrap();
     let path = kept.path().join("titled-chats.json");
     let api = api(&[generated(2)]);
@@ -1147,14 +1158,80 @@ fn a_restarted_service_doesnt_title_a_chat_with_its_automatic_title_again() {
         assert_eq!(restarted.round(&api, now), 0, "{now}");
     }
     assert_eq!(name(&api, 2), "Fix the CSV parser");
-    // Its next chat gets its own, and a title asked for always applies.
+    // Nor its next chat; a title asked for always applies.
     next_chat(&mut restarted, &api, 2, 3, 601);
-    assert_eq!(restarted.round(&api, 601), 1);
-    assert_eq!(name(&api, 2), "Parse quoted commas");
+    assert_eq!(restarted.round(&api, 601), 0);
+    assert_eq!(name(&api, 2), "Fix the CSV parser");
     restarted.send_title(Some("Quoted comma tests"));
     restarted.refresher.request(&session(2));
     assert_eq!(restarted.round(&api, 602), 1);
     assert_eq!(name(&api, 2), "Quoted comma tests");
+}
+
+#[test]
+fn a_title_asked_for_first_is_the_sessions_one_after_a_restart_too() {
+    let kept = tempfile::tempdir().unwrap();
+    // A shell: no agent's turn to follow, so its screen, only when asked.
+    let mut shell = plain_view(2);
+    shell.name = "brisk-otter-2".into();
+    shell.auto_named = true;
+    let api = api(&[shell.clone()]);
+    let mut harness = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
+    harness.send_title(Some("Tail the server logs"));
+    harness.resync(&api, vec![shell], 0);
+    assert_eq!(harness.round(&api, 0), 0);
+    harness.refresher.request(&session(2));
+    assert_eq!(harness.round(&api, 1), 1);
+    assert_eq!(name(&api, 2), "Tail the server logs");
+
+    // The service restarts, then an agent started there reaches its fifth
+    // message: the session had its title, so it gets no automatic one.
+    let mut restarted = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
+    restarted.send_title(Some("Fix the CSV parser"));
+    restarted.resync(&api, vec![api.get(&session(2)).unwrap()], 2);
+    next_chat(&mut restarted, &api, 2, 1, 3);
+    for now in [3, 60, 600] {
+        assert_eq!(restarted.round(&api, now), 0, "{now}");
+    }
+    assert_eq!(name(&api, 2), "Tail the server logs");
+}
+
+#[test]
+fn an_older_releases_titled_chats_count_for_their_session() {
+    let kept = tempfile::tempdir().unwrap();
+    let path = kept.path().join("titled-chats.json");
+    // As a release that titled every chat wrote it: the chats it titled.
+    let older = json!({
+        "version": 1,
+        "sessions": {
+            session(2).as_str(): {"chats": ["synthetic-chat-1", "synthetic-chat-2"], "used": 2}
+        }
+    });
+    fs::write(&path, serde_json::to_vec(&older).unwrap()).unwrap();
+    // A chat it doesn't list, at its fifth message.
+    let api = api(&[generated(2)]);
+    let mut harness = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
+    harness.send_title(Some("Write the release notes"));
+    harness.resync(&api, vec![generated(2)], 0);
+    for now in [0, 60, 600] {
+        assert_eq!(harness.round(&api, now), 0, "{now}");
+    }
+    assert!(!renamed(&api));
+
+    // A title asked for adds its chat, in the format that release reads.
+    harness.refresher.request(&session(2));
+    assert_eq!(harness.round(&api, 601), 1);
+    assert_eq!(name(&api, 2), "Write the release notes");
+    let file: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(file["version"], 1);
+    assert_eq!(
+        file["sessions"][session(2).as_str()]["chats"],
+        json!([
+            "synthetic-chat-1",
+            "synthetic-chat-2",
+            "synthetic-conversation-2"
+        ])
+    );
 }
 
 #[test]
@@ -1181,7 +1258,7 @@ fn titled_chats_of_sessions_gone_or_of_sharing_turned_off_are_forgotten() {
     assert!(!titled_again(&api));
     harness.event(event(2, SessionEvent::Removed), 1);
     assert!(titled_again(&api));
-    // Sharing turned off: every chat is titled again once it's back on.
+    // Sharing turned off: every session is titled again once it's back on.
     let mut harness = Harness::enabled(ReplyMode::Success).titling_in(kept.path());
     harness.resync(&api, vec![generated(2)], 0);
     let revision = harness.refresher.consent().unwrap().revision;

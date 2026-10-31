@@ -648,7 +648,7 @@ fn a_no_context_turn_is_read_again_when_asked_or_at_its_next_prompt() {
     let source = observed(tracker.no_context(&read(1, stamp(1, 1), false, true)));
     assert!(!source.context.recent_output);
     unchanged(tracker.apply_view(&turn_view(1, 7, 5, Lifecycle::Working)));
-    // Due (its chat's fifth message, or asked for): read afresh.
+    // Due (its turn's fifth message, or asked for): read afresh.
     tracker.freshen(&id(1));
     let source = observed(tracker.advance(&id(1)));
     assert!(source.context.recent_output);
@@ -673,7 +673,7 @@ fn turn_settings_are_bounded_and_unfollowed_output_still_counts() {
         }
     );
     observed(tracker.apply_view(&turn_view(1, 7, 1, Lifecycle::Working)));
-    // The chat's automatic summary is due at `every` (the scheduler's); the
+    // The session's automatic summary is due at `every` (the scheduler's); the
     // turn stays one source.
     unchanged(tracker.apply_view(&turn_view(1, 7, 2, Lifecycle::Working)));
     // Without a followed turn (an older daemon), output counts as before.

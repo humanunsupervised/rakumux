@@ -250,9 +250,9 @@ last said or did (`SessionView.agent_output`) and what the user last typed to it
 - **Where it goes:** the lines reach the daemon's clients like the rest of the session's view
   (the TUI, `rakumux-api` and so the phone app). The turn goes only to user clients that ask:
   the AI status service, which, while you're signed in and share the folder, makes one
-  summary per conversation, once its agent has written 5 messages or when its turn finishes
-  sooner (the prompt and the newest 10 messages; at a final reply every message that fits;
-  `sessions.ai_summary` in `config.json`), and others only when asked (the ↻ on a
+  summary per session, in its first conversation whose agent has written 5 messages or whose
+  turn finishes sooner (the prompt and the newest 10 messages; at a final reply every message
+  that fits; `sessions.ai_summary` in `config.json`), and others only when asked (the ↻ on a
   description, or `s`).
 
 ## Replies for the feed
