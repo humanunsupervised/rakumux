@@ -2014,7 +2014,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     doc.keys(vec![
         row("●", "Running"),
         row(
-            "◐",
+            "?",
             "Waiting for you: an agent asked a question or wants permission",
         ),
         row("✕", "Exited: the program ended; its last screen is kept"),
@@ -2027,7 +2027,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
         "For coding agents the list also shows what they're doing: working, blocked (waiting \
          for you), unread reply (finished, not opened yet) or idle. The right-side badge is \
          a spinner for working (including subagents), ○ for idle, ● for an unread reply, \
-         or ◐ when input is needed. Opening the session clears unread across windows; \
+         or ? when input is needed. Opening the session clears unread across windows; \
          list and Grid previews do not. A reply that arrives in the foreground open session \
          is already seen. Rakumux uses agent hooks when available, with screen/process \
          detection as the fallback.",

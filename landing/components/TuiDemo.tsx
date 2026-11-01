@@ -59,7 +59,7 @@ const CLAUDE_STARS = ["✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳"];
 function Mark({ status, frame }: { status: Status; frame: number }) {
   switch (status) {
     case "waiting":
-      return <span className="tn-orange">◐</span>;
+      return <span className="tn-orange">?</span>;
     case "unread":
       return <span className="tn-amber">●</span>;
     case "working":

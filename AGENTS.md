@@ -1582,7 +1582,8 @@ The App and Status tabs group the same list differently (`app/grouping.rs`). App
 app (`AppKey::of`: the session's `agent.kind`, else its foreground program unless a shell, else
 `launch.argv[0]` unless a shell, else `shell`; an ended session keeps its agent), agents first,
 then other programs, then `shell`, each by name, with live/total. Status: a header per status
-(`StatusGroup::of`, like the rows' status marks: waiting for you, unread (a finished turn not yet
+(`StatusGroup::of`, like the rows' status marks: waiting for you (`?`, orange: a question, a permission prompt
+or a menu; `·` is an unknown status), unread (a finished turn not yet
 looked at), working, waiting for response (the `WaitingForResponse` activity phase), running
 (live, nothing reported), exited, dead, then ready (idle: a reply that's been read)), in that order, with a session count. Each app and status has an order of its
 own (`sessions.section_order`, by `Section::key`: `app:claude`, `status:working`): the order the

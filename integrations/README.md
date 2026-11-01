@@ -451,7 +451,7 @@ follows the right-aligned age:
 - Spinner: working, including active subagents.
 - `○`: idle, with no unread completion.
 - `●`: the latest turn finished and has not been opened (`Lifecycle::Done`).
-- `◐`: waiting for input or permission, distinct from a completed reply.
+- `?`: waiting for input or permission, distinct from a completed reply.
 
 Active subagents also show as a count after the status in the session's description, the
 detail's title and Grid cards: `◈ 3` (🤖 or a Nerd Font robot with those icon sets). It's the

@@ -95,7 +95,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
      claude · ⎇ main · working    │
                                   │
  wt-docs  ⎇ docs ─────── 1/2 live │
-   ◐ docs-pass               1h   │
+   ? docs-pass               1h   │
      ⎇ docs · waiting for you     │
                                   │
    ○ old-spike               3d   │

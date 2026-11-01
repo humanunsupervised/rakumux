@@ -243,7 +243,7 @@ mod tests {
                 for (lifecycle, mark) in [
                     (Lifecycle::Idle, "○"),
                     (Lifecycle::Done, "●"),
-                    (Lifecycle::Blocked, "◐"),
+                    (Lifecycle::Blocked, "?"),
                 ] {
                     let mut session = view("A", "agent", 10);
                     session.agent = Some(AgentInfo {
@@ -1184,7 +1184,7 @@ mod tests {
         let list = list_column(&wide, width);
         assert!(list[1].starts_with("   ◔ Status ▾"), "{wide}");
         let headers: Vec<usize> = [
-            " ◐ waiting for you ─",
+            " ? waiting for you ─",
             " ● unread ─",
             " working ─",
             " waiting for response ─",
@@ -1344,7 +1344,7 @@ mod tests {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("┌ Statuses ─"), "{screen}");
             assert!(screen.contains("[x] All statuses"), "{screen}");
-            assert!(screen.contains("[ ] ◐ waiting for"), "{screen}");
+            assert!(screen.contains("[ ] ? waiting for"), "{screen}");
             // Statuses nothing is in yet are listed, to pick them anyway.
             assert!(screen.contains("[ ] ✕ exited"), "{screen}");
             for row in screen.lines().filter(|l| l.contains("] ")) {
@@ -1655,7 +1655,7 @@ mod tests {
         // The footer names the session in view under the header (its mark
         // and name: what fits beside the label and the buttons).
         let footer = narrow.lines().last().unwrap();
-        assert!(footer.starts_with(" ◐ frontend "), "{footer:?}");
+        assert!(footer.starts_with(" ? frontend "), "{footer:?}");
         // On the tabs, the list shows its top again.
         h.app.list.select(crate::app::Selection::Folders);
         let narrow = render(&mut h.app, 80, 24);

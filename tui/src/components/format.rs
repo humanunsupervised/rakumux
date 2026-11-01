@@ -69,9 +69,9 @@ pub fn status_glyph(session: &SessionView) -> (&'static str, Style) {
     match session.status {
         SessionStatus::Dead => ("○", Style::default().fg(p.text_muted)),
         SessionStatus::Exited => ("✕", Style::default().fg(p.accent_pink)),
-        SessionStatus::Unknown => ("?", Style::default().fg(p.text_muted)),
+        SessionStatus::Unknown => ("·", Style::default().fg(p.text_muted)),
         SessionStatus::Live => match session.lifecycle {
-            Lifecycle::Blocked => ("◐", Style::default().fg(p.accent_orange)),
+            Lifecycle::Blocked => ("?", Style::default().fg(p.accent_orange)),
             Lifecycle::Working => (
                 super::utils::get_spinner_char(),
                 Style::default().fg(p.accent_primary),
@@ -89,7 +89,7 @@ pub fn status_glyph(session: &SessionView) -> (&'static str, Style) {
 pub fn status_group_glyph(status: StatusGroup) -> (&'static str, Style) {
     let p = theme::palette();
     match status {
-        StatusGroup::WaitingForYou => ("◐", Style::default().fg(p.accent_orange)),
+        StatusGroup::WaitingForYou => ("?", Style::default().fg(p.accent_orange)),
         StatusGroup::Unread => ("●", Style::default().fg(p.accent_gold)),
         StatusGroup::Working | StatusGroup::WaitingForResponse => (
             super::utils::get_spinner_char(),
@@ -99,7 +99,7 @@ pub fn status_group_glyph(status: StatusGroup) -> (&'static str, Style) {
         StatusGroup::Dead => ("○", Style::default().fg(p.text_muted)),
         StatusGroup::Running => ("●", Style::default().fg(p.accent_green)),
         StatusGroup::Exited => ("✕", Style::default().fg(p.accent_pink)),
-        StatusGroup::Unknown => ("?", Style::default().fg(p.text_muted)),
+        StatusGroup::Unknown => ("·", Style::default().fg(p.text_muted)),
     }
 }
 
@@ -590,8 +590,15 @@ mod tests {
     fn labels_and_glyphs() {
         let mut session = view("A", "a", 0);
         session.lifecycle = Lifecycle::Blocked;
-        assert_eq!(status_glyph(&session).0, "◐");
+        assert_eq!(status_glyph(&session).0, "?");
         assert!(needs_attention(&session));
+        // Waiting for you is the only status marked `?`.
+        assert_eq!(status_group_glyph(StatusGroup::WaitingForYou).0, "?");
+        for status in StatusGroup::ALL {
+            if status != StatusGroup::WaitingForYou {
+                assert_ne!(status_group_glyph(status).0, "?", "{status:?}");
+            }
+        }
         session.status = SessionStatus::Exited;
         session.exit_code = Some(2);
         assert_eq!(status_glyph(&session).0, "✕");
@@ -620,7 +627,7 @@ mod tests {
         );
         assert!("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(status_glyph(&session).0));
         session.lifecycle = Lifecycle::Blocked;
-        assert_eq!(status_glyph(&session).0, "◐");
+        assert_eq!(status_glyph(&session).0, "?");
         session.lifecycle = Lifecycle::Done;
         session.activity = None;
         assert_eq!(status_glyph(&session).0, "●");
@@ -725,7 +732,7 @@ mod tests {
         session.lifecycle = Lifecycle::Working;
         assert!("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(activity_badge(&session).unwrap().0));
         session.lifecycle = Lifecycle::Blocked;
-        assert_eq!(activity_badge(&session).unwrap().0, "◐");
+        assert_eq!(activity_badge(&session).unwrap().0, "?");
         for status in [SessionStatus::Exited, SessionStatus::Dead] {
             session.status = status;
             assert!(activity_badge(&session).is_none());
