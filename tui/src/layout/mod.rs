@@ -93,14 +93,16 @@ const FEED_MAX_DEFAULT_COLS: u16 = 60;
 /// windows show the feed in the session's place, in Rakumux mode only.
 pub const FEED_SESSION_MIN_COLS: u16 = 60;
 
-/// Fewest columns the session and the terminal panel each keep when the
-/// panel is beside it ([`PanelPlacement::Beside`]): the session's minimum
-/// beside a docked feed. Narrower details show the panel below instead.
-pub const PANEL_BESIDE_MIN_COLS: u16 = FEED_SESSION_MIN_COLS;
+/// Fewest columns the session keeps with the terminal panel beside it
+/// ([`PanelPlacement::Beside`]): its minimum beside a docked feed.
+pub const PANEL_BESIDE_SESSION_MIN_COLS: u16 = FEED_SESSION_MIN_COLS;
+/// Fewest columns the terminal panel keeps beside the session.
+pub const PANEL_BESIDE_MIN_COLS: u16 = 40;
 
 /// Narrowest detail that holds the session, a divider and the terminal
-/// panel beside it.
-pub const PANEL_BESIDE_DETAIL_COLS: u16 = 2 * PANEL_BESIDE_MIN_COLS + 1;
+/// panel beside it (101: a 150-column window with the list beside).
+/// Narrower details show the panel below instead.
+pub const PANEL_BESIDE_DETAIL_COLS: u16 = PANEL_BESIDE_SESSION_MIN_COLS + 1 + PANEL_BESIDE_MIN_COLS;
 
 /// Longest session name drawn on a tab before it's cut with `…`.
 pub const TAB_NAME_MAX: usize = 24;
@@ -1274,19 +1276,23 @@ mod tests {
             panel_beside: true,
             ..PaneSizes::default()
         };
-        // The list hidden: 160 - rail - divider - 121 leaves 36 of its 44.
-        assert_eq!(docked_feed_width(160, sidebar, beside(true)), Some(36));
+        // The list hidden: 140 - rail - divider - 101 leaves 36 of its 44;
+        // 160 has room for all 44.
+        assert_eq!(docked_feed_width(160, sidebar, beside(true)), Some(44));
+        assert_eq!(docked_feed_width(140, sidebar, beside(true)), Some(36));
         assert_eq!(
-            docked_feed_width(154, sidebar, beside(true)),
+            docked_feed_width(134, sidebar, beside(true)),
             Some(FEED_MIN_COLS)
         );
         // One column less: the feed keeps its width (the panel goes below).
-        assert_eq!(docked_feed_width(153, sidebar, beside(true)), Some(44));
-        // With the list there's no room at 160: as without the panel.
+        assert_eq!(docked_feed_width(133, sidebar, beside(true)), Some(44));
+        // With the list: 200 narrows it from 50 to 49; at 160 there's no
+        // room, so it's as without the panel.
+        assert_eq!(docked_feed_width(200, sidebar, beside(false)), Some(49));
         assert_eq!(docked_feed_width(160, sidebar, beside(false)), Some(44));
         // Grid's session needs only the detail's columns; Tabs never docks.
         assert_eq!(
-            docked_feed_width(160, SessionLayout::Grid, beside(false)),
+            docked_feed_width(140, SessionLayout::Grid, beside(false)),
             Some(38)
         );
         assert_eq!(
@@ -1294,13 +1300,13 @@ mod tests {
             None
         );
         let areas = split_with(
-            rect(0, 0, 160, 47),
+            rect(0, 0, 140, 47),
             sidebar,
             PaneFocus::Detail,
             beside(true),
         );
         assert_eq!(areas.detail.width, PANEL_BESIDE_DETAIL_COLS);
-        assert_eq!(areas.feed, Some(rect(124, 0, 36, 47)));
+        assert_eq!(areas.feed, Some(rect(104, 0, 36, 47)));
     }
 
     #[test]

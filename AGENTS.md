@@ -1706,12 +1706,14 @@ session, `-` below, or moves it there while it's open (the same shell; focused e
 on an open panel already there they do what `T` does. The placement is saved as
 `sessions.terminal_panel` and Settings → Terminal panel placement switches it.
 Beside (`screen::with_terminal_panel`, `layout::PanelPlacement`): the session, a one-column
-divider, then the panel, each at least `layout::PANEL_BESIDE_MIN_COLS` (60) wide, half each
-until the divider is dragged (its share kept for the window, as the height below is). It splits
+divider, then the panel: the session at least `layout::PANEL_BESIDE_SESSION_MIN_COLS` (60)
+wide and the panel `layout::PANEL_BESIDE_MIN_COLS` (40), about 60/40 until the divider is
+dragged (its share kept for the window, as the height below is, within those minimums). It splits
 only the detail, so it applies to Master detail, Tabs and Grid's session alike, and a docked
 drawer stays right of the panel (list | session | panel | drawer): the drawer narrows towards
 `FEED_MIN_COLS` to make room (`PaneSizes::panel_beside`), and where even that leaves less than
-`layout::PANEL_BESIDE_DETAIL_COLS` (121) the drawer keeps its width and the panel shows below.
+`layout::PANEL_BESIDE_DETAIL_COLS` (101) the drawer keeps its width and the panel shows below.
+Beside fits from a 150-column window with the list beside the session (103 with it hidden).
 Any detail narrower than that (narrow windows, phones, the list and the drawer on a 160-column
 window) shows it below; `|` then says "No room beside: shown below", and a wider window puts it
 beside again. Changing the placement resizes only the terminal with the keys, as a dragged

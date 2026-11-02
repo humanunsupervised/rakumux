@@ -19,7 +19,8 @@ use crate::layout::PanelPlacement;
 use crate::terminal_view::{self, TerminalView};
 
 const DEFAULT_HEIGHT_PERCENT: u16 = 35;
-const DEFAULT_WIDTH_PERCENT: u16 = 50;
+/// Beside: the session about 60%, the panel 40%.
+const DEFAULT_WIDTH_PERCENT: u16 = 40;
 const MAX_CELLS: usize = 500_000;
 const MAX_CHECKPOINT: usize = 2 * 1024 * 1024;
 const SCROLLBACK: usize = 500;

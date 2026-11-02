@@ -197,7 +197,7 @@ new-session flow, and code boundaries.
 - State slices (`state/`):
   - terminal panel (`terminal_panel.rs`): a temporary daemon-owned PTY below or beside the
     main detail (`layout::PanelPlacement`, `sessions.terminal_panel`; `|`/`-` place it,
-    `screen::with_terminal_panel` falls back below without 60 columns each),
+    `screen::with_terminal_panel` falls back below without 60 + 1 + 40 columns),
     not a session. `SessionApi::open_terminal`/`attach_terminal` use the `terminal.pane`
     capability; never `create`, `revive`, `delete`, list entries or saved session output.
     `Focus::Terminal` owns key/paste/mouse/cursor routing; no input leaks to the agent. T or

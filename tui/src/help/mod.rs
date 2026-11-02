@@ -625,9 +625,9 @@ impl KeyAction {
             }
             KeyAction::TerminalPanelBeside | KeyAction::TerminalPanelBelow => {
                 "| opens the terminal panel beside the session, - below it, or moves it there \
-                 while it's open; T then reopens it there. Beside needs 60 columns each for \
-                 the session and the panel (a docked Feed narrows to make room): narrower, \
-                 it shows below. Phones show it below."
+                 while it's open; T then reopens it there. Beside needs 60 columns for the \
+                 session and 40 for the panel (a docked Feed narrows to make room): \
+                 narrower, it shows below. Phones show it below."
                     .into()
             }
             KeyAction::Rtop => "This window, the Rakumux server, its other clients and \

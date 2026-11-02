@@ -520,9 +520,9 @@ async fn capital_t_reopens_the_panel_where_it_was_last_placed() {
 
 #[tokio::test]
 async fn bar_on_a_window_without_room_beside_opens_below_and_says_so() {
-    // 160 columns with the list: the detail has 111, under 60 + 1 + 60.
+    // 149 columns with the list: the detail has 100, under 60 + 1 + 40.
     // A phone too keeps the panel below its session.
-    for (width, height) in [(160, 48), (110, 40), (45, 40)] {
+    for (width, height) in [(149, 48), (140, 48), (110, 40), (45, 40)] {
         let mut h = harness(vec![view("A", "agent", 1)]);
         render(&mut h, width, height);
         h.press(KeyCode::Char('|')).await;
@@ -583,7 +583,18 @@ async fn the_beside_divider_drags_sideways_and_keeps_both_minimums() {
     h.app
         .handle_terminal_event(mouse(MouseEventKind::Drag(MouseButton::Left), 0))
         .await;
-    assert!(h.app.screen().terminal.unwrap().width >= crate::layout::PANEL_BESIDE_MIN_COLS);
+    assert_eq!(
+        h.app.screen().terminal.unwrap().width,
+        crate::layout::PANEL_BESIDE_SESSION_MIN_COLS
+    );
+    // Far past the panel's: it keeps 40.
+    h.app
+        .handle_terminal_event(mouse(MouseEventKind::Drag(MouseButton::Left), 199))
+        .await;
+    assert_eq!(
+        h.app.screen().terminal_panel.unwrap().width,
+        crate::layout::PANEL_BESIDE_MIN_COLS
+    );
     h.app
         .handle_terminal_event(mouse(MouseEventKind::Up(MouseButton::Left), 0))
         .await;

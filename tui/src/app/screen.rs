@@ -137,8 +137,9 @@ pub struct PanelGeometry {
 }
 
 /// Split only the detail, never the sidebar, the feed or the footer.
-/// Beside goes right of the session where the detail holds both with
-/// [`layout::PANEL_BESIDE_MIN_COLS`] each, else below. Below, on short
+/// Beside goes right of the session where the detail holds both, the
+/// session [`layout::PANEL_BESIDE_SESSION_MIN_COLS`] and the panel
+/// [`layout::PANEL_BESIDE_MIN_COLS`], else below. Below, on short
 /// screens the shell takes the detail while focused; it is hidden
 /// otherwise.
 pub fn with_terminal_panel(mut screen: Screen, panel: PanelGeometry) -> Screen {
@@ -149,10 +150,12 @@ pub fn with_terminal_panel(mut screen: Screen, panel: PanelGeometry) -> Screen {
         return screen;
     }
     if panel.placement == PanelPlacement::Beside && fits_beside(detail) {
-        let min = layout::PANEL_BESIDE_MIN_COLS;
         let room = detail.width - 1;
         let width = ((u32::from(room) * u32::from(panel.width_percent.clamp(20, 80))) / 100) as u16;
-        let width = width.clamp(min, room - min);
+        let width = width.clamp(
+            layout::PANEL_BESIDE_MIN_COLS,
+            room - layout::PANEL_BESIDE_SESSION_MIN_COLS,
+        );
         let divider_x = detail.right() - width - 1;
         screen.detail = Some(Rect {
             width: divider_x - detail.x,
@@ -206,8 +209,8 @@ pub fn with_terminal_panel(mut screen: Screen, panel: PanelGeometry) -> Screen {
     screen
 }
 
-/// The detail holds the session and the panel side by side: each keeps
-/// [`layout::PANEL_BESIDE_MIN_COLS`], with a title row and two rows of
+/// The detail holds the session and the panel side by side
+/// ([`layout::PANEL_BESIDE_DETAIL_COLS`]), with a title row and two rows of
 /// shell.
 pub fn fits_beside(detail: Rect) -> bool {
     detail.width >= layout::PANEL_BESIDE_DETAIL_COLS && detail.height >= 3
@@ -352,7 +355,7 @@ mod tests {
         for focus in [Focus::List, Focus::Session, Focus::Terminal] {
             let base = at(200, 48, SessionLayout::Sidebar, focus);
             let detail = base.detail.unwrap();
-            let screen = with_terminal_panel(base, beside(focus == Focus::Terminal, 50));
+            let screen = with_terminal_panel(base, beside(focus == Focus::Terminal, 40));
             assert_tiled(&screen, &format!("{focus:?}"));
             assert!(screen.terminal_panel_beside);
             let (main, divider, panel) = (
@@ -367,18 +370,22 @@ mod tests {
             assert_eq!(panel.right(), detail.right());
             assert_eq!((main.height, panel.height), (47, 47));
             assert_eq!(main.width + 1 + panel.width, detail.width);
-            assert_eq!(panel.width, (detail.width - 1) / 2);
+            // About 60/40 until the divider is dragged: 139 - 1 → 83 | 55.
+            assert_eq!(detail.width, 139);
+            assert_eq!((main.width, panel.width), (83, 55));
             assert_eq!(screen.terminal, Some(main));
             assert_eq!((screen.list, screen.footer), (base.list, base.footer));
         }
         // A dragged divider's share, each side kept to its minimum.
         let base = at(200, 48, SessionLayout::Sidebar, Focus::Terminal);
         let detail = base.detail.unwrap();
+        let widest = detail.width - 1 - layout::PANEL_BESIDE_SESSION_MIN_COLS;
         for (percent, panel_cols) in [
             (20, layout::PANEL_BESIDE_MIN_COLS),
-            (80, detail.width - 1 - layout::PANEL_BESIDE_MIN_COLS),
+            (50, 69),
+            (80, widest),
             (5, layout::PANEL_BESIDE_MIN_COLS),
-            (95, detail.width - 1 - layout::PANEL_BESIDE_MIN_COLS),
+            (95, widest),
         ] {
             let screen = with_terminal_panel(base, beside(true, percent));
             assert_eq!(
@@ -386,21 +393,35 @@ mod tests {
                 panel_cols,
                 "{percent}"
             );
-            assert!(screen.detail.unwrap().width >= layout::PANEL_BESIDE_MIN_COLS);
+            assert!(screen.detail.unwrap().width >= layout::PANEL_BESIDE_SESSION_MIN_COLS);
         }
     }
 
     #[test]
-    fn beside_falls_back_below_where_the_session_and_the_panel_cannot_keep_60_columns_each() {
+    fn beside_falls_back_below_where_the_session_and_the_panel_cannot_keep_their_minimums() {
         let hidden = PaneSizes {
             list_hidden: true,
             ..PaneSizes::default()
         };
-        // 2 rail columns + 121: just enough; one less goes below.
-        for (width, fits) in [(123, true), (122, false), (90, false), (45, false)] {
+        // 60 + 1 + 40 = 101 columns of detail: with the list beside, a
+        // 150-column window (48 + 1 + 101); with it hidden, 2 rail columns
+        // + 101. One column less goes below.
+        for (width, sizes, fits) in [
+            (200, PaneSizes::default(), true),
+            (160, PaneSizes::default(), true),
+            (150, PaneSizes::default(), true),
+            (149, PaneSizes::default(), false),
+            (140, PaneSizes::default(), false),
+            (140, hidden, true),
+            (103, hidden, true),
+            (102, hidden, false),
+            (90, hidden, false),
+            (45, hidden, false),
+        ] {
             for focus in [Focus::List, Focus::Session, Focus::Terminal] {
-                let label = format!("{width} {focus:?}");
-                let screen = with_panel(width, 40, focus, hidden, beside(false, 50));
+                let label = format!("{width} {} {focus:?}", sizes.list_hidden);
+                let hidden = sizes;
+                let screen = with_panel(width, 40, focus, hidden, beside(false, 40));
                 assert_tiled(&screen, &label);
                 let detail_shown = screen.terminal_panel.is_some();
                 if !detail_shown {
@@ -415,8 +436,12 @@ mod tests {
                     assert_eq!(screen.terminal_panel, below.terminal_panel, "{label}");
                     assert_eq!(screen.terminal, below.terminal, "{label}");
                 } else {
-                    assert!(screen.terminal.unwrap().width >= layout::PANEL_BESIDE_MIN_COLS);
-                    assert!(screen.terminal_panel.unwrap().width >= layout::PANEL_BESIDE_MIN_COLS);
+                    let (main, panel) = (screen.terminal.unwrap(), screen.terminal_panel.unwrap());
+                    assert!(
+                        main.width >= layout::PANEL_BESIDE_SESSION_MIN_COLS,
+                        "{label}"
+                    );
+                    assert!(panel.width >= layout::PANEL_BESIDE_MIN_COLS, "{label}");
                 }
             }
         }
@@ -431,7 +456,7 @@ mod tests {
             ..PaneSizes::default()
         };
         // Wide enough for everything at the feed's own width.
-        let screen = with_panel(300, 48, Focus::Terminal, feed(false), beside(true, 50));
+        let screen = with_panel(300, 48, Focus::Terminal, feed(false), beside(true, 40));
         assert_tiled(&screen, "300");
         let (list, main, panel, docked) = (
             screen.list.unwrap(),
@@ -444,19 +469,25 @@ mod tests {
         assert_eq!(screen.feed_divider.unwrap().x, panel.right());
         assert_eq!(docked.x, panel.right() + 1);
         assert_eq!(docked.width, layout::default_feed_width(300));
-        // 160 columns, the list hidden: the feed narrows from 44 so the
-        // session and the panel keep 60 each.
-        let screen = with_panel(160, 48, Focus::Terminal, feed(true), beside(true, 50));
-        assert_tiled(&screen, "160 hidden");
+        // 200 columns with the list: the feed narrows from 50 to 49 so the
+        // detail keeps 101 (60 + 1 + 40).
+        let screen = with_panel(200, 48, Focus::Terminal, feed(false), beside(true, 40));
+        assert_tiled(&screen, "200");
+        assert!(screen.terminal_panel_beside);
+        assert_eq!(layout::default_feed_width(200), 50);
+        assert_eq!(screen.feed.unwrap().width, 49);
+        // 140 columns, the list hidden: the feed narrows from 44 to 36.
+        let screen = with_panel(140, 48, Focus::Terminal, feed(true), beside(true, 40));
+        assert_tiled(&screen, "140 hidden");
         assert!(screen.terminal_panel_beside);
         assert_eq!(
             screen.feed.unwrap().width,
-            160 - layout::RAIL_COLS - 1 - 121
+            140 - layout::RAIL_COLS - 1 - layout::PANEL_BESIDE_DETAIL_COLS
         );
         assert!(screen.feed.unwrap().width >= layout::FEED_MIN_COLS);
-        // The list beside too: no feed width leaves 121, so the feed keeps
+        // 160 with the list: no feed width leaves 101, so the feed keeps
         // its width and the panel goes below.
-        let screen = with_panel(160, 48, Focus::Terminal, feed(false), beside(true, 50));
+        let screen = with_panel(160, 48, Focus::Terminal, feed(false), beside(true, 40));
         assert_tiled(&screen, "160");
         assert!(!screen.terminal_panel_beside);
         assert_eq!(screen.feed.unwrap().width, layout::default_feed_width(160));
@@ -472,7 +503,7 @@ mod tests {
     fn beside_applies_to_tabs_and_to_grids_session_and_short_wide_windows_keep_both() {
         for layout in [SessionLayout::Tabs, SessionLayout::Grid] {
             let base = at(200, 40, layout, Focus::Terminal);
-            let screen = with_terminal_panel(base, beside(true, 50));
+            let screen = with_terminal_panel(base, beside(true, 40));
             assert_tiled(&screen, &format!("{layout:?}"));
             assert!(screen.terminal_panel_beside, "{layout:?}");
             assert_eq!(screen.tabs, base.tabs);
@@ -481,12 +512,12 @@ mod tests {
         // Grid browsing has no detail: nothing to split.
         let grid = at(200, 40, SessionLayout::Grid, Focus::List);
         assert_eq!(
-            with_terminal_panel(grid, beside(false, 50)).terminal_panel,
+            with_terminal_panel(grid, beside(false, 40)).terminal_panel,
             None
         );
         // 10 rows: too short below for both, but beside each keeps every row.
         let short = at(200, 11, SessionLayout::Sidebar, Focus::Session);
-        let screen = with_terminal_panel(short, beside(false, 50));
+        let screen = with_terminal_panel(short, beside(false, 40));
         assert!(screen.terminal_panel_beside);
         assert_eq!(screen.terminal.unwrap().height, 10);
         assert_eq!(screen.terminal_panel.unwrap().height, 10);

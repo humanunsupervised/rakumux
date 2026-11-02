@@ -2565,12 +2565,15 @@ mod tests {
     /// The terminal panel beside or below the session, on a wide window, a
     /// window with the feed docked and a narrow one: `(name, screen)`.
     async fn terminal_panel_renders() -> Vec<(&'static str, String)> {
-        let cases: [(&str, u16, u16, char, bool, bool); 6] = [
-            ("wide-beside", 200, 48, '|', false, false),
-            ("wide-below", 200, 48, '-', false, false),
-            ("feed-beside-list-hidden", 160, 48, '|', true, true),
-            ("feed-falls-back-below", 160, 48, '|', true, false),
-            ("narrow-falls-back-below", 110, 40, '|', false, false),
+        let cases: [(&str, u16, u16, char, bool, bool); 9] = [
+            ("200-beside", 200, 48, '|', false, false),
+            ("200-below", 200, 48, '-', false, false),
+            ("200-feed-beside", 200, 48, '|', true, false),
+            ("160-beside", 160, 48, '|', false, false),
+            ("160-feed-falls-back-below", 160, 48, '|', true, false),
+            ("140-falls-back-below", 140, 48, '|', false, false),
+            ("140-feed-beside-list-hidden", 140, 48, '|', true, true),
+            ("110-falls-back-below", 110, 40, '|', false, false),
             ("phone-below", 45, 30, '|', false, false),
         ];
         let mut out = Vec::new();
@@ -2615,6 +2618,9 @@ mod tests {
                 assert_eq!(header, 0, "{name}\n{screen}");
                 let at = rows[0].chars().take_while(|c| *c != 'T').count();
                 assert!(at > 60, "{name}\n{screen}");
+                // The session keeps 60 columns and the panel 40.
+                let panel = rows[0].chars().count() - at + 1;
+                assert!(panel >= 40, "{name}: {panel}\n{screen}");
                 let column = rows[5].chars().nth(at - 2).unwrap();
                 assert_eq!(column, '│', "{name}\n{screen}");
             } else {
@@ -2622,7 +2628,7 @@ mod tests {
                 assert!(rows[header - 1].contains("────"), "{name}\n{screen}");
             }
             assert!(screen.contains("Cargo.toml"), "{name}\n{screen}");
-            if name.starts_with("feed") {
+            if name.contains("feed") {
                 assert!(screen.contains("≡ Feed"), "{name}\n{screen}");
             }
         }

@@ -949,7 +949,7 @@ impl App {
                 (
                     "Terminal panel placement",
                     value.to_string(),
-                    "Where T opens the terminal panel: below the session, or beside it where the window has room for both (60 columns each; a docked Feed narrows to make room). Narrower windows and phones show it below. | and - open it there or move it while it's open.",
+                    "Where T opens the terminal panel: below the session, or beside it where the window has room for both (60 columns for the session, 40 for the panel; a docked Feed narrows to make room). Narrower windows and phones show it below. | and - open it there or move it while it's open.",
                 )
             }
         };
