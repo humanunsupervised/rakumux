@@ -742,16 +742,11 @@ async fn rakumux_mode_shows_the_mode_the_selected_session_help_and_settings_in_t
         .map(|x| buffer.get(x, 39).symbol().to_string())
         .collect();
     assert!(footer.starts_with(" session: ● a "), "A: {footer:?}");
-    // The mode in the middle, then the buttons.
-    let at = footer.find(" RAKUMUX MODE ").expect("the mode");
-    let label = crate::layout::str_width(" RAKUMUX MODE ");
-    assert_eq!(
-        crate::layout::str_width(&footer[..at]),
-        (120 - label) / 2,
-        "{footer:?}"
-    );
+    // The mode (left of the middle, for the version), then the buttons.
+    assert!(footer.contains(" RAKUMUX MODE   f ≡ Feed "), "{footer:?}");
     assert!(
-        footer.ends_with(" ? Help   , Settings   a ✓ Signed in  "),
+        crate::components::footer::without_version(&footer)
+            .ends_with(" ? Help   , Settings   a ✓ Signed in  "),
         "{footer:?}"
     );
     let screen: String = buffer.content().iter().map(|c| c.symbol()).collect();
@@ -779,6 +774,7 @@ async fn option_arrows_in_sessions_is_a_general_setting() {
 #[tokio::test]
 async fn tips_in_the_footer_turn_off_in_settings_and_are_saved_only_off() {
     let mut h = harness(vec![view("A", "a", 30)]);
+    h.app.settings.sessions.tips = true;
     let row = SettingsItem::Tips.index();
     let general = &h.app.modal_context(false).general[row];
     assert_eq!(general.label, "Tips in the footer");
@@ -5073,7 +5069,8 @@ async fn signed_out_the_footer_offers_sign_in_and_a_tap_starts_it() {
     // Signed in, the same corner says so, and a tap there shows the account.
     let (mut h, _) = account_harness(testing::FakeAccount::signed_in());
     assert!(
-        footer(&h).ends_with(" , Settings   a ✓ Signed in  "),
+        crate::components::footer::without_version(&footer(&h))
+            .ends_with(" , Settings   a ✓ Signed in  "),
         "{:?}",
         footer(&h)
     );

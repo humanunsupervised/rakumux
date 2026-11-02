@@ -1478,8 +1478,7 @@ feed is on; it does what `f` does), `? Help` and `, Settings`, then the
 Rakumux account: `a Sign in` while signed out (a tap asks for a sign-in code
 at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\` alone in
 session mode (the label names the mode); and last, quieter, this Rakumux's version (`v0.1.37`, a
-local build's `v0.1.0`). In Rakumux mode, in the room left between the label and the buttons and
-against the buttons, a **tip** (`app/tips.rs`, `App::tip`): a key and what it does (`T terminal
+local build's `v0.1.0`). In Rakumux mode, just left of the buttons, a **tip** (`app/tips.rs`, `App::tip`): a key and what it does (`T terminal
 panel`, `f every agent's replies`, `t rtop: what sessions use`, the Rakumux key's `session or
 Rakumux mode`, `U update (sessions stay up)`, `w where it changed files`, `v Master detail, Grid,
 Tabs`, `p pin to the top`, `Tab last session`, `a answer agents from the web` only while signed
@@ -1489,10 +1488,11 @@ next day shows the next one; a click or tap on it (`Hit::FooterTip`) shows the n
 window's, memory only), never runs it. None in session mode (those keys aren't Rakumux's there),
 while typing a filter or under a dialog, nor with `sessions.tips` off (Settings → Tips in the
 footer). To count while the feed is hidden the TUI asks the account service for
-it every 10 s as a `background` read (every 2 s while it shows). When the row is short the tip
-goes first (it shows only while the version does and fits beside the centred label: it never moves
-or cuts anything), then the version (it shows only while every button, the session and the message keep their
-room and the label stays centred), then the session gives way (to its name alone, then nothing), then the message is cut, then
+it every 10 s as a `background` read (every 2 s while it shows). The tip and the version may take
+the label off centre, as the buttons may, but never cut the session or the message or drop a
+button (and the tip moves none): each shows only while it fits whole, a column or two clear around
+it. When the row is
+short the tip goes first (it shows only while the version does), then the version, then the session gives way (to its name alone, then nothing), then the message is cut, then
 buttons go from the right (the account, Settings, Help, then the Feed's, which carries the
 count: a 40-column phone keeps it and Help, Settings from 48); the label never goes, its short
 word (`RAKUMUX`) under 14 columns.

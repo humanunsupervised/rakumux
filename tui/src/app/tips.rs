@@ -151,7 +151,14 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{harness, view, FakeAccount};
+    use crate::app::testing::{view, FakeAccount};
+
+    /// A harness with tips on (the harness turns them off).
+    fn harness(sessions: Vec<session_core::model::SessionView>) -> crate::app::testing::Harness {
+        let mut h = crate::app::testing::harness(sessions);
+        h.app.settings.sessions.tips = true;
+        h
+    }
 
     fn all_tips(h: &crate::app::testing::Harness) -> Vec<Tip> {
         (0..TIPS.len() as i32)
@@ -225,7 +232,10 @@ mod tests {
     #[test]
     fn the_setting_hides_tips() {
         let mut h = harness(vec![view("A", "api", 10)]);
-        assert!(h.app.settings.sessions.tips, "on by default");
+        assert!(
+            crate::app::config::Settings::default().sessions.tips,
+            "on by default"
+        );
         h.app.settings.sessions.tips = false;
         assert_eq!(h.app.tip(739_922), None);
         h.app.next_tip();

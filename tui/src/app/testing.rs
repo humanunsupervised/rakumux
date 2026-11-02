@@ -1164,8 +1164,12 @@ impl crate::updater::UpdateService for FakeUpdater {
 
 pub fn options(fake: &Arc<FakeApi>, scope: ScopeRoot, dir: &tempfile::TempDir) -> AppOptions {
     let api: Arc<dyn SessionApi> = fake.clone();
+    let mut settings = Settings::default();
+    // No tip in the footer: it changes with the date and moves the label.
+    // The tips' own tests turn them on.
+    settings.sessions.tips = false;
     AppOptions {
-        settings: Settings::default(),
+        settings,
         config_path: Some(dir.path().join("config.json")),
         scope,
         paths: Some(Layout::with_home(dir.path().to_path_buf())),
