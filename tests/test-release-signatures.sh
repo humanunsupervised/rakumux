@@ -75,9 +75,12 @@ sign_with() {
 # Fixture releases, as GitHub serves them. The package's own install.sh
 # records which release it is.
 FIXTURE="$TEMP/releases"
-platform="$(case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64) echo macos-arm64 ;; Darwin-x86_64) echo macos-intel ;; *) echo linux-x64 ;;
-esac)"
+# A plain case: macOS's bash 3.2 can't parse one inside $( ).
+case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64) platform=macos-arm64 ;;
+    Darwin-x86_64) platform=macos-intel ;;
+    *) platform=linux-x64 ;;
+esac
 package() {
     local tag="$1" dir="$FIXTURE/$1"
     mkdir -p "$dir/build/rakumux-$platform"
