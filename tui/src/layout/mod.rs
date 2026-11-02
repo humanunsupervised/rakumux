@@ -93,6 +93,15 @@ const FEED_MAX_DEFAULT_COLS: u16 = 60;
 /// windows show the feed in the session's place, in Rakumux mode only.
 pub const FEED_SESSION_MIN_COLS: u16 = 60;
 
+/// Fewest columns the session and the terminal panel each keep when the
+/// panel is beside it ([`PanelPlacement::Beside`]): the session's minimum
+/// beside a docked feed. Narrower details show the panel below instead.
+pub const PANEL_BESIDE_MIN_COLS: u16 = FEED_SESSION_MIN_COLS;
+
+/// Narrowest detail that holds the session, a divider and the terminal
+/// panel beside it.
+pub const PANEL_BESIDE_DETAIL_COLS: u16 = 2 * PANEL_BESIDE_MIN_COLS + 1;
+
 /// Longest session name drawn on a tab before it's cut with `…`.
 pub const TAB_NAME_MAX: usize = 24;
 /// Blank columns between two tabs, and between a tab and an overflow
@@ -161,6 +170,38 @@ impl SessionLayout {
         Self::ALL
             .into_iter()
             .filter(move |layout| !(phone && *layout == SessionLayout::Grid))
+    }
+}
+
+/// Where the terminal panel goes in the detail: under the session (the
+/// default), or right of it where the detail has room for both
+/// ([`PANEL_BESIDE_DETAIL_COLS`]); a narrower detail shows it below.
+/// Saved as `sessions.terminal_panel`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelPlacement {
+    /// Under the session, a row between them (`-`).
+    #[default]
+    Below,
+    /// Right of the session, a column between them (`|`).
+    Beside,
+}
+
+impl PanelPlacement {
+    /// Name shown in Settings.
+    pub fn label(self) -> &'static str {
+        match self {
+            PanelPlacement::Below => "Below",
+            PanelPlacement::Beside => "Beside",
+        }
+    }
+
+    /// The other placement (Settings' toggle).
+    pub fn other(self) -> Self {
+        match self {
+            PanelPlacement::Below => PanelPlacement::Beside,
+            PanelPlacement::Beside => PanelPlacement::Below,
+        }
     }
 }
 
@@ -240,6 +281,11 @@ pub struct PaneSizes {
     pub feed: FeedShown,
     /// Docked feed pane width (see [`docked_feed_width`]).
     pub feed_cols: Option<u16>,
+    /// The terminal panel is open beside the session: a docked feed
+    /// narrows (down to [`FEED_MIN_COLS`]) so the detail keeps
+    /// [`PANEL_BESIDE_DETAIL_COLS`]; when even that doesn't fit, the feed
+    /// keeps its width and the panel goes below.
+    pub panel_beside: bool,
 }
 
 /// A phone-width screen ([`PHONE_BELOW`]): the list or a session, never
@@ -293,28 +339,37 @@ pub fn default_feed_width(total: u16) -> u16 {
 /// columns wide: `sizes.feed_cols` (else [`default_feed_width`]), narrowed
 /// down to [`FEED_MIN_COLS`] as far as the session needs to keep
 /// [`FEED_SESSION_MIN_COLS`] beside it (and Master detail its list or
-/// rail). `None` when even the narrowest pane doesn't leave that, and in
-/// Tabs and on phones, which don't dock it.
+/// rail; with the terminal panel beside the session, [`PANEL_BESIDE_DETAIL_COLS`]
+/// when some width leaves that). `None` when even the narrowest pane
+/// doesn't leave the session its columns, and in Tabs and on phones, which
+/// don't dock it.
 pub fn docked_feed_width(total: u16, layout: SessionLayout, sizes: PaneSizes) -> Option<u16> {
     if is_phone(total) || layout == SessionLayout::Tabs {
         return None;
     }
-    let session_fits = |main: u16| {
-        let beside = match layout {
-            SessionLayout::Sidebar if sizes.list_hidden => RAIL_COLS,
-            SessionLayout::Sidebar => list_width(main, sizes.list_cols) + 1,
-            SessionLayout::Grid | SessionLayout::Tabs => 0,
-        };
-        main.saturating_sub(beside) >= FEED_SESSION_MIN_COLS
-    };
     let preferred = sizes
         .feed_cols
         .unwrap_or_else(|| default_feed_width(total))
         .min(total)
         .max(FEED_MIN_COLS);
-    (FEED_MIN_COLS..=preferred)
-        .rev()
-        .find(|width| total > width + 1 && session_fits(total - width - 1))
+    let widest = |detail_cols: u16| {
+        let session_fits = |main: u16| {
+            let beside = match layout {
+                SessionLayout::Sidebar if sizes.list_hidden => RAIL_COLS,
+                SessionLayout::Sidebar => list_width(main, sizes.list_cols) + 1,
+                SessionLayout::Grid | SessionLayout::Tabs => 0,
+            };
+            main.saturating_sub(beside) >= detail_cols
+        };
+        (FEED_MIN_COLS..=preferred)
+            .rev()
+            .find(|width| total > width + 1 && session_fits(total - width - 1))
+    };
+    let with_panel = sizes
+        .panel_beside
+        .then(|| widest(PANEL_BESIDE_DETAIL_COLS))
+        .flatten();
+    with_panel.or_else(|| widest(FEED_SESSION_MIN_COLS))
 }
 
 /// Height of a stacked list in an area `total` rows tall: `percent` of it
@@ -1208,6 +1263,44 @@ mod tests {
         let split = split_with(area, SessionLayout::Sidebar, PaneFocus::List, sizes);
         assert_eq!(split.list, Some(rect(0, 0, 90, 25)));
         assert_eq!(split.detail, rect(0, 26, 90, 13));
+    }
+
+    #[test]
+    fn a_docked_feed_narrows_for_the_terminal_panel_beside_or_keeps_its_width() {
+        let sidebar = SessionLayout::Sidebar;
+        let beside = |list_hidden| PaneSizes {
+            feed: FeedShown::Shown,
+            list_hidden,
+            panel_beside: true,
+            ..PaneSizes::default()
+        };
+        // The list hidden: 160 - rail - divider - 121 leaves 36 of its 44.
+        assert_eq!(docked_feed_width(160, sidebar, beside(true)), Some(36));
+        assert_eq!(
+            docked_feed_width(154, sidebar, beside(true)),
+            Some(FEED_MIN_COLS)
+        );
+        // One column less: the feed keeps its width (the panel goes below).
+        assert_eq!(docked_feed_width(153, sidebar, beside(true)), Some(44));
+        // With the list there's no room at 160: as without the panel.
+        assert_eq!(docked_feed_width(160, sidebar, beside(false)), Some(44));
+        // Grid's session needs only the detail's columns; Tabs never docks.
+        assert_eq!(
+            docked_feed_width(160, SessionLayout::Grid, beside(false)),
+            Some(38)
+        );
+        assert_eq!(
+            docked_feed_width(200, SessionLayout::Tabs, beside(false)),
+            None
+        );
+        let areas = split_with(
+            rect(0, 0, 160, 47),
+            sidebar,
+            PaneFocus::Detail,
+            beside(true),
+        );
+        assert_eq!(areas.detail.width, PANEL_BESIDE_DETAIL_COLS);
+        assert_eq!(areas.feed, Some(rect(124, 0, 36, 47)));
     }
 
     #[test]

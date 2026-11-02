@@ -15,9 +15,11 @@ use super::detail::{classify_output, Attachment, OutputAction};
 use super::runtime::{cancel_flag, AppEvent};
 use super::types::{AppMode, AppResult, Focus};
 use super::App;
+use crate::layout::PanelPlacement;
 use crate::terminal_view::{self, TerminalView};
 
 const DEFAULT_HEIGHT_PERCENT: u16 = 35;
+const DEFAULT_WIDTH_PERCENT: u16 = 50;
 const MAX_CELLS: usize = 500_000;
 const MAX_CHECKPOINT: usize = 2 * 1024 * 1024;
 const SCROLLBACK: usize = 500;
@@ -31,7 +33,10 @@ pub struct TerminalPanel {
     pub attachment: Option<Attachment<PaneId>>,
     pub message: Option<String>,
     pub title: Option<String>,
+    /// Its share of the detail's height below (a dragged divider).
     pub height_percent: u16,
+    /// Its share of the detail's width beside (a dragged divider).
+    pub width_percent: u16,
     pub dragging: bool,
     pending: Option<u64>,
     epoch: u64,
@@ -54,6 +59,7 @@ impl Default for TerminalPanel {
             message: None,
             title: None,
             height_percent: DEFAULT_HEIGHT_PERCENT,
+            width_percent: DEFAULT_WIDTH_PERCENT,
             dragging: false,
             pending: None,
             epoch: 0,
@@ -88,6 +94,53 @@ impl App {
         } else {
             self.show_terminal_panel();
         }
+    }
+
+    /// `|` (beside) and `-` (below): open the panel there, or move it there
+    /// while it's open elsewhere, focusing it either way. Already open
+    /// there, it does what `T` does. Where the detail has no room beside
+    /// (see [`crate::app::screen::fits_beside`]) it shows below and says
+    /// so; the placement is still kept for `T`.
+    pub fn terminal_panel_at(&mut self, placement: PanelPlacement) {
+        if self.terminal_panel.open && self.settings.sessions.terminal_panel == placement {
+            self.toggle_terminal_panel();
+        } else {
+            // Only the panel, focused now, takes its new size.
+            self.keep_panel_placement(placement);
+            self.show_terminal_panel();
+            self.sync_panel_size();
+        }
+        if self.terminal_panel.open
+            && placement == PanelPlacement::Beside
+            && !self.screen_for(Focus::Terminal).terminal_panel_beside
+        {
+            self.set_status("No room beside: shown below");
+        }
+    }
+
+    /// Settings' placement row: keep `placement` for `T` and move an open
+    /// panel there. The terminal with the keys takes its new size, as a
+    /// dragged divider gives it.
+    pub fn place_terminal_panel(&mut self, placement: PanelPlacement) {
+        if !self.keep_panel_placement(placement) || !self.terminal_panel.open {
+            return;
+        }
+        self.sync_panel_size();
+        self.sync_terminal_size();
+    }
+
+    /// Save `placement` as `sessions.terminal_panel`; false when it already
+    /// was.
+    fn keep_panel_placement(&mut self, placement: PanelPlacement) -> bool {
+        if self.settings.sessions.terminal_panel == placement {
+            return false;
+        }
+        self.settings.sessions.terminal_panel = placement;
+        self.terminal_panel.dragging = false;
+        if let Err(error) = self.save_settings() {
+            self.set_status(format!("Couldn't save settings: {error}"));
+        }
+        true
     }
 
     /// Start a standalone shell only when this window has no existing pane.
@@ -535,15 +588,28 @@ impl App {
             .unwrap_or((80, 12))
     }
 
-    pub(super) fn drag_terminal_panel(&mut self, row: u16) {
+    pub(super) fn drag_terminal_panel(&mut self, column: u16, row: u16) {
         let screen = self.screen();
         let (Some(main), Some(panel)) = (screen.detail, screen.terminal_panel) else {
             return;
         };
-        let total = panel.bottom().saturating_sub(main.y).max(1);
-        let height = panel.bottom().saturating_sub(row).saturating_sub(1);
-        self.terminal_panel.height_percent =
-            ((u32::from(height) * 100 / u32::from(total)) as u16).clamp(20, 70);
+        if screen.terminal_panel_beside {
+            // The share of the columns right of the divider; the geometry
+            // keeps both sides their minimum.
+            let total = panel
+                .right()
+                .saturating_sub(main.x)
+                .saturating_sub(1)
+                .max(1);
+            let width = panel.right().saturating_sub(column).saturating_sub(1);
+            self.terminal_panel.width_percent =
+                ((u32::from(width) * 100 / u32::from(total)) as u16).clamp(20, 80);
+        } else {
+            let total = panel.bottom().saturating_sub(main.y).max(1);
+            let height = panel.bottom().saturating_sub(row).saturating_sub(1);
+            self.terminal_panel.height_percent =
+                ((u32::from(height) * 100 / u32::from(total)) as u16).clamp(20, 70);
+        }
         self.sync_panel_size();
         self.sync_terminal_size();
     }

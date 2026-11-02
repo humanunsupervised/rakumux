@@ -242,8 +242,12 @@ pub enum KeyAction {
     CycleLayout,
     /// `b`: hide Master detail's list beside the session, or show it.
     HideList,
-    /// Reveal/focus the independent shell below the detail pane.
+    /// Reveal/focus the independent shell where it was last placed.
     TerminalPanel,
+    /// `|`: the terminal panel beside the session.
+    TerminalPanelBeside,
+    /// `-`: the terminal panel below the session.
+    TerminalPanelBelow,
     /// `t`: rtop, what this machine, Rakumux and every session's processes
     /// use now.
     Rtop,
@@ -267,7 +271,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 48] = [
+    pub const ALL: [KeyAction; 50] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -305,6 +309,8 @@ impl KeyAction {
         KeyAction::CycleLayout,
         KeyAction::HideList,
         KeyAction::TerminalPanel,
+        KeyAction::TerminalPanelBeside,
+        KeyAction::TerminalPanelBelow,
         KeyAction::Rtop,
         KeyAction::Help,
         KeyAction::Settings,
@@ -358,6 +364,8 @@ impl KeyAction {
             | KeyAction::CycleLayout
             | KeyAction::HideList
             | KeyAction::TerminalPanel
+            | KeyAction::TerminalPanelBeside
+            | KeyAction::TerminalPanelBelow
             | KeyAction::Rtop => "Sessions and folders",
             KeyAction::Help
             | KeyAction::Settings
@@ -411,6 +419,8 @@ impl KeyAction {
             KeyAction::CycleLayout => "Cycle layout (Master detail, Grid, Tabs)",
             KeyAction::HideList => "Hide or show the session list",
             KeyAction::TerminalPanel => "Terminal panel (show, focus or hide)",
+            KeyAction::TerminalPanelBeside => "Terminal panel beside the session",
+            KeyAction::TerminalPanelBelow => "Terminal panel below the session",
             KeyAction::Rtop => "rtop (show, focus or hide)",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
@@ -482,6 +492,8 @@ impl KeyAction {
             KeyAction::CycleLayout => plain(&["v"]),
             KeyAction::HideList => plain(&["b"]),
             KeyAction::TerminalPanel => plain(&["T"]),
+            KeyAction::TerminalPanelBeside => plain(&["|"]),
+            KeyAction::TerminalPanelBelow => plain(&["-"]),
             KeyAction::Rtop => plain(&["t"]),
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
@@ -603,12 +615,19 @@ impl KeyAction {
                  of the session (or b again) brings the list back."
                 .into(),
             KeyAction::TerminalPanel => {
-                "T opens a standalone shell below the main detail in the current directory. \
-                 Click a pane to focus it. Use the Rakumux key to return to Rakumux mode; \
+                "T opens a standalone shell in the current directory, below the session or \
+                 beside it, where | or - last put it. Click a pane to focus it. Use the Rakumux key to return to Rakumux mode; \
                  then Esc returns to the shell or T hides it. Hiding does not end its \
                  running command. Exit closes the pane and releases its terminal. No session \
                  is created. Closing or reloading this UI ends its temporary shell, not any \
                  sessions; drag the divider to resize the split."
+                    .into()
+            }
+            KeyAction::TerminalPanelBeside | KeyAction::TerminalPanelBelow => {
+                "| opens the terminal panel beside the session, - below it, or moves it there \
+                 while it's open; T then reopens it there. Beside needs 60 columns each for \
+                 the session and the panel (a docked Feed narrows to make room): narrower, \
+                 it shows below. Phones show it below."
                     .into()
             }
             KeyAction::Rtop => "This window, the Rakumux server, its other clients and \

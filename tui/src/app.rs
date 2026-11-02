@@ -665,6 +665,8 @@ impl App {
             list_hidden: self.list_hidden,
             feed: self.drawer_layout(),
             feed_cols: self.settings.sessions.feed_width,
+            panel_beside: self.terminal_panel.open
+                && self.settings.sessions.terminal_panel == crate::layout::PanelPlacement::Beside,
         }
     }
 
@@ -730,9 +732,13 @@ impl App {
         );
         screen::with_terminal_panel(
             screen,
-            self.terminal_panel.open,
-            focus == Focus::Terminal,
-            self.terminal_panel.height_percent,
+            screen::PanelGeometry {
+                open: self.terminal_panel.open,
+                focused: focus == Focus::Terminal,
+                placement: self.settings.sessions.terminal_panel,
+                height_percent: self.terminal_panel.height_percent,
+                width_percent: self.terminal_panel.width_percent,
+            },
         )
     }
 
@@ -933,8 +939,19 @@ impl App {
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
                 if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
-                "Open a temporary shell below the main detail in the current directory, without creating a session. Exit closes the pane; hiding with × or the Rakumux key then T keeps it running. Closing this UI ends its temporary shell, not any sessions.",
+                "Open a temporary shell below or beside the session in the current directory, without creating a session. Exit closes the pane; hiding with × or the Rakumux key then T keeps it running. Closing this UI ends its temporary shell, not any sessions.",
             ),
+            SettingsItem::TerminalPlacement => {
+                let value = match self.settings.sessions.terminal_panel {
+                    crate::layout::PanelPlacement::Below => "[Below] Beside",
+                    crate::layout::PanelPlacement::Beside => "Below [Beside]",
+                };
+                (
+                    "Terminal panel placement",
+                    value.to_string(),
+                    "Where T opens the terminal panel: below the session, or beside it where the window has room for both (60 columns each; a docked Feed narrows to make room). Narrower windows and phones show it below. | and - open it there or move it while it's open.",
+                )
+            }
         };
         SettingRow {
             section: item.section(),

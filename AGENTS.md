@@ -1109,7 +1109,9 @@ accidents; they don't stop a hostile process running as the same user.
   divider under it, so the split follows a phone keyboard coming and going;
   left out until dragged), session_order ({folder path: [session ids]}: the list order set by
   dragging or `J`/`K`; left out when empty), section_order ({"app:<name>" | "status:<status>":
-  [session ids]}: the same under the App and Status tabs, each its own; left out when empty)}`. The folder filter isn't saved; the
+  [session ids]}: the same under the App and Status tabs, each its own; left out when empty),
+  terminal_panel ("below" | "beside": where `T` opens the terminal panel, as `|` or `-` last
+  placed it; left out while "below")}`. The folder filter isn't saved; the
   `selected_projects` of 0.6 previews, and the `remote_replies` and `remote_sessions` switches of
   0.1.32 and earlier, are ignored and dropped on the next save.
 - **Environment** injected into every session: `RAKUMUX_SESSION_ID`, `RAKUMUX_SESSION_TOKEN`,
@@ -1393,7 +1395,8 @@ folder header, a new session there), `Esc` (after cancelling a pending key or th
 running session in view), `Tab` last session, `1`-`9` go into that session,
 `n` new, `N` new sessions in this folder on your Sprite or here (the `☁ Sprite` toggle), `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
 every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
-screen, `b` hide Master detail's list beside the session and show it again (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
+screen, `b` hide Master detail's list beside the session and show it again (below), `T` the
+terminal panel where it was last placed, `|` it beside the session, `-` below (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `t` rtop (below), `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
 ask to restart only this UI (`y`/Enter confirms, `n`/Esc cancels; reload the launcher and latest
 build; daemon and sessions stay up), `S` ask to restart the server and its services (the server in
@@ -1697,17 +1700,33 @@ highlighted, and a click selects one: again, or a tap on a phone, goes in; the w
 list the keys; `t` hides the drawer. A daemon without `resources` gets "restart it (S)".
 
 **Terminal panel.** `T` in Rakumux mode or Settings → Terminal panel opens a
-temporary daemon-owned login shell under the main detail, without a session record or list entry.
+temporary daemon-owned login shell below or beside the main detail, without a session record or
+list entry. `T` opens it where it was last placed (below by default); `|` opens it beside the
+session, `-` below, or moves it there while it's open (the same shell; focused either way), and
+on an open panel already there they do what `T` does. The placement is saved as
+`sessions.terminal_panel` and Settings → Terminal panel placement switches it.
+Beside (`screen::with_terminal_panel`, `layout::PanelPlacement`): the session, a one-column
+divider, then the panel, each at least `layout::PANEL_BESIDE_MIN_COLS` (60) wide, half each
+until the divider is dragged (its share kept for the window, as the height below is). It splits
+only the detail, so it applies to Master detail, Tabs and Grid's session alike, and a docked
+drawer stays right of the panel (list | session | panel | drawer): the drawer narrows towards
+`FEED_MIN_COLS` to make room (`PaneSizes::panel_beside`), and where even that leaves less than
+`layout::PANEL_BESIDE_DETAIL_COLS` (121) the drawer keeps its width and the panel shows below.
+Any detail narrower than that (narrow windows, phones, the list and the drawer on a 160-column
+window) shows it below; `|` then says "No room beside: shown below", and a wider window puts it
+beside again. Changing the placement resizes only the terminal with the keys, as a dragged
+divider does.
 It starts in the selected session's cwd, otherwise the current folder. `Focus::Terminal` routes keys,
 paste, mouse and cursor only to that attachment, with a distinct TERMINAL MODE footer label.
 The Rakumux key demotes it and returns to Rakumux mode; Esc returns to it, and T hides it.
 The hide button keeps the stream and shell running. Exit/EOF closes the pane and releases its
 terminal automatically; there is no session record to delete. Closing/reloading this UI ends
 the temporary pane shell, never any Rakumux sessions. Drag its
-divider to resize the split. The selected agent remains observed while the shell takes input;
+divider (a row below, a column beside) to resize the split. The selected agent remains observed while the shell takes input;
 only the focused terminal claims size, and scrolling an unfocused shell cannot resize the
-agent. Short windows show the focused pane alone. Grid browsing keeps its grid and hides the
-panel; focusing the shell restores the selected detail above it. Each window keeps one pane,
+agent. Short windows show the focused pane alone below (beside, both keep every row). Grid
+browsing keeps its grid and hides the panel; focusing the shell restores the selected detail
+above or beside it. Each window keeps one pane,
 reusing it after hiding. All work uses SessionApi off the UI thread, with stale-result checks,
 user-only daemon policy, passive emulators, bounded history and input-log privacy. In-place
 daemon restarts preserve pane PTYs. Reconnects attach as observers until the user refocuses;

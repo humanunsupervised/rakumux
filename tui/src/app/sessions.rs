@@ -1157,7 +1157,9 @@ impl App {
         };
         if self.terminal_panel.dragging {
             match event.kind {
-                MouseEventKind::Drag(MouseButton::Left) => self.drag_terminal_panel(event.row),
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.drag_terminal_panel(event.column, event.row)
+                }
                 MouseEventKind::Up(_) => self.terminal_panel.dragging = false,
                 _ => {}
             }

@@ -561,7 +561,10 @@ mod tests {
             }
         }
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("Pin or unpin"), "{screen}");
+        assert!(
+            screen.contains("Terminal panel beside the session"),
+            "{screen}"
+        );
         // No phone or AI naming sections.
         h.press(KeyCode::Home).await;
         let screen = render(&mut h.app, 160, 48);
@@ -2557,6 +2560,72 @@ mod tests {
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("can't reach rakumux.com"), "{screen}");
         assert!(screen.contains("Kept from before."), "{screen}");
+    }
+
+    /// The terminal panel beside or below the session, on a wide window, a
+    /// window with the feed docked and a narrow one: `(name, screen)`.
+    async fn terminal_panel_renders() -> Vec<(&'static str, String)> {
+        let cases: [(&str, u16, u16, char, bool, bool); 6] = [
+            ("wide-beside", 200, 48, '|', false, false),
+            ("wide-below", 200, 48, '-', false, false),
+            ("feed-beside-list-hidden", 160, 48, '|', true, true),
+            ("feed-falls-back-below", 160, 48, '|', true, false),
+            ("narrow-falls-back-below", 110, 40, '|', false, false),
+            ("phone-below", 45, 30, '|', false, false),
+        ];
+        let mut out = Vec::new();
+        for (name, width, height, key, feed, list_hidden) in cases {
+            let mut h = if feed {
+                feed_harness(crate::app::testing::FakeAccount::with_feed(), None)
+            } else {
+                harness(vec![view("A", "api", 20), view("B", "docs", 10)])
+            };
+            h.app.resize(width, height);
+            render(&mut h.app, width, height);
+            if list_hidden {
+                h.press(KeyCode::Char('b')).await;
+            }
+            h.press(KeyCode::Char(key)).await;
+            let panel = h.fake.pane_count() - 1;
+            h.fake.send_pane(
+                panel,
+                AttachEvent::Output {
+                    offset: 0,
+                    bytes: b"$ ls\r\nCargo.toml  src  tests\r\n$ ".to_vec(),
+                },
+            );
+            h.app.process_pending();
+            out.push((name, render(&mut h.app, width, height)));
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn the_terminal_panel_draws_beside_or_below_the_session() {
+        for (name, screen) in terminal_panel_renders().await {
+            let rows: Vec<&str> = screen.lines().collect();
+            let header = rows
+                .iter()
+                .position(|row| row.contains(" Terminal · "))
+                .unwrap_or_else(|| panic!("{name}: no panel\n{screen}"));
+            let beside = name.ends_with("beside") || name.ends_with("hidden");
+            if beside {
+                // The panel's title on the first row, right of the session,
+                // with a column of │ down the divider.
+                assert_eq!(header, 0, "{name}\n{screen}");
+                let at = rows[0].chars().take_while(|c| *c != 'T').count();
+                assert!(at > 60, "{name}\n{screen}");
+                let column = rows[5].chars().nth(at - 2).unwrap();
+                assert_eq!(column, '│', "{name}\n{screen}");
+            } else {
+                assert!(header > 3, "{name}\n{screen}");
+                assert!(rows[header - 1].contains("────"), "{name}\n{screen}");
+            }
+            assert!(screen.contains("Cargo.toml"), "{name}\n{screen}");
+            if name.starts_with("feed") {
+                assert!(screen.contains("≡ Feed"), "{name}\n{screen}");
+            }
+        }
     }
 
     #[tokio::test]

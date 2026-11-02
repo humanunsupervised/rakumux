@@ -376,8 +376,10 @@ pub enum SettingsItem {
     RestartUi,
     /// Restart the server in place with this build (`S`).
     RestartServer,
-    /// Independent shell below the main detail pane.
+    /// Independent shell below or beside the main detail pane.
     TerminalPanel,
+    /// Where `T` opens it: below or beside the session.
+    TerminalPlacement,
     /// rtop: what this machine, Rakumux and every session's processes use
     /// now, in the drawer.
     Rtop,
@@ -398,6 +400,7 @@ impl SettingsItem {
         SettingsItem::RestartServer,
         SettingsItem::Rtop,
         SettingsItem::TerminalPanel,
+        SettingsItem::TerminalPlacement,
     ];
 
     /// The heading Settings lists it under.
@@ -409,7 +412,8 @@ impl SettingsItem {
             | SettingsItem::RestartUi
             | SettingsItem::RestartServer
             | SettingsItem::Rtop
-            | SettingsItem::TerminalPanel => "App",
+            | SettingsItem::TerminalPanel
+            | SettingsItem::TerminalPlacement => "App",
             SettingsItem::Account => "Account",
         }
     }

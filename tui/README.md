@@ -131,7 +131,8 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   cancelled a pending key or the filter) or `Ctrl-\` goes back to the session you came from (or,
   after a start or a reload, into the session shown),
   `Tab` to the one before, `1`-`9` into that session. `n` new, `r` rename, `p` pin, `J`/`K` move
-  the session down/up, `x` close, `d`/`dd` delete, `z` full screen, `P` folders, `/` filter, `\`
+  the session down/up, `x` close, `d`/`dd` delete, `z` full screen, `T` the terminal panel
+  where it was last (`|` beside the session, `-` below it), `P` folders, `/` filter, `\`
   sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `R` restart the UI, `S` restart the server, `q` quit. The footer is a
   full-width bar that shows the mode, in zoom too, with `session: <name>` in its centre:
   orange in Rakumux mode (with the `f ≡ Feed`, `? Help` and `, Settings` buttons on the right,

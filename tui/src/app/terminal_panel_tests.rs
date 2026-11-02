@@ -405,6 +405,228 @@ async fn an_unfocused_shell_exit_does_not_fit_or_resize_the_agent() {
     );
 }
 
+fn saved_placement(h: &Harness) -> Option<String> {
+    let raw = std::fs::read_to_string(h.home.path().join("config.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    json["sessions"]["terminal_panel"]
+        .as_str()
+        .map(str::to_string)
+}
+
+/// The size the pane was last told: by a Promote or a Resize.
+fn last_pane_size(outgoing: &[AttachOutgoing]) -> Option<(u16, u16)> {
+    outgoing.iter().rev().find_map(|event| match event {
+        AttachOutgoing::Command(
+            StreamCommand::Promote { cols, rows } | StreamCommand::Resize { cols, rows },
+        ) => Some((*cols, *rows)),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn bar_opens_the_panel_beside_and_minus_moves_it_below_keeping_its_shell() {
+    let mut h = harness(vec![view("A", "agent", 1)]);
+    render(&mut h, 200, 48);
+    let main = h.last_attach().0;
+    h.fake.outgoing(main);
+    h.key(KeyEvent::new(KeyCode::Char('|'), KeyModifiers::SHIFT))
+        .await;
+    assert_eq!(h.app.focus, Focus::Terminal);
+    let screen = h.app.screen();
+    assert!(screen.terminal_panel_beside);
+    let panel_area = screen.terminal_panel.unwrap();
+    assert_eq!(panel_area.y, screen.terminal.unwrap().y);
+    assert_eq!(
+        h.app.terminal_panel_size(),
+        (panel_area.width, panel_area.height - 1)
+    );
+    assert_eq!(saved_placement(&h).as_deref(), Some("beside"));
+    assert_eq!(
+        h.fake.state.lock().unwrap().terminal_opens[0].cols,
+        panel_area.width
+    );
+    let id = h.app.terminal_panel.id.clone();
+    let panel = pane_index(&h);
+
+    // Back in Rakumux mode, `-` moves the open shell below and focuses it.
+    h.rakumux().await;
+    h.fake.pane_outgoing(panel);
+    h.press(KeyCode::Char('-')).await;
+    assert_eq!(h.app.focus, Focus::Terminal);
+    let screen = h.app.screen();
+    assert!(!screen.terminal_panel_beside);
+    assert!(screen.terminal_panel.unwrap().y > screen.terminal.unwrap().bottom());
+    assert_eq!(h.app.terminal_panel.id, id);
+    assert_eq!(h.fake.pane_count(), 1, "moving started another shell");
+    // The pane, which has the keys, takes its new size; the agent doesn't.
+    let below = h.app.terminal_panel_size();
+    assert_ne!(below.0, panel_area.width);
+    assert_eq!(last_pane_size(&h.fake.pane_outgoing(panel)), Some(below));
+    assert!(!h
+        .fake
+        .outgoing(main)
+        .iter()
+        .any(|event| matches!(event, AttachOutgoing::Command(StreamCommand::Resize { .. }))));
+    // Below is the default: left out of the file.
+    assert_eq!(saved_placement(&h), None);
+    assert_eq!(
+        h.app.settings.sessions.terminal_panel,
+        crate::layout::PanelPlacement::Below
+    );
+
+    // `-` again (already below) does what T does: hides it, then shows it.
+    h.rakumux().await;
+    h.press(KeyCode::Char('-')).await;
+    assert!(!h.app.terminal_panel.open);
+    assert!(h.app.terminal_panel.attachment.is_some());
+    h.press(KeyCode::Char('-')).await;
+    assert!(h.app.terminal_panel.open);
+    assert_eq!(h.app.focus, Focus::Terminal);
+
+    // `|` moves it beside again while it's open.
+    h.rakumux().await;
+    h.press(KeyCode::Char('|')).await;
+    assert!(h.app.screen().terminal_panel_beside);
+    assert_eq!(h.app.focus, Focus::Terminal);
+    assert_eq!(h.fake.pane_count(), 1);
+}
+
+#[tokio::test]
+async fn capital_t_reopens_the_panel_where_it_was_last_placed() {
+    let mut h = harness(vec![view("A", "agent", 1)]);
+    render(&mut h, 200, 48);
+    // Below by default, as before.
+    h.press(KeyCode::Char('T')).await;
+    assert!(!h.app.screen().terminal_panel_beside);
+    h.rakumux().await;
+    h.press(KeyCode::Char('T')).await;
+    assert!(!h.app.terminal_panel.open);
+    // `|` while hidden opens it beside; T hides it and reopens it there.
+    h.press(KeyCode::Char('|')).await;
+    assert!(h.app.terminal_panel.open && h.app.screen().terminal_panel_beside);
+    h.rakumux().await;
+    h.press(KeyCode::Char('T')).await;
+    assert!(!h.app.terminal_panel.open);
+    h.press(KeyCode::Char('T')).await;
+    assert!(h.app.terminal_panel.open && h.app.screen().terminal_panel_beside);
+    assert_eq!(h.app.focus, Focus::Terminal);
+    // `|` on the open, unfocused panel there hides it, as T does.
+    h.rakumux().await;
+    h.press(KeyCode::Char('|')).await;
+    assert!(!h.app.terminal_panel.open);
+    assert_eq!(h.fake.pane_count(), 1);
+    assert_eq!(h.fake.state.lock().unwrap().terminal_opens.len(), 1);
+}
+
+#[tokio::test]
+async fn bar_on_a_window_without_room_beside_opens_below_and_says_so() {
+    // 160 columns with the list: the detail has 111, under 60 + 1 + 60.
+    // A phone too keeps the panel below its session.
+    for (width, height) in [(160, 48), (110, 40), (45, 40)] {
+        let mut h = harness(vec![view("A", "agent", 1)]);
+        render(&mut h, width, height);
+        h.press(KeyCode::Char('|')).await;
+        assert!(h.app.terminal_panel.open, "{width}");
+        assert_eq!(h.app.focus, Focus::Terminal, "{width}");
+        let screen = h.app.screen();
+        assert!(!screen.terminal_panel_beside, "{width}");
+        assert!(screen.terminal_panel.is_some(), "{width}");
+        assert!(
+            h.app.status().is_some_and(|s| s.contains("No room beside")),
+            "{width}: {:?}",
+            h.app.status()
+        );
+        // Still kept for T, so a wider window shows it beside.
+        assert_eq!(saved_placement(&h).as_deref(), Some("beside"));
+        render(&mut h, 200, 48);
+        assert!(h.app.screen().terminal_panel_beside, "{width}");
+    }
+}
+
+#[tokio::test]
+async fn the_beside_divider_drags_sideways_and_keeps_both_minimums() {
+    let mut h = harness(vec![view("A", "agent", 1)]);
+    render(&mut h, 200, 48);
+    h.press(KeyCode::Char('|')).await;
+    let panel = pane_index(&h);
+    // Drawn, so the divider is a hit target.
+    render(&mut h, 200, 48);
+    let divider = h.app.screen().terminal_panel_divider.unwrap();
+    assert_eq!(divider.width, 1);
+    let mouse = |kind, column| {
+        Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    h.app
+        .handle_terminal_event(mouse(MouseEventKind::Down(MouseButton::Left), divider.x))
+        .await;
+    assert!(h.app.terminal_panel.dragging);
+    h.fake.pane_outgoing(panel);
+    h.app
+        .handle_terminal_event(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            divider.x - 10,
+        ))
+        .await;
+    let wider = h.app.screen().terminal_panel.unwrap();
+    // Kept as a share of the width, so within a column of the pointer.
+    assert!(wider.x.abs_diff(divider.x - 10 + 1) <= 1, "{wider:?}");
+    assert_eq!(
+        last_pane_size(&h.fake.pane_outgoing(panel)),
+        Some(h.app.terminal_panel_size())
+    );
+    // Far past the session's minimum: it keeps 60 columns.
+    h.app
+        .handle_terminal_event(mouse(MouseEventKind::Drag(MouseButton::Left), 0))
+        .await;
+    assert!(h.app.screen().terminal.unwrap().width >= crate::layout::PANEL_BESIDE_MIN_COLS);
+    h.app
+        .handle_terminal_event(mouse(MouseEventKind::Up(MouseButton::Left), 0))
+        .await;
+    assert!(!h.app.terminal_panel.dragging);
+    let kept = h.app.terminal_panel.width_percent;
+    // The width is kept like the height below: hidden and shown again.
+    h.rakumux().await;
+    h.press(KeyCode::Char('T')).await;
+    h.press(KeyCode::Char('T')).await;
+    assert_eq!(h.app.terminal_panel.width_percent, kept);
+    assert!(render(&mut h, 200, 48).contains('│'));
+}
+
+#[tokio::test]
+async fn settings_placement_row_moves_the_open_panel_and_is_saved() {
+    use crate::app::types::SettingsItem;
+    let mut h = harness(vec![view("A", "agent", 1)]);
+    render(&mut h, 200, 48);
+    h.press(KeyCode::Char('T')).await;
+    let panel = pane_index(&h);
+    h.rakumux().await;
+    let row = SettingsItem::TerminalPlacement.index();
+    assert_eq!(
+        h.app.modal_context(false).general[row].value,
+        "[Below] Beside"
+    );
+    h.press(KeyCode::Char(',')).await;
+    for _ in 0..row {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert_eq!(
+        h.app.modal_context(false).general[row].value,
+        "Below [Beside]"
+    );
+    assert_eq!(saved_placement(&h).as_deref(), Some("beside"));
+    // Still open, the same shell, now beside; the modal stays.
+    assert!(h.app.terminal_panel.open);
+    assert!(h.app.screen().terminal_panel_beside);
+    assert_eq!(h.fake.pane_count(), panel + 1);
+    assert!(matches!(h.app.mode, AppMode::Modal { .. }));
+}
+
 #[test]
 fn terminal_pane_history_stays_within_its_cell_budget() {
     for (rows, cols) in [(2, 2), (30, 120), (200, 1000), (500, 1000)] {

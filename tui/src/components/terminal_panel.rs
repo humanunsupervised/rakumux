@@ -1,4 +1,5 @@
-//! The utility shell's title, focus cue and passive terminal mirror.
+//! The utility shell's title, focus cue and passive terminal mirror, below
+//! or beside the session.
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -33,14 +34,18 @@ pub fn draw_terminal_panel(
             .as_ref()
             .is_some_and(|attachment| attachment.role == Role::Controller);
     if let Some(divider) = screen.terminal_panel_divider {
+        let line = if screen.terminal_panel_beside {
+            // A column right of the session, one `│` a row.
+            vec![Line::from("│"); usize::from(divider.height)]
+        } else {
+            vec![Line::from("─".repeat(usize::from(divider.width)))]
+        };
         frame.render_widget(
-            Paragraph::new("─".repeat(usize::from(divider.width))).style(Style::default().fg(
-                if app.terminal_panel.dragging {
-                    palette.accent_primary
-                } else {
-                    palette.border_dim
-                },
-            )),
+            Paragraph::new(line).style(Style::default().fg(if app.terminal_panel.dragging {
+                palette.accent_primary
+            } else {
+                palette.border_dim
+            })),
             divider,
         );
         hits.push((divider, Hit::TerminalPanelDivider));

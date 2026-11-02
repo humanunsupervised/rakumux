@@ -8,12 +8,15 @@
 //! moves go through the Feed's cards or rtop's rows, Enter reads a reply or
 //! goes into a row's session and Esc gives them back (`App::drawer_key`).
 //! `b` hides Master detail's list beside the session, and shows it again.
+//! `T` opens the terminal panel where it was last placed, `|` beside the
+//! session and `-` below it.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::settings::{open_help, open_settings};
 use crate::app::types::{AppMode, AppResult, AuthMenu};
 use crate::app::{App, Selection};
+use crate::layout::PanelPlacement;
 
 pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
     if app.list.filter_editing {
@@ -108,6 +111,8 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('n') => app.open_new_session(),
         KeyCode::Char('N') => app.toggle_sprite(),
         KeyCode::Char('T') => app.toggle_terminal_panel(),
+        KeyCode::Char('|') => app.terminal_panel_at(PanelPlacement::Beside),
+        KeyCode::Char('-') => app.terminal_panel_at(PanelPlacement::Below),
         KeyCode::Char('t') => app.toggle_rtop(),
         KeyCode::Char('b') => app.toggle_list(),
         KeyCode::Char('f') => app.toggle_feed(),

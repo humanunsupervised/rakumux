@@ -8,7 +8,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::icons::Icons;
-use crate::layout::SessionLayout;
+use crate::layout::{PanelPlacement, SessionLayout};
 
 /// The order the user gave each folder's sessions: folder → session ids,
 /// first to last.
@@ -61,7 +61,8 @@ pub struct Settings {
 /// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
 /// `phone_offer_seen`, `tips`, `icons`, `sidebar_width`,
-/// `stacked_list_percent`, `feed_width`, `session_order` and `section_order`;
+/// `stacked_list_percent`, `feed_width`, `session_order`, `section_order`
+/// and `terminal_panel`;
 /// other keys in the section (daemon tuning such as `scrollback_rows`) are kept as they are
 /// when the TUI saves the file, except the retired ones
 /// ([`RETIRED_SESSION_KEYS`]), which are dropped.
@@ -160,6 +161,14 @@ pub struct SessionsConfig {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub section_order: SectionOrder,
+    /// Where `T` opens the terminal panel: where `|` (beside) or `-`
+    /// (below) last put it. Left out while it's below; anything else reads
+    /// as below.
+    #[serde(
+        deserialize_with = "lenient_placement",
+        skip_serializing_if = "is_below"
+    )]
+    pub terminal_panel: PanelPlacement,
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
 }
@@ -184,6 +193,7 @@ impl Default for SessionsConfig {
             sprite_env_copy: BTreeMap::new(),
             session_order: SessionOrder::new(),
             section_order: SectionOrder::new(),
+            terminal_panel: PanelPlacement::Below,
             other: serde_json::Map::new(),
         }
     }
@@ -228,6 +238,17 @@ fn lenient_icons<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Icons, D:
 
 fn is_true(value: &bool) -> bool {
     *value
+}
+
+fn lenient_placement<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<PanelPlacement, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+fn is_below(placement: &PanelPlacement) -> bool {
+    *placement == PanelPlacement::Below
 }
 
 fn is_plain(icons: &Icons) -> bool {
@@ -553,6 +574,41 @@ mod tests {
             .sessions
             .session_order
             .is_empty());
+    }
+
+    #[test]
+    fn the_terminal_panel_placement_round_trips_and_is_left_out_while_below() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let mut settings = Settings::default();
+        settings.save_to(&path).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(raw["sessions"].get("terminal_panel").is_none());
+        settings.sessions.terminal_panel = PanelPlacement::Beside;
+        settings.save_to(&path).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(raw["sessions"]["terminal_panel"], "beside");
+        assert_eq!(Settings::load_from(&path).unwrap(), settings);
+        settings.sessions.terminal_panel = PanelPlacement::Below;
+        settings.save_to(&path).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(raw["sessions"].get("terminal_panel").is_none());
+        // A value this version can't read is below.
+        for value in [r#""left""#, "3", r#""below""#] {
+            fs::write(
+                &path,
+                format!(r#"{{"sessions":{{"terminal_panel":{value}}}}}"#),
+            )
+            .unwrap();
+            assert_eq!(
+                Settings::load_from(&path).unwrap().sessions.terminal_panel,
+                PanelPlacement::Below,
+                "{value}"
+            );
+        }
     }
 
     #[test]

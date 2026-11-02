@@ -173,6 +173,14 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             leave(app);
             app.toggle_terminal_panel();
         }
+        KeyAction::TerminalPanelBeside => {
+            leave(app);
+            app.terminal_panel_at(crate::layout::PanelPlacement::Beside);
+        }
+        KeyAction::TerminalPanelBelow => {
+            leave(app);
+            app.terminal_panel_at(crate::layout::PanelPlacement::Below);
+        }
         KeyAction::Rtop => {
             leave(app);
             app.toggle_rtop();
@@ -220,6 +228,12 @@ fn open_item(app: &mut App, item: SettingsItem) {
             app.settings.sessions.tips = on;
             let state = if on { "on" } else { "off" };
             save_config(app, format!("Tips in the footer: {state}"));
+        }
+        SettingsItem::TerminalPlacement => {
+            // Applies live and stays in the modal, as the layout does.
+            let next = app.settings.sessions.terminal_panel.other();
+            app.place_terminal_panel(next);
+            app.set_status(format!("Terminal panel: {}", next.label().to_lowercase()));
         }
         SettingsItem::CycleInSessions => {
             let on = !app.settings.sessions.cycle_keys_in_session;

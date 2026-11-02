@@ -100,7 +100,8 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `r` | Rename |
 | `x` / `d` | Close (end its program) / delete |
 | `v` | Layout: Master detail, Grid, Tabs |
-| `T` | Terminal panel: a scratch shell under the session |
+| `T` | Terminal panel: a scratch shell below or beside the session, where it was last |
+| `\|` / `-` | Terminal panel beside / below the session (moves it while it's open) |
 | `z` | Full screen |
 | `?` / `,` | Help / Settings (every key, searchable) |
 | `U` | Update |
