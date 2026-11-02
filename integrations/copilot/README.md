@@ -75,7 +75,9 @@ To let Copilot drive sessions through MCP, see [mcp/README.md](../../mcp/README.
   typed with the cursor on `Other`, in the box drawn under the dialog; a text field typed and
   `enter`. The last field's `enter` gives the answers (`User responded: …`). A form whose text
   field shows a `default` typed in already isn't answered. Checked against Copilot 1.0.105 with
-  the scripted model; its screens are `fixtures/questions/`.
+  the scripted model; its screens are `fixtures/questions/`. The daemon says
+  `session.answer.copilot`, and the session list `question_answers.copilot`, so rakumux.com sends
+  answers only to a Rakumux that gives them (0.1.39 said `question_answers` alone and gets none).
 
 ## Limits
 

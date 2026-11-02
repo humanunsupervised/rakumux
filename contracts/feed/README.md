@@ -117,9 +117,9 @@ conformance tests, not an HTTP server, database or local runtime.
   shows (never into a session without an agent: it waits for one), and reports it like a
   reply; the agent's next finished reply answers it (`reply_to`) and starts its own thread.
 - **Answers to questions:** while an agent asks the user something in a dialog of its own (Claude
-  Code's `AskUserQuestion`, OpenCode's `question`, Grok Build's `ask_user_question` and Kimi
-  Code's `AskUserQuestion`: questions, each with its options, one or several to choose, and a free
-  answer), the chat shows the question's `tool_call` without a result, and the session list shows
+  Code's `AskUserQuestion`, GitHub Copilot's `ask_user`, Droid's `AskUser`, OpenCode's
+  `question`, Grok Build's `ask_user_question` and Kimi Code's `AskUserQuestion`: questions, each
+  with its options, one or several to choose, and a free answer), the chat shows the question's `tool_call` without a result, and the session list shows
   the session `blocked`. On rakumux.com the user can then answer it: a session
   message with `answer` (`questionAnswer` in common), in that chat (`conversation_id`), naming the
   call (`call_id`) and giving each question's answer in the order asked (`question`, the labels of
@@ -128,7 +128,9 @@ conformance tests, not an HTTP server, database or local runtime.
   asks with `question_answers=1` and whose machine advertises `question_answers` (below), so a
   machine that would type it as text never gets one; it takes one to another agent's question than
   Claude Code's only for a machine that also advertises that agent's `question_answers.<agent>`
-  (`opencode`, `grok`, `kimi`). The machine gives it to the dialog only while
+  (`copilot`, `droid`, `opencode`, `grok`, `kimi`). Rakumux 0.1.39 answers Copilot's and Droid's
+  under `question_answers` alone, so the cloud sends it no answers to theirs; it answers them
+  again once updated. The machine gives it to the dialog only while
   the session shows that chat and its agent asks something, never to a prompt for permission or any
   other dialog: before any key it checks that the conversation's newest question without a result
   is `call_id` and that the screen shows its dialog, and it works the dialog from the screen,
@@ -181,9 +183,10 @@ conformance tests, not an HTTP server, database or local runtime.
   uses while rakumux.com asks (below); `new_sessions`, it takes new sessions asked of it on
   rakumux.com (below); `new_session_agents`, it starts every agent in them, not only Claude
   Code, Codex and OpenCode (below); `question_answers`, it gives answers written on rakumux.com to
-  the questions Claude Code asks in its own dialog (above); `question_answers.opencode`,
-  `question_answers.grok` and `question_answers.kimi`, beside it, to those OpenCode, Grok Build and
-  Kimi Code ask too. The cloud keeps the latest list and
+  the questions Claude Code asks in its own dialog (above); `question_answers.copilot`,
+  `question_answers.droid`, `question_answers.opencode`, `question_answers.grok` and
+  `question_answers.kimi`, beside it, to those GitHub Copilot, Droid, OpenCode, Grok Build and Kimi
+  Code ask too. The cloud keeps the latest list and
   ignores names it doesn't know.
 - **Resources (rtop):** while someone has rtop open on rakumux.com, every machine of the account
   says what it uses now. A replies read answers `resources_wanted: true` then (and only then);

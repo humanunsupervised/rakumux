@@ -69,6 +69,8 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_SUBMIT_EXPECT,
     session_core::api::CAPABILITY_SUBMIT_BLOCKED,
     session_core::api::CAPABILITY_ANSWER,
+    session_core::api::CAPABILITY_ANSWER_COPILOT,
+    session_core::api::CAPABILITY_ANSWER_DROID,
     session_core::api::CAPABILITY_ANSWER_OPENCODE,
     session_core::api::CAPABILITY_ANSWER_GROK,
     session_core::api::CAPABILITY_ANSWER_KIMI,

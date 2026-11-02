@@ -52,7 +52,15 @@ pub(crate) const QUESTION_ANSWERS: &str = "question_answers";
 /// daemon's capability for each, and what the session list says beside
 /// `question_answers` while it does, so rakumux.com offers to answer that
 /// agent's questions only of a machine that gives the answers.
-pub(crate) const AGENT_ANSWERS: [(&str, &str); 3] = [
+pub(crate) const AGENT_ANSWERS: [(&str, &str); 5] = [
+    (
+        session_core::api::CAPABILITY_ANSWER_COPILOT,
+        "question_answers.copilot",
+    ),
+    (
+        session_core::api::CAPABILITY_ANSWER_DROID,
+        "question_answers.droid",
+    ),
     (
         session_core::api::CAPABILITY_ANSWER_OPENCODE,
         "question_answers.opencode",

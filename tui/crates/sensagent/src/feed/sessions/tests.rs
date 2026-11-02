@@ -436,20 +436,21 @@ fn the_list_says_question_answers_only_while_the_daemon_gives_them() {
 fn the_list_says_which_other_agents_questions_the_daemon_answers() {
     let mut sessions = on(&[view("01K89ZQ4D2F6H8J0K2M4N6P8R0")]);
     sessions.set_answers(true);
-    sessions.set_agent_answers(&[true, false, true]);
+    sessions.set_agent_answers(&[true, false, true, false, true]);
     let upload = body(sessions.next_request(NOW, WALL));
     assert_eq!(
         upload["capabilities"],
         serde_json::json!([
             "reply_attachments",
             "question_answers",
+            "question_answers.copilot",
             "question_answers.opencode",
             "question_answers.kimi"
         ])
     );
     sessions.done(true, Ok(stored(true)), NOW);
     // A daemon that answers Claude Code's alone after a reconnect.
-    sessions.set_agent_answers(&[false, false, false]);
+    sessions.set_agent_answers(&[false; 5]);
     let upload = body(sessions.next_request(NOW + SETTLE, WALL));
     assert_eq!(
         upload["capabilities"],

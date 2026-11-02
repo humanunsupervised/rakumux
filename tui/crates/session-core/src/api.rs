@@ -656,6 +656,10 @@ pub const CAPABILITY_SUBMIT_BLOCKED: &str = "session.submit.blocked";
 /// `session_answer`: answer the question an agent asks in its own dialog
 /// (Claude Code's `AskUserQuestion`; the agents below each say so too).
 pub const CAPABILITY_ANSWER: &str = "session.answer";
+/// `session_answer` answers GitHub Copilot's `ask_user` form.
+pub const CAPABILITY_ANSWER_COPILOT: &str = "session.answer.copilot";
+/// `session_answer` answers Droid's `AskUser` questionnaire.
+pub const CAPABILITY_ANSWER_DROID: &str = "session.answer.droid";
 /// `session_answer` answers OpenCode's `question` dialog (1.x and 2).
 pub const CAPABILITY_ANSWER_OPENCODE: &str = "session.answer.opencode";
 /// `session_answer` answers Grok Build's `ask_user_question` dialog.

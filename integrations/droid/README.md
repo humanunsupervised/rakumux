@@ -72,7 +72,9 @@ position. A rewind or a compaction starts another session.
   (`down` to it); a `(multi)` question then takes `down` to `Submit` (`Next` before the last) and
   `enter`. The last question's answer gives them all; there's no review. Its English screens
   only (Droid can show others). Checked against Droid 1.0.0 with a custom model; its screens are
-  `fixtures/questions/` (`.ansi`, with their styles).
+  `fixtures/questions/` (`.ansi`, with their styles). The daemon says `session.answer.droid`, and
+  the session list `question_answers.droid`, so rakumux.com sends answers only to a Rakumux that
+  gives them (0.1.39 said `question_answers` alone and gets none).
 
 ## Resume
 
