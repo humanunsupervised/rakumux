@@ -2191,6 +2191,31 @@ mod tests {
         assert!(!h.app.hits.iter().any(|(_, hit)| *hit == Hit::ModeBadge));
     }
 
+    /// A click on the footer's tip shows the next one, in Rakumux mode.
+    #[tokio::test]
+    async fn a_click_on_the_tip_shows_the_next_one() {
+        let mut h = harness(vec![view("A", "api", 10)]);
+        let day = crate::app::tips::today();
+        let shown = |h: &Harness| {
+            let tip = h.app.tip(day).unwrap();
+            format!("{} {}", tip.keys, tip.text)
+        };
+        let (width, height) = (240, 40);
+        let first = shown(&h);
+        let screen = render(&mut h.app, width, height);
+        let footer = screen.lines().last().unwrap();
+        assert!(footer.contains(&first), "{footer:?}");
+        tap(&mut h, Hit::FooterTip);
+        assert_eq!(h.app.focus, Focus::List);
+        assert!(matches!(h.app.mode, AppMode::Normal));
+        let second = shown(&h);
+        assert_ne!(first, second);
+        let screen = render(&mut h.app, width, height);
+        let footer = screen.lines().last().unwrap();
+        assert!(footer.contains(&second), "{footer:?}");
+        assert!(!footer.contains(&first), "{footer:?}");
+    }
+
     /// The footer's targets line up with what it shows.
     #[tokio::test]
     async fn footer_targets_cover_the_label_and_the_buttons() {

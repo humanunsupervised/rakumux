@@ -777,6 +777,34 @@ async fn option_arrows_in_sessions_is_a_general_setting() {
 }
 
 #[tokio::test]
+async fn tips_in_the_footer_turn_off_in_settings_and_are_saved_only_off() {
+    let mut h = harness(vec![view("A", "a", 30)]);
+    let row = SettingsItem::Tips.index();
+    let general = &h.app.modal_context(false).general[row];
+    assert_eq!(general.label, "Tips in the footer");
+    assert_eq!(general.value, "[On] Off");
+    assert!(h.app.tip(0).is_some());
+    h.press(KeyCode::Char(',')).await;
+    for _ in 0..row {
+        h.press(KeyCode::Down).await;
+    }
+    h.press(KeyCode::Enter).await;
+    assert!(!h.app.settings.sessions.tips);
+    assert_eq!(h.app.tip(0), None);
+    assert_eq!(h.app.modal_context(false).general[row].value, "On [Off]");
+    let path = h.home.path().join("config.json");
+    assert!(!Settings::load_from(&path).unwrap().sessions.tips);
+    assert!(std::fs::read_to_string(&path)
+        .unwrap()
+        .contains("\"tips\": false"));
+    // Turned on again, the key leaves the file.
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.settings.sessions.tips);
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("tips"));
+    assert!(Settings::load_from(&path).unwrap().sessions.tips);
+}
+
+#[tokio::test]
 async fn vim_keys_move_and_gg_goes_to_the_top() {
     let mut h = harness(vec![
         aged("A", "a", 1, 30),

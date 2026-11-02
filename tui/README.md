@@ -134,8 +134,9 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
   the session down/up, `x` close, `d`/`dd` delete, `z` full screen, `P` folders, `/` filter, `\`
   sends `Ctrl-\` to the session, `?` Help, `,` or `o` Settings, `R` restart the UI, `S` restart the server, `q` quit. The footer is a
   full-width bar that shows the mode, in zoom too, with `session: <name>` in its centre:
-  orange in Rakumux mode (with the `f ≡ Feed`, `? Help` and `, Settings` buttons on the right),
-  muted blue in
+  orange in Rakumux mode (with the `f ≡ Feed`, `? Help` and `, Settings` buttons on the right,
+  and, where the row has room to spare, a tip of the day just left of them: a click shows the next
+  one; Settings → Tips in the footer turns them off), muted blue in
   session mode (with a `Ctrl-\ Rakumux` button). Help and Settings list the keys, and
   Settings runs any of them.
 - **Folders**: a session belongs to the folder it was started in (a repo, a worktree, any

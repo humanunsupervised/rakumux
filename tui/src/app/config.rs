@@ -60,7 +60,7 @@ pub struct Settings {
 
 /// The `"sessions"` section. The TUI reads `rakumux_key` (and the older
 /// `prefix_key`), `cycle_keys`, `cycle_keys_in_session`, `welcome_seen`,
-/// `phone_offer_seen`, `icons`, `sidebar_width`,
+/// `phone_offer_seen`, `tips`, `icons`, `sidebar_width`,
 /// `stacked_list_percent`, `feed_width`, `session_order` and `section_order`;
 /// other keys in the section (daemon tuning such as `scrollback_rows`) are kept as they are
 /// when the TUI saves the file, except the retired ones
@@ -91,6 +91,10 @@ pub struct SessionsConfig {
     /// row turns it on any time.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub phone_offer_seen: bool,
+    /// A tip in the footer (a key and what it does, one a day); saved only
+    /// when turned off.
+    #[serde(skip_serializing_if = "is_true")]
+    pub tips: bool,
     /// The layout this window shows: Master detail, Grid or Tabs. Not saved:
     /// every start opens Master detail (an older file's `layout` is dropped).
     #[serde(skip)]
@@ -169,6 +173,7 @@ impl Default for SessionsConfig {
             cycle_keys_in_session: false,
             welcome_seen: false,
             phone_offer_seen: false,
+            tips: true,
             layout: SessionLayout::default(),
             icons: Icons::default(),
             ai_summary: AiSummaryConfig::default(),
@@ -219,6 +224,10 @@ fn lenient_section_order<'de, D: Deserializer<'de>>(
 fn lenient_icons<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Icons, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
     Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn is_plain(icons: &Icons) -> bool {

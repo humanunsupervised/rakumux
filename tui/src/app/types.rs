@@ -366,6 +366,8 @@ pub enum SettingsItem {
     Layout,
     /// Plain, emoji or Nerd Font marks for folders and branches.
     Icons,
+    /// A tip in the footer, one a day.
+    Tips,
     /// Option/Alt+↑/↓ also switch sessions inside a session.
     CycleInSessions,
     /// Install a new release and restart only this UI.
@@ -385,10 +387,11 @@ pub enum SettingsItem {
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then the rest.
-    pub const ALL: [SettingsItem; 9] = [
+    pub const ALL: [SettingsItem; 10] = [
         SettingsItem::Account,
         SettingsItem::Layout,
         SettingsItem::Icons,
+        SettingsItem::Tips,
         SettingsItem::CycleInSessions,
         SettingsItem::Update,
         SettingsItem::RestartUi,
@@ -400,7 +403,7 @@ impl SettingsItem {
     /// The heading Settings lists it under.
     pub fn section(self) -> &'static str {
         match self {
-            SettingsItem::Layout | SettingsItem::Icons => "Appearance",
+            SettingsItem::Layout | SettingsItem::Icons | SettingsItem::Tips => "Appearance",
             SettingsItem::CycleInSessions => "Keyboard",
             SettingsItem::Update
             | SettingsItem::RestartUi

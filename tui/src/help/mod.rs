@@ -428,6 +428,12 @@ impl KeyAction {
         }
     }
 
+    /// [`KeyAction::keys`] as Settings lists them for `ctx`.
+    #[cfg(test)]
+    pub fn keys_for(self, ctx: &ModalContext) -> String {
+        self.keys(&KeyNames::new(ctx))
+    }
+
     /// Its keys: the Rakumux key for leaving a session, Rakumux mode's
     /// keys for the rest, from the configured keys.
     fn keys(self, k: &KeyNames) -> String {

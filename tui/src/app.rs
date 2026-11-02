@@ -51,6 +51,7 @@ mod sessions;
 pub mod sprite;
 pub mod terminal_panel;
 mod text_input;
+pub mod tips;
 pub mod types;
 mod upgrade;
 
@@ -215,6 +216,8 @@ pub enum Hit {
     ShowList,
     /// A key hint on the right of the footer.
     FooterKey(FooterKey),
+    /// The tip in the footer: shows the next one.
+    FooterTip,
 }
 
 /// What a footer button does when tapped: what its keys do.
@@ -400,6 +403,8 @@ pub struct App {
     terminal_output: Vec<u8>,
 
     pub pending_update_version: Option<String>,
+    /// Tips clicked past in the footer (this window's).
+    pub tip_offset: usize,
     pub update_install_method: Option<crate::updater::InstallMethod>,
     /// Reload this UI after detaching and restoring the terminal. Does not
     /// stop or restart the daemon.
@@ -499,6 +504,7 @@ impl App {
             naming_started: HashSet::new(),
             terminal_output: Vec::new(),
             pending_update_version: None,
+            tip_offset: 0,
             update_install_method: None,
             restart_requested: false,
             restart_launcher: None,
@@ -862,6 +868,23 @@ impl App {
                          there never gets them (OpenCode, Pi and Claude Code use them). Off: they \
                          switch sessions in Rakumux mode only."
                     ),
+                    disabled: false,
+                };
+            }
+            SettingsItem::Tips => {
+                let value = if self.settings.sessions.tips {
+                    "[On] Off"
+                } else {
+                    "On [Off]"
+                };
+                return SettingRow {
+                    section: item.section(),
+                    label: "Tips in the footer".into(),
+                    value: value.into(),
+                    note: "A key and what it does, at the right of the footer in Rakumux mode: \
+                           a different one each day, the next one on a click. It shows only \
+                           where the footer has room to spare."
+                        .into(),
                     disabled: false,
                 };
             }

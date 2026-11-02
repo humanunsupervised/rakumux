@@ -1096,7 +1096,8 @@ accidents; they don't stop a hostile process running as the same user.
 - **Config** (`tui/src/app/config.rs`): `Config {anthropic_api_key, openai_api_key,
   ai_primary_provider, openai_model}` plus `sessions {rakumux_key ("ctrl+\\"; an older
   `prefix_key` other than "ctrl+b" still counts), cycle_keys (["alt+up", "alt+down"]),
-  cycle_keys_in_session (false), icons ("plain" | "emoji" | "nerd":
+  cycle_keys_in_session (false), tips (true: a tip in the footer; saved only when false),
+  icons ("plain" | "emoji" | "nerd":
   the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
@@ -1477,9 +1478,20 @@ feed is on; it does what `f` does), `? Help` and `, Settings`, then the
 Rakumux account: `a Sign in` while signed out (a tap asks for a sign-in code
 at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `Ctrl-\` alone in
 session mode (the label names the mode); and last, quieter, this Rakumux's version (`v0.1.37`, a
-local build's `v0.1.0`). To count while the feed is hidden the TUI asks the account service for
-it every 10 s as a `background` read (every 2 s while it shows). When the row is short the
-version goes first (it shows only while every button, the session and the message keep their
+local build's `v0.1.0`). In Rakumux mode, in the room left between the label and the buttons and
+against the buttons, a **tip** (`app/tips.rs`, `App::tip`): a key and what it does (`T terminal
+panel`, `f every agent's replies`, `t rtop: what sessions use`, the Rakumux key's `session or
+Rakumux mode`, `U update (sessions stay up)`, `w where it changed files`, `v Master detail, Grid,
+Tabs`, `p pin to the top`, `Tab last session`, `a answer agents from the web` only while signed
+out, `drag copies a session's text`, `rakumux remote on pairs a phone`), its keys bold as a
+button's, its text in the version's ink. The local date picks it, so it's the same all day and the
+next day shows the next one; a click or tap on it (`Hit::FooterTip`) shows the next one (this
+window's, memory only), never runs it. None in session mode (those keys aren't Rakumux's there),
+while typing a filter or under a dialog, nor with `sessions.tips` off (Settings → Tips in the
+footer). To count while the feed is hidden the TUI asks the account service for
+it every 10 s as a `background` read (every 2 s while it shows). When the row is short the tip
+goes first (it shows only while the version does and fits beside the centred label: it never moves
+or cuts anything), then the version (it shows only while every button, the session and the message keep their
 room and the label stays centred), then the session gives way (to its name alone, then nothing), then the message is cut, then
 buttons go from the right (the account, Settings, Help, then the Feed's, which carries the
 count: a 40-column phone keeps it and Help, Settings from 48); the label never goes, its short
@@ -1706,7 +1718,7 @@ Settings is one scrolling page without tabs (`help::ModalTab::Settings`) under a
 typing narrows it to the settings and actions whose section or name has every word typed
 (`Backspace` deletes, `Esc` clears, then closes; `Space` changes the selected row while nothing
 is typed), and the dialog keeps its size meanwhile. The settings come first (Account, where you
-sign in, then Appearance, Keyboard and App), then under a `Keys`
+sign in, then Appearance (Layout, Icons, Tips in the footer), Keyboard and App), then under a `Keys`
 rule every action and its keys, which `Enter` runs; `↑`/`↓` select among the rows shown; `→`
 shows the selected row's note in a popover over the page (`←`, `Esc`, moving or `Enter` close
 it), so the rows never shift; the wheel moves the selection. A setting that can't be changed

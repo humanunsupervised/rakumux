@@ -36,6 +36,12 @@ use session_core::paths::Layout;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+/// Whether `line` (after `rakumux`) is a subcommand `rakumux` takes.
+#[cfg(test)]
+pub(crate) fn is_command(line: &str) -> bool {
+    CliArgs::try_parse_from(std::iter::once("rakumux").chain(line.split_whitespace())).is_ok()
+}
+
 /// Shown for `unsupported` errors: the daemon predates an operation.
 const UNSUPPORTED_HINT: &str =
     "this Rakumux daemon is older; restart it with `rakumux daemon restart`";

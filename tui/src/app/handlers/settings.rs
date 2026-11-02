@@ -215,6 +215,12 @@ fn open_item(app: &mut App, item: SettingsItem) {
             app.mode = AppMode::Normal;
             app.open_rtop();
         }
+        SettingsItem::Tips => {
+            let on = !app.settings.sessions.tips;
+            app.settings.sessions.tips = on;
+            let state = if on { "on" } else { "off" };
+            save_config(app, format!("Tips in the footer: {state}"));
+        }
         SettingsItem::CycleInSessions => {
             let on = !app.settings.sessions.cycle_keys_in_session;
             app.settings.sessions.cycle_keys_in_session = on;

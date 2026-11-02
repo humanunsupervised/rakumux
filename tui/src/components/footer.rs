@@ -13,10 +13,13 @@
 //! (the account dialog) while signed in. In session mode the Rakumux key
 //! alone, the way out (the label already names the mode). Settings lists
 //! every key. Last, at the far right, quieter, this Rakumux's version
-//! (`v0.1.37`; a local build's says `v0.1.0`).
+//! (`v0.1.37`; a local build's says `v0.1.0`). In Rakumux mode, in the room
+//! between the label and the buttons, against the buttons, the day's tip
+//! (`app::tips`): a click on it shows the next one.
 //!
-//! The footer never wraps or grows: when the row is short the version goes
-//! first (it shows only while everything else keeps its place: every button,
+//! The footer never wraps or grows: when the row is short the tip goes
+//! first (it shows only while the version does and fits beside the centred
+//! label, so it never moves anything), then the version (it shows only while everything else keeps its place: every button,
 //! the session and the message whole, the label centred), the session
 //! gives way next (to its mark and name, then nothing), then the message is
 //! cut (down to [`MIN_MESSAGE`] columns), then buttons are dropped from the
@@ -26,7 +29,7 @@
 //! them, in its short words (`RAKUMUX`, `SESSION`, `TERMINAL`) on a row too
 //! short for the full ones.
 //!
-//! The label and the buttons are tap targets, for phones and the mouse:
+//! The label, the buttons and the tip are tap targets, for phones and the mouse:
 //! `SESSION MODE` switches to Rakumux mode, `RAKUMUX MODE` does what Esc
 //! does (back to the session you came from; while the feed has the keys, the
 //! feed's Esc), and a button does what its keys do.
@@ -61,6 +64,9 @@ const MARGIN: usize = 1;
 
 /// Between the session and the message.
 const SEPARATOR: &str = "  ";
+
+/// Columns kept clear on either side of the tip.
+const TIP_SPACE: usize = 2;
 
 /// How much darker than the orange bar its buttons are (see
 /// [`theme::Palette::faded`]).
@@ -440,6 +446,11 @@ pub fn footer_line(app: &App, width: usize) -> Line<'static> {
 /// button shown. The label, the buttons and a message come first; the
 /// session takes what's left at the left.
 fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
+    footer_on(app, width, crate::app::tips::today())
+}
+
+/// [`footer`] on `day`, whose tip it shows.
+fn footer_on(app: &App, width: usize, day: i32) -> (Line<'static>, Vec<FooterTarget>) {
     let mode = mode_label(app, width);
     let mode_width = str_width(&mode.content);
     let message = message(app);
@@ -534,6 +545,28 @@ fn footer(app: &App, width: usize) -> (Line<'static>, Vec<FooterTarget>) {
                 span.style = span.style.add_modifier(Modifier::BOLD);
             }
         }
+    }
+    // The day's tip, in Rakumux mode while the version shows (everything
+    // else keeps its place), in the room left between the label and the
+    // buttons, against the buttons: it moves nothing, and a click on it
+    // shows the next one where it is.
+    let tip = app
+        .tip(day)
+        .filter(|_| app.focus == Focus::List && with_version.is_some() && !buttons.is_empty())
+        .filter(|tip| x + mode_width + TIP_SPACE + tip.width() + TIP_SPACE <= right);
+    if let Some(tip) = tip {
+        let at = right - TIP_SPACE - tip.width();
+        let used = spans_width(&spans);
+        spans.push(Span::raw(" ".repeat(at.saturating_sub(used))));
+        targets.push((
+            u16::try_from(at).unwrap_or(u16::MAX),
+            u16::try_from(tip.width()).unwrap_or(u16::MAX),
+            Hit::FooterTip,
+        ));
+        let p = theme::palette();
+        let style = Style::default().fg(p.background).bg(p.accent_orange);
+        spans.push(Span::styled(tip.keys, style.add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(format!(" {}", tip.text), style));
     }
     if !buttons.is_empty() {
         let used = spans_width(&spans);
@@ -1114,6 +1147,112 @@ mod tests {
             line.starts_with(" session: ● api  ✕ daemon unavailable · Reconnecting… "),
             "{line:?}"
         );
+    }
+
+    /// 2 November 2026, the day these tests show the tip of.
+    const DAY: i32 = 739_922;
+
+    /// The day's tip as the footer shows it.
+    fn tip_text(app: &App) -> String {
+        let tip = app.tip(DAY).expect("tips are on");
+        format!("{} {}", tip.keys, tip.text)
+    }
+
+    #[test]
+    fn a_wide_row_shows_the_day_s_tip_just_left_of_the_buttons() {
+        let h = harness(vec![view("A", "api", 10)]);
+        let tip = tip_text(&h.app);
+        let (line, targets) = footer_on(&h.app, 240, DAY);
+        let shown = text(&line);
+        assert!(
+            shown.ends_with(&format!("   {tip}  {ALL_BUTTONS}{VERSION}")),
+            "{shown:?}"
+        );
+        assert!(centred(&shown, " RAKUMUX MODE "), "{shown:?}");
+        // Quiet ink on the bar, its keys bold as a button's are.
+        let p = theme::palette();
+        let keys = h.app.tip(DAY).unwrap().keys;
+        let key = line.spans.iter().find(|s| s.content == keys).unwrap();
+        assert!(key.style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(key.style.fg, Some(p.background));
+        assert_eq!(key.style.bg, Some(p.accent_orange));
+        // A tap target over it.
+        let chars: Vec<char> = shown.chars().collect();
+        let (x, width, _) = targets
+            .iter()
+            .find(|(_, _, hit)| *hit == Hit::FooterTip)
+            .expect("the tip is a target");
+        let at: String = chars[usize::from(*x)..usize::from(x + width)]
+            .iter()
+            .collect();
+        assert_eq!(at, tip);
+    }
+
+    #[tokio::test]
+    async fn the_tip_goes_before_the_version_and_never_moves_anything() {
+        let mut h = harness(vec![view("A", "api", 10)]);
+        let mut tip_from = None;
+        let mut version_from = None;
+        // Every tip, signed in and out, with and without a message.
+        for account in [true, false] {
+            h.app.account = if account {
+                AccountStatus::SignedIn(crate::app::testing::FakeAccount::person())
+            } else {
+                AccountStatus::SignedOut
+            };
+            for status in [None, Some("Layout: Tabs")] {
+                match status {
+                    Some(status) => h.app.set_status(status),
+                    None => {
+                        h.app.on_tick(
+                            std::time::Instant::now() + std::time::Duration::from_secs(60),
+                        );
+                    }
+                }
+                for _ in 0..12 {
+                    h.app.settings.sessions.tips = true;
+                    h.app.next_tip();
+                    let tip = tip_text(&h.app);
+                    for width in 0..=320 {
+                        h.app.settings.sessions.tips = true;
+                        let (with, targets) = footer_on(&h.app, width, DAY);
+                        h.app.settings.sessions.tips = false;
+                        let (without, others) = footer_on(&h.app, width, DAY);
+                        let (with, without) = (text(&with), text(&without));
+                        let version = without.ends_with(VERSION);
+                        if version && account && status.is_none() {
+                            version_from.get_or_insert(width);
+                        }
+                        if !with.contains(&tip) {
+                            assert_eq!(with, without, "{width}");
+                            continue;
+                        }
+                        if account && status.is_none() {
+                            tip_from.get_or_insert(width);
+                        }
+                        // Only while the version shows; with spaces in its
+                        // place the row is the same, the targets too.
+                        assert!(version, "{width}: {with:?}");
+                        let blank = " ".repeat(str_width(&tip));
+                        assert_eq!(with.replacen(&tip, &blank, 1), without, "{width}");
+                        let targets: Vec<_> = targets
+                            .into_iter()
+                            .filter(|(_, _, hit)| *hit != Hit::FooterTip)
+                            .collect();
+                        assert_eq!(targets, others, "{width}");
+                    }
+                }
+            }
+        }
+        // As the row narrows the tip goes first, then the version.
+        let (tip_from, version_from) = (tip_from.unwrap(), version_from.unwrap());
+        assert!(tip_from > version_from, "{tip_from} {version_from}");
+        // Never in session mode, where the footer holds the way out alone.
+        h.press(KeyCode::Enter).await;
+        for width in 0..=320 {
+            let (_, targets) = footer_on(&h.app, width, DAY);
+            assert!(targets.iter().all(|(_, _, hit)| *hit != Hit::FooterTip));
+        }
     }
 
     #[tokio::test]

@@ -1411,6 +1411,10 @@ impl App {
                     }
                     return;
                 }
+                Some(Hit::FooterTip) => {
+                    self.next_tip();
+                    return;
+                }
                 Some(Hit::FooterKey(key)) => {
                     // What the button's keys do: Help and Settings are
                     // Rakumux mode keys.
