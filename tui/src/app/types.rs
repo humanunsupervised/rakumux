@@ -389,7 +389,7 @@ pub enum SettingsItem {
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then the rest.
-    pub const ALL: [SettingsItem; 10] = [
+    pub const ALL: [SettingsItem; 11] = [
         SettingsItem::Account,
         SettingsItem::Layout,
         SettingsItem::Icons,
