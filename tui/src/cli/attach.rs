@@ -21,6 +21,7 @@ use session_core::api::{
 use session_core::client::{AttachEvent, AttachSender, AttachStream, SessionApi};
 use session_core::ids::SessionId;
 use session_core::model::{ScopeRoot, SessionStatus, SessionView};
+use std::io::IsTerminal;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -48,7 +49,7 @@ const ALTERNATE_EXITS: [&[u8]; 3] = [b"\x1b[?1049l", b"\x1b[?1047l", b"\x1b[?47l
 
 /// Both stdin and stdout are terminals.
 pub(crate) fn is_terminal() -> bool {
-    atty::is(atty::Stream::Stdin) && atty::is(atty::Stream::Stdout)
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
 /// The controlling terminal's size as (cols, rows), or 80×24.

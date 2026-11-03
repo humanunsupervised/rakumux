@@ -18,6 +18,7 @@ mod theme;
 mod ui;
 mod updater;
 
+use std::io::IsTerminal;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -137,7 +138,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    if !atty::is(atty::Stream::Stdout) {
+    if !std::io::stdout().is_terminal() {
         eprintln!("Error: Cannot run the session screen when stdout is captured.");
         eprintln!("Run `rakumux` directly in a terminal, or use a subcommand such as");
         eprintln!("`rakumux ls` from scripts.");

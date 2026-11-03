@@ -2,6 +2,7 @@
 //! that turns on AI session titles and the agent feed, and the hidden
 //! `rakumux status-service` that holds it (see `crate::account`).
 
+use std::io::IsTerminal;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -29,7 +30,7 @@ pub(crate) fn run(
         .map_err(|error| CliError::internal(format!("can't find this program: {error}")))?;
     let access = LocalAccount::new(layout()?, program, "cli", version());
     match command {
-        AccountCommand::Login => login(&access, atty::is(atty::Stream::Stdout), out),
+        AccountCommand::Login => login(&access, std::io::stdout().is_terminal(), out),
         AccountCommand::Logout => logout(&access, out),
         AccountCommand::Status { json } => status(api, &access, json, out),
     }

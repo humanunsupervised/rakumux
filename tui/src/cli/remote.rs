@@ -10,6 +10,7 @@ use crate::remote_access::{self, Pairing, RunningApi};
 use serde_json::json;
 use session_core::paths::Layout;
 use session_core::remote::RemoteConfig;
+use std::io::IsTerminal;
 use std::io::Write;
 
 pub(crate) fn run(
@@ -19,7 +20,7 @@ pub(crate) fn run(
 ) -> Result<i32, CliError> {
     let layout = layout()?;
     // The QR code only on a terminal (not in a pipe or a file).
-    let qr = atty::is(atty::Stream::Stdout);
+    let qr = std::io::stdout().is_terminal();
     match command {
         RemoteCommand::On { port } => on(globals, &layout, port, qr, out),
         RemoteCommand::Off => off(globals, &layout, out),

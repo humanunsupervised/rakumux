@@ -6,6 +6,7 @@ use serde_json::json;
 use session_core::api::{ApiError, DaemonStatusInfo, ErrorCode, CAPABILITY_DAEMON_RESTART};
 use session_core::client::SessionApi;
 use session_core::paths::{Layout, Registration};
+use std::io::IsTerminal;
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -273,7 +274,7 @@ fn confirm(what: &str, running: u32) -> Result<(), CliError> {
     } else {
         format!("{running} running sessions")
     };
-    if !atty::is(atty::Stream::Stdin) {
+    if !std::io::stdin().is_terminal() {
         return Err(CliError::invalid(format!(
             "{what} ends {sessions}; pass --yes to do it anyway"
         )));
