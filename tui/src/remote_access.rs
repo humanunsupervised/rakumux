@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn magic_dns_comes_first_for_tailscale_addresses() {
         let tailnet = vec![
-            "http://100.88.129.91:7337".to_string(),
+            "http://100.101.102.103:7337".to_string(),
             "http://[fd7a:115c:a1e0::1]:7337".to_string(),
         ];
         assert_eq!(

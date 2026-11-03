@@ -242,14 +242,14 @@ mod tests {
     fn the_tailscale_interface_counts_without_asking_the_cli() {
         let local = [
             addr("lo", "127.0.0.1"),
-            addr("wlp7s0", "192.168.68.58"),
-            addr("tailscale0", "fd7a:115c:a1e0::9633:815b"),
-            addr("tailscale0", "100.88.129.91"),
+            addr("wlp7s0", "192.168.1.20"),
+            addr("tailscale0", "fd7a:115c:a1e0::5a6b:7c8d"),
+            addr("tailscale0", "100.101.102.103"),
             addr("tailscale0", "fe80::1"),
         ];
         assert_eq!(
             select(&local, || panic!("the CLI was asked")),
-            ips(&["100.88.129.91", "fd7a:115c:a1e0::9633:815b"])
+            ips(&["100.101.102.103", "fd7a:115c:a1e0::5a6b:7c8d"])
         );
     }
 
@@ -260,9 +260,9 @@ mod tests {
         let local = [
             addr("eth0", "100.72.10.20"),
             addr("CloudflareWARP", "100.96.0.5"),
-            addr("tailscale0", "100.88.129.91"),
+            addr("tailscale0", "100.101.102.103"),
         ];
-        assert_eq!(select(&local, || None), ips(&["100.88.129.91"]));
+        assert_eq!(select(&local, || None), ips(&["100.101.102.103"]));
         let not_running = || {
             Some(Status {
                 running: false,
@@ -270,7 +270,7 @@ mod tests {
                 dns_name: None,
             })
         };
-        assert_eq!(select(&local, not_running), ips(&["100.88.129.91"]));
+        assert_eq!(select(&local, not_running), ips(&["100.101.102.103"]));
         assert!(select(&[addr("eth0", "100.72.10.20")], || None).is_empty());
     }
 
@@ -307,12 +307,12 @@ mod tests {
     fn status_json_is_read() {
         let json = br#"{"BackendState": "Running",
             "Self": {"DNSName": "box.tail1234.ts.net.", "HostName": "box",
-                     "TailscaleIPs": ["100.88.129.91", "fd7a:115c:a1e0::9633:815b", "nonsense"]}}"#;
+                     "TailscaleIPs": ["100.101.102.103", "fd7a:115c:a1e0::5a6b:7c8d", "nonsense"]}}"#;
         assert_eq!(
             parse_status(json),
             Some(Status {
                 running: true,
-                ips: ips(&["100.88.129.91", "fd7a:115c:a1e0::9633:815b"]),
+                ips: ips(&["100.101.102.103", "fd7a:115c:a1e0::5a6b:7c8d"]),
                 dns_name: Some("box.tail1234.ts.net".into()),
             })
         );

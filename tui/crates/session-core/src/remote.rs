@@ -217,7 +217,7 @@ mod tests {
         let ip = |text: &str| text.parse::<IpAddr>().unwrap();
         for yes in [
             "100.64.0.0",
-            "100.88.129.91",
+            "100.101.102.103",
             "100.127.255.255",
             "fd7a:115c:a1e0::1",
             "fd7a:115c:a1e0:ab12:4843:cd96:6258:b240",
