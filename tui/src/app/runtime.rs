@@ -134,6 +134,14 @@ pub enum AppEvent {
         id: SessionId,
         result: Result<SessionView, ApiError>,
     },
+    /// The session history, read as its modal opened.
+    History {
+        result: Result<Vec<session_core::model::DeletedSession>, ApiError>,
+    },
+    /// A deleted session brought back (dead).
+    Restored {
+        result: Result<SessionView, ApiError>,
+    },
     /// Result of marking a session as used (failures become a status).
     Touched {
         result: Result<(), ApiError>,

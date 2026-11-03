@@ -3,7 +3,9 @@
 //! tracking, git context and audit.
 //!
 //! Submodules:
-//! - `registry`: `sessions_v2`, `projects` and `audit_log` tables.
+//! - `registry`: `sessions_v2`, `projects`, `deleted_sessions` and
+//!   `audit_log` tables.
+//! - `history`: the session history (deleted sessions) as the wire shows it.
 //! - `auth`: hello verification, in-memory session tokens.
 //! - `policy`: stage-A permission matrix for session callers.
 //! - `service`: request handlers and host-event handling.
@@ -20,6 +22,7 @@ mod auth;
 mod env;
 mod events;
 mod git_context;
+mod history;
 mod host_events;
 mod import;
 mod keep_awake;
@@ -165,6 +168,7 @@ impl ControlService {
                 local.upgrade().is_none_or(|inner| inner.has_session(id))
             }),
         );
+        inner.purge_history();
         inner.adopt_host_terminals(handed);
         host_events::start(&inner, host_events)?;
         keep_awake::start(&inner);

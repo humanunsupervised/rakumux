@@ -134,6 +134,8 @@ pub struct FakeState {
     /// The daemon restarts in place (`daemon.restart`).
     pub restarts_in_place: bool,
     pub sessions: Vec<SessionView>,
+    /// Deleted sessions (the session history), most recently deleted first.
+    pub deleted: Vec<SessionView>,
     pub calls: Vec<String>,
     /// Every create request, in order.
     pub creates: Vec<CreateSession>,
@@ -456,6 +458,7 @@ impl SessionApi for FakeApi {
                 session_core::api::CAPABILITY_PLACES,
                 session_core::api::CAPABILITY_RESOURCES,
                 session_core::api::CAPABILITY_SUBMIT_BLOCKED,
+                session_core::api::CAPABILITY_HISTORY,
             ]);
         }
         if state.restarts_in_place {
@@ -548,9 +551,65 @@ impl SessionApi for FakeApi {
     fn delete(&self, id: &SessionId) -> Result<()> {
         self.record(format!("delete {id}"));
         self.take_failure("delete")?;
-        self.find(id)?;
-        self.state.lock().unwrap().sessions.retain(|s| &s.id != id);
+        let session = self.find(id)?;
+        let mut state = self.state.lock().unwrap();
+        state.sessions.retain(|s| &s.id != id);
+        state.deleted.insert(0, session);
         Ok(())
+    }
+
+    fn history(
+        &self,
+        query: Option<&str>,
+        limit: Option<u32>,
+        before: Option<&SessionId>,
+    ) -> Result<session_core::api::HistoryPage> {
+        self.record(format!("history before={before:?}"));
+        self.take_failure("history")?;
+        let state = self.state.lock().unwrap();
+        let start = before
+            .and_then(|before| state.deleted.iter().position(|s| &s.id == before))
+            .map_or(0, |index| index + 1);
+        let limit = limit.unwrap_or(100) as usize;
+        let matching: Vec<_> = state.deleted[start..]
+            .iter()
+            .filter(|s| query.is_none_or(|q| s.name.contains(q)))
+            .collect();
+        Ok(session_core::api::HistoryPage {
+            more: matching.len() > limit,
+            sessions: matching
+                .into_iter()
+                .take(limit)
+                .map(|s| session_core::model::DeletedSession {
+                    id: s.id.clone(),
+                    name: s.name.clone(),
+                    scope: s.scope.clone(),
+                    cwd: s.cwd.clone(),
+                    agent: s.agent.clone(),
+                    git: s.git.clone(),
+                    created_at: s.created_at,
+                    last_active_at: s.last_active_at,
+                    last_message_at: s.last_message_at,
+                    deleted_at: state.now,
+                })
+                .collect(),
+        })
+    }
+
+    fn restore(&self, id: &SessionId) -> Result<SessionView> {
+        self.record(format!("restore {id}"));
+        self.take_failure("restore")?;
+        let mut state = self.state.lock().unwrap();
+        let index = state
+            .deleted
+            .iter()
+            .position(|s| &s.id == id)
+            .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "not in the history"))?;
+        let mut session = state.deleted.remove(index);
+        session.status = SessionStatus::Dead;
+        session.terminal = None;
+        state.sessions.push(session.clone());
+        Ok(session)
     }
 
     fn revive(&self, request: ReviveSession) -> Result<SessionView> {

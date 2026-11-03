@@ -69,7 +69,7 @@ fn reviving_after_the_daemon_ended_unexpectedly_is_not_a_use() {
 }
 
 #[test]
-fn the_last_message_is_kept_across_restarts_and_goes_with_its_session() {
+fn the_last_message_is_kept_across_restarts_and_into_the_session_history() {
     let mut h = Harness::new();
     let s = h.create(Some("agent"));
     assert_eq!(h.get(&s.id).last_message_at, None);
@@ -82,13 +82,22 @@ fn the_last_message_is_kept_across_restarts_and_goes_with_its_session() {
     h.restart();
     assert_eq!(h.get(&s.id).last_message_at, Some(1_792_630_501));
     h.handle(&h.user, Request::SessionDelete { id: s.id.clone() });
-    let left: i64 = h
-        .db()
-        .query_row("SELECT COUNT(*) FROM session_last_message", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(left, 0);
+    // The session history keeps it with its session.
+    let history = match h.handle(
+        &h.user,
+        Request::SessionHistory {
+            query: None,
+            limit: None,
+            before: None,
+        },
+    ) {
+        Response::History(page) => page.sessions,
+        other => panic!("expected the session history, got {other:?}"),
+    };
+    assert_eq!(history[0].last_message_at, Some(1_792_630_501));
+    h.restart();
+    let restored = session(h.handle(&h.user, Request::SessionRestore { id: s.id.clone() }));
+    assert_eq!(restored.last_message_at, Some(1_792_630_501));
 }
 
 #[test]
@@ -524,7 +533,7 @@ fn kill_tree_terminates_descendants_only() {
 }
 
 #[test]
-fn delete_terminates_and_removes_record_token_and_history() {
+fn delete_terminates_and_takes_the_session_out_of_the_list() {
     let h = Harness::new();
     let s = h.create(Some("scratch"));
     let keep = h.create(Some("keep"));
@@ -539,7 +548,8 @@ fn delete_terminates_and_removes_record_token_and_history() {
     );
     let fake = h.host.terminal(terminal);
     assert!(fake.terminated && fake.forgotten);
-    assert!(!history.exists());
+    // Kept for the session history.
+    assert!(history.exists());
     assert_eq!(
         error(h.handle(&h.user, Request::SessionGet { id: s.id.clone() })).code,
         ErrorCode::NotFound

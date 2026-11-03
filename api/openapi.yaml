@@ -315,8 +315,10 @@ paths:
       operationId: deleteSession
       summary: Delete a session.
       description: >
-        Ends its program (if it runs) and removes the session, its saved
-        scrollback and history. Sessions it created stay (without a parent).
+        Ends its program (if it runs) and takes the session out of the list.
+        A daemon with the session history keeps it there, with its saved
+        scrollback, for 90 days (`rakumux history`, `rakumux restore`); an
+        older one removes it. Sessions it created stay (without a parent).
         User callers only (session callers get 403).
       responses:
         "204": { description: Deleted. }

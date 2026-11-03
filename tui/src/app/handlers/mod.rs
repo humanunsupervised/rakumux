@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod dialogs;
 pub mod folders;
+pub mod history;
 pub mod list;
 pub mod sections;
 pub mod session;

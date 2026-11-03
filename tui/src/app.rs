@@ -38,6 +38,7 @@ pub mod folders;
 pub mod grid;
 pub mod grouping;
 mod handlers;
+mod history;
 mod keys;
 mod list_tabs;
 mod new_session;
@@ -216,6 +217,10 @@ pub enum Hit {
     SectionMenu,
     /// A row of the App or Status modal.
     SectionRow(usize),
+    /// The open session history modal (clicks inside it don't close it).
+    HistoryMenu,
+    /// A row of the session history modal.
+    HistoryRow(usize),
     /// The mode label in the footer's centre: `SESSION MODE` switches to
     /// Rakumux mode, `RAKUMUX MODE` goes back to the session you came from.
     ModeBadge,
@@ -978,6 +983,22 @@ impl App {
                 "CPU, memory, network · t".into(),
                 "What this machine, this window, the Rakumux server and every running session's processes use now: CPU, memory and network traffic, about every second, in the drawer on the right beside the Feed. Nothing is recorded.",
             ),
+            SettingsItem::SessionHistory => {
+                let available = self.has_session_history();
+                return SettingRow {
+                    section: item.section(),
+                    label: "Session history".into(),
+                    value: "Open · H".into(),
+                    note: if available {
+                        "Sessions you deleted or closed in the last 90 days, on this machine. \
+                         Enter brings one back into its folder and resumes it."
+                            .into()
+                    } else {
+                        "Restart the server (S) to keep deleted sessions here.".into()
+                    },
+                    disabled: !available,
+                };
+            }
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
                 if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
@@ -1147,6 +1168,8 @@ impl App {
             AppEvent::Deleted { id, result } => self.on_deleted(id, result),
             AppEvent::Killed { id, result } => self.on_killed(id, result),
             AppEvent::Revived { id, result } => self.on_revived(id, result),
+            AppEvent::History { result } => self.on_history(result),
+            AppEvent::Restored { result } => self.on_restored(result),
             AppEvent::Touched { result } => {
                 if let Err(error) = result {
                     self.set_status(format!("Couldn't mark the session as used: {error}"));
@@ -1567,7 +1590,7 @@ impl App {
 }
 
 /// Features this TUI shows, by the capability a daemon announces for them.
-const DAEMON_FEATURES: [(&str, &str); 13] = [
+const DAEMON_FEATURES: [(&str, &str); 14] = [
     ("session.git", "git branches and worktrees"),
     ("projects", "folders"),
     ("session.pin", "pins"),
@@ -1601,6 +1624,7 @@ const DAEMON_FEATURES: [(&str, &str); 13] = [
         "where each session has worked",
     ),
     (session_core::api::CAPABILITY_RESOURCES, "rtop"),
+    (session_core::api::CAPABILITY_HISTORY, "the session history"),
     // Replies from the feed go into an agent at work only while the daemon
     // refuses to type into a prompt it opens (the account service checks).
     (

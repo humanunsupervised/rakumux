@@ -26,6 +26,10 @@ pub(crate) enum Op {
     Rename,
     Kill,
     Delete,
+    /// List the session history.
+    History,
+    /// Bring a deleted session back.
+    Restore,
     Revive,
     Report,
     Read,
@@ -61,6 +65,8 @@ impl Op {
             Op::Rename => "session.rename",
             Op::Kill => "session.kill",
             Op::Delete => "session.delete",
+            Op::History => "session.history",
+            Op::Restore => "session.restore",
             Op::Revive => "session.revive",
             Op::Report => "session.report",
             Op::Read => "session.read",
@@ -97,6 +103,7 @@ impl Op {
                 | Op::Rename
                 | Op::Kill
                 | Op::Delete
+                | Op::Restore
                 | Op::Revive
                 | Op::Report
                 | Op::Send
@@ -150,6 +157,7 @@ pub(crate) fn authorize(
             _ => Err(denied(op, "a session may only do this to itself")),
         },
         Op::Import => Err(denied(op, "importing saved sessions is for user clients")),
+        Op::History | Op::Restore => Err(denied(op, "the session history is for user clients")),
         Op::Turn | Op::Transcript => Err(denied(op, "an agent's conversation is for user clients")),
         Op::Answer => Err(denied(
             op,

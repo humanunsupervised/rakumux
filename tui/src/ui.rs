@@ -126,6 +126,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         AppMode::Sections(picker) => {
             draw_section_picker(f, app, picker, modal_area, &mut menu_hits)
         }
+        AppMode::History(picker) => {
+            crate::components::history::draw_history(f, app, picker, modal_area, &mut menu_hits)
+        }
         AppMode::Renaming(dialog) => draw_rename_dialog(f, dialog, modal_area),
         AppMode::FeedReply(dialog) => draw_feed_reply_dialog(f, dialog, modal_area),
         AppMode::Confirm(dialog) => draw_confirm_dialog(f, dialog, modal_area),
@@ -1873,7 +1876,8 @@ mod tests {
             }),
             "delete" => AppMode::Confirm(ConfirmDialog {
                 title: "Delete session".into(),
-                message: "Delete 'api'? Its process is ended and its saved output removed.".into(),
+                message: "Delete 'api'? Its process is ended; Session history keeps it 90 days."
+                    .into(),
                 action: ConfirmAction::DeleteSession {
                     id,
                     name: "api".into(),
@@ -1909,7 +1913,7 @@ mod tests {
         let mut h = harness(vec![view("A", "api", 10), view("B", "docs", 20)]);
         let expected: [(&str, &[&str]); 5] = [
             ("rename", &["Current: api", "[Enter] Rename • [Esc] Cancel"]),
-            ("delete", &["output removed.", "[y/Enter] Yes • [n/Esc] No"]),
+            ("delete", &["90 days.", "[y/Enter] Yes • [n/Esc] No"]),
             ("restart", &["them.", "are.", "[y] Restart", "[q] Quit"]),
             (
                 "ui restart",

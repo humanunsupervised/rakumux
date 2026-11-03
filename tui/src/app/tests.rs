@@ -3340,6 +3340,7 @@ async fn an_older_daemon_without_sessions_all_lists_its_folders_by_name() {
                 "whole chats in the agent feed",
                 "where each session has worked",
                 "rtop",
+                "the session history",
                 "replies while an agent works"
             ]
         ),
@@ -3862,6 +3863,7 @@ async fn an_older_daemon_falls_back_to_the_launch_folder() {
                 "whole chats in the agent feed",
                 "where each session has worked",
                 "rtop",
+                "the session history",
                 "replies while an agent works"
             ]
         ),

@@ -383,6 +383,11 @@ pub trait TerminalHost: Send + Sync + 'static {
     }
     /// SIGHUP the process group, SIGKILL after 3 s.
     fn terminate(&self, id: TerminalId) -> Result<(), HostError>;
+    /// Save the terminal's scrollback and metadata now, as on exit (a
+    /// session about to go into the session history).
+    fn persist(&self, id: TerminalId) {
+        let _ = id;
+    }
     /// Drop an exited terminal (after its scrollback was persisted).
     fn forget(&self, id: TerminalId);
     fn attach(

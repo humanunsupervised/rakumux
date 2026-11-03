@@ -251,6 +251,8 @@ pub enum KeyAction {
     /// `t`: rtop, what this machine, Rakumux and every session's processes
     /// use now.
     Rtop,
+    /// `H`: the session history, deleted sessions to bring back.
+    SessionHistory,
     Help,
     Settings,
     /// Sign in to the Rakumux account, or see who's signed in.
@@ -271,7 +273,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 50] = [
+    pub const ALL: [KeyAction; 51] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -312,6 +314,7 @@ impl KeyAction {
         KeyAction::TerminalPanelBeside,
         KeyAction::TerminalPanelBelow,
         KeyAction::Rtop,
+        KeyAction::SessionHistory,
         KeyAction::Help,
         KeyAction::Settings,
         KeyAction::Account,
@@ -366,7 +369,8 @@ impl KeyAction {
             | KeyAction::TerminalPanel
             | KeyAction::TerminalPanelBeside
             | KeyAction::TerminalPanelBelow
-            | KeyAction::Rtop => "Sessions and folders",
+            | KeyAction::Rtop
+            | KeyAction::SessionHistory => "Sessions and folders",
             KeyAction::Help
             | KeyAction::Settings
             | KeyAction::Account
@@ -422,6 +426,7 @@ impl KeyAction {
             KeyAction::TerminalPanelBeside => "Terminal panel beside the session",
             KeyAction::TerminalPanelBelow => "Terminal panel below the session",
             KeyAction::Rtop => "rtop (show, focus or hide)",
+            KeyAction::SessionHistory => "Session history",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
             KeyAction::Account => "Sign in, or your account",
@@ -495,6 +500,7 @@ impl KeyAction {
             KeyAction::TerminalPanelBeside => plain(&["|"]),
             KeyAction::TerminalPanelBelow => plain(&["-"]),
             KeyAction::Rtop => plain(&["t"]),
+            KeyAction::SessionHistory => plain(&["H"]),
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
             KeyAction::Account => plain(&["a"]),
@@ -637,6 +643,10 @@ impl KeyAction {
                  session's processes, Enter goes into it, Esc gives the list the keys back. \
                  Network counts each process's TCP connections to other machines (Linux; the \
                  machine's total everywhere). Nothing is recorded."
+                .into(),
+            KeyAction::SessionHistory => "Sessions you deleted or closed in the last 90 \
+                 days, on this machine, newest first. Type to search by name, folder, agent \
+                 or branch; Enter brings one back into its folder and resumes it."
                 .into(),
             KeyAction::Account => "Signed out, it asks for a sign-in code to approve in any \
                  browser (the footer's Sign in does too); signed in, it shows the account and \
@@ -2298,7 +2308,11 @@ fn agents_and_cli(doc: &mut Doc) {
     );
     doc.command(
         "rakumux rm <name|id>",
-        "Delete a session and its saved scrollback.",
+        "Delete a session: it ends, and the session history keeps it 90 days.",
+    );
+    doc.command(
+        "rakumux history [query] [--json] / rakumux restore <id|name>",
+        "Deleted sessions, newest first; restore brings one back into its folder.",
     );
     doc.command(
         "rakumux daemon start|status|stop|restart|logs",

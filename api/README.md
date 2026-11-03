@@ -106,7 +106,7 @@ absolute directory (`~/` expanded) or the name of a known folder.
 | `GET /v1/sessions?all=true` | Every folder's sessions (the daemon's `sessions.all`, else the union of its folders), most recently active first. Not with `folder`; session callers get 403. |
 | `POST /v1/sessions/{id}/revive` | Revive a dead or exited session (its resume command runs) → 200 `{"session": {...}}`, the same envelope as the other session routes. Optional body `{cols?, rows?}`; a live session is a 400. |
 | `POST /v1/sessions/{id}/kill` | End its program (not the sessions it created) → 204; not live → 409 `session_not_live`. |
-| `DELETE /v1/sessions/{id}` | Delete the session → 204. |
+| `DELETE /v1/sessions/{id}` | Delete the session → 204. It stays in the session history 90 days (`rakumux history`, `rakumux restore`). |
 | `GET /v1/events` (WebSocket) | Session events of every folder (a session caller: its own). |
 | `GET /v1/sessions/{id}/attach?role=observer\|controller&cols=&rows=` (WebSocket) | The live terminal. `cols`/`rows` are required for a controller. |
 

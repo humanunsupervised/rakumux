@@ -9,9 +9,9 @@
 
 use crate::api::{
     AgentReply, ApiError, AttachRequest, Attached, Auth, CallerInfo, CreateSession,
-    DaemonStatusInfo, ErrorCode, EventEnvelope, Hello, HelloOk, ReadRequest, ReadResult, Report,
-    Request, Response, ReviveSession, SendRequest, StreamCommand, StreamEvent, SubscribeRequest,
-    WaitRequest, WaitResult,
+    DaemonStatusInfo, ErrorCode, EventEnvelope, Hello, HelloOk, HistoryPage, ReadRequest,
+    ReadResult, Report, Request, Response, ReviveSession, SendRequest, StreamCommand, StreamEvent,
+    SubscribeRequest, WaitRequest, WaitResult,
 };
 use crate::frame::{self, Frame};
 use crate::ids::{MachineId, ReplyId, SessionId};
@@ -47,6 +47,23 @@ pub trait SessionApi: Send + Sync {
     fn rename(&self, id: &SessionId, name: &str) -> Result<SessionView>;
     fn kill(&self, id: &SessionId, tree: bool) -> Result<Vec<SessionId>>;
     fn delete(&self, id: &SessionId) -> Result<()>;
+    /// Deleted sessions, most recently deleted first (user only, daemon
+    /// capability `session.history`): see `Request::SessionHistory`.
+    fn history(
+        &self,
+        query: Option<&str>,
+        limit: Option<u32>,
+        before: Option<&SessionId>,
+    ) -> Result<HistoryPage> {
+        let _ = (query, limit, before);
+        Err(unsupported("the session history"))
+    }
+    /// Bring a deleted session back as a dead session (user only, daemon
+    /// capability `session.history`); revive it to run it again.
+    fn restore(&self, id: &SessionId) -> Result<SessionView> {
+        let _ = id;
+        Err(unsupported("restoring deleted sessions"))
+    }
     fn revive(&self, request: ReviveSession) -> Result<SessionView>;
     fn report(&self, report: Report) -> Result<()>;
     fn read(&self, request: ReadRequest) -> Result<ReadResult>;
@@ -666,6 +683,26 @@ impl SessionApi for Client {
 
     fn delete(&self, id: &SessionId) -> Result<()> {
         self.expect_ok(&Request::SessionDelete { id: id.clone() })
+    }
+
+    fn history(
+        &self,
+        query: Option<&str>,
+        limit: Option<u32>,
+        before: Option<&SessionId>,
+    ) -> Result<HistoryPage> {
+        match self.request(&Request::SessionHistory {
+            query: query.map(str::to_owned),
+            limit,
+            before: before.cloned(),
+        })? {
+            Response::History(page) => Ok(page),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn restore(&self, id: &SessionId) -> Result<SessionView> {
+        self.expect_session(&Request::SessionRestore { id: id.clone() })
     }
 
     fn revive(&self, request: ReviveSession) -> Result<SessionView> {
@@ -1972,6 +2009,10 @@ mod tests {
                 }
                 Request::Subscribe(_) => return serve_events(stream),
                 Request::SessionImport { .. } => Response::Sessions { sessions: vec![] },
+                Request::SessionHistory { .. } => Response::History(Default::default()),
+                Request::SessionRestore { id } => Response::Session {
+                    session: named(id.as_str(), "restored"),
+                },
                 Request::ProjectRelocate { .. } => Response::Ok,
                 Request::Hello(_) => Response::Error {
                     error: ApiError::new(ErrorCode::InvalidArgument, "hello twice"),

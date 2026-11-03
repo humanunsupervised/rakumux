@@ -79,6 +79,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_PREFILL,
     session_core::api::CAPABILITY_PROJECTS_CREATE,
     session_core::api::CAPABILITY_MACHINES,
+    session_core::api::CAPABILITY_HISTORY,
     "attach",
     "subscribe",
     "list",
@@ -119,6 +120,8 @@ const KNOWN_OPS: &[&str] = &[
     "session_rename",
     "session_kill",
     "session_delete",
+    "session_history",
+    "session_restore",
     "session_revive",
     "session_report",
     "session_read",
@@ -1976,6 +1979,12 @@ mod tests {
                 tree: false,
             },
             Request::SessionDelete { id: id.clone() },
+            Request::SessionHistory {
+                query: None,
+                limit: None,
+                before: None,
+            },
+            Request::SessionRestore { id: id.clone() },
             Request::SessionRevive(ReviveSession {
                 id: id.clone(),
                 env: vec![],
@@ -2091,6 +2100,8 @@ mod tests {
                 | Request::SessionRename { .. }
                 | Request::SessionKill { .. }
                 | Request::SessionDelete { .. }
+                | Request::SessionHistory { .. }
+                | Request::SessionRestore { .. }
                 | Request::SessionRevive(_)
                 | Request::SessionReport(_)
                 | Request::SessionRead(_)

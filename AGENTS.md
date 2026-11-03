@@ -722,7 +722,8 @@ last_active_at, added_at, git}` on the wire.
   restarts), `dead` (record without terminal, e.g. after a reboot or daemon restart; saved
   scrollback shown; Enter revives). A session whose program the user ends from inside it in
   the TUI (`exit`, Ctrl-D, quitting the agent, while that window controls it in session mode) is
-  deleted by that TUI right away; one that ends in the background stays `exited`.
+  deleted by that TUI right away (into the session history); one that ends in the background
+  stays `exited`.
 - **Lifecycle**: what the program (usually an agent) is doing: `working`, `blocked` (needs the user),
   `done` (finished a turn, not yet looked at), `idle`, `unknown`, `none` (no agent). Detected by the
   daemon from the screen and foreground process; agents can add a self-report. Hook activity wins
@@ -743,6 +744,17 @@ last_active_at, added_at, git}` on the wire.
   types its resume command (startup commands, a known agent's resume form, or one the agent
   reported). The daemon revives the sessions that were running by itself when it starts after an
   unplanned end (see "Recovery").
+- **Session history** (capability `session.history`; `control/history.rs`): deleting a session
+  (`session_delete`, from any client; the TUI's delete when its program ends from inside too)
+  ends its program (its screen saved first) and moves its record to the registry's
+  `deleted_sessions`, with what its view showed (agent, git context) and when; its saved output,
+  command history, places and last message stay. A deleted session is in no list, subscription,
+  folder count or `running.json`, is never revived by recovery and holds no name; `removed` is
+  published as before. `session_restore` brings it back dead in its folder (renamed ` 2`, ` 3`, …
+  when its name is taken; its parent link dropped when that session is gone) and publishes
+  `created`; reviving it runs its resume command. Sessions deleted more than 90 days ago
+  (`HISTORY_RETENTION_DAYS`) are purged with their files at daemon start and about daily. Machine
+  sessions' history is their own machine's.
 
 ### Recovery
 
@@ -797,12 +809,13 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `auth.delegated`). Then strictly alternating request/response, or a stream after `attach` /
   `subscribe`.
 - Requests (`op`): `ping`, `session_list`, `session_get`, `session_create`, `session_rename`,
-  `session_kill`, `session_delete`, `session_revive`, `session_report`, `session_read`,
-  `session_wait`, `session_send`, `session_submit`, `session_answer`, `session_touch`, `session_pin`,
-  `session_bind`, `project_list`, `project_add`, `project_remove`, `attach`, `subscribe`,
-  `daemon_status`, `daemon_shutdown`, `daemon_restart` (user only, capability `daemon.restart`:
-  `{binary?}`; the daemon checks that `binary handoff-versions` reads its state, answers `ok`,
-  closes every connection and execs it). `session_list` and `subscribe` take `scope` and/or `scopes`
+  `session_kill`, `session_delete`, `session_history`, `session_restore`, `session_revive`,
+  `session_report`, `session_read`, `session_wait`, `session_send`, `session_submit`,
+  `session_answer`, `session_touch`, `session_pin`, `session_bind`, `project_list`,
+  `project_add`, `project_remove`, `attach`, `subscribe`, `daemon_status`, `daemon_shutdown`,
+  `daemon_restart` (user only, capability `daemon.restart`: `{binary?}`; the daemon checks that
+  `binary handoff-versions` reads its state, answers `ok`, closes every connection and execs
+  it). `session_list` and `subscribe` take `scope` and/or `scopes`
   (user callers get the union), or `all` (user callers: every scope, including ones that get
   their first session after a `subscribe`; `scope`/`scopes` are then ignored). Capabilities
   `projects`, `session.pin`, `session.git`, `auth.delegated`, `sessions.all` and `daemon.restart`
@@ -877,9 +890,17 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   (10 s at most after the dialog closed, else `not_taken`). Audited with the call and how many
   answers, never their text; one `ptyd.log` line each, the same. The drivers read the agents'
   English screens.
+- `session_history {query?, limit?, before?}` and `session_restore {id}` (user only, capability
+  `session.history`; session callers get `permission_denied`; both audited): the session history
+  (above), most recently deleted first, as `History {sessions: [DeletedSession {id, name, scope,
+  cwd, agent?, git?, created_at, last_active_at, last_message_at?, deleted_at}], more}`; `query`
+  keeps those whose name, folder path, agent or branch contains it (ignoring case), `limit`
+  defaults to 100 (at most 500) and `before` continues after that id. `session_restore` answers
+  the restored `SessionView` (dead), or `not_found`, or `invalid_argument` when it's listed.
 - `session_import {source}` (user only, capability `session.import`) restores an archive directory
   containing a schema-3 `registry.sqlite3`, saved `sessions/` files and optional `history/` logs.
-  The daemon preserves ids and metadata, refuses existing ids or names, stages files privately,
+  The daemon preserves ids and metadata, refuses existing ids (in the session history too) or
+  names, stages files privately,
   and inserts the records in one transaction. It publishes `created` events but starts no programs.
   Stop the source daemon before reviving imported sessions to avoid duplicate agent conversations.
 - `project_relocate {from,to}` (user only, capability `projects.relocate`) updates saved folder
@@ -1039,8 +1060,9 @@ accidents; they don't stop a hostile process running as the same user.
 
 ```text
 ~/.rakumux/                    ($RAKUMUX_HOME overrides)
-  rakumux.sqlite3              registry, daemon only: sessions_v2, audit_log
-  sessions/<id>/scrollback.ansi  saved scrollback (ANSI rows, oldest first)
+  rakumux.sqlite3              registry, daemon only: sessions_v2, deleted_sessions, audit_log
+  sessions/<id>/scrollback.ansi  saved scrollback (ANSI rows, oldest first); a deleted session's
+                                 stays 90 days
   sessions/<id>/meta.json        SessionMeta {cwd, title, foreground_process, exit_code, updated_at}
   history/<id>.log               command history written by shell/rakumux-command-hook.sh
   logs/ptyd.log                  daemon log (1 MiB, rotated; level RAKUMUX_PTYD_LOG)
@@ -1095,7 +1117,10 @@ accidents; they don't stop a hostile process running as the same user.
   30 days; `projects(path, added_at, last_used_at)` and a `pinned` column on `sessions_v2`;
   `session_places(session_id, path, git_json, last_at, edited)`, created when missing (a session's
   places, replaced together, deleted with it); `session_last_message(session_id, at)`, created
-  when missing (`last_message_at`, saved once it moved on a minute, deleted with its session).
+  when missing (`last_message_at`, saved once it moved on a minute, deleted with its session);
+  `deleted_sessions` (`sessions_v2`'s columns plus `deleted_at`, `view_agent_json`, `git_json`),
+  created when missing: the session history, which a deleted session's places and last message
+  rows go on serving until it's restored or purged (90 days); the loaders skip them meanwhile.
   `PRAGMA user_version = 3` (schema 2 is migrated in place, `projects` backfilled from session
   scopes); the 0.5.x `sessions` table is dropped on first open. Live
   state (terminal ids, session tokens) is in daemon memory only.
@@ -1297,7 +1322,7 @@ builds are never overwritten. Version probes use an isolated environment/home. O
 asks before restarting it, and when a compatible daemon from an older build lacks features the TUI
 shows (capabilities `session.git`, `projects`, `session.pin`, `sessions.all`, `terminal.pane`,
 `session.working_directory`, `session.agent_output`, `session.user_prompt`, `session.turn`,
-`session.replies`, `session.transcript`, `session.places`, `resources`,
+`session.replies`, `session.transcript`, `session.places`, `resources`, `session.history`,
 `session.submit.blocked` (replies typed into an agent at work), read with
 `SessionApi::daemon_capabilities`) it says what's missing
 and offers a restart: in place when the daemon has `daemon.restart` (sessions keep running;
@@ -1370,6 +1395,9 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Status**: live / exited / dead. **Lifecycle**: working / blocked / done / idle / unknown / none.
 - **Report**: what a session says about itself (`session_report`): state, text, result, agent
   identity, resume command.
+- **Session history**: deleted sessions, kept 90 days on this machine (`deleted_sessions`, saved
+  output) and brought back dead with `session_restore` (`H`, Settings → Session history,
+  `rakumux history` / `rakumux restore`).
 - **Revive**: a new terminal for a dead or exited session; **resume spec**: the command it runs
   (`known_agent`, `reported_by_agent`, `startup_command`) or types (`last_command`).
 - **Restart in place**: the daemon execs a new binary in the same process and keeps every running
@@ -1403,7 +1431,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux attach <name\|id>` | Full-screen attach (prefix `Ctrl-\`: `d` detaches, `>`/`<` switch session, `n` new session) |
 | `rakumux rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
 | `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the pinned section at the top of the list) / unpin |
-| `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete |
+| `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete (into the session history, 90 days) |
+| `rakumux history [QUERY] [--json]` / `rakumux restore <id\|name>` | Deleted sessions, most recently deleted first / bring one back into its folder, dead (`attach` or Enter revives it); a name only when one deleted session has it |
 | `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |
 | `rakumux daemon start\|status\|stop\|restart\|logs` | Daemon management: `start` only when none runs; `restart` in place (an older daemon is stopped after asking); `stop` ends every session (not revived) |
@@ -1430,7 +1459,7 @@ folder header, a new session there), `Esc` (after cancelling a pending key or th
 `Ctrl-\` back to the session you came from (with none, as after a start or a UI reload, into the
 running session in view), `Tab` last session, `1`-`9` go into that session,
 `n` new, `N` new sessions in this folder on your Sprite or here (the `☁ Sprite` toggle), `r` rename, `s` a new AI title for the session, `w` where the session has worked (`W`
-every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete, `z` full
+every session's), `y` copy a place's path (below), `p` pin, `J`/`K` move the session down/up, `x` close, `d`/`dd` delete (`H` the session history), `z` full
 screen, `b` hide Master detail's list beside the session and show it again (below), `T` the
 terminal panel where it was last placed, `|` it beside the session, `-` below (below), `P` the Folders modal (Enter on the tabs: the active tab's), `/` filter, `Ctrl-y`/`Ctrl-e`/
 PgUp/PgDn scroll the preview, `\` send `Ctrl-\` to the session, `t` rtop (below), `?` Help, `,`/`o` Settings, `a` sign in (signed in: the account dialog; in the sign-in dialog `c` copies the link to the clipboard over OSC 52), `U` Update, `R`
@@ -1786,7 +1815,9 @@ typing narrows it to the settings and actions whose section or name has every wo
 (`Backspace` deletes, `Esc` clears, then closes; `Space` changes the selected row while nothing
 is typed), and the dialog keeps its size meanwhile. The settings come first (Account, where you
 sign in, then Appearance (Layout, Icons, Tips in the footer), Keyboard and App, whose Update
-automatically turns automatic updates on and off), then under a `Keys`
+automatically turns automatic updates on and off and whose Session history opens the session
+history modal, greyed out with a note to restart the server (S) against a daemon without
+`session.history`), then under a `Keys`
 rule every action and its keys, which `Enter` runs; `↑`/`↓` select among the rows shown; `→`
 shows the selected row's note in a popover over the page (`←`, `Esc`, moving or `Enter` close
 it), so the rows never shift; the wheel moves the selection. A setting that can't be changed
@@ -1828,6 +1859,15 @@ with the folders that complete it listed below (`app/path_complete.rs`: folders 
 dot-folders once the name starts with `.`, capped reads); `↑`/`↓` choose one, Tab (or `→` at the
 end of the query) completes the path with it, and Enter adds it (`add_project`) and shows it
 alone, ready for new sessions. Forgetting a folder is CLI-only (`rakumux folders rm`).
+
+The session history modal (`H`, Settings → Session history; `AppMode::History`,
+`app/history.rs`, `components/history.rs`) reads the whole history once as it opens
+(`SessionApi::history`, off the UI thread) and lists it most recently deleted first: name,
+folder, agent (dropped first on narrow screens, then the folder) and how long ago, under a search
+line; typing narrows it by name, folder, agent or branch (every word). `↑`/`↓` select, `Enter` or a
+click restores the session (`SessionApi::restore`), selects it, revives it and goes into it;
+`Esc` clears the search, then closes. Empty, it says `No deleted sessions` (or `No session
+matches`). Against a daemon without `session.history`, `H` says to restart the server.
 
 ## Shell wrapper integration
 

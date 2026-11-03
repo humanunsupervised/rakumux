@@ -1,5 +1,5 @@
 //! Human-facing session commands: `new`, `ls`, `attach`, `rename`, `pin`,
-//! `unpin`, `kill`, `rm`. The JSON group lives in `session`, folders in
+//! `unpin`, `kill`, `rm`, `history`, `restore`. The JSON group lives in `session`, folders in
 //! `folders`.
 
 use super::args::{Command, LsArgs, MachineCommand, NewArgs};
@@ -8,9 +8,11 @@ use super::table::{self, ago, git_text, Column};
 use super::{folders, output_error, resolve_target, session, CliError, Invocation};
 use crate::printable::printable;
 use serde_json::json;
-use session_core::api::{CallerInfo, CreateSession};
+use session_core::api::{ApiError, CallerInfo, CreateSession, ErrorCode, MAX_HISTORY_LIMIT};
 use session_core::client::SessionApi;
-use session_core::model::{Lifecycle, MachineView, ScopeRoot, SessionStatus, SessionView};
+use session_core::model::{
+    DeletedSession, Lifecycle, MachineView, ScopeRoot, SessionStatus, SessionView,
+};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -35,6 +37,8 @@ pub(crate) fn run(
         Command::Unpin { target } => pin(api, invocation, &target, false, out),
         Command::Kill { target, tree } => kill(api, invocation, &target, tree, out),
         Command::Rm { target } => rm(api, invocation, &target, out),
+        Command::History { query, json } => history(api, query.as_deref(), json, out),
+        Command::Restore { target } => restore(api, &target, out),
         Command::Folders { command, json } => folders::run(api, invocation, command, json, out),
         Command::Session { command } => session::run(api, invocation, command, out),
         Command::Machine { command } => machine(api, command, out),
@@ -357,6 +361,85 @@ fn rm(
     Ok(0)
 }
 
+/// The whole session history, page after page.
+fn read_history(
+    api: &dyn SessionApi,
+    query: Option<&str>,
+) -> Result<Vec<DeletedSession>, CliError> {
+    let mut sessions: Vec<DeletedSession> = Vec::new();
+    loop {
+        let before = sessions.last().map(|session| session.id.clone());
+        let page = api.history(query, Some(MAX_HISTORY_LIMIT), before.as_ref())?;
+        sessions.extend(page.sessions);
+        if !page.more {
+            return Ok(sessions);
+        }
+    }
+}
+
+fn history(
+    api: &dyn SessionApi,
+    query: Option<&str>,
+    json: bool,
+    out: &mut dyn Write,
+) -> Result<i32, CliError> {
+    let sessions = read_history(api, query)?;
+    if json {
+        writeln!(out, "{}", json!({ "sessions": sessions })).map_err(output_error)?;
+        return Ok(0);
+    }
+    let now = table::now();
+    let cells = |cell: &dyn Fn(&DeletedSession) -> String| sessions.iter().map(cell).collect();
+    let text = table::render(vec![
+        Column::new("NAME", cells(&|s| s.name.clone())),
+        Column::new("FOLDER", cells(&|s| s.scope.path().display().to_string())),
+        Column::new(
+            "AGENT",
+            cells(&|s| {
+                s.agent
+                    .as_ref()
+                    .map(|a| a.kind.clone())
+                    .unwrap_or_else(|| "-".into())
+            }),
+        ),
+        Column::new("DELETED", cells(&|s| ago(now, s.deleted_at))),
+        Column::new("ID", cells(&|s| s.id.to_string())),
+    ]);
+    out.write_all(text.as_bytes()).map_err(output_error)?;
+    Ok(0)
+}
+
+fn restore(api: &dyn SessionApi, target: &str, out: &mut dyn Write) -> Result<i32, CliError> {
+    let sessions = read_history(api, None)?;
+    let id = match sessions.iter().find(|s| s.id.as_str() == target) {
+        Some(session) => session.id.clone(),
+        None => {
+            let named: Vec<&DeletedSession> =
+                sessions.iter().filter(|s| s.name == target).collect();
+            match named.as_slice() {
+                [only] => only.id.clone(),
+                [] => {
+                    return Err(CliError::Api(ApiError::new(
+                        ErrorCode::NotFound,
+                        format!("no deleted session {target}"),
+                    )))
+                }
+                several => {
+                    let ids: Vec<String> = several.iter().map(|s| s.id.to_string()).collect();
+                    return Err(CliError::invalid(format!(
+                        "{} deleted sessions are named {target}: restore one by id ({})",
+                        several.len(),
+                        ids.join(", ")
+                    )));
+                }
+            }
+        }
+    };
+    let session = api.restore(&id)?;
+    writeln!(out, "Restored {}", printable(&session.name)).map_err(output_error)?;
+    Ok(0)
+}
+
 // ---------------------------------------------------------------- table
 
 fn status_text(session: &SessionView) -> String {
@@ -516,6 +599,53 @@ mod tests {
         let mut out = Vec::new();
         let code = run(&mut out).unwrap();
         (code, String::from_utf8(out).unwrap())
+    }
+
+    fn deleted(id: &str, name: &str) -> session_core::model::DeletedSession {
+        session_core::model::DeletedSession {
+            id: SessionId::from_string(id),
+            name: name.into(),
+            scope: ScopeRoot::from_canonical("/repo".into()),
+            cwd: "/repo".into(),
+            agent: None,
+            git: None,
+            created_at: 0,
+            last_active_at: 0,
+            last_message_at: None,
+            deleted_at: table::now() - 7200,
+        }
+    }
+
+    #[test]
+    fn history_lists_deleted_sessions_and_restore_takes_an_id_or_a_lone_name() {
+        let api = FakeApi::user(vec![]);
+        *api.deleted.lock().unwrap() = vec![
+            deleted("D1", "web"),
+            deleted("D2", "api"),
+            deleted("D3", "api"),
+        ];
+        let (code, text) = output(|out| history(&api, Some("we"), false, out));
+        assert_eq!(code, 0);
+        assert!(
+            text.starts_with("NAME  FOLDER  AGENT  DELETED  ID\n"),
+            "{text}"
+        );
+        assert!(text.contains("web   /repo   -      2h ago   D1"), "{text}");
+        assert_eq!(api.calls()[0], "history Some(\"we\")");
+        let (_, json) = output(|out| history(&api, None, true, out));
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["sessions"][0]["id"], "D1");
+
+        let (_, text) = output(|out| restore(&api, "web", out));
+        assert_eq!(text, "Restored web\n");
+        assert!(api.calls().contains(&"restore D1".to_string()));
+        output(|out| restore(&api, "D3", out));
+        assert!(api.calls().contains(&"restore D3".to_string()));
+        let mut out = Vec::new();
+        let ambiguous = restore(&api, "api", &mut out).unwrap_err();
+        assert!(matches!(ambiguous, CliError::Api(e) if e.message.contains("D2, D3")));
+        let missing = restore(&api, "nope", &mut out).unwrap_err();
+        assert!(matches!(missing, CliError::Api(e) if e.code == ErrorCode::NotFound));
     }
 
     #[test]

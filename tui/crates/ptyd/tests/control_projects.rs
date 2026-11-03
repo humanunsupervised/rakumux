@@ -1276,5 +1276,8 @@ fn places_are_where_a_sessions_agent_changed_files_and_outlive_its_terminal() {
         h.handle(&h.user, Request::SessionDelete { id: s.id.clone() }),
         Response::Ok
     );
-    assert_eq!(rows(&h), 0);
+    // Kept with the session in the session history, out of every view.
+    assert_eq!(rows(&h), 4);
+    let restored = session(h.handle(&h.user, Request::SessionRestore { id: s.id.clone() }));
+    assert_eq!(places(&restored), expected);
 }

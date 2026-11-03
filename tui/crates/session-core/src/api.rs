@@ -13,8 +13,8 @@
 
 use crate::ids::{MachineId, PaneId, ReplyId, SessionId};
 use crate::model::{
-    AgentInfo, Lifecycle, MachineView, ProjectView, ReportResult, Reported, ScopeRoot,
-    SessionStatus, SessionView,
+    AgentInfo, DeletedSession, Lifecycle, MachineView, ProjectView, ReportResult, Reported,
+    ScopeRoot, SessionStatus, SessionView,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -126,8 +126,32 @@ pub enum Request {
         #[serde(default)]
         tree: bool,
     },
-    /// Terminate if running, then remove the record and its scrollback.
+    /// Terminate if running, then take the session out of the list. A
+    /// daemon with capability `session.history` keeps its record and saved
+    /// output in the session history for [`HISTORY_RETENTION_DAYS`]; an
+    /// older one removes them.
     SessionDelete {
+        id: SessionId,
+    },
+    /// User only (capability `session.history`): deleted sessions, most
+    /// recently deleted first. `query` keeps those whose name, folder,
+    /// agent or branch contains it (ignoring case); `limit` (default
+    /// [`HISTORY_LIMIT`], at most [`MAX_HISTORY_LIMIT`]) caps the page and
+    /// `before` continues after that session of an earlier page. Answered
+    /// with `History`.
+    SessionHistory {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<SessionId>,
+    },
+    /// User only (capability `session.history`): bring a deleted session
+    /// back into its folder as a dead session (revive it to run it again),
+    /// renamed `<name> 2`, `<name> 3`, … when another session has its name
+    /// now. Answered with `Session`.
+    SessionRestore {
         id: SessionId,
     },
     /// Start a new terminal for a Dead or Exited session (same id, cwd,
@@ -705,6 +729,16 @@ pub const CAPABILITY_PREFILL: &str = "session.prefill";
 /// `project_add`'s `create`: make the folder when it doesn't exist.
 pub const CAPABILITY_PROJECTS_CREATE: &str = "projects.create";
 
+/// `session_history` and `session_restore`: deleted sessions are kept for
+/// [`HISTORY_RETENTION_DAYS`] and can be brought back.
+pub const CAPABILITY_HISTORY: &str = "session.history";
+/// How long the session history keeps a deleted session, in days.
+pub const HISTORY_RETENTION_DAYS: i64 = 90;
+/// `session_history`'s page size when no `limit` is given.
+pub const HISTORY_LIMIT: u32 = 100;
+/// The largest page `session_history` gives.
+pub const MAX_HISTORY_LIMIT: u32 = 500;
+
 /// How much of an agent's log `session_transcript` reads by default, in bytes.
 pub const TRANSCRIPT_BYTES: u32 = 512 * 1024;
 /// The most it reads at once.
@@ -914,6 +948,8 @@ pub enum Response {
     Transcript {
         transcript: TranscriptPage,
     },
+    /// The answer to `session_history`.
+    History(HistoryPage),
     Wait(WaitResult),
     Killed {
         killed: Vec<SessionId>,
@@ -936,6 +972,18 @@ pub enum Response {
     Error {
         error: ApiError,
     },
+}
+
+/// A page of the session history (`session_history`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct HistoryPage {
+    /// Most recently deleted first.
+    #[serde(default)]
+    pub sessions: Vec<DeletedSession>,
+    /// More matched than the page holds: ask again with `before` set to the
+    /// last one's id.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub more: bool,
 }
 
 /// A live agent's current turn (`session_turn`): the user's last prompt and
@@ -1498,6 +1546,52 @@ mod tests {
             serde_json::from_value(serde_json::json!({"op": "session_list", "scope": "/repo"}))
                 .unwrap();
         assert!(matches!(old, Request::SessionList { scopes, .. } if scopes.is_empty()));
+    }
+
+    #[test]
+    fn session_history_ops_round_trip() {
+        let json = serde_json::to_value(Request::SessionHistory {
+            query: None,
+            limit: None,
+            before: None,
+        })
+        .unwrap();
+        assert_eq!(json, serde_json::json!({"op": "session_history"}));
+        let history = Request::SessionHistory {
+            query: Some("web".into()),
+            limit: Some(20),
+            before: Some(SessionId::from_string("A")),
+        };
+        let json = serde_json::to_value(&history).unwrap();
+        assert_eq!(serde_json::from_value::<Request>(json).unwrap(), history);
+        let restore = Request::SessionRestore {
+            id: SessionId::from_string("A"),
+        };
+        let json = serde_json::to_value(&restore).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"op": "session_restore", "id": "A"})
+        );
+        let page = Response::History(HistoryPage {
+            sessions: vec![DeletedSession {
+                id: SessionId::from_string("A"),
+                name: "web".into(),
+                scope: ScopeRoot::from_canonical("/repo".into()),
+                cwd: "/repo".into(),
+                agent: None,
+                git: None,
+                created_at: 1,
+                last_active_at: 2,
+                last_message_at: None,
+                deleted_at: 3,
+            }],
+            more: false,
+        });
+        let json = serde_json::to_value(&page).unwrap();
+        assert_eq!(json["type"], "history");
+        assert_eq!(json["sessions"][0]["deleted_at"], 3);
+        assert!(json.get("more").is_none());
+        assert_eq!(serde_json::from_value::<Response>(json).unwrap(), page);
     }
 
     #[test]

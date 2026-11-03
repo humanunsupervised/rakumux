@@ -18,7 +18,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, Tra
 use session_core::api::{ApiError, ErrorCode};
 use session_core::ids::SessionId;
 use session_core::model::{
-    AgentInfo, Creator, LaunchSpec, Reported, ResumeSpec, ScopeRoot, SessionPlace,
+    AgentInfo, Creator, GitInfo, LaunchSpec, Reported, ResumeSpec, ScopeRoot, SessionPlace,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -28,12 +28,16 @@ use std::time::Duration;
 
 /// `PRAGMA user_version` of the current schema: 2 introduced `sessions_v2`
 /// (0.6), 3 added projects and pinning. Tables added since (`session_places`,
-/// `session_last_message`) are created when missing, so older daemons still
-/// open the registry.
+/// `session_last_message`, `deleted_sessions`) are created when missing, so
+/// older daemons still open the registry.
 pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 /// Audit entries older than this are pruned when the registry opens.
 pub(crate) const AUDIT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
+/// Deleted sessions older than this leave the session history for good.
+pub(crate) const HISTORY_RETENTION_MS: i64 =
+    session_core::api::HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(2000);
 
@@ -99,6 +103,35 @@ CREATE TABLE IF NOT EXISTS session_last_message (
   session_id TEXT PRIMARY KEY,
   at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS deleted_sessions (
+  id TEXT PRIMARY KEY,
+  scope_root TEXT NOT NULL,
+  name TEXT NOT NULL,
+  cwd TEXT NOT NULL,
+  launch_json TEXT NOT NULL,
+  resume_json TEXT,
+  created_by_json TEXT NOT NULL,
+  parent_id TEXT,
+  depth INTEGER NOT NULL DEFAULT 0,
+  agent_json TEXT,
+  reported_json TEXT,
+  exit_code INTEGER,
+  created_at INTEGER NOT NULL,
+  last_active_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  description TEXT,
+  notes TEXT,
+  labels_json TEXT,
+  private INTEGER NOT NULL DEFAULT 0,
+  auto_named INTEGER NOT NULL DEFAULT 0,
+  agent_kind TEXT,
+  agent_session_id TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  deleted_at INTEGER NOT NULL,
+  view_agent_json TEXT,
+  git_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_deleted_sessions_at ON deleted_sessions(deleted_at);
 ";
 
 /// Schema 2 → 3: the projects of existing sessions (first created, last
@@ -151,6 +184,18 @@ pub(crate) struct SessionRecord {
     pub auto_named: bool,
     /// Pinned by the user (listed first in its project).
     pub pinned: bool,
+}
+
+/// A deleted session kept in the session history (`deleted_sessions`): its
+/// record as it was, and what its view showed when it was deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeletedRecord {
+    pub record: SessionRecord,
+    pub deleted_at_ms: i64,
+    /// The agent its view showed (detected or reported).
+    pub agent: Option<AgentInfo>,
+    pub git: Option<GitInfo>,
+    pub last_message_at_ms: Option<i64>,
 }
 
 /// A known project: a directory sessions belong to (the wire's scope).
@@ -277,41 +322,7 @@ impl Registry {
     pub fn insert_many(&self, records: &[SessionRecord]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         for record in records {
-            tx.execute(
-                &format!(
-                    "INSERT INTO sessions_v2 ({COLUMNS}) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
-                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"
-                ),
-                params![
-                    record.id.as_str(),
-                    path_text(record.scope.path())?,
-                    record.name,
-                    path_text(&record.cwd)?,
-                    to_json(&record.launch)?,
-                    opt_json(record.resume.as_ref())?,
-                    to_json(&record.created_by)?,
-                    record.parent_id.as_ref().map(SessionId::as_str),
-                    record.depth as i64,
-                    opt_json(record.agent.as_ref())?,
-                    opt_json(record.reported.as_ref())?,
-                    record.exit_code,
-                    record.created_at_ms,
-                    record.last_active_at_ms,
-                    record.ended_at_ms,
-                    record.description,
-                    record.notes,
-                    labels_json(&record.labels)?,
-                    record.private,
-                    record.auto_named,
-                    record.agent.as_ref().map(|a| a.kind.as_str()),
-                    record
-                        .agent
-                        .as_ref()
-                        .and_then(|a| a.agent_session_id.as_deref()),
-                    record.pinned,
-                ],
-            )?;
+            insert_record(&tx, record)?;
             tx.execute(
                 USE_PROJECT,
                 params![path_text(record.scope.path())?, record.created_at_ms],
@@ -372,6 +383,30 @@ impl Registry {
                 ],
             )?;
             changed.push(record.id);
+        }
+        // Deleted sessions follow too, so one restored later comes back
+        // where its folder is now.
+        let deleted: Vec<(String, String, String)> = {
+            let mut statement =
+                transaction.prepare("SELECT id, scope_root, cwd FROM deleted_sessions")?;
+            let rows =
+                statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for (id, scope, cwd) in deleted {
+            let scope = if Path::new(&scope) == from.path() {
+                to.path().to_path_buf()
+            } else {
+                PathBuf::from(scope)
+            };
+            let cwd = match Path::new(&cwd).strip_prefix(from.path()) {
+                Ok(rest) => to.path().join(rest),
+                Err(_) => PathBuf::from(cwd),
+            };
+            transaction.execute(
+                "UPDATE deleted_sessions SET scope_root = ?2, cwd = ?3 WHERE id = ?1",
+                params![id, path_text(&scope)?, path_text(&cwd)?],
+            )?;
         }
         transaction.execute(
             "INSERT INTO projects (path, added_at, last_used_at) \
@@ -627,12 +662,153 @@ impl Registry {
         Ok(orphans)
     }
 
-    /// When each session's agent conversation last had a message
-    /// (`SessionView::last_message_at`), in Unix milliseconds.
+    /// Move a session into the session history (`deleted_sessions`), with
+    /// what its view showed (`agent`, `git`) and when (`deleted_at_ms`). Its
+    /// places and last message stay, for a restore. Its children lose their
+    /// parent link; their ids are returned so their views can be refreshed.
+    pub fn move_to_history(
+        &self,
+        id: &SessionId,
+        deleted_at_ms: i64,
+        agent: Option<&AgentInfo>,
+        git: Option<&GitInfo>,
+    ) -> Result<Vec<SessionId>> {
+        let orphans = self.children(id)?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE sessions_v2 SET parent_id = NULL WHERE parent_id = ?1",
+            [id.as_str()],
+        )?;
+        // A record of the same id from an earlier deletion (restored, then
+        // deleted again) is replaced.
+        tx.execute(
+            &format!(
+                "INSERT OR REPLACE INTO deleted_sessions \
+                 ({COLUMNS}, deleted_at, view_agent_json, git_json) \
+                 SELECT {COLUMNS}, ?2, ?3, ?4 FROM sessions_v2 WHERE id = ?1"
+            ),
+            params![id.as_str(), deleted_at_ms, opt_json(agent)?, opt_json(git)?],
+        )?;
+        tx.execute("DELETE FROM sessions_v2 WHERE id = ?1", [id.as_str()])?;
+        tx.commit()?;
+        Ok(orphans)
+    }
+
+    /// The session history, most recently deleted first. Rows that fail to
+    /// decode are returned separately, as [`Self::list`] does.
+    pub fn history(&self) -> Result<(Vec<DeletedRecord>, Vec<RegistryError>)> {
+        self.select_deleted("", Vec::new())
+    }
+
+    /// Session `id` in the session history.
+    pub fn deleted(&self, id: &SessionId) -> Result<Option<DeletedRecord>> {
+        let (mut records, bad) = self.select_deleted("WHERE d.id = ?1", vec![id.as_str()])?;
+        if let Some(error) = bad.into_iter().next() {
+            return Err(error);
+        }
+        Ok(records.pop())
+    }
+
+    fn select_deleted(
+        &self,
+        filter: &str,
+        params: Vec<&str>,
+    ) -> Result<(Vec<DeletedRecord>, Vec<RegistryError>)> {
+        let columns = COLUMNS
+            .split(',')
+            .map(|column| format!("d.{}", column.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {columns}, d.deleted_at, d.view_agent_json, d.git_json, m.at \
+             FROM deleted_sessions d LEFT JOIN session_last_message m ON m.session_id = d.id \
+             {filter} ORDER BY d.deleted_at DESC, d.id DESC"
+        ))?;
+        let rows = stmt.query_map(params_from_iter(params), |row| {
+            Ok((
+                RawRecord::from_row(row)?,
+                row.get::<_, i64>(23)?,
+                row.get::<_, Option<String>>(24)?,
+                row.get::<_, Option<String>>(25)?,
+                row.get::<_, Option<i64>>(26)?,
+            ))
+        })?;
+        let mut records = Vec::new();
+        let mut bad = Vec::new();
+        for row in rows {
+            let (raw, deleted_at_ms, agent, git, last_message_at_ms) = row?;
+            match decode_deleted(raw, deleted_at_ms, agent, git, last_message_at_ms) {
+                Ok(record) => records.push(record),
+                Err(error) => bad.push(error),
+            }
+        }
+        Ok((records, bad))
+    }
+
+    /// Bring session `id` back from the session history as `name`, ended
+    /// state cleared (so it's dead until revived), its parent link dropped
+    /// when that session is gone, and its project used at `now_ms`. `None`
+    /// when the history has no such session.
+    pub fn restore(
+        &self,
+        id: &SessionId,
+        name: &str,
+        now_ms: i64,
+    ) -> Result<Option<SessionRecord>> {
+        let Some(deleted) = self.deleted(id)? else {
+            return Ok(None);
+        };
+        let mut record = deleted.record;
+        record.name = name.to_string();
+        record.exit_code = None;
+        record.ended_at_ms = None;
+        if let Some(parent) = &record.parent_id {
+            if self.get(parent)?.is_none() {
+                record.parent_id = None;
+            }
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        insert_record(&tx, &record)?;
+        tx.execute(
+            USE_PROJECT,
+            params![path_text(record.scope.path())?, now_ms],
+        )?;
+        tx.execute("DELETE FROM deleted_sessions WHERE id = ?1", [id.as_str()])?;
+        tx.commit()?;
+        Ok(Some(record))
+    }
+
+    /// Remove the sessions deleted before `cutoff_ms` from the session
+    /// history, with their places and last message, for good. Returns their
+    /// ids, so their saved files can go too.
+    pub fn purge_history(&self, cutoff_ms: i64) -> Result<Vec<SessionId>> {
+        let tx = self.conn.unchecked_transaction()?;
+        let ids: Vec<String> = {
+            let mut statement =
+                tx.prepare("SELECT id FROM deleted_sessions WHERE deleted_at < ?1")?;
+            let rows = statement.query_map([cutoff_ms], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for id in &ids {
+            tx.execute("DELETE FROM deleted_sessions WHERE id = ?1", [id])?;
+            tx.execute("DELETE FROM session_places WHERE session_id = ?1", [id])?;
+            tx.execute(
+                "DELETE FROM session_last_message WHERE session_id = ?1",
+                [id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(ids.into_iter().map(SessionId::from_string).collect())
+    }
+
+    /// When each listed session's agent conversation last had a message
+    /// (`SessionView::last_message_at`), in Unix milliseconds. Deleted
+    /// sessions' are left out.
     pub fn last_messages(&self) -> Result<HashMap<SessionId, i64>> {
-        let mut statement = self
-            .conn
-            .prepare("SELECT session_id, at FROM session_last_message")?;
+        let mut statement = self.conn.prepare(
+            "SELECT session_id, at FROM session_last_message \
+             WHERE session_id IN (SELECT id FROM sessions_v2)",
+        )?;
         let rows = statement.query_map([], |row| {
             Ok((
                 SessionId::from_string(row.get::<_, String>(0)?),
@@ -653,13 +829,44 @@ impl Registry {
         Ok(())
     }
 
-    /// Every session's places (`SessionView::places`), in no order. Rows
-    /// that can't be read are left out.
-    pub fn places(&self) -> Result<HashMap<SessionId, Vec<SessionPlace>>> {
-        let mut statement = self
+    /// Session `id`'s last message time, as [`Self::last_messages`].
+    pub fn last_message(&self, id: &SessionId) -> Result<Option<i64>> {
+        Ok(self
             .conn
-            .prepare("SELECT session_id, path, git_json, last_at, edited FROM session_places")?;
-        let rows = statement.query_map([], |row| {
+            .query_row(
+                "SELECT at FROM session_last_message WHERE session_id = ?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Every listed session's places (`SessionView::places`), in no order;
+    /// deleted sessions' are left out, as are rows that can't be read.
+    pub fn places(&self) -> Result<HashMap<SessionId, Vec<SessionPlace>>> {
+        self.select_places(
+            "WHERE session_id IN (SELECT id FROM sessions_v2)",
+            Vec::new(),
+        )
+    }
+
+    /// Session `id`'s places, as [`Self::places`].
+    pub fn places_of(&self, id: &SessionId) -> Result<Vec<SessionPlace>> {
+        Ok(self
+            .select_places("WHERE session_id = ?1", vec![id.as_str()])?
+            .remove(id)
+            .unwrap_or_default())
+    }
+
+    fn select_places(
+        &self,
+        filter: &str,
+        params: Vec<&str>,
+    ) -> Result<HashMap<SessionId, Vec<SessionPlace>>> {
+        let mut statement = self.conn.prepare(&format!(
+            "SELECT session_id, path, git_json, last_at, edited FROM session_places {filter}"
+        ))?;
+        let rows = statement.query_map(params_from_iter(params), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -967,6 +1174,77 @@ fn migrate(conn: &mut Connection, from: i64) -> rusqlite::Result<()> {
     tx.commit()
 }
 
+/// Insert `record` into `sessions_v2`.
+fn insert_record(conn: &Connection, record: &SessionRecord) -> Result<()> {
+    conn.execute(
+        &format!(
+            "INSERT INTO sessions_v2 ({COLUMNS}) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
+             ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"
+        ),
+        params![
+            record.id.as_str(),
+            path_text(record.scope.path())?,
+            record.name,
+            path_text(&record.cwd)?,
+            to_json(&record.launch)?,
+            opt_json(record.resume.as_ref())?,
+            to_json(&record.created_by)?,
+            record.parent_id.as_ref().map(SessionId::as_str),
+            record.depth as i64,
+            opt_json(record.agent.as_ref())?,
+            opt_json(record.reported.as_ref())?,
+            record.exit_code,
+            record.created_at_ms,
+            record.last_active_at_ms,
+            record.ended_at_ms,
+            record.description,
+            record.notes,
+            labels_json(&record.labels)?,
+            record.private,
+            record.auto_named,
+            record.agent.as_ref().map(|a| a.kind.as_str()),
+            record
+                .agent
+                .as_ref()
+                .and_then(|a| a.agent_session_id.as_deref()),
+            record.pinned,
+        ],
+    )?;
+    Ok(())
+}
+
+/// A `deleted_sessions` row, decoded.
+fn decode_deleted(
+    raw: RawRecord,
+    deleted_at_ms: i64,
+    agent: Option<String>,
+    git: Option<String>,
+    last_message_at_ms: Option<i64>,
+) -> Result<DeletedRecord> {
+    let id = raw.id.clone();
+    let corrupt = |what: &str, e: serde_json::Error| {
+        RegistryError::Corrupt(format!("deleted session {id}: {what}: {e}"))
+    };
+    let agent = agent
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|e| corrupt("agent", e))?;
+    let git = git
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|e| corrupt("git", e))?;
+    Ok(DeletedRecord {
+        record: raw.decode()?,
+        deleted_at_ms,
+        agent,
+        git,
+        last_message_at_ms,
+    })
+}
+
 /// Mark the project of session `id` as used at `now_ms`.
 fn use_project_of(conn: &Connection, id: &SessionId, now_ms: i64) -> rusqlite::Result<()> {
     let scope: Option<String> = conn
@@ -1150,6 +1428,66 @@ mod tests {
         ));
         assert_eq!(registry.get(&original.id).unwrap(), Some(original));
         assert_eq!(registry.count().unwrap(), 2);
+    }
+
+    #[test]
+    fn deleted_sessions_keep_their_data_out_of_sight_and_follow_a_moved_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = open(&dir);
+        let mut child = record("C", "/before", "child", 3);
+        child.parent_id = Some(SessionId::from_string("A"));
+        let mut gone = record("A", "/before", "gone", 1);
+        gone.ended_at_ms = Some(2);
+        gone.exit_code = Some(1);
+        registry.insert(&gone).unwrap();
+        registry.insert(&child).unwrap();
+        let place = SessionPlace {
+            path: "/before".into(),
+            git: Some(GitInfo {
+                repo_root: "/before".into(),
+                branch: Some("main".into()),
+                detached_at: None,
+                worktree: None,
+                repo: None,
+                origin: None,
+            }),
+            last_at: 5,
+            edited: true,
+        };
+        registry.set_places(&gone.id, &[place.clone()]).unwrap();
+        registry.set_last_message(&gone.id, 7).unwrap();
+
+        let orphans = registry
+            .move_to_history(&gone.id, 9, None, place.git.as_ref())
+            .unwrap();
+        assert_eq!(orphans, [child.id.clone()]);
+        assert_eq!(registry.get(&gone.id).unwrap(), None);
+        assert_eq!(registry.get(&child.id).unwrap().unwrap().parent_id, None);
+        assert!(!registry.places().unwrap().contains_key(&gone.id));
+        assert!(!registry.last_messages().unwrap().contains_key(&gone.id));
+        // Its name is free.
+        registry.insert(&record("B", "/before", "gone", 4)).unwrap();
+
+        let to = ScopeRoot::from_canonical("/after".into());
+        registry
+            .relocate_project(&ScopeRoot::from_canonical("/before".into()), &to)
+            .unwrap();
+        let (history, bad) = registry.history().unwrap();
+        assert!(bad.is_empty());
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].record.scope, to);
+        assert_eq!(history[0].record.cwd, PathBuf::from("/after"));
+        assert_eq!(history[0].deleted_at_ms, 9);
+        assert_eq!(history[0].last_message_at_ms, Some(7));
+        assert_eq!(history[0].git, place.git);
+
+        let restored = registry.restore(&gone.id, "gone 2", 10).unwrap().unwrap();
+        assert_eq!(restored.name, "gone 2");
+        assert_eq!((restored.ended_at_ms, restored.exit_code), (None, None));
+        assert_eq!(registry.get(&gone.id).unwrap(), Some(restored));
+        assert_eq!(registry.places_of(&gone.id).unwrap(), [place]);
+        assert!(registry.history().unwrap().0.is_empty());
+        assert_eq!(registry.restore(&gone.id, "x", 11).unwrap(), None);
     }
 
     #[test]

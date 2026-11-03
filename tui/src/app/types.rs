@@ -111,7 +111,7 @@ pub struct FeedReplyDialog {
 pub enum ConfirmAction {
     /// Reload only this UI, leaving the daemon and sessions running.
     RestartUi,
-    /// Terminate, then remove the record and its scrollback.
+    /// Terminate, then move it to the session history.
     DeleteSession { id: SessionId, name: String },
     /// Terminate the process; the record stays (Exited, restartable).
     CloseSession { id: SessionId, name: String },
@@ -331,6 +331,34 @@ impl SectionPicker {
     }
 }
 
+/// The session history modal (Settings → Session history, `H`): deleted
+/// sessions, most recently deleted first, narrowed by what's typed; Enter
+/// brings the one under the cursor back and goes into it.
+#[derive(Debug, Clone, Default)]
+pub struct HistoryPicker {
+    /// What's typed: narrows the rows by name, folder, agent or branch.
+    pub query: TextInput,
+    /// Every deleted session the daemon gave, most recently deleted first.
+    pub sessions: Vec<session_core::model::DeletedSession>,
+    /// The sessions shown for the query (indices into `sessions`).
+    pub rows: Vec<usize>,
+    /// Row under the cursor.
+    pub cursor: usize,
+    /// The history is being read.
+    pub loading: bool,
+    /// Reading it failed.
+    pub error: Option<String>,
+}
+
+impl HistoryPicker {
+    /// The deleted session under the cursor.
+    pub fn current(&self) -> Option<&session_core::model::DeletedSession> {
+        self.rows
+            .get(self.cursor)
+            .and_then(|index| self.sessions.get(*index))
+    }
+}
+
 /// Shown when the running daemon speaks another protocol version.
 #[derive(Debug, Clone)]
 pub struct DaemonRestartDialog {
@@ -385,13 +413,15 @@ pub enum SettingsItem {
     /// rtop: what this machine, Rakumux and every session's processes use
     /// now, in the drawer.
     Rtop,
+    /// Deleted sessions, to bring one back.
+    SessionHistory,
     /// Sign in to the Rakumux account (AI session titles, the agent feed).
     Account,
 }
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then the rest.
-    pub const ALL: [SettingsItem; 12] = [
+    pub const ALL: [SettingsItem; 13] = [
         SettingsItem::Account,
         SettingsItem::Layout,
         SettingsItem::Icons,
@@ -402,6 +432,7 @@ impl SettingsItem {
         SettingsItem::RestartUi,
         SettingsItem::RestartServer,
         SettingsItem::Rtop,
+        SettingsItem::SessionHistory,
         SettingsItem::TerminalPanel,
         SettingsItem::TerminalPlacement,
     ];
@@ -416,6 +447,7 @@ impl SettingsItem {
             | SettingsItem::RestartUi
             | SettingsItem::RestartServer
             | SettingsItem::Rtop
+            | SettingsItem::SessionHistory
             | SettingsItem::TerminalPanel
             | SettingsItem::TerminalPlacement => "App",
             SettingsItem::Account => "Account",
@@ -603,6 +635,8 @@ pub enum AppMode {
     Folders(FolderPicker),
     /// The App or Status modal: that tab's filter.
     Sections(SectionPicker),
+    /// The session history: deleted sessions to bring back.
+    History(HistoryPicker),
     Renaming(RenameDialog),
     /// Writing back to a feed entry.
     FeedReply(FeedReplyDialog),

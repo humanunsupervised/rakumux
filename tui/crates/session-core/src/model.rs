@@ -257,6 +257,33 @@ pub struct SessionView {
     pub machine: Option<MachineRef>,
 }
 
+/// A deleted session in the session history (`session_history`): its
+/// record and saved output are kept on this machine for
+/// [`HISTORY_RETENTION_DAYS`](crate::api::HISTORY_RETENTION_DAYS), and
+/// `session_restore` brings it back as a dead session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeletedSession {
+    pub id: SessionId,
+    pub name: String,
+    pub scope: ScopeRoot,
+    pub cwd: PathBuf,
+    /// The agent it ran, as its view last said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentInfo>,
+    /// Its git context when it was deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<GitInfo>,
+    /// Unix seconds.
+    pub created_at: i64,
+    /// Unix seconds, as [`SessionView::last_active_at`].
+    pub last_active_at: i64,
+    /// Unix seconds, as [`SessionView::last_message_at`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_message_at: Option<i64>,
+    /// Unix seconds: when it was deleted.
+    pub deleted_at: i64,
+}
+
 /// Where a session from another machine runs (`SessionView::machine`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineRef {

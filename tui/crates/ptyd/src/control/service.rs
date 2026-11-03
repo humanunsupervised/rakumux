@@ -16,6 +16,7 @@ use super::auth::{self, SessionTokens};
 use super::env::{self, Identity};
 use super::events::{EventBus, Filter, Scopes};
 use super::git_context::{self, GitContexts};
+use super::history;
 use super::lifecycle::LifecycleTracker;
 use super::names;
 use super::places::{self, Places};
@@ -199,6 +200,9 @@ struct State {
     binding_seq: u64,
     /// Reply capture and the replies captured (memory only).
     replies: ReplyRing,
+    /// When the session history was last purged of sessions deleted too
+    /// long ago (Unix milliseconds; 0: not yet).
+    history_purged_ms: i64,
     /// Sessions a restart in place carried over, not looked at yet: the first
     /// tick reads each one's screen and agent conversation as output would,
     /// since a quiet one (an agent waiting for a prompt) shows none.
@@ -318,6 +322,7 @@ impl Inner {
                 binding_seq: 0,
                 replies: ReplyRing::default(),
                 adopted: Vec::new(),
+                history_purged_ms: 0,
                 views: HashMap::new(),
                 git: GitContexts::default(),
                 places: Places::new(saved_places),
@@ -543,6 +548,12 @@ impl Inner {
             Request::SessionRename { id, name } => self.rename(caller, &id, &name),
             Request::SessionKill { id, tree } => self.kill(caller, &id, tree),
             Request::SessionDelete { id } => self.delete(caller, &id),
+            Request::SessionHistory {
+                query,
+                limit,
+                before,
+            } => self.history(caller, query.as_deref(), limit, before.as_ref()),
+            Request::SessionRestore { id } => self.restore(caller, &id),
             Request::SessionRevive(request) => self.revive(caller, request),
             Request::SessionReport(report) => self.report(caller, report),
             Request::SessionRead(request) => self.read(caller, request),
@@ -859,6 +870,12 @@ impl Inner {
         for record in &records {
             if registry.get(&record.id)?.is_some() {
                 return Err(invalid(format!("session {} already exists", record.id)));
+            }
+            if registry.deleted(&record.id)?.is_some() {
+                return Err(invalid(format!(
+                    "session {} is in the session history",
+                    record.id
+                )));
             }
             if registry.name_taken(&record.scope, &record.name, None)? {
                 return Err(name_taken(&record.name));
@@ -1245,8 +1262,23 @@ impl Inner {
         result.map(|()| Response::Ok)
     }
 
+    /// Take the session out of the list into the session history: its
+    /// program ends, its record and saved output stay (its screen saved
+    /// once more while it runs) until it's restored or purged.
     fn delete_session(&self, state: &mut State, record: &SessionRecord) -> Result<(), ApiError> {
-        let orphans = registry(&state.registry)?.delete(&record.id)?;
+        if let Some(terminal) = self.running_terminal(state, &record.id) {
+            self.host.persist(terminal);
+        }
+        let view = match state.views.get(&record.id) {
+            Some(view) => view.clone(),
+            None => self.view(state, record, Vec::new(), None),
+        };
+        let orphans = registry(&state.registry)?.move_to_history(
+            &record.id,
+            self.now(),
+            view.agent.as_ref().or(record.agent.as_ref()),
+            view.git.as_ref(),
+        )?;
         if let Some(live) = state.live.remove(&record.id) {
             match self.host.terminate(live.terminal) {
                 Ok(()) | Err(HostError::NotFound | HostError::NotRunning) => {}
@@ -1266,21 +1298,132 @@ impl Inner {
         state.places.remove(&record.id);
         state.last_messages.remove(&record.id);
         self.save_running(state);
-        if let Err(error) = self.store.remove(&record.id) {
-            crate::log_warn!("control: delete {}: saved output: {error}", record.id);
-        }
-        let history = self.config.layout.history_file(&record.id);
-        match std::fs::remove_file(&history) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => crate::log_warn!("control: delete {}: {}: {e}", record.id, history.display()),
-        }
         self.publish(&record.scope, &record.id, SessionEvent::Removed);
         for orphan in orphans {
             self.refresh(state, &orphan);
         }
         self.changed.notify_all();
         Ok(())
+    }
+
+    fn history(
+        &self,
+        caller: &Caller,
+        query: Option<&str>,
+        limit: Option<u32>,
+        before: Option<&SessionId>,
+    ) -> Result<Response, ApiError> {
+        let state = self.lock();
+        let result = policy::authorize(caller, Op::History, None).and_then(|()| {
+            let (records, bad) = registry(&state.registry)?.history()?;
+            for error in bad {
+                crate::log_warn!("control: session history: {error}");
+            }
+            history::page(records, query, limit, before)
+        });
+        self.audit_outcome(&state, caller, Op::History, None, None, None, &result);
+        result.map(Response::History)
+    }
+
+    fn restore(&self, caller: &Caller, id: &SessionId) -> Result<Response, ApiError> {
+        let mut state = self.lock();
+        let result = policy::authorize(caller, Op::Restore, None)
+            .and_then(|()| self.restore_session(&mut state, id));
+        let scope = result.as_ref().ok().map(|view| view.scope.clone());
+        let name = result.as_ref().ok().map(|view| audit::clip(&view.name));
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::Restore,
+            scope.as_ref(),
+            Some(id),
+            name,
+            &result,
+        );
+        result.map(|session| Response::Session { session })
+    }
+
+    /// Bring session `id` back from the session history, dead, under the
+    /// first name its folder has free (`name`, `name 2`, …).
+    fn restore_session(&self, state: &mut State, id: &SessionId) -> Result<SessionView, ApiError> {
+        let registry = registry(&state.registry)?;
+        if registry.get(id)?.is_some() {
+            return Err(invalid(format!("session {id} is in the list already")));
+        }
+        let Some(deleted) = registry.deleted(id)? else {
+            return Err(not_found(id));
+        };
+        let (others, _) = registry.list(&deleted.record.scope)?;
+        let taken: HashSet<String> = others.into_iter().map(|other| other.name).collect();
+        let name = history::free_name(&deleted.record.name, &taken);
+        let record = registry
+            .restore(id, &name, self.now())?
+            .ok_or_else(|| not_found(id))?;
+        let places = registry.places_of(id)?;
+        let last_message = registry.last_message(id)?;
+        let children = registry.children(id)?;
+        state.places.insert(id, places);
+        if let Some(at) = last_message {
+            state
+                .last_messages
+                .insert(id.clone(), LastMessage { at, saved: at });
+        }
+        let directory = self.git_directory(state, &record);
+        state.git.ensure(id, &directory);
+        let view = self.view(state, &record, children, None);
+        state.views.insert(id.clone(), view.clone());
+        self.publish(
+            &record.scope,
+            id,
+            SessionEvent::Created {
+                session: view.clone(),
+            },
+        );
+        self.changed.notify_all();
+        Ok(view)
+    }
+
+    /// Purge the session history of sessions deleted more than
+    /// `HISTORY_RETENTION_DAYS` ago, with their saved files. At start, then
+    /// about daily from the tick.
+    pub(super) fn purge_history(&self) {
+        let now = self.now();
+        let purged = {
+            let mut state = self.lock();
+            state.history_purged_ms = now;
+            let Ok(registry) = registry(&state.registry) else {
+                return;
+            };
+            match registry.purge_history(now - registry::HISTORY_RETENTION_MS) {
+                Ok(purged) => purged,
+                Err(error) => {
+                    crate::log_warn!("control: purging the session history: {error}");
+                    return;
+                }
+            }
+        };
+        if !purged.is_empty() {
+            crate::log_info!(
+                "control: {} session(s) left the session history",
+                purged.len()
+            );
+        }
+        for id in &purged {
+            self.remove_saved_files(id);
+        }
+    }
+
+    /// A session's saved output and command history.
+    fn remove_saved_files(&self, id: &SessionId) {
+        if let Err(error) = self.store.remove(id) {
+            crate::log_warn!("control: {id}: saved output: {error}");
+        }
+        let history = self.config.layout.history_file(id);
+        match std::fs::remove_file(&history) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => crate::log_warn!("control: {id}: {}: {e}", history.display()),
+        }
     }
 
     fn revive(&self, caller: &Caller, request: ReviveSession) -> Result<Response, ApiError> {
@@ -2304,6 +2447,13 @@ impl Inner {
     /// Re-evaluate lifecycles whose self-report went stale, and re-read git
     /// contexts when their poll is due.
     pub(super) fn on_tick(&self) {
+        let purge_due = {
+            let state = self.lock();
+            self.now().saturating_sub(state.history_purged_ms) >= history::PURGE_EVERY_MS
+        };
+        if purge_due {
+            self.purge_history();
+        }
         let adopted = std::mem::take(&mut self.lock().adopted);
         for (id, terminal) in adopted {
             // Its log is found for the agent the screen showed before, so the

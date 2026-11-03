@@ -715,7 +715,7 @@ impl App {
     /// Make sure session `id` is shown: under All folders a folder filter
     /// that hides its folder shows that folder too (under App or Status,
     /// selecting it shows it), and a text filter that hides it is cleared.
-    fn reveal(&mut self, id: &SessionId) {
+    pub(super) fn reveal(&mut self, id: &SessionId) {
         let shown = |app: &Self| app.list.visible().iter().any(|s| &s.id == id);
         if shown(self) {
             return;
@@ -1083,6 +1083,11 @@ impl App {
             self.section_query_changed();
             return;
         }
+        if let AppMode::History(picker) = &mut self.mode {
+            picker.query.insert_str(&text.replace(['\r', '\n'], " "));
+            self.history_query_changed();
+            return;
+        }
         match &mut self.mode {
             AppMode::Renaming(dialog) => dialog.input.insert_str(text),
             // Lines run on as one: the box holds one.
@@ -1133,6 +1138,10 @@ impl App {
             }
             if matches!(self.mode, AppMode::Sections(_)) {
                 self.section_picker_mouse(event);
+                return;
+            }
+            if matches!(self.mode, AppMode::History(_)) {
+                self.history_mouse(event);
                 return;
             }
             self.divider = DividerState::default();
@@ -1437,7 +1446,12 @@ impl App {
                     return;
                 }
                 Some(
-                    Hit::FolderMenu | Hit::FolderRow(_) | Hit::SectionMenu | Hit::SectionRow(_),
+                    Hit::FolderMenu
+                    | Hit::FolderRow(_)
+                    | Hit::SectionMenu
+                    | Hit::SectionRow(_)
+                    | Hit::HistoryMenu
+                    | Hit::HistoryRow(_),
                 )
                 | None => {}
             }
@@ -1525,6 +1539,31 @@ impl App {
             },
             MouseEventKind::ScrollUp => self.move_section_cursor(-1),
             MouseEventKind::ScrollDown => self.move_section_cursor(1),
+            _ => {}
+        }
+    }
+
+    /// The session history modal: a click on a row brings it back (like
+    /// Enter), the wheel moves the cursor, a click outside closes it.
+    fn history_mouse(&mut self, event: MouseEvent) {
+        let hit = self
+            .hits
+            .iter()
+            .find(|(a, _)| {
+                event.column >= a.x
+                    && event.column < a.x + a.width
+                    && event.row >= a.y
+                    && event.row < a.y + a.height
+            })
+            .map(|(_, hit)| *hit);
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => match hit {
+                Some(Hit::HistoryRow(row)) => self.click_history_row(row),
+                Some(Hit::HistoryMenu) => {}
+                _ => self.mode = AppMode::Normal,
+            },
+            MouseEventKind::ScrollUp => self.move_history_cursor(-1),
+            MouseEventKind::ScrollDown => self.move_history_cursor(1),
             _ => {}
         }
     }
@@ -2058,7 +2097,7 @@ impl App {
         self.mode = AppMode::Confirm(ConfirmDialog {
             title: "Delete session".into(),
             message: format!(
-                "Delete '{}'? Its process is ended and its saved output removed.",
+                "Delete '{}'? Its process is ended; Session history keeps it 90 days.",
                 session.name
             ),
             action: ConfirmAction::DeleteSession {

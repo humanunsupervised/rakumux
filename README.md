@@ -103,6 +103,7 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `J` `K` | Move down or up (or drag the session) |
 | `r` | Rename |
 | `x` / `d` | Close (end its program) / delete |
+| `H` | Session history: bring back a deleted session |
 | `v` | Layout: Master detail, Grid, Tabs |
 | `T` | Terminal panel: a scratch shell below or beside the session, where it was last |
 | `\|` / `-` | Terminal panel beside / below the session (moves it while it's open) |
@@ -151,6 +152,9 @@ An ended session keeps its last screen:
 - **dead**: its terminal is gone, for example after `rakumux daemon stop`. `Enter` revives it,
   resuming the agent's conversation.
 
+A deleted session leaves the list but stays in the **session history** for 90 days, on this
+machine. `H` (or Settings → Session history) searches it; `Enter` brings one back and resumes it.
+
 ### The server
 
 One server per user, `rakumux-ptyd`, owns every terminal. It starts when first needed and keeps
@@ -174,6 +178,7 @@ rakumux rename dev api
 rakumux pin dev
 rakumux kill dev
 rakumux rm dev
+rakumux history                                 # deleted sessions; rakumux restore <id> brings one back
 rakumux daemon status                           # also start, stop, restart, logs
 rakumux --help
 ```

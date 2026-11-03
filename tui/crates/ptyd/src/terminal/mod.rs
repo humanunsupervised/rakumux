@@ -848,6 +848,12 @@ impl TerminalHost for Host {
         shared.request(|reply| ActorMsg::Terminate { reply })?
     }
 
+    fn persist(&self, id: TerminalId) {
+        if let Ok(shared) = self.inner.get(id) {
+            let _ = shared.request(|reply| ActorMsg::Persist { reply });
+        }
+    }
+
     /// Drop the terminal: no events and no scrollback saves from it once
     /// this returns (a save in progress is waited for). A terminal that is
     /// still running is terminated.

@@ -56,6 +56,11 @@ new-session flow, and code boundaries.
   actions (filter
   rows, All folders, show one, tick and show several, add or create a typed folder).
   `handlers/folders.rs` routes its keys.
+- `history.rs`: the session history modal (`AppMode::History(HistoryPicker)`, `H` and Settings →
+  Session history, greyed without `session.history`): the whole history read once as it opens
+  (`AppEvent::History`), filtered here as typed; Enter or a click (`Hit::HistoryRow`) restores
+  (`AppEvent::Restored`), then selects and revives the session like Enter on a dead one. Keys in
+  `handlers/history.rs`, drawing in `components/history.rs`.
 - `path_complete.rs`: the folders that complete a typed path (`suggest`: folders and links to
   them, dot-folders only once the name starts with `.`, case-insensitive only when nothing else
   matches, capped reads; `expand` for `~` and relative paths). The Folders modal lists them as

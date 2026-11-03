@@ -16,6 +16,8 @@ pub const SUBCOMMANDS: &[&str] = &[
     "unpin",
     "kill",
     "rm",
+    "history",
+    "restore",
     "folders",
     "projects",
     "daemon",
@@ -93,9 +95,24 @@ pub enum Command {
         #[arg(long)]
         tree: bool,
     },
-    /// Delete a session: terminate it and remove its record and scrollback
+    /// Delete a session: terminate it and move it to the session history
+    /// (kept 90 days; `rakumux restore` brings it back)
     Rm {
         /// Session name or id
+        target: String,
+    },
+    /// Deleted sessions, most recently deleted first (kept 90 days)
+    History {
+        /// Only those whose name, folder, agent or branch contains this
+        query: Option<String>,
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Bring a deleted session back into its folder (dead: attach or Enter
+    /// in the list revives it)
+    Restore {
+        /// Its id, or its name when one deleted session has it
         target: String,
     },
     /// List the folders sessions belong to, or add or remove one

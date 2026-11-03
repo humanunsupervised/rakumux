@@ -185,6 +185,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             leave(app);
             app.toggle_rtop();
         }
+        KeyAction::SessionHistory => app.open_history(),
         KeyAction::Reload => app.refresh(),
         KeyAction::Restart => app.request_restart(),
         KeyAction::RestartServer => app.request_server_restart(),
@@ -222,6 +223,10 @@ fn open_item(app: &mut App, item: SettingsItem) {
         SettingsItem::Rtop => {
             app.mode = AppMode::Normal;
             app.open_rtop();
+        }
+        SettingsItem::SessionHistory => {
+            app.mode = AppMode::Normal;
+            app.open_history();
         }
         SettingsItem::Tips => {
             let on = !app.settings.sessions.tips;

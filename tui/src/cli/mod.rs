@@ -1,5 +1,6 @@
 //! Command-line subcommands of the `rakumux` binary (`tui`):
-//! `new`, `ls`, `attach`, `rename`, `pin`, `unpin`, `kill`, `rm`,
+//! `new`, `ls`, `attach`, `rename`, `pin`, `unpin`, `kill`, `rm`, `history`,
+//! `restore`,
 //! `folders …` (alias `projects`), `session …` (JSON, for agents and
 //! scripts), `daemon …` and `remote …` (remote access for the phone app).
 //! Global options may precede the subcommand:

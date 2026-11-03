@@ -100,6 +100,8 @@ pub struct FakeApi {
     pub peers: Mutex<Vec<(SessionId, AttachPeer)>>,
     /// Returned by the next call that can fail, once.
     pub fail_next: Mutex<Option<ApiError>>,
+    /// The session history `history` answers, one page.
+    pub deleted: Mutex<Vec<session_core::model::DeletedSession>>,
 }
 
 impl FakeApi {
@@ -131,6 +133,7 @@ impl FakeApi {
             waits: Mutex::new(vec![]),
             peers: Mutex::new(vec![]),
             fail_next: Mutex::new(None),
+            deleted: Mutex::new(vec![]),
         }
     }
 
@@ -214,6 +217,29 @@ impl SessionApi for FakeApi {
 
     fn delete(&self, id: &SessionId) -> Result<()> {
         self.record(format!("delete {id}"))
+    }
+
+    fn history(
+        &self,
+        query: Option<&str>,
+        _limit: Option<u32>,
+        _before: Option<&SessionId>,
+    ) -> Result<session_core::api::HistoryPage> {
+        self.record(format!("history {query:?}"))?;
+        Ok(session_core::api::HistoryPage {
+            sessions: self.deleted.lock().unwrap().clone(),
+            more: false,
+        })
+    }
+
+    fn restore(&self, id: &SessionId) -> Result<SessionView> {
+        self.record(format!("restore {id}"))?;
+        let deleted = self.deleted.lock().unwrap();
+        let found = deleted
+            .iter()
+            .find(|s| &s.id == id)
+            .ok_or_else(|| ApiError::new(session_core::api::ErrorCode::NotFound, "not deleted"))?;
+        Ok(session(id.as_str(), &found.name))
     }
 
     fn revive(&self, request: ReviveSession) -> Result<SessionView> {

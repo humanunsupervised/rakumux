@@ -34,6 +34,8 @@ pub struct FakeTerminal {
     pub keys: Vec<(Vec<String>, Option<String>)>,
     pub terminated: bool,
     pub forgotten: bool,
+    /// Its scrollback was saved on request (`TerminalHost::persist`).
+    pub persisted: bool,
     /// Someone is typing in it: a quiet submit is refused.
     pub typing: bool,
     /// For each checked submit whose Enter came due ([`FakeHost::enter_due`]),
@@ -332,6 +334,7 @@ impl TerminalHost for FakeHost {
                 keys: Vec::new(),
                 terminated: false,
                 forgotten: false,
+                persisted: false,
                 typing: false,
                 enters: Vec::new(),
             },
@@ -487,6 +490,12 @@ impl TerminalHost for FakeHost {
         self.with_running(id, |t| t.terminated = true)?;
         self.exit_terminal(id, None);
         Ok(())
+    }
+
+    fn persist(&self, id: TerminalId) {
+        if let Some(t) = self.state.lock().unwrap().terminals.get_mut(&id) {
+            t.persisted = true;
+        }
     }
 
     fn forget(&self, id: TerminalId) {

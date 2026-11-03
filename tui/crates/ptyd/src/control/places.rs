@@ -136,6 +136,15 @@ impl Places {
         self.by_session.remove(id);
     }
 
+    /// `id`'s places as the registry holds them (a session restored from
+    /// the session history), as [`Places::new`] takes them.
+    pub fn insert(&mut self, id: &SessionId, places: Vec<SessionPlace>) {
+        let mut restored = Places::new(HashMap::from([(id.clone(), places)]));
+        if let Some(list) = restored.by_session.remove(id) {
+            self.by_session.insert(id.clone(), list);
+        }
+    }
+
     /// Record that `id` worked in `resolved`. Returns its list (every working
     /// tree, edited or not) when that changed, to save; the caller's refresh
     /// publishes what [`Places::shown`] says now. A working tree's time is

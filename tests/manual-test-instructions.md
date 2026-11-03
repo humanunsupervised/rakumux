@@ -151,6 +151,8 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
 - [ ] `rakumux attach demo` takes over the terminal; `Ctrl-\ d` detaches, `Ctrl-\ >`/`<`
       switch sessions, `Ctrl-\ n` creates one. Also try it over SSH.
 - [ ] `rakumux rename demo demo2`, `rakumux kill demo2`, `rakumux rm demo2` behave as named.
+- [ ] After `rakumux rm demo2`, `rakumux history` lists it and `rakumux restore demo2` brings it
+  back dead; in the TUI, `H` finds it by typing and Enter restores, revives and goes into it.
 - [ ] Inside a session: `rakumux session list`, `rakumux session read <id>` and
       `rakumux session report --state working --text "running tests"` work; `rakumux kill`
       on another session is refused with a "later release" message.
