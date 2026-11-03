@@ -14,10 +14,14 @@ use std::path::Path;
 #[path = "../../../../../integrations/environment.rs"]
 mod agents;
 
-/// Variables removed from the inherited environment.
+/// Variables removed from the inherited environment. A session is not
+/// inside the multiplexer the client runs in: a program told it is (tmux,
+/// GNU screen) would wrap what it writes for it (OSC 52 in its passthrough,
+/// which a session's terminal drops) or drive it.
 const STRIPPED: &[&str] = &[
     "TMUX",
     "TMUX_PANE",
+    "STY",
     "OMPCODE",
     // Replaced below with this session's values.
     rakumux_env::SOCKET,
@@ -279,6 +283,7 @@ mod tests {
             ("PATH", "/bin"),
             ("TMUX", "x"),
             ("TMUX_PANE", "%1"),
+            ("STY", "123.pts-0.host"),
             ("CLAUDECODE", "1"),
             ("CLAUDE_CODE_SESSION_ID", "c"),
             ("CLAUDE_CODE_CHILD_SESSION", "1"),

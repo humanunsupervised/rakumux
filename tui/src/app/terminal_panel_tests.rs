@@ -647,3 +647,80 @@ fn terminal_pane_history_stays_within_its_cell_budget() {
     assert!(panel_terminal(1000, 1000, "").is_err());
     assert!(panel_terminal(24, 80, "not base64").is_err());
 }
+
+#[tokio::test]
+async fn a_drag_its_program_took_reaches_it_wherever_it_is_let_go() {
+    let mut h = harness(vec![view("A", "agent", 1)]);
+    let main = h.last_attach().0;
+    h.press(KeyCode::Char('T')).await;
+    let panel = pane_index(&h);
+    h.fake.send_pane(
+        panel,
+        AttachEvent::Output {
+            offset: 0,
+            bytes: b"\x1b[?1002h\x1b[?1006h".to_vec(),
+        },
+    );
+    render(&mut h, 160, 48);
+    let pane = panel_output(h.app.screen().terminal_panel.unwrap());
+    h.fake.pane_outgoing(panel);
+    h.fake.outgoing(main);
+    let mouse = |kind, column, row| MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    };
+    // Up out of the panel over the session above it, let go there.
+    let above = pane.y.saturating_sub(5);
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        pane.x + 4,
+        pane.y + 1,
+    ));
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        pane.x + 6,
+        above,
+    ));
+    h.app.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        pane.x + 6,
+        above,
+    ));
+    assert_eq!(
+        h.fake.pane_outgoing(panel),
+        vec![
+            AttachOutgoing::Input(b"\x1b[<0;5;2M".to_vec()),
+            AttachOutgoing::Input(b"\x1b[<32;7;1M".to_vec()),
+            AttachOutgoing::Input(b"\x1b[<0;7;1m".to_vec()),
+        ]
+    );
+    assert!(h.fake.outgoing(main).is_empty());
+    assert_eq!(h.app.focus, Focus::Terminal);
+}
+
+#[tokio::test]
+async fn a_paste_reaches_the_panel_bracketed_with_its_lines_as_returns() {
+    let mut h = harness(vec![view("A", "agent", 1)]);
+    h.press(KeyCode::Char('T')).await;
+    let panel = pane_index(&h);
+    h.fake.send_pane(
+        panel,
+        AttachEvent::Output {
+            offset: 0,
+            bytes: b"\x1b[?2004h".to_vec(),
+        },
+    );
+    h.app.process_pending();
+    h.fake.pane_outgoing(panel);
+    h.app
+        .handle_terminal_event(Event::Paste("one\r\ntwo\nthree".into()))
+        .await;
+    assert_eq!(
+        h.fake.pane_outgoing(panel),
+        vec![AttachOutgoing::Input(
+            b"\x1b[200~one\rtwo\rthree\x1b[201~".to_vec()
+        )]
+    );
+}

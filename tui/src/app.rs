@@ -99,6 +99,15 @@ fn env_snapshot() -> Vec<(String, String)> {
         .collect()
 }
 
+/// The terminal whose program took a mouse press (`App::mouse_grab`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MouseGrab {
+    /// The session in the detail, by id.
+    Session(SessionId),
+    /// The terminal panel's shell.
+    Panel,
+}
+
 /// Mouse state of the line between the session list and the detail.
 /// The session worked in now and the one before it (Tab in Rakumux mode
 /// goes back to that one).
@@ -404,6 +413,12 @@ pub struct App {
     naming_started: HashSet<SessionId>,
     /// Bytes to write to the real terminal (OSC 52 clipboard).
     terminal_output: Vec<u8>,
+    /// The multiplexer this window runs in, whose passthrough clipboard
+    /// writes need (`clipboard::Mux::from_env` in production).
+    pub clipboard_mux: crate::clipboard::Mux,
+    /// The program that took a mouse press, until it's let go: its drags
+    /// and release go to it wherever the pointer is.
+    mouse_grab: Option<MouseGrab>,
 
     pub pending_update_version: Option<String>,
     /// Tips clicked past in the footer (this window's).
@@ -507,6 +522,8 @@ impl App {
             status: None,
             naming_started: HashSet::new(),
             terminal_output: Vec::new(),
+            clipboard_mux: crate::clipboard::Mux::None,
+            mouse_grab: None,
             pending_update_version: None,
             tip_offset: 0,
             update_install_method: None,
@@ -996,6 +1013,14 @@ impl App {
                 crate::help::search_text(row.section, &row.label)
             })
             .collect()
+    }
+
+    /// Put `data` (base64) on the clipboard `selection` (OSC 52's `c`,
+    /// `p`, …) of the terminal this window runs in: OSC 52, written after
+    /// the next frame, also over SSH where the terminal allows it.
+    pub(crate) fn write_clipboard(&mut self, selection: &str, data: &str) {
+        let bytes = crate::clipboard::osc52(selection, data, self.clipboard_mux);
+        self.terminal_output.extend_from_slice(&bytes);
     }
 
     /// Bytes the event loop must write to the real terminal.

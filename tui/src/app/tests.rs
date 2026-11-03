@@ -2686,6 +2686,143 @@ async fn a_drag_over_a_session_copies_its_text_and_a_click_goes_in() {
     assert!(typed(h.fake.outgoing(index)));
 }
 
+/// Session A gone into (this window its controller), its program tracking
+/// the mouse (SGR, button motion, as Claude Code's fullscreen mode does).
+fn in_a_program_that_takes_the_mouse() -> (Harness, usize, Rect) {
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    h.attach_event(
+        index,
+        AttachEvent::Output {
+            offset: 100,
+            bytes: b"\x1b[?1002h\x1b[?1006h".to_vec(),
+        },
+    );
+    draw(&mut h);
+    let pane = h.app.screen().terminal.unwrap();
+    drag(&mut h, (pane.x + 2, pane.y + 2), &[]);
+    h.app.process_pending();
+    assert_eq!(h.app.focus, Focus::Session);
+    draw(&mut h);
+    let pane = h.app.screen().terminal.unwrap();
+    h.fake.outgoing(index);
+    (h, index, pane)
+}
+
+fn typed(out: Vec<AttachOutgoing>) -> Vec<String> {
+    out.into_iter()
+        .filter_map(|message| match message {
+            AttachOutgoing::Input(bytes) => Some(String::from_utf8(bytes).unwrap()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_program_that_takes_the_mouse_gets_a_drag_let_go_past_its_pane() {
+    let (mut h, index, pane) = in_a_program_that_takes_the_mouse();
+    // Out over the list on the left, let go there: the drag and the
+    // release still reach the program, at the pane's first column, so it
+    // ends its selection (Claude Code copies it then).
+    drag(
+        &mut h,
+        (pane.x + 5, pane.y + 1),
+        &[(pane.x + 1, pane.y + 2), (0, pane.y + 3)],
+    );
+    assert_eq!(
+        typed(h.fake.outgoing(index)),
+        [
+            "\x1b[<0;6;2M",
+            "\x1b[<32;2;3M",
+            "\x1b[<32;1;4M",
+            "\x1b[<0;1;4m"
+        ]
+    );
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.app.drag, None);
+    assert!(!h.app.divider.dragging);
+    // Down over the footer: at the last row shown (the terminal's, 24,
+    // above the pane's bottom here).
+    let footer = h.app.screen().footer.unwrap();
+    drag(&mut h, (pane.x + 3, pane.y + 1), &[(pane.x + 4, footer.y)]);
+    let last = pane.height.min(24);
+    assert_eq!(
+        typed(h.fake.outgoing(index)),
+        [
+            "\x1b[<0;4;2M".to_string(),
+            format!("\x1b[<32;5;{last}M"),
+            format!("\x1b[<0;5;{last}m")
+        ]
+    );
+    // Moving without a button, after the release, goes where it is.
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Moved, 0, pane.y + 1));
+    assert!(typed(h.fake.outgoing(index)).is_empty());
+}
+
+#[tokio::test]
+async fn a_paste_reaches_the_session_bracketed_whole_and_never_from_rakumux_mode() {
+    let (mut h, index, _) = in_a_program_that_takes_the_mouse();
+    h.attach_event(
+        index,
+        AttachEvent::Output {
+            offset: 100 + b"\x1b[?1002h\x1b[?1006h".len() as u64,
+            bytes: b"\x1b[?2004h".to_vec(),
+        },
+    );
+    let text = format!("one\r\ntwo\n{}", "x".repeat(200_000));
+    h.app
+        .handle_terminal_event(crossterm::event::Event::Paste(text))
+        .await;
+    assert_eq!(
+        typed(h.fake.outgoing(index)),
+        [format!(
+            "\x1b[200~one\rtwo\r{}\x1b[201~",
+            "x".repeat(200_000)
+        )]
+    );
+    h.rakumux().await;
+    h.fake.outgoing(index);
+    h.app
+        .handle_terminal_event(crossterm::event::Event::Paste("ls\n".into()))
+        .await;
+    assert!(typed(h.fake.outgoing(index)).is_empty());
+}
+
+#[tokio::test]
+async fn a_programs_clipboard_write_reaches_this_terminal_only_while_it_has_the_keys() {
+    let clipboard = || {
+        AttachEvent::Event(StreamEvent::Clipboard {
+            selection: "c".into(),
+            data: "aGk=".into(),
+        })
+    };
+    let mut h = harness(vec![view("A", "a", 10)]);
+    let (index, _) = h.last_attach();
+    // Previewed in Rakumux mode (an observer): not this window's to copy.
+    h.attach_event(index, clipboard());
+    assert!(h.app.take_terminal_output().is_empty());
+    // Gone into: written out as the program wrote it.
+    let (mut h, index, _) = in_a_program_that_takes_the_mouse();
+    h.attach_event(index, clipboard());
+    assert_eq!(h.app.take_terminal_output(), b"\x1b]52;c;aGk=\x07");
+    h.attach_event(
+        index,
+        AttachEvent::Event(StreamEvent::Clipboard {
+            selection: "p".into(),
+            data: "cA==".into(),
+        }),
+    );
+    assert_eq!(h.app.take_terminal_output(), b"\x1b]52;p;cA==\x07");
+    // In tmux: raw for `set-clipboard on`, and through its passthrough.
+    h.app.clipboard_mux = crate::clipboard::Mux::Tmux;
+    h.attach_event(index, clipboard());
+    assert_eq!(
+        h.app.take_terminal_output(),
+        b"\x1b]52;c;aGk=\x07\x1bPtmux;\x1b\x1b]52;c;aGk=\x07\x1b\\"
+    );
+}
+
 #[tokio::test]
 async fn a_drag_stays_in_its_folder_group() {
     let mut h = folders_harness();

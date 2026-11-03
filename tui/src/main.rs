@@ -2,6 +2,7 @@ mod account;
 mod app;
 mod auth;
 mod cli;
+mod clipboard;
 mod components;
 mod escape_time;
 mod help;
@@ -213,6 +214,7 @@ async fn main() -> Result<()> {
         debug,
     });
     app.ptyd_path = cli.ptyd_path.clone();
+    app.clipboard_mux = clipboard::Mux::from_env(|name| std::env::var_os(name));
     app.load_update_state();
     if !app.settings.sessions.welcome_seen {
         app.open_welcome();

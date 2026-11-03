@@ -637,6 +637,8 @@ tui/
     help/                    # Settings modal (General, Keys: actions table) and Help modal (docs, license)
     naming/                  # AI session naming (Anthropic / OpenAI over HTTPS), not while AI titles are on
     auth/                    # Clerk auth, deferred (feature flag off)
+    clipboard.rs             # OSC 52 to the terminal this window runs in (Mux: in tmux also wrapped in
+                             # its passthrough, in GNU screen in DCS pieces; TMUX / STY of the TUI)
     escape_time.rs           # keys whose escape sequence arrives in pieces (phones over SSH): a lone
                              # Esc waits for the rest of an arrow, Home/End, PgUp/PgDn, F1-F4 or a focus
                              # report: 25 ms on a local terminal and a desktop's over SSH (a key is one
@@ -1128,7 +1130,9 @@ accidents; they don't stop a hostile process running as the same user.
   `COPILOT_HOME`, `XDG_DATA_HOME`, `FACTORY_HOME_OVERRIDE` (where the daemon looks for agents'
   conversations, `resume.rs`).
   Sessions the daemon revives by itself get the daemon's environment (the one the client that
-  started it had). Agents' markers never reach a new session (`integrations/environment.rs`), nor
+  started it had). The client's multiplexer's variables (`TMUX`, `TMUX_PANE`, `STY`) never reach a
+  session (it isn't in one: told it is, Claude Code wraps its OSC 52 copy for it, which the
+  session's terminal drops). Agents' markers never reach a new session (`integrations/environment.rs`), nor
   GitHub Copilot's git settings (`GIT_EDITOR`, `GIT_CONFIG_*`, no prompts) from an environment it
   made (`COPILOT_CLI=1`).
 
@@ -1789,8 +1793,14 @@ program doesn't take the mouse, or as observer) or the focused terminal panel se
 (`terminal_view/selection.rs`): in reading order, drawn reversed and kept to that pane (past its
 edge, the nearest cell), from the history shown while scrolled back; letting go copies it over
 OSC 52 (`Copied N characters`), and a click on the preview without moving goes in on release. A
-program that tracks the mouse (Claude Code) gets the drag in session mode. Shift-drag is the
-outer terminal's own selection, across the whole window.
+program that tracks the mouse (Claude Code) gets the drag in session mode (the panel's, while the
+panel has the keys), and keeps it until the button is let go wherever the pointer goes: past the
+pane's edge (over the list, the footer) at its nearest cell, as a terminal reports a drag that
+left its window (`App::mouse_grab`), so its selection ends there too. A program's own copy (OSC
+52, Claude Code's copy on select) is relayed by the daemon to the session's controller only and
+written out by that window (`App::write_clipboard`), never from a preview, Grid or another
+window; a program's clipboard read (`OSC 52 ; ?`) is never answered. Shift-drag is the outer
+terminal's own selection, across the whole window.
 
 Embedded terminals (the detail, Grid cards, the terminal panel) draw a program's default colours
 in the outer terminal's own (`terminal_view::DefaultColors::NATIVE`), not the Rakumux theme;

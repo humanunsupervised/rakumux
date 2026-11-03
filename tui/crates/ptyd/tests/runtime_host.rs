@@ -464,6 +464,41 @@ fn title_cwd_and_bell_become_events() {
 }
 
 #[test]
+fn clipboard_writes_reach_the_controller_only() {
+    let home = TestHome::new();
+    let host = home.host();
+    let info = host.spawn(home.bash_spec(80, 24, b"")).unwrap();
+    wait_for_prompt(&*host, info.id);
+    let controller = host.attach(info.id, Role::Controller, 80, 24).unwrap();
+    let observer = host.attach(info.id, Role::Observer, 80, 24).unwrap();
+    // Both terminators; the second written in two pieces.
+    host.submit(
+        info.id,
+        r"printf '\e]52;c;aGk=\a'; printf '\e]52;c;U1'; sleep 0.2; printf 'Q=\e\\'; echo CLIP_$((1+1))",
+    )
+    .unwrap();
+    wait_for_screen(&*host, info.id, "CLIP_2");
+    let clipboard = |events: &std::sync::mpsc::Receiver<AttachEvent>| {
+        let mut seen = Vec::new();
+        while let Ok(event) = events.recv_timeout(Duration::from_millis(300)) {
+            if let AttachEvent::Event(StreamEvent::Clipboard { selection, data }) = event {
+                seen.push((selection, data));
+            }
+        }
+        seen
+    };
+    assert_eq!(
+        clipboard(&controller.events),
+        vec![
+            ("c".to_string(), "aGk=".to_string()),
+            ("c".to_string(), "U1Q=".to_string())
+        ]
+    );
+    assert!(clipboard(&observer.events).is_empty());
+    host.shutdown();
+}
+
+#[test]
 fn programs_that_ask_for_program_status_get_it_and_their_reports_become_events() {
     let home = TestHome::new();
     let host = home.host();

@@ -116,8 +116,7 @@ impl App {
             return;
         };
         let data = base64::engine::general_purpose::STANDARD.encode(link);
-        self.terminal_output
-            .extend_from_slice(format!("\x1b]52;c;{data}\x07").as_bytes());
+        self.write_clipboard("c", &data);
         self.set_status("Copied the sign-in link.");
     }
 

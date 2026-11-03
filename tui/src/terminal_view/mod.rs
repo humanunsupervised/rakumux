@@ -252,6 +252,17 @@ impl TerminalView {
         input::encode_mouse_at(event, col, row, &self.modes())
     }
 
+    /// [`mouse_bytes`](Self::mouse_bytes) for a drag or the release of a
+    /// press the program took: beyond the pane or the terminal's edge, at
+    /// the nearest cell, as a terminal reports a drag that left its window.
+    pub fn held_mouse_bytes(&self, event: &MouseEvent, pane: Rect) -> Option<Vec<u8>> {
+        if self.frozen.is_some() {
+            return None;
+        }
+        let (row, col) = self.cell_near(event, pane)?;
+        input::encode_mouse_at(event, col, row, &self.modes())
+    }
+
     /// Start selecting text at the cell under `event` in `pane` (the `area`
     /// passed to [`render`](Self::render)). Returns whether it started.
     pub fn start_selection(&mut self, event: &MouseEvent, pane: Rect) -> bool {

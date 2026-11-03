@@ -271,8 +271,7 @@ impl App {
     pub fn copy_sprite_link(&mut self) {
         use base64::Engine;
         let data = base64::engine::general_purpose::STANDARD.encode(TOKEN_PAGE);
-        self.terminal_output
-            .extend_from_slice(format!("\x1b]52;c;{data}\x07").as_bytes());
+        self.write_clipboard("c", &data);
         self.set_status("Copied the link.");
     }
 

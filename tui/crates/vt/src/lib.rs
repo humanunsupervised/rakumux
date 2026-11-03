@@ -543,6 +543,53 @@ mod tests {
         assert_eq!(out.replies, b"\x1b[1;6R\x1b[?62;22c");
     }
 
+    fn clipboard(selection: &str, data: &str) -> Event {
+        Event::Clipboard {
+            selection: selection.into(),
+            data: data.into(),
+        }
+    }
+
+    #[test]
+    fn osc52_writes_with_either_terminator_and_any_selection() {
+        let mut emu = Emulator::responding(24, 80, 0, Colors::default());
+        let out = emu.feed(
+            b"\x1b]52;c;aGk=\x07\x1b]52;c;U1Q=\x1b\\\x1b]52;p;cA==\x07\x1b]52;;ZQ==\x07after",
+        );
+        assert_eq!(
+            out.events,
+            vec![
+                clipboard("c", "aGk="),
+                clipboard("c", "U1Q="),
+                clipboard("p", "cA=="),
+                clipboard("", "ZQ=="),
+            ]
+        );
+        assert!(out.replies.is_empty());
+        assert_eq!(emu.text().trim(), "after");
+    }
+
+    #[test]
+    fn osc52_split_across_reads_and_large_is_one_write() {
+        let data = "QUJD".repeat(300_000);
+        let whole = format!("\x1b]52;c;{data}\x1b\\");
+        let mut emu = Emulator::responding(24, 80, 0, Colors::default());
+        let mut events = Vec::new();
+        for piece in whole.as_bytes().chunks(4093) {
+            events.extend(emu.feed(piece).events);
+        }
+        assert_eq!(events, vec![clipboard("c", &data)]);
+    }
+
+    #[test]
+    fn osc52_reads_and_malformed_writes_are_ignored() {
+        // A read (`?`) is never answered: the clipboard is the user's.
+        let mut emu = Emulator::responding(24, 80, 0, Colors::default());
+        let out = emu.feed(b"\x1b]52;c;?\x07\x1b]52;c;not base64!\x07\x1b]52;x;aGk=\x07");
+        assert!(out.events.is_empty());
+        assert!(out.replies.is_empty());
+    }
+
     #[test]
     fn passive_emulator_never_replies() {
         let mut emu = Emulator::passive(24, 80, 0);

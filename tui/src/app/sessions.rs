@@ -25,7 +25,7 @@ use super::runtime::{cancel_flag, AppEvent};
 use super::screen::Screen;
 use super::session_list::{ListChange, ListRow, Selection, ShownAs};
 use super::types::*;
-use super::{env_snapshot, App, DividerState, FooterKey, Hit, SessionDrag};
+use super::{env_snapshot, App, DividerState, FooterKey, Hit, MouseGrab, SessionDrag};
 use crate::layout::{self, SessionLayout};
 use crate::terminal_view::{self, TerminalView, DEFAULT_SCROLLBACK_ROWS};
 
@@ -412,8 +412,7 @@ impl App {
             StreamEvent::Title { title } => self.detail.title = Some(title),
             StreamEvent::Clipboard { selection, data } => {
                 if attachment.role == Role::Controller {
-                    self.terminal_output
-                        .extend_from_slice(format!("\x1b]52;{selection};{data}\x07").as_bytes());
+                    self.write_clipboard(&selection, &data);
                 }
             }
             StreamEvent::Exited { code } => {
@@ -1125,6 +1124,7 @@ impl App {
             self.hovered_row = None;
             self.hovered_place = None;
             self.terminal_panel.dragging = false;
+            self.mouse_grab = None;
             // A dialog opened: a held session is let go.
             self.end_session_drag();
             if matches!(self.mode, AppMode::Folders(_)) {
@@ -1155,6 +1155,9 @@ impl App {
                     && event.row < a.y + a.height
             })
         };
+        if self.mouse_held_by_program(event) {
+            return;
+        }
         if self.terminal_panel.dragging {
             match event.kind {
                 MouseEventKind::Drag(MouseButton::Left) => {
@@ -1679,6 +1682,60 @@ impl App {
         }
     }
 
+    /// Carry on a press the session's program, or the terminal panel's,
+    /// took (it tracks the mouse): its drags and its release go to that
+    /// program wherever the pointer goes, past the pane's edge at the
+    /// nearest cell, as a terminal reports a drag that left its window. A
+    /// selection dragged out over the list or the footer still ends where
+    /// the program sees it (Claude Code copies what it selected when the
+    /// button is let go). Returns whether the event went to it.
+    fn mouse_held_by_program(&mut self, event: MouseEvent) -> bool {
+        let Some(grab) = self.mouse_grab.clone() else {
+            return false;
+        };
+        match event.kind {
+            MouseEventKind::Drag(_) => {}
+            MouseEventKind::Up(_) => self.mouse_grab = None,
+            // The release went unseen: this press starts afresh.
+            MouseEventKind::Down(_) => {
+                self.mouse_grab = None;
+                return false;
+            }
+            // Motion without a button and the wheel go where the pointer is.
+            _ => return false,
+        }
+        let screen = self.screen();
+        match grab {
+            MouseGrab::Session(id) => {
+                let (Some(terminal), Some(attachment), Some(pane)) = (
+                    self.detail.terminal.as_ref(),
+                    self.detail.attachment.as_ref(),
+                    screen.terminal,
+                ) else {
+                    self.mouse_grab = None;
+                    return false;
+                };
+                if self.focus != Focus::Session
+                    || attachment.id != id
+                    || attachment.role != Role::Controller
+                {
+                    self.mouse_grab = None;
+                    return false;
+                }
+                if let Some(bytes) = terminal.held_mouse_bytes(&event, pane) {
+                    let _ = attachment.input(bytes);
+                }
+            }
+            MouseGrab::Panel => {
+                if !self.held_panel_mouse(event, &screen) {
+                    self.mouse_grab = None;
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     /// Carry on a drag selecting text in the session's view or the terminal
     /// panel's, wherever the pointer goes: letting go copies what it
     /// selected, and a click on the preview goes into its session. Returns
@@ -1726,8 +1783,7 @@ impl App {
     /// it).
     fn copy_selection(&mut self, text: &str) {
         let data = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
-        self.terminal_output
-            .extend_from_slice(format!("\x1b]52;c;{data}\x07").as_bytes());
+        self.write_clipboard("c", &data);
         let count = text.chars().count();
         let plural = if count == 1 { "" } else { "s" };
         self.set_status(format!("Copied {count} character{plural}"));
@@ -1778,6 +1834,10 @@ impl App {
         }
         if let Some(bytes) = terminal.mouse_bytes(&event, pane) {
             let _ = attachment.input(bytes);
+            // Its drags and release go to it wherever they are.
+            if matches!(event.kind, MouseEventKind::Down(_)) {
+                self.mouse_grab = Some(MouseGrab::Session(attachment.id.clone()));
+            }
             return;
         }
         // A program that doesn't take the mouse: a drag selects its text.

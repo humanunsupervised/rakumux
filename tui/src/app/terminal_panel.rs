@@ -461,8 +461,7 @@ impl App {
                         .as_ref()
                         .is_some_and(|a| a.role == Role::Controller)
                 {
-                    self.terminal_output
-                        .extend_from_slice(format!("\x1b]52;{selection};{data}\x07").as_bytes());
+                    self.write_clipboard(&selection, &data);
                 }
             }
             AttachEvent::Event(StreamEvent::Lagged { .. }) => self.request_panel_checkpoint(),
@@ -564,6 +563,10 @@ impl App {
             if let Some(terminal) = &self.terminal_panel.terminal {
                 if let Some(bytes) = terminal.mouse_bytes(&event, pane) {
                     self.panel_input(bytes);
+                    // Its drags and release go to it wherever they are.
+                    if matches!(event.kind, MouseEventKind::Down(_)) {
+                        self.mouse_grab = Some(super::MouseGrab::Panel);
+                    }
                     return;
                 }
             }
@@ -579,6 +582,29 @@ impl App {
                 _ => {}
             }
         }
+    }
+
+    /// A drag or release of a press the panel's program took
+    /// (`mouse_held_by_program`), wherever it is; `false` once the panel
+    /// no longer has the keys.
+    pub(super) fn held_panel_mouse(
+        &mut self,
+        event: MouseEvent,
+        screen: &super::screen::Screen,
+    ) -> bool {
+        let pane = screen.terminal_panel.map(panel_output);
+        let bytes = match (&self.terminal_panel.terminal, pane) {
+            (Some(terminal), Some(pane))
+                if self.focus == Focus::Terminal && !self.terminal_panel.awaiting_checkpoint =>
+            {
+                terminal.held_mouse_bytes(&event, pane)
+            }
+            _ => return false,
+        };
+        if let Some(bytes) = bytes {
+            self.panel_input(bytes);
+        }
+        true
     }
 
     pub fn terminal_panel_size(&self) -> (u16, u16) {

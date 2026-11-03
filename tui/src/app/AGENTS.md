@@ -195,6 +195,9 @@ new-session flow, and code boundaries.
   `Hit::DrawerBarTab`): a click on it gives it the keys, a click beside it (not the
   footer) gives them to the list. The divider drags side to side, or up and down when
   stacked; the line left of the docked feed (`Screen::feed_divider`) drags side to side.
+  A press the session's (or the focused panel's) program takes holds the mouse until it's let
+  go (`mouse_held_by_program`, `App::mouse_grab`): its drags and release go to that program
+  wherever they are, at the pane's nearest cell (`TerminalView::held_mouse_bytes`).
   Clicking "+ New session" creates and enters its shell immediately at any width,
   using the current folder; pending creation ignores repeated clicks.
   A click on the previewed session's terminal goes in. On a phone a
