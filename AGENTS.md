@@ -1272,7 +1272,8 @@ staged/installed folders (`renameat2` on Linux, `renamex_np` on macOS) under the
 (`.rakumux-update.lock`): another window finding it held (`UpdateBusy`) says nothing and tries
 a minute later, when its install finds every binary already at that version and changes
 nothing. Unwritable or unsupported installs fail without changing the old bundle; the window
-says so once (`Couldn't update to X: …`) and doesn't try that version (`failed_version`) again
+says so once (`Couldn't update to X: …`; an unwritable one, as `install.sh` put in root's
+`/usr/local` before 0.1.43, names the installer, which moves it to `~/.local` when run again) and doesn't try that version (`failed_version`) again
 until the next daily check finds it. Installed, the window reloads only its UI through the new
 launcher (stripping `--new-server`) at a safe moment: Rakumux mode, no dialog, half-typed filter
 or pending key, no terminal panel shell (a reload ends it), and no key, click, paste or focus

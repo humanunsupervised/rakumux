@@ -35,13 +35,14 @@ The installer:
 - picks the build for your machine (macOS Apple Silicon, macOS Intel or Linux x64);
 - checks the release's signature (with `minisign` or OpenSSL 3, if you have one) and the download
   against its SHA-256 checksums;
-- installs into `/usr/local`, asking for `sudo` if it needs to.
+- installs where Rakumux can update itself: into `/usr/local` when you can write there without
+  `sudo`, otherwise into `~/.local` (it tells you if `~/.local/bin` isn't on your `PATH` yet).
+  Run again, it updates the copy it installed, and moves one it can't update.
 
-To install into your home directory without `sudo`, run the following, then make sure
-`~/.local/bin` is on your `PATH`:
+To choose the folder yourself (it asks for `sudo` when it needs to):
 
 ```bash
-curl -fsSL https://rakumux.com/install.sh | PREFIX="$HOME/.local" bash
+curl -fsSL https://rakumux.com/install.sh | PREFIX=/usr/local bash
 ```
 
 This gives you three commands:

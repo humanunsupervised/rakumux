@@ -63,8 +63,10 @@ pub(super) fn install(
         .context("cannot locate the installed app")?;
     let parent = root.parent().context("install directory has no parent")?;
     let _lock = lock(parent)?;
-    let staging = tempfile::Builder::new().prefix(".rakumux-update-").tempdir_in(parent)
-        .with_context(|| format!("Cannot write {}. Update with the installer using your original PREFIX outside Rakumux; administrator permission may be required.", parent.display()))?;
+    let staging = tempfile::Builder::new()
+        .prefix(".rakumux-update-")
+        .tempdir_in(parent)
+        .with_context(|| unwritable(parent))?;
     // Another window installed it while this one waited its turn.
     if BINARIES.iter().all(|binary| {
         verify_version(&root.join(binary), &version.to_string(), staging.path()).is_ok()
@@ -126,10 +128,26 @@ pub(super) fn install(
     Ok(root.join("rakumux.sh"))
 }
 
+/// Why an installation this user can't write can't update itself, and the
+/// installer that moves it somewhere it can (install.sh picks ~/.local when
+/// the old place isn't writable, and says how to remove the old copy).
+fn unwritable(parent: &Path) -> String {
+    format!(
+        "{} isn't writable; reinstall to update: curl -fsSL https://rakumux.com/install.sh | bash",
+        parent.display()
+    )
+}
+
 fn lock(parent: &Path) -> Result<File> {
-    let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).mode(0o600).custom_flags(libc::O_NOFOLLOW)
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(parent.join(".rakumux-update.lock"))
-        .context("installation is not writable; run the installer outside Rakumux with your original PREFIX")?;
+        .with_context(|| unwritable(parent))?;
     // SAFETY: `file` owns this valid descriptor and is kept alive throughout installation.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         let error = io::Error::last_os_error();

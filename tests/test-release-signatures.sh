@@ -216,4 +216,46 @@ for mode in $modes; do
     expect_failure 'not a valid signature' run "$FIXTURE/v0.1.56/checksums.txt" "$FIXTURE/v0.1.56/checksums.txt.minisig" v0.1.56
 done
 
+# Without PREFIX: where Rakumux already is when this user can update it there,
+# else the system prefix when writable without sudo, else ~/.local. (Root
+# ignores write bits, so these need a normal user.)
+if [[ "$(id -u)" != 0 ]]; then
+    # install_default SYSTEM [EARLIER]: the installer without PREFIX, the system
+    # prefix SYSTEM and an earlier install's prefix EARLIER on PATH.
+    install_default() {
+        local path
+        path="$(toolbox minisign minisign)"
+        [[ -n "${2:-}" ]] && path="$2/bin:$path"
+        rm -rf "$TEMP/home"
+        mkdir -p "$TEMP/home"
+        env -u PREFIX PATH="$path" HOME="$TEMP/home" SHELL=/bin/zsh RAKUMUX_SYSTEM_PREFIX="$1" RAKUMUX_VERSION=0.1.51 \
+            bash <"$TEMP/install.sh" >"$TEMP/output" 2>&1 || { cat "$TEMP/output" >&2; fail "install without PREFIX"; }
+    }
+    # earlier DIR WRITABLE: a release install's rakumux command in DIR.
+    earlier() {
+        rm -rf "$1"
+        mkdir -p "$1/bin" "$1/libexec/rakumux"
+        printf '#!/bin/bash\nexec "%s/libexec/rakumux/rakumux.sh" "$@"\n' "$1" >"$1/bin/rakumux"
+        chmod 755 "$1/bin/rakumux"
+        [[ "$2" == yes ]] || chmod 555 "$1/bin" "$1/libexec" "$1/libexec/rakumux"
+    }
+    mkdir -p "$TEMP/system-root/bin" "$TEMP/system-root/libexec" && chmod 555 "$TEMP/system-root/bin" "$TEMP/system-root/libexec"
+    mkdir -p "$TEMP/system-mine"
+
+    install_default "$TEMP/system-root"
+    [[ "$(cat "$TEMP/home/.local/installed" 2>/dev/null)" == v0.1.51 ]] || fail "not in ~/.local when the system prefix isn't writable"
+    grep -q "$TEMP/home/.local/bin isn't on your PATH yet. Add it to ~/.zshrc" "$TEMP/output" || fail "no PATH notice"
+    install_default "$TEMP/system-mine"
+    [[ "$(cat "$TEMP/system-mine/installed" 2>/dev/null)" == v0.1.51 ]] || fail "not in a writable system prefix"
+    earlier "$TEMP/mine" yes
+    install_default "$TEMP/system-root" "$TEMP/mine"
+    [[ "$(cat "$TEMP/mine/installed" 2>/dev/null)" == v0.1.51 ]] || fail "an earlier install this user can update wasn't updated in place"
+    grep -q 'sudo rm' "$TEMP/output" && fail "asked to remove the install it updated"
+    earlier "$TEMP/roots" no
+    install_default "$TEMP/system-root" "$TEMP/roots"
+    [[ "$(cat "$TEMP/home/.local/installed" 2>/dev/null)" == v0.1.51 ]] || fail "not moved to ~/.local from an install it can't update"
+    grep -qF "sudo rm -rf $TEMP/roots/libexec/rakumux $TEMP/roots/bin/rakumux" "$TEMP/output" || fail "didn't say how to remove the earlier copy"
+    chmod -R u+w "$TEMP/roots" "$TEMP/system-root"
+fi
+
 echo "Release signature tests passed ($modes)."

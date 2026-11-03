@@ -235,7 +235,7 @@ fn an_unwritable_install_prefix_returns_manual_instructions_without_mutation() {
     let result = install(&source(package("0.1.5"), None), &root, "0.1.5", "linux-x64");
     fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755)).unwrap();
     let error = result.unwrap_err().to_string();
-    assert!(error.contains("installer outside Rakumux") && error.contains("PREFIX"));
+    assert!(error.contains("isn't writable") && error.contains("rakumux.com/install.sh | bash"));
     assert_eq!(fs::read(root.join("rakumux")).unwrap(), b"old");
 }
 

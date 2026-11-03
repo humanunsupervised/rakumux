@@ -4,9 +4,12 @@
 # Downloads the latest release for this machine from GitHub, checks the
 # release's signature (checksums.txt.minisig, by a Rakumux release key below)
 # and the package against its checksums.txt, and runs the package's own
-# install.sh, which puts the commands in $PREFIX/bin (default /usr/local,
-# asking for sudo when it needs to). Another prefix:
-#   curl -fsSL https://rakumux.com/install.sh | PREFIX="$HOME/.local" bash
+# install.sh, which puts the package in $PREFIX/libexec/rakumux and the
+# commands in $PREFIX/bin. Without PREFIX it goes where Rakumux already is,
+# when this user can update it there, else /usr/local when that's writable
+# without sudo, else ~/.local: Rakumux updates itself only where it can
+# write. Another prefix (sudo is asked for when it's needed):
+#   curl -fsSL https://rakumux.com/install.sh | PREFIX=/usr/local bash
 # A specific version: RAKUMUX_VERSION=0.1.0.
 #
 # The signature is checked with minisign, else OpenSSL 3; with neither (as on
@@ -213,7 +216,67 @@ main() {
     [[ "$actual" == "$expected" ]] || fail "checksum mismatch for $package.tar.gz"
 
     tar -xzf "$tmp/$package.tar.gz" -C "$tmp"
+    local earlier
+    earlier="$(earlier_prefix || true)"
+    # RAKUMUX_SYSTEM_PREFIX stands in for /usr/local in tests.
+    if [[ -z "${PREFIX:-}" ]]; then
+        if [[ -n "$earlier" ]] && can_update "$earlier"; then
+            PREFIX="$earlier"
+        elif can_update "${RAKUMUX_SYSTEM_PREFIX:-/usr/local}"; then
+            PREFIX="${RAKUMUX_SYSTEM_PREFIX:-/usr/local}"
+        else
+            PREFIX="$HOME/.local"
+        fi
+    fi
+    export PREFIX
     (cd "$tmp/$package" && ./install.sh)
+    after_install "$earlier"
+}
+
+# writable PATH: PATH, or its nearest existing parent, is writable by this user.
+writable() {
+    local dir="$1"
+    while [[ ! -e "$dir" ]]; do dir="$(dirname "$dir")"; done
+    [[ -w "$dir" ]]
+}
+
+# can_update PREFIX: an install there could update itself (the updater
+# stages the new version beside $PREFIX/libexec/rakumux and swaps it in).
+can_update() {
+    writable "$1/bin" && writable "$1/libexec" && writable "$1/libexec/rakumux"
+}
+
+# The prefix of the Rakumux this installer put on PATH earlier, if any (its
+# rakumux command runs $PREFIX/libexec/rakumux/rakumux.sh; npm's doesn't).
+earlier_prefix() {
+    local command
+    command="$(command -v rakumux 2>/dev/null)" || return 1
+    [[ -f "$command" ]] && grep -q '/libexec/rakumux/rakumux.sh' "$command" 2>/dev/null || return 1
+    dirname "$(dirname "$command")"
+}
+
+# What's left to do: an earlier install that stays (it couldn't update
+# itself), and PATH.
+after_install() {
+    local earlier="$1" profile
+    if [[ -n "$earlier" && "$earlier" != "$PREFIX" ]]; then
+        echo ""
+        echo "Rakumux was also in $earlier, which it can't update itself in. Remove that copy:"
+        echo "  sudo rm -rf $earlier/libexec/rakumux $earlier/bin/rakumux $earlier/bin/rakumux-local $earlier/bin/rakumux-mcp $earlier/bin/rakumux-api"
+    fi
+    case ":$PATH:" in
+        *":$PREFIX/bin:"*) ;;
+        *)
+            case "${SHELL##*/}" in
+                zsh) profile="~/.zshrc" ;;
+                bash) [[ "$(uname -s)" == Darwin ]] && profile="~/.bash_profile" || profile="~/.bashrc" ;;
+                *) profile="your shell's profile" ;;
+            esac
+            echo ""
+            echo "$PREFIX/bin isn't on your PATH yet. Add it to $profile, then open a new terminal:"
+            echo "  export PATH=\"$PREFIX/bin:\$PATH\""
+            ;;
+    esac
 }
 
 main "$@"
