@@ -1428,7 +1428,10 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                     mark_dragged(&mut lines, indent);
                 } else if hovered || shows_pin(app, session) {
                     // Before the row's own target, which would take the tap.
-                    if let Some(pin) = mark_pin(&mut lines, session.pinned, full, indent) {
+                    // Only under the pointer: a phone (no hover) shows the ★
+                    // but a tap there opens the session, never unpins it.
+                    let pin = mark_pin(&mut lines, session.pinned, full, indent);
+                    if let Some(pin) = pin.filter(|_| hovered) {
                         row_hits.push((pin, Hit::PinToggle(index)));
                     }
                 }

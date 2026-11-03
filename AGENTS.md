@@ -1659,9 +1659,9 @@ app and status like any other, with the gold `★` in its gutter just left of it
 the tab bar and Grid show ★ after their name (`layout::PIN_MARK`). In terminals that report
 pointer movement (desktop terminals, also over SSH; not phones), the session row under the
 pointer shows its pin toggle there: `☆` to pin it, the gold `★` to unpin it (under Pinned
-every row's, only under the pointer); a click on it (`Hit::PinToggle`, a pinned row's `★`
-under the other tabs too) does that without selecting the row, and `p` still pins the
-selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
+every row's, only under the pointer); a click on it (`Hit::PinToggle`, only under the
+pointer, so a phone's tap on a pinned row's `★` opens the session) does that without
+selecting the row, and `p` still pins the selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
 held); `J`/`K` move it one place. Moves stay in the session's part of the list: its folder
 (`sessions.session_order`), or under Pinned the pinned sessions (saved under `pinned`). A click without movement still just selects.
 The first load still selects the most recently used session.

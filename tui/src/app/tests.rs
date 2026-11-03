@@ -5400,12 +5400,18 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
         "{}",
         screen.join("\n")
     );
-    let gold = target(&h, Hit::PinToggle(a)).expect("A's pin, not hovered");
+    // A's gold pin shows without the pointer, but only the pointer makes it
+    // a target: a phone's tap there (no hover) opens the session.
+    assert_eq!(target(&h, Hit::PinToggle(a)), None);
     assert!(
-        screen[usize::from(gold.1)].starts_with("  ★ a "),
+        screen.iter().any(|line| line.starts_with("  ★ a ")),
         "{}",
         screen.join("\n")
     );
+    let over = target(&h, Hit::ListRow(a)).unwrap();
+    mouse(&mut h, MouseEventKind::Moved, over);
+    screen_rows(&mut h, 160, 48);
+    let gold = target(&h, Hit::PinToggle(a)).expect("A's pin, hovered");
     assert!(
         screen
             .iter()
