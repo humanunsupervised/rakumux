@@ -1899,7 +1899,10 @@ always spawned with its stdio detached, so capturing a client's output never wai
 
 ## Development rules
 
-- After each fix, run only its targeted regression test(s), adding one if missing
+- Verify every change with end-to-end tests: the real binaries and daemon (`tui/crates/ptyd/tests/runtime_*.rs`
+  and `*_e2e.rs`, `api/tests/api_e2e.rs`, `mcp/tests/full_stack.rs`, `tui/tests/`). Code review is not verification: no
+  reviewer subagent, and no `/code-review`, `/simplify`, `/security-review` or `/ultrareview`.
+- After each fix, run only its targeted end-to-end test(s), adding one if missing
   (`cd tui && cargo test -p <crate> <test_filter> --locked`). Confirm they pass; do not rerun the full suite per fix.
 - Run the full checks only when ready to finalize or release: from `tui/`,
   `cargo build --workspace --locked`, `cargo test --workspace --locked --no-fail-fast`,
