@@ -668,9 +668,9 @@ pub struct TabItem {
     pub badge: Option<(String, Style)>,
 }
 
-/// Marks a pinned session (after its name in the tab bar and Grid; the pin
-/// toggle and done's pinned header in the list). One column wide in every
-/// common terminal font.
+/// Marks a pinned session (after its name in the tab bar and Grid; before
+/// it in the list, the pin toggle; the list's Pinned tab). One column wide
+/// in every common terminal font.
 pub const PIN_MARK: &str = "★";
 
 /// Draw a one-row tab bar into the first row of `area` and return click

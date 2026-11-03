@@ -1,8 +1,9 @@
-//! The tabs on the session list's top row (Status, Folders and App;
+//! The tabs on the session list's top row (Status, Folders, App and Pinned;
 //! `grouping`) and the App and Status modals. ←/→, or a click, switch tabs;
 //! Enter on the top row, or a click on the active tab, opens the active
-//! tab's modal (the Folders modal for All folders, `folders.rs`). Choosing
-//! one gives the list the keys back from the feed (`feed/pane.rs`).
+//! tab's modal (the Folders modal for All folders, `folders.rs`; Pinned has
+//! none). Choosing one gives the list the keys back from the feed
+//! (`feed/pane.rs`).
 //! The App and Status modals list All apps (All statuses), then each app
 //! (status) with its sessions; typing narrows the rows, Tab (Space, while
 //! nothing is typed) ticks several, Enter shows the one under the cursor
@@ -24,6 +25,7 @@ impl App {
         }
         match grouping {
             Grouping::Folder => self.folder_label(),
+            Grouping::Pinned => grouping.name().into(),
             Grouping::App | Grouping::Status => match self.list.section_filter(grouping).as_slice()
             {
                 [] => grouping.name().into(),
@@ -54,10 +56,12 @@ impl App {
         }
     }
 
-    /// Enter on the top row, or a click on the active tab: its modal.
+    /// Enter on the top row, or a click on the active tab: its modal
+    /// (Pinned has none).
     pub fn open_tab_picker(&mut self) {
         match self.list.grouping() {
             Grouping::Folder => self.open_folder_picker(),
+            Grouping::Pinned => {}
             grouping => self.open_section_picker(grouping, None),
         }
     }
@@ -65,8 +69,10 @@ impl App {
     /// The App or Status modal, ticked like its filter, the cursor on
     /// `focus` (else the filter's first, else All).
     pub fn open_section_picker(&mut self, grouping: Grouping, focus: Option<Section>) {
-        if grouping == Grouping::Folder {
-            return self.open_folder_picker();
+        match grouping {
+            Grouping::Folder => return self.open_folder_picker(),
+            Grouping::Pinned => return,
+            Grouping::App | Grouping::Status => {}
         }
         let filter = self.list.section_filter(grouping);
         let focus = match focus.or_else(|| filter.first().cloned()) {
@@ -89,7 +95,7 @@ impl App {
                 .copied()
                 .map(Section::Status)
                 .collect(),
-            Grouping::Folder | Grouping::App => Vec::new(),
+            Grouping::Folder | Grouping::App | Grouping::Pinned => Vec::new(),
         };
         let listed = self
             .list

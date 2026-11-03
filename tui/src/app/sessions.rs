@@ -537,7 +537,6 @@ impl App {
                 let done = Section::Status(StatusGroup::Ready);
                 return self.open_section_picker(Grouping::Status, Some(done));
             }
-            Selection::PinnedHeader => return,
             Selection::FolderHeader(_)
             | Selection::WorktreeHeader(..)
             | Selection::NewSession

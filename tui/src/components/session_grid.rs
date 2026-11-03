@@ -33,10 +33,16 @@ pub fn draw_session_grid(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
         width: header.width.saturating_sub(page_width),
         ..header
     };
+    // The active tab's mark and filter: `◔ Status`, `★ Pinned`.
+    let tab = format!(
+        "{} {}",
+        super::folder_picker::tab_icon(app, app.list.grouping()),
+        app.filter_label()
+    );
     let label = if app.list.filter_editing || !app.list.filter.is_empty() {
-        format!(" {} · /{}", app.filter_label(), app.list.filter.value())
+        format!(" {tab} · /{}", app.list.filter.value())
     } else {
-        format!(" {} · Grid · n new · v layout", app.filter_label())
+        format!(" {tab} · Grid · n new · v layout")
     };
     f.render_widget(
         Paragraph::new(label).style(Style::default().fg(p.text_primary).bg(p.panel)),

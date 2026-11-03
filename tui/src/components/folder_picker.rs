@@ -21,7 +21,7 @@ use crate::app::folders::looks_like_path;
 use crate::app::grouping::Grouping;
 use crate::app::types::{AppMode, FolderPicker, NewFolder, PickerRow, PickerStage};
 use crate::app::{App, Hit};
-use crate::layout::str_width;
+use crate::layout::{str_width, PIN_MARK};
 use crate::theme;
 
 /// Widest the modal gets.
@@ -55,6 +55,7 @@ pub fn tab_icon(app: &App, grouping: Grouping) -> &'static str {
         Grouping::Folder => app.icons().folder(),
         Grouping::App => app.icons().app(),
         Grouping::Status => app.icons().status(),
+        Grouping::Pinned => PIN_MARK,
     }
 }
 
@@ -76,7 +77,12 @@ pub fn draw_selector(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Rec
         return Rect::default();
     }
     let open = tab_picker_open(app);
-    let arrow = if open { "▴" } else { "▾" };
+    // Pinned has no modal to open.
+    let arrow = match (app.list.grouping().has_filter(), open) {
+        (false, _) => "",
+        (true, true) => "▴",
+        (true, false) => "▾",
+    };
     let label = truncate(&app.filter_label(), (area.width as usize).saturating_sub(6));
     let label_style = if focused || open {
         Style::default()
@@ -88,7 +94,8 @@ pub fn draw_selector(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Rec
             .add_modifier(Modifier::BOLD)
     };
     let icon = tab_icon(app, app.list.grouping());
-    let width = ((str_width(&label) + str_width(icon)) as u16 + 5).min(area.width);
+    let width =
+        ((str_width(&label) + str_width(icon) + str_width(arrow)) as u16 + 4).min(area.width);
     let rect = Rect { width, ..area };
     f.render_widget(
         Paragraph::new(Line::from(vec![

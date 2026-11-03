@@ -1,10 +1,10 @@
-//! Left pane (Sidebar layout): the tabs at the top (Status, Folders and App:
-//! what the list is grouped and filtered by; the active one names its
-//! filter, `▤ web ▾`, and Enter or a click on it opens its modal), then the
-//! sessions shown, under a header row per folder (app, status) when there
-//! are several, and "+ New session" last. Beside the session (Master
-//! detail) its last row is `« Hide list`; hidden, a rail at the left edge
-//! (`draw_list_rail`) shows it again.
+//! Left pane (Sidebar layout): the tabs at the top (Status, Folders, App and
+//! Pinned: what the list is grouped and filtered by; the active one names
+//! its filter, `▤ web ▾`, and Enter or a click on it opens its modal, all
+//! but Pinned), then the sessions shown, under a header row per folder
+//! (app, status) when there are several, and "+ New session" last. Beside
+//! the session (Master detail) its last row is `« Hide list`; hidden, a rail
+//! at the left edge (`draw_list_rail`) shows it again.
 //! Each session is a compact cell after a blank row: its name (its AI title
 //! with AI session titles on), then its age and its mark (an agent's
 //! activity, else its status) at the right; then its program and state; then
@@ -16,7 +16,8 @@
 //! spinner while a new title is being made, else the ↻ under the pointer,
 //! which makes one. A row's text starts where its header's does, and the
 //! gutter left of it, where the header's mark sits, holds the row's marks:
-//! the pin toggle under the pointer, the places' `▸`/`▾` and the copy mark.
+//! the gold `★` of a pinned session (but under Pinned), the pin toggle
+//! under the pointer, the places' `▸`/`▾` and the copy mark.
 //! The selected item's text is white and the others' muted; nothing has a
 //! background except the tabs' band. A session being dragged has a blue
 //! bar on its left.
@@ -53,8 +54,7 @@ fn row_height(row: &ListRow) -> u16 {
         | ListRow::FolderHeader(_)
         | ListRow::WorktreeHeader(..)
         | ListRow::SectionHeader(_)
-        | ListRow::ReadPeriodHeader(_)
-        | ListRow::PinnedHeader => 2,
+        | ListRow::ReadPeriodHeader(_) => 2,
         ListRow::Session(_) => 3,
     }
 }
@@ -129,7 +129,6 @@ fn nesting(rows: &[ListRow]) -> Vec<usize> {
                 ListRow::Folders
                 | ListRow::FolderHeader(_)
                 | ListRow::SectionHeader(_)
-                | ListRow::PinnedHeader
                 | ListRow::NewSession => nested = 0,
                 ListRow::Session(_) => return nested,
             }
@@ -199,11 +198,11 @@ pub const MACHINE_MARK: &str = "☁";
 /// pins it.
 const PIN_TOGGLE: &str = "☆";
 
-/// The hovered session's pin toggle, in the gutter just left of its name
-/// (`indent` columns in), the column of its header's mark. `☆` to pin it,
-/// the gold `★` to unpin it. Returns where it is: the mark and the space
-/// after it.
-fn mark_hovered(lines: &mut [Line<'_>], pinned: bool, area: Rect, indent: usize) -> Option<Rect> {
+/// A session's pin toggle, in the gutter just left of its name (`indent`
+/// columns in), the column of its header's mark: under the pointer, or
+/// always for a pinned one but under Pinned. `☆` to pin it, the gold `★`
+/// to unpin it. Returns where it is: the mark and the space after it.
+fn mark_pin(lines: &mut [Line<'_>], pinned: bool, area: Rect, indent: usize) -> Option<Rect> {
     let p = theme::palette();
     let first = lines.iter().position(|line| !line.spans.is_empty())?;
     let (mark, style) = if pinned {
@@ -221,6 +220,12 @@ fn mark_hovered(lines: &mut [Line<'_>], pinned: bool, area: Rect, indent: usize)
         width: 2.min(area.right().saturating_sub(x)),
         height: 1,
     })
+}
+
+/// Whether `session`'s row shows the gold `★` whether hovered or not: it's
+/// pinned, under any tab but Pinned (where every row is).
+fn shows_pin(app: &App, session: &SessionView) -> bool {
+    session.pinned && app.list.grouping() != Grouping::Pinned
 }
 
 /// The session being dragged: a bar in the last column of the `indent`
@@ -338,8 +343,8 @@ pub fn worktree_header_line(
 
 /// The header of one of ready's sub-sections, [`READ_NEST`] further in than
 /// ready's: a clock one column right of ready's mark and when its sessions
-/// were last read one right of its name (a pin for the pinned ones), a
-/// rule, then how many it has, in `width` columns.
+/// were last read one right of its name, a rule, then how many it has, in
+/// `width` columns.
 pub fn read_period_header_line(
     app: &App,
     period: ReadPeriod,
@@ -349,10 +354,7 @@ pub fn read_period_header_line(
     let p = theme::palette();
     let count = sessions_label(app.list.read_period_count(period));
     // "  ◷ label ─── count": a status's header, a step in.
-    let clock = match period {
-        ReadPeriod::Pinned => format!("{PIN_MARK} "),
-        _ => format!("{} ", app.icons().clock()),
-    };
+    let clock = format!("{} ", app.icons().clock());
     let lead = 1 + READ_NEST;
     let fixed = lead + 2 + str_width(&clock) + str_width(&count);
     let label = truncate(period.label(), width.saturating_sub(fixed + 2));
@@ -422,35 +424,6 @@ pub fn section_header_line(
     ])
 }
 
-/// The pinned section's header, drawn like an app's or a status's: the
-/// gold pin, `pinned`, a rule, then how many it shows, in `width` columns.
-pub fn pinned_header_line(app: &App, width: usize, selected: bool) -> Line<'static> {
-    let p = theme::palette();
-    let count = sessions_label(app.list.pinned_count());
-    let mark = format!("{PIN_MARK} ");
-    // " ★ pinned ─── count": three spaces, and at least two rule columns.
-    let fixed = 3 + str_width(&mark) + str_width(&count);
-    let name = truncate("pinned", width.saturating_sub(fixed + 2));
-    let rule = width.saturating_sub(fixed + str_width(&name));
-    let (name_color, rule_color) = if selected {
-        (p.text_bright, p.accent_primary)
-    } else {
-        (p.accent_purple, p.border_dim)
-    };
-    Line::from(vec![
-        Span::raw(" "),
-        Span::styled(mark, Style::default().fg(p.accent_gold)),
-        Span::styled(
-            name,
-            Style::default().fg(name_color).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-        Span::styled("─".repeat(rule), Style::default().fg(rule_color)),
-        Span::raw(" "),
-        Span::styled(count, Style::default().fg(p.text_muted)),
-    ])
-}
-
 /// The content lines of a session cell: two, each after its gutter (two
 /// columns). The first is its gutter's mark, a space, its name, its title
 /// slot (empty without one; see [`mark_title`]), then the age and mark at
@@ -464,7 +437,7 @@ fn session_content(
 ) -> Vec<Vec<Span<'static>>> {
     let p = theme::palette();
     // On the right after the age: an agent's activity, else the status (a
-    // program like nvim). The slot left of the name is the hover pin's.
+    // program like nvim). The slot left of the name is the pin's.
     let badge = activity_badge_at(session, now)
         .map(|(mark, style)| Span::styled(mark, style.add_modifier(Modifier::BOLD)))
         .or_else(|| {
@@ -486,8 +459,9 @@ fn session_content(
         name.push_str(" (this)");
     }
     // Leading marker slot, name, its title slot, at least one space, age +
-    // badge. A pin shows only under the pointer, left of the row
-    // (`mark_hovered`); the ↻ too, in the title slot (`mark_title`).
+    // badge. The pin shows left of the row for a pinned session but under
+    // Pinned, and under the pointer (`mark_pin`); the ↻ under the pointer,
+    // in the title slot (`mark_title`).
     let slot = if has_title_slot(app, session) {
         TITLE_SLOT
     } else {
@@ -888,9 +862,19 @@ fn mark_title(
 /// after the two every tab keeps for the active one's ` ▾` (while it fits).
 const TAB_GAP: usize = 2;
 
-/// Columns every tab keeps after its label for the ` ▾` the active one ends
-/// in, so switching tabs moves nothing.
+/// Columns every tab with a filter keeps after its label for the ` ▾` the
+/// active one ends in, so switching tabs moves nothing. Pinned, which has
+/// no filter, keeps none: it's the last tab, so nothing moves after it.
 const ARROW_SLOT: usize = 2;
+
+/// [`ARROW_SLOT`] for `tab`, while the tabs show the ` ▾` (`arrows`).
+fn arrow_slot(tab: Grouping, arrows: bool) -> usize {
+    if arrows && tab.has_filter() {
+        ARROW_SLOT
+    } else {
+        0
+    }
+}
 
 /// Columns the text filter keeps for itself at the right end of the band.
 const FILTER_MAX: usize = 12;
@@ -920,13 +904,12 @@ struct TabLayout {
 /// the others.
 fn lay_out_tabs(tabs: &[(Grouping, &str, String)], active: Grouping, room: usize) -> TabLayout {
     let width = |gap: usize, arrows: bool, compact: bool, active_label: usize| -> usize {
-        let arrow = if arrows { ARROW_SLOT } else { 0 };
         let tabs_width: usize = tabs
             .iter()
             .map(|(tab, icon, label)| match (*tab == active, compact) {
-                (true, _) => str_width(icon) + 1 + active_label + arrow,
+                (true, _) => str_width(icon) + 1 + active_label + arrow_slot(*tab, arrows),
                 (false, true) => str_width(icon),
-                (false, false) => str_width(icon) + 1 + str_width(label) + arrow,
+                (false, false) => str_width(icon) + 1 + str_width(label) + arrow_slot(*tab, arrows),
             })
             .sum();
         tabs_width + gap * tabs.len().saturating_sub(1)
@@ -966,9 +949,9 @@ fn lay_out_tabs(tabs: &[(Grouping, &str, String)], active: Grouping, room: usize
     }
 }
 
-/// The tabs on a raised band: Status, Folders, App. The active one is bold,
-/// names its filter (`▤ web  ⎇ main`, `◇ claude`), ends in `▾` (it opens
-/// its modal) and is underlined; the text filter shows at the right end
+/// The tabs on a raised band: Status, Folders, App, Pinned. The active one
+/// is bold, names its filter (`▤ web  ⎇ main`, `◇ claude`), ends in `▾` (it
+/// opens its modal; Pinned has none) and is underlined; the text filter shows at the right end
 /// while there is one. White and blue when selected, muted otherwise.
 /// Records a click target per tab.
 fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Vec<(Rect, Hit)>) {
@@ -1028,7 +1011,6 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
     } else {
         (p.neutral_gray, p.neutral_gray, p.text_muted, p.text_muted)
     };
-    let arrow_slot = if layout.arrows { ARROW_SLOT } else { 0 };
     let mut spans = vec![Span::raw(" ".repeat(INDENT))];
     let mut x = INDENT;
     let mut underline = None;
@@ -1054,18 +1036,15 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
                 branch.to_string(),
                 Style::default().fg(p.text_muted),
             ));
-            if layout.arrows {
+            let slot = arrow_slot(*tab, layout.arrows);
+            if slot > 0 {
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(
                     if open { "▴" } else { "▾" },
                     Style::default().fg(arrow),
                 ));
             }
-            x += str_width(icon)
-                + 1
-                + str_width(&layout.active_label)
-                + str_width(branch)
-                + arrow_slot;
+            x += str_width(icon) + 1 + str_width(&layout.active_label) + str_width(branch) + slot;
             underline = Some((start, x - start));
         } else {
             spans.push(Span::styled(*icon, Style::default().fg(other)));
@@ -1077,7 +1056,10 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
                 };
                 // The blank where the active tab's ` ▾` goes.
                 spans.push(Span::styled(
-                    format!(" {tab_label}{branch}{}", " ".repeat(arrow_slot)),
+                    format!(
+                        " {tab_label}{branch}{}",
+                        " ".repeat(arrow_slot(*tab, layout.arrows))
+                    ),
                     Style::default().fg(other),
                 ));
             }
@@ -1089,7 +1071,11 @@ fn draw_tabs(f: &mut Frame, app: &App, area: Rect, selected: bool, hits: &mut Ve
                 } else {
                     0
                 };
-                str_width(icon) + 1 + str_width(tab_label) + branch + arrow_slot
+                str_width(icon)
+                    + 1
+                    + str_width(tab_label)
+                    + branch
+                    + arrow_slot(*tab, layout.arrows)
             };
         }
         let target = Rect {
@@ -1359,15 +1345,6 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 ));
                 lines
             }
-            ListRow::PinnedHeader => {
-                let mut lines = vec![Line::default(); height as usize - 1];
-                lines.push(pinned_header_line(
-                    app,
-                    (inner.width as usize).saturating_sub(1),
-                    is_selected,
-                ));
-                lines
-            }
             ListRow::Session(session) => {
                 // Its text in its header's text column, its marks in the
                 // gutter before it.
@@ -1449,9 +1426,9 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 }
                 if dragged {
                     mark_dragged(&mut lines, indent);
-                } else if hovered {
+                } else if hovered || shows_pin(app, session) {
                     // Before the row's own target, which would take the tap.
-                    if let Some(pin) = mark_hovered(&mut lines, session.pinned, full, indent) {
+                    if let Some(pin) = mark_pin(&mut lines, session.pinned, full, indent) {
                         row_hits.push((pin, Hit::PinToggle(index)));
                     }
                 }
@@ -1475,6 +1452,9 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 format!("   {} loading…", get_spinner_char())
             }
             Connection::Connected(_) if !app.list.filter.is_empty() => "   no matches".into(),
+            Connection::Connected(_) if app.list.grouping() == Grouping::Pinned => {
+                "   no pinned sessions".into()
+            }
             Connection::Connected(_) => "   no sessions yet".into(),
             Connection::Failed(_) => "   daemon unavailable".into(),
         };
@@ -1944,7 +1924,6 @@ mod tests {
         let section = Section::App(AppKey::new("claude"));
         let rows = [
             ListRow::Folders,
-            ListRow::PinnedHeader,
             ListRow::Session(&session),
             ListRow::FolderHeader(&folder),
             ListRow::Session(&session),
@@ -1957,10 +1936,7 @@ mod tests {
             ListRow::NewSession,
         ];
         // A worktree's rows two columns in, a read period's one.
-        assert_eq!(
-            nesting(&rows),
-            [0, 0, 0, 0, 0, 0, NEST, 0, 0, 0, READ_NEST, 0]
-        );
+        assert_eq!(nesting(&rows), [0, 0, 0, 0, 0, NEST, 0, 0, 0, READ_NEST, 0]);
         // A top-level row's text in the header's text column, its gutter
         // where the header's mark is; a nested one's in the worktree
         // header's, or a column right of ready's.
@@ -2168,10 +2144,15 @@ mod tests {
         }
     }
 
-    /// The tabs with `labels` and `marks` (given for Folders, App, Status),
-    /// in the tabs' order.
-    fn tabs(marks: [&'static str; 3], labels: [&str; 3]) -> Vec<(Grouping, &'static str, String)> {
-        let given = [Grouping::Folder, Grouping::App, Grouping::Status];
+    /// The tabs with `labels` and `marks` (given for Folders, App, Status,
+    /// Pinned), in the tabs' order.
+    fn tabs(marks: [&'static str; 4], labels: [&str; 4]) -> Vec<(Grouping, &'static str, String)> {
+        let given = [
+            Grouping::Folder,
+            Grouping::App,
+            Grouping::Status,
+            Grouping::Pinned,
+        ];
         Grouping::ALL
             .iter()
             .map(|tab| {
@@ -2183,10 +2164,10 @@ mod tests {
 
     #[test]
     fn which_tab_is_active_never_moves_the_tabs() {
-        let shown = tabs(["▤", "◇", "◔"], ["web", "App", "Status"]);
-        // Two apart at 40 columns, one apart at 27; then without the arrow,
-        // two apart at 25 and one at 21.
-        for (room, arrows) in [(40, true), (27, true), (25, false), (21, false)] {
+        let shown = tabs(["▤", "◇", "◔", "★"], ["web", "App", "Status", "Pinned"]);
+        // Two apart at 40 columns, one apart at 35; then without the arrow,
+        // two apart at 32 and one at 29. Pinned keeps no room for one.
+        for (room, arrows) in [(40, true), (35, true), (32, false), (29, false)] {
             let layouts: Vec<TabLayout> = Grouping::ALL
                 .iter()
                 .map(|active| lay_out_tabs(&shown, *active, room))
@@ -2206,39 +2187,42 @@ mod tests {
 
     #[test]
     fn tabs_narrow_their_gaps_then_drop_the_arrow_then_show_marks_alone_then_cut_the_label() {
-        let plain = ["▤", "◇", "◔"];
-        let shown = tabs(plain, ["Folders", "App", "Status"]);
+        let plain = ["▤", "◇", "◔", "★"];
+        let shown = tabs(plain, ["Folders", "App", "Status", "Pinned"]);
         let at = |room| {
             let layout = lay_out_tabs(&shown, Grouping::App, room);
             (layout.gap, layout.arrows, layout.compact, layout.width)
         };
-        // `◔ Status    ▤ Folders    ◇ App ▾`: 10 + 11 + 7 with every
-        // tab's arrow room, two apart, then one.
-        assert_eq!(at(40), (2, true, false, 32));
-        assert_eq!(at(31), (1, true, false, 30));
-        // `◔ Status  ▤ Folders  ◇ App`: the names stay, the arrow goes
-        // (from every tab: switching still moves nothing).
-        assert_eq!(at(29), (2, false, false, 26));
-        assert_eq!(at(25), (1, false, false, 24));
-        // `◔  ▤  ◇ App ▾`.
-        assert_eq!(at(23), (2, true, true, 13));
-        assert_eq!(at(12), (1, true, true, 11));
+        // `◔ Status    ▤ Folders    ◇ App ▾  ★ Pinned`: 10 + 11 + 7 with
+        // every filter's arrow room, and 8, two apart, then one.
+        assert_eq!(at(44), (2, true, false, 42));
+        assert_eq!(at(40), (1, true, false, 39));
+        // `◔ Status  ▤ Folders  ◇ App  ★ Pinned`: the names stay, the arrow
+        // goes (from every tab: switching still moves nothing).
+        assert_eq!(at(38), (2, false, false, 36));
+        assert_eq!(at(34), (1, false, false, 33));
+        // `◔  ▤  ◇ App ▾  ★`.
+        assert_eq!(at(32), (2, true, true, 16));
+        assert_eq!(at(14), (1, true, true, 13));
         // Then the active label is cut.
-        let cut = lay_out_tabs(&shown, Grouping::App, 10);
-        assert_eq!((cut.active_label.as_str(), cut.width), ("A…", 10));
+        let cut = lay_out_tabs(&shown, Grouping::App, 12);
+        assert_eq!((cut.active_label.as_str(), cut.width), ("A…", 12));
+        // Pinned active has no `▾` to show.
+        let pinned = lay_out_tabs(&shown, Grouping::Pinned, 14);
+        assert_eq!((pinned.compact, pinned.width), (true, 14));
         // Whatever the room, marks, labels and their width, the tabs fit
         // it once there's room for the marks and the arrow.
-        let emoji = ["📁", "🤖", "🚦"];
+        let emoji = ["📁", "🤖", "🚦", "★"];
         for marks in [plain, emoji] {
             for labels in [
-                ["Folders", "App", "Status"],
-                ["web", "App", "Status"],
-                ["Folders", "App", "waiting for response"],
-                ["12 folders", "opencode", "Status"],
+                ["Folders", "App", "Status", "Pinned"],
+                ["web", "App", "Status", "Pinned"],
+                ["Folders", "App", "waiting for response", "Pinned"],
+                ["12 folders", "opencode", "Status", "Pinned"],
             ] {
                 let shown = tabs(marks, labels);
                 for active in Grouping::ALL {
-                    for room in 12..80 {
+                    for room in 14..80 {
                         let layout = lay_out_tabs(&shown, active, room);
                         assert!(layout.width <= room, "{labels:?} {active:?} {room}");
                     }

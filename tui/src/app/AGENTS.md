@@ -67,8 +67,9 @@ new-session flow, and code boundaries.
   rows (`PickerRow::Suggestion`): `↑`/`↓` choose, Tab or `→` completes, Enter adds, a click
   completes.
 - `grouping.rs`: the list tabs, pure derivations over `SessionView` (no drawing). `Grouping`
-  (Status, Folders, App: `ALL` is the top row's order, `step` for ←/→, no wrap; the default,
-  where every start opens, is Status), `AppKey::of` (agent kind, else a
+  (Status, Folders, App, Pinned: `ALL` is the top row's order, `step` for ←/→, no wrap; the
+  default, where every start opens, is Status; `has_filter`: all but Pinned, which has no
+  filter, modal or `▾`), `AppKey::of` (agent kind, else a
   non-shell foreground program while live, else a non-shell `launch.argv[0]`, else `shell`;
   lowercase; dead sessions keep their agent), `StatusGroup::of` (like the
   status marks, `components::format::status_glyph`: waiting for you, unread (a `done` turn not yet looked at),
@@ -114,8 +115,9 @@ new-session flow, and code boundaries.
   the active one underlined, the accent while it has the keys) and the active tab;
   `components/session_tabs.rs` draws the Tabs layout's drawer tab, named by its active tab.
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
-  folders / App / Status), `filter_label` (the Tabs layout's selector, Grid's header),
-  `switch_tab`/`show_tab` (both give the list the keys from the drawer), `open_tab_picker` (Folders: the Folders modal) and the App and
+  folders / App / Status; Pinned always says Pinned), `filter_label` (the Tabs layout's
+  selector, Grid's header, after the tab's mark), `switch_tab`/`show_tab` (both give the list
+  the keys from the drawer), `open_tab_picker` (Folders: the Folders modal; Pinned: nothing) and the App and
   Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
   then `picker_sections` (sessions' apps or every status but unknown, plus the filter's), typing
   narrows by name, Tab ticks (Space too while nothing is typed: status names have spaces), Enter
@@ -129,20 +131,21 @@ new-session flow, and code boundaries.
   (`Selection::FolderHeader`; the launch folder first, then by name, then path; with no filter
   the folders that have sessions, with one the filter's, empty ones included) or under App and
   Status per app or status (`Selection::SectionHeader`, same rules; Enter opens that tab's
-  modal), and ends with "+ New session". Pinned sessions come first, in the pinned section
-  (`ListRow::PinnedHeader`, `Selection::PinnedHeader`; the list counts as grouped whenever one
-  is shown) under every tab, in its own order (`section_order["pinned"]`, `PINNED_ORDER`), the
-  active tab's filter applied; the groups below leave them out. The order never changes by
-  itself: sessions follow the user's order (`sessions.session_order`), and sessions without a
-  place go last, oldest first; inside an app or status, folder by folder. Under App
-  and Status the selected session is kept shown when it stops matching the filter (`kept`), so
-  a status change never takes away the session being worked in; filter and tab changes
-  (`refilter`) don't keep it. `tab_order` is what a row of session tabs shows (`ShownAs::Tabs`:
-  the Tabs layout, a session under tabs on a phone or from Grid): `visible()`'s sessions in the
-  Folders tab's order under every tab (pinned first), so reading a session or a status change
-  never moves a tab; `move_tab` moves one there as under Folders. `App::shown_as` says which
-  order is on screen, and cycling, `1`-`9`, `↑`/`↓`, `J`/`K`, tab clicks and drags follow it. `move_session` moves one within the pinned section, or its
-  folder and its app or status (`J`/`K`, and the drag in `sessions.rs`: `App::drag`,
+  modal), and ends with "+ New session". Under Pinned only the pinned sessions show, without
+  headers, in their own order (`in_pinned_order`, `section_order["pinned"]`, `PINNED_ORDER`);
+  under the other tabs pinned sessions are listed like any other (the row draws their `★`).
+  The order never changes by itself: sessions follow the user's order
+  (`sessions.session_order`), and sessions without a place go last, oldest first; inside an app
+  or status, folder by folder. Under App, Status and Pinned the selected session is kept shown
+  when it stops matching the filter (`kept`; unpinned, under Pinned), so a status change never
+  takes away the session being worked in; filter and tab changes (`refilter`) don't keep it.
+  `tab_order` is what a row of session tabs shows (`ShownAs::Tabs`: the Tabs layout, a session
+  under tabs on a phone or from Grid): `visible()`'s sessions in the Folders tab's order under
+  every tab but Pinned (its own order there), so reading a session or a status change never
+  moves a tab; `move_tab` moves one there as under Folders (Pinned). `App::shown_as` says which
+  order is on screen, and cycling, `1`-`9`, `↑`/`↓`, `J`/`K`, tab clicks and drags follow it.
+  `move_session` moves one within its folder, its app or status, or under Pinned among the
+  pinned sessions (`move_pinned`) (`J`/`K`, and the drag in `sessions.rs`: `App::drag`,
   `SessionDrag`); `group_target` is `{`/`}` over any headers. A folder filter only sets
   `current_folder` while the Folders tab is active.
 - `screen.rs`: screen geometry for a size, layout, focus, zoom and the dragged pane sizes
@@ -178,7 +181,7 @@ new-session flow, and code boundaries.
   row's session.
 - `grid.rs` and `grid/tests.rs`: Grid's visible-page observer previews, generation checks,
   cancellation and bounded output mailboxes. `layout/grid.rs` computes up to six cards; the
-  folder/text filters and pinned/user order come from `SessionList::visible`. Only the visible
+  active tab's filters and order come from `SessionList::visible`. Only the visible
   cards attach, always as `Role::Observer`, with zero scrollback; saved reads are capped.
   Offscreen cards, layout changes, activation, disconnect and dropping the app cancel previews.
   The preview lease can only detach: never Promote, Resize, Fit, input or Touch. Bell/clipboard

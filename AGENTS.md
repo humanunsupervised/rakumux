@@ -1140,8 +1140,9 @@ accidents; they don't stop a hostile process running as the same user.
   stacked_list_percent (the list's share of the height on narrow screens, set by dragging the
   divider under it, so the split follows a phone keyboard coming and going;
   left out until dragged), session_order ({folder path: [session ids]}: the list order set by
-  dragging or `J`/`K`; left out when empty), section_order ({"app:<name>" | "status:<status>":
-  [session ids]}: the same under the App and Status tabs, each its own; left out when empty),
+  dragging or `J`/`K`; left out when empty), section_order ({"app:<name>" | "status:<status>" | "pinned":
+  [session ids]}: the same under the App, Status and Pinned tabs, each its own; left out when
+  empty),
   terminal_panel ("below" | "beside": where `T` opens the terminal panel, as `|` or `-` last
   placed it; left out while "below")}`. The folder filter isn't saved; the
   `selected_projects` of 0.6 previews, and the `remote_replies` and `remote_sessions` switches of
@@ -1341,18 +1342,19 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   own.
 - **Folder filter**: the Folders tab's filter (`▤ Folders ▾`, `▤ web ▾`, `▤ 3 folders ▾`)
   and the Folders modal it opens; local to one window and not saved.
-- **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, Status, Folders
-  and App: three ways of grouping the sessions. They decide the list's headers (per status,
-  per folder, per app) and the one filter that applies; each keeps its own filter while another
-  is active; none is saved, and every start (a restart or a UI reload) opens Status.
+- **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, Status, Folders,
+  App and Pinned: three ways of grouping the sessions, and the pinned ones alone. They decide
+  the list's headers (per status, per folder, per app; Pinned has none) and the one filter that
+  applies (Pinned has none); each keeps its own filter while another is active; none is saved,
+  and every start (a restart or a UI reload) opens Status.
 - **Drawer** (`app/drawer.rs`): what shows beside the sessions, with two tabs, the **Feed** and
   **rtop**: a pane on the right in Master detail and Grid, a tab in Tabs, the screen on a phone.
   It takes Rakumux mode's keys from the list while focused. Hidden at every start; never opens
   by itself.
 - **Feed** (`app/feed`, `f`): what agents said, across sessions and machines: the drawer's
   Feed tab.
-- **Pin**: a user mark that lists a session in the pinned section, above every folder, app and
-  status.
+- **Pin**: a user mark that lists a session under the Pinned tab (and shows `★` before its
+  name under the other tabs).
 - **Session order**: where the user put each session in the list (drag, `J`/`K`); a TUI setting,
   not part of the registry.
 - **Git context**: a session's branch, linked worktree and repository name, read from `.git` files
@@ -1430,7 +1432,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux ls [--json] [--dead] [--folder DIR]... \| --all` | Sessions of this folder, of the given folders, or of every folder (`--dead` includes dead ones; `--project` is a hidden alias of `--folder`; `--json` gives each session `folder` next to `scope`) |
 | `rakumux attach <name\|id>` | Full-screen attach (prefix `Ctrl-\`: `d` detaches, `>`/`<` switch session, `n` new session) |
 | `rakumux rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
-| `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the pinned section at the top of the list) / unpin |
+| `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the list's Pinned tab) / unpin |
 | `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete (into the session history, 90 days) |
 | `rakumux history [QUERY] [--json]` / `rakumux restore <id\|name>` | Deleted sessions, most recently deleted first / bring one back into its folder, dead (`attach` or Enter revives it); a name only when one deleted session has it |
 | `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
@@ -1450,8 +1452,8 @@ which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_key
 on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the tabs, a header and + New session keep the last session in view,
-one the filters show), `←`/`→` switch between the tabs, Status, Folders and App, wherever the
-selection is (`h`/`l` on the tabs row), `f` the feed and `t` rtop, the drawer's tabs (shows the drawer on that tab with the keys,
+one the filters show), `←`/`→` switch between the tabs, Status, Folders, App and Pinned,
+wherever the selection is (`h`/`l` on the tabs row), `f` the feed and `t` rtop, the drawer's tabs (shows the drawer on that tab with the keys,
 switches to it, gives it the keys, hides it; below),
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
 that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
@@ -1471,17 +1473,21 @@ build: `AccountAccess::restart` asks the service to stop and starts this binary'
 restart_api` SIGTERMs `rakumux-api` and runs `--detach`; also Settings → Restart server, which shows
 the running server's version), `q`
 quit. There is no header: the panes start at the top row, and the list's first row (Sidebar) is
-its tabs, `◔ Status ▾  ▤ Folders    ◇ App` (Status is active at every start; every tab keeps
-room for the active one's `▾`, and Folders shows its branch active or not, so switching tabs
-moves nothing): the active one is bold, underlined and names its filter (`▤ web  ⎇ main ▾`,
-`◇ claude ▾`, `◔ 2 statuses ▾`); short rows narrow the gaps, then drop the `▾` and its room
-from every tab (`◔ Status  ▤ Folders  ◇ App`: names from 28 columns of list, the `▾` from 34),
-then show the inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the
-active tab's filter at the left (`◔ Status ▾`); only Master detail shows the three tabs.
+its tabs, `◔ Status ▾  ▤ Folders    ◇ App    ★ Pinned` (Status is active at every start; every
+tab with a filter keeps room for the active one's `▾`, Pinned, which has none and is last,
+keeps none, and Folders shows its branch active or not, so switching tabs moves nothing): the
+active one is bold, underlined and names its filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`,
+`◔ 2 statuses ▾`; Pinned's is just `★ Pinned`, and Enter or a click on it does nothing); short
+rows narrow the gaps, then drop the `▾` and its room from every tab
+(`◔ Status ▤ Folders ◇ App ★ Pinned`: names from 37 columns of list, the `▾` from 43, so a
+40-column list, a 100-column window's or a phone's, has the names alone), then show the
+inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's mark
+and filter at the left (`◔ Status ▾`, `★ Pinned`); only Master detail shows the four tabs.
 The session tab bar (Tabs, and a session under tabs on a phone or from Grid) holds the sessions
-the active tab's filters show, in the Folders tab's order whatever the active tab
-(`SessionList::tab_order`, `ShownAs::Tabs`: pinned first, then folder by folder in the order the
-user set), so a tab keeps its place and number while its session works or is read; stepping
+the active tab's filters show, in the Folders tab's order (folder by folder in the order the
+user set; under Pinned, the Pinned tab's order) whatever the active tab
+(`SessionList::tab_order`, `ShownAs::Tabs`), so a tab keeps its place and number while its
+session works or is read; stepping
 (cycle keys, `↑`/`↓`, `1`-`9`), clicks, drags and `J`/`K` there follow that order (`App::shown_as`).
 Tabs that don't fit scroll to keep the selected one in view, holding still while it moves among
 those shown (`layout::render_tabs_from`, `App::tab_first`), and the ends say how many are hidden
@@ -1631,9 +1637,9 @@ list never reorders by itself: activity doesn't move a session or a group. The l
 group comes first, then the others by folder name, then path. Sessions follow the order the user
 set, and sessions without a place go last, oldest first, so a new session appears just above
 "+ New session". All layouts share it (a row of session tabs always in this order).
-Headers' names (a folder's, an app's, a status's, `pinned`) and their rows' text start in one
-column; the two left of it are the gutter, where a status's or the pinned header's mark sits and
-a row's marks go: its pin toggle, the places' `▸`/`▾`, the copy mark, and
+Headers' names (a folder's, an app's, a status's) and their rows' text start in one
+column; the two left of it are the gutter, where a status's mark sits and
+a row's marks go: its pin, the places' `▸`/`▾`, the copy mark, and
 `+ New session`'s `+`. With AI session titles on, a live session's name (its title) keeps two
 columns after it: a spinner while a new title is being made, else the ↻ under the pointer
 (`Hit::TitleRefresh`), which makes one; the row has no line for a description or the user's last
@@ -1642,20 +1648,22 @@ that header's words are and its gutter under its mark (`components/session_list.
 ready's read-period headers (mark and words) and their rows (text, gutter and places) start one
 column further in than ready's header and a row directly under any header (`READ_NEST`). A
 dragged row's bar is just left of its gutter.
-**Pinned sessions** sit in a section of their own at the top of the list, above every folder,
-app and status, under every tab: a `★ pinned` header (`ListRow::PinnedHeader`, the gold pin,
-`pinned` and how many; selectable, Enter does nothing), then each pinned session the active
-tab's filter shows; the groups below leave them out, and an app or status left with no other
-session drops its header. The section has an order of its own, the same under every tab
-(`sessions.section_order` under `pinned`): the order the user gave it, then the rest folder by
-folder. In the list they show no other mark, while the tab bar and Grid show ★ after their
-name (`layout::PIN_MARK`). In terminals that report pointer movement (desktop terminals, also
-over SSH; not phones), the session row under the pointer shows its pin toggle in the gutter
-just left of its name: `☆` to pin it,
-the gold `★` to unpin it; a click there (`Hit::PinToggle`) does that without selecting the row,
-and `p` still pins the selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
-held); `J`/`K` move it one place. Moves stay in the session's part of the list: the pinned
-section (saved under `pinned`), or its folder (`sessions.session_order`). A click without movement still just selects.
+**Pinned sessions** have the Pinned tab (`Grouping::Pinned`) to themselves: the pinned
+sessions alone, as plain rows without headers, in the tab's own order (`sessions.section_order`
+under `pinned`, the key the pinned section of 0.1.44 and earlier saved, so its order carries
+over): the order the user gave them there, then the rest folder by folder. No filter applies
+there but the text filter; one unpinned while selected stays shown until something else is
+selected (as a status change under Status), and with none pinned the list says `no pinned
+sessions` above `+ New session`. Under the other tabs a pinned session is listed in its folder,
+app and status like any other, with the gold `★` in its gutter just left of its name, always;
+the tab bar and Grid show ★ after their name (`layout::PIN_MARK`). In terminals that report
+pointer movement (desktop terminals, also over SSH; not phones), the session row under the
+pointer shows its pin toggle there: `☆` to pin it, the gold `★` to unpin it (under Pinned
+every row's, only under the pointer); a click on it (`Hit::PinToggle`, a pinned row's `★`
+under the other tabs too) does that without selecting the row, and `p` still pins the
+selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
+held); `J`/`K` move it one place. Moves stay in the session's part of the list: its folder
+(`sessions.session_order`), or under Pinned the pinned sessions (saved under `pinned`). A click without movement still just selects.
 The first load still selects the most recently used session.
 
 The App and Status tabs group the same list differently (`app/grouping.rs`). App: a header per
@@ -1667,16 +1675,15 @@ or a menu; `·` is an unknown status), unread (a finished turn not yet
 looked at), working, waiting for response (the `WaitingForResponse` activity phase), running
 (live, nothing reported), exited, dead, then ready (idle: a reply that's been read)), in that order, with a session count. Each app and status has an order of its
 own (`sessions.section_order`, by `Section::key`: `app:claude`, `status:working`): the order the
-user gave them there, then the rest folder by folder (launch folder first); pinned sessions are
-in the pinned section above, not here. Dragging and `J`/`K` reorder a session within its header across folders, never into
+user gave them there, then the rest folder by folder (launch folder first), pinned sessions
+among them. Dragging and `J`/`K` reorder a session within its header across folders, never into
 another header, and never change the folders' order. Ready is the exception
 (`StatusGroup::by_last_read`): its sessions are listed by when each was last read
 (`last_active_at`, which going in sets, as it turns an unread reply ready), most recent first,
 under a sub-header per period (`grouping::ReadPeriod`, `ListRow::ReadPeriodHeader`: `◷ last hour`,
 last day, older, the clock from `Icons::clock`, tinted like its sessions' marks; with a session
 count; selectable, Enter opens the Status modal on ready; it and its rows a column in from
-ready's), so reading one moves it to the top.
-A pinned ready session is in the pinned section instead; unpinning puts one back in its period.
+ready's), so reading one moves it to the top; a pinned one too.
 The periods are measured from
 the list's clock (`SessionList::set_clock`, every tick), so sessions move down them as time
 passes. Nothing there can be moved (`J`/`K` say so). A ready session's mark (`○`, wherever it's

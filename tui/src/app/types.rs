@@ -273,7 +273,7 @@ pub enum SectionRow {
 /// were changed (Tab, Space) Enter shows the ticked ones.
 #[derive(Debug, Clone)]
 pub struct SectionPicker {
-    /// `Grouping::App` or `Grouping::Status`.
+    /// `Grouping::App` or `Grouping::Status` (never Folders or Pinned).
     pub grouping: Grouping,
     /// What's typed: narrows the rows by name.
     pub query: TextInput,

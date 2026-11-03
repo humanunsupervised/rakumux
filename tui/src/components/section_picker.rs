@@ -82,7 +82,7 @@ pub fn draw_section_picker(
     f.render_widget(Clear, popup);
     let (title, noun, one) = match picker.grouping {
         Grouping::Status => (" Statuses ", "statuses", "status"),
-        Grouping::Folder | Grouping::App => (" Apps ", "apps", "app"),
+        Grouping::Folder | Grouping::App | Grouping::Pinned => (" Apps ", "apps", "app"),
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -168,7 +168,9 @@ pub fn draw_section_picker(
                 .count();
             match picker.grouping {
                 Grouping::Status => sessions_label(sessions.len()),
-                Grouping::Folder | Grouping::App => count_label(live, sessions.len()),
+                Grouping::Folder | Grouping::App | Grouping::Pinned => {
+                    count_label(live, sessions.len())
+                }
             }
         }
         SectionRow::Section(section) => section_count(app, section),

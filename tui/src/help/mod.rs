@@ -200,7 +200,7 @@ pub enum KeyAction {
     PreviousSession,
     /// `f`: show the feed with the keys, give it the keys, or hide it.
     Feed,
-    /// `→`: the list's next tab (Status, Folders, App).
+    /// `→`: the list's next tab (Status, Folders, App, Pinned).
     NextTab,
     /// `←`: the previous tab.
     PreviousTab,
@@ -395,7 +395,7 @@ impl KeyAction {
             KeyAction::NextSession => "Next session",
             KeyAction::PreviousSession => "Previous session",
             KeyAction::Feed => "Feed (show, focus or hide)",
-            KeyAction::NextTab => "Next tab (Status, Folders, App)",
+            KeyAction::NextTab => "Next tab (Status, Folders, App, Pinned)",
             KeyAction::PreviousTab => "Previous tab",
             KeyAction::Top => "Top of the list",
             KeyAction::Bottom => "Bottom of the list",
@@ -552,7 +552,8 @@ impl KeyAction {
                 None => "Option/Alt+↑/↓ are turned off in your settings; ↑/↓ and j/k move.".into(),
             },
             KeyAction::Top => {
-                "The tabs (Status, Folders, App) are the first row; ←/→ switch them.".into()
+                "The tabs (Status, Folders, App, Pinned) are the first row; ←/→ switch them."
+                    .into()
             }
             KeyAction::Feed => "What your agents said when they finished a turn, on every \
                  machine of your account, newest first: a tab of the drawer on the right of \
@@ -574,8 +575,9 @@ impl KeyAction {
                 "Scrolls the history of the session shown on the right.".into()
             }
             KeyAction::MoveDown | KeyAction::MoveUp => {
-                "Within its folder, among the pinned sessions or the others. Dragging it with \
-                 the mouse does the same. The order is kept until you change it."
+                "Within its folder, app or status; under Pinned, among the pinned sessions. \
+                 Dragging it with the mouse does the same. The order is kept until you change \
+                 it."
                     .into()
             }
             KeyAction::Delete => {
@@ -1698,22 +1700,23 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("The screen");
     match ctx.layout {
         SessionLayout::Sidebar => doc.bullet(format!(
-            "Session list, on the left: the tabs on top (Status, {} Folders, App), then the \
-             sessions in the order you keep them (a new one goes at the bottom), each with a \
-             status mark, a bold title, and its app name in its agent's colour before the git \
-             branch; the selected title is white, the others a softer foreground colour. With \
-             several folders, each has a header row; pinned sessions lead their folder.",
+            "Session list, on the left: the tabs on top (Status, {} Folders, App, ★ Pinned), \
+             then the sessions in the order you keep them (a new one goes at the bottom), each \
+             with a status mark, a bold title, and its app name in its agent's colour before \
+             the git branch; the selected title is white, the others a softer foreground \
+             colour. With several folders, each has a header row; a pinned session shows ★ \
+             left of its name.",
             ctx.icons.folder()
         )),
         SessionLayout::Grid => doc.bullet(
             "Grid: read-only live terminal cards. Arrows or h/j/k/l select; PgUp/PgDn change \
-             page. Enter or a tap opens a session; the Rakumux key returns to Grid. Folder \
-             and text filters and pinned/user ordering apply here too.",
+             page. Enter or a tap opens a session; the Rakumux key returns to Grid. The \
+             list's active tab, its filters and order apply here too.",
         ),
         SessionLayout::Tabs => doc.bullet(format!(
             "Tab bar, along the top: the folder filter ({} Folders) at the left, then the \
-             sessions as numbered tabs, each with a status mark, in the order you keep them. \
-             Pinned tabs (★) come first.",
+             sessions as numbered tabs, each with a status mark, in the order you keep them; \
+             pinned ones show ★.",
             ctx.icons.folder()
         )),
     }
@@ -1773,12 +1776,12 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
     let mut keys = vec![
         row(
             "↑, ↓, j, k",
-            "Select a session or a header; the right side shows the session (the tabs, All \
-             folders, App and Status, are above the first)",
+            "Select a session or a header; the right side shows the session (the tabs, \
+             Status, Folders, App and Pinned, are above the first)",
         ),
         row(
             "←, →",
-            "Switch between the tabs, Status, Folders and App (h, l on the tabs too)",
+            "Switch between the tabs, Status, Folders, App and Pinned (h, l on the tabs too)",
         ),
         row(
             "f",
@@ -1840,8 +1843,8 @@ fn mouse(doc: &mut Doc) {
     doc.heading("Mouse");
     doc.bullet("Click a session in the list to show it; click the session to work in it.");
     doc.bullet(
-        "Click a tab at the top of the list (Status, Folders, App) to group the list by it; \
-         click the active one (▾) to open its modal; click a row there to show it alone, All \
+        "Click a tab at the top of the list (Status, Folders, App, Pinned) to group the list \
+         by it; click the active one (▾) to open its modal; click a row there to show it alone, All \
          to show everything, or outside it to close it.",
     );
     doc.bullet(
@@ -1991,17 +1994,18 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          it and `Enter` adds it.",
     );
     doc.text(
-        "The list's top row has three tabs: Status (where the list starts), a header per \
+        "The list's top row has four tabs: Status (where the list starts), a header per \
          state (waiting for you, unread, working, waiting for response, running, exited, \
-         dead, then ready: the sessions you've read, pinned ones first, then the rest most \
-         recently read first, under last hour, last day and older), Folders, and App, a header per agent or program (claude, codex, \
-         opencode, …, then other programs, then shell); `←`/`→` there (or a click) switch \
-         them. One tab is active \
-         at a time: it decides the headers and the only filter that applies, and each tab \
-         keeps its own while another is active. `Enter` on the active tab opens its modal \
-         (Apps, Statuses) like the Folders modal: tick several with `Tab` (or `Space` while \
-         nothing is typed), `Enter` shows them, `Esc` closes. A session you select stays \
-         shown when its status leaves the filter, until you select another.",
+         dead, then ready: the sessions you've read, most recently read first, under last \
+         hour, last day and older), Folders, App, a header per agent or program (claude, \
+         codex, opencode, …, then other programs, then shell), and Pinned, your pinned \
+         sessions alone; `←`/`→` there (or a click) switch them. One tab is active at a \
+         time: it decides the headers and the only filter that applies, and each tab keeps \
+         its own while another is active. `Enter` on the active tab opens its modal (Apps, \
+         Statuses) like the Folders modal: tick several with `Tab` (or `Space` while nothing \
+         is typed), `Enter` shows them, `Esc` closes. Pinned has no filter. A session you \
+         select stays shown when its status leaves the filter (or you unpin it under \
+         Pinned), until you select another.",
     );
     doc.text(
         "The filter only narrows what this window shows; it isn't saved, so Rakumux always \
@@ -2018,18 +2022,19 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     doc.text(
         "To move a session, drag it up or down with the mouse (in the Tabs layout, drag its tab \
          left or right), or press `J` or `K` in Rakumux mode to move the selected one down \
-         or up. It stays in its folder, and among the pinned sessions or the others. The \
-         order is saved in ~/.rakumux/config.json as `sessions.session_order`.",
+         or up. It stays in its folder (under App and Status, its app or status; under \
+         Pinned, among the pinned sessions). The order is saved in ~/.rakumux/config.json \
+         as `sessions.session_order` (`sessions.section_order` for an app, a status and \
+         Pinned).",
     );
 
     doc.heading("Pinning");
     doc.text(
-        "`p` pins the selected session, or unpins it. With the mouse, the session under the \
-         pointer shows ☆ left of its name (★ when pinned): a click pins or unpins it. Pinned \
-         sessions sit in their own section at the top of the list, under ★ pinned, above every \
-         folder, app and status, under every tab (tabs show ★ after their name), in the order \
-         you give them there. Unpinned, a session goes back to its place among the others. \
-         Every Rakumux window sees the same pins.",
+        "`p` pins the selected session, or unpins it. A pinned session shows ★ left of its \
+         name (tabs show it after their name); with the mouse, the session under the pointer \
+         shows ☆ there: a click pins or unpins it. The Pinned tab lists the pinned sessions \
+         alone, in the order you give them there; under the other tabs they stay in their \
+         folder, app and status like any other. Every Rakumux window sees the same pins.",
     );
 
     doc.heading("Git branch");
@@ -2206,9 +2211,9 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         "Sessions appear as a row of numbered tabs across the top, and the selected tab's \
          session fills the rest of the screen. Long names are shortened with …, and ‹3 or 5› \
          say how many tabs are hidden on that side. The tabs are the sessions the list's \
-         active tab shows, in the Folders order (pinned first, then folder by folder, as you \
-         arranged them), so a tab keeps its place and number while its session works and \
-         you read it.",
+         active tab shows, in the Folders order (folder by folder, as you arranged them; \
+         under Pinned, the pinned order), so a tab keeps its place and number while its \
+         session works and you read it.",
     );
     let cycle = match &k.cycle {
         Some(cycle) => format!(", `{cycle}`"),
@@ -2287,7 +2292,7 @@ fn agents_and_cli(doc: &mut Doc) {
     );
     doc.command(
         "rakumux pin <name|id>, rakumux unpin <name|id>",
-        "Pin a session into the pinned section at the top of the list, or unpin it.",
+        "Pin a session (into the list's Pinned tab), or unpin it.",
     );
     doc.command(
         "rakumux folders [--json], rakumux folders add|rm <dir>",
@@ -3874,7 +3879,7 @@ mod tests {
             ("Back to the session you came from", "Esc, C-a"),
             ("Go into the selected session", "Enter, i, l"),
             ("Feed (show, focus or hide)", "f"),
-            ("Next tab (Status, Folders, App)", "→"),
+            ("Next tab (Status, Folders, App, Pinned)", "→"),
             ("Previous tab", "←"),
             ("Last session", "Tab"),
             ("Go into session 1 to 9", "1-9"),

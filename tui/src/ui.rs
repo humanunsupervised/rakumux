@@ -1165,16 +1165,18 @@ mod tests {
                 .position(|l| l.contains(needle))
                 .unwrap_or_else(|| panic!("{needle} missing: {wide}"))
         };
-        // The pinned section first: docs, the one shell, takes its header
-        // with it. Then agents by name, then other programs; each header ends
-        // in live/total.
-        assert!(at(&list, "★ pinned") < at(&list, " docs "), "{wide}");
-        assert!(at(&list, " docs ") < at(&list, " claude ─"), "{wide}");
-        assert!(!wide.contains(" shell ─"), "{wide}");
-        let headers: Vec<usize> = [" claude ─", " codex ─", " opencode ─", " cargo ─"]
-            .iter()
-            .map(|header| at(&list, header))
-            .collect();
+        // Agents by name, then other programs, then the shell, where docs,
+        // pinned, stays with its gold pin; each header ends in live/total.
+        let headers: Vec<usize> = [
+            " claude ─",
+            " codex ─",
+            " opencode ─",
+            " cargo ─",
+            " shell ─",
+        ]
+        .iter()
+        .map(|header| at(&list, header))
+        .collect();
         assert!(headers.windows(2).all(|w| w[0] < w[1]), "{wide}");
         assert!(list[headers[0]].ends_with("─ 3/3 live"), "{wide}");
         assert!(list[headers[1]].ends_with("─ 1/2 live"), "{wide}");
@@ -1183,6 +1185,8 @@ mod tests {
         assert!(at(&list, "release-notes") < at(&list, "api-refactor"));
         assert!(at(&list, "api-refactor") < at(&list, "styles"));
         assert!(headers[1] < at(&list, "storybook") && at(&list, "storybook") < headers[2]);
+        assert!(headers[4] < at(&list, " docs "), "{wide}");
+        assert!(list[at(&list, " docs ")].starts_with(" ★ docs "), "{wide}");
 
         // Tall enough for every status: each session has a place line too.
         h.app.show_tab(Grouping::Status);
@@ -1224,12 +1228,19 @@ mod tests {
                     usize::from(crate::layout::sidebar_width(width))
                 };
                 let list = list_column(&screen, list_width);
-                // Every tab, the active one with its label and ▾.
-                for mark in ["▤ Folders", "◇ App", "◔ Status"] {
+                // Every tab, the active one with its label, and its ▾ (but
+                // Pinned's, which has no modal) where the list has room.
+                for mark in ["▤ Folders", "◇ App", "◔ Status", "★ Pinned"] {
                     assert!(list[1].contains(mark), "{width}x{height}: {screen}");
                 }
                 let active = format!("{} ▾", h.app.tab_label(grouping));
-                assert!(list[1].contains(&active), "{width}x{height}: {screen}");
+                let arrow = list_width >= 48 && grouping.has_filter();
+                assert_eq!(
+                    list[1].contains(&active),
+                    arrow,
+                    "{width}x{height}: {screen}"
+                );
+                assert_eq!(list[1].contains('▾'), arrow, "{width}x{height}: {screen}");
                 // Headers end in their count: nothing is cut off.
                 for line in list
                     .iter()
@@ -1256,43 +1267,48 @@ mod tests {
         let screen = render(&mut h.app, 40, 30);
         let tabs = screen.lines().nth(1).unwrap();
         assert!(
-            tabs.starts_with("   ◔ waiting for response ▾ ▤ ◇"),
+            tabs.starts_with("   ◔ waiting for respo… ▾ ▤ ◇ ★"),
             "{tabs:?}"
         );
         assert!(tabs.ends_with("/front "), "{tabs:?}");
     }
 
     #[test]
-    fn three_tabs_keep_their_names_in_a_33_column_list() {
+    fn four_tabs_keep_their_names_in_a_37_column_list() {
         use crate::app::grouping::Grouping;
         let mut h = harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Sidebar);
-        h.app.settings.sessions.sidebar_width = Some(33);
+        h.app.settings.sessions.sidebar_width = Some(37);
         let mut rows = Vec::new();
         for grouping in Grouping::ALL {
             h.app.show_tab(grouping);
             let screen = render(&mut h.app, 160, 48);
-            assert_eq!(h.app.screen().list.map(|list| list.width), Some(33));
-            let list = list_column(&screen, 33);
+            assert_eq!(h.app.screen().list.map(|list| list.width), Some(37));
+            let list = list_column(&screen, 37);
             // Every tab by name, too short for the arrow: none keeps room
             // for it, so the tabs sit where they sat.
-            for name in ["◔ Status", "▤ Folders", "◇ App"] {
+            for name in ["◔ Status", "▤ Folders", "◇ App", "★ Pinned"] {
                 assert!(list[1].contains(name), "{grouping:?}: {screen}");
             }
             assert!(!list[1].contains('▾'), "{grouping:?}: {screen}");
             rows.push(list[1].clone());
         }
         assert!(rows.iter().all(|row| row == &rows[0]), "{rows:?}");
-        assert_eq!(rows[0], "   ◔ Status  ▤ Folders  ◇ App");
+        assert_eq!(rows[0], "   ◔ Status ▤ Folders ◇ App ★ Pinned");
         // The active one is still underlined.
         h.app.show_tab(Grouping::Folder);
         let screen = render(&mut h.app, 160, 48);
-        let under = list_column(&screen, 33)[2].clone();
-        assert_eq!(under, format!("   {}{}", " ".repeat(10), "▁".repeat(9)));
+        let under = list_column(&screen, 37)[2].clone();
+        assert_eq!(under, format!("   {}{}", " ".repeat(9), "▁".repeat(9)));
+        h.app.show_tab(Grouping::Pinned);
+        let screen = render(&mut h.app, 160, 48);
+        let under = list_column(&screen, 37)[2].clone();
+        assert_eq!(under, format!("   {}{}", " ".repeat(25), "▁".repeat(8)));
         // A wider list keeps the arrow.
-        h.app.settings.sessions.sidebar_width = Some(36);
+        h.app.settings.sessions.sidebar_width = Some(43);
+        h.app.show_tab(Grouping::Folder);
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            list_column(&screen, 36)[1].contains("▤ Folders ▾"),
+            list_column(&screen, 43)[1].contains("▤ Folders ▾"),
             "{screen}"
         );
     }
@@ -1395,6 +1411,171 @@ mod tests {
         }
     }
 
+    /// [`agents_and_statuses`] with dev-server pinned too (docs is), and
+    /// the Pinned tab's order dev-server first.
+    fn two_pinned(layout: SessionLayout) -> Harness {
+        use session_core::ids::SessionId;
+        let mut sessions = agents_and_statuses();
+        for session in sessions.iter_mut().filter(|s| s.name == "dev-server") {
+            session.pinned = true;
+        }
+        let mut h = harness_with_folders(sessions, &known(), layout);
+        h.app
+            .list
+            .set_section_order(&crate::app::config::SectionOrder::from([(
+                "pinned".to_string(),
+                vec![SessionId::from_string("W2"), SessionId::from_string("R4")],
+            )]));
+        h
+    }
+
+    #[test]
+    fn the_pinned_tab_lists_the_pinned_sessions_and_the_others_mark_them() {
+        use crate::app::grouping::Grouping;
+        for (width, height) in [(40, 40), (100, 40), (160, 48)] {
+            let mut h = two_pinned(SessionLayout::Sidebar);
+            let list_width = if width < 100 {
+                usize::from(width)
+            } else {
+                usize::from(crate::layout::sidebar_width(width))
+            };
+            // Under Pinned: the two, in its order, without headers or marks.
+            h.app.show_tab(Grouping::Pinned);
+            let screen = render(&mut h.app, width, height);
+            let list = list_column(&screen, list_width);
+            let at = |needle: &str| list.iter().position(|l| l.starts_with(needle));
+            let (server, docs) = (at("   dev-server "), at("   docs "));
+            assert!(server.is_some() && docs.is_some(), "{width}: {screen}");
+            assert!(server < docs, "{width}: {screen}");
+            assert!(
+                !list[3..].iter().any(|l| l.contains('─')),
+                "{width}: {screen}"
+            );
+            assert!(
+                !list[3..].iter().any(|l| l.contains('★')),
+                "{width}: {screen}"
+            );
+            for other in ["api-refactor", "frontend", "styles"] {
+                assert!(!screen.contains(other), "{width}: {screen}");
+            }
+            assert!(list[1].contains("★ Pinned"), "{width}: {screen}");
+            assert!(!list[1].contains("Pinned ▾"), "{width}: {screen}");
+            // Under every other tab both are in their groups, their pins
+            // showing.
+            for grouping in [Grouping::Status, Grouping::Folder, Grouping::App] {
+                h.app.show_tab(grouping);
+                let screen = render(&mut h.app, width, 80);
+                let list = list_column(&screen, list_width);
+                assert!(
+                    list.iter().any(|l| l.starts_with(" ★ docs ")),
+                    "{width} {grouping:?}: {screen}"
+                );
+                assert!(
+                    list.iter().any(|l| l.starts_with(" ★ dev-server ")),
+                    "{width} {grouping:?}: {screen}"
+                );
+                assert!(screen.contains("api-refactor"), "{width}: {screen}");
+            }
+        }
+        // Nothing pinned: a short line, then + New session.
+        let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
+        for session in h.app.list.sessions().to_vec() {
+            if session.pinned {
+                let mut unpinned = session.clone();
+                unpinned.pinned = false;
+                h.app.list.upsert(unpinned);
+            }
+        }
+        h.app.show_tab(Grouping::Pinned);
+        let screen = render(&mut h.app, 160, 48);
+        let list = list_column(&screen, crate::layout::sidebar_width(160).into());
+        assert!(
+            list.iter().any(|l| l == "   no pinned sessions"),
+            "{screen}"
+        );
+        assert!(
+            list.iter().any(|l| l.starts_with(" + New session")),
+            "{screen}"
+        );
+        assert!(screen.contains("No pinned sessions"), "{screen}");
+    }
+
+    #[test]
+    fn the_four_tabs_fit_a_28_34_and_40_column_list() {
+        use crate::app::grouping::Grouping;
+        for (width, list_width) in [(160, 28), (160, 34), (40, 40)] {
+            let mut h =
+                harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Sidebar);
+            if width >= 100 {
+                h.app.settings.sessions.sidebar_width = Some(list_width);
+            }
+            for grouping in Grouping::ALL {
+                h.app.show_tab(grouping);
+                let screen = render(&mut h.app, width, 30);
+                let row: String = screen
+                    .lines()
+                    .nth(1)
+                    .unwrap()
+                    .chars()
+                    .take(usize::from(list_width))
+                    .collect();
+                // Each tab's mark, the active one's name, and a column
+                // left before the divider.
+                for mark in ["◔", "▤", "◇", "★"] {
+                    assert!(row.contains(mark), "{list_width} {grouping:?}: {row:?}");
+                }
+                assert!(
+                    row.contains(&h.app.tab_label(grouping)),
+                    "{list_width} {grouping:?}: {row:?}"
+                );
+                assert!(row.ends_with(' '), "{list_width} {grouping:?}: {row:?}");
+                if list_width == 40 {
+                    // A phone: every name, two apart, no ▾.
+                    assert_eq!(row.trim_end(), "   ◔ Status  ▤ Folders  ◇ App  ★ Pinned");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_tabs_layout_and_grid_follow_the_pinned_tab() {
+        use crate::app::grouping::Grouping;
+        // Tabs: the tab bar is in the Folders order, pinned sessions where
+        // their folders put them, with ★ after their name; under Status too.
+        let mut h = two_pinned(SessionLayout::Tabs);
+        let screen = render(&mut h.app, 200, 30);
+        let top = screen.lines().next().unwrap();
+        assert!(top.starts_with(" ▤ Folders ▾ "), "{top:?}");
+        let order = |top: &str, names: &[&str]| {
+            let at: Vec<usize> = names
+                .iter()
+                .map(|name| top.find(name).unwrap_or_else(|| panic!("{name}: {top:?}")))
+                .collect();
+            at.windows(2).all(|w| w[0] < w[1])
+        };
+        let folders_order = ["docs ★", "api-refactor", "dev-server ★", "frontend"];
+        assert!(order(top, &folders_order), "{top:?}");
+        h.app.show_tab(Grouping::Status);
+        let screen = render(&mut h.app, 200, 30);
+        let top = screen.lines().next().unwrap();
+        assert!(top.starts_with(" ◔ Status ▾ "), "{top:?}");
+        assert!(order(top, &folders_order), "{top:?}");
+        // Pinned: the selector without ▾, and only the pinned, in its order.
+        h.app.show_tab(Grouping::Pinned);
+        let screen = render(&mut h.app, 200, 30);
+        let top = screen.lines().next().unwrap();
+        assert!(top.starts_with(" ★ Pinned  "), "{top:?}");
+        assert!(order(top, &["dev-server ★", "docs ★"]), "{top:?}");
+        assert!(!top.contains("api-refactor"), "{top:?}");
+        // Grid's header names it, with its mark.
+        let mut h = two_pinned(SessionLayout::Grid);
+        h.app.show_tab(Grouping::Pinned);
+        let screen = render(&mut h.app, 160, 48);
+        let top = screen.lines().next().unwrap();
+        assert!(top.starts_with(" ★ Pinned · Grid"), "{top:?}");
+        assert!(!screen.contains("api-refactor"), "{screen}");
+    }
+
     fn known() -> Vec<(&'static str, Option<session_core::model::GitInfo>)> {
         vec![
             ("/repo", on_branch("sessions-refactor")),
@@ -1434,11 +1615,14 @@ mod tests {
         let under = format!("   {}{}", " ".repeat(12), "▁".repeat(11));
         assert_eq!(list[2], under, "{wide}");
         // The Status tab, then a folder icon and Folders, with ▾: it opens
-        // the Folders modal. Then the App tab.
+        // the Folders modal. Then the App tab, then Pinned.
         assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
-        assert!(list[1].ends_with("▤ Folders ▾  ◇ App"), "{wide}");
-        // Pinned first, with its mark; subtext is program, then the
-        // folder it works in and its branch.
+        assert!(
+            list[1].ends_with("▤ Folders ▾  ◇ App    ★ Pinned"),
+            "{wide}"
+        );
+        // A pinned session in its place, its gold pin in the gutter;
+        // subtext is program, then the folder it works in and its branch.
         let docs = list.iter().position(|l| l.contains("docs")).unwrap();
         let refactor = list
             .iter()
@@ -1446,7 +1630,7 @@ mod tests {
             .unwrap();
         assert!(docs < refactor, "{wide}");
         assert!(list[docs].contains(" docs "), "{wide}");
-        assert!(!list[docs].contains('★'), "{wide}");
+        assert!(list[docs].starts_with(" ★ docs "), "{wide}");
         // Where it works now: one line, in line with the row's text.
         assert!(list[docs + 2].starts_with("   repo  ⎇ main"), "{wide}");
         assert!(list[refactor + 1].contains("claude"), "{wide}");
@@ -1457,8 +1641,7 @@ mod tests {
         assert!(list.iter().any(|l| l.ends_with(" live")), "{wide}");
         // No header above the list: the folder filter says what's shown.
         assert!(wide.lines().last().unwrap().contains(" RAKUMUX MODE "));
-        // Narrow, the list keeps the selection in view: the pinned section
-        // is above it.
+        // Narrow, the list keeps the selection in view.
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("▤ Folders"), "{narrow}");
         assert!(narrow.contains("api-refactor"), "{narrow}");
@@ -1542,8 +1725,12 @@ mod tests {
         let wide = render(&mut h.app, 160, 48);
         assert!(wide.contains("No sessions in empty yet"), "{wide}");
         assert!(wide.contains("Press n to start one in empty"), "{wide}");
-        // The gaps narrow to keep its branch.
-        assert!(wide.contains("  ▤ empty  ⎇ trunk ▾"), "{wide}");
+        // Its branch after it on the tab, when the list has room for it.
+        assert!(!wide.contains("⎇ trunk ▾"), "{wide}");
+        h.app.settings.sessions.sidebar_width = Some(56);
+        let wide = render(&mut h.app, 160, 48);
+        assert!(wide.contains(" ▤ empty  ⎇ trunk ▾  ◇"), "{wide}");
+        h.app.settings.sessions.sidebar_width = None;
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("no sessions yet"), "{narrow}");
         // On the folder filter: what it shows, and how to change it.
@@ -1609,16 +1796,15 @@ mod tests {
         assert!(repo < api && api < web, "{wide}");
         assert!(list[repo].ends_with("2/2 live"), "{wide}");
         // Headers' names and sessions' text start in one column (a status's
-        // or the pinned one's mark in the gutter left of it).
+        // mark, or a pinned session's, in the gutter left of it).
         assert!(list[repo].starts_with("   repo  ⎇"), "{wide}");
-        assert!(list[at(" docs ")].starts_with("   docs "), "{wide}");
-        assert!(list[at("★ pinned")].starts_with(" ★ pinned"), "{wide}");
+        assert!(list[at(" docs ")].starts_with(" ★ docs "), "{wide}");
         assert!(list[web].ends_with("1/2 live"), "{wide}");
-        // Pinned sessions above every folder, under their own header; the
-        // rows' pins show only under the pointer. Then oldest first.
-        let pinned = at("★ pinned");
-        assert!(pinned < at(" docs ") && at(" docs ") < repo, "{wide}");
-        assert_eq!(wide.matches('★').count(), 1, "{wide}");
+        // A pinned session stays in its folder, its gold pin shown; the
+        // others' pins show only under the pointer. Oldest first.
+        assert!(repo < at(" docs ") && at(" docs ") < api, "{wide}");
+        // The pin, and the Pinned tab's mark.
+        assert_eq!(wide.matches('★').count(), 2, "{wide}");
         assert!(
             web < at("storybook") && at("storybook") < at("frontend"),
             "{wide}"
@@ -1665,7 +1851,7 @@ mod tests {
         // On the tabs, the list shows its top again.
         h.app.list.select(crate::app::Selection::Folders);
         let narrow = render(&mut h.app, 80, 24);
-        assert!(narrow.contains("★ pinned"), "{narrow}");
+        assert!(narrow.contains(" repo  ⎇"), "{narrow}");
         assert!(!narrow.contains(" api ──"), "{narrow}");
     }
 

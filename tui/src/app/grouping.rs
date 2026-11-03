@@ -1,10 +1,12 @@
 //! What the session list is grouped and filtered by: the tabs on its top
 //! row. Status (a section per state, as the user reads it), All folders (a
-//! section per folder, the folder filter of `folders.rs`) and App (a
-//! section per agent or program). One tab is active at a time: it decides
-//! the section headers and the only filter that applies. Each tab keeps its
-//! own filter while another one is active; none is saved. (The feed isn't
-//! one of them: it's a pane of its own, `app/feed`.)
+//! section per folder, the folder filter of `folders.rs`), App (a section
+//! per agent or program) and Pinned (the pinned sessions alone, in the
+//! order the user gave them; no sections, no filter). One tab is active at
+//! a time: it decides the section headers and the only filter that
+//! applies. Each tab keeps its own filter while another one is active; none
+//! is saved. (The feed isn't one of them: it's a pane of its own,
+//! `app/feed`.)
 //!
 //! Everything here is derived from a `SessionView` alone; nothing draws.
 
@@ -25,11 +27,19 @@ pub enum Grouping {
     /// starts.
     #[default]
     Status,
+    /// The pinned sessions, in the order the user gave them: no sections,
+    /// no filter.
+    Pinned,
 }
 
 impl Grouping {
     /// The tabs, left to right: what wants the user first.
-    pub const ALL: [Grouping; 3] = [Grouping::Status, Grouping::Folder, Grouping::App];
+    pub const ALL: [Grouping; 4] = [
+        Grouping::Status,
+        Grouping::Folder,
+        Grouping::App,
+        Grouping::Pinned,
+    ];
 
     /// The tab `delta` places along, stopping at either end.
     pub fn step(self, delta: isize) -> Grouping {
@@ -44,6 +54,7 @@ impl Grouping {
             Grouping::Folder => "Folders",
             Grouping::App => "App",
             Grouping::Status => "Status",
+            Grouping::Pinned => "Pinned",
         }
     }
 
@@ -53,7 +64,14 @@ impl Grouping {
             Grouping::Folder => "folders",
             Grouping::App => "apps",
             Grouping::Status => "statuses",
+            Grouping::Pinned => "pinned",
         }
+    }
+
+    /// Whether it has a filter, and so a modal and the `▾` that opens it:
+    /// every tab but Pinned.
+    pub fn has_filter(self) -> bool {
+        self != Grouping::Pinned
     }
 }
 
@@ -233,12 +251,10 @@ impl StatusGroup {
     }
 }
 
-/// Ready's sub-sections under Status, in order: pinned sessions first, then
-/// the others by when each was last read, most recent first.
+/// Ready's sub-sections under Status, in order: by when each session was
+/// last read, most recent first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ReadPeriod {
-    /// Pinned, however long ago it was read.
-    Pinned,
     /// Within the last hour.
     LastHour,
     /// Within the last day.
@@ -261,23 +277,18 @@ impl ReadPeriod {
         }
     }
 
-    /// The sub-section of `session` at `now` when it's ready: pinned, else by
-    /// its last read (`last_active_at`, which going in sets); `None` for any
-    /// other status.
+    /// The sub-section of `session` at `now` when it's ready, by its last
+    /// read (`last_active_at`, which going in sets); `None` for any other
+    /// status.
     pub fn of_done(now: i64, session: &SessionView) -> Option<ReadPeriod> {
-        StatusGroup::of(session).by_last_read().then(|| {
-            if session.pinned {
-                ReadPeriod::Pinned
-            } else {
-                ReadPeriod::of(now, session.last_active_at)
-            }
-        })
+        StatusGroup::of(session)
+            .by_last_read()
+            .then(|| ReadPeriod::of(now, session.last_active_at))
     }
 
     /// Its name in its header.
     pub fn label(self) -> &'static str {
         match self {
-            ReadPeriod::Pinned => "pinned",
             ReadPeriod::LastHour => "last hour",
             ReadPeriod::LastDay => "last day",
             ReadPeriod::Older => "older",
@@ -309,10 +320,10 @@ impl Section {
     }
 
     /// The section `session` is in under `grouping`; `None` under All
-    /// folders, whose sections are folders.
+    /// folders, whose sections are folders, and Pinned, which has none.
     pub fn of(grouping: Grouping, session: &SessionView) -> Option<Section> {
         match grouping {
-            Grouping::Folder => None,
+            Grouping::Folder | Grouping::Pinned => None,
             Grouping::App => Some(Section::App(AppKey::of(session))),
             Grouping::Status => Some(Section::Status(StatusGroup::of(session))),
         }
@@ -389,13 +400,18 @@ mod tests {
         // Status is the grouping the list starts with, and the first tab.
         assert_eq!(Grouping::default(), Grouping::Status);
         let names: Vec<&str> = Grouping::ALL.iter().map(|g| g.name()).collect();
-        assert_eq!(names, ["Status", "Folders", "App"]);
+        assert_eq!(names, ["Status", "Folders", "App", "Pinned"]);
         assert_eq!(Grouping::Status.step(-1), Grouping::Status);
         assert_eq!(Grouping::Status.step(1), Grouping::Folder);
         assert_eq!(Grouping::Folder.step(1), Grouping::App);
-        assert_eq!(Grouping::App.step(1), Grouping::App);
+        assert_eq!(Grouping::App.step(1), Grouping::Pinned);
+        assert_eq!(Grouping::Pinned.step(1), Grouping::Pinned);
+        assert_eq!(Grouping::Pinned.step(-1), Grouping::App);
         assert_eq!(Grouping::App.step(-1), Grouping::Folder);
         assert_eq!(Grouping::Folder.step(-1), Grouping::Status);
+        // Pinned alone has no filter, so no modal.
+        assert!(!Grouping::Pinned.has_filter());
+        assert!(Grouping::ALL[..3].iter().all(|g| g.has_filter()));
     }
 
     #[test]

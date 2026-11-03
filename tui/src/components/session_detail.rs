@@ -144,24 +144,27 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                         }));
                         !filter.is_empty()
                     }
-                    Grouping::App | Grouping::Status => false,
+                    Grouping::App | Grouping::Status | Grouping::Pinned => false,
                 };
                 if filtering {
                     lines.push(Line::from(""));
                 }
                 let what = match grouping {
-                    Grouping::Folder => " to filter by folder or add one.",
-                    Grouping::App => " to filter by app.",
-                    Grouping::Status => " to filter by status.",
+                    Grouping::Folder => Some(" to filter by folder or add one."),
+                    Grouping::App => Some(" to filter by app."),
+                    Grouping::Status => Some(" to filter by status."),
+                    Grouping::Pinned => None,
                 };
-                lines.push(Line::from(vec![
-                    Span::styled("Press ", muted),
-                    Span::styled("Enter", key),
-                    Span::styled(what, muted),
-                ]));
+                if let Some(what) = what {
+                    lines.push(Line::from(vec![
+                        Span::styled("Press ", muted),
+                        Span::styled("Enter", key),
+                        Span::styled(what, muted),
+                    ]));
+                }
                 lines.push(Line::from(vec![
                     Span::styled("← →", key),
-                    Span::styled(" switch between Status, Folders and App.", muted),
+                    Span::styled(" switch between Status, Folders, App and Pinned.", muted),
                 ]));
                 lines
             } else if app.list.is_loaded() && app.list.filter.is_empty() {
@@ -178,6 +181,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                     (Grouping::Folder, many) if many.len() > 1 => {
                         format!("No sessions in these {} folders yet", many.len())
                     }
+                    (Grouping::Pinned, _) => "No pinned sessions".to_string(),
                     _ => "No sessions yet".to_string(),
                 };
                 vec![
