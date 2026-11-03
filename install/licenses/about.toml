@@ -1,5 +1,5 @@
 # cargo-about configuration for THIRD_PARTY_NOTICES.
-# Used by install/scripts/generate-third-party-notices.sh; see install/AGENTS.md.
+# Used by release-scripts/generate-third-party-notices.sh; see install/AGENTS.md.
 #
 # Licenses of crates linked into the shipped binaries (tui, rakumux-ptyd,
 # rakumux-api, rakumux-mcp).
@@ -30,7 +30,7 @@ ignore-build-dependencies = true
 # Rakumux's own crates use Apache-2.0 and publish = false; they aren't third-party.
 private = { ignore = true }
 
-# Release targets (install/scripts/build-release.sh), so platform-specific crates count.
+# Release targets (release-scripts/build-release.sh), so platform-specific crates count.
 targets = [
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",

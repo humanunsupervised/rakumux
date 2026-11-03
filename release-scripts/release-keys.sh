@@ -17,7 +17,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 KEYS_FILE="${RAKUMUX_RELEASE_KEYS:-$REPO_ROOT/install/release-keys.pub}"
 INSTALLER="$REPO_ROOT/landing/public/install.sh"
 
@@ -27,7 +27,7 @@ fail() {
 }
 
 # BEGIN release signature check
-# The same in landing/public/install.sh and install/scripts/release-keys.sh
+# The same in landing/public/install.sh and release-scripts/release-keys.sh
 # (tests/test-release-signatures.sh compares them). Bash 3.2.
 
 # What can check a minisign signature here: minisign, else openssl when it

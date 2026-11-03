@@ -30,7 +30,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RELEASE_DIR="$REPO_ROOT/release"
 
 info "🧪 Testing Rakumux v$VERSION release packages"
@@ -233,7 +233,7 @@ done
 # Step 6: Script syntax
 info "🐚 Step 6: Testing shell script syntax..."
 SCRIPTS=(rakumux.sh build.sh shell/rakumux-local.sh)
-for script in shell/gwr_*.sh shell/gwr/*.sh shell/build/*.sh install/scripts/*.sh; do
+for script in shell/gwr_*.sh shell/gwr/*.sh shell/build/*.sh release-scripts/*.sh; do
     SCRIPTS+=("$script")
 done
 for script in "${SCRIPTS[@]}"; do
@@ -255,4 +255,4 @@ echo
 success "🚀 Release v$VERSION is ready for deployment!"
 echo
 info "To deploy this release:"
-info "  ./release.sh $VERSION  # complete macOS/Linux binary release through GitHub Actions"
+info "  ./release-scripts/release.sh $VERSION  # complete macOS/Linux binary release through GitHub Actions"

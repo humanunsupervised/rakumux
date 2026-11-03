@@ -17,7 +17,7 @@ TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
 unset RAKUMUX_SESSION_ID RAKUMUX_SESSION_TOKEN RAKUMUX_SOCKET RAKUMUX_VERSION GH_TOKEN GITHUB_TOKEN
 export TMPDIR="$TEMP"
-KEYS_SCRIPT="$ROOT/install/scripts/release-keys.sh"
+KEYS_SCRIPT="$ROOT/release-scripts/release-keys.sh"
 INSTALLER="$ROOT/landing/public/install.sh"
 
 fail() {
@@ -49,7 +49,7 @@ cmp -s <(block "$KEYS_SCRIPT") <(block "$INSTALLER") ||
     fail "install.sh's signature check differs from release-keys.sh's"
 expected_keys="$(RAKUMUX_RELEASE_KEYS= bash "$KEYS_SCRIPT" list | tr '\n' ' ' | sed 's/ *$//')"
 grep -qx "RELEASE_KEYS=\"$expected_keys\"" "$INSTALLER" ||
-    fail "install.sh's RELEASE_KEYS aren't install/release-keys.pub's; run install/scripts/release-keys.sh sync"
+    fail "install.sh's RELEASE_KEYS aren't install/release-keys.pub's; run release-scripts/release-keys.sh sync"
 
 # Throwaway keys: the main and the backup are the release keys, the stranger isn't.
 mkdir "$TEMP/keys"

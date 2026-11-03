@@ -63,7 +63,7 @@ SQLite), builds the Cargo workspace in `tui/`
 (release or `--debug`), and optionally installs globally (`--install`). The workspace produces four
 binaries: `tui` and `rakumux-ptyd` (both needed to run Rakumux), plus `rakumux-api` (the
 external HTTP API, `api/`) and `rakumux-mcp` (the MCP server for agents, `mcp/`), which ship next
-to them. Release packaging lives in `install/scripts/` (see `install/AGENTS.md`).
+to them. Release packaging lives in `release-scripts/` (see `install/AGENTS.md`).
 
 ## rakumux-local.sh
 

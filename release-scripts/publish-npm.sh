@@ -71,7 +71,7 @@ if [[ -n "$DIST_TAG" && ! "$DIST_TAG" =~ ^[A-Za-z][A-Za-z0-9._-]*$ ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 NPM_DIR="$REPO_ROOT/install/npm"
 NPM_OTP_VALUE="${NPM_OTP:-${NPM_PUBLISH_OTP:-}}"
 GITHUB_REPO="humanunsupervised/rakumux"

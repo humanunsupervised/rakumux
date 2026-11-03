@@ -4,7 +4,7 @@
 #
 # Installed Rakumux (the updater, `U` and automatic updates: built in from this
 # file by tui/src/updater/signature.rs), https://rakumux.com/install.sh (a copy,
-# written by `install/scripts/release-keys.sh sync`) and publish-npm.sh accept a
+# written by `release-scripts/release-keys.sh sync`) and publish-npm.sh accept a
 # release only when its checksums.txt.minisig is a signature by one of these
 # keys. The maintainer keeps the secrets offline, never on a server or in
 # GitHub.

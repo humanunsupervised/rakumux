@@ -4,7 +4,7 @@
 # No Homebrew publishing.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="humanunsupervised/rakumux"
 VERSION=""
 INCREMENT="patch"
@@ -61,9 +61,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$INCREMENT" in major|minor|patch) ;; *) fail "invalid increment: $INCREMENT" ;; esac
-"$ROOT/install/scripts/release-targets.sh" "$TARGETS" >/dev/null
+"$ROOT/release-scripts/release-targets.sh" "$TARGETS" >/dev/null
 # Every release carries the keys its own updates must be signed by.
-"$ROOT/install/scripts/release-keys.sh" check >/dev/null || fail "add the release signing keys to install/release-keys.pub first"
+"$ROOT/release-scripts/release-keys.sh" check >/dev/null || fail "add the release signing keys to install/release-keys.pub first"
 cd "$ROOT"
 command -v git >/dev/null 2>&1 || fail "git is required"
 [[ -f .github/workflows/release.yml ]] || fail "binary release workflow is missing"
@@ -76,7 +76,7 @@ case "$remote" in
 esac
 
 if [[ -z "$VERSION" ]]; then
-    VERSION="$(GITHUB_REPO="$REPO" "$ROOT/install/scripts/get-next-version.sh" "$INCREMENT")"
+    VERSION="$(GITHUB_REPO="$REPO" "$ROOT/release-scripts/get-next-version.sh" "$INCREMENT")"
 fi
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || fail "invalid version: $VERSION"
 if [[ "$VERSION" == *-* && "$MODE" == "stable" ]]; then MODE="prerelease"; fi

@@ -37,7 +37,7 @@ warn() { printf "${YELLOW}[HOMEBREW]${NC} %s\n" "$*"; }
 error() { printf "${RED}[HOMEBREW]${NC} %s\n" "$*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATE="$PROJECT_ROOT/install/homebrew/rakumux.rb.template"
 REPO_FORMULA="$PROJECT_ROOT/install/homebrew/Formula/rakumux.rb"
 FORMULA="$REPO_FORMULA"

@@ -109,7 +109,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 6. **`shell/`**: launcher helpers (`gwr_*.sh`, `gwr/check-updates.sh`), build helpers (`build/`),
    `rakumux-local.sh` for running a local checkout, and `rakumux-command-hook.sh` (command
    history for AI naming).
-7. **`install/`**: release and distribution (npm package, Homebrew formula, release scripts).
+7. **`install/`**: release and distribution (npm package, Homebrew formula, release notes and
+   keys); the scripts that build and publish releases are in `release-scripts/`.
 8. **`rakumux-api`** (`api/`, workspace member through `package.workspace = "../tui"`): HTTP/1.1
    and JSON on 127.0.0.1, a thin adapter over `session_core::client` (contract:
    `api/openapi.yaml`). Routes `/v1/health`, `/v1/folders`, `/v1/sessions[/{id}[/content]]`
@@ -561,7 +562,8 @@ TUI animates busy markers locally without network calls.
 ```
 rakumux.sh                 # launcher (entry point)
 build.sh                     # local build
-release.sh                   # release entry point: GitHub release, then npm (--targets selects platforms)
+release-scripts/             # every release script; release.sh is the entry point: GitHub release,
+                             # then npm (--targets selects platforms); see install/AGENTS.md
 api/                         # rakumux-api (external HTTP API), see api/README.md
   openapi.yaml               # the API contract (OpenAPI 3.1)
   src/                       # main, server, instance (flock), discovery (api.json), remote
@@ -576,7 +578,7 @@ mcp/                         # rakumux-mcp (MCP server for agents), see mcp/READ
                              # launch (rakumux-api --detach), render, untrusted, instructions
   tests/                     # mcp_stdio (stub API), full_stack (mcp → api → ptyd)
 shell/                       # launcher, build and hook scripts (see shell/AGENTS.md)
-install/                     # npm, Homebrew, release scripts (see install/AGENTS.md)
+install/                     # npm, Homebrew, release notes and keys (see install/AGENTS.md)
 landing/                     # marketing site: standalone Next.js static export for Vercel (landing/README.md)
 auth/AGENTS.md               # deferred auth design notes
 tests/                       # manual test instructions and remaining shell tests

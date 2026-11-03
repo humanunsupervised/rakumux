@@ -51,7 +51,7 @@ if [[ -n "$NOTES_LAST_COMMITS" ]]; then
   NOTES_ARGS+=("--notes-last=$NOTES_LAST_COMMITS")
 fi
 # Curated notes (install/release-notes/<version>.md) win over notes generated from commits.
-CURATED_NOTES="$SCRIPT_DIR/../release-notes/$VERSION.md"
+CURATED_NOTES="$SCRIPT_DIR/../install/release-notes/$VERSION.md"
 if [[ -f "$CURATED_NOTES" ]]; then
     echo "📝 Using install/release-notes/$VERSION.md"
     cp "$CURATED_NOTES" "$TEMP_NOTES"
@@ -73,7 +73,7 @@ fi
 
 # Check if release directory exists
 if [ ! -d "$RELEASE_DIR" ]; then
-    echo "❌ Release directory not found. Run ./install/scripts/build-release.sh first"
+    echo "❌ Release directory not found. Run ./release-scripts/build-release.sh first"
     rm -f "$TEMP_NOTES"
     exit 1
 fi

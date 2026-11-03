@@ -20,7 +20,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 NPM_DIR="$PROJECT_ROOT/install/npm"
 RELEASE_DIR="$PROJECT_ROOT/release"
 RESOURCES_DIR="$NPM_DIR/resources"
@@ -49,7 +49,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 if ! grep -q "^# Rakumux v$VERSION\$" "$RELEASE_DIR/RELEASE_NOTES.md" 2>/dev/null; then
-    error "$RELEASE_DIR was not built for v$VERSION; run ./install/scripts/build-release.sh $VERSION"
+    error "$RELEASE_DIR was not built for v$VERSION; run ./release-scripts/build-release.sh $VERSION"
     exit 1
 fi
 if [[ ! -f "$RELEASE_DIR/THIRD_PARTY_NOTICES" ]]; then

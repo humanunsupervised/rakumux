@@ -19,13 +19,13 @@ This directory holds the shell-level and manual checks.
   `RAKUMUX_HOME`.
 - **`test-release.sh`**, **`test-release-tag.sh`** - `release.sh` and the release tag's metadata,
   offline.
-- **`test-npm-release.sh`** - `install/scripts/publish-npm.sh --from-release` against fixture
+- **`test-npm-release.sh`** - `release-scripts/publish-npm.sh --from-release` against fixture
   GitHub releases and a stubbed npm: checksums, drafts, dist-tags, skipping a version already on
   npm, trusted publishing, and that only a signed release goes. Offline; publishes nothing.
 - **`test-release-signatures.sh`** - Release signatures with throwaway keys: `install.sh`'s
   checks with minisign, with OpenSSL 3 and with neither (signed, unsigned, another key, a
   signature moved from another release, a tampered package), that its copy of the check and
-  keys match `install/scripts/release-keys.sh` and `install/release-keys.pub`. These two need
+  keys match `release-scripts/release-keys.sh` and `install/release-keys.pub`. These two need
   `minisign` (skipped without it, except in CI).
 
 ```bash

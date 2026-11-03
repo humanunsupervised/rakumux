@@ -27,12 +27,12 @@ mkdir -p "$TEMP/bin" "$FIXTURE/api" "$FIXTURE/assets" "$TEST_LOG"
 WORK="$TEMP/root"
 mkdir -p "$WORK/install/release-notes"
 cp "$ROOT/LICENSE" "$WORK/"
-cp -R "$ROOT/install/scripts" "$WORK/install/"
+cp -R "$ROOT/release-scripts" "$WORK/"
 cp -R "$ROOT/install/npm" "$WORK/install/"
 rm -rf "$WORK/install/npm/resources" "$WORK/install/npm/dist" \
     "$WORK/install/npm/LICENSE" "$WORK/install/npm/THIRD_PARTY_NOTICES"
 printf '# Rakumux 1.2.3\n\nFixture notes.\n' > "$WORK/install/release-notes/1.2.3.md"
-PUBLISH="$WORK/install/scripts/publish-npm.sh"
+PUBLISH="$WORK/release-scripts/publish-npm.sh"
 
 # Throwaway release keys: "main" is a release key, "stranger" isn't.
 mkdir "$TEMP/keys"

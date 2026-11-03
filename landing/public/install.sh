@@ -31,7 +31,7 @@ fail() {
 }
 
 # BEGIN release signature check
-# The same in landing/public/install.sh and install/scripts/release-keys.sh
+# The same in landing/public/install.sh and release-scripts/release-keys.sh
 # (tests/test-release-signatures.sh compares them). Bash 3.2.
 
 # What can check a minisign signature here: minisign, else openssl when it

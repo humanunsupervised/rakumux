@@ -85,32 +85,35 @@ install/
 │   ├── package.json, install.js, README.md
 │   ├── bin/rakumux.js, bin/rakumux-local.js
 │   └── resources/, dist/, LICENSE, THIRD_PARTY_NOTICES   # generated, git-ignored
-├── release-notes/<version>.md     # GitHub release notes for that version
-└── scripts/
-    ├── get-next-version.sh        # Next version from GitHub releases
-    ├── build-release.sh           # Build binaries, packages, checksums, notes
-    ├── generate-third-party-notices.sh
-    ├── test-install.sh            # Pre-deployment checks of release/
-    ├── create-github-release.sh   # gh release create + upload tarballs; notes from
-    │                              # release-notes/<version>.md when it exists
-    ├── release-keys.sh            # The keys: list, check, verify a signature, sync into install.sh
-    ├── generate-release-notes.sh  # Release notes from commit subjects (fallback)
-    ├── release-homebrew.sh        # Render, verify (brew), push the formula
-    ├── stage-npm-package.sh       # Fill install/npm from the tarballs
-    ├── publish-npm.sh             # Stage (a GitHub release, or release/), check packed files, npm publish
-    └── check-github-auth.sh
+└── release-notes/<version>.md     # GitHub release notes for that version
+
+release-scripts/                   # Every release script, at the repository root
+├── release.sh                     # The entry point: tag a release (see below)
+├── release-tag.sh, release-targets.sh   # The tag's mode and targets, for the workflow
+├── get-next-version.sh            # Next version from GitHub releases
+├── build-release.sh               # Build binaries, packages, checksums, notes
+├── generate-third-party-notices.sh
+├── test-install.sh                # Pre-deployment checks of release/
+├── create-github-release.sh       # gh release create + upload tarballs; notes from
+│                                  # install/release-notes/<version>.md when it exists
+├── release-keys.sh                # The keys: list, check, verify a signature, sync into install.sh
+├── generate-release-notes.sh      # Release notes from commit subjects (fallback)
+├── release-homebrew.sh            # Render, verify (brew), push the formula
+├── stage-npm-package.sh           # Fill install/npm from the tarballs
+├── publish-npm.sh                 # Stage (a GitHub release, or release/), check packed files, npm publish
+└── check-github-auth.sh
 ```
 
 ## Release process
 
-The entry point is `release.sh` at the repository root. Run from a clean,
+The entry point is `release-scripts/release.sh`. Run from a clean,
 reviewed public checkout after pushing its source commit to `main`:
 
 ```bash
-./release.sh                               # next patch, all three native targets
-./release.sh --draft                       # build all three; leave release unpublished
-./release.sh --targets=linux-x64            # explicit Linux-only override
-./release.sh --targets=linux-x64 --dry-run  # validate; create/push nothing
+./release-scripts/release.sh                               # next patch, all three native targets
+./release-scripts/release.sh --draft                       # build all three; leave release unpublished
+./release-scripts/release.sh --targets=linux-x64            # explicit Linux-only override
+./release-scripts/release.sh --targets=linux-x64 --dry-run  # validate; create/push nothing
 ```
 
 The script verifies that HEAD equals public `main`, then creates and pushes an annotated
@@ -222,7 +225,7 @@ The trusted publisher names `release.yml`, so the npm job stays in that file (it
 **When the npm job fails**, the GitHub release is already public and `install.sh` serves it; only
 npm lags. Fix the cause (most often the trusted publisher's fields) and re-run the failed `npm` job
 from the workflow run. By hand instead, from a checkout of the tag and logged in to npm:
-`./install/scripts/publish-npm.sh <version> --from-release`. A draft made public later on GitHub
+`./release-scripts/publish-npm.sh <version> --from-release`. A draft made public later on GitHub
 goes to npm the same way.
 
 `stage-npm-package.sh <version> [--allow-partial] [--release-dir=DIR]` sets `package.json`
@@ -285,7 +288,7 @@ the npm job accept a release only with a valid signature by a key in `install/re
 ### Signing a release
 
 The maintainer signs each draft offline: `checksums.txt` with minisign (prehashed, the trusted
-comment above), checked against `install/release-keys.pub` (`install/scripts/release-keys.sh
+comment above), checked against `install/release-keys.pub` (`release-scripts/release-keys.sh
 verify <checksums.txt> <checksums.txt.minisig> v<version>`), then uploads
 `checksums.txt.minisig` and publishes the release as the tag's `Release-Mode` says (stable: the
 latest release; prerelease; draft: left unpublished). Publishing runs the npm job. The signing
@@ -331,12 +334,12 @@ through a release signed by a key it already trusts.
 ## Testing without publishing
 
 ```bash
-./install/scripts/build-release.sh 0.1.0 --no-clean        # Linux: linux-x64 only
-SKIP_BUILD=1 ./install/scripts/test-install.sh 0.1.0
-./install/scripts/publish-npm.sh 0.1.0 --dry-run           # changes install/npm/package.json
-./install/scripts/publish-npm.sh 0.1.33 --from-release --dry-run   # what npm gets from that release
+./release-scripts/build-release.sh 0.1.0 --no-clean        # Linux: linux-x64 only
+SKIP_BUILD=1 ./release-scripts/test-install.sh 0.1.0
+./release-scripts/publish-npm.sh 0.1.0 --dry-run           # changes install/npm/package.json
+./release-scripts/publish-npm.sh 0.1.33 --from-release --dry-run   # what npm gets from that release
 bash tests/test-npm-release.sh                             # offline: fixture releases, stub npm
-./install/scripts/release-homebrew.sh 0.1.0 --render-only --output /tmp/rakumux.rb   # needs all 3 tarballs
+./release-scripts/release-homebrew.sh 0.1.0 --render-only --output /tmp/rakumux.rb   # needs all 3 tarballs
 ```
 
 Manual checks before announcing a release (macOS arm64, macOS Intel, Linux x64 via Linuxbrew):

@@ -112,7 +112,7 @@ latest_local_semver_tag() {
   git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n1
 }
 
-# Source release tags are created by the root release.sh entry point.
+# Source release tags are created by release-scripts/release.sh.
 latest_tracking_tag() {
   git tag -l 'release/v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n1
 }

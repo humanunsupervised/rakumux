@@ -54,45 +54,45 @@ expect_failure() {
     fi
 }
 
-bash "$ROOT/release.sh" 0.1.0 --dry-run >"$TEMP/output"
+bash "$ROOT/release-scripts/release.sh" 0.1.0 --dry-run >"$TEMP/output"
 [[ ! -e "$RELEASE_TEST_LOG" ]]
 grep -q 'Dry run' "$TEMP/output"
 grep -q 'Targets: macos-intel,macos-arm64,linux-x64' "$TEMP/output"
 
-expect_failure env RELEASE_TEST_STATUS=' M source.rs' bash "$ROOT/release.sh" 0.1.0
-expect_failure env RELEASE_TEST_REMOTE='git@github.com:private/internal.git' bash "$ROOT/release.sh" 0.1.0
-expect_failure env RELEASE_TEST_MAIN=not-pushed bash "$ROOT/release.sh" 0.1.0
-expect_failure env RELEASE_TEST_REMOTE_TAG=already-exists bash "$ROOT/release.sh" 0.1.0
-expect_failure env RELEASE_TEST_LOCAL_TAG_STATUS=0 bash "$ROOT/release.sh" 0.1.0
-expect_failure bash "$ROOT/release.sh" 0.1.0 --draft --prerelease
-expect_failure bash "$ROOT/release.sh" --unknown-option
-expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=unsupported
-expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=
-expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=linux-x64,linux-x64
-expect_failure bash "$ROOT/release.sh" 0.1.1 --targets=linux-x64,
+expect_failure env RELEASE_TEST_STATUS=' M source.rs' bash "$ROOT/release-scripts/release.sh" 0.1.0
+expect_failure env RELEASE_TEST_REMOTE='git@github.com:private/internal.git' bash "$ROOT/release-scripts/release.sh" 0.1.0
+expect_failure env RELEASE_TEST_MAIN=not-pushed bash "$ROOT/release-scripts/release.sh" 0.1.0
+expect_failure env RELEASE_TEST_REMOTE_TAG=already-exists bash "$ROOT/release-scripts/release.sh" 0.1.0
+expect_failure env RELEASE_TEST_LOCAL_TAG_STATUS=0 bash "$ROOT/release-scripts/release.sh" 0.1.0
+expect_failure bash "$ROOT/release-scripts/release.sh" 0.1.0 --draft --prerelease
+expect_failure bash "$ROOT/release-scripts/release.sh" --unknown-option
+expect_failure bash "$ROOT/release-scripts/release.sh" 0.1.1 --targets=unsupported
+expect_failure bash "$ROOT/release-scripts/release.sh" 0.1.1 --targets=
+expect_failure bash "$ROOT/release-scripts/release.sh" 0.1.1 --targets=linux-x64,linux-x64
+expect_failure bash "$ROOT/release-scripts/release.sh" 0.1.1 --targets=linux-x64,
 # No release keys yet: no release, as its updates couldn't be checked.
 printf '# none yet\n' >"$TEMP/no-keys.pub"
-expect_failure env RAKUMUX_RELEASE_KEYS="$TEMP/no-keys.pub" bash "$ROOT/release.sh" 0.1.0
+expect_failure env RAKUMUX_RELEASE_KEYS="$TEMP/no-keys.pub" bash "$ROOT/release-scripts/release.sh" 0.1.0
 grep -q 'release signing keys' "$TEMP/output"
 printf 'RWQnot-a-key\n' >"$TEMP/bad-keys.pub"
-expect_failure env RAKUMUX_RELEASE_KEYS="$TEMP/bad-keys.pub" bash "$ROOT/release.sh" 0.1.0
+expect_failure env RAKUMUX_RELEASE_KEYS="$TEMP/bad-keys.pub" bash "$ROOT/release-scripts/release.sh" 0.1.0
 [[ ! -e "$RELEASE_TEST_LOG" ]]
 
-bash "$ROOT/release.sh" 0.1.0 --draft >"$TEMP/output"
+bash "$ROOT/release-scripts/release.sh" 0.1.0 --draft >"$TEMP/output"
 grep -q 'Release-Mode: draft' "$RELEASE_TEST_LOG"
 grep -q 'Release-Targets: macos-intel,macos-arm64,linux-x64' "$RELEASE_TEST_LOG"
 grep -q 'push origin refs/tags/v0.1.0' "$RELEASE_TEST_LOG"
 # CI leaves a draft; signing publishes it.
 grep -q 'sign the draft of v0.1.0' "$TEMP/output"
 
-bash "$ROOT/release.sh" 0.1.1 --target=linux-x64 --dry-run >"$TEMP/output"
+bash "$ROOT/release-scripts/release.sh" 0.1.1 --target=linux-x64 --dry-run >"$TEMP/output"
 grep -q 'Targets: linux-x64' "$TEMP/output"
-bash "$ROOT/release.sh" 0.1.1 --targets=linux-x64,macos-arm64 --dry-run >"$TEMP/output"
+bash "$ROOT/release-scripts/release.sh" 0.1.1 --targets=linux-x64,macos-arm64 --dry-run >"$TEMP/output"
 grep -q 'Targets: linux-x64,macos-arm64' "$TEMP/output"
-[[ "$(bash "$ROOT/install/scripts/release-targets.sh" linux-x64)" == '{"include":[{"os":"ubuntu-24.04","platform":"linux-x64","target":"x86_64-unknown-linux-musl"}]}' ]]
+[[ "$(bash "$ROOT/release-scripts/release-targets.sh" linux-x64)" == '{"include":[{"os":"ubuntu-24.04","platform":"linux-x64","target":"x86_64-unknown-linux-musl"}]}' ]]
 
-[[ "$(bash "$ROOT/install/scripts/get-next-version.sh" patch)" == '0.1.5' ]]
-[[ "$(RELEASE_TEST_HTTP=404 bash "$ROOT/install/scripts/get-next-version.sh" patch)" == '0.1.0' ]]
-expect_failure env RELEASE_TEST_HTTP=403 bash "$ROOT/install/scripts/get-next-version.sh" patch
-expect_failure env RELEASE_TEST_BODY='{"tag_name":"invalid"}' bash "$ROOT/install/scripts/get-next-version.sh" patch
+[[ "$(bash "$ROOT/release-scripts/get-next-version.sh" patch)" == '0.1.5' ]]
+[[ "$(RELEASE_TEST_HTTP=404 bash "$ROOT/release-scripts/get-next-version.sh" patch)" == '0.1.0' ]]
+expect_failure env RELEASE_TEST_HTTP=403 bash "$ROOT/release-scripts/get-next-version.sh" patch
+expect_failure env RELEASE_TEST_BODY='{"tag_name":"invalid"}' bash "$ROOT/release-scripts/get-next-version.sh" patch
 printf 'Binary release entry-point and version-selection tests passed.\n'

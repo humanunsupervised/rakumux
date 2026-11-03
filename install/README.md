@@ -18,9 +18,9 @@ See [INSTALL.md](INSTALL.md) for every option and troubleshooting.
 ## Maintainers
 
 ```bash
-./release.sh                               # macOS Intel + Apple Silicon + Linux x64
-./release.sh --targets=linux-x64            # Linux-only override
-./release.sh --dry-run                     # validate all targets; publish nothing
+./release-scripts/release.sh                               # macOS Intel + Apple Silicon + Linux x64
+./release-scripts/release.sh --targets=linux-x64            # Linux-only override
+./release-scripts/release.sh --dry-run                     # validate all targets; publish nothing
 ```
 
 GitHub Actions publishes the GitHub release, then npm (trusted publishing; one-time setup and

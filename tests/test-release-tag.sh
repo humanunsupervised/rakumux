@@ -13,12 +13,12 @@ git -C "$TEMP/source" -c user.name=Test -c user.email=test@example.invalid tag -
 git -C "$TEMP/source" push --quiet origin refs/tags/v1.2.3
 git -C "$TEMP/source" update-ref refs/tags/v1.2.3 HEAD
 [[ "$(git -C "$TEMP/source" cat-file -t refs/tags/v1.2.3)" == commit ]]
-(cd "$TEMP/source" && "$ROOT/install/scripts/release-tag.sh" v1.2.3) > "$TEMP/output"
+(cd "$TEMP/source" && "$ROOT/release-scripts/release-tag.sh" v1.2.3) > "$TEMP/output"
 [[ "$(git -C "$TEMP/source" cat-file -t refs/tags/v1.2.3)" == tag ]]
 grep -qx 'mode=stable' "$TEMP/output"
 grep -qx 'targets=linux-x64' "$TEMP/output"
 grep -q '"platform":"linux-x64"' "$TEMP/output"
-if (cd "$TEMP/source" && "$ROOT/install/scripts/release-tag.sh" invalid) > /dev/null 2>&1; then
+if (cd "$TEMP/source" && "$ROOT/release-scripts/release-tag.sh" invalid) > /dev/null 2>&1; then
     printf 'Invalid release tag unexpectedly accepted\n' >&2
     exit 1
 fi

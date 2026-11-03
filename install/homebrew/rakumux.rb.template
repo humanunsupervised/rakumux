@@ -1,7 +1,7 @@
 class Rakumux < Formula
   desc "Terminal session manager for coding agents with a fast TUI"
   homepage "https://rakumux.com"
-  # Rendered by install/scripts/release-homebrew.sh; edit the template, not Formula/rakumux.rb.
+  # Rendered by release-scripts/release-homebrew.sh; edit the template, not Formula/rakumux.rb.
   #
   # Binary-only distribution: pre-built packages from GitHub Releases.
   # `version` is stated only where Homebrew can't parse it from the URL: it reads the

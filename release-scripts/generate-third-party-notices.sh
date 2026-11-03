@@ -19,7 +19,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="${1:-$PROJECT_ROOT/release/THIRD_PARTY_NOTICES}"
 CONFIG="$PROJECT_ROOT/install/licenses/about.toml"
 TEMPLATE="$PROJECT_ROOT/install/licenses/THIRD_PARTY_NOTICES.hbs"

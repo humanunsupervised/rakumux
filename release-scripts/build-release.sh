@@ -25,7 +25,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RELEASE_DIR="$PROJECT_ROOT/release"
 LICENSE_FILE="$PROJECT_ROOT/LICENSE"
 
@@ -489,6 +489,6 @@ echo ""
 echo "🔐 SHA256 Checksums:"
 cat "$RELEASE_DIR/checksums.txt"
 echo ""
-echo "📝 Production release entry point: ./release.sh $VERSION"
-echo "1. ./install/scripts/test-install.sh $VERSION        # with SKIP_BUILD=1"
-echo "2. ./install/scripts/create-github-release.sh $VERSION"
+echo "📝 Production release entry point: ./release-scripts/release.sh $VERSION"
+echo "1. ./release-scripts/test-install.sh $VERSION        # with SKIP_BUILD=1"
+echo "2. ./release-scripts/create-github-release.sh $VERSION"

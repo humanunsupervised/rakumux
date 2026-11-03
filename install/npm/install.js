@@ -2,7 +2,7 @@
 
 // Postinstall setup and command runner for the rakumux npm package.
 //
-// Package layout (staged by install/scripts/stage-npm-package.sh):
+// Package layout (staged by release-scripts/stage-npm-package.sh):
 //   resources/scripts/            rakumux.sh, rakumux-local.sh, shell/
 //   resources/prebuilt/<platform>/ rakumux (tui binary), rakumux-ptyd,
 //                                  rakumux-api, rakumux-mcp
