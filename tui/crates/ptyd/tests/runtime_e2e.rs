@@ -277,6 +277,15 @@ impl Drop for Daemon {
     }
 }
 
+/// A launcher file for the daemon's `RAKUMUX_BIN`: it passes on only one
+/// that exists.
+fn launcher(home: &TestHome) -> String {
+    let bin = home.dir.path().join("bin/rakumux");
+    std::fs::create_dir_all(home.dir.path().join("bin")).unwrap();
+    std::fs::write(&bin, "").unwrap();
+    bin.to_string_lossy().into_owned()
+}
+
 fn start_daemon(home: &TestHome, rakumux_bin: &str) -> (Daemon, Registration) {
     start_daemon_with(home, rakumux_bin, &[])
 }
@@ -367,7 +376,8 @@ fn wait_read(client: &mut TestClient, id: &session_core::ids::SessionId, needle:
 #[test]
 fn serve_runs_sessions_with_the_real_control_layer() {
     let home = TestHome::new();
-    let (mut daemon, registration) = start_daemon(&home, "/opt/rakumux/bin/rakumux");
+    let bin = launcher(&home);
+    let (mut daemon, registration) = start_daemon(&home, &bin);
     let mut client = TestClient::connect(&registration.socket);
     assert!(matches!(
         client.hello(&registration.token),
@@ -384,7 +394,7 @@ fn serve_runs_sessions_with_the_real_control_layer() {
         "echo \"ID=$RAKUMUX_SESSION_ID SOCK=$RAKUMUX_SOCKET BIN=$RAKUMUX_BIN TERM=$TERM\"",
     );
     let expected = format!(
-        "ID={} SOCK={} BIN=/opt/rakumux/bin/rakumux TERM=xterm-256color",
+        "ID={} SOCK={} BIN={bin} TERM=xterm-256color",
         session.id,
         registration.socket.display()
     );
@@ -963,7 +973,7 @@ fn a_reply_never_answers_a_prompt_its_agent_opened_after_the_paste() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let (mut daemon, registration) = start_daemon(&home, "/opt/rakumux/bin/rakumux");
+    let (mut daemon, registration) = start_daemon(&home, &launcher(&home));
     let mut client = TestClient::connect(&registration.socket);
     assert!(matches!(
         client.hello(&registration.token),

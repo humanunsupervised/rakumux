@@ -276,7 +276,10 @@ fn create_builds_argv_env_cwd_and_startup_input() {
         env("RAKUMUX_SOCKET").as_deref(),
         Some("/tmp/rakumux-test/ptyd.sock")
     );
-    assert_eq!(env("RAKUMUX_BIN").as_deref(), Some(RAKUMUX_BIN));
+    assert_eq!(
+        env("RAKUMUX_BIN").map(PathBuf::from),
+        Some(rakumux_bin(&h.layout))
+    );
     assert_eq!(env("TERM").as_deref(), Some("xterm-256color"));
     assert_eq!(env("COLORTERM").as_deref(), Some("truecolor"));
     for stripped in [

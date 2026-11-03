@@ -78,7 +78,7 @@ fn a_quiet_session_carried_over_by_a_restart_in_place_is_still_followed() {
             layout: h.layout.clone(),
             user_token: h.user_token.clone(),
             socket: "/tmp/rakumux-test/ptyd.sock".into(),
-            rakumux_bin: Some(RAKUMUX_BIN.into()),
+            rakumux_bin: Some(rakumux_bin(&h.layout)),
             version: "test".into(),
             limits: Limits::default(),
         },

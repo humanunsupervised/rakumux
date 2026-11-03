@@ -572,7 +572,11 @@ pub struct Harness {
     pub detector: Detector,
 }
 
-pub const RAKUMUX_BIN: &str = "/opt/rakumux/bin/rakumux";
+/// The daemon's `RAKUMUX_BIN` in a harness: a file in its home, since the
+/// daemon passes on only a launcher that exists.
+pub fn rakumux_bin(layout: &Layout) -> PathBuf {
+    layout.home.join("bin/rakumux")
+}
 
 impl Harness {
     pub fn new() -> Self {
@@ -594,6 +598,8 @@ impl Harness {
         std::fs::create_dir_all(root.join("project/sub")).unwrap();
         std::fs::create_dir_all(root.join("other")).unwrap();
         let layout = Layout::with_home(root.join("home"));
+        std::fs::create_dir_all(layout.home.join("bin")).unwrap();
+        std::fs::write(rakumux_bin(&layout), "").unwrap();
         let scope = ScopeRoot::from_canonical(root.join("project"));
         let host = FakeHost::new();
         let user_token = Token::generate();
@@ -789,7 +795,7 @@ fn config(layout: &Layout, user_token: &Token) -> ControlConfig {
         layout: layout.clone(),
         user_token: user_token.clone(),
         socket: PathBuf::from("/tmp/rakumux-test/ptyd.sock"),
-        rakumux_bin: Some(PathBuf::from(RAKUMUX_BIN)),
+        rakumux_bin: Some(rakumux_bin(layout)),
         version: "test".into(),
         limits: Limits::default(),
     }
