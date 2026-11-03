@@ -1664,14 +1664,15 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     );
     doc.heading("rtop");
     doc.text(
-        "t in Rakumux mode, or Settings, rtop, shows what this machine and Rakumux use now, \
-         in the drawer on the right beside the Feed (its band names both; f and t switch, \
+        "t in Rakumux mode, or Settings, rtop, shows what this machine and Rakumux use over \
+         the last few minutes, as graphs, in the drawer on the right beside the Feed (its band names both; f and t switch, \
          and hide it while their tab has the keys): this window, the server, its other \
          windows and clients, then every running session with its processes under it (the \
          shell, the agent and what it started). CPU is a percentage of one CPU, memory is \
          resident memory, network what each process's TCP connections carry to other \
          machines (Linux; elsewhere only the machine's total). It updates about every second \
-         while it's on screen and records nothing. s sorts the sessions by memory, CPU, \
+         while it's on screen and keeps what it read in this window's memory only. Under the \
+         rows, the selected one's CPU, memory and network over time. s sorts the sessions by memory, CPU, \
          network or name (▾ marks the column); ←/→ fold a session's processes; Enter goes \
          into it; Esc gives the list the keys back.",
     );

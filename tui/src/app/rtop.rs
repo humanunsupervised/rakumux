@@ -3,8 +3,10 @@
 //! and every live session's processes use now: CPU, memory and network.
 //! Read from the daemon (`SessionApi::resources`, capability `resources`)
 //! about every second while its tab is on screen, off the UI thread; rates
-//! are the differences between the last two samples. Nothing is recorded:
-//! leaving the screen forgets them (its sort, folds and selection stay).
+//! are the differences between the last two samples. Each sample's use goes
+//! into this window's memory for about five minutes (`history.rs`), for the
+//! graphs; leaving the screen forgets the samples and marks a gap there (its
+//! sort, folds and selection stay).
 //!
 //! Rows: this window, the server, the other windows and clients, then the
 //! sessions (sorted by `s`), each with its processes as a tree under it when
@@ -23,6 +25,10 @@ use super::drawer::DrawerTab;
 use super::grouping::AppKey;
 use super::runtime::AppEvent;
 use super::App;
+
+pub mod history;
+
+use history::{History, Point};
 
 /// How often a new sample is asked for: a little under the idle tick, so
 /// every tick asks.
@@ -139,6 +145,8 @@ pub struct RtopView {
     generation: u64,
     latest: Option<ResourceSample>,
     previous: Option<ResourceSample>,
+    /// What was used over the last few minutes, kept off screen too.
+    pub history: History,
     pub error: Option<String>,
     busy: bool,
     due: Option<Instant>,
@@ -158,6 +166,7 @@ impl Default for RtopView {
             generation: 0,
             latest: None,
             previous: None,
+            history: History::default(),
             error: None,
             busy: false,
             due: None,
@@ -172,9 +181,10 @@ impl Default for RtopView {
 
 impl RtopView {
     /// Forget the samples (and drop a sample asked for before): rtop left the
-    /// screen. Its sort, folds and selection stay.
+    /// screen. Its history, with a gap, sort, folds and selection stay.
     fn forget(&mut self) {
         self.generation += 1;
+        self.history.gap();
         self.latest = None;
         self.previous = None;
         self.error = None;
@@ -195,6 +205,63 @@ impl RtopView {
     fn take(&mut self, sample: ResourceSample) {
         self.previous = self.latest.replace(sample);
         self.error = None;
+        let Some(machine) = self.machine() else {
+            return;
+        };
+        let rows = self.usages();
+        let mut total = Usage::default();
+        for (key, usage) in &rows {
+            if !matches!(key, RowKey::Process(..)) {
+                total.add(usage);
+            }
+        }
+        self.history.record(
+            Point::new(
+                machine.cpu,
+                machine.memory_used.map(|m| m as f64),
+                machine.rx,
+                machine.tx,
+            ),
+            machine.memory_total,
+            machine.cpus,
+            Point::of(&total),
+            &rows,
+        );
+    }
+
+    /// Every row's use in the latest sample, folded processes too: Rakumux's
+    /// own processes, the sessions, then the sessions' processes (the order
+    /// [`History::record`] keeps series in).
+    fn usages(&self) -> Vec<(RowKey, Usage)> {
+        let Some(latest) = &self.latest else {
+            return Vec::new();
+        };
+        let earlier = self
+            .previous
+            .as_ref()
+            .map(processes_by_pid)
+            .unwrap_or_default();
+        let seconds = self.seconds();
+        let usage = |process: &ProcessUsage| usage_of(process, earlier.get(&process.pid), seconds);
+        let mut rows = vec![(RowKey::Daemon, usage(&latest.daemon))];
+        rows.extend(
+            latest
+                .clients
+                .iter()
+                .map(|c| (RowKey::Client(c.process.pid), usage(&c.process))),
+        );
+        let mut processes = Vec::new();
+        for session in latest.sessions.iter().filter(|s| !s.processes.is_empty()) {
+            let mut total = Usage::default();
+            for process in &session.processes {
+                let used = usage(process);
+                total.add(&used);
+                processes.push((RowKey::Process(session.id.clone(), process.pid), used));
+            }
+            rows.push((RowKey::Session(session.id.clone()), total));
+        }
+        rows.extend(processes);
+        rows
     }
 
     /// Seconds between the last two samples, when there are two.

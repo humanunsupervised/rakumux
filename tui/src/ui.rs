@@ -2948,7 +2948,7 @@ mod tests {
             "claude",
             "MEMORY▾",
             "Total",
-            "of 16 GB",
+            "10 GB/16 GB",
         ] {
             assert!(pane.contains(text), "{text} missing:\n{pane}");
         }
@@ -3095,6 +3095,120 @@ mod tests {
         h.app.process_pending();
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("restart it (S)"), "{screen}");
+    }
+
+    /// Forty samples, then rtop at the drawer's widths: docked (44), a
+    /// phone's screen (30 to 60, a short one too) and the Tabs layout's
+    /// (120, 160). Frames print with `--nocapture`.
+    #[tokio::test]
+    async fn rtop_draws_what_was_used_over_time_at_every_size() {
+        let mut h = harness(vec![view("A", "fix-login", 20), view("B", "notes", 10)]);
+        // Uneven steps, so the graphs have a shape.
+        let mut scale = 1;
+        let (mut busy, mut received) = (0, 0);
+        let samples: Vec<_> = (0..40u64)
+            .map(|i| {
+                scale += 1 + (i * 3) % 5;
+                busy += 600 + (i * 1_700) % 5_000;
+                received += 2_000 + (i * 7_919) % 40_000;
+                let mut sample = resource_sample(1_000 * (i as i64 + 1), scale);
+                sample.machine.cpu_busy_ms = Some(busy);
+                sample.machine.cpu_total_ms = Some(8_000 * (i + 1));
+                sample.machine.net_rx_bytes = Some(received);
+                sample
+            })
+            .collect();
+        h.fake.state.lock().unwrap().resources = samples;
+        h.press(KeyCode::Char('t')).await;
+        render(&mut h.app, 160, 48);
+        // A tick a second until every sample was read (the fake answers
+        // its last one again after that, with no time between).
+        let calls = |h: &Harness| h.fake.calls().iter().filter(|c| *c == "resources").count();
+        let start = std::time::Instant::now();
+        for second in 0..60 {
+            if calls(&h) >= 40 {
+                break;
+            }
+            h.app
+                .on_tick(start + std::time::Duration::from_secs(second));
+            h.app.process_pending();
+        }
+        assert_eq!(h.app.rtop.history.machine().len(), 40);
+        let braille = |line: &str| line.chars().any(|c| ('\u{2801}'..='\u{28ff}').contains(&c));
+
+        let screen = render(&mut h.app, 160, 48);
+        let drawer = h.app.screen().feed.unwrap();
+        let pane = drawer_text(&screen, usize::from(drawer.x));
+        eprintln!("docked, {} columns:\n{pane}", drawer.width);
+        for text in [
+            "╭ cpu",
+            "╭ mem",
+            "╭ net",
+            "rakumux ",
+            "↓ ",
+            "↑ ",
+            "Total",
+            "MEMORY▾",
+        ] {
+            assert!(pane.contains(text), "{text} missing:\n{pane}");
+        }
+        // The selected row's panel: this window, over time.
+        assert!(pane.contains("╭ rakumux · this window"), "{pane}");
+        let cpu_panel = pane
+            .lines()
+            .skip_while(|l| !l.contains("╭ cpu"))
+            .nth(4)
+            .unwrap();
+        assert!(braille(cpu_panel), "the machine's CPU over time:\n{pane}");
+
+        for (width, height) in [(30, 20), (30, 40), (44, 30), (60, 40), (44, 14)] {
+            let screen = render(&mut h.app, width, height);
+            eprintln!("{width}×{height}:\n{screen}");
+            assert_eq!(h.app.screen().feed.map(|a| a.width), Some(width));
+            assert!(screen.contains("MEMORY"), "{width}×{height}:\n{screen}");
+            if height >= 20 {
+                assert!(screen.contains("fix-login"), "{width}×{height}:\n{screen}");
+            }
+            if height >= 30 {
+                assert!(screen.contains("╭ cpu"), "{width}×{height}:\n{screen}");
+            }
+        }
+        // Short: a line a metric, no panels.
+        let screen = render(&mut h.app, 44, 20);
+        eprintln!("44×20:\n{screen}");
+        assert!(!screen.contains("╭ cpu"), "{screen}");
+        assert!(
+            screen
+                .lines()
+                .any(|l| l.trim_start().starts_with("cpu") && braille(l)),
+            "{screen}"
+        );
+
+        // Wide: the panels side by side, each row with its graph.
+        h.app.set_layout(SessionLayout::Tabs);
+        let bar = render(&mut h.app, 120, 40);
+        if !bar.lines().next().unwrap_or_default().contains("rtop") {
+            h.press(KeyCode::Char('t')).await;
+        }
+        for (width, height) in [(120, 40), (160, 48)] {
+            let screen = render(&mut h.app, width, height);
+            eprintln!("Tabs, {width}×{height}:\n{screen}");
+            let panels = screen.lines().find(|l| l.contains("╭ cpu")).unwrap();
+            assert!(
+                panels.contains("╭ mem") && panels.contains("╭ net"),
+                "{screen}"
+            );
+            let claude = screen
+                .lines()
+                .find(|l| l.contains("claude  --resume"))
+                .unwrap();
+            assert!(braille(claude), "{claude}");
+            assert!(screen.contains("↓ NET"), "{screen}");
+        }
+        // `s` puts the rows' graphs on CPU.
+        h.press(KeyCode::Char('s')).await;
+        let screen = render(&mut h.app, 120, 40);
+        assert!(screen.contains("CPU▾"), "{screen}");
     }
 
     /// Folder names, git names and reports come from files and programs:

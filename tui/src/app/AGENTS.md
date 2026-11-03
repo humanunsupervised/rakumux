@@ -158,9 +158,14 @@ new-session flow, and code boundaries.
   by `components/rtop.rs`, the sorted column marked `▾`). Asks `SessionApi::resources` off the
   UI thread (`AppEvent::Resources`, checked against the view's generation) on ticks about every
   second while its tab is on screen (`rtop_shown`, `rtop_timers`), the second sample half a
-  second after the first; keeps only the last two samples, for rates (`Usage`: % of one CPU,
+  second after the first; keeps the last two samples, for rates (`Usage`: % of one CPU,
   memory, bytes a second), and forgets them when it leaves the screen (`RtopView::forget`; the
-  sort, folds and selection stay). Its keys are `rtop_key`; `Hit::RtopRow` selects a row, again
+  sort, folds and selection stay). Each sample also goes into `RtopView::history`
+  (`rtop/history.rs`, memory only): a ring of `HISTORY_LEN` (300) points for the machine,
+  Rakumux's total and each `RowKey` (`MAX_SERIES` rows, processes last), unknown values kept
+  unknown, a row's series dropped when it's gone, a gap marked on leaving the screen.
+  `components/rtop.rs` draws it (`Overview` panels, the rows' graphs, the selected row's panel;
+  braille graphs in `components/rtop/graph.rs`). Its keys are `rtop_key`; `Hit::RtopRow` selects a row, again
   (a tap on a phone) goes in. `TopView::rows` is pure: this window, the
   server, other windows, other clients, then sessions sorted by `TopSort` with their process
   trees (`tree_order`), folded per session; `rtop_rows` names sessions from the list (name, then

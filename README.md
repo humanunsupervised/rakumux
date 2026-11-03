@@ -137,7 +137,7 @@ gives the list the keys back, and `f` hides the feed. The button counts the repl
 since you last looked.
 
 `t` shows **rtop** in the same drawer: the CPU, memory and network this machine, Rakumux and
-each session's processes use now. `s` sorts, `←` `→` fold a session's processes, `Enter` goes
+each session's processes use, graphed over the last few minutes as btop does. `s` sorts, `←` `→` fold a session's processes, `Enter` goes
 into it; `f` and `t` switch between the two.
 
 ### Status

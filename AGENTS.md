@@ -1388,8 +1388,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   session), not Grid. The drawer (the Feed and rtop) docks on the right in Master detail and Grid
   and is a tab in Tabs.
 - **rtop** (`t`): what the machine, Rakumux's own processes and every running session's
-  processes use now (CPU, memory, network), from `resource_usage`, in the drawer beside the
-  Feed; live only, never recorded. On rakumux.com the same tab shows every machine of the
+  processes use (CPU, memory, network), from `resource_usage`, as graphs over time in the drawer
+  beside the Feed; kept in this window's memory for about five minutes. On rakumux.com the same tab shows every machine of the
   account, from the account service's uploads (component 10).
 - **Contracts**: the crate types and traits that define the architecture.
 
@@ -1716,19 +1716,29 @@ through the hidden detail path. Cards crop/pan rather than resizing terminals. D
 and wire spelling stays `sidebar`, now labelled Master detail; `grid` and `tabs` persist too.
 
 **rtop.** `t` in Rakumux mode or Settings → rtop (`app/rtop.rs`, `components/rtop.rs`) shows, in
-the drawer's rtop tab (above), what this machine and Rakumux use now, read with
-`SessionApi::resources` off the UI thread about every second while that tab is on screen (the first
-two samples half a second apart; off screen its samples are forgotten, its sort, folds and
-selection kept), nothing recorded: a line for the machine (CPU of every CPU together, memory used of total, bytes
-in and out a second; the bars go, then the parts wrap, when narrow), then rows: this window, the
-server (`rakumux-ptyd`), the other windows, then the other clients (`rakumux-api`, the account
-service, CLI calls), a blank line, and each session (name, app and folder) with its processes as
-a tree under it when it runs more than one (each with its arguments, quieter), and their
-`Total` pinned at the bottom. Columns: pid, CPU (a percentage of one CPU, as `top`; orange from
+the drawer's rtop tab (above), what this machine and Rakumux use over time, drawn as btop does,
+read with `SessionApi::resources` off the UI thread about every second while that tab is on
+screen (the first two samples half a second apart). Each sample's use is kept in this window's
+memory only (`app/rtop/history.rs`): a point a sample, the last 300 (about five minutes), for the
+machine, Rakumux's total and each row (at most 512 rows' series, processes last), a row's dropped
+when it's gone; off screen the samples are forgotten and the history kept with a gap, its sort,
+folds and selection too. First the machine's `cpu` (of every CPU together), `mem` (used of total)
+and `net` panels (`components/rtop/graph.rs`: braille graphs, the newest at the right, coloured
+by level, green, orange from half, pink from four fifths; Rakumux's own share in the accent under
+the machine's; download up, upload down; the current values in their borders), side by side from
+90 columns, else cpu over mem and net; short drawers give them a line each, then a line of
+numbers. Then rows: this window, the server (`rakumux-ptyd`), the other windows, then the other
+clients (`rakumux-api`, the account service, CLI calls), a blank line, and each session (name,
+app and folder) with its processes as a tree under it when it runs more than one (each with its
+arguments, quieter), and their `Total` under them. Columns: a graph of the sorted column (CPU,
+by name too, and network each on its own scale; memory on one scale for every row; a known zero
+is a baseline dot, unknown nothing), pid, CPU (a percentage of one CPU, as `top`; orange from
 50%, pink from 100%), resident memory, and bytes received and sent a second over its TCP
-connections (`—` where unknown); narrower, the pid goes, then received and sent merge, then
-network goes. Rates are the last two samples' differences (a pid whose name changed gets none).
-The column the sessions are sorted by has a `▾`. With the drawer's keys, `↑`/`↓` (`j`/`k`, the
+connections (`—` where unknown); narrower, the graphs go, then the pid, then received and sent
+merge, then network goes. Rates are the last two samples' differences (a pid whose name changed
+gets none). The column the sessions are sorted by has a `▾`. Under the rows, while the height
+allows, the selected row's panel: its `cpu`, `mem` and `net` over time (it goes first when
+short). With the drawer's keys, `↑`/`↓` (`j`/`k`, the
 cycle keys), PgUp/PgDn, `Ctrl-d`/`Ctrl-u` and Home/End (`gg`/`G`) select (the selected row is
 highlighted, and a click selects one: again, or a tap on a phone, goes in; the wheel moves);
 `←`/`→` (`h`/`l`) and Space fold and unfold a session's processes; `s` sorts sessions by memory
