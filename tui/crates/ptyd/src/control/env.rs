@@ -37,7 +37,9 @@ pub(crate) struct Identity<'a> {
     pub session_id: &'a SessionId,
     pub token: &'a Token,
     pub socket: &'a Path,
-    /// Daemon-configured `RAKUMUX_BIN`; when None, the request's value (if
+    /// Daemon-configured `RAKUMUX_BIN`; when None, or when that file is gone
+    /// (the install that started the daemon was removed: it keeps its
+    /// launcher's path across restarts in place), the request's value (if
     /// any) is kept.
     pub rakumux_bin: Option<&'a Path>,
 }
@@ -144,7 +146,7 @@ pub(crate) fn terminal_env(
             && !agents::inherited_marker(name)
             && !tool_settings.contains(name)
     });
-    if let Some(bin) = rakumux_bin {
+    if let Some(bin) = rakumux_bin.filter(|bin| bin.is_file()) {
         env.insert(rakumux_env::BIN.into(), bin.to_string_lossy().into_owned());
     }
     env.insert("TERM".into(), "xterm-256color".into());
@@ -264,13 +266,14 @@ mod tests {
 
     #[test]
     fn child_env_strips_markers_and_injects_identity() {
+        let daemon_bin = tempfile::NamedTempFile::new().unwrap();
         let id = SessionId::from_string("S1");
         let token = Token::from_string("tok");
         let identity = Identity {
             session_id: &id,
             token: &token,
             socket: Path::new("/tmp/o.sock"),
-            rakumux_bin: Some(Path::new("/opt/rakumux")),
+            rakumux_bin: Some(daemon_bin.path()),
         };
         let request = pairs(&[
             ("PATH", "/bin"),
@@ -297,7 +300,7 @@ mod tests {
         let expected = pairs(&[
             ("COLORTERM", "truecolor"),
             ("PATH", "/bin"),
-            ("RAKUMUX_BIN", "/opt/rakumux"),
+            ("RAKUMUX_BIN", daemon_bin.path().to_str().unwrap()),
             ("RAKUMUX_HOME", "/h"),
             ("RAKUMUX_SESSION_ID", "S1"),
             ("RAKUMUX_SESSION_TOKEN", "tok"),
@@ -377,6 +380,21 @@ mod tests {
             token: &token,
             socket: Path::new("/s"),
             rakumux_bin: None,
+        };
+        let env = child_env(&pairs(&[("RAKUMUX_BIN", "/client/rakumux")]), &identity);
+        assert!(env.contains(&("RAKUMUX_BIN".into(), "/client/rakumux".into())));
+    }
+
+    #[test]
+    fn request_rakumux_bin_kept_when_the_daemons_is_gone() {
+        let id = SessionId::from_string("S1");
+        let token = Token::from_string("tok");
+        let gone = tempfile::tempdir().unwrap().path().join("rakumux.sh");
+        let identity = Identity {
+            session_id: &id,
+            token: &token,
+            socket: Path::new("/s"),
+            rakumux_bin: Some(&gone),
         };
         let env = child_env(&pairs(&[("RAKUMUX_BIN", "/client/rakumux")]), &identity);
         assert!(env.contains(&("RAKUMUX_BIN".into(), "/client/rakumux".into())));
