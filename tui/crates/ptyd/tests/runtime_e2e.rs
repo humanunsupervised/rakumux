@@ -437,7 +437,7 @@ fn serve_runs_sessions_with_the_real_control_layer() {
         other => panic!("{other:?}"),
     }
 
-    // Delete: terminate, forget, remove saved files; nothing comes back.
+    // Delete: terminate and move it to the history, its saved screen kept.
     assert_eq!(
         client.request(&Request::SessionDelete {
             id: session.id.clone()
@@ -447,7 +447,18 @@ fn serve_runs_sessions_with_the_real_control_layer() {
     assert!(stream.wait_closed());
     let dir = home.layout.session_dir(&session.id);
     std::thread::sleep(Duration::from_millis(500));
-    assert!(!dir.exists(), "{} recreated after delete", dir.display());
+    assert!(dir.join("scrollback.ansi").exists(), "{}", dir.display());
+    match client.request(&Request::SessionHistory {
+        query: None,
+        limit: None,
+        before: None,
+    }) {
+        Response::History(page) => {
+            let ids: Vec<_> = page.sessions.iter().map(|s| &s.id).collect();
+            assert_eq!(ids, [&session.id]);
+        }
+        other => panic!("{other:?}"),
+    }
 
     assert_eq!(client.request(&Request::DaemonShutdown), Response::Ok);
     assert_eq!(wait_exit(&mut daemon), Some(0));
