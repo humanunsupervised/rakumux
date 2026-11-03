@@ -6,8 +6,8 @@
 # file by tui/src/updater/signature.rs), https://rakumux.com/install.sh (a copy,
 # written by `install/scripts/release-keys.sh sync`) and publish-npm.sh accept a
 # release only when its checksums.txt.minisig is a signature by one of these
-# keys. The secrets live on the maintainer's Mac and in 1Password ("Rakumux
-# release key", Private vault), never on a server or in GitHub.
+# keys. The maintainer keeps the secrets offline, never on a server or in
+# GitHub.
 #
 # One key for now. A second key (an offline backup, or a successor) added here
 # reaches installed copies with the next release they verify, signed by a key

@@ -12,7 +12,7 @@
 # RAKUMUX_RELEASE_KEYS names another keys file (tests). A release's
 # checksums.txt.minisig is a minisign signature of its checksums.txt whose
 # trusted comment begins `rakumux-release tag:<tag> file:checksums.txt`
-# (sign-release.sh makes it). See "Signed releases" in install/AGENTS.md.
+# (the maintainer's signing makes it). See "Signed releases" in install/AGENTS.md.
 ###############################################################################
 set -euo pipefail
 

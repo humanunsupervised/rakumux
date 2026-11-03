@@ -37,12 +37,12 @@ privacy. Previously public Apache-2.0 marketing/contracts retain their license.
 - [ ] Generate `THIRD_PARTY_NOTICES` and run the isolated package-install checks.
 - [ ] Create the release against the exact reviewed source commit; package scripts verify its
   `v<version>` tag rather than letting GitHub select a default-branch commit.
-- [ ] Once (done for the main key): the release signing keys, made on the Mac with the secret in
-  1Password, are listed in `install/release-keys.pub` and copied into `landing/public/install.sh`
+- [ ] Once (done for the main key): the release signing keys, their secrets kept offline, are
+  listed in `install/release-keys.pub` and copied into `landing/public/install.sh`
   (`install/scripts/release-keys.sh check` and `sync`). Only public keys go in the repository.
   See "Signed releases" in [install/AGENTS.md](install/AGENTS.md).
-- [ ] Each release: once CI has uploaded the draft, sign and publish it on the Mac with
-  `./install/scripts/sign-release.sh v<version>`, after reading the checksums it shows. Never
+- [ ] Each release: once CI has uploaded the draft, the maintainer signs and publishes it
+  (see "Signing a release" in [install/AGENTS.md](install/AGENTS.md)). Never
   publish a draft from GitHub's page: installers and the updater refuse an unsigned release, and
   the npm job fails on it.
 - [ ] For marketing-only deployment, verify hosting and DNS, then deploy static `landing/`.
@@ -54,7 +54,7 @@ or credentials. Never publish private cloud source as part of this repository's 
 
 The current production entry point is `./release.sh`. GitHub Actions builds a draft release
 only after every selected platform and isolated package-install check succeeds; the maintainer
-signs and publishes it on their Mac (`install/scripts/sign-release.sh`): the GitHub release that
+signs and publishes it: the GitHub release that
 `curl -fsSL https://rakumux.com/install.sh | bash` installs, after which the same packages go to
 npm as `rakumux` (a prerelease under the `next` dist-tag; not without all three targets). Select one target or a comma-separated list with `--targets`; without an
 override, macOS Intel, macOS Apple Silicon and Linux x64 are all built on native GitHub-hosted

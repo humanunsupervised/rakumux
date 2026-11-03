@@ -25,9 +25,8 @@ This directory holds the shell-level and manual checks.
 - **`test-release-signatures.sh`** - Release signatures with throwaway keys: `install.sh`'s
   checks with minisign, with OpenSSL 3 and with neither (signed, unsigned, another key, a
   signature moved from another release, a tampered package), that its copy of the check and
-  keys match `install/scripts/release-keys.sh` and `install/release-keys.pub`, and
-  `sign-release.sh` against a fake `gh`. These two need `minisign` (skipped without it, except
-  in CI).
+  keys match `install/scripts/release-keys.sh` and `install/release-keys.pub`. These two need
+  `minisign` (skipped without it, except in CI).
 
 ```bash
 bash tests/test-repository.sh

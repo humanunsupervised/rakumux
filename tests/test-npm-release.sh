@@ -5,7 +5,7 @@
 # network, the checkout's install/npm or a registry.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Releases are signed (sign-release.sh); minisign makes the fixtures' signatures.
+# Releases are signed; minisign makes the fixtures' signatures.
 if ! command -v minisign >/dev/null 2>&1; then
     if [[ -n "${CI:-}" ]]; then
         echo 'minisign is needed to test npm release staging' >&2

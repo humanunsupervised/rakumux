@@ -1,6 +1,6 @@
 #!/bin/bash
 # Release through GitHub Actions: native binaries to a draft GitHub release,
-# signed and published on the maintainer's Mac (sign-release.sh), then npm.
+# signed and published by the maintainer, then npm.
 # No Homebrew publishing.
 set -euo pipefail
 
@@ -20,8 +20,8 @@ Usage: ./release.sh [VERSION] [--targets=LIST] [--increment=major|minor|patch] [
 
 Creates and pushes a reviewed source tag. GitHub Actions builds and tests only
 the selected native packages, verifies checksums and uploads them as a draft
-release. Then, on your Mac, install/scripts/sign-release.sh vVERSION signs its
-checksums.txt with the release key and publishes it: the release used by
+release. The maintainer then signs its checksums.txt with the release key and
+publishes it: the release used by
 https://rakumux.com/install.sh and the in-app updater, which refuse unsigned
 releases. Publishing sends those packages to npm as rakumux (when all three
 targets are selected; a prerelease under the next dist-tag).
@@ -30,7 +30,7 @@ targets are selected; a prerelease under the next dist-tag).
   --targets=LIST   One target or comma-separated targets (alias: --target)
                    Defaults: macos-intel,macos-arm64,linux-x64 (native CI runners)
   --increment=TYPE Auto-version increment (default: patch)
-  --draft          sign-release.sh signs it but leaves the GitHub release unpublished
+  --draft          Signed, but the GitHub release is left unpublished
   --prerelease     Publish a prerelease, without changing the latest stable release
   --dry-run        Validate and show the tag operation; push and publish nothing
 
@@ -97,4 +97,4 @@ git tag -a "$tag" -m "Rakumux $tag" -m "Release-Mode: $MODE" -m "Release-Targets
 git push origin "refs/tags/$tag"
 printf 'Binary release started: https://github.com/%s/actions/workflows/release.yml\n' "$REPO"
 printf 'CI builds a draft once every selected target and package check succeeds.\n'
-printf 'Then, on your Mac: ./install/scripts/sign-release.sh %s (signs and publishes it; npm follows)\n' "$tag"
+printf 'Then sign the draft of %s and publish it; npm follows.\n' "$tag"

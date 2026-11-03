@@ -1,10 +1,9 @@
 name: Binary release
 
 # A pushed v* tag builds the release and leaves it a draft, unsigned. The
-# maintainer signs it on their Mac (install/scripts/sign-release.sh), which
-# uploads checksums.txt.minisig and publishes it: that `published` event runs
-# the npm job, which checks the signature first. The signing key is never in
-# GitHub. npm's trusted publisher names this file, so npm stays in it.
+# maintainer signs it offline, uploads checksums.txt.minisig and publishes
+# it: that `published` event runs the npm job, which checks the signature
+# first. The signing key is never in GitHub. npm's trusted publisher names this file, so npm stays in it.
 on:
   push:
     tags: ['v*']
@@ -116,7 +115,7 @@ jobs:
             cat "$directory/checksums.txt" >> release-upload/checksums.txt
           done
           (cd release-upload && sha256sum -c checksums.txt)
-      # Never published from here: only a signed release is (sign-release.sh).
+      # Never published from here: only a signed release is.
       - name: Upload the draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -132,12 +131,12 @@ jobs:
           else
             gh release create "$tag" --verify-tag --draft --title "Rakumux $tag" --generate-notes release-upload/*
           fi
-          echo "::notice::$tag is a draft ($mode). Sign and publish it on your Mac: ./install/scripts/sign-release.sh $tag"
+          echo "::notice::$tag is a draft ($mode). It is published once signed."
 
   # The published, signed GitHub release's packages, as install.sh downloads
   # them, go to npm as `rakumux`. Trusted publishing (OIDC): no npm secret;
-  # npmjs.com trusts this repository's release.yml. Runs when sign-release.sh
-  # publishes the release; publish-npm.sh checks its signature against
+  # npmjs.com trusts this repository's release.yml. Runs when the signed
+  # release is published; publish-npm.sh checks its signature against
   # install/release-keys.pub first. If it fails, re-run this job; a version
   # on npm is skipped.
   npm:

@@ -1,6 +1,7 @@
 //! Release signatures. A release's `checksums.txt` is signed with minisign
 //! (Ed25519, prehashed) by a key built in from `install/release-keys.pub`,
-//! with a trusted comment naming the release (`install/scripts/sign-release.sh`).
+//! with a trusted comment naming the release (see "Signed releases" in
+//! `install/AGENTS.md`).
 //! Nothing a release holds is trusted before its signature is: its
 //! `checksums.txt` vouches for the packages only once this has checked it.
 use anyhow::{bail, Context, Result};

@@ -82,8 +82,8 @@ bash "$ROOT/release.sh" 0.1.0 --draft >"$TEMP/output"
 grep -q 'Release-Mode: draft' "$RELEASE_TEST_LOG"
 grep -q 'Release-Targets: macos-intel,macos-arm64,linux-x64' "$RELEASE_TEST_LOG"
 grep -q 'push origin refs/tags/v0.1.0' "$RELEASE_TEST_LOG"
-# CI leaves a draft; signing on the Mac publishes it.
-grep -q 'sign-release.sh v0.1.0' "$TEMP/output"
+# CI leaves a draft; signing publishes it.
+grep -q 'sign the draft of v0.1.0' "$TEMP/output"
 
 bash "$ROOT/release.sh" 0.1.1 --target=linux-x64 --dry-run >"$TEMP/output"
 grep -q 'Targets: linux-x64' "$TEMP/output"

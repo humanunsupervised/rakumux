@@ -1,7 +1,6 @@
 #!/bin/bash
 # Release signatures, offline: install.sh's checks (with minisign, with
-# OpenSSL 3, and with neither), release-keys.sh, and sign-release.sh against
-# a fake gh. Throwaway keys made here; never the network, GitHub or a real
+# OpenSSL 3, and with neither) and release-keys.sh. Throwaway keys made here; never the network, GitHub or a real
 # install. Needs minisign to make the signatures (skipped without it, except
 # in CI).
 set -euo pipefail
@@ -66,7 +65,7 @@ printf '%s\n%s\n' "$(public main)" "$(public main)" >"$TEMP/keys/twice.pub"
 expect_failure 'twice' env RAKUMUX_RELEASE_KEYS="$TEMP/keys/twice.pub" bash "$KEYS_SCRIPT" check
 expect_failure 'no release keys yet' env RAKUMUX_RELEASE_KEYS="$TEMP/keys/none.pub" bash "$KEYS_SCRIPT" check
 
-# sign_with KEY FILE TAG [COMMENT]: FILE.minisig as sign-release.sh makes it.
+# sign_with KEY FILE TAG [COMMENT]: FILE.minisig as a release has it.
 sign_with() {
     local comment="${4:-rakumux-release tag:$3 file:checksums.txt timestamp:1}"
     minisign -S -s "$TEMP/keys/$1.key" -m "$2" -x "$2.minisig" -t "$comment" >/dev/null
@@ -216,113 +215,5 @@ for mode in $modes; do
     expect_failure 'not a valid signature' run "$FIXTURE/v0.1.54/checksums.txt" "$FIXTURE/v0.1.54/checksums.txt.minisig" v0.1.54
     expect_failure 'not a valid signature' run "$FIXTURE/v0.1.56/checksums.txt" "$FIXTURE/v0.1.56/checksums.txt.minisig" v0.1.56
 done
-
-# sign-release.sh against a fake gh: GH holds each release's state and assets.
-GH="$TEMP/gh"
-mkdir -p "$GH"
-cat >"$TEMP/fake/gh" <<'EOF'
-#!/bin/bash
-set -eu
-printf '%s\n' "$*" >>"$GH/log"
-repo="" dir="" pattern="" jq="" args=()
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --repo) repo="$2"; shift 2 ;;
-        --dir) dir="$2"; shift 2 ;;
-        --pattern) pattern="$2"; shift 2 ;;
-        --jq) jq="$2"; shift 2 ;;
-        --json) shift 2 ;;
-        *) args+=("$1"); shift ;;
-    esac
-done
-[[ "${args[0]}" == api || "$repo" == humanunsupervised/rakumux ]] || exit 3
-case "${args[0]} ${args[1]}" in
-    "release view")
-        release="$GH/${args[2]}"
-        [[ -d "$release" ]] || exit 1
-        case "$jq" in
-            .isDraft) cat "$release/draft" ;;
-            '.assets[].name') ls "$release/assets" ;;
-        esac ;;
-    "release download")
-        mkdir -p "$dir"
-        for file in "$GH/${args[2]}/assets/"*; do
-            if [[ -z "$pattern" || "${file##*/}" == "$pattern" ]]; then cp "$file" "$dir/"; fi
-        done ;;
-    "release upload") cp "${args[3]}" "$GH/${args[2]}/assets/" ;;
-    "release edit")
-        printf '%s\n' "${args[*]:3}" >"$GH/${args[2]}/edited"
-        case " ${args[*]} " in *" --draft=false "*) echo false >"$GH/${args[2]}/draft" ;; esac ;;
-    api*)
-        case "${args[1]}" in
-            repos/humanunsupervised/rakumux/git/ref/tags/*)
-                tag="${args[1]##*/}"
-                [[ -f "$GH/$tag/mode" ]] || exit 1
-                echo "tag object-$tag" ;;
-            repos/humanunsupervised/rakumux/git/tags/object-*)
-                tag="${args[1]##*/object-}"
-                case "$jq" in
-                    .message) printf 'Rakumux %s\n\nRelease-Mode: %s\n\nRelease-Targets: linux-x64\n' "$tag" "$(cat "$GH/$tag/mode")" ;;
-                    .object.sha) echo 0123456789abcdef0123456789abcdef01234567 ;;
-                esac ;;
-            *) exit 4 ;;
-        esac ;;
-    *) exit 5 ;;
-esac
-EOF
-chmod +x "$TEMP/fake/gh"
-export GH
-# draft TAG MODE: a draft as the workflow leaves it.
-draft() {
-    rm -rf "${GH:?}/$1"
-    mkdir -p "$GH/$1/assets"
-    echo true >"$GH/$1/draft"
-    echo "$2" >"$GH/$1/mode"
-    package "$1-src" >/dev/null
-    cp "$FIXTURE/$1-src/"* "$GH/$1/assets/"
-}
-sign() { PATH="$TEMP/fake:$PATH" bash "$ROOT/install/scripts/sign-release.sh" "$@"; }
-uploaded() { [[ -f "$GH/$1/assets/checksums.txt.minisig" ]]; }
-
-draft v0.2.0 stable
-sign v0.2.0 --key "$TEMP/keys/main.key" --yes >"$TEMP/output"
-uploaded v0.2.0 || fail "no signature uploaded"
-bash "$KEYS_SCRIPT" verify "$GH/v0.2.0/assets/checksums.txt" "$GH/v0.2.0/assets/checksums.txt.minisig" v0.2.0 >/dev/null
-grep -qx -- '--draft=false --latest' "$GH/v0.2.0/edited" || fail "not published as the latest release"
-grep -q 'Published v0.2.0' "$TEMP/output"
-# The signed release installs.
-mkdir "$FIXTURE/v0.2.0" && cp "$GH/v0.2.0/assets/"* "$FIXTURE/v0.2.0/"
-install minisign 0.2.0 >/dev/null 2>&1 && installed v0.2.0-src || fail "the signed release didn't install"
-
-draft v0.2.1-rc.1 prerelease
-sign 0.2.1-rc.1 --key "$TEMP/keys/backup.key" --yes >/dev/null
-grep -qx -- '--draft=false --prerelease --latest=false' "$GH/v0.2.1-rc.1/edited" || fail "not a prerelease"
-draft v0.2.2 draft
-sign v0.2.2 --key "$TEMP/keys/main.key" --yes >"$TEMP/output"
-uploaded v0.2.2 && [[ ! -e "$GH/v0.2.2/edited" ]] || fail "a --draft release was published"
-
-# Refused, with nothing uploaded or published.
-draft v0.2.3 stable
-expect_failure "isn't one of install/release-keys.pub" sign v0.2.3 --key "$TEMP/keys/stranger.key" --yes
-expect_failure 'already published' sign v0.2.0 --key "$TEMP/keys/main.key" --yes
-echo false >"$GH/v0.2.3/draft"
-expect_failure 'already published' sign v0.2.3 --key "$TEMP/keys/main.key" --yes
-draft v0.2.3 stable
-printf 'tampered' >>"$GH/v0.2.3/assets/rakumux-$platform.tar.gz"
-expect_failure "doesn't match checksums.txt" sign v0.2.3 --key "$TEMP/keys/main.key" --yes
-draft v0.2.3 stable
-printf 'extra' >"$GH/v0.2.3/assets/rakumux-other.tar.gz"
-expect_failure "doesn't list" sign v0.2.3 --key "$TEMP/keys/main.key" --yes
-draft v0.2.3 stable
-echo '' >"$GH/v0.2.3/mode"
-expect_failure 'no Release-Mode' sign v0.2.3 --key "$TEMP/keys/main.key" --yes
-draft v0.2.3 stable
-expect_failure 'no secret key' sign v0.2.3 --key "$TEMP/keys/missing.key" --yes
-expect_failure 'no release v9.9.9' sign v9.9.9 --key "$TEMP/keys/main.key" --yes
-expect_failure 'not a release tag' sign latest --yes
-expect_failure 'no release keys yet' env RAKUMUX_RELEASE_KEYS="$TEMP/keys/none.pub" \
-    PATH="$TEMP/fake:$PATH" bash "$ROOT/install/scripts/sign-release.sh" v0.2.3 --key "$TEMP/keys/main.key" --yes
-uploaded v0.2.3 && fail "a refused release was signed"
-[[ ! -e "$GH/v0.2.3/edited" ]] || fail "a refused release was published"
 
 echo "Release signature tests passed ($modes)."

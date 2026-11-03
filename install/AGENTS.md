@@ -2,7 +2,7 @@
 
 Rakumux ships as four native binaries plus a small bash launcher, through three channels (npm,
 Homebrew, release tarballs) that all behave the same way. Every release publishes the tarballs
-(GitHub) and npm; Homebrew isn't published. Every release is signed on the maintainer's Mac
+(GitHub) and npm; Homebrew isn't published. Every release is signed by the maintainer, offline,
 before it's published (see [Signed releases](#signed-releases)). The source and releases live together
 in `humanunsupervised/rakumux`. The website is <https://rakumux.com>.
 
@@ -93,7 +93,6 @@ install/
     ├── test-install.sh            # Pre-deployment checks of release/
     ├── create-github-release.sh   # gh release create + upload tarballs; notes from
     │                              # release-notes/<version>.md when it exists
-    ├── sign-release.sh            # On the Mac: check a draft, sign checksums.txt, publish it
     ├── release-keys.sh            # The keys: list, check, verify a signature, sync into install.sh
     ├── generate-release-notes.sh  # Release notes from commit subjects (fallback)
     ├── release-homebrew.sh        # Render, verify (brew), push the formula
@@ -121,10 +120,9 @@ selection and builds only those targets on native runners. Supported selections 
 of the invoking machine. `--targets` overrides that selection.
 Every selected package passes `test-install.sh` with an isolated install prefix. The publish
 job verifies the complete selected asset set and combines its checksums before uploading a draft,
-and stops there: the workflow never publishes a release. On the Mac,
-`install/scripts/sign-release.sh v<version>` signs the draft's `checksums.txt` and publishes it
-(see [Signed releases](#signed-releases)); `release.sh` says so when it has pushed the tag.
-`--draft` makes sign-release.sh leave it unpublished; `--prerelease` does not replace the latest
+and stops there: the workflow never publishes a release. The maintainer signs the draft and
+publishes it (see [Signing a release](#signing-a-release)).
+`--draft` leaves it unpublished once signed; `--prerelease` does not replace the latest
 stable release.
 The public installer and the in-app updater download these GitHub release assets and refuse a
 release without a valid signature. Publishing runs the `npm` job, which publishes the same
@@ -134,7 +132,7 @@ under the `next` dist-tag. Homebrew isn't published.
 
 Local prerequisites: git push access to the public repository; curl for automatic version
 selection; release keys in `install/release-keys.pub` (`release.sh` refuses to tag without them).
-To sign: the Mac with the release key, `gh` (logged in with push access) and `minisign`. No npm
+Signing needs the release key (see [Signed releases](#signed-releases)). No npm
 or Homebrew login is needed. Actions uses its scoped
 `GITHUB_TOKEN`, and npm trusts the workflow (trusted publishing, no npm secret). For manual package builds, install Rust and cargo-about; cross-building Linux
 from macOS also needs cargo-zigbuild and zig. Follow `PUBLISHING.md` before publishing source.
@@ -179,7 +177,7 @@ Formula rules:
 ### npm
 
 Every release goes to npm as `rakumux`, made of the packages `install.sh` installs: when
-sign-release.sh publishes the signed GitHub release (the `release: published` event),
+the signed GitHub release is published (the `release: published` event),
 `release.yml`'s `npm` job (`contents: read`, `id-token: write`; Node 24 with `npm@11.21.1`) runs
 `publish-npm.sh <version> --from-release --tag=<latest|next>` from the tag's source. One path for
 CI and by hand:
@@ -247,8 +245,8 @@ fails there with a clear message.
 
 A compromised GitHub account or workflow could otherwise publish any tarball together with a
 `checksums.txt` that vouches for it. So every release's `checksums.txt` is signed with
-**minisign** (Ed25519) by a key made on the maintainer's Mac, password-protected, its secret in
-1Password: never on a server, in GitHub or in CI. Installed Rakumux, `install.sh` and
+**minisign** (Ed25519) by a password-protected key the maintainer keeps offline: never on a
+server, in GitHub or in CI. Installed Rakumux, `install.sh` and
 the npm job accept a release only with a valid signature by a key in `install/release-keys.pub`.
 
 - **The signature**: `checksums.txt.minisig`, a prehashed minisign signature of `checksums.txt`
@@ -256,8 +254,7 @@ the npm job accept a release only with a valid signature by a key in `install/re
   The trusted comment is signed too, and every verifier checks that it names the release being
   installed, so a signature can't be moved onto another release.
 - **The keys**: `install/release-keys.pub` lists the public keys, one per line. Today it lists
-  one, the **main** key (`RWSbAhedaBF6C8DldJ7V1E44o4xiwGcF5k8uNDRmH0+k4drHtANpaq2E`), made on
-  the maintainer's Mac, its secret in 1Password ("Rakumux release key", Private vault). Any key
+  one, the **main** key (`RWSbAhedaBF6C8DldJ7V1E44o4xiwGcF5k8uNDRmH0+k4drHtANpaq2E`). Any key
   listed signs a release installed builds accept; a second one can be added at any time (see
   [Rotation](#rotation)). `tui/src/updater/signature.rs` builds them in (`include_str!`);
   `landing/public/install.sh` carries a copy in `RELEASE_KEYS` (written by `release-keys.sh
@@ -285,67 +282,22 @@ the npm job accept a release only with a valid signature by a key in `install/re
   `RAKUMUX_VERSION` it resolves the latest release's tag first, so every file comes from that
   one release.
 
-### One-time setup on the Mac
+### Signing a release
 
-Done for the main key; kept here for a new key. Commands for macOS with Homebrew and the
-1Password CLI:
-
-```bash
-brew install minisign gh 1password-cli
-gh auth login                                   # push access to humanunsupervised/rakumux
-
-# The key, password-protected (minisign asks for the password twice).
-mkdir -p ~/.minisign && chmod 700 ~/.minisign
-minisign -G -p ~/.minisign/rakumux-release.pub -s ~/.minisign/rakumux-release.key
-
-# The secret into 1Password: a Secure Note "Rakumux release key" in the Private vault whose
-# notes are the whole key file, and a password field holding the key's password. Then check
-# that it reads back the same, and remove the file from disk.
-pbcopy < ~/.minisign/rakumux-release.key       # paste into the note's notes in 1Password
-op read "op://Private/Rakumux release key/notesPlain" | diff - ~/.minisign/rakumux-release.key
-rm -P ~/.minisign/rakumux-release.key
-```
-
-Then, in a checkout of the public repository, list the public key and check the secret signs
-for it:
-
-```bash
-printf '%s main\n' "$(tail -1 ~/.minisign/rakumux-release.pub)" >> install/release-keys.pub
-./install/scripts/release-keys.sh check      # lists the keys
-./install/scripts/release-keys.sh sync       # the same keys into landing/public/install.sh
-bash tests/test-release-signatures.sh        # throwaway keys; checks the copy matches
-printf 'test\n' > /tmp/checksums.txt
-minisign -S -s <(op read "op://Private/Rakumux release key/notesPlain") -m /tmp/checksums.txt \
-    -t "rakumux-release tag:v0.0.0 file:checksums.txt"
-./install/scripts/release-keys.sh verify /tmp/checksums.txt /tmp/checksums.txt.minisig v0.0.0
-```
-
-Commit `install/release-keys.pub` and `landing/public/install.sh` and push them to public `main`
-(the site serves the installer from there). The keys are public; nothing secret goes in GitHub.
-
-### Each release
-
-```bash
-./release.sh                          # tags; CI builds, checks and uploads a draft
-# when the workflow's "Upload the draft release" job is done:
-./install/scripts/sign-release.sh v<version> --op "op://Private/Rakumux release key/notesPlain"
-```
-
-`sign-release.sh` downloads the draft's `checksums.txt` and every asset, checks each against it
-(and that nothing else is there), shows the release, its commit and checksums and asks before
-signing; minisign asks for the key's password. It checks the signature against
-`install/release-keys.pub`, checks that the draft's `checksums.txt` didn't change meanwhile,
-uploads `checksums.txt.minisig` and publishes it as the tag's `Release-Mode` says (stable: the
-latest release; prerelease; draft: signed, left unpublished). Publishing runs the npm job.
-`--key FILE` signs with a key file instead of 1Password. A published release is never re-signed.
+The maintainer signs each draft offline: `checksums.txt` with minisign (prehashed, the trusted
+comment above), checked against `install/release-keys.pub` (`install/scripts/release-keys.sh
+verify <checksums.txt> <checksums.txt.minisig> v<version>`), then uploads
+`checksums.txt.minisig` and publishes the release as the tag's `Release-Mode` says (stable: the
+latest release; prerelease; draft: left unpublished). Publishing runs the npm job. The signing
+tools aren't part of this repository. A published release is never re-signed.
 
 ### Rotation
 
 An installation trusts exactly the keys its own build lists, so a key change reaches it only
 through a release signed by a key it already trusts.
 
-- **Adding a key** (an offline backup, or a successor): make it as above (a backup's secret on
-  a drive kept offline, with its own password), add its line to `install/release-keys.pub`
+- **Adding a key** (an offline backup, or a successor): make it with `minisign -G`
+  (password-protected, its secret kept offline), add its line to `install/release-keys.pub`
   (`<key> backup`), `release-keys.sh sync`, and release as usual, signed by the main key.
   Every installation that verifies that release trusts both keys from then on; `install.sh`
   trusts both as soon as the site serves the synced copy.

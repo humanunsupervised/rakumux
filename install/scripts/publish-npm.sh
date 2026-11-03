@@ -170,7 +170,7 @@ for (const asset of release.assets || []) console.log("asset " + asset.name);
     for name in "${RELEASE_ASSETS[@]}"; do
         if ! grep -qxF "asset $name" <<<"$facts"; then
             if [[ "$name" == checksums.txt.minisig ]]; then
-                error "Release $tag isn't signed (no checksums.txt.minisig); sign it with install/scripts/sign-release.sh"
+                error "Release $tag isn't signed (no checksums.txt.minisig); it's published only once signed"
             else
                 error "Release $tag has no $name; npm needs all of: ${PLATFORMS[*]}"
             fi
