@@ -629,13 +629,13 @@ fn fit_git(repo: &str, branch: &str, room: usize) -> (String, String) {
     (String::new(), truncate(branch, room))
 }
 
-/// A place's repository's name and branch as spans in `style`, with the
-/// gap between them.
+/// A place's repository's name (bold) and branch as spans in `style`, with
+/// the gap between them.
 fn git_spans(repo: String, branch: String, style: Style) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let both = !repo.is_empty() && !branch.is_empty();
     if !repo.is_empty() {
-        spans.push(Span::styled(repo, style));
+        spans.push(Span::styled(repo, style.add_modifier(Modifier::BOLD)));
     }
     if both {
         spans.push(Span::raw(REPO_GAP));
@@ -1783,10 +1783,17 @@ mod tests {
                 "{width}: {line:?}"
             );
         }
-        assert_eq!(
-            text(&place_content(&h.app, &long, 40, false, None, 1000).lines),
-            ["▸ worktrees/fix  focal-md ⎇ fix  3"]
-        );
+        let wide = place_content(&h.app, &long, 40, false, None, 1000).lines;
+        assert_eq!(text(&wide), ["▸ worktrees/fix  focal-md ⎇ fix  3"]);
+        // The repository's name is bold; the branch isn't.
+        let style_of = |content: &str| {
+            wide[0]
+                .iter()
+                .find(|span| span.content == content)
+                .map(|span| span.style.add_modifier)
+        };
+        assert_eq!(style_of("focal-md"), Some(Modifier::BOLD));
+        assert_eq!(style_of("⎇ fix"), Some(Modifier::empty()));
         // The repository's name is cut, then goes, before the count.
         assert_eq!(
             text(&place_content(&h.app, &long, 32, false, None, 1000).lines),

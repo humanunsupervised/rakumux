@@ -2604,12 +2604,16 @@ mod tests {
         assert!(pane[4].contains(" now · "), "{wide}");
         assert!(pane[4].ends_with(" sending ╮"), "{wide}");
         assert!(pane[5].starts_with(" │ Done: the parser handles"), "{wide}");
-        assert!(pane[8].starts_with(" ╰─"), "{wide}");
+        // Ten rows a card, everything it says fitting, so nothing to expand;
+        // a row between cards.
+        assert!(pane[13].starts_with(" ╰─"), "{wide}");
+        assert!(!pane[13].contains("more"), "{wide}");
+        assert_eq!(pane[14], "", "{wide}");
         assert!(
-            pane[9].starts_with(" ╭ nightly-build  claude · repo ─"),
+            pane[15].starts_with(" ╭ nightly-build  claude · repo ─"),
             "{wide}"
         );
-        assert!(pane[9].ends_with(" 5m · ● ╮"), "{wide}");
+        assert!(pane[15].ends_with(" 5m · ● ╮"), "{wide}");
         assert_eq!(
             pane[4].chars().count(),
             pane[5].trim_end_matches(' ').chars().count(),
@@ -2699,11 +2703,11 @@ mod tests {
             status_at: 1,
         }];
         let mut h = feed_harness(crate::app::testing::FakeAccount::with_feed(), Some(page));
-        // A wide screen's pane is a quarter of it.
-        let wide = render(&mut h.app, 200, 48);
+        // A wide screen's pane is a quarter of it (at most 60 columns).
+        let wide = render(&mut h.app, 240, 48);
         let pane = pane_column(&wide, h.app.screen().feed.unwrap().x);
         assert!(
-            pane[4].starts_with(" ╭ parser  claude · fix/csv ─"),
+            pane[4].starts_with(" ╭ parser  claude · repo ⎇ fix/csv ─"),
             "{wide}"
         );
         assert!(pane[4].ends_with(" 3m · ✓ answered ╮"), "{wide}");

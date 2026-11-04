@@ -1383,6 +1383,10 @@ impl App {
                     self.click_feed_entry(index);
                     return;
                 }
+                Some(Hit::FeedExpand(index)) => {
+                    self.click_feed_expand(index);
+                    return;
+                }
                 Some(Hit::FeedReply) => {
                     self.show_drawer_tab(DrawerTab::Feed);
                     self.open_feed_reply();

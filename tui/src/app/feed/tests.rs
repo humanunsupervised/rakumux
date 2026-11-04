@@ -1416,3 +1416,112 @@ fn the_services_name_for_this_machine_replaces_the_hostname() {
     });
     assert_eq!(store.machine(), "studio-6m8b");
 }
+
+/// The feed's lines from its left edge, each row's end trimmed.
+fn feed_lines(h: &mut Harness) -> Vec<String> {
+    let area = h.app.area;
+    let backend = ratatui::backend::TestBackend::new(area.width, area.height);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
+    let feed = h.app.screen().feed.unwrap();
+    let buffer = terminal.backend().buffer();
+    (feed.y..feed.bottom())
+        .map(|y| {
+            (feed.x..feed.right())
+                .map(|x| buffer.get(x, y).symbol().to_string())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn cards_are_ten_rows_a_row_apart_and_expand_to_show_all_they_say() {
+    let mut here = view("B", "docs", 10);
+    here.git = crate::app::testing::on_branch("paper-links");
+    if let Some(git) = here.git.as_mut() {
+        git.repo = Some("focal-md".into());
+    }
+    let fake = FakeApi::new(vec![view("A", "api", 20), here]);
+    let dir = tempfile::tempdir().unwrap();
+    let account = Arc::new(FakeAccount::with_feed());
+    let mut options = options(&fake, scope(), &dir);
+    options.account = account.clone();
+    options.settings.sessions.feed_width = Some(70);
+    let mut h = start(options, fake, dir);
+    let mut long = entry("L", "B", 2_000, Some(2));
+    long.session_name = "docs".into();
+    long.branch = Some("paper-links".into());
+    long.text = (1..=20)
+        .map(|n| format!("Line {n} of the answer."))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let mut short = entry("S", "elsewhere", 1_000, Some(1));
+    short.machine = "lab".into();
+    short.session_name = "nightly".into();
+    short.branch = Some("main".into());
+    let mut first = page(1, 2, vec![long, short], false);
+    first.machine = Some("studio".into());
+    account.queue_feed(first);
+    h.app.resize(240, 60);
+    show_feed(&mut h).await;
+    tick(&mut h, Duration::from_millis(10));
+
+    let lines = feed_lines(&mut h);
+    let top = lines
+        .iter()
+        .position(|line| line.contains("╭ docs"))
+        .unwrap_or_else(|| panic!("{lines:#?}"));
+    // The header names the folder, then the repository (this machine's
+    // session, named unlike its folder) and the branch.
+    assert!(
+        lines[top].contains("docs  claude · repo · focal-md ⎇ paper-links ─"),
+        "{lines:#?}"
+    );
+    // Ten rows, the answer's start, and `▾ more` on its bottom border.
+    assert!(
+        lines[top + 1].contains("Line 1 of the answer."),
+        "{lines:#?}"
+    );
+    assert!(
+        lines[top + 8].contains("Line 8 of the answer. …"),
+        "{lines:#?}"
+    );
+    assert!(lines[top + 9].contains("╰─"), "{lines:#?}");
+    assert!(lines[top + 9].contains(" ▾ more ─╯"), "{lines:#?}");
+    // A row, then the next card: another machine's, so no repository is
+    // known; all it says fits, so nothing to expand.
+    assert_eq!(lines[top + 10], "", "{lines:#?}");
+    assert!(
+        lines[top + 11].contains("╭ nightly  claude · repo ⎇ main ─"),
+        "{lines:#?}"
+    );
+    assert!(!lines[top + 20].contains("more"), "{lines:#?}");
+
+    // Space shows the selected card whole, blank lines kept; again, back.
+    h.press(KeyCode::Char(' ')).await;
+    let lines = feed_lines(&mut h);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Line 20 of the answer.")),
+        "{lines:#?}"
+    );
+    assert_eq!(lines[top + 2].trim_matches(|c| c == ' ' || c == '│'), "");
+    // Line n is on row 2n - 1 inside; the bottom border after line 20.
+    let bottom = top + 40;
+    assert!(lines[bottom - 1].contains("Line 20"), "{lines:#?}");
+    assert!(lines[bottom].contains(" ▴ less ─╯"), "{lines:#?}");
+    assert!(lines[bottom + 2].contains("╭ nightly"), "{lines:#?}");
+    h.press(KeyCode::Char(' ')).await;
+    assert!(feed_lines(&mut h)[top + 9].contains(" ▾ more "));
+    // A click on `▾ more` expands it too, and selects its card.
+    h.app.feed.select(1);
+    let toggle = target(&mut h, Hit::FeedExpand(0));
+    click_at(&mut h, toggle.x + 1, toggle.y);
+    assert_eq!(h.app.feed.selected_index(), Some(0));
+    assert!(feed_lines(&mut h)
+        .iter()
+        .any(|line| line.contains("Line 20 of the answer.")));
+}

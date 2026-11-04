@@ -196,6 +196,9 @@ pub enum Hit {
     /// selects it, or opens it as Enter does when it's selected already (at
     /// once on a phone).
     FeedEntry(usize),
+    /// A card's `▾ more` (`▴ less`) on its bottom border (its index): shows
+    /// it whole in the list, or back at its usual height.
+    FeedExpand(usize),
     /// The Reply button over a reply read whole: writes back to it.
     FeedReply,
     /// The `‹` on the feed's band while a reply is read: back to the cards.

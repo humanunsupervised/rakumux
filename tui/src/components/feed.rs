@@ -1,8 +1,10 @@
 //! The agent feed (`app/feed`) in the drawer ([`draw_feed`]): the drawer's
 //! band (`drawer.rs`), in the accent while it has the keys, over the replies
-//! newest first, each a card (its session, then its agent and branch, on
-//! the left of its top border; its age and where it's up to on the right;
-//! the start of the reply inside), or what the feed is waiting for (a
+//! newest first, each a card a row apart (its session, then its agent,
+//! folder, repository and branch, on the left of its top border; its age and
+//! where it's up to on the right; the start of the reply inside, or all of
+//! it once expanded: Space, or the `▾ more` on its bottom border), or what
+//! the feed is waiting for (a
 //! sign-in, the switch, the first read). The reply read whole (Enter) takes
 //! the cards' place, a `‹` on the band to go back; a wide Feed tab shows it
 //! beside them. It's its whole turn in order once it's read (the prompt,
@@ -35,10 +37,16 @@ use crate::theme;
 
 /// Columns left of the content, as in the session list.
 const INDENT: usize = 3;
-/// Rows per card without a prompt: its top border (the header), three lines
-/// of the answer and its bottom border. A prompt's bar adds its padding
-/// ([`card_rows`]).
-const CELL_ROWS: u16 = 5;
+/// Rows of a card at its usual height: its top border (the header), eight
+/// rows inside and its bottom border.
+const CARD_ROWS: u16 = 10;
+/// Rows between one card and the next.
+const CARD_GAP: u16 = 1;
+/// Lines of an answered prompt a card shows at its usual height.
+const PROMPT_LINES: usize = 1;
+/// The fewest lines of the answer an expanded card taller than the feed
+/// keeps under its prompt.
+const ANSWER_MIN_LINES: usize = 3;
 /// A prompt bar's columns before and after its text.
 const BAR_INSET: usize = 2;
 /// Lines of a tool's output shown in a turn.
@@ -183,12 +191,19 @@ fn draw_feed_list(
     area.y += 1;
     area.height = area.height.saturating_sub(1);
     let selected = app.feed.selected_index().unwrap_or(0);
-    let heights: Vec<u16> = cards.iter().map(card_rows).collect();
-    let first = first_visible_row(&heights, selected, area.height);
+    // Each card's rows and the gap after it; only an expanded card's depend
+    // on what it says.
+    let card_width = area.width.saturating_sub(2);
+    let heights: Vec<u16> = cards
+        .iter()
+        .map(|card| card_rows(app, *card, card_width, area.height) + CARD_GAP)
+        .collect();
+    // The last card shown needs no gap after it.
+    let first = first_visible_row(&heights, selected, area.height + CARD_GAP);
     let now = now_secs();
     let mut y = area.y;
     for (index, card) in cards.iter().enumerate().skip(first) {
-        let rows = heights[index];
+        let rows = heights[index] - CARD_GAP;
         if y + rows > area.bottom() {
             break;
         }
@@ -198,21 +213,94 @@ fn draw_feed_list(
             ..area
         };
         let chosen = index == selected;
-        draw_card(f, app, *card, cell, chosen, focused, now);
+        // The toggle's target goes first: the first target a click is in wins.
+        if let Some(toggle) = draw_card(f, app, *card, cell, chosen, focused, now) {
+            hits.push((toggle, Hit::FeedExpand(index)));
+        }
         hits.push((cell, Hit::FeedEntry(index)));
-        y += rows;
+        y += heights[index];
     }
 }
 
-/// A card's rows: its borders and three lines, and its prompt's bar's
-/// padding above and below (two lines of a waiting prompt, one of an
-/// answered one's, then the answer's start).
-fn card_rows(card: &Card) -> u16 {
-    match card {
-        Card::Open(_) => CELL_ROWS + 2,
-        Card::Entry(entry) if entry.prompt.is_some() => CELL_ROWS + 2,
-        Card::Entry(_) => CELL_ROWS,
+/// A card's rows: [`CARD_ROWS`], or an expanded one's whole body and its
+/// borders (never fewer, and at most `max` rows: the feed's).
+fn card_rows(app: &App, card: Card, width: u16, max: u16) -> u16 {
+    if !app.feed.is_expanded(card) {
+        return CARD_ROWS.min(max.max(1));
     }
+    let body = card_body(card, width, true, false, max);
+    (body.rows() + 2).max(CARD_ROWS).min(max.max(1))
+}
+
+/// What a card shows inside its borders: the prompt's bar, then the answer
+/// (or that it's coming), and whether there's more than it shows.
+struct CardBody {
+    bar: Vec<Line<'static>>,
+    answer: Vec<Line<'static>>,
+    more: bool,
+}
+
+impl CardBody {
+    fn rows(&self) -> u16 {
+        (self.bar.len() + self.answer.len()) as u16
+    }
+}
+
+/// `card`'s body for a card `width` columns wide: at its usual height, its
+/// prompt's first line (a waiting prompt as much as leaves a line for the
+/// note under it) and the start of the answer; expanded, all of both, cut
+/// to fit `max` rows with its borders.
+fn card_body(card: Card, width: u16, expanded: bool, chosen: bool, max: u16) -> CardBody {
+    let p = theme::palette();
+    let inner_rows = if expanded {
+        (max as usize).saturating_sub(2)
+    } else {
+        (CARD_ROWS as usize).saturating_sub(2)
+    };
+    // The bar runs from border to border, the text a column further in.
+    let bar_width = (width as usize).saturating_sub(2);
+    let text_width = (width as usize).saturating_sub(4);
+    let text_style = Style::default().fg(if chosen { p.text_primary } else { p.text_muted });
+    let mut more = false;
+    let bar = match card.prompt() {
+        Some(prompt) => {
+            let whole = prompt_bar(&prompt.text, bar_width, None, chosen).len() - 2;
+            // A waiting prompt's note, or a few lines of an expanded answer.
+            let under = match card {
+                Card::Open(_) => 1,
+                Card::Entry(_) if expanded => ANSWER_MIN_LINES,
+                Card::Entry(_) => inner_rows.saturating_sub(PROMPT_LINES + 2),
+            };
+            let rows = match card {
+                Card::Entry(_) if !expanded => PROMPT_LINES,
+                _ => inner_rows.saturating_sub(under + 2).max(1),
+            };
+            more |= whole > rows;
+            let rows = rows.min(whole.max(1));
+            // An expanded card keeps the prompt's own line breaks.
+            if expanded && whole <= rows {
+                prompt_bar(&prompt.text, bar_width, None, chosen)
+            } else {
+                prompt_bar(&prompt.text, bar_width, Some(rows), chosen)
+            }
+        }
+        None => Vec::new(),
+    };
+    let room = inner_rows.saturating_sub(bar.len());
+    let answer = match card {
+        Card::Entry(entry) => {
+            let (lines, cut) = preview(&entry.text, text_width, room, text_style, expanded);
+            more |= cut;
+            lines
+        }
+        Card::Open(_) => vec![Line::from(Span::styled(
+            "waiting for the answer…",
+            Style::default()
+                .fg(p.text_muted)
+                .add_modifier(Modifier::ITALIC),
+        ))],
+    };
+    CardBody { bar, answer, more }
 }
 
 /// A card's border: the accent's on the selected card while the feed has
@@ -227,9 +315,11 @@ fn card_border(chosen: bool, focused: bool) -> Style {
 }
 
 /// One card in `cell`, a column in from each side: the top border names its
-/// session (then, quieter, its agent and branch) on the left and says its
-/// age and status on the right; inside, the prompt's first line, then the
-/// start of the answer (or that it's coming).
+/// session (then, quieter, its agent, folder, repository and branch) on the
+/// left and says its age and status on the right; inside, the prompt on a
+/// bar, then the answer (or that it's coming); on the bottom border, at the
+/// right, `▾ more` when it shows only part of that (`▴ less` once
+/// expanded), whose target it returns.
 fn draw_card(
     f: &mut Frame,
     app: &App,
@@ -238,7 +328,7 @@ fn draw_card(
     chosen: bool,
     focused: bool,
     now: i64,
-) {
+) -> Option<Rect> {
     let p = theme::palette();
     let card = Rect {
         x: cell.x + 1,
@@ -246,7 +336,7 @@ fn draw_card(
         ..cell
     };
     if card.width < 8 {
-        return;
+        return None;
     }
     let border = card_border(chosen, focused);
     f.render_widget(
@@ -271,53 +361,55 @@ fn draw_card(
         )),
         Rect { height: 1, ..card },
     );
+    let expanded = app.feed.is_expanded(card_of);
+    let body = card_body(card_of, card.width, expanded, chosen, cell.height);
     let inner = Rect {
         x: card.x + 2,
         width: card.width.saturating_sub(4),
         y: card.y + 1,
         height: card.height.saturating_sub(2),
     };
-    let width = inner.width as usize;
-    let text_style = Style::default().fg(if chosen { p.text_primary } else { p.text_muted });
     // The prompt on a bar from border to border, the answer under it.
-    let bar_rows = match card_of.prompt() {
-        Some(prompt) => {
-            let rows = if card_of.entry().is_some() { 1 } else { 2 };
-            let bar = Rect {
-                x: card.x + 1,
-                width: card.width.saturating_sub(2),
-                ..inner
-            };
-            let lines = prompt_bar(&prompt.text, bar.width as usize, Some(rows), chosen);
-            let shown = lines.len().min(inner.height as usize) as u16;
-            f.render_widget(
-                Paragraph::new(lines),
-                Rect {
-                    height: shown,
-                    ..bar
-                },
-            );
-            shown
-        }
-        None => 0,
+    let bar_rows = (body.bar.len() as u16).min(inner.height);
+    f.render_widget(
+        Paragraph::new(body.bar),
+        Rect {
+            x: card.x + 1,
+            width: card.width.saturating_sub(2),
+            height: bar_rows,
+            ..inner
+        },
+    );
+    f.render_widget(
+        Paragraph::new(body.answer),
+        Rect {
+            y: inner.y + bar_rows,
+            height: inner.height - bar_rows,
+            ..inner
+        },
+    );
+    let label = match (expanded, body.more) {
+        (true, _) => " ▴ less ",
+        (false, true) => " ▾ more ",
+        (false, false) => return None,
     };
-    let inner = Rect {
-        y: inner.y + bar_rows,
-        height: inner.height.saturating_sub(bar_rows),
-        ..inner
-    };
-    let mut lines = Vec::new();
-    let room = inner.height as usize;
-    match card_of {
-        Card::Entry(entry) => lines.extend(preview(&entry.text, width, room, text_style)),
-        Card::Open(_) => lines.push(Line::from(Span::styled(
-            "waiting for the answer…",
-            Style::default()
-                .fg(p.text_muted)
-                .add_modifier(Modifier::ITALIC),
-        ))),
+    let width = str_width(label) as u16;
+    if card.height < 2 || card.width < width + 4 {
+        return None;
     }
-    f.render_widget(Paragraph::new(lines), inner);
+    let toggle = Rect {
+        x: card.right() - 2 - width,
+        y: card.bottom() - 1,
+        width,
+        height: 1,
+    };
+    let style = Style::default().fg(if chosen && focused {
+        p.accent_primary
+    } else {
+        p.text_muted
+    });
+    f.render_widget(Paragraph::new(Span::styled(label, style)), toggle);
+    Some(toggle)
 }
 
 /// A user's words on a bar across `width` columns (Tokyo Night's storm
@@ -372,13 +464,26 @@ fn prompt_bar(text: &str, width: usize, rows: Option<usize>, chosen: bool) -> Ve
     bar_lines
 }
 
-/// The start of a reply as a card shows it: its Markdown drawn, blank lines
-/// left out, `rows` of it, `…` when there's more.
-fn preview(text: &str, width: usize, rows: usize, style: Style) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = markdown::render(text, width, style)
-        .into_iter()
-        .filter(|line| line.width() > 0)
-        .collect();
+/// A reply as a card shows it, its Markdown drawn: `rows` of it, `…` when
+/// there's more (and whether there was). At a card's usual height its blank
+/// lines are left out; expanded, only those at its ends.
+fn preview(
+    text: &str,
+    width: usize,
+    rows: usize,
+    style: Style,
+    expanded: bool,
+) -> (Vec<Line<'static>>, bool) {
+    let mut lines: Vec<Line<'static>> = markdown::render(text, width, style);
+    if expanded {
+        while lines.last().is_some_and(|line| line.width() == 0) {
+            lines.pop();
+        }
+        let blank = lines.iter().take_while(|line| line.width() == 0).count();
+        lines.drain(..blank);
+    } else {
+        lines.retain(|line| line.width() > 0);
+    }
     let more = lines.len() > rows;
     lines.truncate(rows);
     if more {
@@ -396,12 +501,13 @@ fn preview(text: &str, width: usize, rows: usize, style: Style) -> Vec<Line<'sta
             last.spans.push(Span::styled(" …", style));
         }
     }
-    lines
+    (lines, more)
 }
 
-/// A card's top border, `width` columns: `╭ session  agent · branch ─── age ·
-/// ● status ╮`. Short of room, the status keeps only its mark, then the
-/// agent and branch give way, then the session's name.
+/// A card's top border, `width` columns: `╭ session  agent · folder · repo ⎇
+/// branch ─── age · ● status ╮`. Short of room, the status keeps only its
+/// mark, then the agent, folder, repository and branch give way from the
+/// end, then the session's name.
 fn card_top(
     app: &App,
     card: Card,
@@ -431,7 +537,7 @@ fn card_top(
     };
     let age = relative_time(now, at / 1000);
     let name = plain(card.session_name());
-    let mut meta = card_meta(card);
+    let mut meta = card_meta(app, card);
     // The status's word goes first when the left part wouldn't fit whole.
     let left_width = str_width(&name) + 2 + str_width(&meta);
     let whole = str_width(&age) + str_width(status.label()) + 7;
@@ -481,14 +587,31 @@ fn card_top(
     Line::from(spans)
 }
 
-/// What a card names after its session: the agent, then the branch it
-/// worked on (its folder when that isn't known).
-fn card_meta(card: Card) -> String {
+/// What a card names after its session: the agent, then its folder, the
+/// repository (when its session is this machine's and listed here, and not
+/// named like its folder) and the branch it worked on: `claude · web ·
+/// focal-md ⎇ main`.
+fn card_meta(app: &App, card: Card) -> String {
+    let folder = card.folder().map(plain).filter(|folder| !folder.is_empty());
+    let repo = app
+        .feed_card_session(card)
+        .and_then(|session| session.git.as_ref())
+        .and_then(|git| git.repo.as_deref())
+        .map(plain)
+        .filter(|repo| !repo.is_empty())
+        .filter(|repo| {
+            !folder
+                .as_ref()
+                .is_some_and(|f| f.eq_ignore_ascii_case(repo))
+        });
     let mut parts = vec![plain(agent_name(card.agent()))];
-    if let Some(place) = card.place() {
-        parts.push(plain(place));
+    parts.extend(folder);
+    parts.extend(repo);
+    let mut meta = parts.join(" · ");
+    if let Some(branch) = card.branch().map(plain).filter(|b| !b.is_empty()) {
+        meta.push_str(&format!(" {} {branch}", app.icons().branch()));
     }
-    parts.join(" · ")
+    meta
 }
 
 /// A status's mark and colour on a card, the colours rakumux.com's Feed

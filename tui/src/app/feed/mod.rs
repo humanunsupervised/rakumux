@@ -124,11 +124,19 @@ impl<'a> Card<'a> {
         }
     }
 
-    /// The branch its agent worked on, else its folder.
-    pub fn place(&self) -> Option<&'a str> {
+    /// Its session's folder name.
+    pub fn folder(&self) -> Option<&'a str> {
         match self {
-            Card::Entry(entry) => entry.branch.as_deref().or(entry.folder.as_deref()),
-            Card::Open(open) => open.branch.as_deref().or(open.folder.as_deref()),
+            Card::Entry(entry) => entry.folder.as_deref(),
+            Card::Open(open) => open.folder.as_deref(),
+        }
+    }
+
+    /// The branch its agent worked on.
+    pub fn branch(&self) -> Option<&'a str> {
+        match self {
+            Card::Entry(entry) => entry.branch.as_deref(),
+            Card::Open(open) => open.branch.as_deref(),
         }
     }
 }
@@ -221,6 +229,8 @@ pub struct FeedStore {
     turns: VecDeque<(String, TurnState)>,
     /// A turn is being read.
     pub(super) turn_busy: bool,
+    /// Cards shown whole in the list (Space, or their `▾ more`), by key.
+    expanded: HashSet<String>,
     /// Entries that were in the feed while it was on screen, by id.
     seen: HashSet<String>,
     /// Entries that finished before this (Unix milliseconds: when this
@@ -249,6 +259,7 @@ impl FeedStore {
             request_generation: 0,
             turns: VecDeque::new(),
             turn_busy: false,
+            expanded: HashSet::new(),
             seen: HashSet::new(),
             since,
         }
@@ -272,6 +283,28 @@ impl FeedStore {
             .iter()
             .filter(|entry| entry.finished_at > self.since && !self.seen.contains(&entry.id))
             .count()
+    }
+
+    /// Whether `card` is shown whole in the list rather than at a card's
+    /// usual height.
+    pub fn is_expanded(&self, card: Card<'_>) -> bool {
+        self.expanded.contains(&card.key())
+    }
+
+    /// Show the card at `index` whole in the list, or back at its usual
+    /// height.
+    pub fn toggle_expanded(&mut self, index: usize) {
+        let Some(key) = self.cards().get(index).map(Card::key) else {
+            return;
+        };
+        if !self.expanded.remove(&key) {
+            // Keys of cards no longer held go once the set outgrows them.
+            if self.expanded.len() >= MAX_ENTRIES {
+                let held: HashSet<String> = self.cards().iter().map(Card::key).collect();
+                self.expanded.retain(|key| held.contains(key));
+            }
+            self.expanded.insert(key);
+        }
     }
 
     /// Entry `id`'s turn, if it was asked for.

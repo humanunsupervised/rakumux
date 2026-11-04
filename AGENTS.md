@@ -1521,14 +1521,19 @@ card's session (rtop's selected row's) while it has the keys. On the Feed, the s
 border is in the accent while it has the keys. With them `↑`/`↓`/`j`/`k` go through the cards, `Enter` (or a second click,
 a tap on a phone) reads the selected reply whole in the cards' place (a `‹` on the band, or `Esc`,
 goes back; `↑`/`↓` scroll it; `Ctrl-d`/`Ctrl-u`, PgUp/PgDn page it), and `Enter` there (or beside
-the cards) goes into its session when it runs here; `←`/`→` and the keys that act on the list's
+the cards) goes into its session when it runs here; `Space` (or a click on a card's `▾ more`)
+shows the selected card whole in the list (`▴ less`, or `Space` again, back; `FeedStore::expanded`,
+this window's); `←`/`→` and the keys that act on the list's
 session do nothing. Grid cards stay read-only observers: nothing in the feed sends
 them Promote, Resize, Fit or input. It lists the account's machines' turns, newest first, each a card
-(`components/feed.rs`, `app::feed::Card`): on its top border the session's name, then quieter
-its agent and branch (the folder when no branch is known), and at the right its age and status
+(`components/feed.rs`, `app::feed::Card`), ten rows tall and a row apart: on its top border the
+session's name, then quieter its agent, folder, repository (only for this machine's sessions
+listed here, from their git context, and not when named like the folder: entries carry none) and
+`⎇ branch`, and at the right its age and status
 (`done`, `sending`, `working`, or the newest reply written back to it: `reply waiting`, `reply
 typed in`, `answered`, `reply not sent`; only the mark when short of room); inside, the
-prompt on a bar, then the start of the answer, its Markdown drawn
+prompt on a bar, then the start of the answer, its Markdown drawn (`▾ more` on its bottom
+border when there's more; expanded, all of it, at most the feed's height)
 (`components/markdown.rs`, pulldown-cmark). A prompt
 still waiting for its answer (rakumux.com's `open` turns, from the uploaded chats) is a card of
 its own, `working`, until the entry that answers it takes the card over. A reply read whole is
@@ -1695,7 +1700,7 @@ says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's places
 (`components/session_list.rs::place_content`, `app/places.rs`). First the folder the session
 works in now (`PlaceRef::Current`: its git context's working tree, else its cwd; its path in the
 session's folder, the folder's name, or `~/…`), one line in the row's text column: its path, then
-its repository's name (`format::repo_label`: not when its folder has that name) and branch
+its repository's name (bold; `format::repo_label`: not when its folder has that name) and branch
 (`focal-md ⎇ paper-links`), even before it changed anything
 there; short of room the path is cut at its start first (down to half the line), then the
 repository's name (to 6 columns, then gone), then the branch at its end, never wrapped

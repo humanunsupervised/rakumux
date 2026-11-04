@@ -87,7 +87,9 @@ new-session flow, and code boundaries.
   `KeyAction::Feed`) is `toggle_drawer(Feed)`; `feed_back` is the feed's Esc. It polls `AccountAccess::feed` off the UI thread every 2 s while
   on screen, and every 10 s as a background read while the account's feed is on, so
   `feed_unseen` can count for the footer and the Feed tab (again at once while `more`). Its keys
-  (`feed_key`: ←/→ and `h` do nothing, `l` is Enter, ↑/↓ scroll a reply being read) and Enter
+  (`feed_key`: ←/→ and `h` do nothing, `l` is Enter, ↑/↓ scroll a reply being read, Space
+  expands the selected card in the list, `toggle_feed_expand`; `Hit::FeedExpand` is its
+  `▾ more`/`▴ less`, `click_feed_expand`) and Enter
   (`open_feed_entry`: read the reply whole; from there, or beside the cards, a reply whose
   session is listed here goes into it under the grouping the sessions last had, one from
   another machine says where it runs). A reply on screen whole brings its whole turn

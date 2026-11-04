@@ -557,7 +557,8 @@ impl KeyAction {
             }
             KeyAction::Feed => "What your agents said when they finished a turn, on every \
                  machine of your account, newest first: a tab of the drawer on the right of \
-                 Master detail and Grid (a tab of its own in Tabs), beside rtop. Enter reads a reply whole, again goes into \
+                 Master detail and Grid (a tab of its own in Tabs), beside rtop. Space shows a card whole in the \
+                 list (again: back); Enter reads a reply whole, again goes into \
                  its session when it runs here; r writes back to it; Esc gives the list the \
                  keys back. The footer's Feed button counts the replies that came since you \
                  last looked. Needs your Rakumux account (Settings → Account)."
@@ -1788,7 +1789,8 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
             "The feed: shows it with the keys, gives it the keys, or hides it. What agents \
              said when they finished a turn, on every machine of your account (signed in: \
              Settings → Account), in a pane on the right (a tab in Tabs). With \
-             its keys, ↑/↓ go through the replies; Enter reads one whole (Esc back), again goes \
+             its keys, ↑/↓ go through the replies; Space shows a card whole in the list (again: \
+             back); Enter reads one whole (Esc back), again goes \
              into its session; r writes back to it: typed into its session when its agent \
              waits, and shown with the answer as a thread; Esc gives the list the keys",
         ),

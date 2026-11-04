@@ -18,6 +18,7 @@ use rakumux_sensagent::feed::{FeedPage, FeedTurn};
 use ratatui::layout::Rect;
 use session_core::ids::SessionId;
 
+use super::Card;
 use crate::app::drawer::DrawerTab;
 use crate::app::runtime::AppEvent;
 use crate::app::types::AccountStatus;
@@ -29,8 +30,8 @@ const FEED_EVERY: Duration = Duration::from_secs(2);
 /// How often otherwise, while the account's feed is on: to count
 /// what's new.
 pub(in crate::app) const FEED_HIDDEN_EVERY: Duration = Duration::from_secs(10);
-/// Rows of a card, about, for paging through them.
-const CARD_ROWS: isize = 6;
+/// Rows of a card and the row after it, for paging through them.
+const CARD_ROWS: isize = 11;
 
 impl App {
     /// The feed has Rakumux mode's keys: the drawer has them on its Feed tab.
@@ -274,6 +275,7 @@ impl App {
             KeyCode::Char('g') => self.pending_key = Some('g'),
             KeyCode::Enter | KeyCode::Char('i' | 'l') => self.open_feed_entry(),
             KeyCode::Char('r') => self.open_feed_reply(),
+            KeyCode::Char(' ') if !reading => self.toggle_feed_expand(),
             KeyCode::Esc => self.feed_back(),
             // Its cards have no sides to go to.
             KeyCode::Left | KeyCode::Right | KeyCode::Char('h') => {}
@@ -323,6 +325,23 @@ impl App {
         self.follow_turn();
     }
 
+    /// Space: the selected card whole in the list, or back at its usual
+    /// height.
+    pub fn toggle_feed_expand(&mut self) {
+        if let Some(index) = self.feed.selected_index() {
+            self.feed.toggle_expanded(index);
+        }
+    }
+
+    /// A click on a card's `▾ more` (`▴ less`): the feed gets the keys, the
+    /// card is selected and shown whole (or back at its usual height).
+    pub fn click_feed_expand(&mut self, index: usize) {
+        self.show_drawer_tab(DrawerTab::Feed);
+        self.feed.select(index);
+        self.feed.toggle_expanded(index);
+        self.follow_turn();
+    }
+
     /// Enter: the selected card's reply whole in the cards' place; from
     /// there (or beside the cards), into its session.
     pub fn open_feed_entry(&mut self) {
@@ -362,6 +381,16 @@ impl App {
     /// names while the feed has the keys.
     pub fn feed_session(&self) -> Option<&session_core::model::SessionView> {
         let card = self.feed.selected_card()?;
+        self.list
+            .get(&SessionId::from_string(card.session_id().to_owned()))
+    }
+
+    /// `card`'s session when it's this machine's and listed here: what its
+    /// card reads the repository's name from (entries carry none).
+    pub fn feed_card_session(&self, card: Card<'_>) -> Option<&session_core::model::SessionView> {
+        if card.machine() != self.feed.machine() {
+            return None;
+        }
         self.list
             .get(&SessionId::from_string(card.session_id().to_owned()))
     }
