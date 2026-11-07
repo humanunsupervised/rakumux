@@ -176,7 +176,6 @@ impl App {
         self.terminal_panel.needs_refocus = false;
         self.pending_key = None;
         self.list.filter_editing = false;
-        self.grid.clear();
         self.reconcile_detail();
         let size = self.terminal_panel_size();
         if let Some(attachment) = self.terminal_panel.attachment.as_mut() {

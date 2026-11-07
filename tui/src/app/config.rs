@@ -101,7 +101,7 @@ pub struct SessionsConfig {
     /// default; only `false` is written. Settings → Update automatically.
     #[serde(skip_serializing_if = "is_true")]
     pub auto_update: bool,
-    /// The layout this window shows: Master detail, Grid or Tabs. Not saved:
+    /// The layout this window shows: Master detail or Tabs. Not saved:
     /// every start opens Master detail (an older file's `layout` is dropped).
     #[serde(skip)]
     pub layout: SessionLayout,

@@ -104,7 +104,7 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `r` | Rename |
 | `x` / `d` | Close (end its program) / delete |
 | `H` | Session history: bring back a deleted session |
-| `v` | Layout: Master detail, Grid, Tabs |
+| `v` | Layout: Master detail or Tabs |
 | `T` | Terminal panel: a scratch shell below or beside the session, where it was last |
 | `\|` / `-` | Terminal panel beside / below the session (moves it while it's open) |
 | `z` | Full screen |
@@ -132,7 +132,7 @@ Tabs across the top of the list group your sessions:
 
 `f` (or the footer's **≡ Feed** button) shows the **Feed** beside your sessions: your agents'
 replies, newest first (needs an account). It's a tab of the drawer on the right in Master detail
-and Grid (a tab of its own in Tabs). `Enter` reads a reply, again goes into its session; `Esc`
+(a tab of its own in Tabs). `Enter` reads a reply, again goes into its session; `Esc`
 gives the list the keys back, and `f` hides the feed. The button counts the replies that came in
 since you last looked.
 

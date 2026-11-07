@@ -76,7 +76,6 @@ impl App {
         };
         let cli = self.sprite_cli_dir();
         self.creating_session = true;
-        self.grid.clear();
         self.mode = AppMode::Normal;
         self.set_status("Creating a session on your Sprite...");
         self.exec

@@ -36,7 +36,7 @@ impl App {
     }
 
     /// The active tab's label: what the list shows (the Tabs layout's
-    /// selector and Grid's header say it).
+    /// selector says it).
     pub fn filter_label(&self) -> String {
         self.tab_label(self.list.grouping())
     }

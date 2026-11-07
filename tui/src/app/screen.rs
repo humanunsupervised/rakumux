@@ -29,8 +29,6 @@ const MIN_TERMINAL: u16 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Screen {
-    /// Read-only terminal cards; no detail terminal is on screen here.
-    pub grid: Option<Rect>,
     /// Session list (Sidebar).
     pub list: Option<Rect>,
     /// Draggable line between the list and the detail (Sidebar): a column
@@ -56,7 +54,7 @@ pub struct Screen {
     pub terminal_panel_divider: Option<Rect>,
     /// The panel is right of the detail (its divider is a column).
     pub terminal_panel_beside: bool,
-    /// The agent feed: a docked pane on the right (Master detail, Grid), the
+    /// The agent feed: a docked pane on the right (Master detail), the
     /// session's place (narrower windows, in Rakumux mode), the body under
     /// the tab bar (Tabs, its tab selected) or the screen (a phone).
     pub feed: Option<Rect>,
@@ -104,7 +102,6 @@ pub fn compute(
         Focus::Session | Focus::Terminal => PaneFocus::Detail,
     };
     let areas = layout::split_with(body, session_layout, pane_focus, sizes);
-    screen.grid = areas.grid;
     screen.list = areas.list;
     screen.divider = areas.divider;
     screen.stacked = areas.stacked;
@@ -254,7 +251,6 @@ mod tests {
     fn assert_tiled(screen: &Screen, label: &str) {
         let footer = screen.footer.expect("footer");
         let panes: Vec<Rect> = [
-            screen.grid,
             screen.list,
             screen.divider,
             screen.rail,
@@ -500,21 +496,13 @@ mod tests {
     }
 
     #[test]
-    fn beside_applies_to_tabs_and_to_grids_session_and_short_wide_windows_keep_both() {
-        for layout in [SessionLayout::Tabs, SessionLayout::Grid] {
-            let base = at(200, 40, layout, Focus::Terminal);
-            let screen = with_terminal_panel(base, beside(true, 40));
-            assert_tiled(&screen, &format!("{layout:?}"));
-            assert!(screen.terminal_panel_beside, "{layout:?}");
-            assert_eq!(screen.tabs, base.tabs);
-            assert_eq!(screen.terminal_panel.unwrap().y, base.detail.unwrap().y);
-        }
-        // Grid browsing has no detail: nothing to split.
-        let grid = at(200, 40, SessionLayout::Grid, Focus::List);
-        assert_eq!(
-            with_terminal_panel(grid, beside(false, 40)).terminal_panel,
-            None
-        );
+    fn beside_applies_to_tabs_and_short_wide_windows_keep_both() {
+        let base = at(200, 40, SessionLayout::Tabs, Focus::Terminal);
+        let screen = with_terminal_panel(base, beside(true, 40));
+        assert_tiled(&screen, "Tabs");
+        assert!(screen.terminal_panel_beside);
+        assert_eq!(screen.tabs, base.tabs);
+        assert_eq!(screen.terminal_panel.unwrap().y, base.detail.unwrap().y);
         // 10 rows: too short below for both, but beside each keeps every row.
         let short = at(200, 11, SessionLayout::Sidebar, Focus::Session);
         let screen = with_terminal_panel(short, beside(false, 40));
@@ -558,18 +546,12 @@ mod tests {
     #[test]
     fn a_phone_shows_the_list_or_the_session_under_tabs() {
         for layout in SessionLayout::ALL {
-            // A phone in portrait, Rakumux mode: Master detail's list (or
-            // Grid's cards, which the app doesn't offer on phones), then
+            // A phone in portrait, Rakumux mode: Master detail's list, then
             // the footer; Tabs keeps its tab bar over the session.
             let screen = at(45, 40, layout, Focus::List);
             match layout {
-                SessionLayout::Grid => {
-                    assert_eq!(screen.grid, Some(Rect::new(0, 0, 45, 39)));
-                    assert_eq!(screen.list, None);
-                }
                 SessionLayout::Sidebar => {
                     assert_eq!(screen.list, Some(Rect::new(0, 0, 45, 39)));
-                    assert_eq!(screen.grid, None);
                 }
                 SessionLayout::Tabs => {
                     assert_eq!(screen.list, None);
@@ -650,12 +632,11 @@ mod tests {
                     let footer = screen.footer.unwrap();
                     assert_eq!(footer, Rect::new(0, height - 1, width, 1), "{label}");
                     let phone = width < layout::PHONE_BELOW;
-                    // The session is on screen, except in a phone's list
-                    // and in Grid.
+                    // The session is on screen, except in a phone's list.
                     let list_alone = phone && layout == SessionLayout::Sidebar;
-                    if (list_alone || layout == SessionLayout::Grid) && focus == Focus::List {
+                    if list_alone && focus == Focus::List {
                         assert!(screen.terminal.is_none(), "{label}");
-                        assert_eq!(screen.grid.or(screen.list).unwrap().width, width, "{label}");
+                        assert_eq!(screen.list.unwrap().width, width, "{label}");
                         continue;
                     }
                     let terminal = screen.terminal.expect(&label);

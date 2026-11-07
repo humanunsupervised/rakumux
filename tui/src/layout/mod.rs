@@ -16,16 +16,12 @@
 //!   room for both, and Rakumux mode shows the list alone.
 //! - **Tabs**: one row of session tabs across the top; the selected tab's
 //!   detail fills the rest. Works at any width.
-//! - **Grid**: a bounded page of read-only live terminal cards. Session
-//!   focus uses the full-screen terminal under tabs; no detail terminal is
-//!   on screen while browsing, so it cannot claim any terminal's size.
 //!
 //! The agent feed ([`PaneSizes::feed`]) docks as a pane on the right in
-//! Master detail and Grid, a one-column divider left of it, while the
-//! session keeps [`FEED_SESSION_MIN_COLS`] beside it; narrower windows show
-//! it in the session's place in Rakumux mode only (the detail, or Grid's
-//! cards while it has the keys). Tabs shows it as a tab, the body under the
-//! tab bar while that tab is selected. Phones show it alone, full screen,
+//! Master detail, a one-column divider left of it, while the session keeps
+//! [`FEED_SESSION_MIN_COLS`] beside it; narrower windows show it in the
+//! session's place in Rakumux mode only. Tabs shows it as a tab, the body
+//! under the tab bar while that tab is selected. Phones show it alone, full screen,
 //! while it has the keys.
 //!
 //! The layout is a user setting (`sessions.layout` in
@@ -40,8 +36,6 @@ use ratatui::text::Span;
 use serde::{Deserialize, Serialize};
 
 use crate::theme;
-
-pub mod grid;
 
 /// Screens narrower than this are phones (about 40–60 columns in portrait,
 /// whatever the layout setting): one thing at a time. Rakumux mode shows
@@ -118,21 +112,18 @@ pub enum SessionLayout {
     /// Session list on the left, detail on the right.
     #[default]
     Sidebar,
-    /// Paged read-only live terminal cards; opening one enters session mode.
-    Grid,
     /// A tab bar of sessions across the top, detail below.
     Tabs,
 }
 
 impl SessionLayout {
     /// Every layout, in settings-menu order.
-    pub const ALL: [SessionLayout; 3] = [Self::Sidebar, Self::Grid, Self::Tabs];
+    pub const ALL: [SessionLayout; 2] = [Self::Sidebar, Self::Tabs];
 
     /// Name shown in the settings menu and help.
     pub fn label(self) -> &'static str {
         match self {
             SessionLayout::Sidebar => "Master detail",
-            SessionLayout::Grid => "Grid",
             SessionLayout::Tabs => "Tabs",
         }
     }
@@ -144,34 +135,15 @@ impl SessionLayout {
                 "Session list on the left (on top when narrow), the session beside it"
             }
             SessionLayout::Tabs => "Sessions as tabs across the top, the selected one below",
-            SessionLayout::Grid => {
-                "Read-only live terminal cards; Enter opens a session, PgUp/PgDn change page"
-            }
         }
     }
 
-    /// The following layout, wrapping around (for a settings toggle).
+    /// The other layout (`v`, the settings toggle).
     pub fn next(self) -> Self {
         match self {
-            SessionLayout::Sidebar => SessionLayout::Grid,
-            SessionLayout::Grid => SessionLayout::Tabs,
+            SessionLayout::Sidebar => SessionLayout::Tabs,
             SessionLayout::Tabs => SessionLayout::Sidebar,
         }
-    }
-
-    /// The following layout a screen offers: phones have no Grid.
-    pub fn next_on(self, phone: bool) -> Self {
-        match self.next() {
-            SessionLayout::Grid if phone => SessionLayout::Grid.next(),
-            next => next,
-        }
-    }
-
-    /// The layouts a screen offers: phones have no Grid.
-    pub fn offered(phone: bool) -> impl Iterator<Item = SessionLayout> {
-        Self::ALL
-            .into_iter()
-            .filter(move |layout| !(phone && *layout == SessionLayout::Grid))
     }
 }
 
@@ -237,8 +209,6 @@ pub enum FeedShown {
 /// Rectangles for one frame. Panes that aren't shown are `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LayoutAreas {
-    /// Full-body session cards (Grid, Rakumux mode only).
-    pub grid: Option<Rect>,
     /// Session list: a column on the left, or the top of a stacked screen
     /// (Sidebar only).
     pub list: Option<Rect>,
@@ -359,7 +329,7 @@ pub fn docked_feed_width(total: u16, layout: SessionLayout, sizes: PaneSizes) ->
             let beside = match layout {
                 SessionLayout::Sidebar if sizes.list_hidden => RAIL_COLS,
                 SessionLayout::Sidebar => list_width(main, sizes.list_cols) + 1,
-                SessionLayout::Grid | SessionLayout::Tabs => 0,
+                SessionLayout::Tabs => 0,
             };
             main.saturating_sub(beside) >= detail_cols
         };
@@ -426,7 +396,7 @@ pub fn split_with(
     };
     let rakumux = focus == PaneFocus::List;
     let focused = rakumux && sizes.feed == FeedShown::Focused;
-    // Alone: a phone, Grid's cards or a list too short to share with it.
+    // Alone: a phone or a list too short to share with it.
     let alone = || LayoutAreas {
         feed: Some(area),
         ..only(hidden(area))
@@ -443,12 +413,9 @@ pub fn split_with(
             width: area.width - width - 1,
             ..area
         };
-        let mut areas = match layout {
-            // The session keeps its columns beside the list, whatever the
-            // main area's width.
-            SessionLayout::Sidebar => side_by_side(main, without),
-            _ => split_sessions(main, layout, focus, without),
-        };
+        // Only Master detail docks it: the session keeps its columns beside
+        // the list, whatever the main area's width.
+        let mut areas = side_by_side(main, without);
         areas.feed_divider = Some(Rect {
             x: main.right(),
             width: 1,
@@ -469,7 +436,7 @@ pub fn split_with(
             areas.detail = hidden(areas.detail);
         }
         // Too narrow to dock: in the session's place in Rakumux mode.
-        SessionLayout::Sidebar | SessionLayout::Grid if rakumux => {
+        SessionLayout::Sidebar if rakumux => {
             if !areas.detail.is_empty() {
                 areas.feed = Some(areas.detail);
                 areas.detail = hidden(areas.detail);
@@ -485,7 +452,6 @@ pub fn split_with(
 /// Only the detail.
 fn only(detail: Rect) -> LayoutAreas {
     LayoutAreas {
-        grid: None,
         list: None,
         divider: None,
         stacked: false,
@@ -552,15 +518,6 @@ fn split_sessions(
             })
         }
     };
-    if layout == SessionLayout::Grid {
-        return match focus {
-            PaneFocus::List => LayoutAreas {
-                grid: Some(area),
-                ..only(hidden(area))
-            },
-            PaneFocus::Detail | PaneFocus::Zoomed => tabs_over(area),
-        };
-    }
     // A phone's Master detail is the list, then a session under tabs; its
     // Tabs keeps the tab bar over the session.
     if is_phone(area.width) && layout == SessionLayout::Sidebar {
@@ -601,7 +558,7 @@ fn split_sessions(
             PaneFocus::Detail | PaneFocus::Zoomed => only(area),
         },
         SessionLayout::Sidebar => side_by_side(area, sizes),
-        SessionLayout::Tabs | SessionLayout::Grid => tabs_over(area),
+        SessionLayout::Tabs => tabs_over(area),
     }
 }
 
@@ -668,7 +625,7 @@ pub struct TabItem {
     pub badge: Option<(String, Style)>,
 }
 
-/// Marks a pinned session (after its name in the tab bar and Grid; before
+/// Marks a pinned session (after its name in the tab bar; before
 /// it in the list, the pin toggle; the list's Pinned tab). One column wide
 /// in every common terminal font.
 pub const PIN_MARK: &str = "★";
@@ -1029,20 +986,11 @@ mod tests {
         );
         let parsed: SessionLayout = serde_json::from_str("\"tabs\"").unwrap();
         assert_eq!(parsed, SessionLayout::Tabs);
-        assert_eq!(
-            serde_json::from_str::<SessionLayout>("\"grid\"").unwrap(),
-            SessionLayout::Grid
-        );
-        assert_eq!(
-            serde_json::to_string(&SessionLayout::Grid).unwrap(),
-            "\"grid\""
-        );
     }
 
     #[test]
     fn layout_next_wraps_and_labels_are_distinct() {
-        assert_eq!(SessionLayout::Sidebar.next(), SessionLayout::Grid);
-        assert_eq!(SessionLayout::Grid.next(), SessionLayout::Tabs);
+        assert_eq!(SessionLayout::Sidebar.next(), SessionLayout::Tabs);
         assert_eq!(SessionLayout::Tabs.next(), SessionLayout::Sidebar);
         assert_eq!(SessionLayout::Sidebar.label(), "Master detail");
         assert_eq!(SessionLayout::Tabs.label(), "Tabs");
@@ -1115,7 +1063,7 @@ mod tests {
             let zoomed = split_with(area, SessionLayout::Sidebar, PaneFocus::Zoomed, hidden);
             assert_eq!((zoomed.rail, zoomed.detail), (None, area));
         }
-        // Only beside the detail: stacked, on a phone, in Grid and Tabs the
+        // Only beside the detail: stacked, on a phone and in Tabs the
         // list (or the layout's own panes) shows as usual.
         for (width, height) in [(90, 39), (45, 39)] {
             let area = rect(0, 0, width, height);
@@ -1124,10 +1072,8 @@ mod tests {
             assert_eq!(kept.rail, None);
             assert_eq!(kept.list, shown.list);
         }
-        for layout in [SessionLayout::Grid, SessionLayout::Tabs] {
-            let kept = split_with(area, layout, PaneFocus::List, hidden);
-            assert_eq!(kept, split(area, layout, PaneFocus::List));
-        }
+        let kept = split_with(area, SessionLayout::Tabs, PaneFocus::List, hidden);
+        assert_eq!(kept, split(area, SessionLayout::Tabs, PaneFocus::List));
     }
 
     #[test]
@@ -1181,18 +1127,12 @@ mod tests {
             for (width, height) in [(40, 19), (45, 39), (59, 52), (79, 30)] {
                 assert!(is_phone(width) && is_single_pane(width, layout));
                 let area = rect(0, 0, width, height);
-                // Rakumux mode: Master detail's list alone (Grid's cards,
-                // which the app doesn't offer on phones); Tabs keeps its
+                // Rakumux mode: Master detail's list alone; Tabs keeps its
                 // tab bar over the session.
                 let list = split(area, layout, PaneFocus::List);
                 match layout {
-                    SessionLayout::Grid => {
-                        assert_eq!(list.grid, Some(area));
-                        assert_eq!(list.list, None);
-                    }
                     SessionLayout::Sidebar => {
                         assert_eq!(list.list, Some(area));
-                        assert_eq!(list.grid, None);
                     }
                     SessionLayout::Tabs => {
                         assert_eq!(list.list, None);
@@ -1290,11 +1230,7 @@ mod tests {
         // room, so it's as without the panel.
         assert_eq!(docked_feed_width(200, sidebar, beside(false)), Some(49));
         assert_eq!(docked_feed_width(160, sidebar, beside(false)), Some(44));
-        // Grid's session needs only the detail's columns; Tabs never docks.
-        assert_eq!(
-            docked_feed_width(140, SessionLayout::Grid, beside(false)),
-            Some(38)
-        );
+        // Tabs never docks.
         assert_eq!(
             docked_feed_width(200, SessionLayout::Tabs, beside(false)),
             None
@@ -1323,21 +1259,13 @@ mod tests {
             assert_eq!(areas.list, Some(rect(0, 0, 48, 47)));
             assert_eq!(areas.detail, rect(49, 0, 66, 47));
         }
-        // Grid: the cards, or a session under its tabs, left of it.
-        let grid = split_with(area, SessionLayout::Grid, PaneFocus::List, shown);
-        assert_eq!(grid.grid, Some(rect(0, 0, 115, 47)));
-        assert_eq!(grid.feed, Some(rect(116, 0, 44, 47)));
-        let session = split_with(area, SessionLayout::Grid, PaneFocus::Detail, shown);
-        assert_eq!(session.tabs, Some(rect(0, 0, 115, 1)));
-        assert_eq!(session.detail, rect(0, 1, 115, 46));
         // Narrowed down to its minimum before it gives up docking.
         let sidebar = SessionLayout::Sidebar;
         assert_eq!(docked_feed_width(160, sidebar, shown), Some(44));
         assert_eq!(docked_feed_width(145, sidebar, shown), Some(35));
         assert_eq!(docked_feed_width(140, sidebar, shown), Some(FEED_MIN_COLS));
         assert_eq!(docked_feed_width(139, sidebar, shown), None);
-        // A hidden list leaves room on narrower windows; Grid needs only the
-        // session's columns.
+        // A hidden list leaves room on narrower windows.
         let hidden = PaneSizes {
             list_hidden: true,
             ..shown
@@ -1345,8 +1273,6 @@ mod tests {
         assert_eq!(docked_feed_width(120, sidebar, hidden), Some(44));
         assert_eq!(docked_feed_width(93, sidebar, hidden), Some(FEED_MIN_COLS));
         assert_eq!(docked_feed_width(92, sidebar, hidden), None);
-        assert_eq!(docked_feed_width(91, SessionLayout::Grid, shown), Some(30));
-        assert_eq!(docked_feed_width(90, SessionLayout::Grid, shown), None);
         // A dragged width, within bounds.
         let dragged = |cols| PaneSizes {
             feed_cols: Some(cols),
@@ -1365,7 +1291,7 @@ mod tests {
         assert_eq!(default_feed_width(400), 60);
         // Never in Tabs or on a phone.
         assert_eq!(docked_feed_width(200, SessionLayout::Tabs, shown), None);
-        assert_eq!(docked_feed_width(79, SessionLayout::Grid, shown), None);
+        assert_eq!(docked_feed_width(79, SessionLayout::Sidebar, shown), None);
     }
 
     #[test]
@@ -1399,17 +1325,16 @@ mod tests {
         );
         assert!(stacked.stacked);
         assert_eq!(stacked.feed, Some(rect(0, 16, 90, 23)));
-        // A list too short to share, Grid's cards, a phone: alone, only while
+        // A list too short to share, a phone: alone, only while
         // it has the keys.
         for (area, layout) in [
             (rect(0, 0, 90, 10), SessionLayout::Sidebar),
-            (rect(0, 0, 85, 39), SessionLayout::Grid),
             (rect(0, 0, 45, 39), SessionLayout::Sidebar),
             (rect(0, 0, 45, 39), SessionLayout::Tabs),
         ] {
             let alone = split_with(area, layout, PaneFocus::List, focused);
             assert_eq!(alone.feed, Some(area), "{layout:?} {area:?}");
-            assert!(alone.list.is_none() && alone.grid.is_none() && alone.tabs.is_none());
+            assert!(alone.list.is_none() && alone.tabs.is_none());
             assert!(alone.detail.is_empty());
             for (focus, sizes) in [(PaneFocus::List, shown), (PaneFocus::Detail, focused)] {
                 assert_eq!(

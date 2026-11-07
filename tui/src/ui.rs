@@ -24,7 +24,6 @@ use crate::components::{
     footer::draw_footer,
     section_picker::draw_section_picker,
     session_detail::draw_session_detail,
-    session_grid::draw_session_grid,
     session_list::{draw_list_rail, draw_session_list},
     session_tabs::draw_session_tabs,
     terminal_panel::draw_terminal_panel,
@@ -78,10 +77,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .unwrap_or(area);
     let mut hits = Vec::new();
     let mut tab_hits = Vec::new();
-
-    if let Some(grid) = screen.grid {
-        draw_session_grid(f, app, grid, &mut hits);
-    }
 
     if let Some(list) = screen.list {
         draw_session_list(f, app, list, &mut hits);
@@ -531,7 +526,7 @@ mod tests {
             assert!(screen.contains("▶ Account"), "{screen}");
             assert!(at("▶ Account") < at("Appearance"));
             assert!(!screen.contains("Available on sign-in"), "{screen}");
-            assert!(screen.contains("[Master detail] Grid Tabs"), "{screen}");
+            assert!(screen.contains("[Master detail] Tabs"), "{screen}");
             // The selected setting's note waits for `→`.
             assert!(!screen.contains("Session list on the left"), "{screen}");
             assert!(screen.contains("Enter change"), "{screen}");
@@ -965,7 +960,7 @@ mod tests {
         h.press(KeyCode::Char('o')).await;
         let screen = render(&mut h.app, 80, 24);
         assert!(screen.contains("Settings"), "{screen}");
-        assert!(screen.contains("[Master detail] Grid Tabs"), "{screen}");
+        assert!(screen.contains("[Master detail] Tabs"), "{screen}");
         h.press(KeyCode::Esc).await;
         h.type_text("dd").await;
         let screen = render(&mut h.app, 80, 24);
@@ -1391,24 +1386,19 @@ mod tests {
     }
 
     #[test]
-    fn the_tabs_layout_and_grid_say_the_active_tabs_filter() {
+    fn the_tabs_layout_says_the_active_tabs_filter() {
         use crate::app::grouping::Grouping;
-        for layout in [SessionLayout::Tabs, SessionLayout::Grid] {
-            let mut h = harness_with_folders(agents_and_statuses(), &known(), layout);
-            h.app.show_sections(
-                Grouping::App,
-                vec![crate::app::grouping::Section::App(
-                    crate::app::grouping::AppKey::new("claude"),
-                )],
-            );
-            let screen = render(&mut h.app, 160, 48);
-            let top = screen.lines().next().unwrap();
-            assert!(top.contains("claude"), "{layout:?}: {top:?}");
-            assert!(!screen.contains("frontend"), "{layout:?}: {screen}");
-            if layout == SessionLayout::Tabs {
-                assert!(top.starts_with(" ◇ claude ▾ "), "{top:?}");
-            }
-        }
+        let mut h = harness_with_folders(agents_and_statuses(), &known(), SessionLayout::Tabs);
+        h.app.show_sections(
+            Grouping::App,
+            vec![crate::app::grouping::Section::App(
+                crate::app::grouping::AppKey::new("claude"),
+            )],
+        );
+        let screen = render(&mut h.app, 160, 48);
+        let top = screen.lines().next().unwrap();
+        assert!(top.starts_with(" ◇ claude ▾ "), "{top:?}");
+        assert!(!screen.contains("frontend"), "{screen}");
     }
 
     /// [`agents_and_statuses`] with dev-server pinned too (docs is), and
@@ -1538,7 +1528,7 @@ mod tests {
     }
 
     #[test]
-    fn the_tabs_layout_and_grid_follow_the_pinned_tab() {
+    fn the_tabs_layout_follows_the_pinned_tab() {
         use crate::app::grouping::Grouping;
         // Tabs: the tab bar is in the Folders order, pinned sessions where
         // their folders put them, with ★ after their name; under Status too.
@@ -1567,13 +1557,6 @@ mod tests {
         assert!(top.starts_with(" ★ Pinned  "), "{top:?}");
         assert!(order(top, &["dev-server ★", "docs ★"]), "{top:?}");
         assert!(!top.contains("api-refactor"), "{top:?}");
-        // Grid's header names it, with its mark.
-        let mut h = two_pinned(SessionLayout::Grid);
-        h.app.show_tab(Grouping::Pinned);
-        let screen = render(&mut h.app, 160, 48);
-        let top = screen.lines().next().unwrap();
-        assert!(top.starts_with(" ★ Pinned · Grid"), "{top:?}");
-        assert!(!screen.contains("api-refactor"), "{screen}");
     }
 
     fn known() -> Vec<(&'static str, Option<session_core::model::GitInfo>)> {
@@ -1705,7 +1688,6 @@ mod tests {
                     assert!(top.contains("   ▤ web  ⎇ main"), "{top}")
                 }
                 SessionLayout::Tabs => assert!(top.starts_with(" ▤ web ▾ "), "{top}"),
-                SessionLayout::Grid => assert!(top.contains("web"), "{top}"),
             }
             // Several: how many.
             h.app
@@ -2135,9 +2117,7 @@ mod tests {
                 h.press(KeyCode::Char(c)).await;
             }
             let screen = render(&mut h.app, width, height);
-            // (A phone has no Grid.)
             assert!(screen.contains("[Master detail] Tabs"), "{screen}");
-            assert!(!screen.contains("Grid"), "{screen}");
             // Esc clears the search, then closes.
             h.press(KeyCode::Esc).await;
             h.press(KeyCode::Esc).await;
@@ -3005,32 +2985,6 @@ mod tests {
             "{screen}"
         );
         assert!(screen.contains("hello from the fake"), "{screen}");
-    }
-
-    #[test]
-    fn grid_shows_the_feed_in_a_pane_beside_the_cards() {
-        let mut h = with_layout(
-            vec![view("A", "api", 20), view("B", "docs", 10)],
-            SessionLayout::Grid,
-        );
-        let before = render(&mut h.app, 160, 48);
-        let grid = h.app.screen().grid.unwrap();
-        h.app.open_feed();
-        let screen = render(&mut h.app, 160, 48);
-        let feed = h.app.screen().feed.unwrap();
-        let cards = h.app.screen().grid.unwrap();
-        assert_eq!(cards.right() + 1, feed.x);
-        assert_eq!(feed.right(), grid.right());
-        assert_eq!(
-            pane_column(&screen, feed.x)[1],
-            "   ≡ Feed   ▥ rtop",
-            "{screen}"
-        );
-        assert!(screen.contains("api"), "{screen}");
-        assert_ne!(screen, before);
-        h.app.close_drawer();
-        render(&mut h.app, 160, 48);
-        assert_eq!(h.app.screen().grid, Some(grid));
     }
 
     /// What the daemon would say: this window, an API, and session A

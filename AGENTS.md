@@ -633,7 +633,7 @@ tui/
     ui.rs, components/       # rendering: session list, detail, Folders modal, dialogs, footer (session,
                              # messages, mode label), welcome tour, phone access (offer, pairing dialog with QR code)
     terminal_view/           # live terminal pane widget, key/mouse/paste encoding
-    layout/                  # Master detail / Grid / Tabs geometry, tab bar, session cycling
+    layout/                  # Master detail / Tabs geometry, tab bar, session cycling
     help/                    # Settings modal (General, Keys: actions table) and Help modal (docs, license)
     naming/                  # AI session naming (Anthropic / OpenAI over HTTPS), not while AI titles are on
     auth/                    # Clerk auth, deferred (feature flag off)
@@ -1348,7 +1348,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   applies (Pinned has none); each keeps its own filter while another is active; none is saved,
   and every start (a restart or a UI reload) opens Status.
 - **Drawer** (`app/drawer.rs`): what shows beside the sessions, with two tabs, the **Feed** and
-  **rtop**: a pane on the right in Master detail and Grid, a tab in Tabs, the screen on a phone.
+  **rtop**: a pane on the right in Master detail, a tab in Tabs, the screen on a phone.
   It takes Rakumux mode's keys from the list while focused. Hidden at every start; never opens
   by itself.
 - **Feed** (`app/feed`, `f`): what agents said, across sessions and machines: the drawer's
@@ -1412,11 +1412,10 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   session mode (keys go to the program) to Rakumux mode (keys drive Rakumux; the session is
   previewed). `rakumux attach` uses it as its prefix.
 - **Layout**: Master detail (`sidebar`, default: list left, detail right; on narrow windows the
-  list stacked above the detail in Rakumux mode), Grid (`grid`: paged read-only live terminal
-  cards), or Tabs (`tabs`, tab bar on top). Not saved: every start opens Master detail. Phones
-  offer Master detail (the list, then a session under tabs) and Tabs (the tab bar over the
-  session), not Grid. The drawer (the Feed and rtop) docks on the right in Master detail and Grid
-  and is a tab in Tabs.
+  list stacked above the detail in Rakumux mode) or Tabs (`tabs`, tab bar on top). Not saved:
+  every start opens Master detail. On phones Master detail is the list, then a session under
+  tabs, and Tabs the tab bar over the session. The drawer (the Feed and rtop) docks on the right
+  in Master detail and is a tab in Tabs.
 - **rtop** (`t`): what the machine, Rakumux's own processes and every running session's
   processes use (CPU, memory, network), from `resource_usage`, as graphs over time in the drawer
   beside the Feed; kept in this window's memory for about five minutes. On rakumux.com the same tab shows every machine of the
@@ -1481,9 +1480,9 @@ active one is bold, underlined and names its filter (`▤ web  ⎇ main ▾`, `�
 rows narrow the gaps, then drop the `▾` and its room from every tab
 (`◔ Status ▤ Folders ◇ App ★ Pinned`: names from 37 columns of list, the `▾` from 43, so a
 40-column list, a 100-column window's or a phone's, has the names alone), then show the
-inactive tabs as their marks. The tab bar (Tabs) and Grid's header show the active tab's mark
+inactive tabs as their marks. The tab bar (Tabs) shows the active tab's mark
 and filter at the left (`◔ Status ▾`, `★ Pinned`); only Master detail shows the four tabs.
-The session tab bar (Tabs, and a session under tabs on a phone or from Grid) holds the sessions
+The session tab bar (Tabs, and a session under tabs on a phone) holds the sessions
 the active tab's filters show, in the Folders tab's order (folder by folder in the order the
 user set; under Pinned, the Pinned tab's order) whatever the active tab
 (`SessionList::tab_order`, `ShownAs::Tabs`), so a tab keeps its place and number while its
@@ -1499,14 +1498,14 @@ in the accent while the drawer has the keys; a click on a name shows that tab wi
 is hidden at every start and never opens by itself; the shown/hidden state and its tab are this
 window's, never saved. Only the tab on screen works: the feed is read every 2 s and rtop samples
 only while their tab shows. Master
-detail and Grid dock it on the right (`layout::split_with`, `Screen::feed`): list (or Grid's
-cards) | session | a one-column line (`Screen::feed_divider`, dragged to resize, saved as
+detail docks it on the right (`layout::split_with`, `Screen::feed`): list | session | a
+one-column line (`Screen::feed_divider`, dragged to resize, saved as
 `sessions.feed_width`) | the drawer, `layout::default_feed_width` (44 columns, a quarter of wide
 screens, at most 60) and at least `FEED_MIN_COLS` (30). The session narrows and takes the new
 size at once, as a dragged divider gives it (`sync_terminal_size`); it docks only while the session
 keeps `FEED_SESSION_MIN_COLS` (60) beside it (and Master detail its list or rail: hiding the list
 makes room). Narrower windows from 80 columns show the drawer in the session's place in Rakumux
-mode only (beside or under the list; Grid's cards give way only while it has the keys) and session
+mode only (beside or under the list) and session
 mode keeps the session's full width. Tabs gives it a tab of its own, first in the tab bar before a
 `│`, unnumbered, never moved, named by its active tab (` ≡ Feed ●N `, with the count, or
 ` ▥ rtop `); selected, the body under the bar shows the drawer, on the Feed its cards and, from
@@ -1516,7 +1515,7 @@ active tab handles them, `App::drawer_key`): `f` (`t`) shows it on the Feed (rto
 switches to that tab, gives them to it while the list has them, and hides it while that tab has
 them; a click gives them to the side it lands on; `Esc` (after a pending key; the feed first goes
 back from a reply read whole) gives them back to the list, hiding it where it would leave the
-screen (a phone, narrow Grid); session mode gives them back too. The footer names the selected
+screen (a phone); session mode gives them back too. The footer names the selected
 card's session (rtop's selected row's) while it has the keys. On the Feed, the selected card's
 border is in the accent while it has the keys. With them `↑`/`↓`/`j`/`k` go through the cards, `Enter` (or a second click,
 a tap on a phone) reads the selected reply whole in the cards' place (a `‹` on the band, or `Esc`,
@@ -1524,8 +1523,7 @@ goes back; `↑`/`↓` scroll it; `Ctrl-d`/`Ctrl-u`, PgUp/PgDn page it), and `En
 the cards) goes into its session when it runs here; `Space` (or a click on a card's `▾ more`)
 shows the selected card whole in the list (`▴ less`, or `Space` again, back; `FeedStore::expanded`,
 this window's); `←`/`→` and the keys that act on the list's
-session do nothing. Grid cards stay read-only observers: nothing in the feed sends
-them Promote, Resize, Fit or input. It lists the account's machines' turns, newest first, each a card
+session do nothing. It lists the account's machines' turns, newest first, each a card
 (`components/feed.rs`, `app::feed::Card`), ten rows tall and a row apart: on its top border the
 session's name, then quieter its agent, folder, repository (only for this machine's sessions
 listed here, from their git context, and not when named like the folder: entries carry none) and
@@ -1559,7 +1557,7 @@ at once), `a ✓ Signed in` while signed in (a tap opens the account dialog); `C
 session mode (the label names the mode); and last, quieter, this Rakumux's version (`v0.1.37`, a
 local build's `v0.1.0`). In Rakumux mode, just left of the buttons, a **tip** (`app/tips.rs`, `App::tip`): a key and what it does (`T terminal
 panel`, `f every agent's replies`, `t rtop: what sessions use`, the Rakumux key's `session or
-Rakumux mode`, `U update (sessions stay up)`, `w where it changed files`, `v Master detail, Grid,
+Rakumux mode`, `U update (sessions stay up)`, `w where it changed files`, `v Master detail or
 Tabs`, `p pin to the top`, `Tab last session`, `a answer agents from the web` only while signed
 out, `drag copies a session's text`, `rakumux remote on pairs a phone`), its keys bold as a
 button's, its text in the version's ink. The local date picks it, so it's the same all day and the
@@ -1584,7 +1582,7 @@ Beside the session (Master detail, 100 columns or more) the list's last row is `
 and the session takes its columns, leaving a `layout::RAIL_COLS` (2) wide rail at the left edge, a
 sliver of the list pane with `»` at its bottom and the divider's line (`Hit::ShowList`: a click
 shows the list again, as `b` does). Keys still move through the sessions while it's hidden. The session on screen takes the new pane size at once (`sync_terminal_size`, as a dragged
-divider does). Stacked and phone screens, Grid and Tabs show no button and ignore it (`b` says so);
+divider does). Stacked and phone screens and Tabs show no button and ignore it (`b` says so);
 the state is this window's, never saved, and comes back when the window widens again.
 When Tailscale runs on the machine and phone access was never set up (no `remote.json`), Rakumux
 asks once, in Rakumux mode with no other dialog open (so after the tour), "Use Rakumux from your
@@ -1595,8 +1593,7 @@ changes it; Settings has no phone or AI naming rows (API keys come from `config.
 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`).
 
 Phones (under `layout::PHONE_BELOW` = 80 columns; phone terminals
-are about 40–60 columns in portrait) offer Master detail and Tabs, not Grid (a chosen Grid shows
-as Master detail there, and `v` skips it). Master detail shows one thing at a time: Rakumux mode is
+are about 40–60 columns in portrait): Master detail shows one thing at a time: Rakumux mode is
 the session list alone, full screen (the feed, while it has the keys); a tap on a session (or
 `Enter`) goes into it, and session mode
 gives it the screen under a row of tabs, one per session (no folder filter; a tap on
@@ -1661,7 +1658,7 @@ there but the text filter; one unpinned while selected stays shown until somethi
 selected (as a status change under Status), and with none pinned the list says `no pinned
 sessions` above `+ New session`. Under the other tabs a pinned session is listed in its folder,
 app and status like any other, with the gold `★` in its gutter just left of its name, always;
-the tab bar and Grid show ★ after their name (`layout::PIN_MARK`). In terminals that report
+the tab bar shows ★ after their name (`layout::PIN_MARK`). In terminals that report
 pointer movement (desktop terminals, also over SSH; not phones), the session row under the
 pointer shows its pin toggle there: `☆` to pin it, the gold `★` to unpin it (under Pinned
 every row's, only under the pointer); a click on it (`Hit::PinToggle`, only under the
@@ -1744,17 +1741,8 @@ precedence; without folder context, the launch folder). A session made in a fold
 hides adds that folder to the filter. Other folders, commands and startup commands are CLI-only:
 `rakumux new --cwd DIR --cmd C -- ARGV`.
 
-**Grid.** Settings → Layout or `v` in Rakumux mode cycles Master detail, Grid and
-Tabs (phones skip Grid). Grid fills the body above the one-row footer with up to six terminal
-cards; a phone shows Master detail instead. Arrows or `h`/`j`/`k`/`l` select cards, PgUp/PgDn change page, Home/End go to the ends;
-`P` and `/` keep filtering folders and text. Enter or a tap opens a session full screen under
-tabs; `Ctrl-\` returns to Grid. `n` or the last + New session card creates immediately.
-Only visible cards attach, always as observers, and are cancelled offscreen, on activation,
-layout change, disconnect or shutdown. Previews use passive, zero-scrollback mirrors, bounded
-mailboxes and checked generations; saved output is read with a cap. Browsing never sends
-Promote, Resize, Fit, terminal input, Touch, clipboard, bell or terminal-query replies, even
-through the hidden detail path. Cards crop/pan rather than resizing terminals. Default config
-and wire spelling stays `sidebar`, now labelled Master detail; `grid` and `tabs` persist too.
+**Layouts.** Settings → Layout or `v` in Rakumux mode switches between Master detail and
+Tabs.
 
 **rtop.** `t` in Rakumux mode or Settings → rtop (`app/rtop.rs`, `components/rtop.rs`) shows, in
 the drawer's rtop tab (above), what this machine and Rakumux use over time, drawn as btop does,
@@ -1796,7 +1784,7 @@ Beside (`screen::with_terminal_panel`, `layout::PanelPlacement`): the session, a
 divider, then the panel: the session at least `layout::PANEL_BESIDE_SESSION_MIN_COLS` (60)
 wide and the panel `layout::PANEL_BESIDE_MIN_COLS` (40), about 60/40 until the divider is
 dragged (its share kept for the window, as the height below is, within those minimums). It splits
-only the detail, so it applies to Master detail, Tabs and Grid's session alike, and a docked
+only the detail, so it applies to Master detail and Tabs alike, and a docked
 drawer stays right of the panel (list | session | panel | drawer): the drawer narrows towards
 `FEED_MIN_COLS` to make room (`PaneSizes::panel_beside`), and where even that leaves less than
 `layout::PANEL_BESIDE_DETAIL_COLS` (101) the drawer keeps its width and the panel shows below.
@@ -1813,9 +1801,8 @@ terminal automatically; there is no session record to delete. Closing/reloading 
 the temporary pane shell, never any Rakumux sessions. Drag its
 divider (a row below, a column beside) to resize the split. The selected agent remains observed while the shell takes input;
 only the focused terminal claims size, and scrolling an unfocused shell cannot resize the
-agent. Short windows show the focused pane alone below (beside, both keep every row). Grid
-browsing keeps its grid and hides the panel; focusing the shell restores the selected detail
-above or beside it. Each window keeps one pane,
+agent. Short windows show the focused pane alone below (beside, both keep every row). Each
+window keeps one pane,
 reusing it after hiding. All work uses SessionApi off the UI thread, with stale-result checks,
 user-only daemon policy, passive emulators, bounded history and input-log privacy. In-place
 daemon restarts preserve pane PTYs. Reconnects attach as observers until the user refocuses;
@@ -1851,11 +1838,11 @@ panel has the keys), and keeps it until the button is let go wherever the pointe
 pane's edge (over the list, the footer) at its nearest cell, as a terminal reports a drag that
 left its window (`App::mouse_grab`), so its selection ends there too. A program's own copy (OSC
 52, Claude Code's copy on select) is relayed by the daemon to the session's controller only and
-written out by that window (`App::write_clipboard`), never from a preview, Grid or another
+written out by that window (`App::write_clipboard`), never from a preview or another
 window; a program's clipboard read (`OSC 52 ; ?`) is never answered. Shift-drag is the outer
 terminal's own selection, across the whole window.
 
-Embedded terminals (the detail, Grid cards, the terminal panel) draw a program's default colours
+Embedded terminals (the detail, the terminal panel) draw a program's default colours
 in the outer terminal's own (`terminal_view::DefaultColors::NATIVE`), not the Rakumux theme;
 colours a program sets itself are kept. The daemon still answers OSC 10/11 colour queries with
 Tokyo Night's (`vt::Colors`).

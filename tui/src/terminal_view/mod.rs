@@ -97,8 +97,7 @@ impl TerminalView {
         self.reset_with_history(rows, cols, checkpoint, self.scrollback.max(lines));
     }
 
-    /// Apply a screen checkpoint without allocating extra history. Used by
-    /// bounded, passive Grid previews, which retain no scrollback.
+    /// Apply a screen checkpoint without allocating extra history.
     pub fn reset_screen(&mut self, rows: u16, cols: u16, checkpoint: &[u8]) {
         self.reset_with_history(rows, cols, checkpoint, self.scrollback);
     }
@@ -117,11 +116,6 @@ impl TerminalView {
     /// kept as history for [`scroll`](Self::scroll); the cursor is hidden.
     pub fn reset_to_text(&mut self, rows: u16, cols: u16, text: &str) {
         self.reset(rows, cols, &text_checkpoint(text));
-    }
-
-    /// Saved text without extra retained history, for bounded Grid cards.
-    pub fn reset_screen_to_text(&mut self, rows: u16, cols: u16, text: &str) {
-        self.reset_screen(rows, cols, &text_checkpoint(text));
     }
 
     /// Apply live output. While scrolled back the picture stays frozen;

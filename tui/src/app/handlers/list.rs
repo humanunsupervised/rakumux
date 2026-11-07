@@ -75,14 +75,6 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
             return handle_list_key(app, plain);
         }
         KeyCode::Char('q') => return AppResult::Exit,
-        KeyCode::Up | KeyCode::Char('k') if app.browsing_grid() => {
-            app.move_grid_selection(-(app.grid_page().columns as isize))
-        }
-        KeyCode::Down | KeyCode::Char('j') if app.browsing_grid() => {
-            app.move_grid_selection(app.grid_page().columns as isize)
-        }
-        KeyCode::Left | KeyCode::Char('h') if app.browsing_grid() => app.move_grid_selection(-1),
-        KeyCode::Right | KeyCode::Char('l') if app.browsing_grid() => app.move_grid_selection(1),
         // ←/→ go along the list's tabs wherever the selection is (`h`/`l`
         // on the top row, where Enter opens the active one's modal); ↑/↓
         // go through the sessions.

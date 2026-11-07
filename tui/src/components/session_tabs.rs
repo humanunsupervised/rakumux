@@ -5,7 +5,7 @@
 //! so tabs keep their places as statuses change. While the drawer is shown
 //! its tab comes first, named by its active tab (Feed or rtop), before a
 //! line, unnumbered and never moved (`draw_drawer_tab`). A phone's
-//! session-mode tab row (and Grid's) is the same bar without the filter or
+//! session-mode tab row is the same bar without the filter or
 //! the drawer's tab.
 
 use ratatui::{

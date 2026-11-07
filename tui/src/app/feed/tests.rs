@@ -540,66 +540,6 @@ async fn in_tabs_the_feed_is_a_tab_of_its_own() {
 }
 
 #[tokio::test]
-async fn in_grid_the_feed_is_a_pane_beside_the_cards_and_never_touches_them() {
-    use session_core::api::{Role, StreamCommand};
-    use session_core::client::AttachOutgoing;
-    let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Grid);
-    account.queue_feed(page(
-        1,
-        1,
-        vec![
-            entry("L", "B", 1_000, Some(1)),
-            entry("M", "A", 500, Some(2)),
-        ],
-        false,
-    ));
-    let grid = h.app.screen().grid.unwrap();
-    assert!(h.app.browsing_grid());
-    show_feed(&mut h).await;
-    let screen = h.app.screen();
-    let feed = screen.feed.unwrap();
-    assert_eq!(screen.grid.unwrap().right() + 1, feed.x);
-    assert_eq!(feed.right(), grid.right());
-    assert!(h.app.browsing_grid());
-    assert!(screen.terminal.is_none());
-    // Moving through the feed, reading a reply, giving the keys back and
-    // hiding it send the cards' sessions nothing.
-    for index in 0..h.fake.attach_count() {
-        h.fake.outgoing(index);
-    }
-    for code in [
-        KeyCode::Down,
-        KeyCode::Up,
-        KeyCode::Enter,
-        KeyCode::Down,
-        KeyCode::Esc,
-        KeyCode::Esc,
-        KeyCode::Char('f'),
-        KeyCode::Char('f'),
-    ] {
-        h.press(code).await;
-    }
-    assert!(!h.app.drawer_open());
-    for index in 0..h.fake.attach_count() {
-        assert_eq!(h.fake.attach_request(index).role, Role::Observer);
-        for message in h.fake.outgoing(index) {
-            assert_eq!(message, AttachOutgoing::Command(StreamCommand::Detach));
-        }
-    }
-    assert!(!h.fake.calls().iter().any(|c| c.starts_with("touch ")));
-    // A session opened from Grid: under its tabs, the pane beside it.
-    show_feed(&mut h).await;
-    h.press(KeyCode::Enter).await;
-    h.press(KeyCode::Enter).await;
-    assert_eq!(h.app.focus, Focus::Session);
-    assert_eq!(h.selected().as_deref(), Some("B"));
-    let screen = h.app.screen();
-    assert_eq!(screen.tabs.unwrap().right() + 1, feed.x);
-    assert_eq!(screen.feed, Some(feed));
-    assert_eq!(h.app.terminal_size().0, feed.x - 1);
-}
-
-#[tokio::test]
 async fn on_a_phone_the_feed_fills_the_screen_while_it_has_the_keys() {
     for layout in [SessionLayout::Sidebar, SessionLayout::Tabs] {
         let (mut h, account) = feed_harness(FakeAccount::with_feed(), layout);
@@ -671,18 +611,6 @@ async fn too_narrow_to_dock_it_the_feed_takes_the_sessions_place_in_rakumux_mode
     assert!(screen.stacked);
     assert_eq!(screen.feed.unwrap().y, screen.divider.unwrap().bottom());
     assert!(screen.detail.is_none());
-    // Grid that narrow: the cards give way while the feed has the keys,
-    // and Esc hides it.
-    h.app.set_layout(SessionLayout::Grid);
-    h.press(KeyCode::Char('f')).await;
-    assert!(h.app.feed_has_keys());
-    let screen = h.app.screen();
-    assert!(screen.grid.is_none());
-    assert_eq!(screen.feed, Some(ratatui::layout::Rect::new(0, 0, 90, 39)));
-    assert!(!h.app.browsing_grid());
-    h.press(KeyCode::Esc).await;
-    assert!(!h.app.drawer_open());
-    assert!(h.app.browsing_grid());
 }
 
 #[tokio::test]

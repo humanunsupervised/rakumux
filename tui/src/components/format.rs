@@ -221,18 +221,8 @@ pub fn truncate_start(text: &str, width: usize) -> String {
 const REPORT_MIN: usize = 12;
 
 /// Second line of a list row: the colour-coded app first, then its git
-/// branch, state and report. Only the app name gets its identifying colour.
-pub fn secondary_line(
-    session: &SessionView,
-    width: usize,
-    icons: Icons,
-    detail_style: Style,
-) -> Line<'static> {
-    facts_line(session, width, icons, detail_style, true)
-}
-
-/// [`secondary_line`], with the branch (`branch`) or without (the session
-/// list says it on the session's place line).
+/// branch (`branch`; the session list says it on the session's place line
+/// instead), state and report. Only the app name gets its identifying colour.
 pub fn facts_line(
     session: &SessionView,
     width: usize,
@@ -523,7 +513,7 @@ mod tests {
             ("OpenCode", p.label_slate_blue),
         ] {
             session.terminal.as_mut().unwrap().foreground_process = Some(program.into());
-            let line = secondary_line(&session, 80, Icons::Plain, detail_style);
+            let line = facts_line(&session, 80, Icons::Plain, detail_style, true);
             assert_eq!(line.spans[0].content, program);
             assert_eq!(line.spans[0].style.fg, Some(color));
             assert_eq!(line.spans[1].content, " · ⎇ main");
@@ -542,7 +532,7 @@ mod tests {
         let style = Style::default().fg(theme::palette().text_muted);
         for icons in Icons::ALL {
             for width in 0..80 {
-                let line = secondary_line(&session, width, icons, style);
+                let line = facts_line(&session, width, icons, style, true);
                 assert!(line.width() <= width);
                 assert_eq!(
                     line.spans[0].style.fg,
@@ -550,7 +540,7 @@ mod tests {
                 );
             }
         }
-        let line = secondary_line(&session, 5, Icons::Plain, style);
+        let line = facts_line(&session, 5, Icons::Plain, style, true);
         assert_eq!(line.spans[0].content, "open…");
     }
 
@@ -643,7 +633,7 @@ mod tests {
         session.lifecycle = Lifecycle::Working;
         let style = Style::default();
         let text = |session: &SessionView, icons: Icons| -> String {
-            secondary_line(session, 80, icons, style)
+            facts_line(session, 80, icons, style, true)
                 .spans
                 .iter()
                 .map(|span| span.content.as_ref())

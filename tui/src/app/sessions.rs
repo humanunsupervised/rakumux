@@ -154,10 +154,6 @@ impl App {
     /// a removed session, a new selection, or a saved session that came
     /// back to life (revived by another client).
     pub(super) fn reconcile_detail(&mut self) {
-        if self.browsing_grid() {
-            self.sync_grid();
-            return;
-        }
         let selected = self.list.selected_session().cloned();
         let shown = self.shown_session();
         // Session mode needs its session selected; without it, back to
@@ -203,10 +199,6 @@ impl App {
     /// [`App::shown_session`] keeps in view): observe it when live, its
     /// saved screen otherwise.
     pub(super) fn show_selected(&mut self) {
-        if self.browsing_grid() {
-            self.sync_grid();
-            return;
-        }
         match self.shown_session() {
             None => {
                 self.detail.retarget(DetailView::Empty);
@@ -243,9 +235,6 @@ impl App {
         };
         let generation = self.detail.retarget(DetailView::Loading(id.clone()));
         self.pending_focus = (role == Role::Controller).then_some(generation);
-        if role == Role::Controller {
-            self.grid.clear();
-        }
         let (cols, rows) = self.terminal_size();
         let request = AttachRequest {
             id: id.clone(),
@@ -580,7 +569,6 @@ impl App {
     fn enter_session_focus(&mut self) {
         self.demote_terminal_panel();
         self.came_from_terminal = false;
-        self.grid.clear();
         self.focus = Focus::Session;
         self.drawer_lost_keys();
         self.pending_key = None;
@@ -613,7 +601,6 @@ impl App {
         self.zoomed = false;
         self.pending_focus = None;
         self.sync_terminal_size();
-        self.sync_grid();
     }
 
     /// The Rakumux key in session mode (or a click on the list): give up
@@ -625,7 +612,6 @@ impl App {
             self.focus = Focus::List;
             self.came_from_terminal = true;
             self.came_from = None;
-            self.sync_grid();
             return;
         }
         self.came_from_terminal = false;
@@ -764,10 +750,6 @@ impl App {
 
     /// `Ctrl-d` / `Ctrl-u`: move the selection half a list page.
     pub fn move_half_page(&mut self, direction: isize) {
-        if self.browsing_grid() {
-            self.move_grid_selection(direction * (self.grid_page().capacity as isize / 2).max(1));
-            return;
-        }
         // Sessions are three rows; a page is the list's height in them.
         let rows = self.screen().list.map_or(30, |list| list.height) as isize;
         let step = (rows / 3 / 2).max(1);
@@ -806,17 +788,12 @@ impl App {
         };
         if moved {
             self.save_session_order();
-            self.sync_grid();
         }
     }
 
     /// `Ctrl-y`/`Ctrl-e`, PgUp/PgDn: scroll the previewed session's history
     /// (positive = back in time).
     pub fn scroll_preview(&mut self, delta: i32) {
-        if self.browsing_grid() {
-            self.move_grid_page(if delta > 0 { -1 } else { 1 });
-            return;
-        }
         if let Some(terminal) = self.detail.terminal.as_mut() {
             terminal.scroll(delta);
         }
@@ -1015,7 +992,6 @@ impl App {
     /// includes the "+ New session" row; Tabs only has sessions.
     pub fn move_selection(&mut self, delta: isize) {
         match self.session_layout() {
-            SessionLayout::Grid => self.move_grid_selection(delta),
             SessionLayout::Sidebar => {
                 if self.list.move_selection(delta) {
                     self.reconcile_detail();
@@ -1058,7 +1034,6 @@ impl App {
         }
         self.sync_terminal_size();
         self.reconcile_detail();
-        self.sync_grid();
     }
 
     // ------------------------------------------------------------ input
@@ -1307,19 +1282,6 @@ impl App {
                     self.focus_terminal_panel();
                     return;
                 }
-                Some(Hit::GridCell(index)) => {
-                    let id = self.list.visible().get(index).map(|s| s.id.clone());
-                    self.list.select(match id {
-                        Some(id) => Selection::Session(id),
-                        None => Selection::NewSession,
-                    });
-                    self.activate_selected();
-                    return;
-                }
-                Some(Hit::GridPage(delta)) => {
-                    self.move_grid_page(delta);
-                    return;
-                }
                 // The selection stays where it is.
                 Some(Hit::TitleRefresh(row)) => {
                     if let Some(ListRow::Session(session)) = self.list.rows().get(row) {
@@ -1502,7 +1464,7 @@ impl App {
             }
         } else if inside(screen.terminal) {
             self.terminal_mouse(event, screen.terminal.unwrap_or_default());
-        } else if inside(screen.list) || inside(screen.grid) {
+        } else if inside(screen.list) {
             match event.kind {
                 MouseEventKind::ScrollUp => self.move_selection(-1),
                 MouseEventKind::ScrollDown => self.move_selection(1),
@@ -1945,7 +1907,6 @@ impl App {
             self.terminal_size(),
         );
         self.creating_session = true;
-        self.grid.clear();
         self.mode = AppMode::Normal;
         self.set_status("Creating session...");
         self.exec.job(move || AppEvent::Created {

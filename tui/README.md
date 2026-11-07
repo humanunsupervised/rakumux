@@ -106,8 +106,7 @@ Global options before the subcommand: `--ptyd-path <PATH>`, `--debug`. Exit code
 ```
 
 - **Layouts**: Sidebar (above, default) or Tabs (a tab bar of sessions on top, the selected session
-  below), or Grid (live terminal cards; not on phones); switch with `v` or in Settings (`,` or
-  `o` in Rakumux mode). Every start opens Master detail; the choice isn't saved.
+  below); switch with `v` or in Settings (`,` or `o` in Rakumux mode). Every start opens Master detail; the choice isn't saved.
 - **Narrow screens and phones** (Sidebar, under 100 columns; e.g. Blink, Termius or a web
   terminal): in Rakumux mode the list sits on top and the selected session below it, so you see
   it while you pick one. The list takes 40% of the height (at least the folder filter and two

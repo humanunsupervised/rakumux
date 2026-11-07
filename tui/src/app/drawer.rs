@@ -1,7 +1,7 @@
 //! The drawer: what shows beside the sessions on the right, with two tabs,
 //! the Feed (`feed/`) and rtop (`rtop.rs`). Every start hides it; `f` shows
-//! it on the Feed, `t` on rtop (or Settings for either). Master detail and
-//! Grid dock it as a pane on the right, a draggable line left of it, and the
+//! it on the Feed, `t` on rtop (or Settings for either). Master detail docks
+//! it as a pane on the right, a draggable line left of it, and the
 //! session's pane narrows (the session on screen takes the new size, as a
 //! dragged divider gives it). A window too narrow to keep the session usable
 //! beside it shows it in the session's place in Rakumux mode only. Tabs
@@ -15,8 +15,7 @@
 //! gives it the keys while the list has them, and hides the drawer while
 //! that tab has them; a click focuses the side it lands on, a click on a
 //! band's tab shows that tab; Esc gives the keys back to the list, hiding
-//! the drawer where it would vanish (a phone, Grid's cards on a narrow
-//! window). Session mode gives them back too. Only the active tab works:
+//! the drawer where it would vanish (a phone). Session mode gives them back too. Only the active tab works:
 //! the feed is read fast and rtop samples only while their tab is on
 //! screen.
 
@@ -144,8 +143,7 @@ impl App {
     }
 
     /// The list takes Rakumux mode's keys back. Where the drawer would then
-    /// leave the screen (a phone, Grid's cards on a narrow window) it's
-    /// hidden; Tabs keeps its tab.
+    /// leave the screen (a phone) it's hidden; Tabs keeps its tab.
     pub fn unfocus_drawer(&mut self) {
         if !self.drawer_focused {
             return;
@@ -209,13 +207,12 @@ impl App {
     }
 
     /// The drawer came, went, moved or changed tab: the session on screen
-    /// takes its pane's new size (as a dragged divider gives it), Grid's
-    /// previews follow their cards, and the tab that came on screen starts
+    /// takes its pane's new size (as a dragged divider gives it), and the
+    /// tab that came on screen starts
     /// (the feed is asked for changes, rtop for a sample) while the one that
     /// left stops.
     pub(in crate::app) fn drawer_moved(&mut self) {
         self.sync_terminal_size();
-        self.sync_grid();
         let now = Instant::now();
         self.feed_timers(now);
         self.rtop_timers(now);

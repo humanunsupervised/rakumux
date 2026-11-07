@@ -111,7 +111,6 @@ impl App {
         if Some(width) != self.settings.sessions.feed_width {
             self.settings.sessions.feed_width = Some(width);
             self.sync_terminal_size();
-            self.sync_grid();
         }
     }
 

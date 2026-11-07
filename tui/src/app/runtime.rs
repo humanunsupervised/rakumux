@@ -98,22 +98,6 @@ pub enum AppEvent {
         generation: u64,
         result: Result<ReadResult, ApiError>,
     },
-    PreviewAttached {
-        id: SessionId,
-        generation: u64,
-        result: Result<AttachStream, ApiError>,
-    },
-    PreviewSaved {
-        id: SessionId,
-        generation: u64,
-        result: Result<ReadResult, ApiError>,
-    },
-    /// Coalesced notification: queued output is bounded per visible card.
-    PreviewReady {
-        id: SessionId,
-        generation: u64,
-        mailbox: super::grid::PreviewMailbox,
-    },
     Created {
         result: Result<SessionView, ApiError>,
     },
@@ -231,7 +215,6 @@ pub enum ExecMode {
 #[derive(Clone)]
 enum TerminalTarget {
     Detail,
-    Grid(SessionId, super::grid::PreviewMailbox),
     Panel,
 }
 
@@ -318,22 +301,6 @@ impl Exec {
             stream.into_events(),
             cancel,
             TerminalTarget::Detail,
-        );
-    }
-
-    /// Pump a read-only card through a bounded, coalescing mailbox.
-    pub fn pump_preview(
-        &mut self,
-        id: SessionId,
-        generation: u64,
-        stream: AttachStream,
-        cancel: CancelFlag,
-    ) {
-        self.pump_terminal(
-            generation,
-            stream.into_events(),
-            cancel,
-            TerminalTarget::Grid(id, Default::default()),
         );
     }
 
@@ -489,16 +456,6 @@ fn forward_attach(
     event: AttachEvent,
 ) -> bool {
     let event = match target {
-        TerminalTarget::Grid(id, mailbox) => {
-            if !mailbox.push(event) {
-                return true;
-            }
-            AppEvent::PreviewReady {
-                id: id.clone(),
-                generation,
-                mailbox: mailbox.clone(),
-            }
-        }
         TerminalTarget::Detail => AppEvent::Attach { generation, event },
         TerminalTarget::Panel => AppEvent::PanelAttach { generation, event },
     };

@@ -102,7 +102,7 @@ new-session flow, and code boundaries.
   at every start, nothing opens it by itself), `drawer_focused` (it has Rakumux mode's keys:
   `drawer_has_keys`; `drawer_lost_keys` when session mode or the terminal panel takes them) and
   `drawer_tab` go to the layout as `PaneSizes::feed` (`layout::FeedShown`), and `Screen::feed`
-  says where it is: docked on the right (Master detail, Grid; `Screen::feed_divider`,
+  says where it is: docked on the right (Master detail; `Screen::feed_divider`,
   `drag_feed_divider` saves `sessions.feed_width`), the session's place on narrower windows in
   Rakumux mode, the body under the tab bar while the Tabs layout's drawer tab is selected
   (`drawer_tab_shown`), or the screen on a phone while it has the keys. `drawer_shown` is
@@ -111,14 +111,14 @@ new-session flow, and code boundaries.
   `Hit::DrawerTab`); `unfocus_drawer` (Esc, a click beside it, a grouping picked) gives the
   list the keys, hiding it where it would leave the screen; `drawer_back` is the active tab's
   Esc, `drawer_key` its keys, `drawer_session` what the footer names. Every change runs
-  `drawer_moved`: the session on screen takes its new pane size (`sync_terminal_size`), Grid's
-  previews follow their cards, and the tab that came on screen starts (feed read, rtop sample)
+  `drawer_moved`: the session on screen takes its new pane size (`sync_terminal_size`), and the
+  tab that came on screen starts (feed read, rtop sample)
   while the other stops. `components/drawer.rs::draw_drawer` draws the band (`≡ Feed   ▥ rtop`,
   the active one underlined, the accent while it has the keys) and the active tab;
   `components/session_tabs.rs` draws the Tabs layout's drawer tab, named by its active tab.
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
   folders / App / Status; Pinned always says Pinned), `filter_label` (the Tabs layout's
-  selector, Grid's header, after the tab's mark), `switch_tab`/`show_tab` (both give the list
+  selector, after the tab's mark), `switch_tab`/`show_tab` (both give the list
   the keys from the drawer), `open_tab_picker` (Folders: the Folders modal; Pinned: nothing) and the App and
   Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
   then `picker_sections` (sessions' apps or every status but unknown, plus the filter's), typing
@@ -142,7 +142,7 @@ new-session flow, and code boundaries.
   when it stops matching the filter (`kept`; unpinned, under Pinned), so a status change never
   takes away the session being worked in; filter and tab changes (`refilter`) don't keep it.
   `tab_order` is what a row of session tabs shows (`ShownAs::Tabs`: the Tabs layout, a session
-  under tabs on a phone or from Grid): `visible()`'s sessions in the Folders tab's order under
+  under tabs on a phone): `visible()`'s sessions in the Folders tab's order under
   every tab but Pinned (its own order there), so reading a session or a status change never
   moves a tab; `move_tab` moves one there as under Folders (Pinned). `App::shown_as` says which
   order is on screen, and cycling, `1`-`9`, `↑`/`↓`, `J`/`K`, tab clicks and drags follow it.
@@ -156,8 +156,7 @@ new-session flow, and code boundaries.
   the top row and the footer (session, messages, mode label, Help/Settings keys) is always exactly the
   last row, zoom included, so modes, selection and messages never move a pane. Phones
   (`layout::is_phone`, under 80 columns, `App::phone`) show the list alone in Rakumux mode
-  (or Grid cards when Grid is selected) and the session under a tab bar in session mode
-  (`App::list_layout` is Sidebar there except for Grid).
+  and the session under a tab bar in session mode.
   Narrow Sidebar windows (80–99 columns) stack the list above the detail in Rakumux mode
   (`Screen::stacked`, the divider a row) and give the session everything above the footer in
   session mode; `terminal_size` is always the session-mode pane. Side by side the list can be
@@ -181,18 +180,8 @@ new-session flow, and code boundaries.
   trees (`tree_order`), folded per session; `rtop_rows` names sessions from the list (name, then
   `AppKey` and folder). The selection is kept by `RowKey` as rows change; Enter `go_into`s the
   row's session.
-- `grid.rs` and `grid/tests.rs`: Grid's visible-page observer previews, generation checks,
-  cancellation and bounded output mailboxes. `layout/grid.rs` computes up to six cards; the
-  active tab's filters and order come from `SessionList::visible`. Only the visible
-  cards attach, always as `Role::Observer`, with zero scrollback; saved reads are capped.
-  Offscreen cards, layout changes, activation, disconnect and dropping the app cancel previews.
-  The preview lease can only detach: never Promote, Resize, Fit, input or Touch. Bell/clipboard
-  events and terminal queries have no external effect. Grid browsing has no hidden detail
-  attachment or `Screen::terminal`, so size claims cannot escape through the detail path.
-  Cards render cropped/panned at the terminal's real size. Enter/tap uses normal activation;
-  the Rakumux key returns to Grid. Arrows/h/j/k/l select, PgUp/PgDn page, n creates immediately.
-  Settings > Layout or `v` cycles Master detail (`sidebar`, still default), Grid
-  (`grid`) and Tabs (`tabs`); `v` is forwarded normally in session mode.
+- Layouts: Settings > Layout or `v` switches between Master detail (`sidebar`, the default) and
+  Tabs (`tabs`); `v` is forwarded normally in session mode.
 - Terminal size: `sync_terminal_size` (attach, own pane change) and `claim_terminal_size` (the
   user did something: key, click, paste, focus-in; at most once a second) send `Resize`
   (controller) or `Fit` (observer) when the session's size isn't this window's; the daemon

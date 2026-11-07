@@ -445,7 +445,7 @@ its list: that screen isn't the question as asked, so nothing is typed (`questio
 
 ## Session badges
 
-Live agents have a right-side activity mark in the list, tabs and Grid. In the list it
+Live agents have a right-side activity mark in the list and tabs. In the list it
 follows the right-aligned age:
 
 - Spinner: working, including active subagents.
@@ -454,11 +454,11 @@ follows the right-aligned age:
 - `?`: waiting for input or permission, distinct from a completed reply.
 
 Active subagents also show as a count after the status in the session's description, the
-detail's title and Grid cards: `◈ 3` (🤖 or a Nerd Font robot with those icon sets). It's the
+detail's title: `◈ 3` (🤖 or a Nerd Font robot with those icon sets). It's the
 subagents only; the session's own agent is the row itself.
 
-Opening the session marks a completed reply seen for every client. Passive list/Grid
-previews never do. Replies arriving in an open, focused conversation at the bottom of its
+Opening the session marks a completed reply seen for every client. The list's passive
+preview never does. Replies arriving in an open, focused conversation at the bottom of its
 history are marked seen; a background window, dialog or focused utility shell does not
 acknowledge them. Terminal focus reporting is needed to distinguish background windows.
 Read state is owned by the daemon, not inferred separately by each UI. Compatible daemon

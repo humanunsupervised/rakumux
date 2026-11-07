@@ -960,7 +960,6 @@ async fn the_list_hides_only_beside_the_session() {
         (SessionLayout::Sidebar, 90, 40),
         (SessionLayout::Sidebar, 45, 40),
         (SessionLayout::Tabs, 160, 48),
-        (SessionLayout::Grid, 160, 48),
     ] {
         let mut h = harness(vec![view("A", "a", 10)]);
         h.app.set_layout(layout);
@@ -2172,8 +2171,6 @@ async fn settings_switch_layout_live_without_saving_it() {
     }
     h.press(KeyCode::Enter).await;
     assert_eq!(settings_tab(&h), Some(ModalTab::Settings));
-    assert_eq!(h.app.session_layout(), SessionLayout::Grid);
-    h.press(KeyCode::Enter).await;
     assert_eq!(h.app.session_layout(), SessionLayout::Tabs);
     // Tabs keep creation order: B (created at 10) is tab 1.
     assert_eq!(h.app.list.visible()[0].id, id("B"));
@@ -2311,9 +2308,8 @@ fn naming_input_reads_history_and_the_visible_screen() {
 async fn clicking_new_session_creates_once_and_enters_the_shell_without_a_keyboard_action() {
     for layout in SessionLayout::ALL {
         for (width, height) in [(40, 20), (80, 24), (90, 24), (160, 48)] {
-            // Tabs has no New session item (`n` makes one); a phone has no
-            // Grid.
-            if layout == SessionLayout::Tabs || (layout == SessionLayout::Grid && width < 80) {
+            // Tabs has no New session item (`n` makes one).
+            if layout == SessionLayout::Tabs {
                 continue;
             }
             for existing in [false, true] {
@@ -2324,8 +2320,7 @@ async fn clicking_new_session_creates_once_and_enters_the_shell_without_a_keyboa
                 });
                 h.app.resize(width, height);
                 h.app.set_layout(layout);
-                // On short grids the action may be on a later page, and
-                // below a short list's fold.
+                // It may be below a short list's fold.
                 h.app.list.select(Selection::NewSession);
                 h.app.process_pending();
                 let mut terminal =
@@ -2335,9 +2330,8 @@ async fn clicking_new_session_creates_once_and_enters_the_shell_without_a_keyboa
                     .draw(|frame| crate::ui::draw(frame, &mut h.app))
                     .unwrap();
                 let new_row = h.app.list.row_count() - 1;
-                let new_card = h.app.list.visible().len();
                 let area = h.app.hits.iter().find_map(|(area, hit)| {
-                    (*hit == Hit::ListRow(new_row) || *hit == Hit::GridCell(new_card)).then_some(*area)
+                    (*hit == Hit::ListRow(new_row)).then_some(*area)
                 }).unwrap_or_else(|| panic!("New session hit target missing: {layout:?} {width}x{height} existing={existing}"));
                 for index in 0..h.fake.attach_count() {
                     h.fake.outgoing(index);

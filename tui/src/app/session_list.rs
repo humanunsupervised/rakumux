@@ -18,7 +18,7 @@
 //! tabs: that order, then the rest folder by folder, so a drag there never
 //! changes the folders' order. The Pinned tab has one too (under
 //! [`PINNED_ORDER`], set the same ways). A pinned session is listed like
-//! any other under the other tabs. The list and Grid use the active tab's
+//! any other under the other tabs. The list uses the active tab's
 //! order; a row of tabs ([`ShownAs::Tabs`]) shows the same sessions in the
 //! Folders tab's order (Pinned's under Pinned), so a tab keeps its place
 //! (and number) as statuses change and sessions are read. Selection is
@@ -73,11 +73,11 @@ pub enum Selection {
 /// How the sessions are laid out on screen, which decides their order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShownAs {
-    /// The list (and Grid's cards): the active tab's order, under its
+    /// The list: the active tab's order, under its
     /// headers ([`SessionList::visible`]).
     List,
-    /// A row of tabs (the Tabs layout, a session under tabs on a phone or
-    /// from Grid): the same sessions in the Folders tab's order
+    /// A row of tabs (the Tabs layout, a session under tabs on a phone):
+    /// the same sessions in the Folders tab's order
     /// ([`SessionList::tab_order`]).
     Tabs,
 }

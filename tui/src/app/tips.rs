@@ -86,7 +86,7 @@ const TIPS: &[Entry] = &[
     ),
     tip(
         "v",
-        "Master detail, Grid, Tabs",
+        "Master detail or Tabs",
         Source::Key(KeyAction::CycleLayout),
     ),
     tip("p", "pin to the top", Source::Key(KeyAction::Pin)),

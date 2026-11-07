@@ -35,7 +35,6 @@ pub mod drawer;
 mod feature_flags;
 pub mod feed;
 pub mod folders;
-pub mod grid;
 pub mod grouping;
 mod handlers;
 mod history;
@@ -182,12 +181,8 @@ pub enum Hit {
     /// One of a session row's places, both its lines (that list row, that
     /// place): copies its path.
     Place(usize, places::PlaceRef),
-    /// Visible Grid card in filtered session order (last is New session).
-    GridCell(usize),
-    /// Previous/next Grid page.
-    GridPage(isize),
     /// The top row of the list around its tabs, the left end of the tab
-    /// bar, Grid's header: opens the active tab's modal.
+    /// bar: opens the active tab's modal.
     FolderSelector,
     /// A tab on the list's top row: activates it, or opens its modal when
     /// it's the active one.
@@ -381,7 +376,6 @@ pub struct App {
 
     pub list: SessionList,
     pub detail: Detail,
-    pub grid: grid::GridPreviews,
     pub terminal_panel: terminal_panel::TerminalPanel,
     pub focus: Focus,
     /// Terminal focus reporting prevents background windows acknowledging replies.
@@ -509,7 +503,6 @@ impl App {
             sync_cancel: None,
             list,
             detail: Detail::default(),
-            grid: grid::GridPreviews::default(),
             terminal_panel: terminal_panel::TerminalPanel::default(),
             focus: Focus::List,
             window_focused: true,
@@ -607,23 +600,14 @@ impl App {
 
     // ------------------------------------------------------------ layout
 
-    /// The layout in use: the one chosen, except on a phone, which has no
-    /// Grid (it shows Master detail instead).
+    /// The layout in use.
     pub fn session_layout(&self) -> SessionLayout {
-        match self.settings.sessions.layout {
-            SessionLayout::Grid if self.no_grid() => SessionLayout::Sidebar,
-            layout => layout,
-        }
+        self.settings.sessions.layout
     }
 
-    /// The layout `v` switches to (phones skip Grid).
+    /// The layout `v` switches to.
     pub fn next_layout(&self) -> SessionLayout {
-        self.session_layout().next_on(self.no_grid())
-    }
-
-    /// This screen has no Grid: a phone, once its size is known.
-    fn no_grid(&self) -> bool {
-        self.area.width > 0 && self.phone()
+        self.session_layout().next()
     }
 
     /// Where keys go now is the session's program (session mode with no
@@ -740,8 +724,8 @@ impl App {
     }
 
     /// How the sessions on screen are laid out: as tabs while a tab bar
-    /// shows them (Tabs; a session under tabs on a phone or from Grid, zoomed
-    /// in or not), else as the list or Grid's cards. Stepping through them
+    /// shows them (Tabs; a session under tabs on a phone, zoomed in or not),
+    /// else as the list. Stepping through them
     /// (cycle keys, `1`-`9`, `J`/`K`) follows that order.
     pub fn shown_as(&self) -> ShownAs {
         let unzoomed = screen::compute(
@@ -848,9 +832,10 @@ impl App {
         let (label, value, note) = match item {
             SettingsItem::Layout => {
                 let layout = self.session_layout();
-                let value = SessionLayout::offered(self.no_grid())
+                let value = SessionLayout::ALL
+                    .iter()
                     .map(|l| {
-                        if l == layout {
+                        if *l == layout {
                             format!("[{}]", l.label())
                         } else {
                             l.label().to_string()
@@ -1085,7 +1070,6 @@ impl App {
     /// Timers: status expiry, reconnects and done's sub-sections as time
     /// passes. Returns whether to redraw.
     pub fn on_tick(&mut self, now: Instant) -> bool {
-        self.sync_grid();
         self.sync_terminal_panel();
         let mut changed = self.is_animating();
         changed |= self.list.set_clock(wall_clock());
@@ -1141,25 +1125,6 @@ impl App {
             AppEvent::Attach { generation, event } => self.on_attach_event(generation, event),
             AppEvent::SavedScreen { generation, result } => {
                 self.on_saved_screen(generation, result)
-            }
-            AppEvent::PreviewAttached {
-                id,
-                generation,
-                result,
-            } => self.on_preview_attached(id, generation, result),
-            AppEvent::PreviewSaved {
-                id,
-                generation,
-                result,
-            } => self.on_preview_saved(id, generation, result),
-            AppEvent::PreviewReady {
-                id,
-                generation,
-                mailbox,
-            } => {
-                for event in mailbox.drain() {
-                    self.on_preview_event(&id, generation, event);
-                }
             }
             AppEvent::FoldersLoaded { result } => self.on_folders_loaded(result),
             AppEvent::FolderAdded { result } => self.on_folder_added(result),
@@ -1227,7 +1192,6 @@ impl App {
                 self.set_status(format!("Background task failed: {message}"))
             }
         }
-        self.sync_grid();
         self.sync_terminal_panel();
     }
 
@@ -1292,7 +1256,6 @@ impl App {
             self.claim_panel_size();
             self.acknowledge_visible_completion();
         }
-        self.sync_grid();
         result
     }
 
@@ -1332,7 +1295,6 @@ impl App {
         self.area = Rect::new(0, 0, width, height);
         self.sync_terminal_size();
         self.sync_panel_size();
-        self.sync_grid();
     }
 
     // ------------------------------------------------------------ daemon
@@ -1469,7 +1431,6 @@ impl App {
     /// The subscription (and so presumably the daemon) went away.
     fn connection_lost(&mut self, reason: String) {
         self.terminal_panel_disconnected();
-        self.grid.clear();
         if let Some(cancel) = self.sync_cancel.take() {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
@@ -1600,7 +1561,6 @@ impl App {
     /// isn't reported as a lost connection.
     fn let_go_of_daemon(&mut self) {
         self.terminal_panel_disconnected();
-        self.grid.clear();
         if self.connection.is_connected() {
             if let Some(cancel) = self.sync_cancel.take() {
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);

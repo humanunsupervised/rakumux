@@ -15,7 +15,6 @@ pub mod phone_access;
 pub mod rtop;
 pub mod section_picker;
 pub mod session_detail;
-pub mod session_grid;
 pub mod session_list;
 pub mod session_tabs;
 pub mod sprite;

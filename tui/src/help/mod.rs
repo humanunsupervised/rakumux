@@ -238,7 +238,7 @@ pub enum KeyAction {
     Delete,
     Zoom,
     Filter,
-    /// Cycle Master detail, Grid and Tabs in Rakumux mode.
+    /// Switch between Master detail and Tabs in Rakumux mode.
     CycleLayout,
     /// `b`: hide Master detail's list beside the session, or show it.
     HideList,
@@ -403,8 +403,8 @@ impl KeyAction {
             KeyAction::HalfPageUp => "Half a page up",
             KeyAction::NextFolder => "Next folder",
             KeyAction::PreviousFolder => "Previous folder",
-            KeyAction::ScrollBack => "Scroll back (Grid: previous page)",
-            KeyAction::ScrollForward => "Scroll forward (Grid: next page)",
+            KeyAction::ScrollBack => "Scroll back",
+            KeyAction::ScrollForward => "Scroll forward",
             KeyAction::NewSession => "New session",
             KeyAction::SpriteToggle => "New sessions here on your Sprite",
             KeyAction::FilterFolders => "Filter by folder",
@@ -420,7 +420,7 @@ impl KeyAction {
             KeyAction::Delete => "Delete session",
             KeyAction::Zoom => "Work in the session full screen",
             KeyAction::Filter => "Filter sessions",
-            KeyAction::CycleLayout => "Cycle layout (Master detail, Grid, Tabs)",
+            KeyAction::CycleLayout => "Switch layout (Master detail, Tabs)",
             KeyAction::HideList => "Hide or show the session list",
             KeyAction::TerminalPanel => "Terminal panel (show, focus or hide)",
             KeyAction::TerminalPanelBeside => "Terminal panel beside the session",
@@ -557,7 +557,7 @@ impl KeyAction {
             }
             KeyAction::Feed => "What your agents said when they finished a turn, on every \
                  machine of your account, newest first: a tab of the drawer on the right of \
-                 Master detail and Grid (a tab of its own in Tabs), beside rtop. Space shows a card whole in the \
+                 Master detail (a tab of its own in Tabs), beside rtop. Space shows a card whole in the \
                  list (again: back); Enter reads a reply whole, again goes into \
                  its session when it runs here; r writes back to it; Esc gives the list the \
                  keys back. The footer's Feed button counts the replies that came since you \
@@ -974,7 +974,7 @@ pub struct SettingRow {
     pub section: &'static str,
     /// What it sets, e.g. `Layout`.
     pub label: String,
-    /// Its current value, e.g. `[Master detail] Grid Tabs` or `not set`.
+    /// Its current value, e.g. `[Master detail] Tabs` or `not set`.
     pub value: String,
     /// Shown below the rows while this one is selected.
     pub note: String,
@@ -1709,11 +1709,6 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
              left of its name.",
             ctx.icons.folder()
         )),
-        SessionLayout::Grid => doc.bullet(
-            "Grid: read-only live terminal cards. Arrows or h/j/k/l select; PgUp/PgDn change \
-             page. Enter or a tap opens a session; the Rakumux key returns to Grid. The \
-             list's active tab, its filters and order apply here too.",
-        ),
         SessionLayout::Tabs => doc.bullet(format!(
             "Tab bar, along the top: the folder filter ({} Folders) at the left, then the \
              sessions as numbered tabs, each with a status mark, in the order you keep them; \
@@ -1721,7 +1716,7 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
             ctx.icons.folder()
         )),
     }
-    doc.bullet("Detail or Grid cards: terminal screens, updating as the programs run.");
+    doc.bullet("Detail: the session's terminal screen, updating as the program runs.");
     doc.bullet(
         "The feed (`f`): what your agents said when they finished a turn, on every machine of \
          your account, in a pane on the right (a tab in Tabs); `f` again hides it.",
@@ -2073,7 +2068,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          for you), unread reply (finished, not opened yet) or idle. The right-side badge is \
          a spinner for working (including subagents), ○ for idle, ● for an unread reply, \
          or ? when input is needed. Opening the session clears unread across windows; \
-         list and Grid previews do not. A reply that arrives in the foreground open session \
+         the list's preview does not. A reply that arrives in the foreground open session \
          is already seen. Rakumux uses agent hooks when available, with screen/process \
          detection as the fallback.",
     );
@@ -2176,8 +2171,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         layout::STACK_MIN_ROWS + 1
     ));
     doc.text(format!(
-        "On a phone (below {} columns) Master detail and Tabs are offered, not Grid. Master \
-         detail shows one thing at a time: Rakumux mode is the session list; tap a session to \
+        "On a phone (below {} columns) Master detail shows one thing at a time: Rakumux mode is the session list; tap a session to \
          open it, full screen under a row of tabs (tap a tab to switch); Tabs keeps the tabs \
          over the session in Rakumux mode too; `{p}` or a tap on SESSION MODE in the middle of \
          the bottom row goes back to the list, and RAKUMUX MODE returns to the session. Tap \
@@ -2188,25 +2182,8 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
         "A session is one terminal, so every window shows the program drawn for one size: \
          the size of the window you're using. Press a key or click in a window (or bring it to \
          the front) and the session takes its size, unless someone is typing in it in another \
-          window right now. Grid browsing never claims a terminal's size or control.",
+          window right now.",
     );
-
-    doc.heading("Grid");
-    doc.text(
-        "A responsive page of up to six cards shows real live terminal output as read-only \
-         observers; phones don't offer Grid. Only visible cards have preview streams. Terminals \
-         keep their existing size; cards crop and pan rather than resizing them. Titles and \
-         selected borders stay readable while inactive output fades. Saved sessions show \
-         their saved output; the session Rakumux runs inside is never attached.",
-    );
-    doc.text(format!(
-        "Arrows or `h`/`j`/`k`/`l` select cards; `PgUp`/`PgDn` change page, `Home`/`End` \
-         go to the ends. `Enter` or a tap opens the selected session full screen under tabs; \
-         `{p}` returns to Grid. `n` or the + New session card creates and enters a generated-name \
-         session immediately. `P` filters folders, `/` filters text, and pins and your saved \
-         session order are retained. Browsing, scrolling, focus and window resize send no \
-         terminal input, size requests or activity touches."
-    ));
 
     doc.heading("Tabs");
     doc.text(
@@ -2229,7 +2206,7 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
 
     doc.heading("The feed");
     doc.text(format!(
-        "`f` shows the feed: in Master detail and Grid a pane on the right, and the session \
+        "`f` shows the feed: in Master detail a pane on the right, and the session \
          narrows to make room while it keeps {} columns; a narrower window shows the feed in \
          the session's place in Rakumux mode only. Tabs gives it a tab of its own before the \
          sessions'. On a phone it fills the screen. Every start hides it.",
@@ -2239,16 +2216,16 @@ fn layouts(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.heading("Switching layouts");
     doc.text(format!(
         "Change Layout in Settings (`,` or `{SETTINGS_KEY}` in Rakumux mode). \
-         It applies at once to this window; every start opens Master detail. `v` cycles \
-          Master detail, Grid and Tabs in Rakumux mode (a phone skips Grid); session mode \
-          forwards `v` to the program."
+         It applies at once to this window; every start opens Master detail. `v` switches \
+          between Master detail and Tabs in Rakumux mode; session mode forwards `v` to the \
+          program."
     ));
 
     doc.heading("Zoom");
     doc.text(format!(
         "`z` in Rakumux mode works in the selected session with the list or tab bar hidden, \
          so it gets the whole screen above the footer, which keeps showing the mode; `{p}` \
-          brings the list or Grid back. Works in all layouts."
+          brings the list back. Works in all layouts."
     ));
 
     doc.heading("Session cycle keys");
@@ -3037,7 +3014,7 @@ mod tests {
             version: "0.6.0".to_string(),
             in_session: false,
             general: vec![
-                setting("Layout", "[Master detail] Grid Tabs", "List on the left."),
+                setting("Layout", "[Master detail] Tabs", "List on the left."),
                 setting("Anthropic API key", "not set", "Used for AI session naming"),
                 setting("OpenAI model", "gpt-4o-mini", "The model for naming"),
             ],
@@ -3515,7 +3492,7 @@ mod tests {
         // Nothing needlessly cut.
         let page = page_text(&context, 0, body);
         assert!(page.contains("▶ Layout"), "{page}");
-        assert!(page.contains("[Master detail] Grid Tabs"), "{page}");
+        assert!(page.contains("[Master detail] Tabs"), "{page}");
         for action in KeyAction::ALL {
             assert!(
                 page.contains(action.label()),
@@ -3649,7 +3626,7 @@ mod tests {
                 .to_string()
         };
         for (label, value) in [
-            ("  Layout", "[Master detail] Grid Tabs"),
+            ("  Layout", "[Master detail] Tabs"),
             ("▶ Anthropic API key", "not set"),
             ("  OpenAI model", "gpt-4o-mini"),
         ] {
@@ -3709,11 +3686,7 @@ mod tests {
         let page = settings_lines(&context, 0, "", 30);
         let text: Vec<String> = page.lines.iter().map(line_text).collect();
         let layout = text.iter().position(|l| l == "▶ Layout").unwrap();
-        assert_eq!(
-            text[layout + 1],
-            "    [Master detail] Grid Tabs",
-            "{text:?}"
-        );
+        assert_eq!(text[layout + 1], "    [Master detail] Tabs", "{text:?}");
         // From its heading to its value.
         assert_eq!(page.selected, (layout - 1, layout + 1));
         assert!(text.contains(&"    not set".to_string()), "{text:?}");
@@ -3721,10 +3694,7 @@ mod tests {
         let lines = settings_lines(&context, 0, "", 76).lines;
         let layout = line_text(&lines[1]);
         assert!(layout.starts_with("▶ Layout  "), "{layout:?}");
-        assert!(
-            layout.ends_with("  [Master detail] Grid Tabs"),
-            "{layout:?}"
-        );
+        assert!(layout.ends_with("  [Master detail] Tabs"), "{layout:?}");
         assert_eq!(lines[1].width(), 76);
         // A short screen scrolls to the selected row.
         let state = state(ModalTab::Settings).with_selected(ROWS - 1);
@@ -3893,8 +3863,8 @@ mod tests {
             ("Half a page up", "Ctrl-u"),
             ("Next folder", "}"),
             ("Previous folder", "{"),
-            ("Scroll back (Grid: previous page)", "Ctrl-y, PgUp"),
-            ("Scroll forward (Grid: next page)", "Ctrl-e, PgDn"),
+            ("Scroll back", "Ctrl-y, PgUp"),
+            ("Scroll forward", "Ctrl-e, PgDn"),
             ("New session", "n"),
             ("Filter by folder", "P"),
             ("Rename session", "r"),
@@ -3905,7 +3875,7 @@ mod tests {
             ("Delete session", "d, dd"),
             ("Work in the session full screen", "z"),
             ("Filter sessions", "/"),
-            ("Cycle layout (Master detail, Grid, Tabs)", "v"),
+            ("Switch layout (Master detail, Tabs)", "v"),
             ("Help", "?"),
             ("Settings", "comma (,), o"),
             ("Update Rakumux (sessions keep running)", "U"),
@@ -4123,7 +4093,6 @@ mod tests {
             "rakumux-ptyd",
             "many windows",
             "Master detail",
-            "Grid",
             "Tabs",
             "rakumux attach <name|id>",
             "rakumux daemon start|status|stop|restart|logs",
