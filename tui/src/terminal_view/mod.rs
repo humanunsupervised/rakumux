@@ -174,10 +174,13 @@ impl TerminalView {
         self.scroll_offset = frozen.screen.scrollback();
     }
 
-    /// Back to the live screen.
+    /// Back to the live screen; a selection made on the history shown goes
+    /// with it.
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
-        self.frozen = None;
+        if self.frozen.take().is_some() {
+            self.selection = None;
+        }
     }
 
     /// Draw into `area` of `buf`. The terminal is drawn at its own size,

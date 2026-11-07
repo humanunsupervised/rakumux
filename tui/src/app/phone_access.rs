@@ -36,7 +36,7 @@ impl App {
     pub fn offer_phone_access(&mut self) -> bool {
         if !self.phone_offer_pending
             || self.creating_session
-            || self.pending_focus.is_some()
+            || self.awaiting_focus()
             || !matches!(self.mode, AppMode::Normal)
             || self.focus != Focus::List
         {

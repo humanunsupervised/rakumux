@@ -11,7 +11,7 @@
 
 use crate::dto::DaemonHealth;
 use session_core::api::{ApiError, ErrorCode, HelloOk, MACHINE_CLIENT};
-use session_core::client::{AuthMode, Client, ClientConfig};
+use session_core::client::{AuthMode, Client, ClientConfig, SessionApi};
 use session_core::ids::SessionId;
 use session_core::paths::Layout;
 use std::collections::HashMap;
@@ -136,7 +136,12 @@ impl DaemonPool {
                 // `details.agent_conversation` tells callers (the MCP server)
                 // that no session could be found for the conversation.
                 let user = self.client(&Identity::User)?;
-                if !user.capabilities().iter().any(|c| c == "auth.delegated") {
+                // The latest hello's: a daemon restarted in place since may
+                // have gained it.
+                let capabilities = user
+                    .daemon_capabilities()
+                    .unwrap_or_else(|| user.capabilities().to_vec());
+                if !capabilities.iter().any(|c| c == "auth.delegated") {
                     let mut error = ApiError::new(
                         ErrorCode::Unsupported,
                         "this Rakumux daemon can't act for agent conversations yet; \

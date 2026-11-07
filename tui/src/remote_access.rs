@@ -95,14 +95,24 @@ pub fn rotate(layout: &Layout, ptyd_path: Option<&Path>) -> Result<RemoteConfig,
 /// What to pair a phone with while remote access is on (`None`: it's off).
 /// Starts the API when none runs, and restarts one that has no remote
 /// listener while this machine now has a Tailscale address (Tailscale came
-/// up after the API started).
+/// up after the API started). A token the API would refuse is replaced first,
+/// as `enable` does; addresses `listen` names aren't Tailscale's, so a
+/// restart wouldn't bind them either.
 pub fn pairing(layout: &Layout, ptyd_path: Option<&Path>) -> Result<Option<Pairing>, String> {
-    let Some(config) = load(layout)?.filter(|config| config.enabled) else {
+    let (config, repaired) = load_or_new(layout)?;
+    if !config.enabled {
         return Ok(None);
-    };
+    }
+    if repaired {
+        save(&config, layout)?;
+    }
     let api = match running_api(layout) {
         Some(api) if !api.remote_urls.is_empty() => api,
-        Some(_) if !tailscale::addresses().unwrap_or_default().is_empty() => {
+        Some(_)
+            if repaired
+                || (config.listen.is_empty()
+                    && !tailscale::addresses().unwrap_or_default().is_empty()) =>
+        {
             stop_api(layout)?;
             start_api(layout, ptyd_path)?
         }

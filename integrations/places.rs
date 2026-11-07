@@ -86,6 +86,8 @@ pub struct PlaceScan {
     cursor: Option<TranscriptCursor>,
     /// The agent's directory as of the cursor: relative paths are its.
     cwd: Option<PathBuf>,
+    /// The directory a read from the start begins with.
+    start_cwd: Option<PathBuf>,
     home: Option<PathBuf>,
     /// The last read stopped before the end.
     behind: bool,
@@ -100,6 +102,7 @@ impl PlaceScan {
         Self {
             source,
             cursor: None,
+            start_cwd: cwd.clone(),
             cwd,
             home: std::env::var_os("HOME")
                 .filter(|home| !home.is_empty())
@@ -138,6 +141,7 @@ impl PlaceScan {
                         .map(|metadata| super::copilot::identity(&metadata));
                     if self.file != file {
                         self.cursor = None;
+                        self.cwd = self.start_cwd.clone();
                     }
                     self.file = file;
                 }

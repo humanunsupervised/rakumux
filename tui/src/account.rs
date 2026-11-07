@@ -166,10 +166,33 @@ impl LocalAccount {
     }
 
     /// Run `op` on the service: connected before, else connecting, and
-    /// starting it when `start`. `None`: not running and not started.
+    /// starting it when `start`. `None`: not running and not started. `op`
+    /// may run twice (a connection lost after sending it): for requests that
+    /// may, see [`Self::with_once`].
     fn with<T>(
         &self,
         start: bool,
+        op: impl Fn(&OwnerClient) -> Result<T, OwnerError>,
+    ) -> Result<Option<T>, String> {
+        self.run(start, true, op)
+    }
+
+    /// [`Self::with`] for a request that does something each time it's
+    /// made (a sign-in started, a sign-out, a title asked for): not made
+    /// again when the connection it went on is lost, as the service may have
+    /// taken it.
+    fn with_once<T>(
+        &self,
+        start: bool,
+        op: impl Fn(&OwnerClient) -> Result<T, OwnerError>,
+    ) -> Result<Option<T>, String> {
+        self.run(start, false, op)
+    }
+
+    fn run<T>(
+        &self,
+        start: bool,
+        again: bool,
         op: impl Fn(&OwnerClient) -> Result<T, OwnerError>,
     ) -> Result<Option<T>, String> {
         let mut cached = self
@@ -178,7 +201,14 @@ impl LocalAccount {
             .map_err(|_| "the account connection is unusable".to_string())?;
         if let Some(client) = cached.as_ref() {
             match op(client) {
-                Err(OwnerError::Connection) => *cached = None,
+                Err(OwnerError::Connection) => {
+                    *cached = None;
+                    if !again {
+                        return Err(
+                            "the connection to the account service was lost: try again".into()
+                        );
+                    }
+                }
                 result => return result.map(Some).map_err(|error| error.to_string()),
             }
         }
@@ -226,7 +256,7 @@ impl AccountAccess for LocalAccount {
     }
 
     fn sign_in(&self) -> Result<SignInView, String> {
-        self.with(true, OwnerClient::sign_in_start)?
+        self.with_once(true, OwnerClient::sign_in_start)?
             .ok_or_else(|| "the account service didn't start".into())
     }
 
@@ -243,7 +273,7 @@ impl AccountAccess for LocalAccount {
     fn sign_out(&self) -> Result<RevocationView, String> {
         // Credentials are removed by the service, so start it for them.
         Ok(self
-            .with(self.has_saved_account(), OwnerClient::sign_out)?
+            .with_once(self.has_saved_account(), OwnerClient::sign_out)?
             .unwrap_or(RevocationView::NotNeeded))
     }
 
@@ -268,7 +298,7 @@ impl AccountAccess for LocalAccount {
     }
 
     fn summarize(&self, session: &SessionId) -> Result<(), String> {
-        self.with(self.has_saved_account(), |client| client.summarize(session))
+        self.with_once(self.has_saved_account(), |client| client.summarize(session))
             .map(|_| ())
     }
 

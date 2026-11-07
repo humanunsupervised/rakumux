@@ -51,12 +51,13 @@ pub(super) fn switch(
     else {
         return false;
     };
-    let switched = conversation.as_deref() != Some(current.as_str()) || *path != found;
+    // Read again from its start (another chat, or this one's file written
+    // anew): what that read finds isn't new, so it counts as a switch.
     *path = found;
     *offset = 0;
     partial.clear();
     *conversation = Some(current);
-    switched
+    true
 }
 
 /// `path` as Cursor names a project directory: every run of characters that

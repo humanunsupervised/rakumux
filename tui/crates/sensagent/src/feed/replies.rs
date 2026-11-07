@@ -917,7 +917,13 @@ impl ReplySync {
         self.machine = machine;
         self.cursor = 0;
         self.poll = None;
-        self.pending.clear();
+        // Those pending under the old name won't be read again: files saved
+        // for one not typed in (nor being typed in) go, as `hold` does.
+        for (id, _) in std::mem::take(&mut self.pending) {
+            if self.files.remove(&id).is_some() && !self.delivering(&id) {
+                self.discards.push_back(id);
+            }
+        }
         self.next_read = now;
     }
 

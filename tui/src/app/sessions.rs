@@ -91,7 +91,7 @@ impl App {
                 // Re-show the selection; a focused live session stays
                 // focused. An attach that takes focus (a session just
                 // created) is left to land.
-                let focusing = self.pending_focus.is_some()
+                let focusing = self.awaiting_focus()
                     && matches!(&self.detail.view, DetailView::Loading(id)
                         if self.list.selected_id() == Some(id));
                 // The session the user was typing in when the connection
@@ -740,9 +740,26 @@ impl App {
         if self.list.selected_session().is_none() {
             return;
         }
+        // A dead or exited session is revived first; it zooms once that lands.
+        let reviving = self.api().is_some()
+            && self.list.selected_session().is_some_and(|session| {
+                matches!(session.status, SessionStatus::Dead | SessionStatus::Exited)
+                    && !self.is_self_session(&session.id)
+            });
         self.zoomed = true;
         self.activate_selected();
+        if !reviving {
+            self.unzoom_unless_entering();
+        }
         self.sync_terminal_size();
+    }
+
+    /// Zoom only lasts while a session is entered, or about to be (its
+    /// attach as controller on its way): a `z` that didn't go in leaves none.
+    fn unzoom_unless_entering(&mut self) {
+        if self.focus != Focus::Session && !self.awaiting_focus() {
+            self.zoomed = false;
+        }
     }
 
     /// `Ctrl-d` / `Ctrl-u`: move the selection half a list page.
@@ -1067,7 +1084,7 @@ impl App {
     }
 
     pub fn handle_paste(&mut self, text: &str) {
-        if self.creating_session || self.pending_focus.is_some() {
+        if self.creating_session || self.awaiting_focus() {
             return;
         }
         if let AppMode::Folders(picker) = &mut self.mode {
@@ -1121,15 +1138,17 @@ impl App {
     }
 
     pub fn handle_mouse(&mut self, event: MouseEvent) {
-        if self.creating_session || self.pending_focus.is_some() {
+        if self.creating_session || self.awaiting_focus() {
             return;
         }
         if !matches!(self.mode, AppMode::Normal) {
             self.hovered_row = None;
             self.hovered_place = None;
             self.terminal_panel.dragging = false;
+            self.divider = DividerState::default();
+            self.feed_divider.dragging = false;
             self.mouse_grab = None;
-            // A dialog opened: a held session is let go.
+            // A dialog opened: a held session or divider is let go.
             self.end_session_drag();
             if matches!(self.mode, AppMode::Folders(_)) {
                 self.folder_picker_mouse(event);
@@ -1143,7 +1162,6 @@ impl App {
                 self.history_mouse(event);
                 return;
             }
-            self.divider = DividerState::default();
             // The wheel moves Settings' selection and scrolls Help.
             if let AppMode::Modal { state, .. } = &mut self.mode {
                 match event.kind {
@@ -2221,6 +2239,7 @@ impl App {
             }
             Err(error) => self.set_status(format!("Revive failed: {error}")),
         }
+        self.unzoom_unless_entering();
     }
 
     /// `c`: quit and let the shell wrapper `cd` into the session's folder.

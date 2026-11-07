@@ -198,7 +198,7 @@ impl App {
 
     /// Synchronize at state transitions and ticks, never during card drawing.
     pub(super) fn sync_grid(&mut self) {
-        if !self.browsing_grid() || self.pending_focus.is_some() || self.creating_session {
+        if !self.browsing_grid() || self.awaiting_focus() || self.creating_session {
             self.grid.clear();
             return;
         }

@@ -130,7 +130,7 @@ impl EscapeJoiner {
         // Not a key's sequence: the Esc and its pieces were keys of their
         // own; then this event (which may be another lone Esc).
         let mut out = self.flush();
-        out.extend(self.feed(event, now, self.wait));
+        out.extend(self.feed(event, now, wait));
         out
     }
 

@@ -613,7 +613,7 @@ impl Machines {
             self.mark_unreachable(machine, &e);
             unreachable(&url, &e)
         })?;
-        self.mark_connected(machine, version);
+        self.mark_reached(machine, version);
         exchange(&mut requests, request, limit).map_err(|e| unreachable(&url, &e))
     }
 
@@ -707,6 +707,22 @@ impl Machines {
         let mut state = lock(&self.shared.state);
         let live = state.live.entry(machine.clone()).or_default();
         live.state = Some(MachineState::Connected);
+        live.error = None;
+        live.version = Some(short_text(&version));
+    }
+
+    /// Reached on a connection of its own, closed after one answer:
+    /// connected only while a lasting connection is open, else idle (which
+    /// the housekeeping that closes idle connections would never set).
+    fn mark_reached(&self, machine: &MachineId, version: String) {
+        let mut state = lock(&self.shared.state);
+        let live = state.live.entry(machine.clone()).or_default();
+        let lasting = live.watching || live.requests.is_some();
+        live.state = Some(if lasting {
+            MachineState::Connected
+        } else {
+            MachineState::Idle
+        });
         live.error = None;
         live.version = Some(short_text(&version));
     }

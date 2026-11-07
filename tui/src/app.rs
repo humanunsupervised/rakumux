@@ -633,13 +633,20 @@ impl App {
             && matches!(self.mode, AppMode::Normal)
     }
 
+    /// An attach that should take focus is still on its way: only while the
+    /// detail still shows the generation it was asked for, so a selection
+    /// that moved elsewhere meanwhile never leaves input blocked.
+    fn awaiting_focus(&self) -> bool {
+        self.pending_focus == Some(self.detail.generation)
+    }
+
     /// Session input, pending shell input and credential dialogs must never
     /// expose typed characters in the input-debug log.
     pub fn input_is_private(&self) -> bool {
         self.keys_go_to_session()
             || (self.came_from_terminal && self.terminal_panel.open)
             || self.creating_session
-            || self.pending_focus.is_some()
+            || self.awaiting_focus()
             || self.terminal_panel.busy()
             || matches!(self.mode, AppMode::AuthEmail(_) | AppMode::AuthCode(_))
     }
@@ -1293,7 +1300,7 @@ impl App {
         if key.kind == KeyEventKind::Release {
             return AppResult::Continue;
         }
-        if self.creating_session || self.pending_focus.is_some() {
+        if self.creating_session || self.awaiting_focus() {
             return AppResult::Continue;
         }
         if !self.flags.auth
@@ -1495,6 +1502,11 @@ impl App {
                 } else {
                     self.set_status(format!("Daemon restart failed: {error}"));
                 }
+                // We let go of the daemon before asking; it still runs (or a
+                // new one does): connect again, so a retry restarts it in place.
+                if !self.connection.is_connected() {
+                    self.connect();
+                }
             }
         }
     }
@@ -1554,6 +1566,14 @@ impl App {
                         .map_err(|error| error.message),
                 )
             });
+            return;
+        }
+        if in_place {
+            // Not connected again yet (a restart in place just failed): never
+            // fall back to stopping it, which would end every session.
+            if let AppMode::DaemonRestart(dialog) = &mut self.mode {
+                dialog.error = Some("Reconnecting to the server; try again in a moment.".into());
+            }
             return;
         }
         let Some(paths) = self.paths.clone() else {

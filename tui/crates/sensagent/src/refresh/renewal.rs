@@ -43,6 +43,9 @@ impl Renewal {
         }
         self.revision = revision;
         self.failures = 0;
+        // A renewal asked for was for the credentials just replaced (or
+        // signed out); the new ones are planned afresh.
+        self.now = false;
         self.due = session.map(|session| due(session.expires_at(), now));
     }
 

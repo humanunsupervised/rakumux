@@ -126,7 +126,7 @@ impl App {
             && !self.list.filter_editing
             && self.pending_key.is_none()
             && !self.creating_session
-            && self.pending_focus.is_none()
+            && !self.awaiting_focus()
             && self.terminal_panel.id.is_none()
             && now.saturating_duration_since(self.auto_update.last_input) >= RELOAD_IDLE
     }

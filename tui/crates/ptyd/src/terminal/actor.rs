@@ -211,7 +211,6 @@ pub(crate) struct Actor {
     last_persist: Instant,
     phase: Phase,
     eof: bool,
-    exit_code: Option<i32>,
     kill_due: Option<Instant>,
     kill_groups: Vec<i32>,
     forgotten: bool,
@@ -281,7 +280,6 @@ impl Actor {
             last_persist: now,
             phase: Phase::Running,
             eof: false,
-            exit_code: None,
             kill_due: None,
             kill_groups: Vec::new(),
             forgotten: false,
@@ -345,7 +343,6 @@ impl Actor {
             }
             ActorMsg::ChildExited => {
                 let code = pty_io::reap(self.pid);
-                self.exit_code = code;
                 if self.eof {
                     return self.finalize(code, now);
                 }
@@ -899,10 +896,7 @@ impl Actor {
         let (tx, events) = std::sync::mpsc::sync_channel(ATTACH_QUEUE);
         if role == Role::Controller {
             // Take over first, so the checkpoint is taken at the new size.
-            if let Err(e) = self.take_control(id, cols, rows, now) {
-                self.set_controlled(None);
-                return Err(e);
-            }
+            self.take_control(id, cols, rows, now)?;
         }
         let checkpoint = self.emulator.checkpoint();
         self.sinks.push(Sink::new(id, role, tx));
@@ -916,8 +910,9 @@ impl Actor {
         })
     }
 
-    /// Make `id` the controller (demoting the previous one) and apply its
-    /// size. `id` may not have a sink yet (attaching as controller).
+    /// Apply `id`'s size and make it the controller (demoting the previous
+    /// one). `id` may not have a sink yet (attaching as controller). A size
+    /// that can't be applied changes no role.
     fn take_control(
         &mut self,
         id: AttachmentId,
@@ -925,6 +920,9 @@ impl Actor {
         rows: u16,
         now: Instant,
     ) -> Result<(), HostError> {
+        // The PTY first, so a size it refuses changes nothing; the roles
+        // change before the attachments hear of the new size.
+        let resized = self.resize_pty(cols, rows)?;
         let previous = self.controller.replace(id);
         if let Some(previous) = previous.filter(|p| *p != id) {
             if let Some(sink) = self.sinks.iter_mut().find(|s| s.id == previous) {
@@ -949,7 +947,10 @@ impl Actor {
             }
         }
         self.set_controlled(Some(id));
-        self.resize_to(cols, rows, now)
+        if let Some((cols, rows)) = resized {
+            self.resized(cols, rows, now);
+        }
+        Ok(())
     }
 
     fn demote(&mut self, id: AttachmentId, now: Instant) {
@@ -1024,13 +1025,27 @@ impl Actor {
 
     /// Resize the PTY and the emulator together and tell every attachment.
     fn resize_to(&mut self, cols: u16, rows: u16, now: Instant) -> Result<(), HostError> {
+        if let Some((cols, rows)) = self.resize_pty(cols, rows)? {
+            self.resized(cols, rows, now);
+        }
+        Ok(())
+    }
+
+    /// Give the PTY the clamped size: `Some` when it changed, for
+    /// [`Self::resized`].
+    fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<Option<(u16, u16)>, HostError> {
         let (cols, rows) = clamp_size(cols, rows);
         if self.emulator.size() == (rows, cols) {
-            return Ok(());
+            return Ok(None);
         }
         self.master
             .resize(cols, rows)
             .map_err(|e| HostError::Io(format!("resize failed: {e}")))?;
+        Ok(Some((cols, rows)))
+    }
+
+    /// The emulator and every attachment follow the PTY's new size.
+    fn resized(&mut self, cols: u16, rows: u16, now: Instant) {
         self.emulator.resize(rows, cols);
         {
             let mut state = self.shared.lock();
@@ -1048,7 +1063,6 @@ impl Actor {
             }),
             now,
         );
-        Ok(())
     }
 
     // ------------------------------------------------------------ process
