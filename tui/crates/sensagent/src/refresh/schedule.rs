@@ -11,6 +11,11 @@ use crate::source::Candidate;
 /// in the chat it shows then, when its turn hasn't finished sooner, unless the
 /// turn settings say otherwise (`TurnSettings::every`).
 pub const AUTO_STEPS: u32 = 5;
+/// How long a program started in a session (anything but a shell) runs in its
+/// foreground before the session's one automatic summary is made, if its agent
+/// hasn't earned it sooner. An agent whose turns the daemon follows waits for
+/// its first prompt as well.
+pub const APP_RUNNING: Duration = Duration::from_secs(5);
 /// A session whose read or request failed waits this long before another attempt,
 /// doubling with each further failure in a row up to `MAX_ERROR_BACKOFF`.
 pub const ERROR_BACKOFF: Duration = Duration::from_secs(60);
@@ -82,10 +87,30 @@ struct Timing {
     /// The session had its one automatic summary, or one asked for was made:
     /// it gets no automatic one again.
     summarized: bool,
+    /// The program in its foreground, never a shell, and when it was first
+    /// seen there (for [`APP_RUNNING`]).
+    program: Option<(String, Duration)>,
+}
+
+impl Timing {
+    /// Follow the program in the foreground; whether it has run there for
+    /// [`APP_RUNNING`] as of `now`.
+    fn ran(&mut self, program: Option<&str>, now: Duration) -> bool {
+        match (program, &self.program) {
+            (Some(program), Some((seen, _))) if program == seen => {}
+            (Some(program), _) => self.program = Some((program.to_owned(), now)),
+            (None, _) => self.program = None,
+        }
+        self.program
+            .as_ref()
+            .is_some_and(|(_, since)| now.saturating_sub(*since) >= APP_RUNNING)
+    }
 }
 
 /// When to summarise which session: once in its life, in the first chat whose
-/// agent reaches its [`AUTO_STEPS`]th output or finishes sooner, and whenever
+/// agent reaches its [`AUTO_STEPS`]th output or finishes sooner, or once a
+/// program started there has run [`APP_RUNNING`] (an agent given its first
+/// prompt), whichever comes first, and whenever
 /// the user asks (a summary asked for that's made counts as that one too);
 /// never on a timer. Error backoff, a rate-limit pause and a global start
 /// budget still apply. Pure state over an injected monotonic `now`; the dispatch
@@ -158,16 +183,26 @@ impl RefreshScheduler {
         if self.halted(now) {
             return Vec::new();
         }
+        // A session no longer live (or now private) starts its program's
+        // clock again when it's back.
+        let listed: HashSet<&SessionId> = candidates.iter().map(|c| &c.session).collect();
+        for (session, timing) in &mut self.sessions {
+            if !listed.contains(session) {
+                timing.program = None;
+            }
+        }
         let mut due = Vec::new();
         for candidate in candidates {
+            let timing = self.sessions.entry(candidate.session.clone()).or_default();
+            let ran = timing.ran(candidate.program.as_deref(), now) && !candidate.awaits_prompt;
             if running.contains(&candidate.session) {
                 continue;
             }
-            let timing = self.sessions.entry(candidate.session.clone()).or_default();
-            let ready = candidate
-                .turn
-                .as_ref()
-                .is_some_and(|turn| turn.messages >= self.auto_at || candidate.finished);
+            let ready = ran
+                || candidate
+                    .turn
+                    .as_ref()
+                    .is_some_and(|turn| turn.messages >= self.auto_at || candidate.finished);
             let auto = ready && !timing.summarized;
             if !timing.requested && !auto {
                 continue;

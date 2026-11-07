@@ -24,6 +24,17 @@ fn candidate(number: u8, turn: Option<AgentTurn>, finished: bool) -> Candidate {
         dirty: false,
         finished,
         turn,
+        program: None,
+        awaits_prompt: false,
+    }
+}
+
+/// A session running `program` in its foreground.
+fn running(number: u8, program: &str, turn: Option<AgentTurn>, awaits_prompt: bool) -> Candidate {
+    Candidate {
+        program: Some(program.into()),
+        awaits_prompt,
+        ..candidate(number, turn, false)
     }
 }
 
@@ -424,4 +435,146 @@ fn the_global_budget_bounds_starts_per_window() {
     }
     assert!(!scheduler.has_budget(secs(59)));
     assert!(scheduler.has_budget(secs(60)));
+}
+
+#[test]
+fn a_program_started_at_the_prompt_is_summarised_once_it_ran_five_seconds() {
+    let mut scheduler = RefreshScheduler::new();
+    assert!(plan(&mut scheduler, secs(0), vec![candidate(1, None, false)]).is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(3),
+        vec![running(1, "htop", None, false)]
+    )
+    .is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(7),
+        vec![running(1, "htop", None, false)]
+    )
+    .is_empty());
+    assert_eq!(
+        plan(
+            &mut scheduler,
+            secs(8),
+            vec![running(1, "htop", None, false)]
+        ),
+        vec![auto(1, "")]
+    );
+    let due = auto(1, "");
+    scheduler.started(&due, secs(8));
+    assert_eq!(
+        scheduler.finished(&due.session, Outcome::Done, secs(9)),
+        Some(String::new())
+    );
+    // Its one: no other program gets another.
+    assert!(plan(
+        &mut scheduler,
+        secs(60),
+        vec![running(1, "vim", None, false)]
+    )
+    .is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(90),
+        vec![running(1, "vim", None, false)]
+    )
+    .is_empty());
+}
+
+#[test]
+fn a_program_that_ends_or_changes_starts_the_five_seconds_again() {
+    let mut scheduler = RefreshScheduler::new();
+    assert!(plan(&mut scheduler, secs(0), vec![running(1, "ls", None, false)]).is_empty());
+    // Back at the shell's prompt.
+    assert!(plan(&mut scheduler, secs(1), vec![candidate(1, None, false)]).is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(10),
+        vec![running(1, "npm", None, false)]
+    )
+    .is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(13),
+        vec![running(1, "vim", None, false)]
+    )
+    .is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(17),
+        vec![running(1, "vim", None, false)]
+    )
+    .is_empty());
+    // Not live meanwhile: its clock starts again.
+    assert!(plan(&mut scheduler, secs(18), vec![]).is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(19),
+        vec![running(1, "vim", None, false)]
+    )
+    .is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(23),
+        vec![running(1, "vim", None, false)]
+    )
+    .is_empty());
+    assert_eq!(
+        plan(
+            &mut scheduler,
+            secs(24),
+            vec![running(1, "vim", None, false)]
+        ),
+        vec![auto(1, "")]
+    );
+}
+
+#[test]
+fn an_agent_is_summarised_at_five_seconds_only_once_it_has_a_prompt() {
+    let mut scheduler = RefreshScheduler::new();
+    assert!(plan(
+        &mut scheduler,
+        secs(0),
+        vec![running(1, "claude", None, true)]
+    )
+    .is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(40),
+        vec![running(1, "claude", None, true)]
+    )
+    .is_empty());
+    // The first prompt: the agent has run 5 s, so its title is made of it
+    // without waiting for five messages.
+    assert_eq!(
+        plan(
+            &mut scheduler,
+            secs(41),
+            vec![running(1, "claude", turn("c1", 0), false)]
+        ),
+        vec![auto(1, "c1")]
+    );
+    // Prompted at once: it waits for the 5 s.
+    let mut scheduler = RefreshScheduler::new();
+    assert!(plan(
+        &mut scheduler,
+        secs(0),
+        vec![running(2, "claude", turn("c1", 1), false)]
+    )
+    .is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(4),
+        vec![running(2, "claude", turn("c1", 1), false)]
+    )
+    .is_empty());
+    assert_eq!(
+        plan(
+            &mut scheduler,
+            secs(5),
+            vec![running(2, "claude", turn("c1", 1), false)]
+        ),
+        vec![auto(2, "c1")]
+    );
 }

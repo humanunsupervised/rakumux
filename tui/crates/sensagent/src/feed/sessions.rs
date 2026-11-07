@@ -194,13 +194,18 @@ const SHELLS: &[&str] = &[
     "sh", "bash", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh", "nu", "xonsh", "elvish",
 ];
 
+/// Whether `program` is a shell (`bash`, `zsh`, …).
+pub(crate) fn is_shell(program: &str) -> bool {
+    SHELLS.contains(&program)
+}
+
 /// The app the TUI's App tab files `view` under (its `grouping::AppKey`), when it isn't `shell`:
 /// the agent the session names, else its foreground program while it runs, else the program it
 /// started with; never a shell. Lowercase, a name only, within the contract's 64 characters.
 fn program_of(view: &SessionView) -> Option<String> {
     let usable = |program: &str| {
         let program = program.trim();
-        (!program.is_empty() && !SHELLS.contains(&program)).then(|| program.to_owned())
+        (!program.is_empty() && !is_shell(program)).then(|| program.to_owned())
     };
     let agent = view.agent.as_ref().and_then(|agent| usable(&agent.kind));
     let foreground = view

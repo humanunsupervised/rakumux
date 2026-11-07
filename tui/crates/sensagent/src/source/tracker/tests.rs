@@ -684,3 +684,46 @@ fn turn_settings_are_bounded_and_unfollowed_output_still_counts() {
     assert!(tracker.is_dirty(&id(2)));
     assert!(!candidate(&tracker, 2).follows_turn);
 }
+
+fn running(number: u32, program: &str, agent: Option<&str>) -> SessionView {
+    let mut view = view(number);
+    if let Some(terminal) = view.terminal.as_mut() {
+        terminal.foreground_process = Some(program.into());
+    }
+    view.agent = agent.map(|kind| session_core::model::AgentInfo {
+        kind: kind.into(),
+        agent_session_id: None,
+        agent_session_path: None,
+    });
+    view
+}
+
+#[test]
+fn candidates_name_the_program_started_at_the_prompt_never_a_shell() {
+    let mut tracker = SourceTracker::new();
+    let _ = tracker.apply_view(&running(1, "bash", None));
+    assert_eq!(candidate(&tracker, 1).program, None);
+    // A new foreground program fences nothing: the same stamp.
+    unchanged(tracker.apply_view(&running(1, "htop", None)));
+    let htop = candidate(&tracker, 1);
+    assert_eq!(htop.program.as_deref(), Some("htop"));
+    assert!(!htop.awaits_prompt);
+
+    // An agent whose turns the daemon follows waits for its first prompt.
+    let _ = tracker.apply_view(&running(2, "claude", Some("claude")));
+    let claude = candidate(&tracker, 2);
+    assert_eq!(claude.program.as_deref(), Some("claude"));
+    assert!(claude.awaits_prompt);
+    let mut prompted = running(2, "claude", Some("claude"));
+    prompted.agent_turn = Some(AgentTurn {
+        id: 1,
+        messages: 0,
+        conversation_id: None,
+    });
+    let _ = tracker.apply_view(&prompted);
+    assert!(!candidate(&tracker, 2).awaits_prompt);
+
+    // One whose turns aren't followed is described from its screen.
+    let _ = tracker.apply_view(&running(3, "aider", Some("aider")));
+    assert!(!candidate(&tracker, 3).awaits_prompt);
+}

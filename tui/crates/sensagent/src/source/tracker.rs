@@ -52,6 +52,12 @@ pub(crate) struct Candidate {
     pub(crate) follows_turn: bool,
     /// The followed turn: its chat and how many messages the agent wrote.
     pub(crate) turn: Option<AgentTurn>,
+    /// The program in its foreground now, never a shell: one started at its
+    /// prompt (or as it started), for [`APP_RUNNING`](crate::refresh::APP_RUNNING).
+    pub(crate) program: Option<String>,
+    /// An agent whose turns the daemon follows runs but was given no prompt
+    /// yet: its title waits for one, as its screen says nothing of the work.
+    pub(crate) awaits_prompt: bool,
 }
 
 /// AI summaries of agents' turns (`sessions.ai_summary` in the TUI's
@@ -99,6 +105,12 @@ pub(super) struct Facts {
     pub(super) reported: Option<Reported>,
     /// The agent's turn the daemon follows (`SessionView::agent_turn`).
     pub(super) turn: Option<AgentTurn>,
+    /// The program in the foreground while live, never a shell. Not part of
+    /// [`Facts::same`]: only the scheduler's clock reads it.
+    pub(super) program: Option<String>,
+    /// The agent the session runs (`AgentInfo::kind`). Not part of
+    /// [`Facts::same`].
+    pub(super) agent: Option<String>,
 }
 
 /// What a session is doing, as far as its summaries go.
@@ -144,7 +156,29 @@ impl Facts {
             lifecycle: view.lifecycle,
             reported: view.reported.clone(),
             turn: view.agent_turn.clone().filter(|_| live),
+            program: view
+                .terminal
+                .as_ref()
+                .filter(|_| live)
+                .and_then(|terminal| terminal.foreground_process.as_deref())
+                .map(str::trim)
+                .filter(|program| !program.is_empty() && !crate::feed::is_shell(program))
+                .map(str::to_owned),
+            agent: view
+                .agent
+                .as_ref()
+                .map(|agent| agent.kind.clone())
+                .filter(|_| live),
         }
+    }
+
+    /// An agent whose turns the daemon follows (one rakumux.com takes) runs
+    /// and has no turn yet: nobody gave it a prompt.
+    fn awaits_prompt(&self) -> bool {
+        let followed = |name: &str| crate::feed::feed_agent(name).is_some();
+        self.turn.is_none()
+            && (self.agent.as_deref().is_some_and(followed)
+                || self.program.as_deref().is_some_and(followed))
     }
 
     pub(super) fn follows_turn(&self) -> bool {
@@ -277,6 +311,8 @@ impl SourceTracker {
                 facts.live = false;
                 facts.pid = None;
                 facts.turn = None;
+                facts.program = None;
+                facts.agent = None;
                 phase = None;
             }
             SessionEvent::Lifecycle { lifecycle } => facts.lifecycle = *lifecycle,
@@ -319,6 +355,8 @@ impl SourceTracker {
             facts.live = false;
             facts.pid = None;
             facts.turn = None;
+            facts.program = None;
+            facts.agent = None;
             match self.apply(&id, facts, None) {
                 Ok(SourceUpdate::Unchanged) => {}
                 Ok(update) => updates.push(update),
@@ -367,6 +405,8 @@ impl SourceTracker {
                 ),
                 follows_turn: tracked.facts.follows_turn(),
                 turn: tracked.facts.turn.clone(),
+                program: tracked.facts.program.clone(),
+                awaits_prompt: tracked.facts.awaits_prompt(),
             })
     }
 

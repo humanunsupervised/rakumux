@@ -18,8 +18,8 @@ pub use engine::{
 };
 pub use runner::{RefreshClient, RefreshError, RefreshRunner};
 pub use schedule::{
-    RefreshFailure, AUTO_STEPS, BUDGET_STARTS, BUDGET_WINDOW, ERROR_BACKOFF, INTERRUPTED_RETRY,
-    MAX_ERROR_BACKOFF, MAX_RUNNING,
+    RefreshFailure, APP_RUNNING, AUTO_STEPS, BUDGET_STARTS, BUDGET_WINDOW, ERROR_BACKOFF,
+    INTERRUPTED_RETRY, MAX_ERROR_BACKOFF, MAX_RUNNING,
 };
 pub use sign_in::{SignInFailure, SignInPrompt, SignInState};
 pub use titles::{Retitle, Retitled};

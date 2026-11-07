@@ -6,7 +6,8 @@
 //! `reply_attachments`, answers to agents' questions only to a reader that
 //! asks for them and whose list says `question_answers`) and their files
 //! while they're pending, and records every status report, uploaded entry,
-//! chat message and request.
+//! chat message and request. With `summaries` on it says AI session titles
+//! are on too and answers each title request with `title`.
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -108,6 +109,13 @@ pub struct State {
     pub fetches: Vec<String>,
     /// Every request: `METHOD path status`.
     pub log: Vec<String>,
+    /// The account's AI session titles are on (`ai_session_summaries`).
+    pub summaries: bool,
+    /// The title each AI session-status request is answered with.
+    pub title: String,
+    /// AI session-status requests (`POST /api/v1/ai/session-status`): when
+    /// (Unix ms), and the body as sent.
+    pub titles: Vec<(u64, Value)>,
 }
 
 impl State {
@@ -370,8 +378,19 @@ impl Served {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/api/v1/features") => answer(
                 200,
-                json!({"version": 1, "features": {"ai_session_summaries": false, "feed": true}}),
+                json!({"version": 1, "features":
+                    {"ai_session_summaries": state.summaries, "feed": true}}),
             ),
+            ("POST", "/api/v1/ai/session-status") if state.summaries => {
+                let request_id = body["request_id"].clone();
+                let title = state.title.clone();
+                state.titles.push((now_ms(), body));
+                answer(
+                    200,
+                    json!({"version": 1, "request_id": request_id,
+                        "status_text": "Watching the build", "title": title}),
+                )
+            }
             ("POST", "/api/v1/feed/sessions") => {
                 let stored = body["sessions"].as_array().map_or(0, Vec::len);
                 state.sessions = Some(body);

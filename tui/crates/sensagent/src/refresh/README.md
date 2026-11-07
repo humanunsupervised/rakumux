@@ -60,6 +60,12 @@ instead of sent.
   latest prompt and what the agent wrote about it, and stays the prompt's while the agent
   goes on, so its title still names the session when it arrives. The turn settings are
   read again every minute (`with_turn_settings`).
+- **Programs started at the prompt.** A session is also summarised, once in its life as
+  above, when the program in its foreground (never a shell) has run there for
+  `APP_RUNNING` (5 s), whichever rule comes first. A program that ends or changes sooner,
+  or a session that stops being live, starts the clock again. An agent whose turns the
+  daemon follows waits for its first prompt too (`Candidate::awaits_prompt`), so it's
+  summarised from that prompt; any other program from its screen.
 - **Asked for.** A summary asked for (`request`) whose attempt was interrupted (a new
   prompt or another change of the session meanwhile, a rate limit) stays asked for and
   is tried again after `INTERRUPTED_RETRY` (5 s), of what the session shows then.

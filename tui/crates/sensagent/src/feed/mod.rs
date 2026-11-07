@@ -28,6 +28,7 @@ mod turn;
 mod uploads;
 mod wire;
 
+pub(crate) use agents::feed_agent;
 pub use cache::{
     FeedEntry, FeedPage, FeedPrompt, FeedReply, FeedStatus, OpenTurn, ReplyAttachment,
     ReplyFailure, ReplyStatus,
@@ -41,6 +42,7 @@ pub(crate) use poke::{listen, PokeEvent, PokeSync};
 pub(crate) use replies::{Fetch, Fetched, ReplySync, ReplyWork, TYPING_QUIET};
 pub use replies::{ReplyWrite, ReplyWriteStatus};
 pub(crate) use resources::{ResourceSync, ResourceWork};
+pub(crate) use sessions::is_shell;
 pub(crate) use sessions::SessionSync;
 pub use sync::machine_name;
 pub(crate) use sync::FeedSync;

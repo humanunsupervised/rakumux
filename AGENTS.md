@@ -158,9 +158,13 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    (never private ones), and off it stops. **One
    automatic title per session**: a session is titled by itself once in its life, in the first
    agent conversation the daemon follows there (`session_turn`) whose agent has written 5
-   messages (`sessions.ai_summary.every_messages`) or whose turn finishes sooner; its later
-   turns and chats get none, nor does a program whose turns the daemon doesn't follow
-   (`RefreshScheduler::plan`). After that only when asked: `OwnerRequest::Summarize` (the ↻
+   messages (`sessions.ai_summary.every_messages`) or whose turn finishes sooner, or once a
+   program started there (anything in its foreground but a shell: `sleep`, `npm`, an agent)
+   has run 5 s (`APP_RUNNING`), whichever comes first; a program that ends or changes sooner
+   starts the 5 s again, and an agent whose turns the daemon follows waits for its first
+   prompt as well, so it's titled from that prompt, not its empty screen; any other program
+   is titled from its screen. Its later turns and chats get none (`RefreshScheduler::plan`).
+   After that only when asked: `OwnerRequest::Summarize` (the ↻
    after a hovered session's name, or `s`), which always applies; a title asked for and made
    counts as the session's one, so none comes by itself after it either. A first automatic
    attempt that won't be tried again (its input can't be sent or holds nothing to describe, or
@@ -182,7 +186,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    dead sessions included, read at each (re)subscribe) is forgotten, and turning sharing off or
    signing out clears it, as it always made every session's title due again: signed in again,
    a session gets one more automatic title (as soon as its agent's current turn has 5 messages
-   or has finished), which renames it only while its name is still the generated one or the
+   or has finished, or its program has run 5 s), which renames it only while its name is still the generated one or the
    title the service last gave it. Nothing refreshes on
    a timer. **The title names the session** (`refresh/titles.rs`): a worker renames it through
    the daemon (`session_rename`, as the user) only while its name is the generated one
