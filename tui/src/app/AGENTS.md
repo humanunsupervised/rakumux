@@ -209,16 +209,24 @@ new-session flow, and code boundaries.
   session mode.
 - `constants.rs`: timings and UI constants. `feature_flags.rs`: code-only flags (`auth: false`).
 - State slices (`state/`):
-  - terminal panel (`terminal_panel.rs`): a temporary daemon-owned PTY below or beside the
-    main detail (`layout::PanelPlacement`, `sessions.terminal_panel`; `|`/`-` place it,
+  - terminal panel (`terminal_panel.rs`): per session, tabs of temporary daemon-owned PTYs
+    below or beside the main detail. `terminal_panel` is the shown session's shown tab
+    (`follow_panel_owner` swaps it as the shown session changes, from `show_selected` and
+    `attach`); `parked_panels` keeps every other tab (`owner`, `seq`, `active`: the tab a
+    session shows again) with its stream. `route_panel_attached`/`route_panel_event` find a
+    tab by its epoch (unique in the process); `with_parked` applies one to a parked tab with
+    `panel_in_background` set, so nothing reaches focus, the footer or sizes. `+` on the bar
+    (`Hit::TerminalPanelNewTab`, `new_terminal_tab`) adds a tab, a tab click
+    (`Hit::TerminalPanelTab`, `show_terminal_tab`) shows it; `end_session_panels` drops a
+    removed session's tabs, which ends their shells. Placement (`layout::PanelPlacement`, `sessions.terminal_panel`; `|`/`-` place it,
     `screen::with_terminal_panel` falls back below without 60 + 1 + 40 columns),
     not a session. `SessionApi::open_terminal`/`attach_terminal` use the `terminal.pane`
     capability; never `create`, `revive`, `delete`, list entries or saved session output.
     `Focus::Terminal` owns key/paste/mouse/cursor routing; no input leaks to the agent. T or
     Settings opens/focuses it, the Rakumux key demotes, Esc returns, T/× hides without ending
-    its shell. Hiding keeps the stream and passive mirror alive, so a hidden exit still closes
-    and cleans up the pane. Exit/EOF releases the lease and clears its id; reopening is a fresh
-    terminal. Closing/reloading the UI drops the lease and ends only its temporary shell.
+    its shells. Hiding keeps the streams and passive mirrors alive, so a hidden exit still
+    closes and cleans up its tab. Exit/EOF releases the lease and closes the tab (the last one
+    closes the panel); reopening is a fresh terminal. Closing/reloading the UI drops the lease and ends only its temporary shell.
     Open/reattach run as jobs with checked epochs and one pending operation. An opaque `PaneId`
     cannot alias a session or a different pane after a crash. Reconnects only attach an existing
     pane as observer, never create replacements. Missing capability is an explicit restart

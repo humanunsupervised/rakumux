@@ -165,6 +165,10 @@ pub enum Hit {
     TerminalPanel,
     TerminalPanelHide,
     TerminalPanelDivider,
+    /// A tab of the terminal panel (its `TerminalPanel::seq`).
+    TerminalPanelTab(u64),
+    /// The panel's `+`: another terminal in this session.
+    TerminalPanelNewTab,
     /// Session list row (0 = the tabs; headers count).
     ListRow(usize),
     /// The `☁ Sprite` toggle on `+ New session`.
@@ -377,6 +381,12 @@ pub struct App {
     pub list: SessionList,
     pub detail: Detail,
     pub terminal_panel: terminal_panel::TerminalPanel,
+    /// Every other terminal tab this window keeps: the shown session's
+    /// other tabs and other sessions' tabs, each with its stream.
+    pub parked_panels: Vec<terminal_panel::TerminalPanel>,
+    /// A parked tab's stream event or attach result is being applied:
+    /// none of it may change focus, the footer or the session's size.
+    panel_in_background: bool,
     pub focus: Focus,
     /// Terminal focus reporting prevents background windows acknowledging replies.
     window_focused: bool,
@@ -504,6 +514,8 @@ impl App {
             list,
             detail: Detail::default(),
             terminal_panel: terminal_panel::TerminalPanel::default(),
+            parked_panels: Vec::new(),
+            panel_in_background: false,
             focus: Focus::List,
             window_focused: true,
             zoomed: false,
@@ -996,18 +1008,18 @@ impl App {
             }
             SettingsItem::TerminalPanel => (
                 "Terminal panel",
-                if self.terminal_panel.open { "Available · Enter focuses" } else { "Open · T" }.into(),
-                "Open a temporary shell below or beside the session in the current directory, without creating a session. Exit closes the pane; hiding with × or the Rakumux key then T keeps it running. Closing this UI ends its temporary shell, not any sessions.",
+                if self.terminal_panel.open { "Focus · T" } else { "Open · T" }.into(),
+                "A shell in the session's directory, below or beside it, without creating a session. Each session has its own panel, shown only with it; + on its bar adds another terminal as a tab, and a tab's exit closes it. Hiding with × or the Rakumux key then T keeps them running. Closing this UI ends its shells, not any sessions.",
             ),
             SettingsItem::TerminalPlacement => {
                 let value = match self.settings.sessions.terminal_panel {
-                    crate::layout::PanelPlacement::Below => "[Below] Beside",
-                    crate::layout::PanelPlacement::Beside => "Below [Beside]",
+                    crate::layout::PanelPlacement::Below => "[Below -] Beside |",
+                    crate::layout::PanelPlacement::Beside => "Below - [Beside |]",
                 };
                 (
                     "Terminal panel placement",
                     value.to_string(),
-                    "Where T opens the terminal panel: below the session, or beside it where the window has room for both (60 columns for the session, 40 for the panel; a docked Feed narrows to make room). Narrower windows and phones show it below. | and - open it there or move it while it's open.",
+                    "Where T opens the terminal panel: below the session, or beside it where the window has room for both (60 columns for the session, 40 for the panel; a docked Feed narrows to make room). Narrower windows and phones show it below. - and | open it there or move it while it's open.",
                 )
             }
         };
@@ -1070,7 +1082,7 @@ impl App {
     /// Timers: status expiry, reconnects and done's sub-sections as time
     /// passes. Returns whether to redraw.
     pub fn on_tick(&mut self, now: Instant) -> bool {
-        self.sync_terminal_panel();
+        self.sync_terminal_panels();
         let mut changed = self.is_animating();
         changed |= self.list.set_clock(wall_clock());
         changed |= self.offer_phone_access();
@@ -1099,10 +1111,10 @@ impl App {
     pub fn handle_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::PanelAttached { generation, result } => {
-                self.on_panel_attached(generation, result)
+                self.route_panel_attached(generation, result)
             }
             AppEvent::PanelAttach { generation, event } => {
-                self.on_panel_attach_event(generation, event)
+                self.route_panel_event(generation, event)
             }
             AppEvent::Connected(api) => self.on_connected(api),
             AppEvent::ConnectFailed(error) => self.on_connect_failed(error),
@@ -1192,7 +1204,7 @@ impl App {
                 self.set_status(format!("Background task failed: {message}"))
             }
         }
-        self.sync_terminal_panel();
+        self.sync_terminal_panels();
     }
 
     /// Input from the terminal.
@@ -1430,7 +1442,7 @@ impl App {
 
     /// The subscription (and so presumably the daemon) went away.
     fn connection_lost(&mut self, reason: String) {
-        self.terminal_panel_disconnected();
+        self.terminal_panels_disconnected();
         if let Some(cancel) = self.sync_cancel.take() {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
@@ -1560,7 +1572,7 @@ impl App {
     /// Stop listening to the daemon before it goes away on purpose, so that
     /// isn't reported as a lost connection.
     fn let_go_of_daemon(&mut self) {
-        self.terminal_panel_disconnected();
+        self.terminal_panels_disconnected();
         if self.connection.is_connected() {
             if let Some(cancel) = self.sync_cancel.take() {
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);

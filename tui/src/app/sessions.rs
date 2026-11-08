@@ -143,6 +143,9 @@ impl App {
             return;
         }
         self.reconcile_detail();
+        if matches!(envelope.event, SessionEvent::Removed) {
+            self.end_session_panels(&id);
+        }
         if self.detail.session_id() == Some(&id) {
             self.sync_terminal_size();
         }
@@ -199,6 +202,7 @@ impl App {
     /// [`App::shown_session`] keeps in view): observe it when live, its
     /// saved screen otherwise.
     pub(super) fn show_selected(&mut self) {
+        self.follow_panel_owner();
         match self.shown_session() {
             None => {
                 self.detail.retarget(DetailView::Empty);
@@ -226,6 +230,7 @@ impl App {
     }
 
     fn attach(&mut self, id: &SessionId, role: Role) {
+        self.follow_panel_owner();
         let Some(api) = self.api() else {
             self.detail.retarget(DetailView::Error {
                 id: id.clone(),
@@ -1282,6 +1287,14 @@ impl App {
                     self.focus_terminal_panel();
                     return;
                 }
+                Some(Hit::TerminalPanelTab(seq)) => {
+                    self.show_terminal_tab(seq);
+                    return;
+                }
+                Some(Hit::TerminalPanelNewTab) => {
+                    self.new_terminal_tab();
+                    return;
+                }
                 // The selection stays where it is.
                 Some(Hit::TitleRefresh(row)) => {
                     if let Some(ListRow::Session(session)) = self.list.rows().get(row) {
@@ -2149,6 +2162,7 @@ impl App {
                     self.leave_session_focus(false);
                 }
                 self.reconcile_detail();
+                self.end_session_panels(&id);
                 self.set_status(format!("Deleted {name}"));
             }
             Err(error) => self.set_status(format!("Delete failed: {error}")),

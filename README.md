@@ -105,7 +105,7 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `x` / `d` | Close (end its program) / delete |
 | `H` | Session history: bring back a deleted session |
 | `v` | Layout: Master detail or Tabs |
-| `T` | Terminal panel: a scratch shell below or beside the session, where it was last |
+| `T` | Terminal panel: the session's own scratch shells (`+` adds a tab) below or beside it, where it was last |
 | `\|` / `-` | Terminal panel beside / below the session (moves it while it's open) |
 | `z` | Full screen |
 | `?` / `,` | Help / Settings (every key, searchable) |

@@ -2783,7 +2783,7 @@ mod tests {
             let rows: Vec<&str> = screen.lines().collect();
             let header = rows
                 .iter()
-                .position(|row| row.contains(" Terminal · "))
+                .position(|row| row.contains(" Terminal  1  + · "))
                 .unwrap_or_else(|| panic!("{name}: no panel\n{screen}"));
             let beside = name.ends_with("beside") || name.ends_with("hidden");
             if beside {

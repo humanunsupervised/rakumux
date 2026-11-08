@@ -624,11 +624,12 @@ impl KeyAction {
                  of the session (or b again) brings the list back."
                 .into(),
             KeyAction::TerminalPanel => {
-                "T opens a standalone shell in the current directory, below the session or \
-                 beside it, where | or - last put it. Click a pane to focus it. Use the Rakumux key to return to Rakumux mode; \
+                "T opens the session's own shell in its directory, below the session or \
+                 beside it, where | or - last put it; each session has its own panel, and + on \
+                 its bar adds another terminal as a tab. Click a pane to focus it. Use the Rakumux key to return to Rakumux mode; \
                  then Esc returns to the shell or T hides it. Hiding does not end its \
-                 running command. Exit closes the pane and releases its terminal. No session \
-                 is created. Closing or reloading this UI ends its temporary shell, not any \
+                 running command. Exit closes the tab and releases its terminal. No session \
+                 is created. Closing or reloading this UI ends its shells, not any \
                  sessions; drag the divider to resize the split."
                     .into()
             }
@@ -1666,14 +1667,17 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
 
     doc.heading("Terminal panel");
     doc.text(
-        "T in Rakumux mode, or Settings, Terminal panel, opens a separate shell \
-         underneath the main detail in the current directory. Click a pane to focus it; \
+        "T in Rakumux mode, or Settings, Terminal panel, opens the session's terminal panel \
+         where it was last placed (- below the session, | beside it), a shell in its directory. \
+         Each session has its own panel, shown only with that session; + on its bar adds \
+         another terminal as a tab, and a click on a tab shows it. Click a pane to focus it; \
          TERMINAL MODE in the footer identifies shell input. The Rakumux key returns to Rakumux mode, \
          then Esc returns to the shell or T hides it. The hide button never ends its program. \
          Drag the divider to resize. Short windows show the focused pane alone. No session \
-         or session-list entry is created. Exit closes the pane and releases its terminal; \
-         closing or reloading this UI ends the temporary shell. A daemon restart in place \
-         preserves it, reconnecting read-only until refocused.",
+         or session-list entry is created. Exit closes the tab and releases its terminal; \
+         the last tab's closes the panel; deleting the session ends its shells, and closing \
+         or reloading this UI ends them all. A daemon restart in place preserves them, \
+         reconnecting read-only until refocused.",
     );
     doc.heading("rtop");
     doc.text(

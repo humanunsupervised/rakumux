@@ -1778,9 +1778,19 @@ highlighted, and a click selects one: again, or a tap on a phone, goes in; the w
 (the default), CPU, network or name; Enter goes into the selected row's session; Esc gives the
 list the keys; `t` hides the drawer. A daemon without `resources` gets "restart it (S)".
 
-**Terminal panel.** `T` in Rakumux mode or Settings → Terminal panel opens a
-temporary daemon-owned login shell below or beside the main detail, without a session record or
-list entry. `T` opens it where it was last placed (below by default); `|` opens it beside the
+**Terminal panel.** `T` in Rakumux mode or Settings → Terminal panel opens the shown session's
+terminal panel: a temporary daemon-owned login shell below or beside the main detail, without a
+session record or list entry. Each session has its own panel (`App::terminal_panel` is the shown
+tab of the session in view, `App::shown_session`; every other tab is kept in
+`App::parked_panels` with its stream): selecting or going into another session hides this one's
+panel, shells running, and shows that session's as it was left (open or hidden, on the tab it
+showed), or none; the keys go back to the list if the panel had them. The panel's bar holds a
+tab per terminal (` Terminal  1  2  + `, the shown one bold and underlined): `+`
+(`Hit::TerminalPanelNewTab`, the only way; no key) opens another shell in the session's
+directory as a new tab and focuses it, and a click on a tab (`Hit::TerminalPanelTab`) shows and
+focuses it. A tab's shell exiting closes that tab (the panel shows the session's newest other
+one); the last one's closes the panel. A deleted session's tabs end with it. With no session
+shown, the panel belongs to none and works the same. `T` opens it where it was last placed (below by default); `|` opens it beside the
 session, `-` below, or moves it there while it's open (the same shell; focused either way), and
 on an open panel already there they do what `T` does. The placement is saved as
 `sessions.terminal_panel` and Settings → Terminal panel placement switches it.
@@ -1797,19 +1807,22 @@ Any detail narrower than that (narrow windows, phones, the list and the drawer o
 window) shows it below; `|` then says "No room beside: shown below", and a wider window puts it
 beside again. Changing the placement resizes only the terminal with the keys, as a dragged
 divider does.
-It starts in the selected session's cwd, otherwise the current folder. `Focus::Terminal` routes keys,
+It starts in the shown session's cwd, otherwise the current folder. `Focus::Terminal` routes keys,
 paste, mouse and cursor only to that attachment, with a distinct TERMINAL MODE footer label.
 The Rakumux key demotes it and returns to Rakumux mode; Esc returns to it, and T hides it.
-The hide button keeps the stream and shell running. Exit/EOF closes the pane and releases its
+The hide button keeps the streams and shells running. Exit/EOF closes the tab and releases its
 terminal automatically; there is no session record to delete. Closing/reloading this UI ends
-the temporary pane shell, never any Rakumux sessions. Drag its
+the panels' shells, never any Rakumux sessions. Drag its
 divider (a row below, a column beside) to resize the split. The selected agent remains observed while the shell takes input;
 only the focused terminal claims size, and scrolling an unfocused shell cannot resize the
-agent. Short windows show the focused pane alone below (beside, both keep every row). Each
-window keeps one pane,
-reusing it after hiding. All work uses SessionApi off the UI thread, with stale-result checks,
+agent. Short windows show the focused pane alone below (beside, both keep every row). A
+session's panel is reused after hiding. Only the shown tab of the shown session is ever a
+controller or claims a size; every other tab stays an observer, and its stream events and attach
+results (each tab's epochs unique in the process) update it without touching focus, the footer
+or the session's size (`App::with_parked`). All work uses SessionApi off the UI thread, with stale-result checks,
 user-only daemon policy, passive emulators, bounded history and input-log privacy. In-place
-daemon restarts preserve pane PTYs. Reconnects attach as observers until the user refocuses;
+daemon restarts preserve pane PTYs. Reconnects re-attach every tab as an observer until the user
+refocuses;
 they never create replacement shells implicitly. An older daemon reports that an in-place
 restart is needed; no fallback creates a normal or hidden session.
 

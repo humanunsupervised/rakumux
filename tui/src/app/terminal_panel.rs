@@ -1,7 +1,11 @@
-//! A window-local terminal pane, not a Rakumux session. Hiding retains its
-//! stream; shell exit closes the pane and the daemon releases the PTY.
+//! A session's terminal panel: tabs of terminal panes, each a daemon-owned
+//! PTY, not a Rakumux session. Only the shown session's panel shows; the
+//! other sessions' tabs, and the shown session's other tabs, keep their
+//! streams (`App::parked_panels`). Hiding retains the streams; a tab's shell
+//! exit closes that tab and the daemon releases its PTY.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
@@ -9,7 +13,7 @@ use session_core::api::{
     ApiError, ErrorCode, OpenTerminal, Role, StreamCommand, StreamEvent, TerminalAttachRequest,
 };
 use session_core::client::{AttachEvent, TerminalStream};
-use session_core::ids::PaneId;
+use session_core::ids::{PaneId, SessionId};
 
 use super::detail::{classify_output, Attachment, OutputAction};
 use super::runtime::{cancel_flag, AppEvent};
@@ -25,8 +29,26 @@ const MAX_CELLS: usize = 500_000;
 const MAX_CHECKPOINT: usize = 2 * 1024 * 1024;
 const SCROLLBACK: usize = 500;
 
-/// An independent terminal and its view. It has no registry/session state.
+/// Tab ids and attach epochs, unique across every tab of this process, so a
+/// stream event always finds its own tab.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_id() -> u64 {
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// One tab of a session's terminal panel: an independent terminal and its
+/// view. It has no registry/session state.
 pub struct TerminalPanel {
+    /// The session whose panel it is a tab of (`None`: no session shown).
+    pub owner: Option<SessionId>,
+    /// This tab's id, in the order tabs were opened (0 before its shell).
+    pub seq: u64,
+    /// Parked: its session's panel shows this tab when the session is
+    /// shown again.
+    active: bool,
+    /// The panel is shown (the shown tab), or will be when its session is
+    /// shown again (a parked `active` tab).
     pub open: bool,
     pub id: Option<PaneId>,
     pub cwd: Option<PathBuf>,
@@ -52,6 +74,9 @@ pub struct TerminalPanel {
 impl Default for TerminalPanel {
     fn default() -> Self {
         Self {
+            owner: None,
+            seq: 0,
+            active: false,
             open: false,
             id: None,
             cwd: None,
@@ -80,7 +105,7 @@ impl TerminalPanel {
     }
 
     fn clear_attachment(&mut self) {
-        self.epoch = self.epoch.wrapping_add(1);
+        self.epoch = next_id();
         self.pending = None;
         self.attachment = None;
     }
@@ -89,6 +114,7 @@ impl TerminalPanel {
 impl App {
     /// Reveal/focus a pane, or hide it after leaving its input mode.
     pub fn toggle_terminal_panel(&mut self) {
+        self.follow_panel_owner();
         if self.terminal_panel.open && self.came_from_terminal && !self.terminal_panel.needs_refocus
         {
             self.hide_terminal_panel();
@@ -103,6 +129,7 @@ impl App {
     /// (see [`crate::app::screen::fits_beside`]) it shows below and says
     /// so; the placement is still kept for `T`.
     pub fn terminal_panel_at(&mut self, placement: PanelPlacement) {
+        self.follow_panel_owner();
         if self.terminal_panel.open && self.settings.sessions.terminal_panel == placement {
             self.toggle_terminal_panel();
         } else {
@@ -144,14 +171,16 @@ impl App {
         true
     }
 
-    /// Start a standalone shell only when this window has no existing pane.
+    /// Show the shown session's panel, starting its first shell (in the
+    /// session's directory) when it has none.
     pub fn show_terminal_panel(&mut self) {
+        self.follow_panel_owner();
         if self.terminal_panel.id.is_none() {
             self.terminal_panel.id = Some(PaneId::generate());
+            self.terminal_panel.seq = next_id();
             self.terminal_panel.cwd = Some(
-                self.list
-                    .selected_session()
-                    .map(|session| session.cwd.clone())
+                self.shown_session()
+                    .map(|session| session.cwd)
                     .unwrap_or_else(|| self.current_folder().path().to_path_buf()),
             );
             self.terminal_panel.creating = true;
@@ -160,6 +189,211 @@ impl App {
         }
         self.terminal_panel.open = true;
         self.focus_terminal_panel();
+    }
+
+    /// The panel's `+`: another terminal in the shown session's directory,
+    /// as a new tab, focused.
+    pub fn new_terminal_tab(&mut self) {
+        self.follow_panel_owner();
+        if self.terminal_panel.id.is_some() {
+            let next = TerminalPanel {
+                owner: self.terminal_panel.owner.clone(),
+                ..TerminalPanel::default()
+            };
+            self.bring_tab_forward(next, false);
+        }
+        self.show_terminal_panel();
+    }
+
+    /// A click on a tab: show it in the panel and give it the keys.
+    pub fn show_terminal_tab(&mut self, seq: u64) {
+        if self.terminal_panel.seq != seq {
+            let owner = self.terminal_panel.owner.clone();
+            let Some(index) = self
+                .parked_panels
+                .iter()
+                .position(|tab| tab.seq == seq && tab.owner == owner)
+            else {
+                return;
+            };
+            let mut next = self.parked_panels.remove(index);
+            next.open = true;
+            self.bring_tab_forward(next, false);
+        }
+        self.focus_terminal_panel();
+    }
+
+    /// The shown session's tabs, in the order they were opened.
+    pub fn terminal_tabs(&self) -> Vec<u64> {
+        let owner = &self.terminal_panel.owner;
+        let mut tabs: Vec<u64> = self
+            .parked_panels
+            .iter()
+            .filter(|tab| &tab.owner == owner)
+            .map(|tab| tab.seq)
+            .chain((self.terminal_panel.id.is_some()).then_some(self.terminal_panel.seq))
+            .collect();
+        tabs.sort_unstable();
+        tabs
+    }
+
+    /// Any terminal tab's shell running in this window, shown or not.
+    pub fn has_terminal_shells(&self) -> bool {
+        self.terminal_panel.id.is_some() || !self.parked_panels.is_empty()
+    }
+
+    /// The session the panel belongs to: the one the detail keeps in view.
+    fn panel_owner(&self) -> Option<SessionId> {
+        self.shown_session().map(|session| session.id)
+    }
+
+    /// Show the panel of the session in view, never another's: the panel
+    /// shown so far is parked with its tabs and streams, and this session's
+    /// comes back as it was left (open or hidden, on the tab it showed).
+    pub(super) fn follow_panel_owner(&mut self) {
+        let owner = self.panel_owner();
+        if self.terminal_panel.owner == owner {
+            return;
+        }
+        if self.focus == Focus::Terminal {
+            self.focus = Focus::List;
+        }
+        self.came_from_terminal = false;
+        if self.mouse_grab == Some(super::MouseGrab::Panel) {
+            self.mouse_grab = None;
+        }
+        let next = match self
+            .parked_panels
+            .iter()
+            .position(|tab| tab.owner == owner && tab.active)
+        {
+            Some(index) => self.parked_panels.remove(index),
+            None => TerminalPanel {
+                owner,
+                ..TerminalPanel::default()
+            },
+        };
+        self.bring_tab_forward(next, true);
+    }
+
+    /// Show `next` in the panel and park the tab shown so far: its
+    /// session's tab to show again when `session_switch`, else one of the
+    /// panel's other tabs. The panel keeps the window's split sizes.
+    fn bring_tab_forward(&mut self, mut next: TerminalPanel, session_switch: bool) {
+        self.demote_terminal_panel();
+        let mut previous = std::mem::take(&mut self.terminal_panel);
+        next.height_percent = previous.height_percent;
+        next.width_percent = previous.width_percent;
+        next.active = false;
+        next.dragging = false;
+        previous.dragging = false;
+        previous.active = session_switch;
+        if !session_switch {
+            previous.open = false;
+        }
+        if previous.id.is_some() {
+            self.parked_panels.push(previous);
+        }
+        self.terminal_panel = next;
+    }
+
+    /// Apply `f` to the parked tab `seq` as if it were shown, with nothing
+    /// it does reaching focus, the footer or the session's size. A tab
+    /// whose shell ended goes; its session then shows another of its tabs.
+    fn with_parked<R>(&mut self, seq: u64, f: impl FnOnce(&mut App) -> R) -> Option<R> {
+        let index = self.parked_panels.iter().position(|tab| tab.seq == seq)?;
+        let mut tab = self.parked_panels.swap_remove(index);
+        let (active, open) = (tab.active, tab.open);
+        std::mem::swap(&mut self.terminal_panel, &mut tab);
+        self.panel_in_background = true;
+        let result = f(self);
+        self.panel_in_background = false;
+        std::mem::swap(&mut self.terminal_panel, &mut tab);
+        if tab.id.is_some() {
+            self.parked_panels.push(tab);
+        } else if active {
+            if let Some(other) = self
+                .parked_panels
+                .iter_mut()
+                .filter(|other| other.owner == tab.owner)
+                .max_by_key(|other| other.seq)
+            {
+                other.active = true;
+                other.open = open;
+            }
+        }
+        Some(result)
+    }
+
+    /// An attach result for whichever tab asked for it.
+    pub(super) fn route_panel_attached(
+        &mut self,
+        generation: u64,
+        result: Result<TerminalStream, ApiError>,
+    ) {
+        if generation == self.terminal_panel.epoch {
+            return self.on_panel_attached(generation, result);
+        }
+        match self
+            .parked_panels
+            .iter()
+            .find(|tab| tab.epoch == generation)
+            .map(|tab| tab.seq)
+        {
+            Some(seq) => {
+                self.with_parked(seq, |app| app.on_panel_attached(generation, result));
+            }
+            None => {
+                if let Ok(stream) = result {
+                    stream.detach();
+                }
+            }
+        }
+    }
+
+    /// A stream event for whichever tab it belongs to.
+    pub(super) fn route_panel_event(&mut self, generation: u64, event: AttachEvent) {
+        if generation == self.terminal_panel.epoch {
+            return self.on_panel_attach_event(generation, event);
+        }
+        if let Some(seq) = self
+            .parked_panels
+            .iter()
+            .find(|tab| tab.epoch == generation)
+            .map(|tab| tab.seq)
+        {
+            self.with_parked(seq, |app| app.on_panel_attach_event(generation, event));
+        }
+    }
+
+    /// Open or re-attach every tab that waits for it, shown or not.
+    pub(super) fn sync_terminal_panels(&mut self) {
+        self.sync_terminal_panel();
+        let waiting: Vec<u64> = self
+            .parked_panels
+            .iter()
+            .filter(|tab| tab.needs_open || tab.reconnect)
+            .map(|tab| tab.seq)
+            .collect();
+        for seq in waiting {
+            self.with_parked(seq, |app| app.sync_terminal_panel());
+        }
+    }
+
+    /// The daemon went away: every tab re-attaches once it's back.
+    pub(super) fn terminal_panels_disconnected(&mut self) {
+        self.terminal_panel_disconnected();
+        let parked: Vec<u64> = self.parked_panels.iter().map(|tab| tab.seq).collect();
+        for seq in parked {
+            self.with_parked(seq, |app| app.terminal_panel_disconnected());
+        }
+    }
+
+    /// A session that's gone ends its panel's shells.
+    pub(super) fn end_session_panels(&mut self, id: &SessionId) {
+        self.follow_panel_owner();
+        self.parked_panels
+            .retain(|tab| tab.owner.as_ref() != Some(id));
     }
 
     pub fn focus_terminal_panel(&mut self) {
@@ -253,7 +487,7 @@ impl App {
         };
         let creating = self.terminal_panel.creating;
         let size = self.terminal_panel_size();
-        self.terminal_panel.epoch = self.terminal_panel.epoch.wrapping_add(1);
+        self.terminal_panel.epoch = next_id();
         let generation = self.terminal_panel.epoch;
         self.terminal_panel.pending = Some(generation);
         self.terminal_panel.needs_open = false;
@@ -295,7 +529,9 @@ impl App {
             Ok(stream) => stream,
             Err(error) if !self.terminal_panel.creating && error.code == ErrorCode::NotFound => {
                 self.finish_terminal_panel();
-                self.set_status("Terminal ended while disconnected; open a new pane with T.");
+                if !self.panel_in_background {
+                    self.set_status("Terminal ended while disconnected; open a new pane with T.");
+                }
                 return;
             }
             Err(error) => {
@@ -334,7 +570,10 @@ impl App {
             attached.offset,
         );
         if attached.role == Role::Controller {
-            if self.focus != Focus::Terminal || !self.terminal_panel.open {
+            if self.panel_in_background
+                || self.focus != Focus::Terminal
+                || !self.terminal_panel.open
+            {
                 if let Err(error) = attachment.change_role(StreamCommand::Demote) {
                     self.terminal_panel.message =
                         Some(format!("Can't release stale terminal control: {error}"));
@@ -344,7 +583,7 @@ impl App {
             } else {
                 attachment.sent_size = Some((attached.cols, attached.rows));
             }
-        } else if self.focus == Focus::Terminal {
+        } else if self.focus == Focus::Terminal && !self.panel_in_background {
             self.focus = Focus::List;
             self.came_from_terminal = true;
             self.set_status("Terminal reconnected read-only; click it or press T to take control.");
@@ -359,8 +598,14 @@ impl App {
         self.claim_panel_size();
     }
 
-    /// Shell exit is not a saved session: close the pane and release its lease.
+    /// Shell exit is not a saved session: close the tab and release its
+    /// lease. The panel shows the session's other tab, if it has one; with
+    /// none, it closes.
     fn finish_terminal_panel(&mut self) {
+        let (was_open, was_focused) = (
+            self.terminal_panel.open,
+            self.focus == Focus::Terminal && !self.panel_in_background,
+        );
         self.terminal_panel.clear_attachment();
         self.terminal_panel.open = false;
         self.terminal_panel.id = None;
@@ -374,6 +619,26 @@ impl App {
         self.terminal_panel.dragging = false;
         self.terminal_panel.awaiting_checkpoint = false;
         self.terminal_panel.needs_refocus = false;
+        if self.panel_in_background {
+            return;
+        }
+        let owner = self.terminal_panel.owner.clone();
+        if let Some(index) = self
+            .parked_panels
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| tab.owner == owner)
+            .max_by_key(|(_, tab)| tab.seq)
+            .map(|(index, _)| index)
+        {
+            let mut next = self.parked_panels.remove(index);
+            next.open = was_open;
+            self.bring_tab_forward(next, false);
+            if was_focused && was_open {
+                self.focus_terminal_panel();
+            }
+            return;
+        }
         if self.focus == Focus::Terminal {
             self.focus = Focus::List;
         }
@@ -440,10 +705,11 @@ impl App {
                     return;
                 }
                 attachment.role = role;
-                if role == Role::Observer && self.focus == Focus::Terminal {
+                let focused = self.focus == Focus::Terminal && !self.panel_in_background;
+                if role == Role::Observer && focused {
                     self.focus = Focus::List;
                     self.came_from_terminal = true;
-                } else if role == Role::Controller && self.focus != Focus::Terminal {
+                } else if role == Role::Controller && !focused {
                     self.demote_terminal_panel();
                 }
             }
@@ -453,6 +719,7 @@ impl App {
             AttachEvent::Event(StreamEvent::Cwd { path }) => self.terminal_panel.cwd = Some(path),
             AttachEvent::Event(StreamEvent::Clipboard { selection, data }) => {
                 if self.focus == Focus::Terminal
+                    && !self.panel_in_background
                     && matches!(self.mode, AppMode::Normal)
                     && self
                         .terminal_panel
@@ -648,7 +915,10 @@ impl App {
     }
 
     fn resize_panel(&mut self, geometry_changed: bool) {
-        if self.focus != Focus::Terminal || self.screen().terminal_panel.is_none() {
+        if self.panel_in_background
+            || self.focus != Focus::Terminal
+            || self.screen().terminal_panel.is_none()
+        {
             return;
         }
         let size = self.terminal_panel_size();
@@ -694,7 +964,7 @@ impl App {
         self.terminal_panel.needs_refocus = true;
         self.terminal_panel.retry_at = None;
         self.terminal_panel.message = Some("Terminal disconnected; reconnecting…".into());
-        if self.focus == Focus::Terminal {
+        if self.focus == Focus::Terminal && !self.panel_in_background {
             self.focus = Focus::List;
             self.came_from_terminal = true;
         }

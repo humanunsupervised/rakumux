@@ -619,7 +619,7 @@ async fn settings_placement_row_moves_the_open_panel_and_is_saved() {
     let row = SettingsItem::TerminalPlacement.index();
     assert_eq!(
         h.app.modal_context(false).general[row].value,
-        "[Below] Beside"
+        "[Below -] Beside |"
     );
     h.press(KeyCode::Char(',')).await;
     for _ in 0..row {
@@ -628,7 +628,7 @@ async fn settings_placement_row_moves_the_open_panel_and_is_saved() {
     h.press(KeyCode::Enter).await;
     assert_eq!(
         h.app.modal_context(false).general[row].value,
-        "Below [Beside]"
+        "Below - [Beside |]"
     );
     assert_eq!(saved_placement(&h).as_deref(), Some("beside"));
     // Still open, the same shell, now beside; the modal stays.

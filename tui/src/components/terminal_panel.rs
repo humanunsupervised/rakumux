@@ -3,7 +3,7 @@
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
-    text::{Line, Span},
+    text::Line,
     widgets::{Paragraph, Wrap},
     Frame,
 };
@@ -70,21 +70,49 @@ pub fn draw_terminal_panel(
     } else {
         "click to focus".into()
     };
-    let title = format!(" Terminal · {folder} · {status}");
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            truncate(&title, usize::from(area.width.saturating_sub(hide.width))),
-            Style::default()
-                .fg(if focused {
-                    palette.text_bright
-                } else {
-                    palette.text_primary
-                })
-                .bg(palette.surface)
-                .add_modifier(Modifier::BOLD),
-        ))),
-        header,
-    );
+    // The bar: ` Terminal `, a tab for each of the session's terminals
+    // (the shown one bold and underlined), `+` for another, then where it
+    // runs; `× hide` at the right.
+    let bar = Style::default().bg(palette.surface);
+    let room = hide.x;
+    frame.render_widget(Paragraph::new("").style(bar), header);
+    let mut x = header.x;
+    let mut place = |frame: &mut Frame, text: &str, style: Style| -> Option<Rect> {
+        let width = (text.chars().count() as u16).min(room.saturating_sub(x));
+        if width == 0 {
+            return None;
+        }
+        let rect = Rect { x, width, ..header };
+        frame.render_widget(
+            Paragraph::new(truncate(text, usize::from(width))).style(style),
+            rect,
+        );
+        x += width;
+        Some(rect)
+    };
+    let title_style = bar
+        .fg(if focused {
+            palette.text_bright
+        } else {
+            palette.text_primary
+        })
+        .add_modifier(Modifier::BOLD);
+    place(frame, " Terminal ", title_style);
+    let shown = app.terminal_panel.seq;
+    for (index, seq) in app.terminal_tabs().into_iter().enumerate() {
+        let style = if seq == shown {
+            title_style.add_modifier(Modifier::UNDERLINED)
+        } else {
+            bar.fg(palette.text_muted)
+        };
+        if let Some(rect) = place(frame, &format!(" {} ", index + 1), style) {
+            hits.push((rect, Hit::TerminalPanelTab(seq)));
+        }
+    }
+    if let Some(rect) = place(frame, " + ", bar.fg(palette.neutral_gray)) {
+        hits.push((rect, Hit::TerminalPanelNewTab));
+    }
+    place(frame, &format!("· {folder} · {status}"), title_style);
     frame.render_widget(
         Paragraph::new(" × hide ").style(
             Style::default()
