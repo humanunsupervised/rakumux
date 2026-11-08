@@ -243,6 +243,42 @@ fn replies_written_while_claude_code_works_go_in_one_at_a_time_across_a_restart(
     eprintln!("mid-turn replies end to end: {:?}", started.elapsed());
 }
 
+/// A security checkpoint in front of rakumux.com (an HTML 403) is an outage,
+/// not the cloud's refusal: the report that met it is sent again.
+#[test]
+fn a_report_that_meets_a_security_checkpoint_is_sent_again() {
+    let world = World::new();
+    let _daemon = world.start_daemon();
+    let client = world.client();
+    let session = world.start_claude(&client);
+    let _service = world.start_service(1);
+    world.wait(
+        "the account service to list the session and read replies",
+        || {
+            let state = world.cloud.state();
+            let listed = state.sessions.as_ref().is_some_and(|list| {
+                list["sessions"].as_array().is_some_and(|sessions| {
+                    sessions.iter().any(|listed| {
+                        listed["id"] == session.id.as_str()
+                            && listed["conversation_id"] == CONVERSATION
+                    })
+                })
+            });
+            listed && !state.reads.is_empty()
+        },
+    );
+
+    world.cloud.state().checkpoints = 1;
+    world.allow(1);
+    let shown = (session.id.as_str(), session.name.as_str());
+    let reply = world.cloud.write_reply(shown, CONVERSATION, FIRST, &[]);
+    world.wait("the reply typed in", || world.received().len() == 1);
+    world.wait("its report to get past the checkpoint", || {
+        world.cloud.state().checkpoints == 0
+    });
+    world.wait("the reply reported delivered", || world.delivered(&reply));
+}
+
 /// The second reply's files: saved once each under the reply's own folder
 /// (the second `image.png` as `image (2).png`), as fetched, and typed as
 /// their paths after its text. Returns the paths.

@@ -551,7 +551,8 @@ impl CloudAIClient {
         let result = self.transport.send(outgoing);
         cancel.check()?;
         let reply = result?;
-        if (300..=399).contains(&reply.status) {
+        if (300..=399).contains(&reply.status) || security_checkpoint(reply.status, &reply.headers)
+        {
             return Err(CloudAIError::HttpStatus(reply.status));
         }
         // A revoke answers 204, without a body.
@@ -610,7 +611,8 @@ impl CloudAIClient {
         let result = self.transport.send(outgoing);
         cancel.check()?;
         let reply = result?;
-        if (300..=399).contains(&reply.status) {
+        if (300..=399).contains(&reply.status) || security_checkpoint(reply.status, &reply.headers)
+        {
             return Err(CloudAIError::HttpStatus(reply.status));
         }
         if reply.headers.contains_key(header::CONTENT_ENCODING)
@@ -813,6 +815,12 @@ fn response_read_error(error: io::Error) -> CloudAIError {
     } else {
         NetworkFailure::Request
     })
+}
+
+/// A 403 that isn't the feed's JSON comes from a security checkpoint in front
+/// of the cloud: an outage to wait out, never the cloud refusing the request.
+fn security_checkpoint(status: u16, headers: &HeaderMap) -> bool {
+    status == 403 && require_json_headers(headers).is_err()
 }
 
 fn require_json_headers(headers: &HeaderMap) -> Result<(), CloudAIError> {

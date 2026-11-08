@@ -116,6 +116,8 @@ pub struct State {
     /// AI session-status requests (`POST /api/v1/ai/session-status`): when
     /// (Unix ms), and the body as sent.
     pub titles: Vec<(u64, Value)>,
+    /// How many of the next status reports meet a security checkpoint.
+    pub checkpoints: usize,
 }
 
 impl State {
@@ -310,6 +312,15 @@ fn error(status: u16, code: &str) -> Answer {
     answer(status, json!({"error": {"code": code, "message": message}}))
 }
 
+/// What Vercel's Security Checkpoint answers in front of rakumux.com.
+fn checkpoint() -> Answer {
+    Answer(
+        403,
+        "text/html; charset=utf-8",
+        b"<!DOCTYPE html><title>Vercel Security Checkpoint</title>".to_vec(),
+    )
+}
+
 impl Served {
     fn connection(&self, stream: TcpStream, config: Arc<rustls::ServerConfig>) {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
@@ -328,6 +339,7 @@ impl Served {
             200 => "OK",
             400 => "Bad Request",
             401 => "Unauthorized",
+            403 => "Forbidden",
             _ => "Not Found",
         };
         let head = format!(
@@ -373,6 +385,10 @@ impl Served {
         let mut state = self.state();
         if bearer != state.token || machine_id != Some(self.machine.id.as_str()) {
             return error(401, "unauthenticated");
+        }
+        if request.path == "/api/v1/feed/replies/status" && state.checkpoints > 0 {
+            state.checkpoints -= 1;
+            return checkpoint();
         }
         let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
         match (request.method.as_str(), request.path.as_str()) {
