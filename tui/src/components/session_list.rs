@@ -33,13 +33,13 @@ use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
 use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
 use super::format::{
-    activity_badge_at, branch_label, last_activity, place_label, program_color, read_period_style,
+    activity_badge_at, branch_label, facts_line, last_activity, place_label, read_period_style,
     relative_time, repo_label, session_repos, status_glyph, status_group_glyph, truncate,
     truncate_start, PIN_MARK,
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
-use crate::app::grouping::{AppKey, Grouping, ReadPeriod, Section};
+use crate::app::grouping::{Grouping, ReadPeriod, Section};
 use crate::app::places::PlaceRef;
 use crate::app::{App, Connection, Hit, ListRow};
 use crate::layout::str_width;
@@ -469,11 +469,12 @@ fn session_content(
     };
     let name = truncate(&name, width.saturating_sub(right_width + 3 + slot));
     let pad = width.saturating_sub(2 + str_width(&name) + slot + right_width);
-    let (name_style, age_color) = if selected {
+    let (name_style, detail_color, age_color) = if selected {
         (
             Style::default()
                 .fg(p.text_bright)
                 .add_modifier(Modifier::BOLD),
+            p.text_primary,
             p.neutral_gray,
         )
     } else {
@@ -481,6 +482,7 @@ fn session_content(
             Style::default()
                 .fg(p.text_unselected)
                 .add_modifier(Modifier::BOLD),
+            p.text_muted,
             p.text_muted,
         )
     };
@@ -496,16 +498,13 @@ fn session_content(
         first.push(Span::raw(" "));
         first.push(badge);
     }
-    // Under the name and its places (`place_content`), the app it runs,
-    // alone, in its colour, ending where the right column starts.
+    // Under the name and its places (`place_content`): the app, its
+    // subagents and report (an ended session's way back), ending where the
+    // right column starts.
     let column = width.saturating_sub(2 + RIGHT_COLUMN);
-    let app_key = AppKey::of(session);
-    let program = app_key.as_str();
-    let app_style = Style::default().fg(program_color(program));
-    let second = vec![
-        Span::raw("  "),
-        Span::styled(truncate(program, column), app_style),
-    ];
+    let detail = Style::default().fg(detail_color);
+    let mut second = vec![Span::raw("  ")];
+    second.extend(facts_line(session, column, app.icons(), detail, false).spans);
     vec![first, second]
 }
 
@@ -1386,7 +1385,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_app_line_names_the_app_alone_in_its_colour() {
+    fn the_last_line_is_the_app_its_subagents_and_report() {
         use crate::app::testing::{harness, on_branch, view};
 
         let h = harness(vec![]);
@@ -1396,19 +1395,24 @@ mod tests {
             kind: "opencode".into(),
             ..Default::default()
         });
+        session.reported = Some(session_core::model::Reported {
+            state: None,
+            text: Some("tests pass".into()),
+            result: None,
+            at: 0,
+        });
         let p = theme::palette();
         for selected in [false, true] {
             let lines = session_content(&h.app, &session, 40, selected, 0);
-            assert_eq!(text(&lines[1..]), ["  opencode"]);
+            // The app in its colour, then the report; the repositories and
+            // branch are on the line above (`place_content`).
+            assert_eq!(text(&lines[1..]), ["  opencode · tests pass"]);
             assert_eq!(lines[1][1].style.fg, Some(p.label_slate_blue));
         }
-        // An ended session keeps its agent; a shell says so.
+        // An ended session says how to bring it back.
         session.status = SessionStatus::Dead;
         let lines = session_content(&h.app, &session, 40, false, 0);
-        assert_eq!(text(&lines[1..]), ["  opencode"]);
-        session.agent = None;
-        let lines = session_content(&h.app, &session, 40, false, 0);
-        assert_eq!(text(&lines[1..]), ["  shell"]);
+        assert_eq!(text(&lines[1..]), ["  dead · ⏎ revive · tests pass"]);
     }
 
     /// `session` with `places` (paths in its folder `/repo`, a branch each,

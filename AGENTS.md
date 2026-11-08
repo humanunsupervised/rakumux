@@ -1717,9 +1717,9 @@ each: first where it works now (`PlaceRef::Current`: its git context's working t
 cwd), then every other (`app::places::listed_places`), most recent first: its path (in the
 session's folder, the folder's name, or `~/…`), then its repository's name (`format::repo_label`:
 not when its folder has that name) and branch, and its age at the right (where it works now: its
-place's, when it changed files there). Under them, the last line, the app alone in its colour
-(`AppKey::of`, as the App tab files it: an ended session keeps its agent; else `shell`); no
-status words (its mark on the right says it), subagents or report. No place has a mark or bar
+place's, when it changed files there). Under them, the last line: the app, its subagents and
+its report (`format::facts_line`), no status words (its mark on the right says it) but an ended
+session's `exited · ⏎ restart` or `dead · ⏎ revive`. No place has a mark or bar
 left of it. The list is the daemon's places, so a checkout the session only started in or read
 from isn't among them. Paths are cut at their start when narrow, the same on phones. `↓`/`↑`
 (`j`/`k`) step through the selected session's open places pair by pair as if each were a row

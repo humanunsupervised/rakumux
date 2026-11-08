@@ -684,10 +684,8 @@ mod tests {
         assert!(wide.contains("saved line two"), "{wide}");
         assert!(wide.contains("Dead · Enter to revive"), "{wide}");
         assert!(wide.contains("○ old-spike"), "{wide}");
-        // Its row names its app alone; the detail says how to revive it.
         let narrow = render(&mut h.app, 80, 24);
-        assert!(narrow.contains("old-spike"), "{narrow}");
-        assert!(!narrow.contains("⏎ revive"), "{narrow}");
+        assert!(narrow.contains("dead · ⏎ revive"), "{narrow}");
     }
 
     #[test]
@@ -1798,9 +1796,10 @@ mod tests {
             web < at("storybook") && at("storybook") < at("frontend"),
             "{wide}"
         );
-        // The repositories, then the app alone.
+        // The repositories, then the program and state.
         assert!(list[at("frontend") + 1].contains("▸ "), "{wide}");
         assert!(list[at("frontend") + 2].contains("codex"), "{wide}");
+        assert!(list[at("storybook") + 2].contains("dead"), "{wide}");
         assert!(!wide.contains("⎇ feature/login"), "{wide}");
         assert!(list[at("server") + 2].contains("cargo"), "{wide}");
         // A selected header stands out: its rule turns blue.
