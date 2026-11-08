@@ -277,7 +277,7 @@ async fn f_docks_the_feed_on_the_right_and_esc_and_f_move_the_keys() {
     assert!(h.app.feed_shown());
     assert_eq!(h.app.focus, Focus::List);
     h.press(KeyCode::Right).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    assert_eq!(h.app.list.grouping(), Grouping::Repo);
     // `f` gives the feed the keys, then hides it.
     h.press(KeyCode::Char('f')).await;
     assert!(h.app.feed_has_keys());

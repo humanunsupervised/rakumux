@@ -223,7 +223,7 @@ async fn protocol_mismatch_asks_before_restarting_the_daemon() {
 
 #[tokio::test]
 async fn events_from_other_clients_keep_the_list_live() {
-    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]).on_folders_tab();
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]).on_repos_tab();
     h.event(
         "C",
         SessionEvent::Created {
@@ -807,7 +807,7 @@ async fn vim_keys_move_and_gg_goes_to_the_top() {
         aged("B", "b", 2, 20),
         aged("C", "c", 3, 10),
     ])
-    .on_folders_tab();
+    .on_repos_tab();
     h.press(KeyCode::Char('G')).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
     h.press(KeyCode::Char('g')).await;
@@ -2449,7 +2449,7 @@ async fn clicking_new_session_creates_once_and_enters_the_shell_without_a_keyboa
 
 #[tokio::test]
 async fn clicking_a_row_selects_it_and_paste_goes_to_the_focused_session() {
-    let mut h = harness(vec![aged("A", "a", 1, 20), aged("B", "b", 2, 10)]).on_folders_tab();
+    let mut h = harness(vec![aged("A", "a", 1, 20), aged("B", "b", 2, 10)]).on_repos_tab();
     let backend = ratatui::backend::TestBackend::new(160, 48);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
     terminal.draw(|f| crate::ui::draw(f, &mut h.app)).unwrap();
@@ -2574,6 +2574,18 @@ fn saved_order(h: &Harness) -> serde_json::Value {
     saved["sessions"]["session_order"].clone()
 }
 
+/// The Repos tab's section of the repository `name`.
+fn repo_section(name: &str) -> grouping::Section {
+    grouping::Section::Repo(grouping::RepoKey::named(name))
+}
+
+/// The order saved for the Repos, Agent and Status tabs' sections.
+fn saved_section_order(h: &Harness) -> serde_json::Value {
+    let saved = std::fs::read_to_string(h.home.path().join("config.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    saved["sessions"]["section_order"].clone()
+}
+
 async fn shift(h: &mut Harness, c: char) {
     h.key(crossterm::event::KeyEvent::new(
         KeyCode::Char(c),
@@ -2589,7 +2601,7 @@ async fn dragging_a_session_moves_it_live_and_saves_the_order_on_release() {
         view("B", "bravo", 20),
         view("C", "charlie", 30),
     ])
-    .on_folders_tab();
+    .on_repos_tab();
     draw(&mut h);
     let (a, b, c) = (list_row(&h, "A"), list_row(&h, "B"), list_row(&h, "C"));
     let x = a.x + 4;
@@ -2631,8 +2643,8 @@ async fn dragging_a_session_moves_it_live_and_saves_the_order_on_release() {
         .handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x, 46));
     assert_eq!(visible_ids(&h), ["B", "C", "A"]);
     assert_eq!(
-        saved_order(&h),
-        serde_json::json!({"/repo": ["B", "C", "A"]})
+        saved_section_order(&h),
+        serde_json::json!({"repo:repo": ["B", "C", "A"]})
     );
     assert_eq!(h.app.drag, None);
     let buffer = draw(&mut h);
@@ -2886,7 +2898,10 @@ async fn a_drag_stays_in_its_folder_group() {
         &[(x, a1.y + 1), (x, a1.y + 2), (x, 46)],
     );
     assert_eq!(visible_ids(&h), ["R2", "R1", "A1", "W1"]);
-    assert_eq!(saved_order(&h), serde_json::json!({"/repo": ["R2", "R1"]}));
+    assert_eq!(
+        saved_section_order(&h),
+        serde_json::json!({"repo:repo": ["R2", "R1"]})
+    );
     // A1 dragged up over /repo stays the first (and only) of /api.
     draw(&mut h);
     let (r2, a1) = (list_row(&h, "R2"), list_row(&h, "A1"));
@@ -3112,14 +3127,14 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
         view("B", "b", 20),
         view("C", "c", 30),
     ])
-    .on_folders_tab();
+    .on_repos_tab();
     // The newest is last and selected (most recently used).
     assert_eq!(h.selected().as_deref(), Some("C"));
     shift(&mut h, 'K').await;
     assert_eq!(visible_ids(&h), ["A", "C", "B"]);
     assert_eq!(
-        saved_order(&h),
-        serde_json::json!({"/repo": ["A", "C", "B"]})
+        saved_section_order(&h),
+        serde_json::json!({"repo:repo": ["A", "C", "B"]})
     );
     shift(&mut h, 'K').await;
     shift(&mut h, 'K').await;
@@ -3137,7 +3152,7 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
     assert_eq!(visible_ids(&h), ["A", "C", "B"]);
     assert_eq!(h.selected().as_deref(), Some("A"));
     // Under Pinned, J/K move it among the pinned sessions, saved as their
-    // order; the folders' order stays.
+    // order; the repository's order stays.
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('p')).await;
     h.app.show_tab(grouping::Grouping::Pinned);
@@ -3152,13 +3167,13 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
         saved["sessions"]["section_order"]["pinned"],
         serde_json::json!(["C", "A"])
     );
-    h.app.show_tab(grouping::Grouping::Folder);
+    h.app.show_tab(grouping::Grouping::Repo);
     assert_eq!(visible_ids(&h), ["A", "C", "B"]);
     // On the folder filter there's nothing to move.
     h.press(KeyCode::Home).await;
     shift(&mut h, 'J').await;
     assert_eq!(h.app.status(), Some("Select a session to move."));
-    // Inside a session J is the program's (past the folder's header).
+    // Inside a session J is the program's (past the repository's bar).
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Enter).await;
@@ -3176,7 +3191,7 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
     fake.state.lock().unwrap().sessions.push(view("D", "d", 1));
     let mut options = options(&fake, scope(), &home);
     options.settings = Settings::load_from(&home.path().join("config.json")).unwrap();
-    let h = start(options, fake, home).on_folders_tab();
+    let h = start(options, fake, home).on_repos_tab();
     assert_eq!(visible_ids(&h), ["A", "C", "B", "D"]);
 }
 
@@ -3228,7 +3243,7 @@ async fn done_periods_have_headers_with_counts_and_enter_opens_the_status_modal_
 
 #[tokio::test]
 async fn the_keys_tab_lists_and_runs_the_move_actions() {
-    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]).on_folders_tab();
+    let mut h = harness(vec![view("A", "a", 10), view("B", "b", 20)]).on_repos_tab();
     let row = |action: crate::help::KeyAction| {
         crate::help::KeyAction::ALL
             .iter()
@@ -3251,7 +3266,10 @@ async fn the_keys_tab_lists_and_runs_the_move_actions() {
     assert!(matches!(h.app.mode, AppMode::Normal));
     assert_eq!(h.app.focus, Focus::List);
     assert_eq!(visible_ids(&h), ["B", "A"]);
-    assert_eq!(saved_order(&h), serde_json::json!({"/repo": ["B", "A"]}));
+    assert_eq!(
+        saved_section_order(&h),
+        serde_json::json!({"repo:repo": ["B", "A"]})
+    );
 }
 
 // ---------------------------------------------------------------- folders
@@ -3445,14 +3463,14 @@ async fn cycling_and_movement_run_across_folder_groups() {
     );
     h.alt(KeyCode::Up).await;
     assert_eq!(h.selected().as_deref(), Some("W1"));
-    // Arrow keys stop on the headers; the folder filter is first and
+    // Arrow keys stop on the repositories' bars; the tabs are first and
     // "+ New session" last.
     h.press(KeyCode::Home).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
     h.press(KeyCode::Down).await;
     assert_eq!(
         h.app.list.selection(),
-        &session_list::Selection::FolderHeader(scope())
+        &session_list::Selection::SectionHeader(repo_section("repo"))
     );
     h.press(KeyCode::Down).await;
     assert_eq!(h.selected().as_deref(), Some("R1"));
@@ -3462,9 +3480,9 @@ async fn cycling_and_movement_run_across_folder_groups() {
     h.press(KeyCode::Up).await;
     assert_eq!(
         h.app.list.selection(),
-        &session_list::Selection::FolderHeader(folder("/web"))
+        &session_list::Selection::SectionHeader(repo_section("web"))
     );
-    // `{` and `}` jump between folders.
+    // `{` and `}` jump between repositories.
     h.press(KeyCode::Char('{')).await;
     assert_eq!(h.selected().as_deref(), Some("A1"));
     h.press(KeyCode::Char('{')).await;
@@ -4108,18 +4126,12 @@ async fn clicking_new_session_keeps_the_clicked_sections_folder() {
 }
 
 #[tokio::test]
-async fn empty_folder_header_sets_new_session_target_without_changing_the_preview() {
+async fn a_folder_without_sessions_picked_alone_takes_new_sessions() {
     let mut h = folders_harness();
     let empty = folder("/empty");
-    h.app.show_folders(vec![folder("/web"), empty.clone()]);
-    let shown = h.app.detail.session_id().cloned();
-    h.press(KeyCode::Home).await;
-    h.press(KeyCode::Down).await;
-    assert_eq!(
-        h.app.list.selection(),
-        &Selection::FolderHeader(empty.clone())
-    );
-    assert_eq!(h.app.detail.session_id(), shown.as_ref());
+    // Its repository has no sessions yet, so no bar: only + New session.
+    h.app.show_folders(vec![empty.clone()]);
+    assert!(h.app.list.visible().is_empty());
     h.press(KeyCode::End).await;
     h.press(KeyCode::Enter).await;
     assert_eq!(created_folder(&h), empty);
@@ -4264,6 +4276,88 @@ fn app_section(name: &str) -> grouping::Section {
     grouping::Section::App(grouping::AppKey::new(name))
 }
 
+/// A section's bar collapses its sessions under it with a click (a tap) or
+/// Space, and opens them again the same way; selecting one of its sessions
+/// elsewhere (its tab, the feed) opens it, and a text filter shows every
+/// section open.
+#[tokio::test]
+async fn a_click_or_space_on_a_sections_bar_collapses_it() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use grouping::Grouping;
+    let mut h = agents_harness();
+    h.app.show_tab(Grouping::App);
+    h.app
+        .list
+        .select(session_list::Selection::Session(id("R1")));
+    let claude = app_section("claude");
+    let shown = |h: &Harness, wanted: &str| {
+        h.app
+            .list
+            .rows()
+            .iter()
+            .any(|row| matches!(row, ListRow::Session(s) if s.id.as_str() == wanted))
+    };
+    let bar_row = |h: &Harness| {
+        h.app
+            .list
+            .rows()
+            .iter()
+            .position(
+                |row| matches!(row, ListRow::SectionHeader(s) if **s == app_section("claude")),
+            )
+            .expect("claude's bar")
+    };
+    assert!(shown(&h, "R1") && shown(&h, "R2"));
+    // A click on the bar: collapsed, the selection on the bar; codex's
+    // sessions still shown.
+    screen_rows(&mut h, 160, 48);
+    let row = bar_row(&h);
+    let (area, _) = *h
+        .app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::ListRow(row))
+        .expect("the bar's target");
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        h.app.handle_mouse(MouseEvent {
+            kind,
+            column: area.x + 4,
+            row: area.y + area.height - 1,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    assert!(h.app.list.is_collapsed(&claude));
+    assert!(!shown(&h, "R1") && !shown(&h, "R2"));
+    assert!(shown(&h, "W1"));
+    assert_eq!(
+        h.app.list.selection(),
+        &session_list::Selection::SectionHeader(claude.clone())
+    );
+    let screen = screen_rows(&mut h, 160, 48).join("\n");
+    assert!(screen.contains("2/2 live ▸"), "{screen}");
+    assert!(!screen.contains("release-notes"), "{screen}");
+    // Space on the selected bar opens it again, and closes it.
+    h.press(KeyCode::Char(' ')).await;
+    assert!(!h.app.list.is_collapsed(&claude));
+    assert!(shown(&h, "R1"));
+    h.press(KeyCode::Char(' ')).await;
+    assert!(h.app.list.is_collapsed(&claude));
+    // A text filter shows every section open.
+    h.app.list.filter.set("r");
+    assert!(shown(&h, "R1"));
+    h.app.list.filter.set("");
+    assert!(!shown(&h, "R1"));
+    // Selecting one of its sessions elsewhere opens it.
+    h.app
+        .list
+        .select(session_list::Selection::Session(id("R2")));
+    assert!(!h.app.list.is_collapsed(&claude));
+    assert!(shown(&h, "R2"));
+}
+
 #[tokio::test]
 async fn every_start_opens_the_status_tab_on_the_most_recent_session() {
     use grouping::Grouping;
@@ -4286,10 +4380,11 @@ async fn every_start_opens_the_status_tab_on_the_most_recent_session() {
 async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal() {
     use grouping::Grouping;
     let mut h = agents_harness();
-    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    h.app.show_tab(Grouping::Repo);
+    assert_eq!(h.app.list.grouping(), Grouping::Repo);
     h.press(KeyCode::Home).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
-    // → and l go along the tabs (Status, Folders, App, Pinned) and stop
+    // → and l go along the tabs (Status, Repos, Agent, Pinned) and stop
     // at the last; the top row stays selected; ← and h come back.
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
@@ -4325,9 +4420,9 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     assert!(matches!(h.app.mode, AppMode::Normal));
     assert_eq!(h.app.list.grouping(), Grouping::App);
     assert!(h.app.list.section_filter(Grouping::App).is_empty());
-    // All folders' modal is the Folders modal.
+    // The Repos tab's modal is the Folders modal.
     h.press(KeyCode::Char('h')).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    assert_eq!(h.app.list.grouping(), Grouping::Repo);
     h.press(KeyCode::Enter).await;
     assert!(matches!(h.app.mode, AppMode::Folders(_)));
     h.press(KeyCode::Esc).await;
@@ -4339,7 +4434,7 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     h.press(KeyCode::Left).await;
     assert_eq!(h.app.list.grouping(), Grouping::Status);
     h.press(KeyCode::Right).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    assert_eq!(h.app.list.grouping(), Grouping::Repo);
     assert_eq!(h.app.focus, Focus::List);
     assert_eq!(h.app.list.selected_id(), Some(&selected));
     h.press(KeyCode::Enter).await;
@@ -4377,8 +4472,8 @@ async fn the_app_modal_ticks_several_enter_shows_them_and_esc_changes_nothing() 
         [app_section("claude"), app_section("codex")]
     );
     assert_eq!(visible_ids(&h), ["R1", "R2", "W1"]);
-    assert_eq!(h.app.tab_label(Grouping::App), "2 apps");
-    assert_eq!(h.app.status(), Some("Showing 2 apps"));
+    assert_eq!(h.app.tab_label(Grouping::App), "2 agents");
+    assert_eq!(h.app.status(), Some("Showing 2 agents"));
     // Opened again: ticked like the filter, the cursor on its first app.
     h.app.list.select(session_list::Selection::Folders);
     h.press(KeyCode::Enter).await;
@@ -4402,7 +4497,7 @@ async fn the_app_modal_ticks_several_enter_shows_them_and_esc_changes_nothing() 
     assert_eq!(section_rows(&h)[0], ">[ ] all");
     h.press(KeyCode::Enter).await;
     assert!(h.app.list.section_filter(Grouping::App).is_empty());
-    assert_eq!(h.app.tab_label(Grouping::App), "App");
+    assert_eq!(h.app.tab_label(Grouping::App), "Agent");
 }
 
 #[tokio::test]
@@ -4494,34 +4589,34 @@ async fn clicks_switch_tabs_open_the_active_ones_modal_and_pick_its_rows() {
     click(&mut h, Hit::FolderSelector);
     assert_eq!(section_picker(&h).grouping, Grouping::Status);
     h.press(KeyCode::Esc).await;
-    // All folders' tab, clicked twice: the Folders modal, as before.
-    click(&mut h, Hit::ListTab(Grouping::Folder));
-    assert_eq!(h.app.list.grouping(), Grouping::Folder);
-    click(&mut h, Hit::ListTab(Grouping::Folder));
+    // The Repos tab, clicked twice: the Folders modal, its filter.
+    click(&mut h, Hit::ListTab(Grouping::Repo));
+    assert_eq!(h.app.list.grouping(), Grouping::Repo);
+    click(&mut h, Hit::ListTab(Grouping::Repo));
     assert!(matches!(h.app.mode, AppMode::Folders(_)));
 }
 
 #[tokio::test]
-async fn the_folders_modal_from_another_tab_shows_folders_under_all_folders() {
+async fn the_folders_modal_from_another_tab_shows_folders_under_the_repos_tab() {
     use grouping::Grouping;
     let mut h = agents_harness();
     h.app
         .show_sections(Grouping::App, vec![app_section("claude")]);
     assert_eq!(visible_ids(&h), ["R1", "R2"]);
-    // `P` still opens the Folders modal; a folder picked there makes All
-    // folders the active tab.
+    // `P` still opens the Folders modal; a folder picked there makes the
+    // Repos tab active, narrowed to that folder's sessions.
     h.press(KeyCode::Char('P')).await;
     cursor_to(&mut h, "/web");
     h.press(KeyCode::Enter).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Folder);
+    assert_eq!(h.app.list.grouping(), Grouping::Repo);
     assert_eq!(h.app.list.folder_filter(), [folder("/web")]);
     assert_eq!(visible_ids(&h), ["W1"]);
-    assert_eq!(h.app.tab_label(Grouping::App), "App");
+    assert_eq!(h.app.tab_label(Grouping::App), "Agent");
     // The app filter waited for its tab.
     h.app.show_tab(Grouping::App);
     assert_eq!(visible_ids(&h), ["R1", "R2"]);
     assert_eq!(h.app.tab_label(Grouping::App), "claude");
-    assert_eq!(h.app.tab_label(Grouping::Folder), "Folders");
+    assert_eq!(h.app.tab_label(Grouping::Repo), "Repos");
 }
 
 #[tokio::test]
@@ -5362,7 +5457,7 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
             .find(|(_, hit)| *hit == wanted)
             .map(|(area, _)| (area.x + 1, area.y + area.height - 1))
     };
-    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]).on_folders_tab();
+    let mut h = harness(vec![view("A", "a", 20), view("B", "b", 10)]).on_repos_tab();
     let selected = h.app.list.selection().clone();
     screen_rows(&mut h, 160, 48);
     let row = h
@@ -5374,7 +5469,7 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
         .unwrap();
     assert_eq!(target(&h, Hit::PinToggle(row)), None);
     // The pointer over B's row: its pin shows in the gutter left of its
-    // name, which starts where its folder's header's does.
+    // name, which starts where its repository's bar's does.
     let over = target(&h, Hit::ListRow(row)).unwrap();
     mouse(&mut h, MouseEventKind::Moved, over);
     assert_eq!(h.app.hovered_row, Some(row));
@@ -5386,7 +5481,9 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
         screen[usize::from(pin.1)]
     );
     assert!(
-        screen.iter().any(|line| line.starts_with("   repo ─")),
+        screen
+            .iter()
+            .any(|line| line.starts_with("   repo ") && line.contains("2/2 live ▾")),
         "{}",
         screen.join("\n")
     );
@@ -5529,7 +5626,7 @@ async fn a_sessions_details_follow_its_name_with_no_message_or_description_betwe
     let mut with_output = view("A", "api", 20);
     with_output.agent_output = Some("Bash: Run the tests".into());
     with_output.user_prompt = Some("Fix the flaky test".into());
-    let mut h = harness(vec![with_output.clone(), view("B", "docs", 10)]).on_folders_tab();
+    let mut h = harness(vec![with_output.clone(), view("B", "docs", 10)]).on_repos_tab();
     let plain = screen_rows(&mut h, 160, 48);
     let screen = plain.join("\n");
     assert!(!screen.contains("Fix the flaky test"), "{screen}");
@@ -5538,7 +5635,7 @@ async fn a_sessions_details_follow_its_name_with_no_message_or_description_betwe
     let mut without = with_output;
     without.agent_output = None;
     without.user_prompt = None;
-    let mut h = harness(vec![without, view("B", "docs", 10)]).on_folders_tab();
+    let mut h = harness(vec![without, view("B", "docs", 10)]).on_repos_tab();
     assert_eq!(screen_rows(&mut h, 160, 48), plain);
 }
 
@@ -5554,7 +5651,7 @@ async fn the_lines_under_a_name_stop_short_of_its_age_and_mark() {
     if let Some(git) = long.git.as_mut() {
         git.repo = Some("repository".repeat(20));
     }
-    let mut h = harness(vec![long]).on_folders_tab();
+    let mut h = harness(vec![long]).on_repos_tab();
     let screen = screen_rows(&mut h, 160, 48);
     let title = screen.iter().position(|row| row.contains(" api ")).unwrap();
     let list_width = usize::from(crate::layout::sidebar_width(160));
@@ -5653,7 +5750,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         place("/repo/worktrees/fix", "fix", 30, true),
         place("/repo", "main", 600, false),
     ];
-    let mut h = harness(vec![agent, view("B", "plain", 10)]).on_folders_tab();
+    let mut h = harness(vec![agent, view("B", "plain", 10)]).on_repos_tab();
     // The list draws its ages from its clock: fixed, so a second passing
     // can't change them.
     h.app.list.set_clock(now);
@@ -5823,7 +5920,7 @@ fn worked_in(id: &str, name: &str, places: &[&str]) -> session_core::model::Sess
 #[tokio::test]
 async fn an_open_places_path_copies_with_y_or_a_click() {
     let agent = worked_in("A", "agent", &["/repo/worktrees/fix", "/srv/other"]);
-    let mut h = harness(vec![agent, view("B", "plain", 10)]).on_folders_tab();
+    let mut h = harness(vec![agent, view("B", "plain", 10)]).on_repos_tab();
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
     screen_rows(&mut h, 160, 48);
@@ -5959,7 +6056,7 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
 async fn a_session_taller_than_the_list_scrolls_to_its_place() {
     let paths: Vec<String> = (1..=12).map(|n| format!("/srv/place{n:02}")).collect();
     let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
-    let mut h = harness(vec![worked_in("A", "agent", &paths)]).on_folders_tab();
+    let mut h = harness(vec![worked_in("A", "agent", &paths)]).on_repos_tab();
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
     h.app.places_open.insert(a);
@@ -6197,7 +6294,7 @@ async fn places_name_their_repository_before_the_branch() {
         repo: Some("focal-md".into()),
         ..GitInfo::default()
     });
-    let mut h = harness(vec![paper, citations, release]).on_folders_tab();
+    let mut h = harness(vec![paper, citations, release]).on_repos_tab();
     h.app.list.set_clock(now);
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
@@ -6214,7 +6311,7 @@ async fn places_name_their_repository_before_the_branch() {
         let screen = screen_rows(h, width, 48);
         let first = screen
             .iter()
-            .position(|line| line.contains(" ─"))
+            .position(|line| line.trim_end().ends_with(['▾', '▸']))
             .unwrap_or_else(|| panic!("{}", screen.join("\n")));
         let last = screen
             .iter()
@@ -6230,7 +6327,7 @@ async fn places_name_their_repository_before_the_branch() {
     assert_eq!(
         list(&mut h, 60),
         [
-            "   focal-md ────────────────────────────────────── 3/3 live",
+            "   focal-md                                     3/3 live ▾",
             "",
             "   Paper links                                         1h ○",
             " ▾ focal-md, rakumux",
@@ -6265,7 +6362,7 @@ async fn places_name_their_repository_before_the_branch() {
     assert_eq!(
         list(&mut h, 40),
         [
-            "   focal-md ────────────────── 3/3 live",
+            "   focal-md                 3/3 live ▾",
             "",
             "   Paper links                     1h ○",
             " ▾ focal-md, rakumux",
@@ -6320,7 +6417,7 @@ async fn session_rows_line_up_with_their_headers_text() {
         now,
     );
     citations.lifecycle = Lifecycle::Done;
-    let mut h = harness(vec![paper, citations]).on_folders_tab();
+    let mut h = harness(vec![paper, citations]).on_repos_tab();
     h.app.list.set_clock(now);
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
@@ -6334,7 +6431,7 @@ async fn session_rows_line_up_with_their_headers_text() {
         let screen = screen_rows(h, width, height);
         let first = screen
             .iter()
-            .position(|line| line.contains(" ─"))
+            .position(|line| line.trim_end().ends_with(['▾', '▸']))
             .unwrap_or_else(|| panic!("{}", screen.join("\n")));
         let last = screen
             .iter()
@@ -6350,7 +6447,7 @@ async fn session_rows_line_up_with_their_headers_text() {
     assert_eq!(
         list(&mut h, 60, 40),
         [
-            "   focal-md ────────────────────────────────────── 2/2 live",
+            "   focal-md                                     2/2 live ▾",
             "",
             "   Paper links                                         1h ○",
             " ▾ focal-md",
@@ -6380,7 +6477,7 @@ async fn session_rows_line_up_with_their_headers_text() {
     assert_eq!(
         list(&mut h, 40, 40),
         [
-            "   focal-md ────────────────── 2/2 live",
+            "   focal-md                 2/2 live ▾",
             "",
             "   Paper links                     1h ○",
             " ▾ focal-md",
@@ -6437,13 +6534,13 @@ async fn session_rows_line_up_with_their_headers_text() {
     assert_eq!(
         list(&mut h, 60, 40),
         [
-            " ● unread ─────────────────────────────────────── 1 session",
+            " ● unread                                      1 session ▾",
             "",
             "   Citations                                          10m ●",
             " ▸ focal-md",
             "   codex",
             "",
-            " ○ ready ──────────────────────────────────────── 1 session",
+            " ○ ready                                       1 session ▾",
             "",
             "  ◷ last hour ─────────────────────────────────── 1 session",
             "",

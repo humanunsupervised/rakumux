@@ -51,9 +51,9 @@ new-session flow, and code boundaries.
   `subscribe { scopes }` + `list_in` of the known folders; else `list(Some(launch))` on
   `unsupported`), `compare_folders` (launch folder first, then name, then path),
   `App::folder_label`, `App::current_folder` (the current section, retained on the folder filter
-  and "+ New session" rows; a single-folder filter takes precedence under the Folders tab; without
-  folder context, the launch folder), `App::show_folders` (sets the filter and makes the Folders tab
-  active; an older daemon resyncs for a folder it isn't watching) and the Folders modal's
+  and "+ New session" rows; a single-folder filter takes precedence under the Repos tab; a selected
+  repository's bar, the folder of its first session; without folder context, the launch folder),
+  `App::show_folders` (sets the filter and makes the Repos tab active; an older daemon resyncs for a folder it isn't watching) and the Folders modal's
   actions (filter
   rows, All folders, show one, tick and show several, add or create a typed folder).
   `handlers/folders.rs` routes its keys.
@@ -68,11 +68,13 @@ new-session flow, and code boundaries.
   rows (`PickerRow::Suggestion`): `↑`/`↓` choose, Tab or `→` completes, Enter adds, a click
   completes.
 - `grouping.rs`: the list tabs, pure derivations over `SessionView` (no drawing). `Grouping`
-  (Status, Folders, App, Pinned: `ALL` is the top row's order, `step` for ←/→, no wrap; the
+  (Status, Repos, Agent, Pinned: `ALL` is the top row's order; `Folder`, the folders' grouping,
+  is no tab, only the session tab bar's order; `step` for ←/→, no wrap; the
   default, where every start opens, is Status; `has_filter`: all but Pinned, which has no
   filter, modal or `▾`), `AppKey::of` (agent kind, else a
   non-shell foreground program while live, else a non-shell `launch.argv[0]`, else `shell`;
-  lowercase; dead sessions keep their agent), `StatusGroup::of` (like the
+  lowercase; dead sessions keep their agent), `RepoKey::of` (the git context's `repo`, from
+  `origin`, else the folder's name: worktrees and branches under their repository), `StatusGroup::of` (like the
   status marks, `components::format::status_glyph`: waiting for you, unread (a `done` turn not yet looked at),
   working, waiting for response by activity phase, running, exited, dead, unknown, done (`idle`);
   display order = enum order; `saved_name` keeps the old `status:done`/`status:idle` keys), `Section`
@@ -117,11 +119,11 @@ new-session flow, and code boundaries.
   while the other stops. `components/drawer.rs::draw_drawer` draws the band (`≡ Feed   ▥ rtop`,
   the active one underlined, the accent while it has the keys) and the active tab;
   `components/session_tabs.rs` draws the Tabs layout's drawer tab, named by its active tab.
-- `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say All
-  folders / App / Status; Pinned always says Pinned), `filter_label` (the Tabs layout's
+- `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say Repos /
+  Agent / Status; the Repos tab names the folder filter; Pinned always says Pinned), `filter_label` (the Tabs layout's
   selector, after the tab's mark), `switch_tab`/`show_tab` (both give the list
-  the keys from the drawer), `open_tab_picker` (Folders: the Folders modal; Pinned: nothing) and the App and
-  Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
+  the keys from the drawer), `open_tab_picker` (Repos: the Folders modal; Pinned: nothing),
+  `toggle_selected_section` (Space on a section's bar), and the Agent and Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
   then `picker_sections` (sessions' apps or every status but unknown, plus the filter's), typing
   narrows by name, Tab ticks (Space too while nothing is typed: status names have spaces), Enter
   shows (`show_sections`, which makes that tab active), Esc closes.
@@ -130,27 +132,27 @@ new-session flow, and code boundaries.
   (`set_folder_filter`; empty = All folders) and the App/Status filters (`set_section_filter`),
   of which only the active tab's applies, locally with the text filter in `visible()`. `rows()`
   starts with the tabs (`Selection::Folders`; ←/→ switch them, Enter opens the active tab's
-  modal), puts a selectable header row per folder when more than one is shown
-  (`Selection::FolderHeader`; the launch folder first, then by name, then path; with no filter
-  the folders that have sessions, with one the filter's, empty ones included) or under App and
-  Status per app or status (`Selection::SectionHeader`, same rules; Enter opens that tab's
-  modal), and ends with "+ New session". Under Pinned only the pinned sessions show, without
+  modal), puts a selectable section bar per repository (always, a lone one too; the launch
+  folder's first, then by name; only the folder filter's folders' sessions), or under Agent
+  and Status per agent or status when more than one is shown (`Selection::SectionHeader`; Enter
+  opens that tab's modal; a click, or Space, collapses it: `toggle_collapsed`, `collapsed`,
+  this window's; a text filter shows every section open), and ends with "+ New session". Under Pinned only the pinned sessions show, without
   headers, in their own order (`in_pinned_order`, `section_order["pinned"]`, `PINNED_ORDER`);
   under the other tabs pinned sessions are listed like any other (the row draws their `★`).
   The order never changes by itself: sessions follow the user's order
   (`sessions.session_order`), and sessions without a place go last, oldest first; inside an app
-  or status, folder by folder. Under App, Status and Pinned the selected session is kept shown
+  or status, folder by folder. Under Agent, Status and Pinned the selected session is kept shown
   when it stops matching the filter (`kept`; unpinned, under Pinned), so a status change never
   takes away the session being worked in; filter and tab changes (`refilter`) don't keep it.
   `tab_order` is what a row of session tabs shows (`ShownAs::Tabs`: the Tabs layout, a session
-  under tabs on a phone): `visible()`'s sessions in the Folders tab's order under
+  under tabs on a phone): `visible()`'s sessions in the folders' order under
   every tab but Pinned (its own order there), so reading a session or a status change never
-  moves a tab; `move_tab` moves one there as under Folders (Pinned). `App::shown_as` says which
+  moves a tab; `move_tab` moves one there in its folder (Pinned: among them). `App::shown_as` says which
   order is on screen, and cycling, `1`-`9`, `↑`/`↓`, `J`/`K`, tab clicks and drags follow it.
-  `move_session` moves one within its folder, its app or status, or under Pinned among the
+  `move_session` moves one within its repository, agent or status, or under Pinned among the
   pinned sessions (`move_pinned`) (`J`/`K`, and the drag in `sessions.rs`: `App::drag`,
   `SessionDrag`); `group_target` is `{`/`}` over any headers. A folder filter only sets
-  `current_folder` while the Folders tab is active.
+  `current_folder` while the Repos tab is active.
 - `screen.rs`: screen geometry for a size, layout, focus, zoom and the dragged pane sizes
   (`layout::PaneSizes`: `sidebar_width`, `stacked_list_percent`, `feed_width`) and the feed
   (`PaneSizes::feed`, `Screen::feed`; see `feed/`). No header: the panes start at

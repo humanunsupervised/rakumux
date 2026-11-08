@@ -1292,7 +1292,7 @@ pub fn harness(sessions: Vec<SessionView>) -> Harness {
 }
 
 /// Started in `/repo` on a daemon that knows `known` (with their git
-/// context) and the sessions' folders, under the Folders tab.
+/// context) and the sessions' folders, under the Repos tab.
 pub fn harness_with_folders(
     sessions: Vec<SessionView>,
     known: &[(&str, Option<GitInfo>)],
@@ -1305,14 +1305,14 @@ pub fn harness_with_folders(
     let dir = tempfile::tempdir().unwrap();
     let mut options = options(&fake, scope(), &dir);
     options.settings.sessions.layout = layout;
-    start(options, fake, dir).on_folders_tab()
+    start(options, fake, dir).on_repos_tab()
 }
 
 impl Harness {
-    /// The Folders tab made active, as if picked after the start (which is
+    /// The Repos tab made active, as if picked after the start (which is
     /// under Status).
-    pub fn on_folders_tab(mut self) -> Self {
-        self.app.show_tab(crate::app::grouping::Grouping::Folder);
+    pub fn on_repos_tab(mut self) -> Self {
+        self.app.show_tab(crate::app::grouping::Grouping::Repo);
         self.app.process_pending();
         self
     }

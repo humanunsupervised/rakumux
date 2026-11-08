@@ -217,7 +217,7 @@ mod tests {
         assert!(wide.contains("Press n to start one in repo"), "{wide}");
         // The tabs head the list, Status active: where it starts.
         assert!(
-            wide.contains("\n   ◔ Status ▾  ▤ Folders    ◇ App"),
+            wide.contains("\n   ◔ Status ▾  ▤ Repos    ◇ Agent"),
             "{wide}"
         );
         assert!(wide.contains("RAKUMUX"), "{wide}");
@@ -915,7 +915,7 @@ mod tests {
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             assert!(screen.contains("hello from the fake"), "{screen}");
-            assert!(!screen.contains("▤ Folders"), "{screen}");
+            assert!(!screen.contains("▤ Repos"), "{screen}");
             assert!(!screen.contains("RAKUMUX"), "{screen}");
             // The terminal starts at the top; the footer keeps the zoomed
             // session, the mode and the way out.
@@ -931,7 +931,7 @@ mod tests {
         // Back in Rakumux mode the list returns, and the label says so.
         h.rakumux().await;
         let screen = render(&mut h.app, 160, 48);
-        assert!(screen.contains("▤ Folders"), "{screen}");
+        assert!(screen.contains("▤ Repos"), "{screen}");
         let footer = screen.lines().last().unwrap();
         assert!(footer.contains(" RAKUMUX MODE "), "{footer:?}");
     }
@@ -1102,6 +1102,12 @@ mod tests {
             result: None,
             at: 0,
         });
+        // The web folder's sessions in its own repository (its `origin`).
+        for session in [&mut front, &mut storybook] {
+            if let Some(git) = session.git.as_mut() {
+                git.repo = Some("web".into());
+            }
+        }
         vec![refactor, docs, front, storybook, server]
     }
 
@@ -1152,7 +1158,7 @@ mod tests {
         let wide = render(&mut h.app, 160, 60);
         let list = list_column(&wide, width);
         assert!(
-            list[1].starts_with("   ◔ Status    ▤ Folders    ◇ App ▾"),
+            list[1].starts_with("   ◔ Status    ▤ Repos    ◇ Agent ▾"),
             "{wide}"
         );
         let at = |list: &[String], needle: &str| {
@@ -1160,21 +1166,23 @@ mod tests {
                 .position(|l| l.contains(needle))
                 .unwrap_or_else(|| panic!("{needle} missing: {wide}"))
         };
+        // A section's bar: its name, and at its end the count and ▾.
+        let bar = |list: &[String], name: &str| {
+            list.iter()
+                .position(|l| {
+                    l.trim_end().ends_with(['▾', '▸']) && l.contains(&format!(" {name} "))
+                })
+                .unwrap_or_else(|| panic!("{name}'s bar missing: {wide}"))
+        };
         // Agents by name, then other programs, then the shell, where docs,
-        // pinned, stays with its gold pin; each header ends in live/total.
-        let headers: Vec<usize> = [
-            " claude ─",
-            " codex ─",
-            " opencode ─",
-            " cargo ─",
-            " shell ─",
-        ]
-        .iter()
-        .map(|header| at(&list, header))
-        .collect();
+        // pinned, stays with its gold pin; each bar ends in live/total.
+        let headers: Vec<usize> = ["claude", "codex", "opencode", "cargo", "shell"]
+            .iter()
+            .map(|header| bar(&list, header))
+            .collect();
         assert!(headers.windows(2).all(|w| w[0] < w[1]), "{wide}");
-        assert!(list[headers[0]].ends_with("─ 3/3 live"), "{wide}");
-        assert!(list[headers[1]].ends_with("─ 1/2 live"), "{wide}");
+        assert!(list[headers[0]].ends_with(" 3/3 live ▾"), "{wide}");
+        assert!(list[headers[1]].ends_with(" 1/2 live ▾"), "{wide}");
         // Inside an app, the launch folder's sessions first, each folder
         // in its own order; the dead Codex session stays under codex.
         assert!(at(&list, "release-notes") < at(&list, "api-refactor"));
@@ -1188,24 +1196,34 @@ mod tests {
         let wide = render(&mut h.app, 160, 80);
         let list = list_column(&wide, width);
         assert!(list[1].starts_with("   ◔ Status ▾"), "{wide}");
+        let bar = |list: &[String], name: &str| {
+            list.iter()
+                .position(|l| l.trim_end().ends_with(['▾', '▸']) && l.contains(name))
+                .unwrap_or_else(|| panic!("{name}'s bar missing: {wide}"))
+        };
         let headers: Vec<usize> = [
-            " ? waiting for you ─",
-            " ● unread ─",
-            " working ─",
-            " waiting for response ─",
-            " ● running ─",
-            " ○ dead ─",
-            " ○ ready ─",
+            " ? waiting for you ",
+            " ● unread ",
+            " working ",
+            " waiting for response ",
+            " ● running ",
+            " ○ dead ",
+            " ○ ready ",
         ]
         .iter()
-        .map(|header| at(&list, header))
+        .map(|header| bar(&list, header))
         .collect();
         assert!(headers.windows(2).all(|w| w[0] < w[1]), "{wide}");
-        assert!(list[headers[4]].ends_with("─ 2 sessions"), "{wide}");
-        assert!(list[headers[0]].ends_with("─ 1 session"), "{wide}");
+        assert!(list[headers[4]].ends_with(" 2 sessions ▾"), "{wide}");
+        assert!(list[headers[0]].ends_with(" 1 session ▾"), "{wide}");
         assert!(headers[0] < at(&list, "review-pr-412") && at(&list, "review-pr-412") < headers[1]);
         assert!(headers[3] < at(&list, "frontend") && at(&list, "frontend") < headers[4]);
-        assert!(!wide.contains(" exited ─"), "no empty statuses: {wide}");
+        assert!(
+            !list
+                .iter()
+                .any(|l| l.contains(" exited ") && l.trim_end().ends_with('▾')),
+            "no empty statuses: {wide}"
+        );
     }
 
     #[test]
@@ -1225,7 +1243,7 @@ mod tests {
                 let list = list_column(&screen, list_width);
                 // Every tab, the active one with its label, and its ▾ (but
                 // Pinned's, which has no modal) where the list has room.
-                for mark in ["▤ Folders", "◇ App", "◔ Status", "★ Pinned"] {
+                for mark in ["▤ Repos", "◇ Agent", "◔ Status", "★ Pinned"] {
                     assert!(list[1].contains(mark), "{width}x{height}: {screen}");
                 }
                 let active = format!("{} ▾", h.app.tab_label(grouping));
@@ -1281,29 +1299,29 @@ mod tests {
             let list = list_column(&screen, 37);
             // Every tab by name, too short for the arrow: none keeps room
             // for it, so the tabs sit where they sat.
-            for name in ["◔ Status", "▤ Folders", "◇ App", "★ Pinned"] {
+            for name in ["◔ Status", "▤ Repos", "◇ Agent", "★ Pinned"] {
                 assert!(list[1].contains(name), "{grouping:?}: {screen}");
             }
             assert!(!list[1].contains('▾'), "{grouping:?}: {screen}");
             rows.push(list[1].clone());
         }
         assert!(rows.iter().all(|row| row == &rows[0]), "{rows:?}");
-        assert_eq!(rows[0], "   ◔ Status ▤ Folders ◇ App ★ Pinned");
+        assert_eq!(rows[0], "   ◔ Status ▤ Repos ◇ Agent ★ Pinned");
         // The active one is still underlined.
-        h.app.show_tab(Grouping::Folder);
+        h.app.show_tab(Grouping::Repo);
         let screen = render(&mut h.app, 160, 48);
         let under = list_column(&screen, 37)[2].clone();
-        assert_eq!(under, format!("   {}{}", " ".repeat(9), "▁".repeat(9)));
+        assert_eq!(under, format!("   {}{}", " ".repeat(9), "▁".repeat(7)));
         h.app.show_tab(Grouping::Pinned);
         let screen = render(&mut h.app, 160, 48);
         let under = list_column(&screen, 37)[2].clone();
         assert_eq!(under, format!("   {}{}", " ".repeat(25), "▁".repeat(8)));
         // A wider list keeps the arrow.
         h.app.settings.sessions.sidebar_width = Some(43);
-        h.app.show_tab(Grouping::Folder);
+        h.app.show_tab(Grouping::Repo);
         let screen = render(&mut h.app, 160, 48);
         assert!(
-            list_column(&screen, 43)[1].contains("▤ Folders ▾"),
+            list_column(&screen, 43)[1].contains("▤ Repos ▾"),
             "{screen}"
         );
     }
@@ -1317,9 +1335,9 @@ mod tests {
         h.press(KeyCode::Enter).await;
         let wide = render(&mut h.app, 160, 48);
         let lines: Vec<&str> = wide.lines().collect();
-        assert!(lines[1].contains("◇ App ▴"), "{wide}");
-        assert!(wide.contains("┌ Apps ─"), "{wide}");
-        assert!(wide.contains("❯ Filter apps"), "{wide}");
+        assert!(lines[1].contains("◇ Agent ▴"), "{wide}");
+        assert!(wide.contains("┌ Agents ─"), "{wide}");
+        assert!(wide.contains("❯ Filter agents"), "{wide}");
         let row = |name: &str| {
             lines
                 .iter()
@@ -1327,15 +1345,15 @@ mod tests {
                 .unwrap_or_else(|| panic!("{name} missing: {wide}"))
         };
         assert!(
-            lines[row("All apps")].contains("▎ [x] All apps  7/8 live"),
+            lines[row("All agents")].contains("▎ [x] All agents  7/8 live"),
             "{wide}"
         );
         assert!(
-            lines[row("claude")].contains("[ ] claude    3/3 live"),
+            lines[row("claude")].contains("[ ] claude      3/3 live"),
             "{wide}"
         );
         assert!(
-            lines[row("codex")].contains("[ ] codex     1/2 live"),
+            lines[row("codex")].contains("[ ] codex       1/2 live"),
             "{wide}"
         );
         let order: Vec<usize> = ["claude", "codex", "opencode", "cargo", "shell"]
@@ -1521,7 +1539,7 @@ mod tests {
                 assert!(row.ends_with(' '), "{list_width} {grouping:?}: {row:?}");
                 if list_width == 40 {
                     // A phone: every name, two apart, no ▾.
-                    assert_eq!(row.trim_end(), "   ◔ Status  ▤ Folders  ◇ App  ★ Pinned");
+                    assert_eq!(row.trim_end(), "   ◔ Status  ▤ Repos  ◇ Agent  ★ Pinned");
                 }
             }
         }
@@ -1535,7 +1553,7 @@ mod tests {
         let mut h = two_pinned(SessionLayout::Tabs);
         let screen = render(&mut h.app, 200, 30);
         let top = screen.lines().next().unwrap();
-        assert!(top.starts_with(" ▤ Folders ▾ "), "{top:?}");
+        assert!(top.starts_with(" ▤ Repos ▾ "), "{top:?}");
         let order = |top: &str, names: &[&str]| {
             let at: Vec<usize> = names
                 .iter()
@@ -1583,7 +1601,7 @@ mod tests {
     }
 
     #[test]
-    fn one_folder_shows_all_folders_branches_and_no_headers() {
+    fn one_repository_still_has_its_bar_and_no_branch_while_places_are_closed() {
         let sessions: Vec<SessionView> = three_folders()
             .into_iter()
             .filter(|s| s.scope == scope())
@@ -1595,13 +1613,13 @@ mod tests {
         // underlined on its last row.
         assert!(list[0].is_empty(), "{wide}");
         // `◔ Status` with its arrow's room and two columns.
-        let under = format!("   {}{}", " ".repeat(12), "▁".repeat(11));
+        let under = format!("   {}{}", " ".repeat(12), "▁".repeat(9));
         assert_eq!(list[2], under, "{wide}");
-        // The Status tab, then a folder icon and Folders, with ▾: it opens
-        // the Folders modal. Then the App tab, then Pinned.
-        assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
+        // The Status tab, then a folder icon and Repos, with ▾: it opens
+        // the Folders modal. Then the Agent tab, then Pinned.
+        assert!(list[1].starts_with("   ◔ Status    ▤ Repos ▾"), "{wide}");
         assert!(
-            list[1].ends_with("▤ Folders ▾  ◇ App    ★ Pinned"),
+            list[1].ends_with("▤ Repos ▾  ◇ Agent    ★ Pinned"),
             "{wide}"
         );
         // A pinned session in its place, its gold pin in the gutter; under
@@ -1617,63 +1635,59 @@ mod tests {
         // Its repositories, the toggle in the gutter; no folder or branch.
         assert!(list[docs + 1].starts_with(" ▸ repo"), "{wide}");
         assert!(list[refactor + 2].contains("claude"), "{wide}");
-        // The branch only on the folder's header.
-        assert_eq!(
+        // No branch while the places are closed.
+        assert!(!wide.contains("⎇ sessions-refactor"), "{wide}");
+        assert!(!wide.contains("worktree"), "{wide}");
+        // The lone repository still has its bar, with its name.
+        assert!(
             list.iter()
-                .filter(|l| l.contains("⎇ sessions-refactor"))
-                .count(),
-            1,
-            "{wide}"
+                .any(|l| l.starts_with("   repo ") && l.ends_with(" 2/2 live ▾")),
+            "the repository's bar: {wide}"
         );
-        assert!(!wide.contains("worktree"), "branch only: {wide}");
-        // The lone folder still has its header, with its name.
-        assert!(wide.contains("──"), "the folder's header: {wide}");
-        assert!(list.iter().any(|l| l.ends_with(" live")), "{wide}");
         // No header above the list: the folder filter says what's shown.
         assert!(wide.lines().last().unwrap().contains(" RAKUMUX MODE "));
         // Narrow, the list keeps the selection in view.
         let narrow = render(&mut h.app, 80, 24);
-        assert!(narrow.contains("▤ Folders"), "{narrow}");
+        assert!(narrow.contains("▤ Repos"), "{narrow}");
         assert!(narrow.contains("api-refactor"), "{narrow}");
     }
 
     #[test]
-    fn a_worktree_inside_the_folder_gets_a_header_with_its_path_and_count() {
+    fn a_worktree_goes_under_its_repository_named_by_its_origin() {
+        // The folder `/repo` is a checkout of `orchestrator` (its origin);
+        // one session works in its main checkout, one in a worktree of it.
+        let repo = |root: &str, branch: &str, worktree: Option<&str>| {
+            Some(session_core::model::GitInfo {
+                repo_root: root.into(),
+                branch: Some(branch.into()),
+                detached_at: None,
+                worktree: worktree.map(Into::into),
+                repo: Some("orchestrator".into()),
+                origin: None,
+            })
+        };
+        let mut main = view("A", "main-work", 10);
+        main.git = repo("/repo", "main", None);
         let mut feature = view("B", "feature-work", 20);
-        feature.git = Some(session_core::model::GitInfo {
-            repo_root: "/repo/worktrees/feature".into(),
-            branch: Some("feat/login".into()),
-            detached_at: None,
-            worktree: Some("feature".into()),
-            repo: None,
-            origin: None,
-        });
-        let mut h = harness(vec![view("A", "main-work", 10), feature]).on_folders_tab();
+        feature.git = repo("/repo/worktrees/feature", "feat/login", Some("feature"));
+        let mut h = harness(vec![main, feature]).on_repos_tab();
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, crate::layout::sidebar_width(160).into());
-        let header = list
-            .iter()
-            .position(|l| l.contains("⎇ worktrees/feature"))
-            .unwrap_or_else(|| panic!("no worktree header: {wide}"));
-        assert!(
-            list[header].starts_with("   ⎇ worktrees/feature  feat/login "),
-            "{wide}"
-        );
-        assert!(list[header].ends_with("1/1 live"), "{wide}");
-        // Below the folder's own sessions, above the worktree's.
+        // One bar, the repository's, with both sessions under it at the
+        // same depth; no worktree header, no folder name.
+        let bars: Vec<&String> = list.iter().filter(|l| l.ends_with('▾')).collect();
+        assert_eq!(bars.len(), 1, "{wide}");
+        assert!(bars[0].starts_with("   orchestrator "), "{wide}");
+        assert!(bars[0].ends_with(" 2/2 live ▾"), "{wide}");
+        assert!(!wide.contains("⎇ worktrees/feature"), "{wide}");
         let main = list.iter().position(|l| l.contains("main-work")).unwrap();
         let work = list
             .iter()
             .position(|l| l.contains("feature-work"))
             .unwrap();
-        assert!(main < header && header < work, "{wide}");
-        // The folder's own sessions in line with its name; the worktree's
-        // a step in, in line with its header's words, their repositories'
-        // lines too.
-        assert!(list.iter().any(|l| l.starts_with("   repo ─")), "{wide}");
         assert!(list[main].starts_with("   main-work "), "{wide}");
-        assert!(list[work].starts_with("     feature-work "), "{wide}");
-        assert!(list[work + 1].starts_with("   ▸ "), "{wide}");
+        assert!(list[work].starts_with("   feature-work "), "{wide}");
+        assert!(list[work + 1].starts_with(" ▸ orchestrator"), "{wide}");
     }
 
     #[test]
@@ -1684,13 +1698,13 @@ mod tests {
                 let screen = render(&mut h.app, 160, 48);
                 screen.lines().take(2).collect::<Vec<_>>().join("\n")
             };
-            assert!(first_lines(&mut h).contains("▤ Folders"), "{layout:?}");
-            // One folder: its name, and in the list its branch.
+            assert!(first_lines(&mut h).contains("▤ Repos"), "{layout:?}");
+            // One folder: its name.
             h.app.show_folders(vec![folder("/code/web")]);
             let top = first_lines(&mut h);
             match layout {
                 SessionLayout::Sidebar => {
-                    assert!(top.contains("   ▤ web  ⎇ main"), "{top}")
+                    assert!(top.contains("   ◔ Status    ▤ web ▾  ◇ Agent"), "{top}")
                 }
                 SessionLayout::Tabs => assert!(top.starts_with(" ▤ web ▾ "), "{top}"),
             }
@@ -1712,12 +1726,9 @@ mod tests {
         let wide = render(&mut h.app, 160, 48);
         assert!(wide.contains("No sessions in empty yet"), "{wide}");
         assert!(wide.contains("Press n to start one in empty"), "{wide}");
-        // Its branch after it on the tab, when the list has room for it.
-        assert!(!wide.contains("⎇ trunk ▾"), "{wide}");
-        h.app.settings.sessions.sidebar_width = Some(56);
-        let wide = render(&mut h.app, 160, 48);
-        assert!(wide.contains(" ▤ empty  ⎇ trunk ▾  ◇"), "{wide}");
-        h.app.settings.sessions.sidebar_width = None;
+        // Its name on the Repos tab, without a branch.
+        assert!(wide.contains(" ▤ empty ▾  ◇"), "{wide}");
+        assert!(!wide.contains("⎇ trunk"), "{wide}");
         let narrow = render(&mut h.app, 80, 24);
         assert!(narrow.contains("no sessions yet"), "{narrow}");
         // On the folder filter: what it shows, and how to change it.
@@ -1734,6 +1745,8 @@ mod tests {
     fn icons_follow_the_setting_and_keep_the_list_aligned() {
         use crate::icons::Icons;
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
+        // Branches show in the sessions' places, open.
+        h.app.toggle_all_places();
         for icons in Icons::ALL {
             h.app.settings.sessions.icons = icons;
             for (width, height) in SIZES {
@@ -1758,84 +1771,78 @@ mod tests {
     }
 
     #[test]
-    fn all_folders_are_grouped_under_headers() {
+    fn the_repos_tab_groups_sessions_under_a_bar_per_repository() {
         let mut h = harness_with_folders(three_folders(), &known(), SessionLayout::Sidebar);
         let wide = render(&mut h.app, 160, 48);
         let list = list_column(&wide, crate::layout::sidebar_width(160).into());
-        assert!(list[1].starts_with("   ◔ Status    ▤ Folders ▾"), "{wide}");
+        assert!(list[1].starts_with("   ◔ Status    ▤ Repos ▾"), "{wide}");
         let at = |needle: &str| {
             list.iter()
                 .position(|l| l.contains(needle))
                 .unwrap_or_else(|| panic!("{needle} missing: {wide}"))
         };
-        // A folder's header, not a session's place line naming the folder.
-        let header = |needle: &str| {
+        // A repository's bar, not a session's line naming it.
+        let bar = |name: &str| {
             list.iter()
-                .position(|l| l.contains(needle) && l.contains("──"))
-                .unwrap_or_else(|| panic!("{needle} header missing: {wide}"))
+                .position(|l| l.starts_with(&format!("   {name} ")) && l.ends_with('▾'))
+                .unwrap_or_else(|| panic!("{name}'s bar missing: {wide}"))
         };
-        // The launch folder first, then by name (api, then web).
-        let (repo, api, web) = (
-            header(" repo  ⎇"),
-            header(" api ──"),
-            header(" web  ⎇ main"),
-        );
+        // The launch folder's repository first, then by name: `api` (a
+        // folder outside any repository, by its name), then `web` (named by
+        // its origin).
+        let (repo, api, web) = (bar("repo"), bar("api"), bar("web"));
         assert!(repo < api && api < web, "{wide}");
-        assert!(list[repo].ends_with("2/2 live"), "{wide}");
-        // Headers' names and sessions' text start in one column (a status's
-        // mark, or a pinned session's, in the gutter left of it).
-        assert!(list[repo].starts_with("   repo  ⎇"), "{wide}");
+        assert!(list[repo].ends_with(" 2/2 live ▾"), "{wide}");
+        assert!(list[web].ends_with(" 1/2 live ▾"), "{wide}");
+        // Bars' names and sessions' text start in one column (a pinned
+        // session's pin in the gutter left of it).
         assert!(list[at(" docs ")].starts_with(" ★ docs "), "{wide}");
-        assert!(list[web].ends_with("1/2 live"), "{wide}");
-        // A pinned session stays in its folder, its gold pin shown; the
+        // A pinned session stays in its repository, its gold pin shown; the
         // others' pins show only under the pointer. Oldest first.
         assert!(repo < at(" docs ") && at(" docs ") < api, "{wide}");
-        // The pin, and the Pinned tab's mark.
         assert_eq!(wide.matches('★').count(), 2, "{wide}");
+        // A worktree's session is under its repository, no header of its own.
         assert!(
             web < at("storybook") && at("storybook") < at("frontend"),
             "{wide}"
         );
-        // The repositories, then the program and state.
-        assert!(list[at("frontend") + 1].contains("▸ "), "{wide}");
+        assert!(!wide.contains("worktree"), "{wide}");
+        // Under a name, the repositories, then the program and state.
+        assert!(list[at("frontend") + 1].contains(", web"), "{wide}");
         assert!(list[at("frontend") + 2].contains("codex"), "{wide}");
         assert!(list[at("storybook") + 2].contains("dead"), "{wide}");
-        assert!(!wide.contains("⎇ feature/login"), "{wide}");
         assert!(list[at("server") + 2].contains("cargo"), "{wide}");
-        // A selected header stands out: its rule turns blue.
-        h.app
-            .list
-            .select(crate::app::Selection::FolderHeader(folder("/code/api")));
-        let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
-        terminal.draw(|f| draw(f, &mut h.app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let row = (0..48)
-            .find(|&y| {
-                (0..40)
-                    .map(|x| buffer.get(x, y).symbol())
-                    .collect::<String>()
-                    .contains(" api ──")
-            })
-            .unwrap();
-        let rule = (0..40)
-            .find(|&x| buffer.get(x, row).symbol() == "─")
-            .unwrap();
-        assert_eq!(buffer.get(rule, row).fg, theme::palette().accent_primary);
+        // A bar has a background of its own; selected, the selection's.
+        let p = theme::palette();
+        let bar_bg = |h: &mut crate::app::testing::Harness, name: &str| {
+            let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
+            terminal.draw(|f| draw(f, &mut h.app)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let row = (0..48)
+                .find(|&y| {
+                    (0..40)
+                        .map(|x| buffer.get(x, y).symbol())
+                        .collect::<String>()
+                        .starts_with(&format!("   {name} "))
+                })
+                .unwrap();
+            (buffer.get(0, row).bg, buffer.get(30, row).bg)
+        };
+        assert_eq!(bar_bg(&mut h, "api"), (p.surface, p.surface));
+        h.app.list.select(crate::app::Selection::SectionHeader(
+            crate::app::grouping::Section::Repo(crate::app::grouping::RepoKey::named("api")),
+        ));
+        assert_eq!(bar_bg(&mut h, "api"), (p.selection, p.selection));
         // Narrow: still grouped; the stacked list scrolls to the selected
-        // header, and the session in view stays below it.
+        // bar, and the session in view stays below it.
         let narrow = render(&mut h.app, 80, 24);
-        assert!(narrow.contains("▤ Folders"), "{narrow}");
-        assert!(narrow.contains(" api ──"), "{narrow}");
+        assert!(narrow.contains("▤ Repos"), "{narrow}");
+        assert!(narrow.contains("   api "), "{narrow}");
         assert!(narrow.contains("hello from the fake"), "{narrow}");
-        // The footer names the session in view under the header (its mark
+        // The footer names the session in view under the bar (its mark
         // and name: what fits beside the label and the buttons).
         let footer = narrow.lines().last().unwrap();
         assert!(footer.starts_with(" ? frontend "), "{footer:?}");
-        // On the tabs, the list shows its top again.
-        h.app.list.select(crate::app::Selection::Folders);
-        let narrow = render(&mut h.app, 80, 24);
-        assert!(narrow.contains(" repo  ⎇"), "{narrow}");
-        assert!(!narrow.contains(" api ──"), "{narrow}");
     }
 
     #[tokio::test]
@@ -1844,7 +1851,7 @@ mod tests {
         h.press(KeyCode::Char('P')).await;
         let wide = render(&mut h.app, 160, 48);
         let lines: Vec<&str> = wide.lines().collect();
-        assert!(lines[1].starts_with("   ◔ Status    ▤ Folders"), "{wide}");
+        assert!(lines[1].starts_with("   ◔ Status    ▤ Repos"), "{wide}");
         assert!(lines[1].contains("▴"), "{wide}");
         assert!(wide.contains("┌ Folders ─"), "{wide}");
         assert!(
@@ -1982,13 +1989,13 @@ mod tests {
         for (width, height) in SIZES {
             let screen = render(&mut h.app, width, height);
             let bar = screen.lines().next().unwrap();
-            assert!(bar.starts_with(" ▤ Folders ▾  "), "{bar:?}");
+            assert!(bar.starts_with(" ▤ Repos ▾  "), "{bar:?}");
         }
         // Wide enough for every tab: the launch folder's first, pinned
         // first, then the other folders' by name.
         let screen = render(&mut h.app, 160, 48);
         let bar = screen.lines().next().unwrap();
-        assert!(bar.starts_with(" ▤ Folders ▾   1 ● docs ★ "), "{bar:?}");
+        assert!(bar.starts_with(" ▤ Repos ▾   1 ● docs ★ "), "{bar:?}");
         let at = |name: &str| bar.find(name).unwrap();
         assert!(at("api-refactor") < at("server") && at("server") < at("frontend"));
         assert!(h
@@ -2010,7 +2017,7 @@ mod tests {
         assert!(wide.contains("[y] Restart"), "{wide}");
         h.press(KeyCode::Esc).await;
         let wide = render(&mut h.app, 160, 48);
-        assert!(wide.contains("▤ Folders"), "{wide}");
+        assert!(wide.contains("▤ Repos"), "{wide}");
         assert!(wide.contains("api"), "{wide}");
         h.press(KeyCode::Char('P')).await;
         let wide = render(&mut h.app, 160, 48);
@@ -2159,7 +2166,7 @@ mod tests {
             assert!(!layout.stacked && layout.detail.is_none(), "{screen}");
             assert_eq!(layout.list.unwrap().height, height - 1);
             // Status marks are on the right, after the age.
-            for name in ["▤ Folders", "  api ", "  docs ", "+ New session"] {
+            for name in ["▤ Repos", "  api ", "  docs ", "+ New session"] {
                 assert!(screen.contains(name), "{name}: {screen}");
             }
             // No session on screen.
@@ -2177,7 +2184,7 @@ mod tests {
             h.press(KeyCode::Enter).await;
             assert_eq!(h.app.focus, Focus::Session);
             let screen = render(&mut h.app, width, height);
-            assert!(!screen.contains("▤ Folders"), "{screen}");
+            assert!(!screen.contains("▤ Repos"), "{screen}");
             let tabs = screen.lines().next().unwrap();
             assert!(tabs.contains("api") && tabs.contains("docs"), "{tabs:?}");
             assert!(screen
@@ -2192,7 +2199,7 @@ mod tests {
             h.rakumux().await;
             assert_eq!(h.app.focus, Focus::List);
             let screen = render(&mut h.app, width, height);
-            assert!(screen.contains("▤ Folders"), "{screen}");
+            assert!(screen.contains("▤ Repos"), "{screen}");
             assert!(!screen.contains("hello from the fake"), "{screen}");
         }
     }
@@ -2218,7 +2225,7 @@ mod tests {
                 let selected = h.app.list.selected_session().expect("a session");
                 let name = format!("  {} ", selected.name);
                 assert!(top.contains(&name), "{name} {width}x{height}: {screen}");
-                assert!(top.contains("▤ Folders"), "{screen}");
+                assert!(top.contains("▤ Repos"), "{screen}");
             }
             // + New session: in view, and the last session stays below.
             h.press(KeyCode::Char('G')).await;

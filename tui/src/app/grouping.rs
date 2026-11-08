@@ -10,7 +10,6 @@
 //!
 //! Everything here is derived from a `SessionView` alone; nothing draws.
 
-use std::cmp::Ordering;
 use std::path::Path;
 
 use session_core::activity::ActivityPhase;
@@ -19,9 +18,13 @@ use session_core::model::{Lifecycle, ScopeRoot, SessionStatus, SessionView};
 /// A tab of the list's top row: what the list is grouped and filtered by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Grouping {
-    /// All folders: a section per folder, narrowed by the folder filter.
+    /// A section per folder, its linked worktrees under it: no longer a tab,
+    /// but the folders' order, which the session tab bar (Tabs) follows.
     Folder,
-    /// A section per app: the agent or program a session runs.
+    /// A section per repository: the one a session works in now, its
+    /// worktrees and branches included, named by its `origin` ([`RepoKey`]).
+    Repo,
+    /// A section per app (the Agent tab): the agent or program a session runs.
     App,
     /// A section per status: what a session is doing; where the list
     /// starts.
@@ -36,7 +39,7 @@ impl Grouping {
     /// The tabs, left to right: what wants the user first.
     pub const ALL: [Grouping; 4] = [
         Grouping::Status,
-        Grouping::Folder,
+        Grouping::Repo,
         Grouping::App,
         Grouping::Pinned,
     ];
@@ -52,7 +55,8 @@ impl Grouping {
     pub fn name(self) -> &'static str {
         match self {
             Grouping::Folder => "Folders",
-            Grouping::App => "App",
+            Grouping::Repo => "Repos",
+            Grouping::App => "Agent",
             Grouping::Status => "Status",
             Grouping::Pinned => "Pinned",
         }
@@ -62,7 +66,8 @@ impl Grouping {
     pub fn plural(self) -> &'static str {
         match self {
             Grouping::Folder => "folders",
-            Grouping::App => "apps",
+            Grouping::Repo => "repos",
+            Grouping::App => "agents",
             Grouping::Status => "statuses",
             Grouping::Pinned => "pinned",
         }
@@ -72,6 +77,45 @@ impl Grouping {
     /// every tab but Pinned.
     pub fn has_filter(self) -> bool {
         self != Grouping::Pinned
+    }
+}
+
+/// The repository a session works in now, as the Repo tab groups it: its git
+/// context's `repo` (the `origin` remote's name, else the main checkout's
+/// folder name), so its worktrees and branches go under the repository
+/// itself; outside any repository, its folder's name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RepoKey(String);
+
+impl RepoKey {
+    /// The repository `session` works in now (see [`RepoKey`]).
+    pub fn of(session: &SessionView) -> RepoKey {
+        let repo = session
+            .git
+            .as_ref()
+            .and_then(|git| git.repo.as_deref())
+            .map(str::trim)
+            .filter(|repo| !repo.is_empty());
+        let folder = session
+            .scope
+            .path()
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned());
+        RepoKey(
+            repo.map(str::to_owned)
+                .or(folder)
+                .unwrap_or_else(|| session.scope.path().display().to_string()),
+        )
+    }
+
+    /// The repository called `name` (tests).
+    #[cfg(test)]
+    pub fn named(name: &str) -> RepoKey {
+        RepoKey(name.to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -313,6 +357,7 @@ impl ReadPeriod {
 /// A section of the list under the App or Status tab.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Section {
+    Repo(RepoKey),
     App(AppKey),
     Status(StatusGroup),
 }
@@ -328,6 +373,7 @@ impl Section {
     /// `app:claude`, `status:working`.
     pub fn key(&self) -> String {
         match self {
+            Section::Repo(repo) => format!("repo:{}", repo.as_str()),
             Section::App(app) => format!("app:{}", app.as_str()),
             Section::Status(status) => format!("status:{}", status.saved_name()),
         }
@@ -338,6 +384,7 @@ impl Section {
     pub fn of(grouping: Grouping, session: &SessionView) -> Option<Section> {
         match grouping {
             Grouping::Folder | Grouping::Pinned => None,
+            Grouping::Repo => Some(Section::Repo(RepoKey::of(session))),
             Grouping::App => Some(Section::App(AppKey::of(session))),
             Grouping::Status => Some(Section::Status(StatusGroup::of(session))),
         }
@@ -346,6 +393,7 @@ impl Section {
     /// The tab it belongs to.
     pub fn grouping(&self) -> Grouping {
         match self {
+            Section::Repo(_) => Grouping::Repo,
             Section::App(_) => Grouping::App,
             Section::Status(_) => Grouping::Status,
         }
@@ -354,6 +402,7 @@ impl Section {
     /// Its name in the header, the modal and the tab: `claude`, `working`.
     pub fn label(&self) -> &str {
         match self {
+            Section::Repo(repo) => repo.as_str(),
             Section::App(app) => app.as_str(),
             Section::Status(status) => status.label(),
         }
@@ -361,8 +410,9 @@ impl Section {
 }
 
 /// Put sections in display order, which activity never changes: statuses
-/// in [`StatusGroup`]'s order; apps that are agents (some session's
-/// `agent.kind`) first, then other programs, then the shell, each by name.
+/// in [`StatusGroup`]'s order; repositories by name (ignoring case); apps
+/// that are agents (some session's `agent.kind`) first, then other
+/// programs, then the shell, each by name.
 pub fn sort_sections(sections: &mut [Section], sessions: &[SessionView]) {
     let is_agent = |app: &AppKey| {
         sessions.iter().any(|s| {
@@ -375,14 +425,24 @@ pub fn sort_sections(sections: &mut [Section], sessions: &[SessionView]) {
         Section::App(app) if app.as_str() == AppKey::SHELL => 2,
         Section::App(app) if is_agent(app) => 0,
         Section::App(_) => 1,
-        Section::Status(_) => 0,
+        Section::Status(_) | Section::Repo(_) => 0,
+    };
+    // Sections of different kinds never share a list: by kind, for a total order.
+    let kind = |section: &Section| match section {
+        Section::Repo(_) => 0,
+        Section::App(_) => 1,
+        Section::Status(_) => 2,
     };
     sections.sort_by(|a, b| {
         rank(a).cmp(&rank(b)).then_with(|| match (a, b) {
+            (Section::Repo(a), Section::Repo(b)) => a
+                .as_str()
+                .to_lowercase()
+                .cmp(&b.as_str().to_lowercase())
+                .then_with(|| a.cmp(b)),
             (Section::App(a), Section::App(b)) => a.cmp(b),
             (Section::Status(a), Section::Status(b)) => a.cmp(b),
-            (Section::App(_), Section::Status(_)) => Ordering::Less,
-            (Section::Status(_), Section::App(_)) => Ordering::Greater,
+            (a, b) => kind(a).cmp(&kind(b)),
         })
     });
 }
@@ -414,18 +474,50 @@ mod tests {
         // Status is the grouping the list starts with, and the first tab.
         assert_eq!(Grouping::default(), Grouping::Status);
         let names: Vec<&str> = Grouping::ALL.iter().map(|g| g.name()).collect();
-        assert_eq!(names, ["Status", "Folders", "App", "Pinned"]);
+        assert_eq!(names, ["Status", "Repos", "Agent", "Pinned"]);
         assert_eq!(Grouping::Status.step(-1), Grouping::Status);
-        assert_eq!(Grouping::Status.step(1), Grouping::Folder);
-        assert_eq!(Grouping::Folder.step(1), Grouping::App);
+        assert_eq!(Grouping::Status.step(1), Grouping::Repo);
+        assert_eq!(Grouping::Repo.step(1), Grouping::App);
         assert_eq!(Grouping::App.step(1), Grouping::Pinned);
         assert_eq!(Grouping::Pinned.step(1), Grouping::Pinned);
         assert_eq!(Grouping::Pinned.step(-1), Grouping::App);
-        assert_eq!(Grouping::App.step(-1), Grouping::Folder);
-        assert_eq!(Grouping::Folder.step(-1), Grouping::Status);
+        assert_eq!(Grouping::App.step(-1), Grouping::Repo);
+        assert_eq!(Grouping::Repo.step(-1), Grouping::Status);
         // Pinned alone has no filter, so no modal.
         assert!(!Grouping::Pinned.has_filter());
         assert!(Grouping::ALL[..3].iter().all(|g| g.has_filter()));
+    }
+
+    #[test]
+    fn a_session_is_grouped_under_the_repository_it_works_in_by_its_origin() {
+        let mut session = view("A", "a", 0);
+        // Outside any repository: its folder's name.
+        assert_eq!(RepoKey::of(&session).as_str(), "repo");
+        // In a worktree or on a branch of `orchestrator` (its `origin`), from a
+        // folder named otherwise: under `orchestrator`.
+        session.git = Some(session_core::model::GitInfo {
+            repo_root: "/repo/worktrees/fix".into(),
+            branch: Some("fix".into()),
+            worktree: Some("fix".into()),
+            repo: Some("orchestrator".into()),
+            ..Default::default()
+        });
+        assert_eq!(RepoKey::of(&session).as_str(), "orchestrator");
+        assert_eq!(
+            Section::of(Grouping::Repo, &session)
+                .map(|s| s.key())
+                .as_deref(),
+            Some("repo:orchestrator")
+        );
+        // A repository's sections by name, ignoring case.
+        let mut sections = vec![
+            Section::Repo(RepoKey("web".into())),
+            Section::Repo(RepoKey("Api".into())),
+            Section::Repo(RepoKey("orchestrator".into())),
+        ];
+        sort_sections(&mut sections, &[]);
+        let names: Vec<&str> = sections.iter().map(|s| s.label()).collect();
+        assert_eq!(names, ["Api", "orchestrator", "web"]);
     }
 
     #[test]

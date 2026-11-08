@@ -423,8 +423,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    the TUI's feed shows its thread under its turn.
    **Session list** (`feed/sessions.rs`, `SessionSync`): while the feed is on the service
    uploads the machine's whole list of sessions (`POST /api/v1/feed/sessions`, at most 200, never
-   private or dead ones): what the TUI's Status, Folders and App tabs group by (name, folder
-   name, branch, agent, or without a named one the `program` the App tab files it under (its
+   private or dead ones): what the TUI's Status, Repos and Agent tabs group by (name, folder
+   name, branch, agent, or without a named one the `program` the Agent tab files it under (its
    `AppKey`, never a shell), `status`, `lifecycle`, activity `phase`, the conversation shown,
    `pinned`, `last_active_at`), when it changes (at most every 3 s) and every 60 s meanwhile, so
    rakumux.com's Status, Folders and App pages list the account's sessions, show a session's
@@ -1353,13 +1353,17 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Folder** (scope, scope root; `project` on the wire): the directory a session was started in;
   the TUI shows all folders, grouped, and the folder filter narrows them; agents see only their
   own.
-- **Folder filter**: the Folders tab's filter (`▤ Folders ▾`, `▤ web ▾`, `▤ 3 folders ▾`)
+- **Folder filter**: the Repos tab's filter (`▤ Repos ▾`, `▤ web ▾`, `▤ 3 folders ▾`)
   and the Folders modal it opens; local to one window and not saved.
-- **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, Status, Folders,
-  App and Pinned: three ways of grouping the sessions, and the pinned ones alone. They decide
-  the list's headers (per status, per folder, per app; Pinned has none) and the one filter that
-  applies (Pinned has none); each keeps its own filter while another is active; none is saved,
-  and every start (a restart or a UI reload) opens Status.
+- **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, Status, Repos,
+  Agent and Pinned: three ways of grouping the sessions, and the pinned ones alone. They decide
+  the list's sections (per status, per repository, per agent or app; Pinned has none) and the
+  one filter that applies (Pinned has none); each keeps its own filter while another is active;
+  none is saved, and every start (a restart or a UI reload) opens Status. (The Folders grouping
+  of 0.1.48 and earlier, `Grouping::Folder`, is no tab now; its order is the session tab bar's.)
+- **Section bar**: a section's header in the list (a status's, a repository's, an agent's): a
+  bar on a background of its own; a click or tap on it, or Space on it, collapses its sessions
+  under it and opens them again.
 - **Drawer** (`app/drawer.rs`): what shows beside the sessions, with two tabs, the **Feed** and
   **rtop**: a pane on the right in Master detail, a tab in Tabs, the screen on a phone.
   It takes Rakumux mode's keys from the list while focused. Hidden at every start; never opens
@@ -1464,7 +1468,7 @@ which switches to **Rakumux mode** (and `Option`/`Alt`+`↑/↓` when `cycle_key
 on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+`↑/↓` select (the
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the tabs, a header and + New session keep the last session in view,
-one the filters show), `←`/`→` switch between the tabs, Status, Folders, App and Pinned,
+one the filters show), `←`/`→` switch between the tabs, Status, Repos, Agent and Pinned,
 wherever the selection is (`h`/`l` on the tabs row), `f` the feed and `t` rtop, the drawer's tabs (shows the drawer on that tab with the keys,
 switches to it, gives it the keys, hides it; below),
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
@@ -1485,18 +1489,18 @@ build: `AccountAccess::restart` asks the service to stop and starts this binary'
 restart_api` SIGTERMs `rakumux-api` and runs `--detach`; also Settings → Restart server, which shows
 the running server's version), `q`
 quit. There is no header: the panes start at the top row, and the list's first row (Sidebar) is
-its tabs, `◔ Status ▾  ▤ Folders    ◇ App    ★ Pinned` (Status is active at every start; every
+its tabs, `◔ Status ▾  ▤ Repos    ◇ Agent    ★ Pinned` (Status is active at every start; every
 tab with a filter keeps room for the active one's `▾`, Pinned, which has none and is last,
-keeps none, and Folders shows its branch active or not, so switching tabs moves nothing): the
-active one is bold, underlined and names its filter (`▤ web  ⎇ main ▾`, `◇ claude ▾`,
+keeps none, so switching tabs moves nothing): the
+active one is bold, underlined and names its filter (`▤ web ▾`, `◇ claude ▾`,
 `◔ 2 statuses ▾`; Pinned's is just `★ Pinned`, and Enter or a click on it does nothing); short
 rows narrow the gaps, then drop the `▾` and its room from every tab
-(`◔ Status ▤ Folders ◇ App ★ Pinned`: names from 37 columns of list, the `▾` from 43, so a
+(`◔ Status ▤ Repos ◇ Agent ★ Pinned`: names from 37 columns of list, the `▾` from 43, so a
 40-column list, a 100-column window's or a phone's, has the names alone), then show the
 inactive tabs as their marks. The tab bar (Tabs) shows the active tab's mark
 and filter at the left (`◔ Status ▾`, `★ Pinned`); only Master detail shows the four tabs.
 The session tab bar (Tabs, and a session under tabs on a phone) holds the sessions
-the active tab's filters show, in the Folders tab's order (folder by folder in the order the
+the active tab's filters show, in the folders' order (folder by folder in the order the
 user set; under Pinned, the Pinned tab's order) whatever the active tab
 (`SessionList::tab_order`, `ShownAs::Tabs`), so a tab keeps its place and number while its
 session works or is read; stepping
@@ -1640,27 +1644,34 @@ as controller, `Fit` as observer). The daemon ignores an observer's `Fit` only w
 typed in the last 5 s (`CONTROLLER_TYPING`), so whoever is typing keeps their size. Nobody fits
 back by itself, so two windows never resize a session back and forth.
 
-The list (`app/session_list.rs`) holds every folder's sessions; under the Folders tab each folder
-shown has a header row (name, branch, live/total; selectable), a lone folder too. Inside a folder,
-sessions whose git context is a linked worktree other than the folder's own working tree
-(`grouping::linked_worktree`: one inside the repo, like `worktrees/feature`, or elsewhere) go
-under a header for that worktree (`ListRow::WorktreeHeader`: its path in the folder, its branch,
-live/total; selectable, Enter starts a new session there when it's inside the folder), after the
-folder's own sessions and ordered by path. The section follows the agent's working directory, so
-a session moves between them as its agent changes worktree; moves stay within one. The
-list never reorders by itself: activity doesn't move a session or a group. The launch folder's
-group comes first, then the others by folder name, then path. Sessions follow the order the user
-set, and sessions without a place go last, oldest first, so a new session appears just above
-"+ New session". All layouts share it (a row of session tabs always in this order).
-Headers' names (a folder's, an app's, a status's) and their rows' text start in one
+The list (`app/session_list.rs`) holds every folder's sessions. Under the Repos tab
+(`Grouping::Repo`) each repository shown has a section bar (its name, live/total; selectable), a
+lone one too: the repository a session works in now (`grouping::RepoKey`: its git context's
+`repo`, the `origin` remote's name, else the main checkout's folder name; outside any
+repository, its folder's name), so a session in a worktree or on a branch of a repository is
+under the repository itself, whatever its folder is called. It follows the agent's working
+directory, so a session moves between sections as its agent changes repository. The launch
+folder's repository comes first, then the others by name (ignoring case). The Repos tab's filter
+is the folder filter (the Folders modal): only the chosen folders' sessions. The list never
+reorders by itself: activity doesn't move a session or a group. Sessions follow the order the
+user set, and sessions without a place go last, oldest first, so a new session appears just
+above "+ New session". **Section bars** (`components/session_list.rs::section_header_line`): a
+section's header (a repository's, an agent's, a status's; ready's read periods stay plain
+sub-headers) is a bar across the list on `Palette::surface` (`Palette::selection` while
+selected): its mark (a status's), its name in bold, then at the right its count and `▾`, or
+`▸` while collapsed. A click or tap on a bar (`Hit::ListRow` on a `ListRow::SectionHeader`), or
+Space on a selected one, collapses its sessions under it, or opens them again
+(`SessionList::toggle_collapsed`; per window, never saved): a selected session it hides gives
+the selection to the bar; selecting one of its sessions otherwise (its tab, the feed, a new
+one) opens it; a text filter shows every section open. Enter on a bar still opens the tab's
+modal.
+Headers' names (a repository's, an agent's, a status's) and their rows' text start in one
 column; the two left of it are the gutter, where a status's mark sits and
 a row's marks go: its pin, the places' `▸`/`▾`, the copy mark, and
 `+ New session`'s `+`. With AI session titles on, a live session's name (its title) keeps two
 columns after it: a spinner while a new title is being made, else the ↻ under the pointer
 (`Hit::TitleRefresh`), which makes one; the row has no line for a description or the user's last
-message. A row under a worktree's header starts a step further in, its text where
-that header's words are and its gutter under its mark (`components/session_list.rs::nesting`);
-ready's read-period headers (mark and words) and their rows (text, gutter and places) start one
+message. Ready's read-period headers (mark and words) and their rows (text, gutter and places) start one
 column further in than ready's header and a row directly under any header (`READ_NEST`). A
 dragged row's bar is just left of its gutter.
 **Pinned sessions** have the Pinned tab (`Grouping::Pinned`) to themselves: the pinned
@@ -1669,20 +1680,22 @@ under `pinned`, the key the pinned section of 0.1.44 and earlier saved, so its o
 over): the order the user gave them there, then the rest folder by folder. No filter applies
 there but the text filter; one unpinned while selected stays shown until something else is
 selected (as a status change under Status), and with none pinned the list says `no pinned
-sessions` above `+ New session`. Under the other tabs a pinned session is listed in its folder,
-app and status like any other, with the gold `★` in its gutter just left of its name, always;
+sessions` above `+ New session`. Under the other tabs a pinned session is listed in its
+repository, agent and status like any other, with the gold `★` in its gutter just left of its name, always;
 the tab bar shows ★ after their name (`layout::PIN_MARK`). In terminals that report
 pointer movement (desktop terminals, also over SSH; not phones), the session row under the
 pointer shows its pin toggle there: `☆` to pin it, the gold `★` to unpin it (under Pinned
 every row's, only under the pointer); a click on it (`Hit::PinToggle`, only under the
 pointer, so a phone's tap on a pinned row's `★` opens the session) does that without
 selecting the row, and `p` still pins the selected one. Dragging a session row (Sidebar) or tab (Tabs) moves it live (a blue bar marks the row while
-held); `J`/`K` move it one place. Moves stay in the session's part of the list: its folder
-(`sessions.session_order`), or under Pinned the pinned sessions (saved under `pinned`). A click without movement still just selects.
+held); `J`/`K` move it one place. Moves stay in the session's part of the list: its section
+(`sessions.section_order`: `repo:<name>` under Repos), its folder in the session tab bar
+(`sessions.session_order`), or under Pinned the pinned sessions (saved under `pinned`). A click
+without movement still just selects.
 The first load still selects the most recently used session.
 
-The App and Status tabs group the same list differently (`app/grouping.rs`). App: a header per
-app (`AppKey::of`: the session's `agent.kind`, else its foreground program unless a shell, else
+The Agent and Status tabs group the same list differently (`app/grouping.rs`). Agent
+(`Grouping::App`): a bar per agent or app (`AppKey::of`: the session's `agent.kind`, else its foreground program unless a shell, else
 `launch.argv[0]` unless a shell, else `shell`; an ended session keeps its agent), agents first,
 then other programs, then `shell`, each by name, with live/total. Status: a header per status
 (`StatusGroup::of`, like the rows' status marks: waiting for you (`?`, orange: a question, a permission prompt
@@ -1733,11 +1746,12 @@ place the keys are on. A status
 change moves a session to another header, but the selected session stays shown when it stops
 matching the filter (an answered question), until something else is selected. Their modals
 (`AppMode::Sections`, `components/section_picker.rs`) work like the Folders modal: All, then each
-app or status with counts (Status lists every status); typing narrows, `Tab` (and `Space` while
+agent or status with counts (Status lists every status); typing narrows, `Tab` (and `Space` while
 nothing is typed) tick several, `Enter` shows them, `Esc` closes. A click on a tab activates it,
-on the active one opens its modal; `P` opens the Folders modal from any tab and a folder picked
-there makes the Folders tab active. New sessions still go in `App::current_folder`; a folder filter
-only counts while the Folders tab is active.
+on the active one opens its modal (the Repos tab's: the Folders modal); `P` opens the Folders
+modal from any tab and a folder picked there makes the Repos tab active. New sessions still go
+in `App::current_folder` (a selected repository's bar: the folder of its first session); a
+folder filter only counts while the Repos tab is active.
 
 New session (`n`, "+ New session", Enter on a folder header) creates immediately with the generated name
 (`New session`, `New session 2`, … within its folder, until its AI title or the user names it),
@@ -1869,10 +1883,10 @@ in the outer terminal's own (`terminal_view::DefaultColors::NATIVE`), not the Ra
 colours a program sets itself are kept. The daemon still answers OSC 10/11 colour queries with
 Tokyo Night's (`vt::Colors`).
 
-The Folders modal (`P`, Enter on or a click on the active Folders tab; `AppMode::Folders`,
+The Folders modal (`P`, Enter on or a click on the active Repos tab; `AppMode::Folders`,
 `app/folders.rs`) lists All folders (ticked when there's no filter), then every folder that has
 sessions (and the filter's), with name, path, branch and live/total; typing filters the rows.
-`Enter` on a folder shows it alone, on All folders every folder; `Tab`/`Space` tick several, and
+`Enter` on a folder shows it alone under the Repos tab, on All folders every folder; `Tab`/`Space` tick several, and
 then `Enter` shows the ticked folders plus the one under the cursor (`Tab`/`Space` on All folders
 clears the ticks). `Esc` closes without changes. A typed folder path (starting with `/`, `~` or
 `.`, or with a `/` in it) is offered as `+ Add folder` (or `+ Create folder`, confirmed with `y`)

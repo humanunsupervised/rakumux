@@ -94,7 +94,7 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `Esc` | Back to the session you came from |
 | `Tab` / `1`–`9` | Last session / that session |
 | `n` | New session in the current folder |
-| `←` `→` | Switch tabs: Status, Folders, App, Pinned |
+| `←` `→` | Switch tabs: Status, Repos, Agent, Pinned |
 | `f` / `t` | Show, focus or hide the feed / rtop |
 | `P` / `/` | Filter by folder / by text |
 | `p` | Pin or unpin |

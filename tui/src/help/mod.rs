@@ -200,7 +200,7 @@ pub enum KeyAction {
     PreviousSession,
     /// `f`: show the feed with the keys, give it the keys, or hide it.
     Feed,
-    /// `→`: the list's next tab (Status, Folders, App, Pinned).
+    /// `→`: the list's next tab (Status, Repos, Agent, Pinned).
     NextTab,
     /// `←`: the previous tab.
     PreviousTab,
@@ -395,7 +395,7 @@ impl KeyAction {
             KeyAction::NextSession => "Next session",
             KeyAction::PreviousSession => "Previous session",
             KeyAction::Feed => "Feed (show, focus or hide)",
-            KeyAction::NextTab => "Next tab (Status, Folders, App, Pinned)",
+            KeyAction::NextTab => "Next tab (Status, Repos, Agent, Pinned)",
             KeyAction::PreviousTab => "Previous tab",
             KeyAction::Top => "Top of the list",
             KeyAction::Bottom => "Bottom of the list",
@@ -531,8 +531,8 @@ impl KeyAction {
             ),
             KeyAction::GoIn => "A dead session is revived, an exited one restarted. On the \
                  tabs at the top it opens the active tab's modal (Statuses, Folders or \
-                 Apps); on a folder's header or + New session, creates a generated-name \
-                 session and enters its shell immediately."
+                 Agents) or a section's bar its modal; on + New session, creates a \
+                 generated-name session and enters its shell immediately."
                 .into(),
             KeyAction::LastSession => {
                 "Into the session you worked in before the current one.".into()
@@ -552,7 +552,7 @@ impl KeyAction {
                 None => "Option/Alt+↑/↓ are turned off in your settings; ↑/↓ and j/k move.".into(),
             },
             KeyAction::Top => {
-                "The tabs (Status, Folders, App, Pinned) are the first row; ←/→ switch them."
+                "The tabs (Status, Repos, Agent, Pinned) are the first row; ←/→ switch them."
                     .into()
             }
             KeyAction::Feed => "What your agents said when they finished a turn, on every \
@@ -576,7 +576,7 @@ impl KeyAction {
                 "Scrolls the history of the session shown on the right.".into()
             }
             KeyAction::MoveDown | KeyAction::MoveUp => {
-                "Within its folder, app or status; under Pinned, among the pinned sessions. \
+                "Within its repository, agent or status; under Pinned, among the pinned sessions. \
                  Dragging it with the mouse does the same. The order is kept until you change \
                  it."
                     .into()
@@ -1699,20 +1699,20 @@ fn overview(doc: &mut Doc, ctx: &ModalContext, k: &KeyNames) {
     doc.text(
         "Every session belongs to a folder: the one it was started in, such as a git \
          repository, a worktree or any other folder. Rakumux shows the sessions of all \
-         folders, under a header per folder. `Enter` on the folder filter at the top of the \
-         list (or `P`) narrows the list to one folder or several, or adds a folder. The \
+         folders; the Repos tab groups them under a bar per repository. `Enter` on the Repos \
+         tab (or `P`) narrows the list to one folder or several, or adds a folder. The \
          Sessions tab has the details.",
     );
 
     doc.heading("The screen");
     match ctx.layout {
         SessionLayout::Sidebar => doc.bullet(format!(
-            "Session list, on the left: the tabs on top (Status, {} Folders, App, ★ Pinned), \
+            "Session list, on the left: the tabs on top (Status, {} Repos, Agent, ★ Pinned), \
              then the sessions in the order you keep them (a new one goes at the bottom), each \
              with a status mark, a bold title, and its app name in its agent's colour before \
              the git branch; the selected title is white, the others a softer foreground \
-             colour. With several folders, each has a header row; a pinned session shows ★ \
-             left of its name.",
+             colour. Each repository, agent or status has a bar over its sessions (a click or \
+             Space collapses it); a pinned session shows ★ left of its name.",
             ctx.icons.folder()
         )),
         SessionLayout::Tabs => doc.bullet(format!(
@@ -1779,11 +1779,11 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         row(
             "↑, ↓, j, k",
             "Select a session or a header; the right side shows the session (the tabs, \
-             Status, Folders, App and Pinned, are above the first)",
+             Status, Repos, Agent and Pinned, are above the first)",
         ),
         row(
             "←, →",
-            "Switch between the tabs, Status, Folders, App and Pinned (h, l on the tabs too)",
+            "Switch between the tabs, Status, Repos, Agent and Pinned (h, l on the tabs too)",
         ),
         row(
             "f",
@@ -1846,7 +1846,7 @@ fn mouse(doc: &mut Doc) {
     doc.heading("Mouse");
     doc.bullet("Click a session in the list to show it; click the session to work in it.");
     doc.bullet(
-        "Click a tab at the top of the list (Status, Folders, App, Pinned) to group the list \
+        "Click a tab at the top of the list (Status, Repos, Agent, Pinned) to group the list \
          by it; click the active one (▾) to open its modal; click a row there to show it alone, All \
          to show everything, or outside it to close it.",
     );
@@ -1987,7 +1987,7 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     );
     doc.text(
         "The folder filter at the top of the list (at the left end of the tab bar in the Tabs \
-         layout) says what's shown: Folders (all of them), one folder's name, or how many. \
+         layout) says what's shown on the Repos tab: Repos (all of them), one folder's name, or how many. \
          `Enter` on it, `P` or a click opens the Folders modal: All folders, then every folder \
          that has sessions. Type to narrow the rows; `Enter` shows the folder under the cursor \
          alone, and on All folders every folder again. Tick several with `Tab` or `Space` and \
@@ -2000,12 +2000,14 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
         "The list's top row has four tabs: Status (where the list starts), a header per \
          state (waiting for you, unread, working, waiting for response, running, exited, \
          dead, then ready: the sessions you've read, most recently read first, under last \
-         hour, last day and older), Folders, App, a header per agent or program (claude, \
+         hour, last day and older), Repos, a bar per repository (named by its origin, its \
+         worktrees and branches under it), Agent, a bar per agent or program (claude, \
          codex, opencode, …, then other programs, then shell), and Pinned, your pinned \
          sessions alone; `←`/`→` there (or a click) switch them. One tab is active at a \
          time: it decides the headers and the only filter that applies, and each tab keeps \
-         its own while another is active. `Enter` on the active tab opens its modal (Apps, \
-         Statuses) like the Folders modal: tick several with `Tab` (or `Space` while nothing \
+         its own while another is active. A click on a section's bar, or `Space` on it, \
+         collapses it, and again opens it. `Enter` on the active tab opens its modal (Agents, \
+         Statuses; Repos: the Folders modal) like the Folders modal: tick several with `Tab` (or `Space` while nothing \
          is typed), `Enter` shows them, `Esc` closes. Pinned has no filter. A session you \
          select stays shown when its status leaves the filter (or you unpin it under \
          Pinned), until you select another.",
@@ -3857,7 +3859,7 @@ mod tests {
             ("Back to the session you came from", "Esc, C-a"),
             ("Go into the selected session", "Enter, i, l"),
             ("Feed (show, focus or hide)", "f"),
-            ("Next tab (Status, Folders, App, Pinned)", "→"),
+            ("Next tab (Status, Repos, Agent, Pinned)", "→"),
             ("Previous tab", "←"),
             ("Last session", "Tab"),
             ("Go into session 1 to 9", "1-9"),

@@ -52,7 +52,7 @@ pub fn folder_branch(app: &App, folder: &ScopeRoot) -> Option<String> {
 /// The mark of a tab of the list's top row, in the user's icon style.
 pub fn tab_icon(app: &App, grouping: Grouping) -> &'static str {
     match grouping {
-        Grouping::Folder => app.icons().folder(),
+        Grouping::Folder | Grouping::Repo => app.icons().folder(),
         Grouping::App => app.icons().app(),
         Grouping::Status => app.icons().status(),
         Grouping::Pinned => PIN_MARK,
@@ -63,7 +63,7 @@ pub fn tab_icon(app: &App, grouping: Grouping) -> &'static str {
 /// is open.
 pub fn tab_picker_open(app: &App) -> bool {
     match &app.mode {
-        AppMode::Folders(_) => app.list.grouping() == Grouping::Folder,
+        AppMode::Folders(_) => matches!(app.list.grouping(), Grouping::Folder | Grouping::Repo),
         AppMode::Sections(picker) => app.list.grouping() == picker.grouping,
         _ => false,
     }

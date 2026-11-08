@@ -271,7 +271,7 @@ pub fn facts_line(
 }
 
 /// App labels in their agent's own colour (a quiet blue for other apps),
-/// independent of lifecycle and its status colours (rows, and the App tab's
+/// independent of lifecycle and its status colours (rows, and the Agent tab's
 /// headers and modal).
 pub fn program_color(program: &str) -> Color {
     let p = theme::palette();

@@ -381,10 +381,13 @@ pub fn read_period_header_line(
     ])
 }
 
-/// An app's or a status's header, like a folder's: its name (a status
-/// after its mark, an app's where that mark would be), a rule, then how
-/// many sessions it has (`2/3 live` for an app, `3 sessions` for a status),
-/// in `width` columns. Selected, the name is white and the rule blue.
+/// A section's header (an app's, a repository's, a status's) as a bar
+/// across the list, on a background of its own so sections stand out from
+/// their sessions: its mark (a status's; a repository's or an app's name
+/// where a status's is, in line with its sessions' text), its name, then at
+/// the right how many sessions it has (`2/3 live`, `3 sessions`) and `▾`
+/// (open) or `▸` (collapsed: a click, or Space, opens it), in `width`
+/// columns. Selected, the bar takes the selection's colour.
 pub fn section_header_line(
     app: &App,
     section: &Section,
@@ -393,36 +396,51 @@ pub fn section_header_line(
 ) -> Line<'static> {
     let p = theme::palette();
     let count = section_count(app, section);
+    let collapsed = app.list.is_collapsed(section);
+    let toggle = if collapsed {
+        SECTION_CLOSED
+    } else {
+        SECTION_OPEN
+    };
+    let bar = if selected { p.selection } else { p.surface };
+    let on_bar = |style: Style| style.bg(bar);
     let (mark, mark_style) = match section {
         Section::Status(status) => {
             let (glyph, style) = status_group_glyph(*status);
             (format!("{glyph} "), style)
         }
-        // Its name where a status's is, in line with its sessions' text.
-        Section::App(_) => (" ".repeat(GUTTER), Style::default()),
+        Section::Repo(_) | Section::App(_) => (" ".repeat(GUTTER), Style::default()),
     };
-    // " mark name ─── count": three spaces, and at least two rule columns.
-    let fixed = 3 + str_width(&mark) + str_width(&count);
-    let name = truncate(section.label(), width.saturating_sub(fixed + 2));
-    let rule = width.saturating_sub(fixed + str_width(&name));
-    let (name_color, rule_color) = if selected {
-        (p.text_bright, p.accent_primary)
+    // " mark name … count ▾ ": the name gets what's left, at least a column
+    // before the count.
+    let tail = format!("{count} {toggle} ");
+    let fixed = 1 + str_width(&mark) + str_width(&tail) + 1;
+    let name = truncate(section.label(), width.saturating_sub(fixed));
+    let gap = width.saturating_sub(fixed - 1 + str_width(&name));
+    let name_color = if selected {
+        p.text_bright
     } else {
-        (p.accent_purple, p.border_dim)
+        p.accent_purple
     };
     Line::from(vec![
-        Span::raw(" "),
-        Span::styled(mark, mark_style),
+        Span::styled(" ", on_bar(Style::default())),
+        Span::styled(mark, on_bar(mark_style)),
         Span::styled(
             name,
-            Style::default().fg(name_color).add_modifier(Modifier::BOLD),
+            on_bar(Style::default().fg(name_color).add_modifier(Modifier::BOLD)),
         ),
-        Span::raw(" "),
-        Span::styled("─".repeat(rule), Style::default().fg(rule_color)),
-        Span::raw(" "),
-        Span::styled(count, Style::default().fg(p.text_muted)),
+        Span::styled(" ".repeat(gap), on_bar(Style::default())),
+        Span::styled(count, on_bar(Style::default().fg(p.neutral_gray))),
+        Span::styled(" ", on_bar(Style::default())),
+        Span::styled(toggle, on_bar(Style::default().fg(p.accent_primary))),
+        Span::styled(" ", on_bar(Style::default())),
     ])
 }
+
+/// At the right of a section's bar: its sessions shown (`▾`) or collapsed
+/// under it (`▸`).
+const SECTION_OPEN: &str = "▾";
+const SECTION_CLOSED: &str = "▸";
 
 /// The content lines of a session cell: two, each after its gutter (two
 /// columns). The first is its gutter's mark, a space, its name, its title
@@ -1710,11 +1728,11 @@ mod tests {
         }
     }
 
-    /// The tabs with `labels` and `marks` (given for Folders, App, Status,
+    /// The tabs with `labels` and `marks` (given for Repos, Agent, Status,
     /// Pinned), in the tabs' order.
     fn tabs(marks: [&'static str; 4], labels: [&str; 4]) -> Vec<(Grouping, &'static str, String)> {
         let given = [
-            Grouping::Folder,
+            Grouping::Repo,
             Grouping::App,
             Grouping::Status,
             Grouping::Pinned,
@@ -1730,10 +1748,10 @@ mod tests {
 
     #[test]
     fn which_tab_is_active_never_moves_the_tabs() {
-        let shown = tabs(["▤", "◇", "◔", "★"], ["web", "App", "Status", "Pinned"]);
-        // Two apart at 40 columns, one apart at 35; then without the arrow,
-        // two apart at 32 and one at 29. Pinned keeps no room for one.
-        for (room, arrows) in [(40, true), (35, true), (32, false), (29, false)] {
+        let shown = tabs(["▤", "◇", "◔", "★"], ["web", "Agent", "Status", "Pinned"]);
+        // Two apart at 42 columns, one apart at 37; then without the arrow,
+        // two apart at 34 and one at 31. Pinned keeps no room for one.
+        for (room, arrows) in [(42, true), (37, true), (34, false), (31, false)] {
             let layouts: Vec<TabLayout> = Grouping::ALL
                 .iter()
                 .map(|active| lay_out_tabs(&shown, *active, room))
@@ -1754,22 +1772,22 @@ mod tests {
     #[test]
     fn tabs_narrow_their_gaps_then_drop_the_arrow_then_show_marks_alone_then_cut_the_label() {
         let plain = ["▤", "◇", "◔", "★"];
-        let shown = tabs(plain, ["Folders", "App", "Status", "Pinned"]);
+        let shown = tabs(plain, ["Repos", "Agent", "Status", "Pinned"]);
         let at = |room| {
             let layout = lay_out_tabs(&shown, Grouping::App, room);
             (layout.gap, layout.arrows, layout.compact, layout.width)
         };
-        // `◔ Status    ▤ Folders    ◇ App ▾  ★ Pinned`: 10 + 11 + 7 with
+        // `◔ Status    ▤ Repos    ◇ Agent ▾  ★ Pinned`: 10 + 9 + 9 with
         // every filter's arrow room, and 8, two apart, then one.
         assert_eq!(at(44), (2, true, false, 42));
         assert_eq!(at(40), (1, true, false, 39));
-        // `◔ Status  ▤ Folders  ◇ App  ★ Pinned`: the names stay, the arrow
+        // `◔ Status  ▤ Repos  ◇ Agent  ★ Pinned`: the names stay, the arrow
         // goes (from every tab: switching still moves nothing).
         assert_eq!(at(38), (2, false, false, 36));
         assert_eq!(at(34), (1, false, false, 33));
-        // `◔  ▤  ◇ App ▾  ★`.
-        assert_eq!(at(32), (2, true, true, 16));
-        assert_eq!(at(14), (1, true, true, 13));
+        // `◔  ▤  ◇ Agent ▾  ★`.
+        assert_eq!(at(32), (2, true, true, 18));
+        assert_eq!(at(16), (1, true, true, 15));
         // Then the active label is cut.
         let cut = lay_out_tabs(&shown, Grouping::App, 12);
         assert_eq!((cut.active_label.as_str(), cut.width), ("A…", 12));
@@ -1781,9 +1799,9 @@ mod tests {
         let emoji = ["📁", "🤖", "🚦", "★"];
         for marks in [plain, emoji] {
             for labels in [
-                ["Folders", "App", "Status", "Pinned"],
-                ["web", "App", "Status", "Pinned"],
-                ["Folders", "App", "waiting for response", "Pinned"],
+                ["Repos", "Agent", "Status", "Pinned"],
+                ["web", "Agent", "Status", "Pinned"],
+                ["Repos", "Agent", "waiting for response", "Pinned"],
                 ["12 folders", "opencode", "Status", "Pinned"],
             ] {
                 let shown = tabs(marks, labels);
@@ -1798,12 +1816,14 @@ mod tests {
     }
 
     #[test]
-    fn app_and_status_headers_fit_their_width_and_end_in_their_count() {
-        use crate::app::grouping::{AppKey, StatusGroup};
+    fn section_headers_are_bars_that_fit_their_width_and_end_in_their_count_and_toggle() {
+        use crate::app::grouping::{AppKey, RepoKey, StatusGroup};
         use crate::app::testing::{harness, view};
-        let h = harness(vec![view("A", "a", 0)]);
+        let mut h = harness(vec![view("A", "a", 0)]);
+        let p = theme::palette();
         let sections = [
             Section::App(AppKey::new("opencode")),
+            Section::Repo(RepoKey::of(&view("B", "b", 0))),
             Section::Status(StatusGroup::WaitingForResponse),
         ];
         for section in &sections {
@@ -1812,17 +1832,35 @@ mod tests {
                 assert_eq!(line.width(), width, "{section:?} {width}");
                 let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
                 assert!(
-                    text.ends_with(" live") || text.ends_with("sessions"),
+                    text.ends_with(" live ▾ ") || text.ends_with("sessions ▾ "),
                     "{text}"
                 );
+                // A bar: every cell on the bar's background, no rule.
+                assert!(
+                    line.spans
+                        .iter()
+                        .all(|span| span.style.bg == Some(p.surface)),
+                    "{text}"
+                );
+                assert!(!text.contains('─'), "{text}");
             }
         }
-        let line = section_header_line(&h.app, &sections[1], 40, true);
+        // Selected: the selection's background, the name white.
+        let line = section_header_line(&h.app, &sections[2], 40, true);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.starts_with(" "), "{text}");
-        assert!(text.contains(" waiting for response ─"), "{text}");
-        assert!(text.ends_with("─ no sessions"), "{text}");
-        assert_eq!(line.spans[2].style.fg, Some(theme::palette().text_bright));
+        assert!(text.contains(" waiting for response "), "{text}");
+        assert!(text.ends_with(" no sessions ▾ "), "{text}");
+        assert_eq!(line.spans[2].style.fg, Some(p.text_bright));
+        assert!(line
+            .spans
+            .iter()
+            .all(|span| span.style.bg == Some(p.selection)));
+        // Collapsed: `▸`.
+        h.app.list.toggle_collapsed(&sections[2]);
+        let line = section_header_line(&h.app, &sections[2], 40, false);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.ends_with(" no sessions ▸ "), "{text}");
     }
 
     #[test]

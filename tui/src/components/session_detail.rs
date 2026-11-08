@@ -131,7 +131,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                     Line::from(""),
                 ];
                 let filtering = match grouping {
-                    Grouping::Folder => {
+                    Grouping::Folder | Grouping::Repo => {
                         let filter = app.list.folder_filter();
                         lines.extend(filter.iter().map(|folder| {
                             Line::from(vec![
@@ -150,8 +150,8 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                     lines.push(Line::from(""));
                 }
                 let what = match grouping {
-                    Grouping::Folder => Some(" to filter by folder or add one."),
-                    Grouping::App => Some(" to filter by app."),
+                    Grouping::Folder | Grouping::Repo => Some(" to filter by folder or add one."),
+                    Grouping::App => Some(" to filter by agent."),
                     Grouping::Status => Some(" to filter by status."),
                     Grouping::Pinned => None,
                 };
@@ -164,7 +164,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                 }
                 lines.push(Line::from(vec![
                     Span::styled("← →", key),
-                    Span::styled(" switch between Status, Folders, App and Pinned.", muted),
+                    Span::styled(" switch between Status, Repos, Agent and Pinned.", muted),
                 ]));
                 lines
             } else if app.list.is_loaded() && app.list.filter.is_empty() {
@@ -175,10 +175,10 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                     {
                         format!("No sessions in {}", app.filter_label())
                     }
-                    (Grouping::Folder, [only]) => {
+                    (Grouping::Folder | Grouping::Repo, [only]) => {
                         format!("No sessions in {} yet", app.folders.name_of(only))
                     }
-                    (Grouping::Folder, many) if many.len() > 1 => {
+                    (Grouping::Folder | Grouping::Repo, many) if many.len() > 1 => {
                         format!("No sessions in these {} folders yet", many.len())
                     }
                     (Grouping::Pinned, _) => "No pinned sessions".to_string(),

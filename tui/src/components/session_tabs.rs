@@ -1,7 +1,7 @@
 //! Session tab bar (Tabs layout): the active list tab's filter at the left
 //! end (the folder filter under All folders), then the tabs drawn by
 //! `layout::render_tabs_from`: the sessions that filter shows, in the
-//! Folders tab's order whatever the active tab (`SessionList::tab_order`),
+//! folders' order whatever the active tab (`SessionList::tab_order`),
 //! so tabs keep their places as statuses change. While the drawer is shown
 //! its tab comes first, named by its active tab (Feed or rtop), before a
 //! line, unnumbered and never moved (`draw_drawer_tab`). A phone's

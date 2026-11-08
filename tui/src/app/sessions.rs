@@ -702,8 +702,8 @@ impl App {
         self.activate_selected();
     }
 
-    /// Make sure session `id` is shown: under All folders a folder filter
-    /// that hides its folder shows that folder too (under App or Status,
+    /// Make sure session `id` is shown: under Repos a folder filter that
+    /// hides its folder shows that folder too (under Agent or Status,
     /// selecting it shows it), and a text filter that hides it is cleared.
     pub(super) fn reveal(&mut self, id: &SessionId) {
         let shown = |app: &Self| app.list.visible().iter().any(|s| &s.id == id);
@@ -714,7 +714,7 @@ impl App {
             return;
         };
         let filter = self.list.folder_filter();
-        let folder_tab = self.list.grouping() == Grouping::Folder;
+        let folder_tab = matches!(self.list.grouping(), Grouping::Folder | Grouping::Repo);
         if folder_tab && !filter.is_empty() && !filter.contains(&folder) {
             let mut folders = filter.to_vec();
             folders.push(folder);
@@ -1325,6 +1325,14 @@ impl App {
                 Some(Hit::ListRow(row)) => {
                     if self.focus != Focus::List {
                         self.enter_rakumux_mode();
+                    }
+                    // A section's header: a click (a tap) collapses or opens it.
+                    if let Some(ListRow::SectionHeader(section)) = self.list.rows().get(row) {
+                        let section = (*section).clone();
+                        self.list.select(Selection::SectionHeader(section.clone()));
+                        self.list.toggle_collapsed(&section);
+                        self.reconcile_detail();
+                        return;
                     }
                     self.list.select_row(row);
                     // New session is an action, not a preview selection:

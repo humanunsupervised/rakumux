@@ -134,6 +134,9 @@ pub struct SessionList {
     apps: Vec<AppKey>,
     /// The Status tab's filter: the statuses shown, or every one when empty.
     statuses: Vec<StatusGroup>,
+    /// Sections whose sessions are hidden under their header (a click on
+    /// it, or Space): this window's, never saved.
+    collapsed: HashSet<Section>,
     /// The folders shown under All folders, in display order: the filter's,
     /// or with no filter every folder that has sessions.
     groups: Vec<ScopeRoot>,
@@ -182,6 +185,7 @@ impl SessionList {
             folders: Vec::new(),
             apps: Vec::new(),
             statuses: Vec::new(),
+            collapsed: HashSet::new(),
             groups: Vec::new(),
             all_folders: Vec::new(),
             sections: Vec::new(),
@@ -246,7 +250,7 @@ impl SessionList {
     /// kept for when All folders is back.
     pub fn set_folder_filter(&mut self, folders: Vec<ScopeRoot>) {
         self.folders = unique(folders);
-        self.refilter(self.grouping == Grouping::Folder);
+        self.refilter(matches!(self.grouping, Grouping::Folder | Grouping::Repo));
     }
 
     /// The folder filter: the folders shown, or none for all folders.
@@ -257,7 +261,7 @@ impl SessionList {
     /// The folder filter while it applies (All folders is the active tab).
     fn active_folder_filter(&self) -> &[ScopeRoot] {
         match self.grouping {
-            Grouping::Folder => &self.folders,
+            Grouping::Folder | Grouping::Repo => &self.folders,
             Grouping::App | Grouping::Status | Grouping::Pinned => &[],
         }
     }
@@ -283,7 +287,8 @@ impl SessionList {
     /// Pinned, which has none).
     pub fn section_filter(&self, grouping: Grouping) -> Vec<Section> {
         match grouping {
-            Grouping::Folder | Grouping::Pinned => Vec::new(),
+            // The Repos tab's filter is the folder filter.
+            Grouping::Folder | Grouping::Repo | Grouping::Pinned => Vec::new(),
             Grouping::App => self.apps.iter().cloned().map(Section::App).collect(),
             Grouping::Status => self.statuses.iter().copied().map(Section::Status).collect(),
         }
@@ -295,13 +300,13 @@ impl SessionList {
     pub fn set_section_filter(&mut self, grouping: Grouping, sections: Vec<Section>) {
         let sections = unique(sections);
         match grouping {
-            Grouping::Folder | Grouping::Pinned => return,
+            Grouping::Folder | Grouping::Repo | Grouping::Pinned => return,
             Grouping::App => {
                 self.apps = sections
                     .into_iter()
                     .filter_map(|section| match section {
                         Section::App(app) => Some(app),
-                        Section::Status(_) => None,
+                        _ => None,
                     })
                     .collect();
             }
@@ -310,7 +315,7 @@ impl SessionList {
                     .into_iter()
                     .filter_map(|section| match section {
                         Section::Status(status) => Some(status),
-                        Section::App(_) => None,
+                        _ => None,
                     })
                     .collect();
             }
@@ -351,6 +356,8 @@ impl SessionList {
         match self.grouping {
             // A lone folder still gets its header: its name and branch.
             Grouping::Folder => !self.groups.is_empty(),
+            // A lone repository still gets its bar: its name.
+            Grouping::Repo => !self.sections.is_empty(),
             Grouping::App | Grouping::Status => self.sections.len() > 1,
             Grouping::Pinned => false,
         }
@@ -772,11 +779,12 @@ impl SessionList {
     }
 
     /// The session shown whatever the App or Status filter (or whether
-    /// it's pinned, under Pinned) says: the selected one. All folders keeps
-    /// none, since a session never changes folder.
+    /// it's pinned, under Pinned) says: the selected one. The folder
+    /// filter (All folders, Repos) keeps none, since a session never
+    /// changes folder.
     fn kept(&self) -> Option<&SessionId> {
         match (self.grouping, &self.selection) {
-            (Grouping::Folder, _) => None,
+            (Grouping::Folder | Grouping::Repo, _) => None,
             (_, Selection::Session(id)) => Some(id),
             _ => None,
         }
@@ -797,13 +805,17 @@ impl SessionList {
                     visible.extend(self.in_folder_order(group).into_iter().filter(matching));
                 }
             }
-            Grouping::App | Grouping::Status => {
+            Grouping::Repo | Grouping::App | Grouping::Status => {
+                // The Repos tab narrows by the folder filter.
+                let folders = self.active_folder_filter();
+                let in_folders =
+                    |s: &&SessionView| folders.is_empty() || folders.contains(&s.scope);
                 for section in &self.sections {
                     let shown = self.section_shown(section);
                     visible.extend(
                         self.in_section_order(section)
                             .into_iter()
-                            .filter(|s| shown || kept == Some(&s.id))
+                            .filter(|s| (shown && in_folders(s)) || kept == Some(&s.id))
                             .filter(matching),
                     );
                 }
@@ -908,14 +920,43 @@ impl SessionList {
     /// shows every app or status).
     fn section_shown(&self, section: &Section) -> bool {
         match section {
+            // Narrowed by the folder filter instead.
+            Section::Repo(_) => true,
             Section::App(app) => self.apps.is_empty() || self.apps.contains(app),
             Section::Status(status) => self.statuses.is_empty() || self.statuses.contains(status),
         }
     }
 
+    /// Whether `section`'s sessions are hidden under its header.
+    pub fn is_collapsed(&self, section: &Section) -> bool {
+        self.collapsed.contains(section)
+    }
+
+    /// Hide `section`'s sessions under its header, or show them again; a
+    /// selected session it hides gives the selection to the header.
+    pub fn toggle_collapsed(&mut self, section: &Section) {
+        if self.collapsed.remove(section) {
+            return;
+        }
+        self.collapsed.insert(section.clone());
+        let hidden = match &self.selection {
+            Selection::Session(id) => self
+                .get(id)
+                .and_then(|s| Section::of(self.grouping, s))
+                .is_some_and(|of| &of == section),
+            Selection::ReadPeriodHeader(_) => section == &Section::Status(StatusGroup::Ready),
+            _ => false,
+        };
+        if hidden {
+            self.place = None;
+            self.selection = Selection::SectionHeader(section.clone());
+        }
+    }
+
     /// Every row: the tabs, the sessions, under a header per folder (app,
     /// status) when several are shown, then "+ New session" last. While
-    /// filtering by text, headers without a match are left out.
+    /// filtering by text, headers without a match are left out, and every
+    /// section is open; otherwise a collapsed section shows its header alone.
     pub fn rows(&self) -> Vec<ListRow<'_>> {
         let visible = self.visible();
         let mut rows =
@@ -953,6 +994,9 @@ impl SessionList {
         for section in &self.sections {
             let start = rows.len();
             rows.push(ListRow::SectionHeader(section));
+            if !filtering && self.collapsed.contains(section) {
+                continue;
+            }
             self.push_sessions(
                 &mut rows,
                 visible
@@ -1150,6 +1194,13 @@ impl SessionList {
         if self.selection != selection {
             self.place = None;
         }
+        // A session selected (by its tab, the feed, a new one) shows: its
+        // section opens.
+        if let Selection::Session(id) = &selection {
+            if let Some(section) = self.get(id).and_then(|s| Section::of(self.grouping, s)) {
+                self.collapsed.remove(&section);
+            }
+        }
         self.selection = selection;
         self.reselect = false;
         // The selected session is shown under App or Status, whatever the
@@ -1166,6 +1217,12 @@ impl SessionList {
             Selection::FolderHeader(folder) | Selection::WorktreeHeader(folder, _) => {
                 Some(folder.clone())
             }
+            // A repository's header: the folder of its first session.
+            Selection::SectionHeader(section @ Section::Repo(_)) => self
+                .visible()
+                .into_iter()
+                .find(|s| Section::of(Grouping::Repo, s).as_ref() == Some(section))
+                .map(|s| s.scope.clone()),
             Selection::Folders
             | Selection::SectionHeader(_)
             | Selection::ReadPeriodHeader(_)
@@ -1325,9 +1382,11 @@ impl SessionList {
             return Vec::new();
         }
         let filter = self.section_filter(grouping);
+        let folders = self.active_folder_filter();
         let candidates: Vec<Section> = if filter.is_empty() {
             self.sessions
                 .iter()
+                .filter(|s| folders.is_empty() || folders.contains(&s.scope))
                 .filter_map(|s| Section::of(grouping, s))
                 .collect()
         } else {
@@ -1339,6 +1398,18 @@ impl SessionList {
         };
         let mut sections = unique(candidates);
         sort_sections(&mut sections, &self.sessions);
+        // The launch folder's repository first, as its folder was.
+        if grouping == Grouping::Repo {
+            let launch = self
+                .sessions
+                .iter()
+                .filter(|s| s.scope == self.launch)
+                .find_map(|s| Section::of(grouping, s));
+            if let Some(at) = launch.and_then(|launch| sections.iter().position(|s| *s == launch)) {
+                let first = sections.remove(at);
+                sections.insert(0, first);
+            }
+        }
         sections
     }
 }

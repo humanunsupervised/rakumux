@@ -326,20 +326,21 @@ impl App {
         }
     }
 
-    /// Show these folders (none: all folders) under All folders, which
-    /// becomes the active tab. The list already has every folder's
-    /// sessions; an older daemon is asked for a folder it isn't watching
-    /// yet.
+    /// Show these folders' sessions (none: all folders) under the Repos tab,
+    /// which becomes the active one, grouped by repository; new sessions go
+    /// in a lone one. The list already has every
+    /// folder's sessions; an older daemon is asked for a folder it isn't
+    /// watching yet.
     pub fn show_folders(&mut self, folders: Vec<ScopeRoot>) {
         self.unfocus_drawer();
         let current = self.list.folder_filter();
-        let unchanged = self.list.grouping() == Grouping::Folder
+        let unchanged = self.list.grouping() == Grouping::Repo
             && folders.len() == current.len()
             && folders.iter().all(|f| current.contains(f));
         if unchanged {
             return;
         }
-        self.list.set_grouping(Grouping::Folder);
+        self.list.set_grouping(Grouping::Repo);
         self.list.set_folder_filter(folders);
         let unlisted = self
             .list

@@ -38,7 +38,7 @@ pub fn sessions_label(total: usize) -> String {
 pub fn section_count(app: &App, section: &Section) -> String {
     let (live, total) = app.list.section_counts(section);
     match section {
-        Section::App(_) => count_label(live, total),
+        Section::Repo(_) | Section::App(_) => count_label(live, total),
         Section::Status(_) => sessions_label(total),
     }
 }
@@ -82,7 +82,8 @@ pub fn draw_section_picker(
     f.render_widget(Clear, popup);
     let (title, noun, one) = match picker.grouping {
         Grouping::Status => (" Statuses ", "statuses", "status"),
-        Grouping::Folder | Grouping::App | Grouping::Pinned => (" Apps ", "apps", "app"),
+        Grouping::Repo => (" Repos ", "repos", "repo"),
+        Grouping::Folder | Grouping::App | Grouping::Pinned => (" Agents ", "agents", "agent"),
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -156,6 +157,7 @@ pub fn draw_section_picker(
     let lead = 6;
     let name_width = |row: &SectionRow| match row {
         SectionRow::All => str_width("All ") + str_width(noun),
+        SectionRow::Section(Section::Repo(repo)) => str_width(repo.as_str()),
         SectionRow::Section(Section::App(app)) => str_width(app.as_str()),
         SectionRow::Section(Section::Status(status)) => 2 + str_width(status.label()),
     };
@@ -168,7 +170,7 @@ pub fn draw_section_picker(
                 .count();
             match picker.grouping {
                 Grouping::Status => sessions_label(sessions.len()),
-                Grouping::Folder | Grouping::App | Grouping::Pinned => {
+                Grouping::Folder | Grouping::Repo | Grouping::App | Grouping::Pinned => {
                     count_label(live, sessions.len())
                 }
             }
@@ -230,6 +232,10 @@ pub fn draw_section_picker(
             SectionRow::Section(Section::App(app)) => {
                 vec![Span::styled(truncate(app.as_str(), name_w), name_style)]
             }
+            SectionRow::Section(Section::Repo(repo)) => vec![Span::styled(
+                truncate(repo.as_str(), name_w),
+                name_style.add_modifier(Modifier::BOLD),
+            )],
             SectionRow::Section(Section::Status(status)) => {
                 let (glyph, glyph_style) = status_group_glyph(*status);
                 vec![

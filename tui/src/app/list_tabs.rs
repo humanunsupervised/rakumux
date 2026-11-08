@@ -11,6 +11,7 @@
 //! without changes.
 
 use super::grouping::{sort_sections, Grouping, Section, StatusGroup};
+use super::session_list::Selection;
 use super::types::{AppMode, SectionPicker, SectionRow};
 use super::App;
 
@@ -24,7 +25,12 @@ impl App {
             return grouping.name().into();
         }
         match grouping {
+            // The Repos tab names its folder filter, as the Folders tab did.
             Grouping::Folder => self.folder_label(),
+            Grouping::Repo => match self.list.folder_filter() {
+                [] => grouping.name().into(),
+                _ => self.folder_label(),
+            },
             Grouping::Pinned => grouping.name().into(),
             Grouping::App | Grouping::Status => match self.list.section_filter(grouping).as_slice()
             {
@@ -39,6 +45,14 @@ impl App {
     /// selector says it).
     pub fn filter_label(&self) -> String {
         self.tab_label(self.list.grouping())
+    }
+
+    /// Space on a section's header: collapse it, or open it again.
+    pub fn toggle_selected_section(&mut self) {
+        if let Selection::SectionHeader(section) = self.list.selection().clone() {
+            self.list.toggle_collapsed(&section);
+            self.reconcile_detail();
+        }
     }
 
     /// ←/→ (`h`/`l` on the top row): the previous or next tab.
@@ -60,7 +74,7 @@ impl App {
     /// (Pinned has none).
     pub fn open_tab_picker(&mut self) {
         match self.list.grouping() {
-            Grouping::Folder => self.open_folder_picker(),
+            Grouping::Folder | Grouping::Repo => self.open_folder_picker(),
             Grouping::Pinned => {}
             grouping => self.open_section_picker(grouping, None),
         }
@@ -70,7 +84,7 @@ impl App {
     /// `focus` (else the filter's first, else All).
     pub fn open_section_picker(&mut self, grouping: Grouping, focus: Option<Section>) {
         match grouping {
-            Grouping::Folder => return self.open_folder_picker(),
+            Grouping::Folder | Grouping::Repo => return self.open_folder_picker(),
             Grouping::Pinned => return,
             Grouping::App | Grouping::Status => {}
         }
@@ -95,7 +109,7 @@ impl App {
                 .copied()
                 .map(Section::Status)
                 .collect(),
-            Grouping::Folder | Grouping::App | Grouping::Pinned => Vec::new(),
+            Grouping::Folder | Grouping::Repo | Grouping::App | Grouping::Pinned => Vec::new(),
         };
         let listed = self
             .list
