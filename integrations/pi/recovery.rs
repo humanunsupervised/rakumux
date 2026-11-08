@@ -228,11 +228,26 @@ mod tests {
         path
     }
 
+    /// Written to since: a line appended, and its time a minute on, so it's
+    /// the newest whatever the file system's clock resolution.
     fn touch_later(path: &Path) {
-        std::thread::sleep(std::time::Duration::from_millis(20));
         let line = b"{\"type\":\"label\"}\n";
         let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
         std::io::Write::write_all(&mut file, line).unwrap();
+        set_age(path, -60);
+    }
+
+    /// Set `path`'s modification time `seconds` before now (after, when negative).
+    fn set_age(path: &Path, seconds: i64) {
+        let now = std::time::SystemTime::now();
+        let shift = std::time::Duration::from_secs(seconds.unsigned_abs());
+        let at = if seconds >= 0 {
+            now - shift
+        } else {
+            now + shift
+        };
+        let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_modified(at).unwrap();
     }
 
     #[test]
@@ -298,6 +313,8 @@ mod tests {
             "c-old",
             "/home/me/repo",
         );
+        // Written a minute before the next: never the same time.
+        set_age(&old, 60);
         let new = write(
             &dir,
             "2026-10-30T00-00-00-000Z_c-new.jsonl",
