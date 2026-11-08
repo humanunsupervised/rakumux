@@ -265,6 +265,8 @@ pub(crate) struct SessionSync {
     machine: String,
     /// What else this machine handles, said with every upload.
     capabilities: Vec<&'static str>,
+    /// This Rakumux's version, said with every upload (`rakumux_version`).
+    version: Option<String>,
     enabled: bool,
     /// The cloud's last answer said it takes places.
     places: bool,
@@ -302,6 +304,7 @@ impl SessionSync {
         Self {
             machine,
             capabilities,
+            version: None,
             enabled: false,
             places: false,
             subagents: false,
@@ -315,6 +318,12 @@ impl SessionSync {
             retry_at: Duration::ZERO,
             retry: RETRY_MIN,
         }
+    }
+
+    /// Also say this Rakumux is `version` with every upload.
+    pub fn with_version(mut self, version: Option<String>) -> Self {
+        self.version = version;
+        self
     }
 
     /// Also say `capability` with every upload (what this machine handles).
@@ -463,7 +472,13 @@ impl SessionSync {
             return None;
         }
         let capabilities = &self.capabilities;
-        let mut request = wire::sessions_upload(&self.machine, &list, wall_ms, capabilities)?;
+        let mut request = wire::sessions_upload(
+            &self.machine,
+            &list,
+            wall_ms,
+            capabilities,
+            self.version.as_deref(),
+        )?;
         if matches!(&request, FeedRequest::Sessions { body } if body.len() > MAX_BODY_BYTES) {
             // Too large with them: the same list without places or agents'
             // latest steps (and it counts as sent, so it isn't sent again
@@ -471,7 +486,13 @@ impl SessionSync {
             let mut smaller = list.clone();
             without_places(&mut smaller);
             without_output(&mut smaller);
-            request = wire::sessions_upload(&self.machine, &smaller, wall_ms, capabilities)?;
+            request = wire::sessions_upload(
+                &self.machine,
+                &smaller,
+                wall_ms,
+                capabilities,
+                self.version.as_deref(),
+            )?;
         }
         self.sending = Some(list);
         Some(request)

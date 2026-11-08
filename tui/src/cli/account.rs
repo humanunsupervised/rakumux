@@ -33,6 +33,12 @@ pub(crate) fn run(
         AccountCommand::Login => login(&access, std::io::stdout().is_terminal(), out),
         AccountCommand::Logout => logout(&access, out),
         AccountCommand::Status { json } => status(api, &access, json, out),
+        // After an update asked on rakumux.com: this release's service takes
+        // over from the one that installed it.
+        AccountCommand::RestartService => match access.restart() {
+            Ok(_) => Ok(0),
+            Err(error) => Err(CliError::internal(error)),
+        },
     }
 }
 

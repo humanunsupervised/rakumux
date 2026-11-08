@@ -138,6 +138,8 @@ pub(crate) enum FeedRequest {
     MachineRevoke { machine: String },
     /// Say whether a new session asked for on rakumux.com was started, as `body`.
     NewSessionStatus { body: Vec<u8> },
+    /// Say how an update asked for on rakumux.com went, as `body`.
+    UpdateStatus { body: Vec<u8> },
 }
 
 impl FeedRequest {
@@ -346,6 +348,8 @@ struct SessionsUpload<'a> {
     at: i64,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     capabilities: &'a [&'a str],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rakumux_version: Option<&'a str>,
 }
 
 /// This machine's session list as `sessions-upload`, with what else it
@@ -356,6 +360,7 @@ pub(crate) fn sessions_upload(
     sessions: &[super::sessions::SessionState],
     at: i64,
     capabilities: &[&str],
+    rakumux_version: Option<&str>,
 ) -> Option<FeedRequest> {
     let body = serde_json::to_vec(&SessionsUpload {
         version: 1,
@@ -363,6 +368,7 @@ pub(crate) fn sessions_upload(
         sessions,
         at: at.max(1_577_836_800_000),
         capabilities,
+        rakumux_version,
     })
     .ok()?;
     Some(FeedRequest::Sessions { body })
@@ -974,6 +980,12 @@ struct WireReplies {
     /// New sessions asked of this machine (`new_sessions`), read row by row.
     #[serde(default)]
     new_sessions: Option<serde_json::Value>,
+    /// The newest release rakumux.com knows of (`release`).
+    #[serde(default)]
+    release: Option<serde_json::Value>,
+    /// The update asked of this machine (`updates`).
+    #[serde(default)]
+    updates: Option<serde_json::Value>,
 }
 
 /// Replies as read: those that fit the contract (replies to entries, and
@@ -994,6 +1006,10 @@ pub(crate) struct RepliesRead {
     pub resources_wanted: bool,
     /// The new sessions pending for this machine, when the read brought them.
     pub new_sessions: Vec<super::new_sessions::NewSessionAsk>,
+    /// The newest stable release rakumux.com knows of, when it says.
+    pub release: Option<String>,
+    /// The update asked of this machine, when the read brought one.
+    pub updates: Vec<super::updates::MachineUpdateAsk>,
 }
 
 impl RepliesRead {
@@ -1050,6 +1066,8 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
             .map(|ms| Duration::from_millis(ms.clamp(1_000, 60_000))),
         resources_wanted: page.resources_wanted,
         new_sessions: super::new_sessions::asks(page.new_sessions),
+        release: super::updates::release(page.release),
+        updates: super::updates::asks(page.updates),
     })
 }
 
@@ -1470,6 +1488,54 @@ mod tests {
             retry_after: Some(Duration::from_secs(30)),
             body: body.as_bytes().to_vec(),
         }
+    }
+
+    /// A replies read says the newest release and the update asked of this
+    /// machine; one off the contract is left out on its own, never the read.
+    #[test]
+    fn a_replies_read_brings_the_release_and_the_update() {
+        let read = replies(&reply(
+            200,
+            r#"{"version":1,"replies":[],"latest_seq":0,"more":false,
+                "release":{"version":"0.1.49"},
+                "updates":[{"id":"01K8A2B3C4D5E6F7G8H9J0K1M2","version":"0.1.49"}]}"#,
+        ))
+        .unwrap();
+        assert_eq!(read.release.as_deref(), Some("0.1.49"));
+        assert_eq!(read.updates.len(), 1);
+        assert_eq!(read.updates[0].version, "0.1.49");
+        let off = replies(&reply(
+            200,
+            r#"{"version":1,"replies":[],"latest_seq":0,"more":false,
+                "release":{"version":"latest"},"updates":[{"id":"x","version":"0.1.49"}]}"#,
+        ))
+        .unwrap();
+        assert_eq!((off.release, off.updates.len()), (None, 0));
+        let older = replies(&reply(
+            200,
+            r#"{"version":1,"replies":[],"latest_seq":0,"more":false}"#,
+        ))
+        .unwrap();
+        assert_eq!((older.release, older.updates.len()), (None, 0));
+    }
+
+    /// The session list says this Rakumux's version and that it takes updates.
+    #[test]
+    fn a_session_list_says_its_version() {
+        let Some(FeedRequest::Sessions { body }) =
+            sessions_upload("studio", &[], 1, &["remote_update"], Some("0.1.49"))
+        else {
+            panic!("no request");
+        };
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["rakumux_version"], "0.1.49");
+        assert_eq!(body["capabilities"], serde_json::json!(["remote_update"]));
+        let Some(FeedRequest::Sessions { body }) = sessions_upload("studio", &[], 1, &[], None)
+        else {
+            panic!("no request");
+        };
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(body.get("rakumux_version").is_none());
     }
 
     fn entry(id: &str, text: &str) -> FeedEntry {
@@ -2144,12 +2210,13 @@ mod tests {
 
     #[test]
     fn the_session_list_says_what_else_the_machine_handles() {
-        let body = |capabilities: &[&str]| match sessions_upload("studio", &[], 1, capabilities) {
-            Some(FeedRequest::Sessions { body }) => {
-                serde_json::from_slice::<serde_json::Value>(&body).unwrap()
-            }
-            other => panic!("expected a session list, got {other:?}"),
-        };
+        let body =
+            |capabilities: &[&str]| match sessions_upload("studio", &[], 1, capabilities, None) {
+                Some(FeedRequest::Sessions { body }) => {
+                    serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+                }
+                other => panic!("expected a session list, got {other:?}"),
+            };
         assert_eq!(
             body(&[REPLY_ATTACHMENTS])["capabilities"],
             serde_json::json!(["reply_attachments"])

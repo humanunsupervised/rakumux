@@ -234,7 +234,11 @@ impl App {
         }
         self.feed.busy = false;
         // A failure (the service restarting) keeps what's shown.
-        let Ok(page) = result else { return };
+        let Ok(mut page) = result else { return };
+        // rakumux.com says a newer release is out: offered at once.
+        if let Some(release) = page.release.take() {
+            self.release_known(release);
+        }
         let more = self.feed.apply(page);
         if self.feed_shown() {
             // On screen: none of it is new.

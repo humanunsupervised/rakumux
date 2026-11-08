@@ -2550,6 +2550,7 @@ mod tests {
             more: false,
             open: None,
             machine: None,
+            release: None,
         }
     }
 

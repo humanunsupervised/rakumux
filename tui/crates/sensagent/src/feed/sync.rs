@@ -79,6 +79,8 @@ fn folder_name(scope: &ScopeRoot) -> Option<String> {
 /// The feed's state on the owner thread.
 pub(crate) struct FeedSync {
     cache: FeedCache,
+    /// The newest release rakumux.com said, for TUIs.
+    release: Option<String>,
     machine: String,
     sessions: HashMap<SessionId, SessionMeta>,
     signed_in: bool,
@@ -108,6 +110,7 @@ impl FeedSync {
     pub fn new(machine: String) -> Self {
         Self {
             cache: FeedCache::default(),
+            release: None,
             machine,
             sessions: HashMap::new(),
             signed_in: false,
@@ -313,7 +316,8 @@ impl FeedSync {
                 | FeedResult::Realtime(_)
                 | FeedResult::Enrolled(_)
                 | FeedResult::Revoked
-                | FeedResult::NewSessionReported,
+                | FeedResult::NewSessionReported
+                | FeedResult::UpdateReported,
             ) => {}
             Err(failure) => self.fail(failure, now),
         }
@@ -338,8 +342,14 @@ impl FeedSync {
         }
         FeedPage {
             machine: Some(self.machine.clone()),
+            release: self.release.clone(),
             ..self.cache.page(self.status(), after, generation)
         }
+    }
+
+    /// rakumux.com's replies read said the newest release is `version`.
+    pub fn set_release(&mut self, version: String) {
+        self.release = Some(version);
     }
 
     /// Another machine held this one's name: it goes by `machine` now, and

@@ -126,6 +126,33 @@ impl App {
         self.look_for_update(now) || prompted
     }
 
+    /// rakumux.com says `version` is the newest release (through the account
+    /// service, as it's published): newer than this window's and not on
+    /// record yet, it's recorded for every window of the home and offered as
+    /// a check would have found it (installed by itself, or the modal).
+    pub(super) fn release_known(&mut self, version: String) {
+        if !is_newer(app_version(), &version)
+            || self.pending_update_version.as_deref() == Some(version.as_str())
+            || self.auto_update.ready.is_some()
+        {
+            return;
+        }
+        let Some(path) = self.update_state_path() else {
+            return;
+        };
+        let mut state = UpdateState::load_from(&path).unwrap_or_default();
+        if state.latest_version.as_deref() == Some(version.as_str()) && state.pending_upgrade {
+            self.consider_update(state);
+            return;
+        }
+        let method = self.updater.method();
+        state.mark_update_available(version, method);
+        // A new release: a new try for one whose install failed.
+        state.failed_version = None;
+        self.save_shared_state(&state);
+        self.consider_update(state);
+    }
+
     /// The update modal, by itself, in Rakumux mode with nothing else open:
     /// a newer release this window would only tell of (automatic updates off,
     /// npm, Homebrew, an install that failed), or one automatic updates

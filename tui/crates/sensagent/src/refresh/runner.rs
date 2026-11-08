@@ -33,7 +33,7 @@ use crate::feed::{
     ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
     FeedResult, FeedSync, Fetch, Fetched, NewSessionSync, NewSessionWork, PokeEvent, PokeSync,
     RealtimeToken, ReplySync, ReplyWork, ResourceSync, ResourceWork, SessionMessage, SessionSync,
-    TurnRead, Uploads,
+    TurnRead, UpdateSync, UpdateWork, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -205,6 +205,10 @@ enum Message {
     NewSessionCreated(String, Result<SessionView, ErrorCode>),
     /// A new session's status report finished.
     NewSessionReported(FeedCompletion),
+    /// The updater finished an update asked of this machine (its id).
+    UpdateInstalled(String, Result<(), crate::service::UpdateFailure>),
+    /// An update's status report finished.
+    UpdateReported(FeedCompletion),
     SignIn(u64, SignInEvent),
     Renewed(RenewalEvent),
     /// An enrolled machine's sign-in with its credential finished.
@@ -270,6 +274,8 @@ enum Work<A, C> {
     CreateSession(String, CreateSession),
     /// Report a new session's status.
     NewSessionReport(FeedJob<A, C>),
+    /// Report an update's status.
+    UpdateReport(FeedJob<A, C>),
 }
 
 /// Where the owner sends work. Replies being typed in and replies or session
@@ -659,10 +665,16 @@ fn own<S, A, C>(
     let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
     let mut replies = ReplySync::new(machine.clone(), refresher.reply_state());
     let mut new_sessions = NewSessionSync::new(machine.clone(), refresher.new_session_state());
+    let updater = refresher.updater();
+    let mut updates = UpdateSync::new(machine.clone(), updater.is_some(), refresher.update_state());
     let uploads = refresher.uploads().map(Uploads::new);
     let mut sessions = SessionSync::new(machine.clone(), uploads.is_some())
         .handling(crate::feed::NEW_SESSIONS)
-        .handling(crate::feed::NEW_SESSION_AGENTS);
+        .handling(crate::feed::NEW_SESSION_AGENTS)
+        .with_version(refresher.version());
+    if updater.is_some() {
+        sessions = sessions.handling(crate::feed::REMOTE_UPDATE);
+    }
     let mut resources = ResourceSync::new();
     let mut pokes = PokeSync::new();
     // The running realtime connection's stop, if one runs.
@@ -714,6 +726,15 @@ fn own<S, A, C>(
             follow_resources(&refresher, &mut resources, &sessions, work, now);
             let confirmed = sessions.confirmed();
             follow_new_sessions(&refresher, &mut new_sessions, confirmed, work, now);
+            follow_updates(
+                &refresher,
+                &mut updates,
+                updater.as_ref(),
+                confirmed,
+                work,
+                messages,
+                now,
+            );
             follow_pokes(
                 &refresher,
                 &mut pokes,
@@ -872,6 +893,11 @@ fn own<S, A, C>(
                 // New sessions asked of this machine come with its replies read.
                 if let Ok(FeedResult::Replies(read)) = &mut completion.outcome {
                     new_sessions.read(current, std::mem::take(&mut read.new_sessions));
+                    // So does the update asked of it, and the newest release.
+                    updates.read(current, std::mem::take(&mut read.updates));
+                    if let Some(release) = read.release.take().filter(|_| current) {
+                        feed.set_release(release);
+                    }
                 }
                 let taken = current && machine_taken(&completion.outcome);
                 // Someone has rtop open on rakumux.com: send what this machine uses.
@@ -893,7 +919,17 @@ fn own<S, A, C>(
                         &mut new_sessions,
                         now,
                     );
+                    updates.rename(machine.clone());
                 }
+                follow_updates(
+                    &refresher,
+                    &mut updates,
+                    updater.as_ref(),
+                    sessions.confirmed(),
+                    work,
+                    messages,
+                    now,
+                );
                 follow_replies(
                     &refresher,
                     &mut replies,
@@ -943,6 +979,35 @@ fn own<S, A, C>(
                     &mut new_sessions,
                     sessions.confirmed(),
                     work,
+                    now,
+                );
+            }
+            Message::UpdateInstalled(id, result) => {
+                updates.installed(&id, result);
+                follow_updates(
+                    &refresher,
+                    &mut updates,
+                    updater.as_ref(),
+                    sessions.confirmed(),
+                    work,
+                    messages,
+                    now,
+                );
+            }
+            Message::UpdateReported(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::UpdateReported => Ok(()),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                updates.reported(current, outcome, now);
+                follow_updates(
+                    &refresher,
+                    &mut updates,
+                    updater.as_ref(),
+                    sessions.confirmed(),
+                    work,
+                    messages,
                     now,
                 );
             }
@@ -1579,6 +1644,65 @@ fn follow_new_sessions<S, A, C>(
     }
 }
 
+/// Start what the update asked of this machine on rakumux.com needs next:
+/// install it (on a thread of its own: a download takes a while), report it,
+/// then hand over to the new account service. Only while signed in with the
+/// account's feed on and rakumux.com `confirmed` this machine's name.
+fn follow_updates<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    updates: &mut UpdateSync,
+    updater: Option<&Arc<dyn crate::service::Updater>>,
+    confirmed: bool,
+    work: &Workers<A, C>,
+    messages: &Sender<Message>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled =
+        refresher.account().is_some() && refresher.feed_switch() == Some(true) && confirmed;
+    updates.set_enabled(enabled, now);
+    for _ in 0..4 {
+        match updates.next_work(now) {
+            Some(UpdateWork::Install { id, version }) => {
+                let Some(updater) = updater.cloned() else {
+                    updates.installed(&id, Err(crate::service::UpdateFailure::Unsupported));
+                    continue;
+                };
+                let messages = messages.clone();
+                let installing = id.clone();
+                let started = thread::Builder::new()
+                    .name("rakumux-status-update".into())
+                    .spawn(move || {
+                        let result = updater.install(&version);
+                        let _ = messages.send(Message::UpdateInstalled(installing, result));
+                    });
+                if started.is_err() {
+                    updates.installed(&id, Err(crate::service::UpdateFailure::InstallFailed));
+                }
+            }
+            Some(UpdateWork::Report(request)) => match refresher.feed_job(request) {
+                Some(job) => {
+                    let _ = work.send(Work::UpdateReport(job));
+                }
+                None => {
+                    updates.reported(false, Err(FeedFailure::Unauthorized), now);
+                    return;
+                }
+            },
+            Some(UpdateWork::HandOver) => {
+                if let Some(updater) = updater {
+                    updater.hand_over();
+                }
+                return;
+            }
+            None => return,
+        }
+    }
+}
+
 /// Upload the session list when it's due. Only while signed in with the
 /// account's feed on.
 fn follow_sessions<S, A, C>(
@@ -1966,6 +2090,16 @@ where
                 match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
                     Ok(completion) => Message::NewSessionReported(completion),
                     Err(_) => Message::NewSessionReported(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
+            }
+            Ok(Work::UpdateReport(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::UpdateReported(completion),
+                    Err(_) => Message::UpdateReported(FeedCompletion {
                         revision,
                         outcome: Err(FeedFailure::Unavailable(None)),
                     }),

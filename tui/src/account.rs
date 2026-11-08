@@ -135,6 +135,7 @@ pub fn signed_out_feed() -> FeedPage {
         more: false,
         open: None,
         machine: None,
+        release: None,
     }
 }
 
@@ -413,7 +414,12 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
         }
     }
     let settings = layout.home.join("config.json");
-    let config = ServiceConfig::from_env()?.with_turn_settings(move || turn_settings(&settings));
+    let config = ServiceConfig::from_env()?
+        .with_turn_settings(move || turn_settings(&settings))
+        .with_updater(std::sync::Arc::new(MachineUpdater {
+            layout: layout.clone(),
+            version,
+        }));
     // Its HTTP clients block, which a thread of the async runtime may not do.
     std::thread::Builder::new()
         .name("rakumux-status-service".into())
@@ -425,6 +431,88 @@ pub fn serve(layout: Layout, version: &'static str) -> Result<(), ServiceError> 
         .map_err(|_| ServiceError::Start)?
         .join()
         .map_err(|_| ServiceError::Start)?
+}
+
+/// Installs the releases asked of this machine on rakumux.com, through the
+/// verified path `U` takes (a binary installation only: signed GitHub
+/// releases), then restarts the server in place with the new `rakumux-ptyd`
+/// (sessions keep running) and the local API; hands over to the new
+/// release's account service once that's reported.
+struct MachineUpdater {
+    layout: Layout,
+    version: &'static str,
+}
+
+impl MachineUpdater {
+    /// Where the installation's binaries are: beside this program, or beside
+    /// the launcher an install moved it to.
+    fn root(launcher: Option<&Path>) -> Option<PathBuf> {
+        match launcher {
+            Some(launcher) => launcher.parent().map(Path::to_path_buf),
+            None => std::env::current_exe()
+                .ok()
+                .map(|program| on_disk(&program))
+                .and_then(|program| program.parent().map(Path::to_path_buf)),
+        }
+    }
+
+    /// The installation's root after the last install (this program's).
+    fn installed_root(&self) -> Option<PathBuf> {
+        Self::root(None)
+    }
+}
+
+impl service::Updater for MachineUpdater {
+    fn install(&self, version: &str) -> Result<(), service::UpdateFailure> {
+        use crate::updater::{InstallMethod, SystemUpdateService, UpdateService};
+        let updater = SystemUpdateService;
+        if updater.method() != InstallMethod::Binary {
+            return Err(service::UpdateFailure::Unsupported);
+        }
+        let launcher = updater
+            .install(version, InstallMethod::Binary)
+            .map_err(|error| {
+                eprintln!(
+                    "rakumux-status: an update asked on rakumux.com couldn't install: {error:#}"
+                );
+                service::UpdateFailure::InstallFailed
+            })?;
+        let root = Self::root(launcher.as_deref()).ok_or(service::UpdateFailure::RestartFailed)?;
+        let ptyd = root.join("rakumux-ptyd");
+        let client = session_core::client::Client::connect(session_core::client::ClientConfig {
+            layout: self.layout.clone(),
+            client_name: "rakumux-status-update".into(),
+            version: self.version.into(),
+            auth: session_core::client::AuthMode::User,
+            spawn: false,
+            ptyd_path: None,
+        })
+        .map_err(|_| service::UpdateFailure::RestartFailed)?;
+        use session_core::client::SessionApi;
+        client
+            .restart_daemon(Some(&ptyd))
+            .map_err(|_| service::UpdateFailure::RestartFailed)?;
+        // The local API, when it runs, on the new release too.
+        let _ = crate::remote_access::restart_api(&self.layout, Some(&ptyd));
+        Ok(())
+    }
+
+    fn hand_over(&self) {
+        let Some(root) = self.installed_root() else {
+            return;
+        };
+        use std::os::unix::process::CommandExt;
+        let mut command = std::process::Command::new(root.join("rakumux"));
+        command
+            .args(["account", "restart-service"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .env(session_core::env::HOME, &self.layout.home)
+            .process_group(0);
+        // Not waited for: it stops this service, then starts its own.
+        let _ = command.spawn();
+    }
 }
 
 /// `sessions.ai_summary` of `config.json`: the defaults when it can't be read.

@@ -1168,6 +1168,7 @@ impl crate::account::AccountAccess for FakeAccount {
             more: false,
             open: None,
             machine: None,
+            release: None,
         })
     }
 }

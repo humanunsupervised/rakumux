@@ -369,6 +369,9 @@ pub enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Restart the account service with this binary's (after an update)
+    #[command(hide = true)]
+    RestartService,
 }
 
 #[derive(Subcommand, Debug, PartialEq)]

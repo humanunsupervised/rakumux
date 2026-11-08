@@ -46,6 +46,7 @@ pub fn page(generation: u64, revision: u64, entries: Vec<FeedEntry>, more: bool)
         more,
         open: None,
         machine: None,
+        release: None,
     }
 }
 
@@ -137,6 +138,67 @@ fn feed_harness(account: FakeAccount, layout: SessionLayout) -> (Harness, Arc<Fa
 fn tick(h: &mut Harness, after: Duration) {
     h.app.on_tick(Instant::now() + after);
     h.app.process_pending();
+}
+
+/// rakumux.com says a newer release is out (through the account service's
+/// feed pages, as it's published): recorded for the home's windows and
+/// offered at once, without waiting for the hourly check: installed by itself
+/// with automatic updates on, else the update modal. An older or the same
+/// version changes nothing.
+#[tokio::test]
+async fn a_release_rakumux_com_announces_is_offered_at_once() {
+    use crate::app::testing::FakeUpdater;
+    for auto_update in [false, true] {
+        let (mut h, account) = feed_harness(FakeAccount::with_feed(), SessionLayout::Sidebar);
+        // No release found by a check of its own.
+        let updater = Arc::new(FakeUpdater::default());
+        h.app.updater = updater.clone();
+        h.app.settings.sessions.auto_update = auto_update;
+        tick(&mut h, Duration::from_secs(1));
+        assert!(h.app.pending_update_version.is_none());
+        // A read every 10 s or so: each page is read by the next tick.
+        let mut at = 1;
+        let mut read = |h: &mut Harness, page: FeedPage| {
+            let asked = account.feed_asks().len();
+            account.feed_pages.lock().unwrap().push_back(page);
+            while account.feed_asks().len() == asked {
+                at += 11;
+                tick(h, Duration::from_secs(at));
+            }
+        };
+        for version in ["0.0.1", crate::app::app_version()] {
+            let mut same = page(1, 1, vec![], false);
+            same.release = Some(version.into());
+            read(&mut h, same);
+            assert!(h.app.pending_update_version.is_none(), "{version}");
+        }
+        let mut announced = page(1, 2, vec![], false);
+        announced.release = Some("99.3.0".into());
+        read(&mut h, announced);
+        let state =
+            crate::updater::UpdateState::load_from(&h.home.path().join("update_state.json"))
+                .unwrap();
+        assert_eq!(state.latest_version.as_deref(), Some("99.3.0"));
+        if auto_update {
+            assert!(
+                updater.calls().contains(&"install 99.3.0".to_string()),
+                "installed by itself: {:?}",
+                updater.calls()
+            );
+        } else {
+            assert_eq!(h.app.pending_update_version.as_deref(), Some("99.3.0"));
+            tick(&mut h, Duration::from_secs(41));
+            assert!(
+                matches!(&h.app.mode, AppMode::Upgrade(dialog) if dialog.prompted && dialog.latest_version.as_deref() == Some("99.3.0")),
+                "{:?}",
+                h.app.mode
+            );
+            assert!(
+                !updater.calls().iter().any(|c| c.starts_with("install")),
+                "nothing installed before Update now"
+            );
+        }
+    }
 }
 
 /// The feed shown with `f`, with the keys.

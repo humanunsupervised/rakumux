@@ -232,6 +232,11 @@ pub struct FeedPage {
     /// differ from its hostname; absent from an older service.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// The newest stable Rakumux release rakumux.com knows of (its version),
+    /// which a TUI offers once it's newer than its own; absent while none is
+    /// known, and from an older service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<String>,
 }
 
 struct Cached {
@@ -474,6 +479,7 @@ impl FeedCache {
             more,
             open: (self.open_revision > after).then(|| self.open.clone()),
             machine: None,
+            release: None,
         }
     }
 

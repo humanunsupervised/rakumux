@@ -171,6 +171,12 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     reply_state: Option<std::path::PathBuf>,
     /// Where new sessions keep which were started across a restart.
     new_session_state: Option<std::path::PathBuf>,
+    /// Where updates keep which were installed across a restart.
+    update_state: Option<std::path::PathBuf>,
+    /// Installs the releases asked of this machine on rakumux.com.
+    updater: Option<std::sync::Arc<dyn crate::service::Updater>>,
+    /// This Rakumux's version, which the session list says.
+    version: Option<String>,
     /// This machine's id and name for the feed, until the owner takes it.
     machine: Option<crate::feed::MachineIdentity>,
     /// The name this service last gave each session (its AI title).
@@ -211,6 +217,9 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             uploads: None,
             reply_state: None,
             new_session_state: None,
+            update_state: None,
+            updater: None,
+            version: None,
             machine: None,
             titles: Titles::default(),
             titled: TitledChats::default(),
@@ -290,6 +299,40 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where new sessions keep their state, if anywhere.
     pub(crate) fn new_session_state(&self) -> Option<std::path::PathBuf> {
         self.new_session_state.clone()
+    }
+
+    /// Keep which updates were installed here, and the reports not yet taken,
+    /// in `path`, so a restarted service never installs one twice.
+    pub fn with_update_state(mut self, path: std::path::PathBuf) -> Self {
+        self.update_state = Some(path);
+        self
+    }
+
+    pub(crate) fn update_state(&self) -> Option<std::path::PathBuf> {
+        self.update_state.clone()
+    }
+
+    /// Install the releases asked of this machine on rakumux.com with `updater`.
+    pub fn with_updater(mut self, updater: std::sync::Arc<dyn crate::service::Updater>) -> Self {
+        self.updater = Some(updater);
+        self
+    }
+
+    pub(crate) fn updater(&self) -> Option<std::sync::Arc<dyn crate::service::Updater>> {
+        self.updater.clone()
+    }
+
+    /// This Rakumux is `version` (the session list says it, when it's a release's).
+    pub fn with_version(mut self, version: &str) -> Self {
+        self.version = Some(version.to_owned());
+        self
+    }
+
+    /// This Rakumux's version, when it's a stable release's.
+    pub(crate) fn version(&self) -> Option<String> {
+        self.version
+            .clone()
+            .filter(|version| crate::feed::is_version(version))
     }
 
     /// Go by `machine` in the feed (made from the hostname, memory only,

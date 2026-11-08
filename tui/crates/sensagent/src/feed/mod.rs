@@ -25,6 +25,7 @@ mod resources;
 mod sessions;
 mod sync;
 mod turn;
+mod updates;
 mod uploads;
 mod wire;
 
@@ -47,6 +48,7 @@ pub(crate) use sessions::SessionSync;
 pub use sync::machine_name;
 pub(crate) use sync::FeedSync;
 pub use turn::{FeedTurn, FeedTurnStatus};
+pub(crate) use updates::{is_version, UpdateSync, UpdateWork, REMOTE_UPDATE};
 pub(crate) use uploads::{fetch, Uploads, CLEAN_EVERY};
 pub use wire::FeedFailure;
 
