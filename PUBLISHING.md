@@ -37,12 +37,13 @@ privacy. Previously public Apache-2.0 marketing/contracts retain their license.
 - [ ] Generate `THIRD_PARTY_NOTICES` and run the isolated package-install checks.
 - [ ] Create the release against the exact reviewed source commit; package scripts verify its
   `v<version>` tag rather than letting GitHub select a default-branch commit.
-- [ ] Once (done for the main key): the release signing keys, their secrets kept offline, are
-  listed in `install/release-keys.pub` and copied into `landing/public/install.sh`
-  (`release-scripts/release-keys.sh check` and `sync`). Only public keys go in the repository.
+- [ ] Once (done for the main key): the release signing keys are listed in
+  `install/release-keys.pub` and copied into `landing/public/install.sh`
+  (`release-scripts/release-keys.sh check` and `sync`). Only public keys go in the repository;
+  the secrets are kept offline, or (the `ci` key) in the protected `release` environment.
   See "Signed releases" in [install/AGENTS.md](install/AGENTS.md).
-- [ ] Each release: once CI has uploaded the draft, the maintainer signs and publishes it
-  (see "Signing a release" in [install/AGENTS.md](install/AGENTS.md)). Never
+- [ ] Each release: once CI has uploaded the draft, approve the workflow's `sign` job, or sign
+  and publish it offline (see "Signing a release" in [install/AGENTS.md](install/AGENTS.md)). Never
   publish a draft from GitHub's page: installers and the updater refuse an unsigned release, and
   the npm job fails on it.
 - [ ] For marketing-only deployment, verify hosting and DNS, then deploy static `landing/`.

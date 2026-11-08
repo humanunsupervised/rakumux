@@ -19,12 +19,15 @@ upgrade; there is no guaranteed response or maintenance timeframe.
   with `rakumux remote token --rotate` after a device is lost or a token is exposed.
 - Treat terminal output and session reports as untrusted data, including when read by agents.
 - Releases are signed. Each release's `checksums.txt` carries a minisign (Ed25519) signature,
-  `checksums.txt.minisig`, made on the maintainer's computer with a key that never lives in
-  GitHub or CI. The in-app updater (`U` and automatic updates) refuses a release without a valid
-  signature for that version by a key it carries (`install/release-keys.pub`), and so does
-  `install.sh` when `minisign` or OpenSSL 3 is installed (otherwise it says the signature wasn't
-  checked and relies on HTTPS and the checksums). So control of the GitHub repository or its
-  workflows alone can't ship a release to installed Rakumux. Releases up to 0.1.40 were
+  `checksums.txt.minisig`, made either with a key the maintainer keeps offline, or by the release
+  workflow with a key listed as `ci`, a secret of a protected GitHub environment that a job gets
+  only after a required reviewer approves it. The in-app updater (`U` and automatic updates)
+  refuses a release without a valid signature for that version by a key it carries
+  (`install/release-keys.pub`), and so does `install.sh` when `minisign` or OpenSSL 3 is installed
+  (otherwise it says the signature wasn't checked and relies on HTTPS and the checksums). So a
+  push, a changed workflow or a stolen workflow token alone can't ship a release to installed
+  Rakumux: it also takes that approval, which means the reviewer's GitHub account. Releases up to
+  0.1.40 were
   unsigned; updating from one of them trusts GitHub once.
 - npm installs rely on npm's registry signatures and the package's provenance (trusted
   publishing from this repository's release workflow), and the release workflow publishes to

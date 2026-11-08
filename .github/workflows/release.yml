@@ -1,9 +1,14 @@
 name: Binary release
 
-# A pushed v* tag builds the release and leaves it a draft, unsigned. The
-# maintainer signs it offline, uploads checksums.txt.minisig and publishes
-# it: that `published` event runs the npm job, which checks the signature
-# first. The signing key is never in GitHub. npm's trusted publisher names this file, so npm stays in it.
+# A pushed v* tag builds the release and leaves it a draft, unsigned. Then
+# either the `sign` job signs and publishes it, once the `release`
+# environment's reviewer approves (its key is that environment's secret; only
+# when the repository variable RAKUMUX_CI_SIGNING is `true` and the newest
+# published release already trusts that key), and the same run goes on to npm;
+# or the maintainer signs it with the offline key, uploads
+# checksums.txt.minisig and publishes it, and that `published` event runs the
+# npm job. npm checks the signature first either way. See "Signed releases" in
+# install/AGENTS.md. npm's trusted publisher names this file, so npm stays in it.
 on:
   push:
     tags: ['v*']
@@ -133,14 +138,86 @@ jobs:
           fi
           echo "::notice::$tag is a draft ($mode). It is published once signed."
 
+  # Whether this run may sign the draft: CI signing is on, and the key named
+  # `ci` in install/release-keys.pub is listed the same in the newest
+  # published release's, so every copy that updated to that release accepts
+  # the signature (a release that adds or changes the key is signed offline).
+  signable:
+    needs: [prepare, publish]
+    if: github.event_name == 'push' && vars.RAKUMUX_CI_SIGNING == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+      trusted_by: ${{ steps.check.outputs.trusted_by }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check that the newest published release trusts the CI key
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          current="$(./release-scripts/release-keys.sh named ci)"
+          newest="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 \
+            --json tagName --jq '.[].tagName' | grep -vx "$GITHUB_REF_NAME" | head -1 || true)"
+          trusted=""
+          if [[ -n "$current" && -n "$newest" ]]; then
+            git show "$newest:install/release-keys.pub" > "$RUNNER_TEMP/trusted-keys.pub" 2>/dev/null || true
+            trusted="$(RAKUMUX_RELEASE_KEYS="$RUNNER_TEMP/trusted-keys.pub" ./release-scripts/release-keys.sh named ci 2>/dev/null || true)"
+          fi
+          if [[ -n "$current" && "$trusted" == "$current" ]]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "trusted_by=$newest" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$GITHUB_REF_NAME stays a draft: ${newest:-no published release} doesn't list this commit's ci key, so sign it with the offline key."
+          fi
+
+  # Signs and publishes the draft once the `release` environment's reviewer
+  # approves this job (GitHub asks them; one tap in GitHub Mobile). The key is
+  # that environment's secret, only ever in this job.
+  sign:
+    needs: [prepare, publish, signable]
+    if: github.event_name == 'push' && needs.signable.outputs.ok == 'true'
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    outputs:
+      published: ${{ steps.sign.outputs.published }}
+      mode: ${{ steps.sign.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install --yes minisign && minisign -v
+      - name: Sign and publish the draft
+        id: sign
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RAKUMUX_SIGNING_KEY: ${{ secrets.RAKUMUX_RELEASE_SIGNING_KEY }}
+          TRUSTED_BY: ${{ needs.signable.outputs.trusted_by }}
+        shell: bash
+        run: |
+          git show "$TRUSTED_BY:install/release-keys.pub" > "$RUNNER_TEMP/trusted-keys.pub"
+          ./release-scripts/sign-draft.sh "$GITHUB_REF_NAME" --trusted-by "$RUNNER_TEMP/trusted-keys.pub"
+
   # The published, signed GitHub release's packages, as install.sh downloads
   # them, go to npm as `rakumux`. Trusted publishing (OIDC): no npm secret;
   # npmjs.com trusts this repository's release.yml. Runs when the signed
   # release is published; publish-npm.sh checks its signature against
   # install/release-keys.pub first. If it fails, re-run this job; a version
-  # on npm is skipped.
+  # on npm is skipped. Runs when a release signed offline is published, or in
+  # the tag's run once `sign` published it (a release the workflow's own token
+  # publishes starts no `release` event, so npm never runs twice).
   npm:
-    if: github.event_name == 'release'
+    needs: [sign]
+    if: >-
+      always() && (github.event_name == 'release' ||
+      (github.event_name == 'push' && needs.sign.outputs.published == 'true'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -151,7 +228,7 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          PRERELEASE: ${{ github.event.release.prerelease }}
+          PRERELEASE: ${{ github.event.release.prerelease || needs.sign.outputs.mode == 'prerelease' }}
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"

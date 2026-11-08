@@ -6,11 +6,11 @@
 # file by tui/src/updater/signature.rs), https://rakumux.com/install.sh (a copy,
 # written by `release-scripts/release-keys.sh sync`) and publish-npm.sh accept a
 # release only when its checksums.txt.minisig is a signature by one of these
-# keys. The maintainer keeps the secrets offline, never on a server or in
-# GitHub.
+# keys. `main`'s secret is kept offline; a key named `ci` is the one the release
+# workflow signs with, a secret of its protected `release` environment.
 #
-# One key for now. A second key (an offline backup, or a successor) added here
-# reaches installed copies with the next release they verify, signed by a key
-# they already trust; see "Rotation" in install/AGENTS.md. Add it as:
-# RWQ...its 56 characters... backup
+# A key added here reaches installed copies with the next release they verify,
+# signed by a key they already trust; see "Rotation" in install/AGENTS.md. Add
+# one as:
+# RWQ...its 56 characters... ci
 RWSbAhedaBF6C8DldJ7V1E44o4xiwGcF5k8uNDRmH0+k4drHtANpaq2E main

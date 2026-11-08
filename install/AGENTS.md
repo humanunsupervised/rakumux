@@ -122,9 +122,10 @@ selection and builds only those targets on native runners. Supported selections 
 (static musl), `macos-arm64` and `macos-intel`. All three are selected by default, independent
 of the invoking machine. `--targets` overrides that selection.
 Every selected package passes `test-install.sh` with an isolated install prefix. The publish
-job verifies the complete selected asset set and combines its checksums before uploading a draft,
-and stops there: the workflow never publishes a release. The maintainer signs the draft and
-publishes it (see [Signing a release](#signing-a-release)).
+job verifies the complete selected asset set and combines its checksums before uploading a draft:
+nothing publishes a release unsigned. The draft is then signed and published by the workflow's
+`sign` job, once its reviewer approves, or by the maintainer with the offline key (see
+[Signing a release](#signing-a-release)).
 `--draft` leaves it unpublished once signed; `--prerelease` does not replace the latest
 stable release.
 The public installer and the in-app updater download these GitHub release assets and refuse a
@@ -246,11 +247,12 @@ fails there with a clear message.
 
 ## Signed releases
 
-A compromised GitHub account or workflow could otherwise publish any tarball together with a
+A compromised workflow, or a stolen token, could otherwise publish any tarball together with a
 `checksums.txt` that vouches for it. So every release's `checksums.txt` is signed with
-**minisign** (Ed25519) by a password-protected key the maintainer keeps offline: never on a
-server, in GitHub or in CI. Installed Rakumux, `install.sh` and
-the npm job accept a release only with a valid signature by a key in `install/release-keys.pub`.
+**minisign** (Ed25519): by the `ci` key, a secret of the protected `release` GitHub environment
+that only a job its reviewer approved can read, or by the **main** key, password-protected and
+kept offline, never on a server or in GitHub. Installed Rakumux, `install.sh` and the npm job
+accept a release only with a valid signature by a key in `install/release-keys.pub`.
 
 - **The signature**: `checksums.txt.minisig`, a prehashed minisign signature of `checksums.txt`
   whose trusted comment is `rakumux-release tag:v<version> file:checksums.txt timestamp:<unix>`.
@@ -287,12 +289,29 @@ the npm job accept a release only with a valid signature by a key in `install/re
 
 ### Signing a release
 
-The maintainer signs each draft offline: `checksums.txt` with minisign (prehashed, the trusted
-comment above), checked against `install/release-keys.pub` (`release-scripts/release-keys.sh
-verify <checksums.txt> <checksums.txt.minisig> v<version>`), then uploads
-`checksums.txt.minisig` and publishes the release as the tag's `Release-Mode` says (stable: the
-latest release; prerelease; draft: left unpublished). Publishing runs the npm job. The signing
-tools aren't part of this repository. A published release is never re-signed.
+Both ways sign `checksums.txt` with minisign (prehashed, the trusted comment above), check it
+against `install/release-keys.pub` (`release-scripts/release-keys.sh verify <checksums.txt>
+<checksums.txt.minisig> v<version>`), upload `checksums.txt.minisig` and publish the release as
+the tag's `Release-Mode` says (stable: the latest release; prerelease; draft: left unpublished).
+A published release is never re-signed.
+
+- **In the workflow, approved** (`.github/workflows/release.yml`, jobs `signable` and `sign`;
+  `release-scripts/sign-draft.sh`): with the repository variable `RAKUMUX_CI_SIGNING` set to
+  `true`, `signable` checks, with no secrets, that the key named `ci` in this commit's
+  `install/release-keys.pub` is listed the same in the newest published release's, so every
+  copy that updated to that release accepts the signature. `sign` then runs in the `release`
+  environment: GitHub holds it until a required reviewer approves (a tap in GitHub Mobile), and
+  only then gives it the secret `RAKUMUX_RELEASE_SIGNING_KEY`, a key made with `minisign -G -W`
+  (no password: the environment's protection is its secret store and the approval, and nobody
+  is there to type one). `sign-draft.sh` checks the draft as a person would (a draft without a
+  signature, an annotated tag with a `Release-Mode`, every package matching `checksums.txt` and
+  nothing else there), signs, verifies against this commit's keys and the newest published
+  release's, and publishes. The same run then goes on to npm: a release published with the
+  workflow's own token starts no `release` event.
+- **Offline, with the main key**: for a release `signable` refuses (one that adds or changes the
+  `ci` key), when the environment's key is unavailable, or with CI signing off. The draft
+  waits; publishing it starts the `release` event, which runs the npm job. These signing tools
+  aren't part of this repository.
 
 ### Rotation
 
@@ -304,15 +323,25 @@ through a release signed by a key it already trusts.
   (`<key> backup`), `release-keys.sh sync`, and release as usual, signed by the main key.
   Every installation that verifies that release trusts both keys from then on; `install.sh`
   trusts both as soon as the site serves the synced copy.
+- **Adding the `ci` key**: make it with `minisign -G -W` and put the secret file straight into
+  the environment (`gh secret set RAKUMUX_RELEASE_SIGNING_KEY --env release < ci.key`, then
+  delete the file; it is never kept). List it as `<key> ci`, `release-keys.sh sync`, and release
+  signed offline. Automatic updates install only the newest release, so a copy that hasn't
+  taken that release yet refuses the next one if the workflow signs it: leave about a week
+  before setting `RAKUMUX_CI_SIGNING` to `true` (a copy that still misses it updates once with
+  `install.sh`, which fetches the current keys).
+- **Replacing the `ci` key** (or after an exposure): remove the secret, list the new key as
+  `ci` in a release signed offline, then set the new secret and wait the same week. `signable`
+  refuses until the newest published release lists the same key.
 - **Retiring a key**: drop its line in a release signed by a key that stays. Installations
   updated past that release no longer accept it.
-- **The trade-off of one key**: today the main key is the only trusted key. If it's lost, no
+- **The trade-off of one key**: while the main key is the only trusted key, if it's lost no
   installed copy can accept another release; if it's exposed, an attacker who also controls
   GitHub can sign releases every installed copy accepts. Either way the only way to a new key
   is users reinstalling with `install.sh` once a release with the new key is out (npm and
   Homebrew users updating through their package manager get it then too). With a second
-  trusted key kept offline, a release signed by it replaces the main key for every installation
-  that updates. When the main key is exposed, rotate at once and say so in the release notes.
+  trusted key, a release signed by it replaces the other for every installation that updates.
+  When a key is exposed, rotate at once and say so in the release notes.
 
 ## Licensing
 

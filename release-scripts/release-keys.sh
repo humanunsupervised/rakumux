@@ -5,6 +5,7 @@
 # Usage:
 #   release-keys.sh list                    the keys in install/release-keys.pub
 #   release-keys.sh check                   fails unless it lists at least one valid key
+#   release-keys.sh named NAME              the key listed with that name (`ci`), if any
 #   release-keys.sh verify FILE SIG TAG     FILE (checksums.txt) is signed by one
 #                                           of the keys, for release TAG
 #   release-keys.sh sync                    write the keys into landing/public/install.sh
@@ -153,6 +154,12 @@ check_keys() {
     printf '%s lists %s release key(s)\n' "$KEYS_FILE" "$count"
 }
 
+# The key KEYS_FILE lists under NAME (the word after it), if any.
+named_key() {
+    [[ -f "$KEYS_FILE" ]] || fail "no keys file: $KEYS_FILE"
+    sed -e 's/#.*//' "$KEYS_FILE" | awk -v name="$1" 'NF >= 2 && $2 == name { print $1; exit }'
+}
+
 # Rewrite the RELEASE_KEYS line of the installer.
 sync_installer() {
     local keys line
@@ -168,6 +175,10 @@ sync_installer() {
 case "${1:-}" in
     list) list_keys ;;
     check) check_keys ;;
+    named)
+        [[ $# -eq 2 ]] || fail "usage: release-keys.sh named NAME"
+        named_key "$2"
+        ;;
     verify)
         [[ $# -eq 4 ]] || fail "usage: release-keys.sh verify FILE SIGNATURE TAG"
         [[ -f "$2" ]] || fail "no such file: $2"
@@ -187,7 +198,7 @@ case "${1:-}" in
         ;;
     sync) sync_installer ;;
     -h | --help | "")
-        sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
         ;;
     *) fail "unknown command: $1" ;;
 esac
