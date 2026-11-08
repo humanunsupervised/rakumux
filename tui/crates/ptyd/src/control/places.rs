@@ -136,6 +136,28 @@ impl Places {
         self.by_session.remove(id);
     }
 
+    /// Every session's working trees (edited or not), to look for the ones
+    /// gone from disk ([`Places::forget_gone`]).
+    pub fn every_path(&self) -> Vec<(SessionId, PathBuf)> {
+        self.by_session
+            .iter()
+            .flat_map(|(id, list)| {
+                list.iter()
+                    .map(move |place| (id.clone(), place.path.clone()))
+            })
+            .collect()
+    }
+
+    /// Drop `gone` (working trees no longer on disk: a worktree removed, a
+    /// checkout deleted) from `id`'s list. Returns its list when that changed,
+    /// to save.
+    pub fn forget_gone(&mut self, id: &SessionId, gone: &[PathBuf]) -> Option<&[SessionPlace]> {
+        let list = self.by_session.get_mut(id)?;
+        let before = list.len();
+        list.retain(|place| !gone.contains(&place.path));
+        (list.len() != before).then_some(list.as_slice())
+    }
+
     /// `id`'s places as the registry holds them (a session restored from
     /// the session history), as [`Places::new`] takes them.
     pub fn insert(&mut self, id: &SessionId, places: Vec<SessionPlace>) {

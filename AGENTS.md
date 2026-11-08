@@ -736,7 +736,9 @@ last_active_at, added_at, git}` on the wire.
   but their worktrees, `~/.kimi-code`, `~/.amp` and Amp's cache and config, Claude Code's
   `/tmp/claude-<uid>`, Pi's `~/.pi/agent`) and
   in `/proc`, `/sys`, `/dev` are never places. Kept in the registry, so ended sessions keep
-  theirs; only paths are read. They stay on this machine (not in `rakumux-api`), except their
+  theirs; only paths are read. A working tree gone from disk (a worktree removed once its
+  branch was merged, a checkout deleted) is forgotten, every session's, ended ones too: the
+  daemon looks for each about once a minute and as it starts (`ControlService::sweep_places`). They stay on this machine (not in `rakumux-api`), except their
   names in the feed's session list (below).
 - **Status**: `live` (terminal running), `exited` (process ended; final screen kept; Enter
   restarts), `dead` (record without terminal, e.g. after a reboot or daemon restart; saved

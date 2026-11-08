@@ -61,6 +61,9 @@ const RESUME_CHECK_MS: i64 = 5_000;
 const OUTPUT_CHECK_MS: i64 = 1_000;
 /// How often a running agent's conversation is read for where it works.
 const PLACES_CHECK_MS: i64 = 1_000;
+/// How often sessions' places are looked for on disk, to forget the
+/// working trees removed since (`ControlService::sweep_places`).
+const PLACES_SWEEP_MS: i64 = 60_000;
 /// How much of it is read at once: a long one is read from its start over
 /// several checks.
 const PLACES_BUDGET: usize = 512 * 1024;
@@ -203,6 +206,8 @@ struct State {
     /// When the session history was last purged of sessions deleted too
     /// long ago (Unix milliseconds; 0: not yet).
     history_purged_ms: i64,
+    /// When sessions' places were last looked for on disk (`sweep_places`).
+    places_swept_ms: i64,
     /// Sessions a restart in place carried over, not looked at yet: the first
     /// tick reads each one's screen and agent conversation as output would,
     /// since a quiet one (an agent waiting for a prompt) shows none.
@@ -323,6 +328,7 @@ impl Inner {
                 replies: ReplyRing::default(),
                 adopted: Vec::new(),
                 history_purged_ms: 0,
+                places_swept_ms: 0,
                 views: HashMap::new(),
                 git: GitContexts::default(),
                 places: Places::new(saved_places),
@@ -1386,6 +1392,40 @@ impl Inner {
     /// Purge the session history of sessions deleted more than
     /// `HISTORY_RETENTION_DAYS` ago, with their saved files. At start, then
     /// about daily from the tick.
+    /// Forget the places (working trees) gone from disk: a worktree removed
+    /// once merged, a checkout deleted. Every session's, ended ones too; the
+    /// directories are looked at without the state lock, then each changed
+    /// list is saved and its view published.
+    pub(super) fn sweep_places(&self) {
+        let paths = {
+            let mut state = self.lock();
+            state.places_swept_ms = self.now();
+            state.places.every_path()
+        };
+        let mut gone: HashMap<SessionId, Vec<PathBuf>> = HashMap::new();
+        for (id, path) in paths {
+            if !path.is_dir() {
+                gone.entry(id).or_default().push(path);
+            }
+        }
+        if gone.is_empty() {
+            return;
+        }
+        let mut state = self.lock();
+        for (id, paths) in &gone {
+            let Some(list) = state.places.forget_gone(id, paths).map(<[_]>::to_vec) else {
+                continue;
+            };
+            let saved = registry(&state.registry)
+                .and_then(|registry| registry.set_places(id, &list).map_err(ApiError::from));
+            if let Err(error) = saved {
+                crate::log_warn!("control: places of {id}: {error}");
+            }
+            self.refresh(&mut state, id);
+        }
+        self.changed.notify_all();
+    }
+
     pub(super) fn purge_history(&self) {
         let now = self.now();
         let purged = {
@@ -2453,6 +2493,13 @@ impl Inner {
         };
         if purge_due {
             self.purge_history();
+        }
+        let sweep_due = {
+            let state = self.lock();
+            self.now().saturating_sub(state.places_swept_ms) >= PLACES_SWEEP_MS
+        };
+        if sweep_due {
+            self.sweep_places();
         }
         let adopted = std::mem::take(&mut self.lock().adopted);
         for (id, terminal) in adopted {
