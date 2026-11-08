@@ -1687,7 +1687,7 @@ another header, and never change the folders' order. Ready is the exception
 (`StatusGroup::by_last_read`): its sessions are listed by when each was last read
 (`last_active_at`, which going in sets, as it turns an unread reply ready), most recent first,
 under a sub-header per period (`grouping::ReadPeriod`, `ListRow::ReadPeriodHeader`: `◷ last hour`,
-last day, older, the clock from `Icons::clock`, tinted like its sessions' marks; with a session
+last 2, 4, 8, 12 and 24 hours, older; each holds those read since the one before), the clock from `Icons::clock`, tinted like its sessions' marks; with a session
 count; selectable, Enter opens the Status modal on ready; it and its rows a column in from
 ready's), so reading one moves it to the top; a pinned one too.
 The periods are measured from

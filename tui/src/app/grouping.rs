@@ -257,8 +257,16 @@ impl StatusGroup {
 pub enum ReadPeriod {
     /// Within the last hour.
     LastHour,
-    /// Within the last day.
-    LastDay,
+    /// Within the last 2 hours (and not the last hour).
+    Last2Hours,
+    /// Within the last 4 hours.
+    Last4Hours,
+    /// Within the last 8 hours.
+    Last8Hours,
+    /// Within the last 12 hours.
+    Last12Hours,
+    /// Within the last 24 hours.
+    Last24Hours,
     /// Longer ago.
     Older,
 }
@@ -267,13 +275,15 @@ impl ReadPeriod {
     /// The period, at `now`, of a session last read at `last_read` (both
     /// in seconds); a clock behind the read counts it as just now.
     pub fn of(now: i64, last_read: i64) -> ReadPeriod {
-        let age = now.saturating_sub(last_read);
-        if age <= 3_600 {
-            ReadPeriod::LastHour
-        } else if age <= 86_400 {
-            ReadPeriod::LastDay
-        } else {
-            ReadPeriod::Older
+        const HOUR: i64 = 3_600;
+        match now.saturating_sub(last_read) {
+            age if age <= HOUR => ReadPeriod::LastHour,
+            age if age <= 2 * HOUR => ReadPeriod::Last2Hours,
+            age if age <= 4 * HOUR => ReadPeriod::Last4Hours,
+            age if age <= 8 * HOUR => ReadPeriod::Last8Hours,
+            age if age <= 12 * HOUR => ReadPeriod::Last12Hours,
+            age if age <= 24 * HOUR => ReadPeriod::Last24Hours,
+            _ => ReadPeriod::Older,
         }
     }
 
@@ -290,7 +300,11 @@ impl ReadPeriod {
     pub fn label(self) -> &'static str {
         match self {
             ReadPeriod::LastHour => "last hour",
-            ReadPeriod::LastDay => "last day",
+            ReadPeriod::Last2Hours => "last 2 hours",
+            ReadPeriod::Last4Hours => "last 4 hours",
+            ReadPeriod::Last8Hours => "last 8 hours",
+            ReadPeriod::Last12Hours => "last 12 hours",
+            ReadPeriod::Last24Hours => "last 24 hours",
             ReadPeriod::Older => "older",
         }
     }
@@ -497,8 +511,13 @@ mod tests {
         let now = 1_000_000;
         assert_eq!(ReadPeriod::of(now, now), ReadPeriod::LastHour);
         assert_eq!(ReadPeriod::of(now, now - 3_600), ReadPeriod::LastHour);
-        assert_eq!(ReadPeriod::of(now, now - 3_601), ReadPeriod::LastDay);
-        assert_eq!(ReadPeriod::of(now, now - 86_400), ReadPeriod::LastDay);
+        assert_eq!(ReadPeriod::of(now, now - 3_601), ReadPeriod::Last2Hours);
+        assert_eq!(ReadPeriod::of(now, now - 7_200), ReadPeriod::Last2Hours);
+        assert_eq!(ReadPeriod::of(now, now - 7_201), ReadPeriod::Last4Hours);
+        assert_eq!(ReadPeriod::of(now, now - 14_401), ReadPeriod::Last8Hours);
+        assert_eq!(ReadPeriod::of(now, now - 28_801), ReadPeriod::Last12Hours);
+        assert_eq!(ReadPeriod::of(now, now - 43_201), ReadPeriod::Last24Hours);
+        assert_eq!(ReadPeriod::of(now, now - 86_400), ReadPeriod::Last24Hours);
         assert_eq!(ReadPeriod::of(now, now - 86_401), ReadPeriod::Older);
         assert_eq!(ReadPeriod::of(now, now + 60), ReadPeriod::LastHour);
         let mut session = view("A", "a", now - 7_200);
@@ -506,9 +525,9 @@ mod tests {
         session.lifecycle = Lifecycle::Idle;
         assert_eq!(
             ReadPeriod::of_done(now, &session),
-            Some(ReadPeriod::LastDay)
+            Some(ReadPeriod::Last2Hours)
         );
-        assert_eq!(ReadPeriod::LastDay.label(), "last day");
+        assert_eq!(ReadPeriod::Last2Hours.label(), "last 2 hours");
     }
 
     #[test]

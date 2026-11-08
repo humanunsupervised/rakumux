@@ -142,7 +142,11 @@ pub fn read_period_style(period: ReadPeriod) -> Style {
     };
     match period {
         ReadPeriod::LastHour => amber(DONE_FADE.0),
-        ReadPeriod::LastDay => amber(DONE_FADE.1),
+        ReadPeriod::Last2Hours
+        | ReadPeriod::Last4Hours
+        | ReadPeriod::Last8Hours
+        | ReadPeriod::Last12Hours
+        | ReadPeriod::Last24Hours => amber(DONE_FADE.1),
         ReadPeriod::Older => Style::default().fg(p.text_muted),
     }
 }
@@ -709,7 +713,7 @@ mod tests {
         let (hour, day, older) = (at(60), at(7_200), at(3 * 86_400));
         assert!([hour.0, day.0, older.0].iter().all(|mark| *mark == "○"));
         assert_eq!(hour.1, read_period_style(ReadPeriod::LastHour));
-        assert_eq!(day.1, read_period_style(ReadPeriod::LastDay));
+        assert_eq!(day.1, read_period_style(ReadPeriod::Last2Hours));
         assert_eq!(older.1.fg, Some(p.text_muted));
         if let Some(shade) = p.faded(p.accent_gold, 0.3) {
             assert_eq!(hour.1.fg, Some(shade));

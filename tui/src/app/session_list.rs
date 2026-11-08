@@ -1518,7 +1518,7 @@ mod tests {
             "^",
             "  · last hour",
             "b",
-            "  · last day",
+            "  · last 2 hours",
             "c",
             "  · older",
             "a",
@@ -1536,7 +1536,7 @@ mod tests {
     }
 
     #[test]
-    fn done_has_a_sub_section_for_the_last_hour_the_last_day_and_older() {
+    fn done_has_a_sub_section_per_read_period() {
         let now = 1_000_000;
         let read = |id: &str, ago: i64| {
             let mut session = aged(id, &id.to_lowercase(), 1, now - ago);
@@ -1551,6 +1551,8 @@ mod tests {
                 read("B", 60),
                 read("C", 7_200),
                 read("D", 600),
+                read("E", 5 * 3_600),
+                read("F", 20 * 3_600),
             ],
             Listed::All,
         );
@@ -1563,8 +1565,12 @@ mod tests {
                 "  · last hour",
                 "b",
                 "d",
-                "  · last day",
+                "  · last 2 hours",
                 "c",
+                "  · last 8 hours",
+                "e",
+                "  · last 24 hours",
+                "f",
                 "  · older",
                 "a",
                 "+"
@@ -1583,7 +1589,7 @@ mod tests {
             list.group_target(1),
             Some(Selection::Session(SessionId::from_string("C")))
         );
-        // Time passing moves D into the last day; nothing else changes.
+        // Time passing moves D into the last 2 hours, and C on to the last 4.
         assert!(list.set_clock(now + 3_100));
         assert_eq!(
             row_names(&list),
@@ -1591,9 +1597,14 @@ mod tests {
                 "^",
                 "  · last hour",
                 "b",
-                "  · last day",
+                "  · last 2 hours",
                 "d",
+                "  · last 4 hours",
                 "c",
+                "  · last 8 hours",
+                "e",
+                "  · last 24 hours",
+                "f",
                 "  · older",
                 "a",
                 "+"
@@ -1605,7 +1616,7 @@ mod tests {
         assert!(list.set_clock(now + 100_000));
         assert_eq!(
             row_names(&list),
-            ["^", "  · older", "b", "d", "c", "a", "+"]
+            ["^", "  · older", "b", "d", "c", "e", "f", "a", "+"]
         );
         assert!(matches!(list.selection(), Selection::Session(_)));
         // Only under Status.
