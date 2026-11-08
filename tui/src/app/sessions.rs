@@ -531,6 +531,9 @@ impl App {
                 let done = Section::Status(StatusGroup::Ready);
                 return self.open_section_picker(Grouping::Status, Some(done));
             }
+            Selection::StatusHeader(section, _) => {
+                return self.open_section_picker(section.grouping(), Some(section))
+            }
             Selection::FolderHeader(_)
             | Selection::WorktreeHeader(..)
             | Selection::NewSession
@@ -1129,7 +1132,7 @@ impl App {
             self.feed_divider.dragging = false;
             self.mouse_grab = None;
             // A dialog opened: a held session or divider is let go.
-            self.end_session_drag(false);
+            self.end_session_drag();
             if matches!(self.mode, AppMode::Folders(_)) {
                 self.folder_picker_mouse(event);
                 return;
@@ -1196,7 +1199,7 @@ impl App {
                 return;
             }
             // Released, or the release went unseen: drop it where it is.
-            self.end_session_drag(matches!(event.kind, MouseEventKind::Up(_)));
+            self.end_session_drag();
             if matches!(event.kind, MouseEventKind::Up(_)) {
                 return;
             }
@@ -1216,10 +1219,6 @@ impl App {
             {
                 Some(*row)
             }
-            _ => None,
-        });
-        self.hovered_pinned = self.hits.iter().find_map(|(area, hit)| match hit {
-            Hit::PinnedRow(row) | Hit::PinnedToggle(row) if inside(Some(*area)) => Some(*row),
             _ => None,
         });
         // What a click there would do: not over the current place's toggle.
@@ -1414,14 +1413,6 @@ impl App {
                     self.click_rtop_row(index);
                     return;
                 }
-                Some(Hit::PinnedRow(index)) => {
-                    self.click_pinned_row(index);
-                    return;
-                }
-                Some(Hit::PinnedToggle(index)) => {
-                    self.unpin_row(index);
-                    return;
-                }
                 Some(Hit::Drawer | Hit::DrawerBarTab) => {
                     self.focus_drawer();
                     return;
@@ -1483,7 +1474,6 @@ impl App {
                 _ => return,
             };
             match self.drawer_tab() {
-                DrawerTab::Pinned => return self.pinned_move(step),
                 DrawerTab::Rtop => return self.rtop_move(step),
                 DrawerTab::Feed => {}
             }
@@ -1628,59 +1618,13 @@ impl App {
 
     /// The session being dragged, once the pointer has moved.
     pub fn dragged_session(&self) -> Option<&SessionId> {
-        self.drag
-            .as_ref()
-            .filter(|d| d.started && !d.pinned)
-            .map(|d| &d.id)
-    }
-
-    /// The row of the drawer's Pinned tab being dragged, once the pointer
-    /// has moved.
-    pub fn dragged_pinned(&self) -> Option<&SessionId> {
-        self.drag
-            .as_ref()
-            .filter(|d| d.started && d.pinned)
-            .map(|d| &d.id)
-    }
-
-    /// The pointer moved with a Pinned row held: it takes the place of the
-    /// row under the pointer; above the rows the first place, below them
-    /// the last.
-    fn drag_pinned(&mut self, row: u16) {
-        let rows: Vec<(Rect, usize)> = self
-            .hits
-            .iter()
-            .filter_map(|(area, hit)| match hit {
-                Hit::PinnedRow(index) => Some((*area, *index)),
-                _ => None,
-            })
-            .collect();
-        let Some(top) = rows.iter().map(|(area, _)| area.y).min() else {
-            return;
-        };
-        let to = match rows.iter().find(|(a, _)| row >= a.y && row < a.bottom()) {
-            Some((_, index)) => *index,
-            None if row < top => 0,
-            None => usize::MAX,
-        };
-        let Some(drag) = self.drag.as_mut() else {
-            return;
-        };
-        drag.started = true;
-        let id = drag.id.clone();
-        let moved = self.list.move_pinned(&id, to);
-        if let Some(drag) = self.drag.as_mut() {
-            drag.moved |= moved;
-        }
+        self.drag.as_ref().filter(|d| d.started).map(|d| &d.id)
     }
 
     /// The pointer moved with a session held: it takes the place of the
     /// session under the pointer, if that's the way the pointer went, and
     /// stays within its part of the list.
     fn drag_session(&mut self, column: u16, row: u16) {
-        if self.drag.as_ref().is_some_and(|drag| drag.pinned) {
-            return self.drag_pinned(row);
-        }
         let tabs = self.screen().tabs.is_some();
         let Some(drag) = self.drag.as_mut() else {
             return;
@@ -1755,17 +1699,13 @@ impl App {
         }
     }
 
-    /// Let go of a dragged session (`released`: a button seen coming up);
-    /// the new order is saved, and a Pinned row selected already and not
-    /// moved goes into its session.
-    fn end_session_drag(&mut self, released: bool) {
+    /// Let go of a dragged session: the new order is saved.
+    fn end_session_drag(&mut self) {
         let Some(drag) = self.drag.take() else {
             return;
         };
         if drag.moved {
             self.save_session_order();
-        } else if drag.opens && !drag.started && released {
-            self.pinned_enter();
         }
     }
 

@@ -43,7 +43,6 @@ mod list_tabs;
 mod new_session;
 pub mod path_complete;
 mod phone_access;
-pub mod pinned;
 pub mod places;
 pub mod rtop;
 mod runtime;
@@ -146,11 +145,6 @@ pub struct SessionDrag {
     pub started: bool,
     /// The session moved.
     pub moved: bool,
-    /// A row of the drawer's Pinned tab, moved among the pinned sessions.
-    pub pinned: bool,
-    /// Let go without moving, it goes into its session (a Pinned row that
-    /// was selected already).
-    pub opens: bool,
 }
 
 impl SessionDrag {
@@ -161,17 +155,6 @@ impl SessionDrag {
             last: at,
             started: false,
             moved: false,
-            pinned: false,
-            opens: false,
-        }
-    }
-
-    /// A row of the drawer's Pinned tab, `id`, pressed.
-    pub fn pinned(id: SessionId, opens: bool) -> Self {
-        Self {
-            pinned: true,
-            opens,
-            ..Self::new(id, 0)
         }
     }
 }
@@ -228,11 +211,6 @@ pub enum Hit {
     /// A row of rtop (its index): selects it, or goes into its session as
     /// Enter does when it's selected already (at once on a phone).
     RtopRow(usize),
-    /// A row of the drawer's Pinned tab (its index): selects it and holds it
-    /// for a drag; let go on one selected already, goes into its session.
-    PinnedRow(usize),
-    /// The `★` on the Pinned row under the pointer (its index): unpins it.
-    PinnedToggle(usize),
     /// The open Folders modal (clicks inside it don't close it).
     FolderMenu,
     /// A row of the Folders modal.
@@ -367,10 +345,8 @@ pub struct App {
     /// The drawer has Rakumux mode's keys (its pane focused, its tab
     /// selected) rather than the list. Session mode clears it.
     drawer_focused: bool,
-    /// The drawer's tab: Pinned, the Feed or rtop.
+    /// The drawer's tab: the Feed or rtop.
     drawer_tab: drawer::DrawerTab,
-    /// The drawer's Pinned tab's selection (`app/pinned.rs`).
-    pinned_view: pinned::PinnedView,
     /// rtop (`app/rtop.rs`): its samples while it's on screen, its sort,
     /// folds and selection for as long as the window runs.
     pub rtop: rtop::RtopView,
@@ -426,8 +402,6 @@ pub struct App {
     /// The list row under the mouse pointer (terminals that report
     /// movement): a session row there shows its pin toggle.
     pub hovered_row: Option<usize>,
-    /// The row of the drawer's Pinned tab under the pointer.
-    pub hovered_pinned: Option<usize>,
     /// The place under the mouse pointer, on either of its lines (its list
     /// row, and which of its session's): it shows its copy mark.
     pub hovered_place: Option<(usize, places::PlaceRef)>,
@@ -531,7 +505,6 @@ impl App {
             drawer_open: false,
             drawer_focused: false,
             drawer_tab: drawer::DrawerTab::Feed,
-            pinned_view: pinned::PinnedView::default(),
             rtop: rtop::RtopView::default(),
             rtop_on_screen: false,
             feed_on_screen: false,
@@ -559,7 +532,6 @@ impl App {
             list_hidden: false,
             drag: None,
             hovered_row: None,
-            hovered_pinned: None,
             hovered_place: None,
             places_open: HashSet::new(),
             mode: AppMode::Normal,
@@ -767,7 +739,6 @@ impl App {
         self.list_hidden = !self.list_hidden;
         self.divider = DividerState::default();
         self.hovered_row = None;
-        self.hovered_pinned = None;
         self.hovered_place = None;
         self.sync_terminal_size();
     }
@@ -1029,7 +1000,7 @@ impl App {
             SettingsItem::Pinned => (
                 "Pinned",
                 "Your pinned sessions · *".into(),
-                "The sessions you pinned (p), in the drawer on the right beside the Feed. J/K or a drag orders them, Enter goes in.",
+                "The sessions you pinned (p), the list's first tab, by status. J/K or a drag orders them, Enter goes in.",
             ),
             SettingsItem::Rtop => (
                 "rtop",

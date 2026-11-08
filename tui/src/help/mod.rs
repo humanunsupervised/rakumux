@@ -200,7 +200,7 @@ pub enum KeyAction {
     PreviousSession,
     /// `f`: show the feed with the keys, give it the keys, or hide it.
     Feed,
-    /// `→`: the list's next tab (Status, Repos, Agent).
+    /// `→`: the list's next tab (Pinned, Status, Repos, Agent).
     NextTab,
     /// `←`: the previous tab.
     PreviousTab,
@@ -248,7 +248,7 @@ pub enum KeyAction {
     TerminalPanelBeside,
     /// `-`: the terminal panel below the session.
     TerminalPanelBelow,
-    /// `*`: the drawer's Pinned tab, the pinned sessions.
+    /// `*`: the list's Pinned tab, the pinned sessions.
     Pinned,
     /// `t`: rtop, what this machine, Rakumux and every session's processes
     /// use now.
@@ -399,7 +399,7 @@ impl KeyAction {
             KeyAction::NextSession => "Next session",
             KeyAction::PreviousSession => "Previous session",
             KeyAction::Feed => "Feed (show, focus or hide)",
-            KeyAction::NextTab => "Next tab (Status, Repos, Agent)",
+            KeyAction::NextTab => "Next tab (Pinned, Status, Repos, Agent)",
             KeyAction::PreviousTab => "Previous tab",
             KeyAction::Top => "Top of the list",
             KeyAction::Bottom => "Bottom of the list",
@@ -429,7 +429,7 @@ impl KeyAction {
             KeyAction::TerminalPanel => "Terminal panel (show, focus or hide)",
             KeyAction::TerminalPanelBeside => "Terminal panel beside the session",
             KeyAction::TerminalPanelBelow => "Terminal panel below the session",
-            KeyAction::Pinned => "Pinned sessions (show, focus or hide)",
+            KeyAction::Pinned => "Pinned sessions",
             KeyAction::Rtop => "rtop (show, focus or hide)",
             KeyAction::SessionHistory => "Session history",
             KeyAction::Help => "Help",
@@ -558,7 +558,7 @@ impl KeyAction {
                 None => "Option/Alt+↑/↓ are turned off in your settings; ↑/↓ and j/k move.".into(),
             },
             KeyAction::Top => {
-                "The tabs (Status, Repos, Agent) are the first row; ←/→ switch them."
+                "The tabs (Pinned, Status, Repos, Agent) are the first row; ←/→ switch them."
                     .into()
             }
             KeyAction::Feed => "What your agents said when they finished a turn, on every \
@@ -582,7 +582,7 @@ impl KeyAction {
                 "Scrolls the history of the session shown on the right.".into()
             }
             KeyAction::MoveDown | KeyAction::MoveUp => {
-                "Within its repository, agent or status; in the drawer's Pinned tab, among the pinned sessions. \
+                "Within its repository and status, its agent and status, its status, or its status under Pinned. \
                  Dragging it with the mouse does the same. The order is kept until you change \
                  it."
                     .into()
@@ -648,9 +648,8 @@ impl KeyAction {
                  narrower, it shows below. Phones show it below."
                     .into()
             }
-            KeyAction::Pinned => "The sessions you pinned, in the drawer on the right, first \
-                 before the Feed and rtop. Moving through them previews each; Enter goes in, p \
-                 unpins, J/K or a drag orders them, Esc gives the list the keys back."
+            KeyAction::Pinned => "The sessions you pinned, the list's first tab, under a bar \
+                 per status. Enter goes in, p unpins, J/K or a drag orders them."
                 .into(),
             KeyAction::Rtop => "This window, the Rakumux server, its other clients and \
                  every running session, each session's processes under it: CPU (100% is one \
@@ -1789,17 +1788,15 @@ fn moving_around(doc: &mut Doc, k: &KeyNames) {
         row(
             "↑, ↓, j, k",
             "Select a session or a header; the right side shows the session (the tabs, \
-             Status, Repos and Agent, are above the first)",
+             Pinned, Status, Repos and Agent, are above the first)",
         ),
         row(
             "←, →",
-            "Switch between the tabs, Status, Repos and Agent (h, l on the tabs too)",
+            "Switch between the tabs, Pinned, Status, Repos and Agent (h, l on the tabs too)",
         ),
         row(
             "*",
-            "Your pinned sessions, the drawer's first tab: shows it with the keys, gives it the \
-             keys, or hides it. With its keys, ↑/↓ preview each, Enter goes in, p unpins, J/K \
-             order them; Esc gives the list the keys",
+            "Your pinned sessions, the list's first tab, under a bar per status",
         ),
         row(
             "f",
@@ -1862,14 +1859,13 @@ fn mouse(doc: &mut Doc) {
     doc.heading("Mouse");
     doc.bullet("Click a session in the list to show it; click the session to work in it.");
     doc.bullet(
-        "Click a tab at the top of the list (Status, Repos, Agent) to group the list \
+        "Click a tab at the top of the list (Pinned, Status, Repos, Agent) to group the list \
          by it; click the active one (▾) to open its modal; click a row there to show it alone, All \
          to show everything, or outside it to close it.",
     );
     doc.bullet(
-        "Click the footer's Feed button to show the feed (again to hide it). Click Pinned, Feed \
-         or rtop on the drawer's band to switch. Drag a Pinned row to order them; click one \
-         selected already to go in. Click a reply or an rtop row to select it, again \
+        "Click the footer's Feed button to show the feed (again to hide it). Click Feed \
+         or rtop on the drawer's band to switch. Click a reply or an rtop row to select it, again \
          to read it or go into its session; click either side to give it the keys. Drag the \
          line left of the drawer to resize it.",
     );
@@ -2014,12 +2010,14 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
          it and `Enter` adds it.",
     );
     doc.text(
-        "The list's top row has three tabs: Status (where the list starts), a header per \
+        "The list's top row has four tabs: Pinned, the pinned sessions alone under a bar per \
+         status (with none, it says so), Status (where the list starts), a header per \
          state (waiting for you, unread, working, waiting for response, running, exited, \
          dead, then ready: the sessions you've read, most recently read first, under last \
          hour, last day and older), Repos, a bar per repository (named by its origin, its \
          worktrees and branches under it), Agent, a bar per agent or program (claude, \
-         codex, opencode, …, then other programs, then shell); `←`/`→` there (or a click) switch them. One tab is active at a \
+         codex, opencode, …, then other programs, then shell), and inside each repository \
+         and agent a quieter bar per status; `←`/`→` there (or a click) switch them. One tab is active at a \
          time: it decides the headers and the only filter that applies, and each tab keeps \
          its own while another is active. A click on a section's bar, or `Space` on it, \
          collapses it, and again opens it. `Enter` on the active tab opens its modal (Agents, \
@@ -2042,8 +2040,8 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     doc.text(
         "To move a session, drag it up or down with the mouse (in the Tabs layout, drag its tab \
          left or right), or press `J` or `K` in Rakumux mode to move the selected one down \
-         or up. It stays in its folder (under App and Status, its app or status; in the \
-         drawer's Pinned tab, among the pinned sessions). The order is saved in ~/.rakumux/config.json \
+         or up. It stays in its folder (under App and Status, its app or status; under \
+         Repos and Agent, its status too; under Pinned, its status). The order is saved in ~/.rakumux/config.json \
          as `sessions.session_order` (`sessions.section_order` for an app, a status and \
          Pinned).",
     );
@@ -2052,9 +2050,9 @@ fn sessions(doc: &mut Doc, k: &KeyNames) {
     doc.text(
         "`p` pins the selected session, or unpins it. A pinned session shows ★ left of its \
          name (tabs show it after their name); with the mouse, the session under the pointer \
-         shows ☆ there: a click pins or unpins it. `*` shows the drawer's Pinned tab, the pinned \
-         sessions alone, in the order you give them there; in the list they stay in their \
-         folder, app and status like any other. Every Rakumux window sees the same pins.",
+         shows ☆ there: a click pins or unpins it. `*` shows the list's Pinned tab, the pinned \
+         sessions alone, by status, in the order you give them there; under the other tabs \
+         they stay in their repository, agent and status like any other. Every Rakumux window sees the same pins.",
     );
 
     doc.heading("Git branch");
@@ -2293,7 +2291,7 @@ fn agents_and_cli(doc: &mut Doc) {
     );
     doc.command(
         "rakumux pin <name|id>, rakumux unpin <name|id>",
-        "Pin a session (into the drawer's Pinned tab), or unpin it.",
+        "Pin a session (into the list's Pinned tab), or unpin it.",
     );
     doc.command(
         "rakumux folders [--json], rakumux folders add|rm <dir>",
@@ -3873,7 +3871,7 @@ mod tests {
             ("Back to the session you came from", "Esc, C-a"),
             ("Go into the selected session", "Enter, i, l"),
             ("Feed (show, focus or hide)", "f"),
-            ("Next tab (Status, Repos, Agent)", "→"),
+            ("Next tab (Pinned, Status, Repos, Agent)", "→"),
             ("Previous tab", "←"),
             ("Last session", "Tab"),
             ("Go into session 1 to 9", "1-9"),

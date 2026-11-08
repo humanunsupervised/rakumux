@@ -13,6 +13,9 @@ pub enum ColorSupport {
 pub struct Palette {
     pub background: Color,
     pub surface: Color,
+    /// A sub-group's header bar: between the panel and `surface`, so it's
+    /// quieter than a section's bar.
+    pub subgroup_bar: Color,
     pub border: Color,
     pub text_primary: Color,
     /// Text of the selected list item (white).
@@ -290,6 +293,7 @@ impl Theme {
                 // bg; the storm style's bg for bars; blue
                 background,
                 surface: Color::Rgb(36, 40, 59),
+                subgroup_bar: Color::Rgb(31, 33, 48),
                 border: Color::Rgb(122, 162, 247),
                 // fg
                 text_primary: Color::Rgb(192, 202, 245),
@@ -331,8 +335,10 @@ impl Theme {
     fn basic(support: ColorSupport) -> Theme {
         let palette = match support {
             ColorSupport::Truecolor | ColorSupport::Ansi256 => Palette {
-                background: Color::Indexed(17),        // #00005f
-                surface: Color::Indexed(18),           // #000087
+                background: Color::Indexed(17), // #00005f
+                surface: Color::Indexed(18),    // #000087
+                // No colour lies between the panel and `surface`: no fill.
+                subgroup_bar: Color::Indexed(17),
                 border: Color::Indexed(111),           // #87afff ≈ blue
                 text_primary: Color::Indexed(189),     // #d7d7ff ≈ fg
                 text_bright: Color::Indexed(231),      // #ffffff
@@ -363,6 +369,8 @@ impl Theme {
             ColorSupport::Ansi16 => Palette {
                 background: Color::Black,
                 surface: Color::DarkGray,
+                // No colour lies between the panel and `surface`: no fill.
+                subgroup_bar: Color::Black,
                 border: Color::Blue,
                 text_primary: Color::White,
                 text_bright: Color::White,

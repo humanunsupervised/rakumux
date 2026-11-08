@@ -39,7 +39,7 @@ use super::format::{
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
-use crate::app::grouping::{Grouping, ReadPeriod, Section};
+use crate::app::grouping::{Grouping, ReadPeriod, Section, StatusGroup};
 use crate::app::places::PlaceRef;
 use crate::app::{App, Connection, Hit, ListRow};
 use crate::layout::str_width;
@@ -54,7 +54,8 @@ fn row_height(row: &ListRow) -> u16 {
         | ListRow::FolderHeader(_)
         | ListRow::WorktreeHeader(..)
         | ListRow::SectionHeader(_)
-        | ListRow::ReadPeriodHeader(_) => 2,
+        | ListRow::ReadPeriodHeader(_)
+        | ListRow::StatusHeader(..) => 2,
         ListRow::Session(_) => 3,
     }
 }
@@ -125,7 +126,7 @@ fn nesting(rows: &[ListRow]) -> Vec<usize> {
         .map(|row| {
             match row {
                 ListRow::WorktreeHeader(..) => nested = NEST,
-                ListRow::ReadPeriodHeader(_) => nested = READ_NEST,
+                ListRow::ReadPeriodHeader(_) | ListRow::StatusHeader(..) => nested = READ_NEST,
                 ListRow::Folders
                 | ListRow::FolderHeader(_)
                 | ListRow::SectionHeader(_)
@@ -220,48 +221,6 @@ fn mark_pin(lines: &mut [Line<'_>], pinned: bool, area: Rect, indent: usize) -> 
         width: 2.min(area.right().saturating_sub(x)),
         height: 1,
     })
-}
-
-/// A row of the drawer's Pinned tab in `area`: a blank line, then a list
-/// row's name, repositories and app (its places open in the list only).
-/// Returns its lines and, under the pointer, where its `★` is.
-pub(super) fn pinned_row_lines(
-    app: &App,
-    session: &SessionView,
-    area: Rect,
-    selected: bool,
-    hovered: bool,
-    dragged: bool,
-) -> (Vec<Line<'static>>, Option<Rect>) {
-    let indent = row_indent(0);
-    let width = (area.width as usize).saturating_sub(indent + 1);
-    let now = app.list.now();
-    let mut content = session_content(app, session, width, selected, now).into_iter();
-    let mut cell: Vec<_> = content.next().into_iter().collect();
-    let places = place_content(app, session, width, selected, None, now);
-    cell.extend(places.lines.into_iter().take(1).map(|mut line| {
-        line[0] = Span::raw(" ".repeat(GUTTER));
-        line
-    }));
-    cell.extend(content);
-    let top = usize::from(area.height).saturating_sub(cell.len());
-    let mut lines = cell_lines(cell, area.height, indent);
-    if has_title_slot(app, session) {
-        mark_title(
-            &mut lines,
-            top,
-            app.title_refreshing(&session.id),
-            false,
-            area,
-        );
-    }
-    let mut pin = None;
-    if dragged {
-        mark_dragged(&mut lines, indent);
-    } else if hovered {
-        pin = mark_pin(&mut lines, true, area, indent);
-    }
-    (lines, pin)
 }
 
 /// The session being dragged: a bar in the last column of the `indent`
@@ -387,33 +346,76 @@ pub fn read_period_header_line(
     width: usize,
     selected: bool,
 ) -> Line<'static> {
-    let p = theme::palette();
     let count = sessions_label(app.list.read_period_count(period));
-    // "  ◷ label ─── count": a status's header, a step in.
     let clock = format!("{} ", app.icons().clock());
-    let lead = 1 + READ_NEST;
-    let fixed = lead + 2 + str_width(&clock) + str_width(&count);
-    let label = truncate(period.label(), width.saturating_sub(fixed + 2));
-    let rule = width.saturating_sub(fixed + str_width(&label));
-    let (label_color, rule_color) = if selected {
-        (p.text_bright, p.accent_primary)
+    // The clock in the amber its sessions' marks have.
+    subgroup_bar_line(
+        clock,
+        read_period_style(period),
+        period.label(),
+        count,
+        width,
+        selected,
+    )
+}
+
+/// The header of a status's sessions inside a repository or an app: its
+/// mark and name, then at the right how many it has, in `width` columns.
+pub fn status_header_line(
+    app: &App,
+    section: &Section,
+    status: StatusGroup,
+    width: usize,
+    selected: bool,
+) -> Line<'static> {
+    let (glyph, glyph_style) = status_group_glyph(status);
+    let count = sessions_label(app.list.status_count(section, status));
+    subgroup_bar_line(
+        format!("{glyph} "),
+        glyph_style,
+        status.label(),
+        count,
+        width,
+        selected,
+    )
+}
+
+/// A sub-group's header as a bar across the list, quieter than its
+/// section's: [`READ_NEST`] further in, `mark`, `label`, then `count` where
+/// the section's count ends. Selected, the bar takes the selection's colour.
+fn subgroup_bar_line(
+    mark: String,
+    mark_style: Style,
+    label: &str,
+    count: String,
+    width: usize,
+    selected: bool,
+) -> Line<'static> {
+    let p = theme::palette();
+    let bar = if selected {
+        p.selection
     } else {
-        (p.label_blue, p.border_dim)
+        p.subgroup_bar
+    };
+    let on_bar = |style: Style| style.bg(bar);
+    let lead = 1 + READ_NEST;
+    // After the count: the columns of the section's " ▾ ".
+    let tail = 3;
+    let fixed = lead + str_width(&mark) + str_width(&count) + tail;
+    let label = truncate(label, width.saturating_sub(fixed + 1));
+    let gap = width.saturating_sub(fixed + str_width(&label));
+    let label_color = if selected {
+        p.text_bright
+    } else {
+        p.label_blue
     };
     Line::from(vec![
-        Span::raw(" ".repeat(lead)),
-        // The clock in the amber its sessions' marks have.
-        Span::styled(clock, read_period_style(period)),
-        Span::styled(
-            label,
-            Style::default()
-                .fg(label_color)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-        Span::styled("─".repeat(rule), Style::default().fg(rule_color)),
-        Span::raw(" "),
-        Span::styled(count, Style::default().fg(p.text_muted)),
+        Span::styled(" ".repeat(lead), on_bar(Style::default())),
+        Span::styled(mark, on_bar(mark_style)),
+        Span::styled(label, on_bar(Style::default().fg(label_color))),
+        Span::styled(" ".repeat(gap), on_bar(Style::default())),
+        Span::styled(count, on_bar(Style::default().fg(p.text_muted))),
+        Span::styled(" ".repeat(tail), on_bar(Style::default())),
     ])
 }
 
@@ -441,7 +443,7 @@ pub fn section_header_line(
     let bar = if selected { p.selection } else { p.surface };
     let on_bar = |style: Style| style.bg(bar);
     let (mark, mark_style) = match section {
-        Section::Status(status) => {
+        Section::Status(status) | Section::Pinned(status) => {
             let (glyph, style) = status_group_glyph(*status);
             (format!("{glyph} "), style)
         }
@@ -826,8 +828,7 @@ fn mark_title(
 const TAB_GAP: usize = 2;
 
 /// Columns every tab with a filter keeps after its label for the ` ▾` the
-/// active one ends in, so switching tabs moves nothing. Pinned, which has
-/// no filter, keeps none: it's the last tab, so nothing moves after it.
+/// active one ends in, so switching tabs moves nothing.
 const ARROW_SLOT: usize = 2;
 
 /// [`ARROW_SLOT`] while the tabs show the ` ▾` (`arrows`).
@@ -912,7 +913,7 @@ fn lay_out_tabs(tabs: &[(Grouping, &str, String)], active: Grouping, room: usize
     }
 }
 
-/// The tabs on a raised band: Status, Folders, App. The active one
+/// The tabs on a raised band: Pinned, Status, Repos, Agent. The active one
 /// is bold, names its filter (`▤ web  ⎇ main`, `◇ claude`), ends in `▾` (it
 /// opens its modal) and is underlined; the text filter shows at the right end
 /// while there is one. White and blue when selected, muted otherwise.
@@ -1174,6 +1175,28 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
     if inner.height == 0 {
         return;
     }
+    // The Pinned tab with nothing in it says so, above "+ New session".
+    if app.list.grouping() == Grouping::Pinned && app.list.pinned().is_empty() {
+        let note = Rect {
+            y: inner.y + inner.height.min(1),
+            height: 1,
+            ..inner
+        }
+        .intersection(inner);
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                format!("{}no pinned items", " ".repeat(INDENT)),
+                Style::default().fg(p.text_muted),
+            )),
+            note,
+        );
+        let used = (note.bottom() - inner.y).min(inner.height);
+        inner.y += used;
+        inner.height -= used;
+        if inner.height == 0 {
+            return;
+        }
+    }
 
     // A row's content width: its gutter and text, right of its indent, less
     // a right margin.
@@ -1299,6 +1322,17 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 lines.push(read_period_header_line(
                     app,
                     *period,
+                    (inner.width as usize).saturating_sub(1),
+                    is_selected,
+                ));
+                lines
+            }
+            ListRow::StatusHeader(section, status) => {
+                let mut lines = vec![Line::default(); height as usize - 1];
+                lines.push(status_header_line(
+                    app,
+                    section,
+                    *status,
                     (inner.width as usize).saturating_sub(1),
                     is_selected,
                 ));
@@ -1758,16 +1792,49 @@ mod tests {
     }
 
     /// The tabs with `labels` and `marks` (given for Repos, Agent, Status),
-    /// in the tabs' order.
+    /// in the tabs' order, without Pinned.
     fn tabs(marks: [&'static str; 3], labels: [&str; 3]) -> Vec<(Grouping, &'static str, String)> {
         let given = [Grouping::Repo, Grouping::App, Grouping::Status];
         Grouping::ALL
             .iter()
+            .filter(|tab| given.contains(tab))
             .map(|tab| {
                 let i = given.iter().position(|t| t == tab).unwrap();
                 (*tab, marks[i], labels[i].to_string())
             })
             .collect()
+    }
+
+    #[test]
+    fn a_subgroups_bar_is_quieter_than_its_sections_and_fills_the_row() {
+        let p = theme::palette();
+        let line = subgroup_bar_line(
+            "◷ ".to_string(),
+            Style::default(),
+            "last hour",
+            "2 sessions".to_string(),
+            30,
+            false,
+        );
+        assert_eq!(line.width(), 30);
+        assert!(line
+            .spans
+            .iter()
+            .all(|s| s.style.bg == Some(p.subgroup_bar)));
+        assert!(!line.spans.iter().any(|s| s.content.contains('─')));
+        assert_ne!(p.subgroup_bar, p.surface);
+        let selected = subgroup_bar_line(
+            "◷ ".to_string(),
+            Style::default(),
+            "last hour",
+            "2 sessions".to_string(),
+            30,
+            true,
+        );
+        assert!(selected
+            .spans
+            .iter()
+            .all(|s| s.style.bg == Some(p.selection)));
     }
 
     #[test]

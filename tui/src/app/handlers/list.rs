@@ -109,7 +109,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('H') => app.open_history(),
         KeyCode::Char('b') => app.toggle_list(),
         KeyCode::Char('f') => app.toggle_feed(),
-        KeyCode::Char('*') => app.toggle_pinned(),
+        KeyCode::Char('*') => app.show_pinned(),
         KeyCode::Char('v') => app.set_layout(app.next_layout()),
         KeyCode::Char('p') => app.toggle_pin(),
         KeyCode::Char(' ') => app.toggle_selected_section(),

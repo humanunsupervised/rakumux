@@ -14,12 +14,11 @@ use ratatui::{
 };
 
 use super::feed::draw_feed;
-use super::pinned::draw_pinned;
 use super::rtop::draw_rtop;
 use super::session_list::folder_item_height;
 use crate::app::drawer::DrawerTab;
 use crate::app::{App, Hit};
-use crate::layout::{str_width, PIN_MARK};
+use crate::layout::str_width;
 use crate::theme;
 
 /// Columns left of the band's first tab, as in the session list.
@@ -34,7 +33,7 @@ pub fn draw_drawer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
     }
     match app.drawer_tab() {
         DrawerTab::Feed => draw_feed(f, app, area, hits),
-        tab @ (DrawerTab::Pinned | DrawerTab::Rtop) => {
+        DrawerTab::Rtop => {
             let p = theme::palette();
             f.render_widget(
                 Block::default().style(Style::default().fg(p.text_primary).bg(p.panel)),
@@ -50,10 +49,7 @@ pub fn draw_drawer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
                 height: area.height - band.height,
                 ..area
             };
-            match tab {
-                DrawerTab::Pinned => draw_pinned(f, app, body, hits),
-                _ => draw_rtop(f, app, body, hits),
-            }
+            draw_rtop(f, app, body, hits);
         }
     }
     hits.push((area, Hit::Drawer));
@@ -62,7 +58,6 @@ pub fn draw_drawer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
 /// `tab`'s mark in the icon style the user picked.
 pub(super) fn tab_icon(app: &App, tab: DrawerTab) -> &'static str {
     match tab {
-        DrawerTab::Pinned => PIN_MARK,
         DrawerTab::Feed => app.icons().feed(),
         DrawerTab::Rtop => app.icons().rtop(),
     }

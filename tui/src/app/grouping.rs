@@ -1,10 +1,11 @@
 //! What the session list is grouped and filtered by: the tabs on its top
-//! row. Status (a section per state, as the user reads it), All folders (a
+//! row. Pinned (the pinned sessions alone, a section per state), Status (a
+//! section per state, as the user reads it), All folders (a
 //! section per folder, the folder filter of `folders.rs`) and App (a section
 //! per agent or program). One tab is active at a time: it decides the
 //! section headers and the only filter that applies. Each tab keeps its own
-//! filter while another one is active; none is saved. (The pinned sessions,
-//! the feed and rtop aren't among them: they're the drawer's, `drawer.rs`.)
+//! filter while another one is active; none is saved. (The feed and rtop
+//! aren't among them: they're the drawer's, `drawer.rs`.)
 //!
 //! Everything here is derived from a `SessionView` alone; nothing draws.
 
@@ -12,6 +13,8 @@ use std::path::Path;
 
 use session_core::activity::ActivityPhase;
 use session_core::model::{Lifecycle, ScopeRoot, SessionStatus, SessionView};
+
+use super::session_list::PINNED_ORDER;
 
 /// A tab of the list's top row: what the list is grouped and filtered by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -28,11 +31,18 @@ pub enum Grouping {
     /// starts.
     #[default]
     Status,
+    /// The pinned sessions alone, a section per status.
+    Pinned,
 }
 
 impl Grouping {
     /// The tabs, left to right: what wants the user first.
-    pub const ALL: [Grouping; 3] = [Grouping::Status, Grouping::Repo, Grouping::App];
+    pub const ALL: [Grouping; 4] = [
+        Grouping::Pinned,
+        Grouping::Status,
+        Grouping::Repo,
+        Grouping::App,
+    ];
 
     /// The tab `delta` places along, stopping at either end.
     pub fn step(self, delta: isize) -> Grouping {
@@ -48,6 +58,7 @@ impl Grouping {
             Grouping::Repo => "Repos",
             Grouping::App => "Agent",
             Grouping::Status => "Status",
+            Grouping::Pinned => "Pinned",
         }
     }
 
@@ -57,7 +68,7 @@ impl Grouping {
             Grouping::Folder => "folders",
             Grouping::Repo => "repos",
             Grouping::App => "agents",
-            Grouping::Status => "statuses",
+            Grouping::Status | Grouping::Pinned => "statuses",
         }
     }
 }
@@ -342,6 +353,8 @@ pub enum Section {
     Repo(RepoKey),
     App(AppKey),
     Status(StatusGroup),
+    /// A status's pinned sessions, under the Pinned tab.
+    Pinned(StatusGroup),
 }
 
 impl Section {
@@ -351,6 +364,12 @@ impl Section {
         matches!(self, Section::Status(status) if status.by_last_read())
     }
 
+    /// Whether its sessions are listed under a sub-header per status: a
+    /// repository's and an app's are.
+    pub fn has_status_subgroups(&self) -> bool {
+        matches!(self, Section::Repo(_) | Section::App(_))
+    }
+
     /// How the order of its sessions is saved (`sessions.section_order`):
     /// `app:claude`, `status:working`.
     pub fn key(&self) -> String {
@@ -358,6 +377,8 @@ impl Section {
             Section::Repo(repo) => format!("repo:{}", repo.as_str()),
             Section::App(app) => format!("app:{}", app.as_str()),
             Section::Status(status) => format!("status:{}", status.saved_name()),
+            // One order for every pinned session, whatever its status.
+            Section::Pinned(_) => PINNED_ORDER.to_owned(),
         }
     }
 
@@ -369,6 +390,9 @@ impl Section {
             Grouping::Repo => Some(Section::Repo(RepoKey::of(session))),
             Grouping::App => Some(Section::App(AppKey::of(session))),
             Grouping::Status => Some(Section::Status(StatusGroup::of(session))),
+            Grouping::Pinned => session
+                .pinned
+                .then(|| Section::Pinned(StatusGroup::of(session))),
         }
     }
 
@@ -378,6 +402,7 @@ impl Section {
             Section::Repo(_) => Grouping::Repo,
             Section::App(_) => Grouping::App,
             Section::Status(_) => Grouping::Status,
+            Section::Pinned(_) => Grouping::Pinned,
         }
     }
 
@@ -386,7 +411,7 @@ impl Section {
         match self {
             Section::Repo(repo) => repo.as_str(),
             Section::App(app) => app.as_str(),
-            Section::Status(status) => status.label(),
+            Section::Status(status) | Section::Pinned(status) => status.label(),
         }
     }
 }
@@ -407,13 +432,14 @@ pub fn sort_sections(sections: &mut [Section], sessions: &[SessionView]) {
         Section::App(app) if app.as_str() == AppKey::SHELL => 2,
         Section::App(app) if is_agent(app) => 0,
         Section::App(_) => 1,
-        Section::Status(_) | Section::Repo(_) => 0,
+        Section::Status(_) | Section::Pinned(_) | Section::Repo(_) => 0,
     };
     // Sections of different kinds never share a list: by kind, for a total order.
     let kind = |section: &Section| match section {
         Section::Repo(_) => 0,
         Section::App(_) => 1,
         Section::Status(_) => 2,
+        Section::Pinned(_) => 3,
     };
     sections.sort_by(|a, b| {
         rank(a).cmp(&rank(b)).then_with(|| match (a, b) {
@@ -423,7 +449,9 @@ pub fn sort_sections(sections: &mut [Section], sessions: &[SessionView]) {
                 .cmp(&b.as_str().to_lowercase())
                 .then_with(|| a.cmp(b)),
             (Section::App(a), Section::App(b)) => a.cmp(b),
-            (Section::Status(a), Section::Status(b)) => a.cmp(b),
+            (Section::Status(a), Section::Status(b)) | (Section::Pinned(a), Section::Pinned(b)) => {
+                a.cmp(b)
+            }
             (a, b) => kind(a).cmp(&kind(b)),
         })
     });
@@ -453,16 +481,18 @@ mod tests {
 
     #[test]
     fn tabs_step_without_wrapping() {
-        // Status is the grouping the list starts with, and the first tab.
+        // Status is the grouping the list starts with; Pinned is the first tab.
         assert_eq!(Grouping::default(), Grouping::Status);
         let names: Vec<&str> = Grouping::ALL.iter().map(|g| g.name()).collect();
-        assert_eq!(names, ["Status", "Repos", "Agent"]);
-        assert_eq!(Grouping::Status.step(-1), Grouping::Status);
+        assert_eq!(names, ["Pinned", "Status", "Repos", "Agent"]);
+        assert_eq!(Grouping::Pinned.step(-1), Grouping::Pinned);
+        assert_eq!(Grouping::Pinned.step(1), Grouping::Status);
         assert_eq!(Grouping::Status.step(1), Grouping::Repo);
         assert_eq!(Grouping::Repo.step(1), Grouping::App);
         assert_eq!(Grouping::App.step(1), Grouping::App);
         assert_eq!(Grouping::App.step(-1), Grouping::Repo);
         assert_eq!(Grouping::Repo.step(-1), Grouping::Status);
+        assert_eq!(Grouping::Status.step(-1), Grouping::Pinned);
     }
 
     #[test]

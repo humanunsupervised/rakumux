@@ -15,9 +15,10 @@
 //! of its folder. Each app and status has an order of its own
 //! (`sessions.section_order`), set the same ways under the App and Status
 //! tabs: that order, then the rest folder by folder, so a drag there never
-//! changes the folders' order. The drawer's Pinned tab has one too (under
-//! [`PINNED_ORDER`], [`SessionList::pinned`]). A pinned session is listed
-//! like any other. The list uses the active tab's
+//! changes the folders' order. The Pinned tab lists the pinned sessions
+//! alone, by status, in one order of their own (under [`PINNED_ORDER`],
+//! [`SessionList::pinned`]). Under Repos and Agent each section's sessions
+//! are listed by status, under a sub-header per status. The list uses the active tab's
 //! order; a row of tabs ([`ShownAs::Tabs`]) shows the same sessions in the
 //! Folders tab's order, so a tab keeps its place
 //! (and number) as statuses change and sessions are read. Selection is
@@ -64,6 +65,9 @@ pub enum Selection {
     /// The header of one of ready's sub-sections under Status (when its
     /// sessions were last read): Enter opens the Status modal on ready.
     ReadPeriodHeader(ReadPeriod),
+    /// The header of a status's sessions inside a repository or an app:
+    /// Enter opens that tab's modal there.
+    StatusHeader(Section, StatusGroup),
     NewSession,
     Session(SessionId),
 }
@@ -95,6 +99,8 @@ pub enum ListRow<'a> {
     /// A sub-section of ready under Status: sessions last read in that
     /// period.
     ReadPeriodHeader(ReadPeriod),
+    /// A status's sub-section inside a repository or an app.
+    StatusHeader(&'a Section, StatusGroup),
     NewSession,
     Session(&'a SessionView),
 }
@@ -132,6 +138,8 @@ pub struct SessionList {
     apps: Vec<AppKey>,
     /// The Status tab's filter: the statuses shown, or every one when empty.
     statuses: Vec<StatusGroup>,
+    /// The Pinned tab's filter: the statuses shown, or every one when empty.
+    pinned_statuses: Vec<StatusGroup>,
     /// Sections whose sessions are hidden under their header (a click on
     /// it, or Space): this window's, never saved.
     collapsed: HashSet<Section>,
@@ -183,6 +191,7 @@ impl SessionList {
             folders: Vec::new(),
             apps: Vec::new(),
             statuses: Vec::new(),
+            pinned_statuses: Vec::new(),
             collapsed: HashSet::new(),
             groups: Vec::new(),
             all_folders: Vec::new(),
@@ -241,6 +250,17 @@ impl SessionList {
             .count()
     }
 
+    /// How many of the sessions shown are under `status` inside `section`.
+    pub fn status_count(&self, section: &Section, status: StatusGroup) -> usize {
+        self.visible()
+            .into_iter()
+            .filter(|s| {
+                StatusGroup::of(s) == status
+                    && Section::of(self.grouping, s).as_ref() == Some(section)
+            })
+            .count()
+    }
+
     /// Show these folders (none: all folders). Nothing is fetched: the
     /// list keeps every folder's sessions. Under All folders, a selection
     /// the filter hides goes to the most recent session shown; so does one
@@ -260,7 +280,7 @@ impl SessionList {
     fn active_folder_filter(&self) -> &[ScopeRoot] {
         match self.grouping {
             Grouping::Folder | Grouping::Repo => &self.folders,
-            Grouping::App | Grouping::Status => &[],
+            Grouping::App | Grouping::Status | Grouping::Pinned => &[],
         }
     }
 
@@ -288,6 +308,12 @@ impl SessionList {
             Grouping::Folder | Grouping::Repo => Vec::new(),
             Grouping::App => self.apps.iter().cloned().map(Section::App).collect(),
             Grouping::Status => self.statuses.iter().copied().map(Section::Status).collect(),
+            Grouping::Pinned => self
+                .pinned_statuses
+                .iter()
+                .copied()
+                .map(Section::Pinned)
+                .collect(),
         }
     }
 
@@ -312,6 +338,15 @@ impl SessionList {
                     .into_iter()
                     .filter_map(|section| match section {
                         Section::Status(status) => Some(status),
+                        _ => None,
+                    })
+                    .collect();
+            }
+            Grouping::Pinned => {
+                self.pinned_statuses = sections
+                    .into_iter()
+                    .filter_map(|section| match section {
+                        Section::Pinned(status) => Some(status),
                         _ => None,
                     })
                     .collect();
@@ -354,7 +389,8 @@ impl SessionList {
             // A lone folder still gets its header: its name and branch.
             Grouping::Folder => !self.groups.is_empty(),
             // A lone repository still gets its bar: its name.
-            Grouping::Repo => !self.sections.is_empty(),
+            // So does a lone status under Pinned.
+            Grouping::Repo | Grouping::Pinned => !self.sections.is_empty(),
             Grouping::App | Grouping::Status => self.sections.len() > 1,
         }
     }
@@ -456,15 +492,6 @@ impl SessionList {
             .collect()
     }
 
-    /// Whether selecting `id` shows it in the list: the folder filter (while
-    /// it applies) and the text filter let it through.
-    pub fn can_show(&self, id: &SessionId) -> bool {
-        let folders = self.active_folder_filter();
-        self.get(id)
-            .is_some_and(|s| folders.is_empty() || folders.contains(&s.scope))
-            && self.matches_text(id)
-    }
-
     /// The visible position a drag over list row `row` aims at: a
     /// session's own, or for another row the next session's below it (the
     /// folder filter: the first; "+ New session": past the last).
@@ -510,10 +537,13 @@ impl SessionList {
         if section.as_ref().is_some_and(Section::by_last_read) {
             return false;
         }
+        // Inside a repository or an app, a session stays under its status.
+        let by_status = section.as_ref().is_some_and(Section::has_status_subgroups);
         let in_part = |s: &&SessionView| {
             (section.is_some()
                 || (s.scope == moving.scope && linked_worktree(s) == linked_worktree(moving)))
                 && Section::of(grouping, s) == section
+                && (!by_status || StatusGroup::of(s) == StatusGroup::of(moving))
         };
         // A part is contiguous in the list.
         let first = visible.iter().position(in_part).unwrap_or(from);
@@ -524,12 +554,13 @@ impl SessionList {
         }
         let target = visible[to].id.clone();
         if let Some(section) = section {
-            // Every session of the app or status, in its order now.
-            let mut order: Vec<SessionId> = self
-                .in_section_order(&section)
-                .iter()
-                .map(|s| s.id.clone())
-                .collect();
+            // Every session of the app or status, in its order now; every
+            // pinned one under Pinned, whose statuses share an order.
+            let sessions = match section {
+                Section::Pinned(_) => self.pinned(),
+                _ => self.in_section_order(&section),
+            };
+            let mut order: Vec<SessionId> = sessions.iter().map(|s| s.id.clone()).collect();
             let (Some(from), Some(to)) = (
                 order.iter().position(|s| s == id),
                 order.iter().position(|s| s == &target),
@@ -563,24 +594,6 @@ impl SessionList {
         true
     }
 
-    /// Move pinned session `id` to place `to` among the pinned sessions (the
-    /// drawer's Pinned tab), past the last meaning the last; saved as their
-    /// order. Returns whether it moved.
-    pub fn move_pinned(&mut self, id: &SessionId, to: usize) -> bool {
-        let mut order: Vec<SessionId> = self.pinned().iter().map(|s| s.id.clone()).collect();
-        let Some(from) = order.iter().position(|s| s == id) else {
-            return false;
-        };
-        let to = to.min(order.len() - 1);
-        if to == from {
-            return false;
-        }
-        let moved = order.remove(from);
-        order.insert(to, moved);
-        self.section_order.insert(PINNED_ORDER.to_owned(), order);
-        true
-    }
-
     /// A list snapshot has been received at least once.
     pub fn is_loaded(&self) -> bool {
         self.loaded
@@ -605,6 +618,7 @@ impl SessionList {
             | Selection::WorktreeHeader(..)
             | Selection::SectionHeader(_)
             | Selection::ReadPeriodHeader(_)
+            | Selection::StatusHeader(..)
             | Selection::NewSession => {}
         }
         self.ensure_selection_visible();
@@ -788,7 +802,7 @@ impl SessionList {
                     visible.extend(self.in_folder_order(group).into_iter().filter(matching));
                 }
             }
-            Grouping::Repo | Grouping::App | Grouping::Status => {
+            Grouping::Repo | Grouping::App | Grouping::Status | Grouping::Pinned => {
                 // The Repos tab narrows by the folder filter.
                 let folders = self.active_folder_filter();
                 let in_folders =
@@ -808,7 +822,7 @@ impl SessionList {
     }
 
     /// Every pinned session, whatever the list's tab and filters show, in
-    /// the drawer's Pinned tab's order: the order the user gave them there,
+    /// the Pinned tab's order: the order the user gave them there,
     /// then the rest folder by folder (launch folder first), each in its
     /// folder's order.
     pub fn pinned(&self) -> Vec<&SessionView> {
@@ -889,6 +903,10 @@ impl SessionList {
         } else {
             sessions.sort_by_key(|s| place(s));
         }
+        // Stable: inside a status, the order above.
+        if section.has_status_subgroups() {
+            sessions.sort_by_key(|s| StatusGroup::of(s));
+        }
         sessions
     }
 
@@ -908,6 +926,9 @@ impl SessionList {
             Section::Repo(_) => true,
             Section::App(app) => self.apps.is_empty() || self.apps.contains(app),
             Section::Status(status) => self.statuses.is_empty() || self.statuses.contains(status),
+            Section::Pinned(status) => {
+                self.pinned_statuses.is_empty() || self.pinned_statuses.contains(status)
+            }
         }
     }
 
@@ -929,6 +950,7 @@ impl SessionList {
                 .and_then(|s| Section::of(self.grouping, s))
                 .is_some_and(|of| &of == section),
             Selection::ReadPeriodHeader(_) => section == &Section::Status(StatusGroup::Ready),
+            Selection::StatusHeader(of, _) => of == section,
             _ => false,
         };
         if hidden {
@@ -947,7 +969,7 @@ impl SessionList {
             Vec::with_capacity(visible.len() + self.groups.len().max(self.sections.len()) + 2);
         rows.push(ListRow::Folders);
         if !self.is_grouped() {
-            self.push_sessions(&mut rows, visible);
+            self.push_sessions(&mut rows, self.sections.first(), visible);
             rows.push(ListRow::NewSession);
             return rows;
         }
@@ -983,6 +1005,7 @@ impl SessionList {
             }
             self.push_sessions(
                 &mut rows,
+                Some(section),
                 visible
                     .iter()
                     .copied()
@@ -996,15 +1019,27 @@ impl SessionList {
         rows
     }
 
-    /// `sessions` as rows, ready ones under Status after a header for when
-    /// they were last read (they come sorted by it).
+    /// `sessions` of `section` as rows, ready ones under Status after a
+    /// header for when they were last read (they come sorted by it), those
+    /// of a repository or an app after a header for their status (they come
+    /// sorted by it too).
     fn push_sessions<'a>(
         &'a self,
         rows: &mut Vec<ListRow<'a>>,
+        section: Option<&'a Section>,
         sessions: impl IntoIterator<Item = &'a SessionView>,
     ) {
+        let by_status = section.filter(|section| section.has_status_subgroups());
         let mut period = None;
+        let mut shown_status = None;
         for session in sessions {
+            if let Some(section) = by_status {
+                let status = StatusGroup::of(session);
+                if shown_status != Some(status) {
+                    rows.push(ListRow::StatusHeader(section, status));
+                    shown_status = Some(status);
+                }
+            }
             if let Some(read) = self.read_period(session) {
                 if period != Some(read) {
                     rows.push(ListRow::ReadPeriodHeader(read));
@@ -1052,6 +1087,7 @@ impl SessionList {
             | Selection::WorktreeHeader(..)
             | Selection::SectionHeader(_)
             | Selection::ReadPeriodHeader(_)
+            | Selection::StatusHeader(..)
             | Selection::NewSession => None,
         }
     }
@@ -1093,6 +1129,9 @@ impl SessionList {
             Selection::ReadPeriodHeader(period) => rows
                 .iter()
                 .position(|row| matches!(row, ListRow::ReadPeriodHeader(p) if p == period)),
+            Selection::StatusHeader(section, status) => rows.iter().position(
+                |row| matches!(row, ListRow::StatusHeader(s, st) if *s == section && st == status),
+            ),
             Selection::Session(id) => rows
                 .iter()
                 .position(|row| matches!(row, ListRow::Session(s) if &s.id == id)),
@@ -1110,6 +1149,9 @@ impl SessionList {
             }
             Some(ListRow::SectionHeader(section)) => Selection::SectionHeader((*section).clone()),
             Some(ListRow::ReadPeriodHeader(period)) => Selection::ReadPeriodHeader(*period),
+            Some(ListRow::StatusHeader(section, status)) => {
+                Selection::StatusHeader((*section).clone(), *status)
+            }
             Some(ListRow::NewSession) => Selection::NewSession,
             Some(ListRow::Session(s)) => Selection::Session(s.id.clone()),
             None => return,
@@ -1162,7 +1204,12 @@ impl SessionList {
                 .map_or(0, |i| i as isize),
         };
         let header = *headers.get(usize::try_from(current + delta).ok()?)?;
-        Some(match (rows.get(header + 1), rows[header]) {
+        // A section's status sub-header isn't a group: its first session is.
+        let next = match rows.get(header + 1) {
+            Some(ListRow::StatusHeader(..)) => rows.get(header + 2),
+            next => next,
+        };
+        Some(match (next, rows[header]) {
             (Some(ListRow::Session(s)), _) => Selection::Session(s.id.clone()),
             (_, ListRow::SectionHeader(section)) => Selection::SectionHeader(section.clone()),
             (_, ListRow::FolderHeader(folder)) => Selection::FolderHeader(folder.clone()),
@@ -1170,6 +1217,9 @@ impl SessionList {
                 Selection::WorktreeHeader(folder.clone(), root.to_path_buf())
             }
             (_, ListRow::ReadPeriodHeader(period)) => Selection::ReadPeriodHeader(period),
+            (_, ListRow::StatusHeader(section, status)) => {
+                Selection::StatusHeader(section.clone(), status)
+            }
             (_, ListRow::Folders | ListRow::NewSession | ListRow::Session(_)) => return None,
         })
     }
@@ -1202,7 +1252,8 @@ impl SessionList {
                 Some(folder.clone())
             }
             // A repository's header: the folder of its first session.
-            Selection::SectionHeader(section @ Section::Repo(_)) => self
+            Selection::SectionHeader(section @ Section::Repo(_))
+            | Selection::StatusHeader(section @ Section::Repo(_), _) => self
                 .visible()
                 .into_iter()
                 .find(|s| Section::of(Grouping::Repo, s).as_ref() == Some(section))
@@ -1210,6 +1261,7 @@ impl SessionList {
             Selection::Folders
             | Selection::SectionHeader(_)
             | Selection::ReadPeriodHeader(_)
+            | Selection::StatusHeader(..)
             | Selection::NewSession => match self.active_folder_filter() {
                 [only] => Some(only.clone()),
                 _ => None,
@@ -1228,7 +1280,8 @@ impl SessionList {
             Selection::FolderHeader(_)
             | Selection::WorktreeHeader(..)
             | Selection::SectionHeader(_)
-            | Selection::ReadPeriodHeader(_) => self.header_shown(),
+            | Selection::ReadPeriodHeader(_)
+            | Selection::StatusHeader(..) => self.header_shown(),
             Selection::Folders | Selection::NewSession => true,
         };
         if !shown {
@@ -1254,6 +1307,9 @@ impl SessionList {
             Selection::ReadPeriodHeader(period) => {
                 rows.contains(&ListRow::ReadPeriodHeader(*period))
             }
+            Selection::StatusHeader(section, status) => {
+                rows.contains(&ListRow::StatusHeader(section, *status))
+            }
             Selection::Folders | Selection::NewSession | Selection::Session(_) => true,
         }
     }
@@ -1268,7 +1324,8 @@ impl SessionList {
             Selection::FolderHeader(_)
             | Selection::WorktreeHeader(..)
             | Selection::SectionHeader(_)
-            | Selection::ReadPeriodHeader(_) => self.header_shown(),
+            | Selection::ReadPeriodHeader(_)
+            | Selection::StatusHeader(..) => self.header_shown(),
             Selection::Folders | Selection::NewSession => !leave_top_row,
         };
         if !kept {
@@ -1464,6 +1521,7 @@ mod tests {
                 }
                 ListRow::SectionHeader(section) => format!("## {}", section.label()),
                 ListRow::ReadPeriodHeader(period) => format!("  · {}", period.label()),
+                ListRow::StatusHeader(_, status) => format!("  - {}", status.label()),
                 ListRow::Session(s) => s.name.clone(),
             })
             .collect()
@@ -2265,6 +2323,54 @@ mod tests {
     }
 
     #[test]
+    fn repos_and_agents_list_their_sessions_under_a_header_per_status() {
+        let in_state = |id: &str, name: &str, at: i64, lifecycle: Lifecycle| {
+            let mut session = view(id, name, at);
+            session.lifecycle = lifecycle;
+            session
+        };
+        let mut list = loaded(vec![
+            in_state("A", "ready-old", 1, Lifecycle::Idle),
+            in_state("B", "working", 2, Lifecycle::Working),
+            in_state("C", "ready-new", 3, Lifecycle::Idle),
+        ]);
+        for grouping in [Grouping::Repo, Grouping::App] {
+            list.set_grouping(grouping);
+            let names = row_names(&list);
+            let sessions: Vec<&str> = names
+                .iter()
+                .map(String::as_str)
+                .filter(|name| {
+                    name.starts_with("  - ") || name.contains("ready") || *name == "working"
+                })
+                .collect();
+            assert_eq!(
+                sessions,
+                [
+                    "  - working",
+                    "working",
+                    "  - ready",
+                    "ready-old",
+                    "ready-new"
+                ],
+                "{grouping:?}"
+            );
+        }
+        // A session moves only among its status; a section's order is kept.
+        let id = SessionId::from_string;
+        list.set_grouping(Grouping::Repo);
+        assert!(!list.move_session(&id("B"), 3), "working has one session");
+        assert!(list.move_session(&id("C"), 1));
+        assert_eq!(ids(&list), ["B", "C", "A"]);
+        // A header's selection follows its row, and collapsing takes it.
+        let section = Section::of(Grouping::Repo, list.get(&id("A")).unwrap()).unwrap();
+        list.select(Selection::StatusHeader(section.clone(), StatusGroup::Ready));
+        assert_eq!(list.selected_row(), 4);
+        list.toggle_collapsed(&section);
+        assert_eq!(list.selection(), &Selection::SectionHeader(section));
+    }
+
+    #[test]
     fn the_pinned_sessions_keep_an_order_of_their_own_whatever_the_list_shows() {
         let id = SessionId::from_string;
         let pinned = |list: &SessionList| -> Vec<String> {
@@ -2276,10 +2382,11 @@ mod tests {
         assert_eq!(pinned(&list), ["repo-pinned", "web-pinned"]);
         // Moved among themselves, whatever their folders; saved as the
         // pinned order, and the folders' order doesn't change.
-        assert!(list.move_pinned(&id("W1"), 0));
+        list.set_grouping(Grouping::Pinned);
+        assert!(list.move_session(&id("W1"), 0));
         assert_eq!(pinned(&list), ["web-pinned", "repo-pinned"]);
         // Past the end is the last place, which R1 has already.
-        assert!(!list.move_pinned(&id("R1"), 3));
+        assert!(!list.move_session(&id("R1"), 3));
         assert_eq!(
             list.section_order().get(PINNED_ORDER),
             Some(&vec![id("W1"), id("R1")])
@@ -2298,8 +2405,6 @@ mod tests {
         list.filter.set("repo");
         assert_eq!(pinned(&list), ["web-pinned", "repo-pinned"]);
         // But they say what selecting one can show.
-        assert!(list.can_show(&id("R1")));
-        assert!(!list.can_show(&id("W1")));
         list.filter.set("");
         // Unpinned, it leaves; a new pin goes last.
         let mut unpinned = list.get(&id("R1")).unwrap().clone();
@@ -2329,12 +2434,20 @@ mod tests {
                 "+"
             ]
         );
-        // One app: no header, pinned or not.
+        // One app: no section bar, pinned or not; its status row stays.
         list.set_grouping(Grouping::App);
         assert!(!list.is_grouped());
         assert_eq!(
             row_names(&list),
-            ["^", "repo-pinned", "repo", "web-pinned", "web", "+"]
+            [
+                "^",
+                "  - running",
+                "repo-pinned",
+                "repo",
+                "web-pinned",
+                "web",
+                "+"
+            ]
         );
         list.set_grouping(Grouping::Status);
         assert_eq!(
@@ -2537,36 +2650,57 @@ mod tests {
         assert_eq!(names(&list), ["w1", "w2"]);
         list.set_grouping(Grouping::App);
         assert!(list.is_grouped());
-        // Agents first, then the shell; inside an app the launch folder's
-        // sessions first, each folder in its own order. The folder filter
-        // doesn't apply here.
+        // Agents first, then the shell; inside an app by status, under a
+        // row per status. The folder filter doesn't apply here.
         assert_eq!(
             row_names(&list),
             [
                 "^",
                 "## claude",
-                "r1",
+                "  - unread",
                 "r4",
+                "  - working",
+                "r1",
+                "  - ready",
                 "w1",
                 "## codex",
+                "  - waiting for you",
                 "r3",
+                "  - dead",
                 "w2",
                 "## shell",
+                "  - running",
                 "r2",
                 "+"
             ]
         );
         assert_eq!(list.section_counts(&app("claude")), (3, 3));
         assert_eq!(list.section_counts(&app("codex")), (1, 2));
-        // The app filter: one app, no headers.
+        // The app filter: one app, no section bar, its status rows kept.
         list.set_section_filter(Grouping::App, vec![app("codex")]);
-        assert_eq!(row_names(&list), ["^", "r3", "w2", "+"]);
+        assert_eq!(
+            row_names(&list),
+            ["^", "  - waiting for you", "r3", "  - dead", "w2", "+"]
+        );
         assert_eq!(list.section_filter(Grouping::App), [app("codex")]);
         // Two apps: their headers, in display order whatever the ticks'.
         list.set_section_filter(Grouping::App, vec![app("shell"), app("claude")]);
         assert_eq!(
             row_names(&list),
-            ["^", "## claude", "r1", "r4", "w1", "## shell", "r2", "+"]
+            [
+                "^",
+                "## claude",
+                "  - unread",
+                "r4",
+                "  - working",
+                "r1",
+                "  - ready",
+                "w1",
+                "## shell",
+                "  - running",
+                "r2",
+                "+"
+            ]
         );
         // Back on the Folders tab, its filter applies again; the app filter
         // waits for the App tab.
@@ -2574,10 +2708,10 @@ mod tests {
         assert_eq!(names(&list), ["w1", "w2"]);
         assert_eq!(list.folder_filter(), [folder("/web")]);
         list.set_grouping(Grouping::App);
-        assert_eq!(names(&list), ["r1", "r4", "w1", "r2"]);
+        assert_eq!(names(&list), ["r4", "r1", "w1", "r2"]);
         // The text filter still narrows, dropping headers without a match.
         list.filter.set("w");
-        assert_eq!(row_names(&list), ["^", "## claude", "w1", "+"]);
+        assert_eq!(row_names(&list), ["^", "## claude", "  - ready", "w1", "+"]);
     }
 
     #[test]
@@ -2757,7 +2891,7 @@ mod tests {
         // A header of a tab that isn't active anymore isn't kept.
         list.set_section_filter(Grouping::App, vec![]);
         list.select(Selection::SectionHeader(app("shell")));
-        assert_eq!(list.selected_row(), 8);
+        assert_eq!(list.selected_row(), 13);
         list.set_grouping(Grouping::Folder);
         assert!(matches!(list.selection(), Selection::Session(_)));
     }
@@ -2765,6 +2899,13 @@ mod tests {
     #[test]
     fn moves_and_group_jumps_stay_within_an_app() {
         let mut list = agents();
+        // Claude's sessions share a status: a move there isn't stopped at
+        // a status's edge.
+        for id in ["R4", "W1"] {
+            let mut working = list.get(&SessionId::from_string(id)).unwrap().clone();
+            working.lifecycle = Lifecycle::Working;
+            list.upsert(working);
+        }
         let by_folder = names(&list);
         list.set_grouping(Grouping::App);
         let (r1, r4) = (SessionId::from_string("R1"), SessionId::from_string("R4"));

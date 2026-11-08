@@ -410,7 +410,7 @@ pub enum SettingsItem {
     TerminalPanel,
     /// Where `T` opens it: below or beside the session.
     TerminalPlacement,
-    /// The pinned sessions, in the drawer.
+    /// The pinned sessions: the list's Pinned tab.
     Pinned,
     /// rtop: what this machine, Rakumux and every session's processes use
     /// now, in the drawer.

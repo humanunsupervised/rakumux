@@ -55,6 +55,7 @@ pub fn tab_icon(app: &App, grouping: Grouping) -> &'static str {
         Grouping::Folder | Grouping::Repo => app.icons().folder(),
         Grouping::App => app.icons().app(),
         Grouping::Status => app.icons().status(),
+        Grouping::Pinned => crate::layout::PIN_MARK,
     }
 }
 

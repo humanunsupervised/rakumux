@@ -183,7 +183,7 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
         }
         KeyAction::Pinned => {
             leave(app);
-            app.toggle_pinned();
+            app.show_pinned();
         }
         KeyAction::Rtop => {
             leave(app);
@@ -226,7 +226,7 @@ fn open_item(app: &mut App, item: SettingsItem) {
         }
         SettingsItem::Pinned => {
             app.mode = AppMode::Normal;
-            app.open_pinned();
+            app.show_pinned();
         }
         SettingsItem::Rtop => {
             app.mode = AppMode::Normal;

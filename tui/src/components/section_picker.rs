@@ -39,7 +39,7 @@ pub fn section_count(app: &App, section: &Section) -> String {
     let (live, total) = app.list.section_counts(section);
     match section {
         Section::Repo(_) | Section::App(_) => count_label(live, total),
-        Section::Status(_) => sessions_label(total),
+        Section::Status(_) | Section::Pinned(_) => sessions_label(total),
     }
 }
 
@@ -81,7 +81,7 @@ pub fn draw_section_picker(
     };
     f.render_widget(Clear, popup);
     let (title, noun, one) = match picker.grouping {
-        Grouping::Status => (" Statuses ", "statuses", "status"),
+        Grouping::Status | Grouping::Pinned => (" Statuses ", "statuses", "status"),
         Grouping::Repo => (" Repos ", "repos", "repo"),
         Grouping::Folder | Grouping::App => (" Agents ", "agents", "agent"),
     };
@@ -159,7 +159,9 @@ pub fn draw_section_picker(
         SectionRow::All => str_width("All ") + str_width(noun),
         SectionRow::Section(Section::Repo(repo)) => str_width(repo.as_str()),
         SectionRow::Section(Section::App(app)) => str_width(app.as_str()),
-        SectionRow::Section(Section::Status(status)) => 2 + str_width(status.label()),
+        SectionRow::Section(Section::Status(status) | Section::Pinned(status)) => {
+            2 + str_width(status.label())
+        }
     };
     let count_of = |row: &SectionRow| match row {
         SectionRow::All => {
@@ -169,7 +171,7 @@ pub fn draw_section_picker(
                 .filter(|s| s.status == SessionStatus::Live)
                 .count();
             match picker.grouping {
-                Grouping::Status => sessions_label(sessions.len()),
+                Grouping::Status | Grouping::Pinned => sessions_label(sessions.len()),
                 Grouping::Folder | Grouping::Repo | Grouping::App => {
                     count_label(live, sessions.len())
                 }
@@ -236,7 +238,7 @@ pub fn draw_section_picker(
                 truncate(repo.as_str(), name_w),
                 name_style.add_modifier(Modifier::BOLD),
             )],
-            SectionRow::Section(Section::Status(status)) => {
+            SectionRow::Section(Section::Status(status) | Section::Pinned(status)) => {
                 let (glyph, glyph_style) = status_group_glyph(*status);
                 vec![
                     Span::styled(glyph, glyph_style),

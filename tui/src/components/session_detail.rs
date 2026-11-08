@@ -144,7 +144,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                         }));
                         !filter.is_empty()
                     }
-                    Grouping::App | Grouping::Status => false,
+                    Grouping::App | Grouping::Status | Grouping::Pinned => false,
                 };
                 if filtering {
                     lines.push(Line::from(""));
@@ -152,7 +152,7 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                 let what = match grouping {
                     Grouping::Folder | Grouping::Repo => " to filter by folder or add one.",
                     Grouping::App => " to filter by agent.",
-                    Grouping::Status => " to filter by status.",
+                    Grouping::Status | Grouping::Pinned => " to filter by status.",
                 };
                 lines.push(Line::from(vec![
                     Span::styled("Press ", muted),
@@ -161,13 +161,13 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect, focused: bool) -> Option<
                 ]));
                 lines.push(Line::from(vec![
                     Span::styled("← →", key),
-                    Span::styled(" switch between Status, Repos and Agent.", muted),
+                    Span::styled(" switch between Pinned, Status, Repos and Agent.", muted),
                 ]));
                 lines
             } else if app.list.is_loaded() && app.list.filter.is_empty() {
                 // Nothing in the folders (apps, statuses) shown.
                 let title = match (grouping, app.list.folder_filter()) {
-                    (Grouping::App | Grouping::Status, _)
+                    (Grouping::App | Grouping::Status | Grouping::Pinned, _)
                         if !app.list.section_filter(grouping).is_empty() =>
                     {
                         format!("No sessions in {}", app.filter_label())

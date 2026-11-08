@@ -231,8 +231,7 @@ async fn events_from_other_clients_keep_the_list_live() {
         },
     );
     assert!(h.app.list.get(&id("C")).is_some());
-    let mut renamed = view("A", "renamed-elsewhere", 10);
-    renamed.lifecycle = Lifecycle::Working;
+    let renamed = view("A", "renamed-elsewhere", 10);
     h.event("A", SessionEvent::Updated { session: renamed });
     assert_eq!(h.app.list.get(&id("A")).unwrap().name, "renamed-elsewhere");
 
@@ -818,7 +817,8 @@ async fn vim_keys_move_and_gg_goes_to_the_top() {
     assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
     h.ctrl('u').await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
-    // Past the folder's header to the second session.
+    // Past the folder's header and its status's row to the second session.
+    h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
@@ -2457,7 +2457,8 @@ async fn clicking_a_row_selects_it_and_paste_goes_to_the_focused_session() {
         .app
         .hits
         .iter()
-        .find(|(_, hit)| *hit == Hit::ListRow(3))
+        // B: under the tabs, the repository's bar, its status's row and A.
+        .find(|(_, hit)| *hit == Hit::ListRow(4))
         .unwrap();
     h.app.handle_mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
@@ -2611,20 +2612,20 @@ async fn dragging_a_session_moves_it_live_and_saves_the_order_on_release() {
     // Not dragged yet: no drag bar (the pointer's row shows its pin in
     // the gutter beside it).
     let buffer = draw(&mut h);
-    assert_ne!(buffer.get(a.x, a.y + 1).symbol(), "▎");
-    assert_eq!(buffer.get(a.x + 1, a.y + 1).symbol(), "☆");
-    // Over B: A takes its place, marked as dragged (left of its gutter),
-    // still selected.
+    assert_ne!(buffer.get(a.x + 1, a.y + 1).symbol(), "▎");
+    assert_eq!(buffer.get(a.x + 2, a.y + 1).symbol(), "☆");
+    // Over B: A takes its place, marked as dragged (left of its gutter, a
+    // column in under its status's row), still selected.
     h.app
         .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x, b.y + 1));
     assert_eq!(visible_ids(&h), ["B", "A", "C"]);
     assert_eq!(h.selected().as_deref(), Some("A"));
     let buffer = draw(&mut h);
-    let mark = buffer.get(b.x, b.y + 1);
+    let mark = buffer.get(b.x + 1, b.y + 1);
     assert_eq!(mark.symbol(), "▎");
     assert_eq!(mark.fg, crate::theme::palette().accent_primary);
-    assert_eq!(buffer.get(b.x, b.y + 2).symbol(), "▎");
-    assert_eq!(buffer.get(b.x + 1, b.y + 1).symbol(), " ");
+    assert_eq!(buffer.get(b.x + 1, b.y + 2).symbol(), "▎");
+    assert_eq!(buffer.get(b.x + 2, b.y + 1).symbol(), " ");
     // Nothing is saved while it's held.
     assert!(!h.home.path().join("config.json").exists());
     // Over C, then back up past the top: clamped to the first place.
@@ -2649,7 +2650,7 @@ async fn dragging_a_session_moves_it_live_and_saves_the_order_on_release() {
     assert_eq!(h.app.drag, None);
     let buffer = draw(&mut h);
     let a = list_row(&h, "A");
-    assert_eq!(buffer.get(a.x, a.y + 1).symbol(), " ");
+    assert_eq!(buffer.get(a.x + 1, a.y + 1).symbol(), " ");
     // Activity doesn't undo it.
     h.event(
         "B",
@@ -3155,7 +3156,9 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
     h.press(KeyCode::Home).await;
     shift(&mut h, 'J').await;
     assert_eq!(h.app.status(), Some("Select a session to move."));
-    // Inside a session J is the program's (past the repository's bar).
+    // Inside a session J is the program's (past the repository's bar and
+    // its status's row).
+    h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Enter).await;
@@ -3207,9 +3210,11 @@ async fn done_periods_have_headers_with_counts_and_enter_opens_the_status_modal_
     };
     let mut h = harness(vec![read("A", now - 30), read("B", now - 3 * 86_400)]);
     let screen = screen_rows(&mut h, 160, 48).join("\n");
-    assert!(screen.contains(" ◷ last hour ─"), "{screen}");
-    assert!(screen.contains("─ 1 session"), "{screen}");
-    assert!(screen.contains(" ◷ older ─"), "{screen}");
+    // A filled bar, no rule; its count ends three columns from its right.
+    assert!(screen.contains(" ◷ last hour  "), "{screen}");
+    assert!(screen.contains("  1 session    │"), "{screen}");
+    assert!(screen.contains(" ◷ older  "), "{screen}");
+    assert!(!screen.contains("last hour ─"), "{screen}");
     h.app
         .list
         .select(session_list::Selection::ReadPeriodHeader(ReadPeriod::Older));
@@ -3454,10 +3459,20 @@ async fn cycling_and_movement_run_across_folder_groups() {
         h.app.list.selection(),
         &session_list::Selection::SectionHeader(repo_section("repo"))
     );
+    // Then on the row of its status.
+    h.press(KeyCode::Down).await;
+    assert_eq!(
+        h.app.list.selection(),
+        &session_list::Selection::StatusHeader(
+            repo_section("repo"),
+            grouping::StatusGroup::Running
+        )
+    );
     h.press(KeyCode::Down).await;
     assert_eq!(h.selected().as_deref(), Some("R1"));
     h.press(KeyCode::End).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::NewSession);
+    h.press(KeyCode::Up).await;
     h.press(KeyCode::Up).await;
     h.press(KeyCode::Up).await;
     assert_eq!(
@@ -3989,6 +4004,7 @@ async fn new_sessions_go_in_the_current_folder() {
     h.press(KeyCode::Home).await;
     h.press(KeyCode::Down).await;
     h.press(KeyCode::Down).await;
+    h.press(KeyCode::Down).await;
     assert_eq!(h.selected().as_deref(), Some("R1"));
     h.press(KeyCode::Char('n')).await;
     assert_eq!(created_folder(&h), scope());
@@ -4366,7 +4382,7 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     assert_eq!(h.app.list.grouping(), Grouping::Repo);
     h.press(KeyCode::Home).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
-    // → and l go along the tabs (Status, Repos, Agent) and stop
+    // → and l go along the tabs (Pinned, Status, Repos, Agent) and stop
     // at the last; the top row stays selected; ← and h come back.
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
@@ -4378,11 +4394,12 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     h.press(KeyCode::Left).await;
     h.press(KeyCode::Left).await;
     h.press(KeyCode::Char('h')).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Status);
-    // Status comes first; there they stop (the feed is no tab).
+    assert_eq!(h.app.list.grouping(), Grouping::Pinned);
+    // Pinned comes first; there they stop (the feed is no tab).
     h.press(KeyCode::Left).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Status);
+    assert_eq!(h.app.list.grouping(), Grouping::Pinned);
     assert!(!h.app.drawer_open());
+    h.press(KeyCode::Right).await;
     h.press(KeyCode::Right).await;
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
@@ -4405,6 +4422,7 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     h.press(KeyCode::Esc).await;
     // Off the top row ← and → switch tabs too, the session staying
     // selected; Enter (or `l`) goes in.
+    h.press(KeyCode::Down).await;
     h.press(KeyCode::Down).await;
     h.press(KeyCode::Down).await;
     let selected = h.app.list.selected_id().cloned().expect("a session");
@@ -4436,7 +4454,8 @@ async fn the_app_modal_ticks_several_enter_shows_them_and_esc_changes_nothing() 
     );
     h.press(KeyCode::Esc).await;
     assert!(h.app.list.section_filter(Grouping::App).is_empty());
-    assert_eq!(visible_ids(&h), ["R1", "R2", "W1", "R3"]);
+    // Inside claude, by status: R2 waits for you, R1 is working.
+    assert_eq!(visible_ids(&h), ["R2", "R1", "W1", "R3"]);
     // Enter after ticking: the ticked ones and the one under the cursor.
     h.press(KeyCode::Enter).await;
     h.press(KeyCode::Down).await;
@@ -4448,7 +4467,7 @@ async fn the_app_modal_ticks_several_enter_shows_them_and_esc_changes_nothing() 
         h.app.list.section_filter(Grouping::App),
         [app_section("claude"), app_section("codex")]
     );
-    assert_eq!(visible_ids(&h), ["R1", "R2", "W1"]);
+    assert_eq!(visible_ids(&h), ["R2", "R1", "W1"]);
     assert_eq!(h.app.tab_label(Grouping::App), "2 agents");
     assert_eq!(h.app.status(), Some("Showing 2 agents"));
     // Opened again: ticked like the filter, the cursor on its first app.
@@ -4579,7 +4598,7 @@ async fn the_folders_modal_from_another_tab_shows_folders_under_the_repos_tab() 
     let mut h = agents_harness();
     h.app
         .show_sections(Grouping::App, vec![app_section("claude")]);
-    assert_eq!(visible_ids(&h), ["R1", "R2"]);
+    assert_eq!(visible_ids(&h), ["R2", "R1"]);
     // `P` still opens the Folders modal; a folder picked there makes the
     // Repos tab active, narrowed to that folder's sessions.
     h.press(KeyCode::Char('P')).await;
@@ -4591,7 +4610,7 @@ async fn the_folders_modal_from_another_tab_shows_folders_under_the_repos_tab() 
     assert_eq!(h.app.tab_label(Grouping::App), "Agent");
     // The app filter waited for its tab.
     h.app.show_tab(Grouping::App);
-    assert_eq!(visible_ids(&h), ["R1", "R2"]);
+    assert_eq!(visible_ids(&h), ["R2", "R1"]);
     assert_eq!(h.app.tab_label(Grouping::App), "claude");
     assert_eq!(h.app.tab_label(Grouping::Repo), "Repos");
 }
@@ -5446,14 +5465,15 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
         .unwrap();
     assert_eq!(target(&h, Hit::PinToggle(row)), None);
     // The pointer over B's row: its pin shows in the gutter left of its
-    // name, which starts where its repository's bar's does.
+    // name, a column in from where its repository's bar's starts, under
+    // its status's row.
     let over = target(&h, Hit::ListRow(row)).unwrap();
     mouse(&mut h, MouseEventKind::Moved, over);
     assert_eq!(h.app.hovered_row, Some(row));
     let screen = screen_rows(&mut h, 160, 48);
     let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
     assert!(
-        screen[usize::from(pin.1)].starts_with(" ☆ b "),
+        screen[usize::from(pin.1)].starts_with("  ☆ b "),
         "{:?}",
         screen[usize::from(pin.1)]
     );
@@ -5482,7 +5502,7 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     mouse(&mut h, MouseEventKind::Moved, over);
     let screen = screen_rows(&mut h, 160, 48);
     let pin = target(&h, Hit::PinToggle(row)).expect("the pin");
-    assert!(screen[usize::from(pin.1)].starts_with(" ★ b "));
+    assert!(screen[usize::from(pin.1)].starts_with("  ★ b "));
     mouse(&mut h, MouseEventKind::Down(MouseButton::Left), pin);
     assert!(h.fake.calls().contains(&"pin B false".to_string()));
     // Off the list, no pin shows.
@@ -5538,7 +5558,7 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     assert!(
         screen
             .iter()
-            .any(|line| line.starts_with("  ◷ last hour ─")),
+            .any(|line| line.starts_with("  ◷ last hour  ")),
         "{}",
         screen.join("\n")
     );
@@ -5727,7 +5747,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         .iter()
         .position(|line| line.contains(" agent "))
         .expect("its name");
-    assert_eq!(in_list(&screen[name + 1]), " ▸ repo", "{text}");
+    assert_eq!(in_list(&screen[name + 1]), "  ▸ repo", "{text}");
     assert_eq!(
         column(&screen[name + 1], "repo"),
         column(&screen[name], "agent")
@@ -5740,7 +5760,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     h.press(KeyCode::Char('w')).await;
     let screen = screen_rows(&mut h, 160, 48);
     let text = screen.join("\n");
-    assert_eq!(in_list(&screen[name + 1]), " ▾ repo", "{text}");
+    assert_eq!(in_list(&screen[name + 1]), "  ▾ repo", "{text}");
     let pair = |path: &str| {
         screen
             .iter()
@@ -6001,7 +6021,7 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     let screen = hover(&mut h, current.x + 6, current.y);
     assert_eq!(h.app.hovered_place, Some((row, places::PlaceRef::Current)));
     let at = usize::from(current.y);
-    assert!(screen[at].starts_with(" ⧉   repo"), "{:?}", screen[at]);
+    assert!(screen[at].starts_with("  ⧉   repo"), "{:?}", screen[at]);
     click(&mut h, current.y);
     assert_eq!(copied(&mut h), "/repo");
     assert!(h.app.places_open(&a));
@@ -6286,29 +6306,31 @@ async fn places_name_their_repository_before_the_branch() {
         [
             "   focal-md                                     3/3 live ▾",
             "",
-            "   Paper links                                         1h ○",
-            " ▾ focal-md, rakumux",
-            "     ──────────────────────────────────────────────────────",
-            "     /work/focal-md-paper-links",
-            "     focal-md ⎇ paper-links                              9d",
-            "     ──────────────────────────────────────────────────────",
-            "     /work/focal-md-pubmed-pmc-audit",
-            "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
-            "     ──────────────────────────────────────────────────────",
-            " ⧉   /work/rakumux",
-            "     ⎇ main                                             10d",
-            "     ──────────────────────────────────────────────────────",
-            "     /work/focal-md-citations",
-            "     focal-md ⎇ fix/citation-format                     11d",
-            "   claude",
+            "  ○ ready                                     3 sessions",
             "",
-            "   Citations                                          10m ○",
-            " ▸ focal-md",
-            "   codex",
+            "    Paper links                                        1h ○",
+            "  ▾ focal-md, rakumux",
+            "      ─────────────────────────────────────────────────────",
+            "      /work/focal-md-paper-links",
+            "      focal-md ⎇ paper-links                             9d",
+            "      ─────────────────────────────────────────────────────",
+            "      /work/focal-md-pubmed-pmc-audit",
+            "      focal-md ⎇ audit/pubmed-pmc-ingest-20261008       10d",
+            "      ─────────────────────────────────────────────────────",
+            "  ⧉   /work/rakumux",
+            "      ⎇ main                                            10d",
+            "      ─────────────────────────────────────────────────────",
+            "      /work/focal-md-citations",
+            "      focal-md ⎇ fix/citation-format                    11d",
+            "    claude",
             "",
-            "   Release notes                                       2m ○",
-            " ▸ focal-md",
-            "   claude",
+            "    Citations                                         10m ○",
+            "  ▸ focal-md",
+            "    codex",
+            "",
+            "    Release notes                                      2m ○",
+            "  ▸ focal-md",
+            "    claude",
             "",
             " + New session                                     ☁ Sprite",
         ]
@@ -6321,29 +6343,31 @@ async fn places_name_their_repository_before_the_branch() {
         [
             "   focal-md                 3/3 live ▾",
             "",
-            "   Paper links                     1h ○",
-            " ▾ focal-md, rakumux",
-            "     ──────────────────────────────────",
-            "     /work/focal-md-paper-links",
-            "     focal-md ⎇ paper-links          9d",
-            "     ──────────────────────────────────",
-            "     /work/focal-md-pubmed-pmc-audit",
-            "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
-            "     ──────────────────────────────────",
-            " ⧉   /work/rakumux",
-            "     ⎇ main                         10d",
-            "     ──────────────────────────────────",
-            "     /work/focal-md-citations",
-            "     focal-md ⎇ fix/citation-format 11d",
-            "   claude",
+            "  ○ ready                 3 sessions",
             "",
-            "   Citations                      10m ○",
-            " ▸ focal-md",
-            "   codex",
+            "    Paper links                    1h ○",
+            "  ▾ focal-md, rakumux",
+            "      ─────────────────────────────────",
+            "      /work/focal-md-paper-links",
+            "      focal-md ⎇ paper-links         9d",
+            "      ─────────────────────────────────",
+            "      /work/focal-md-pubmed-pmc-audit",
+            "      ⎇ audit/pubmed-pmc-ingest-20… 10d",
+            "      ─────────────────────────────────",
+            "  ⧉   /work/rakumux",
+            "      ⎇ main                        10d",
+            "      ─────────────────────────────────",
+            "      /work/focal-md-citations",
+            "      focal-… ⎇ fix/citation-format 11d",
+            "    claude",
             "",
-            "   Release notes                   2m ○",
-            " ▸ focal-md",
-            "   claude",
+            "    Citations                     10m ○",
+            "  ▸ focal-md",
+            "    codex",
+            "",
+            "    Release notes                  2m ○",
+            "  ▸ focal-md",
+            "    claude",
             "",
             " + New session                 ☁ Sprite",
         ]
@@ -6406,25 +6430,29 @@ async fn session_rows_line_up_with_their_headers_text() {
         [
             "   focal-md                                     2/2 live ▾",
             "",
-            "   Paper links                                         1h ○",
-            " ▾ focal-md",
-            "     ──────────────────────────────────────────────────────",
-            "     /work/focal-md-paper-links",
-            "     focal-md ⎇ paper-links                              9d",
-            "     ──────────────────────────────────────────────────────",
-            "     /work/focal-md-pubmed-pmc-audit",
-            "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
-            "     ──────────────────────────────────────────────────────",
-            " ⧉   /work/focal-md-mvp-trial-workspaces",
-            "     focal-md ⎇ feature/mvp-trial-workspaces            10d",
-            "     ──────────────────────────────────────────────────────",
-            "     /work/focal-md-citations",
-            "     focal-md ⎇ fix/citation-format                     11d",
-            "   claude",
+            "  ● unread                                     1 session",
             "",
-            "   Citations                                          10m ●",
-            " ▸ focal-md",
-            "   codex",
+            "    Citations                                         10m ●",
+            "  ▸ focal-md",
+            "    codex",
+            "",
+            "  ○ ready                                      1 session",
+            "",
+            "    Paper links                                        1h ○",
+            "  ▾ focal-md",
+            "      ─────────────────────────────────────────────────────",
+            "      /work/focal-md-paper-links",
+            "      focal-md ⎇ paper-links                             9d",
+            "      ─────────────────────────────────────────────────────",
+            "      /work/focal-md-pubmed-pmc-audit",
+            "      focal-md ⎇ audit/pubmed-pmc-ingest-20261008       10d",
+            "      ─────────────────────────────────────────────────────",
+            "  ⧉   /work/focal-md-mvp-trial-workspaces",
+            "      focal-md ⎇ feature/mvp-trial-workspaces           10d",
+            "      ─────────────────────────────────────────────────────",
+            "      /work/focal-md-citations",
+            "      focal-md ⎇ fix/citation-format                    11d",
+            "    claude",
             "",
             " + New session                                     ☁ Sprite",
         ]
@@ -6436,25 +6464,29 @@ async fn session_rows_line_up_with_their_headers_text() {
         [
             "   focal-md                 2/2 live ▾",
             "",
-            "   Paper links                     1h ○",
-            " ▾ focal-md",
-            "     ──────────────────────────────────",
-            "     /work/focal-md-paper-links",
-            "     focal-md ⎇ paper-links          9d",
-            "     ──────────────────────────────────",
-            "     /work/focal-md-pubmed-pmc-audit",
-            "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
-            "     ──────────────────────────────────",
-            " ⧉   …ork/focal-md-mvp-trial-workspaces",
-            "     ⎇ feature/mvp-trial-workspaces 10d",
-            "     ──────────────────────────────────",
-            "     /work/focal-md-citations",
-            "     focal-md ⎇ fix/citation-format 11d",
-            "   claude",
+            "  ● unread                 1 session",
             "",
-            "   Citations                      10m ●",
-            " ▸ focal-md",
-            "   codex",
+            "    Citations                     10m ●",
+            "  ▸ focal-md",
+            "    codex",
+            "",
+            "  ○ ready                  1 session",
+            "",
+            "    Paper links                    1h ○",
+            "  ▾ focal-md",
+            "      ─────────────────────────────────",
+            "      /work/focal-md-paper-links",
+            "      focal-md ⎇ paper-links         9d",
+            "      ─────────────────────────────────",
+            "      /work/focal-md-pubmed-pmc-audit",
+            "      ⎇ audit/pubmed-pmc-ingest-20… 10d",
+            "      ─────────────────────────────────",
+            "  ⧉   …rk/focal-md-mvp-trial-workspaces",
+            "      ⎇ feature/mvp-trial-workspac… 10d",
+            "      ─────────────────────────────────",
+            "      /work/focal-md-citations",
+            "      focal-… ⎇ fix/citation-format 11d",
+            "    claude",
             "",
             " + New session                 ☁ Sprite",
         ]
@@ -6499,7 +6531,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "",
             " ○ ready                                       1 session ▾",
             "",
-            "  ◷ last hour ─────────────────────────────────── 1 session",
+            "  ◷ last hour                                  1 session",
             "",
             "    Paper links                                        1h ○",
             "  ▾ focal-md",
@@ -6717,183 +6749,72 @@ fn pinned_view(id: &str, at: i64) -> session_core::model::SessionView {
     session
 }
 
-fn pinned_ids(h: &Harness) -> Vec<String> {
-    h.app
-        .list
-        .pinned()
-        .iter()
-        .map(|s| s.id.to_string())
-        .collect()
-}
-
-/// The top left cell where hit `want` was last drawn.
-fn pinned_hit(h: &Harness, want: Hit) -> Option<(u16, u16)> {
-    h.app
-        .hits
-        .iter()
-        .find(|(_, hit)| *hit == want)
-        .map(|(area, _)| (area.x, area.y))
+/// `id`'s session, pinned, in `lifecycle`.
+fn pinned_in(
+    id: &str,
+    at: i64,
+    lifecycle: session_core::model::Lifecycle,
+) -> session_core::model::SessionView {
+    let mut session = pinned_view(id, at);
+    session.lifecycle = lifecycle;
+    session
 }
 
 #[tokio::test]
-async fn star_shows_the_pinned_tab_whose_keys_preview_order_unpin_and_go_in() {
-    use drawer::DrawerTab;
+async fn star_shows_the_pinned_tab_by_status_whose_rows_order_and_unpin() {
+    use grouping::Grouping;
+    use session_core::model::Lifecycle;
     let mut h = harness(vec![
-        pinned_view("A", 10),
-        pinned_view("B", 20),
+        pinned_in("A", 10, Lifecycle::Working),
+        pinned_in("B", 20, Lifecycle::Working),
+        pinned_in("R", 25, Lifecycle::Idle),
         view("C", "c", 30),
     ]);
-    // C, unpinned, is selected: the tab starts on its first row and moves
-    // nothing in the list.
-    assert_eq!(h.selected().as_deref(), Some("C"));
     h.press(KeyCode::Char('*')).await;
-    assert_eq!(h.app.drawer_tab(), DrawerTab::Pinned);
-    assert!(h.app.drawer_has_keys());
-    assert_eq!(h.selected().as_deref(), Some("C"));
-    assert_eq!(h.app.pinned_session().unwrap().id, id("A"));
-    assert_eq!(h.app.drawer_session().map(|s| s.id.clone()), Some(id("A")));
+    assert_eq!(h.app.list.grouping(), Grouping::Pinned);
+    assert!(!h.app.drawer_open(), "the drawer stays out of it");
+    // Only the pinned sessions, working before ready.
+    assert_eq!(visible_ids(&h), ["A", "B", "R"]);
+    let headers: Vec<String> = h
+        .app
+        .list
+        .rows()
+        .iter()
+        .filter_map(|row| match row {
+            ListRow::SectionHeader(section) => Some(section.label().to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(headers, ["working", "ready"]);
 
-    // Until the row is the list's session the list's keys do nothing: `d`
-    // never deletes the session in view for the row highlighted.
-    h.fake.clear_calls();
-    h.press(KeyCode::Char('d')).await;
-    h.press(KeyCode::Char('x')).await;
-    assert!(matches!(h.app.mode, AppMode::Normal));
-    assert!(h.fake.calls().is_empty(), "{:?}", h.fake.calls());
-
-    // ↓ previews the next row in the session's pane, keeping the keys.
-    h.press(KeyCode::Down).await;
-    assert_eq!(h.selected().as_deref(), Some("B"));
-    assert_eq!(h.app.pinned_session().unwrap().id, id("B"));
-    assert!(h.app.drawer_has_keys());
-    // Now the row is the list's session, `x` closes it as the list's would.
-    h.press(KeyCode::Char('x')).await;
-    assert!(!matches!(h.app.mode, AppMode::Normal));
-    h.press(KeyCode::Esc).await;
-    assert!(matches!(h.app.mode, AppMode::Normal));
-
-    // K moves it among the pinned sessions, saved as their order; the list
-    // doesn't change.
-    let listed = visible_ids(&h);
-    shift(&mut h, 'K').await;
-    assert_eq!(pinned_ids(&h), ["B", "A"]);
-    assert_eq!(visible_ids(&h), listed);
-    assert_eq!(h.app.pinned_session().unwrap().id, id("B"));
+    // J moves a row among its status; saved as the pinned sessions' order,
+    // keeping the others'.
+    h.app.list.select(Selection::Session(id("A")));
+    shift(&mut h, 'J').await;
+    assert_eq!(visible_ids(&h), ["B", "A", "R"]);
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(h.home.path().join("config.json")).unwrap())
             .unwrap();
-    assert_eq!(
-        saved["sessions"]["section_order"]["pinned"],
-        serde_json::json!(["B", "A"])
+    let order = saved["sessions"]["section_order"]["pinned"].clone();
+    let order: Vec<String> = serde_json::from_value(order).unwrap();
+    assert_eq!(order.len(), 3, "{order:?}");
+    assert!(
+        order.iter().position(|s| s == "B") < order.iter().position(|s| s == "A"),
+        "{order:?}"
     );
+    // It can't leave its status.
+    shift(&mut h, 'J').await;
+    assert_eq!(visible_ids(&h), ["B", "A", "R"]);
 
-    // p unpins the row; the next takes its place.
+    // p unpins the row, which leaves the tab.
     h.fake.clear_calls();
     h.press(KeyCode::Char('p')).await;
-    assert!(h.fake.calls().contains(&"pin B false".to_string()));
-    assert_eq!(pinned_ids(&h), ["A"]);
-    assert_eq!(h.app.pinned_session().unwrap().id, id("A"));
+    assert!(h.fake.calls().contains(&"pin A false".to_string()));
+    assert_eq!(visible_ids(&h), ["B", "R"]);
 
-    // Esc gives the list the keys, the drawer staying; `*` gives them back,
-    // and again hides it.
-    h.press(KeyCode::Esc).await;
-    assert!(!h.app.drawer_has_keys());
-    assert!(h.app.drawer_open());
-    h.press(KeyCode::Char('*')).await;
-    assert!(h.app.drawer_has_keys());
-    h.press(KeyCode::Char('*')).await;
-    assert!(!h.app.drawer_open());
-
-    // Enter goes into the row's session.
-    h.press(KeyCode::Char('*')).await;
+    // Enter goes in.
+    h.app.list.select(Selection::Session(id("B")));
     h.press(KeyCode::Enter).await;
-    assert_eq!(h.selected().as_deref(), Some("A"));
-    assert_eq!(h.app.focus, Focus::Session);
-    assert!(!h.app.drawer_has_keys());
-}
-
-#[tokio::test]
-async fn a_pinned_session_the_lists_filters_hide_is_gone_into_but_not_previewed() {
-    let web = folder("/web");
-    let mut h = harness(vec![view("A", "a", 10), {
-        let mut session = view_in(&web, "W", "w", 20);
-        session.pinned = true;
-        session
-    }])
-    .on_repos_tab();
-    h.app.show_folders(vec![scope()]);
-    assert_eq!(visible_ids(&h), ["A"]);
-    h.press(KeyCode::Char('*')).await;
-    h.press(KeyCode::Down).await;
-    assert_eq!(h.selected().as_deref(), Some("A"));
-    assert_eq!(h.app.pinned_session().unwrap().id, id("W"));
-    // Going in shows its folder too.
-    h.press(KeyCode::Enter).await;
-    assert_eq!(h.selected().as_deref(), Some("W"));
-    assert!(visible_ids(&h).contains(&"W".to_string()));
-}
-
-#[tokio::test]
-async fn pinned_rows_click_to_select_drag_to_order_and_unpin_under_the_pointer() {
-    let mut h = harness(vec![
-        pinned_view("A", 10),
-        pinned_view("B", 20),
-        pinned_view("C", 30),
-        view("D", "d", 40),
-    ]);
-    h.press(KeyCode::Char('*')).await;
-    screen_rows(&mut h, 160, 48);
-    let press = MouseEventKind::Down(MouseButton::Left);
-    let release = MouseEventKind::Up(MouseButton::Left);
-
-    // A click on another row selects it (and previews it) without going in.
-    let (x, y) = pinned_hit(&h, Hit::PinnedRow(1)).unwrap();
-    h.app.handle_mouse(mouse(press, x, y));
-    h.app.handle_mouse(mouse(release, x, y));
-    assert_eq!(h.app.pinned_session().unwrap().id, id("B"));
     assert_eq!(h.selected().as_deref(), Some("B"));
-    assert_eq!(h.app.focus, Focus::List);
-
-    // Dragged to the top it takes the first place, saved when let go.
-    let (top_x, top_y) = pinned_hit(&h, Hit::PinnedRow(0)).unwrap();
-    h.app.handle_mouse(mouse(press, x, y));
-    h.app
-        .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), top_x, top_y));
-    assert_eq!(h.app.dragged_pinned(), Some(&id("B")));
-    assert_eq!(h.app.dragged_session(), None);
-    assert_eq!(pinned_ids(&h), ["B", "A", "C"]);
-    h.app.handle_mouse(mouse(release, top_x, top_y));
-    assert_eq!(h.app.focus, Focus::List, "a drag never goes in");
-    let saved: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(h.home.path().join("config.json")).unwrap())
-            .unwrap();
-    assert_eq!(
-        saved["sessions"]["section_order"]["pinned"],
-        serde_json::json!(["B", "A", "C"])
-    );
-
-    // The pointer over a row shows the gold pin, which unpins it.
-    screen_rows(&mut h, 160, 48);
-    let (x, y) = pinned_hit(&h, Hit::PinnedRow(2)).unwrap();
-    h.app.handle_mouse(mouse(MouseEventKind::Moved, x, y));
-    let screen = screen_rows(&mut h, 160, 48);
-    let (pin_x, pin_y) = pinned_hit(&h, Hit::PinnedToggle(2)).expect("the pin");
-    assert!(
-        screen[usize::from(pin_y)].contains('★'),
-        "{}",
-        screen.join("\n")
-    );
-    h.fake.clear_calls();
-    h.app.handle_mouse(mouse(press, pin_x, pin_y));
-    h.app.process_pending();
-    assert!(h.fake.calls().contains(&"pin C false".to_string()));
-
-    // A click on the row already selected goes in, on release.
-    screen_rows(&mut h, 160, 48);
-    let (x, y) = pinned_hit(&h, Hit::PinnedRow(0)).unwrap();
-    h.app.handle_mouse(mouse(press, x, y));
-    assert_eq!(h.app.focus, Focus::List);
-    h.app.handle_mouse(mouse(release, x, y));
     assert_eq!(h.app.focus, Focus::Session);
-    assert_eq!(h.selected().as_deref(), Some("B"));
 }

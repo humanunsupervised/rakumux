@@ -1,4 +1,4 @@
-//! The tabs on the session list's top row (Status, Folders and App;
+//! The tabs on the session list's top row (Pinned, Status, Repos and Agent;
 //! `grouping`) and the App and Status modals. ←/→, or a click, switch tabs;
 //! Enter on the top row, or a click on the active tab, opens the active
 //! tab's modal (the Folders modal for All folders, `folders.rs`). Choosing
@@ -30,12 +30,13 @@ impl App {
                 [] => grouping.name().into(),
                 _ => self.folder_label(),
             },
-            Grouping::App | Grouping::Status => match self.list.section_filter(grouping).as_slice()
-            {
-                [] => grouping.name().into(),
-                [only] => only.label().into(),
-                many => format!("{} {}", many.len(), grouping.plural()),
-            },
+            Grouping::App | Grouping::Status | Grouping::Pinned => {
+                match self.list.section_filter(grouping).as_slice() {
+                    [] => grouping.name().into(),
+                    [only] => only.label().into(),
+                    many => format!("{} {}", many.len(), grouping.plural()),
+                }
+            }
         }
     }
 
@@ -68,6 +69,15 @@ impl App {
         }
     }
 
+    /// `*` (or Settings' action): the Pinned tab, showing the list if it
+    /// was hidden.
+    pub fn show_pinned(&mut self) {
+        if self.list_hidden {
+            self.toggle_list();
+        }
+        self.show_tab(Grouping::Pinned);
+    }
+
     /// Enter on the top row, or a click on the active tab: its modal.
     pub fn open_tab_picker(&mut self) {
         match self.list.grouping() {
@@ -81,7 +91,7 @@ impl App {
     pub fn open_section_picker(&mut self, grouping: Grouping, focus: Option<Section>) {
         match grouping {
             Grouping::Folder | Grouping::Repo => return self.open_folder_picker(),
-            Grouping::App | Grouping::Status => {}
+            Grouping::App | Grouping::Status | Grouping::Pinned => {}
         }
         let filter = self.list.section_filter(grouping);
         let focus = match focus.or_else(|| filter.first().cloned()) {
@@ -104,7 +114,7 @@ impl App {
                 .copied()
                 .map(Section::Status)
                 .collect(),
-            Grouping::Folder | Grouping::Repo | Grouping::App => Vec::new(),
+            Grouping::Folder | Grouping::Repo | Grouping::App | Grouping::Pinned => Vec::new(),
         };
         let listed = self
             .list
