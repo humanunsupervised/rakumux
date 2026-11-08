@@ -77,7 +77,7 @@ pub enum Command {
         #[arg(value_name = "NAME|ID", required = true, num_args = 1..=2)]
         args: Vec<String>,
     },
-    /// Pin a session: it's listed under the list's Pinned tab
+    /// Pin a session: it's listed under the drawer's Pinned tab
     Pin {
         /// Session name or id
         target: String,

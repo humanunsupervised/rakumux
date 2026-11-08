@@ -12,6 +12,7 @@ pub mod format;
 pub mod history;
 pub mod markdown;
 pub mod phone_access;
+pub mod pinned;
 pub mod rtop;
 pub mod section_picker;
 pub mod session_detail;

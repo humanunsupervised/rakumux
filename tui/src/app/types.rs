@@ -273,7 +273,7 @@ pub enum SectionRow {
 /// were changed (Tab, Space) Enter shows the ticked ones.
 #[derive(Debug, Clone)]
 pub struct SectionPicker {
-    /// `Grouping::App` or `Grouping::Status` (never Folders or Pinned).
+    /// `Grouping::App` or `Grouping::Status` (never Folders).
     pub grouping: Grouping,
     /// What's typed: narrows the rows by name.
     pub query: TextInput,
@@ -410,6 +410,8 @@ pub enum SettingsItem {
     TerminalPanel,
     /// Where `T` opens it: below or beside the session.
     TerminalPlacement,
+    /// The pinned sessions, in the drawer.
+    Pinned,
     /// rtop: what this machine, Rakumux and every session's processes use
     /// now, in the drawer.
     Rtop,
@@ -421,7 +423,7 @@ pub enum SettingsItem {
 
 impl SettingsItem {
     /// In Settings' order: signing in first, then the rest.
-    pub const ALL: [SettingsItem; 13] = [
+    pub const ALL: [SettingsItem; 14] = [
         SettingsItem::Account,
         SettingsItem::Layout,
         SettingsItem::Icons,
@@ -431,6 +433,7 @@ impl SettingsItem {
         SettingsItem::Update,
         SettingsItem::RestartUi,
         SettingsItem::RestartServer,
+        SettingsItem::Pinned,
         SettingsItem::Rtop,
         SettingsItem::SessionHistory,
         SettingsItem::TerminalPanel,
@@ -446,6 +449,7 @@ impl SettingsItem {
             | SettingsItem::Update
             | SettingsItem::RestartUi
             | SettingsItem::RestartServer
+            | SettingsItem::Pinned
             | SettingsItem::Rtop
             | SettingsItem::SessionHistory
             | SettingsItem::TerminalPanel

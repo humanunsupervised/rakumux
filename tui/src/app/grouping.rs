@@ -1,12 +1,10 @@
 //! What the session list is grouped and filtered by: the tabs on its top
 //! row. Status (a section per state, as the user reads it), All folders (a
-//! section per folder, the folder filter of `folders.rs`), App (a section
-//! per agent or program) and Pinned (the pinned sessions alone, in the
-//! order the user gave them; no sections, no filter). One tab is active at
-//! a time: it decides the section headers and the only filter that
-//! applies. Each tab keeps its own filter while another one is active; none
-//! is saved. (The feed isn't one of them: it's a pane of its own,
-//! `app/feed`.)
+//! section per folder, the folder filter of `folders.rs`) and App (a section
+//! per agent or program). One tab is active at a time: it decides the
+//! section headers and the only filter that applies. Each tab keeps its own
+//! filter while another one is active; none is saved. (The pinned sessions,
+//! the feed and rtop aren't among them: they're the drawer's, `drawer.rs`.)
 //!
 //! Everything here is derived from a `SessionView` alone; nothing draws.
 
@@ -30,19 +28,11 @@ pub enum Grouping {
     /// starts.
     #[default]
     Status,
-    /// The pinned sessions, in the order the user gave them: no sections,
-    /// no filter.
-    Pinned,
 }
 
 impl Grouping {
     /// The tabs, left to right: what wants the user first.
-    pub const ALL: [Grouping; 4] = [
-        Grouping::Status,
-        Grouping::Repo,
-        Grouping::App,
-        Grouping::Pinned,
-    ];
+    pub const ALL: [Grouping; 3] = [Grouping::Status, Grouping::Repo, Grouping::App];
 
     /// The tab `delta` places along, stopping at either end.
     pub fn step(self, delta: isize) -> Grouping {
@@ -58,7 +48,6 @@ impl Grouping {
             Grouping::Repo => "Repos",
             Grouping::App => "Agent",
             Grouping::Status => "Status",
-            Grouping::Pinned => "Pinned",
         }
     }
 
@@ -69,14 +58,7 @@ impl Grouping {
             Grouping::Repo => "repos",
             Grouping::App => "agents",
             Grouping::Status => "statuses",
-            Grouping::Pinned => "pinned",
         }
-    }
-
-    /// Whether it has a filter, and so a modal and the `▾` that opens it:
-    /// every tab but Pinned.
-    pub fn has_filter(self) -> bool {
-        self != Grouping::Pinned
     }
 }
 
@@ -380,10 +362,10 @@ impl Section {
     }
 
     /// The section `session` is in under `grouping`; `None` under All
-    /// folders, whose sections are folders, and Pinned, which has none.
+    /// folders, whose sections are folders.
     pub fn of(grouping: Grouping, session: &SessionView) -> Option<Section> {
         match grouping {
-            Grouping::Folder | Grouping::Pinned => None,
+            Grouping::Folder => None,
             Grouping::Repo => Some(Section::Repo(RepoKey::of(session))),
             Grouping::App => Some(Section::App(AppKey::of(session))),
             Grouping::Status => Some(Section::Status(StatusGroup::of(session))),
@@ -474,18 +456,13 @@ mod tests {
         // Status is the grouping the list starts with, and the first tab.
         assert_eq!(Grouping::default(), Grouping::Status);
         let names: Vec<&str> = Grouping::ALL.iter().map(|g| g.name()).collect();
-        assert_eq!(names, ["Status", "Repos", "Agent", "Pinned"]);
+        assert_eq!(names, ["Status", "Repos", "Agent"]);
         assert_eq!(Grouping::Status.step(-1), Grouping::Status);
         assert_eq!(Grouping::Status.step(1), Grouping::Repo);
         assert_eq!(Grouping::Repo.step(1), Grouping::App);
-        assert_eq!(Grouping::App.step(1), Grouping::Pinned);
-        assert_eq!(Grouping::Pinned.step(1), Grouping::Pinned);
-        assert_eq!(Grouping::Pinned.step(-1), Grouping::App);
+        assert_eq!(Grouping::App.step(1), Grouping::App);
         assert_eq!(Grouping::App.step(-1), Grouping::Repo);
         assert_eq!(Grouping::Repo.step(-1), Grouping::Status);
-        // Pinned alone has no filter, so no modal.
-        assert!(!Grouping::Pinned.has_filter());
-        assert!(Grouping::ALL[..3].iter().all(|g| g.has_filter()));
     }
 
     #[test]

@@ -89,7 +89,7 @@ const TIPS: &[Entry] = &[
         "Master detail or Tabs",
         Source::Key(KeyAction::CycleLayout),
     ),
-    tip("p", "pin to the top", Source::Key(KeyAction::Pin)),
+    tip("p", "pin to the drawer", Source::Key(KeyAction::Pin)),
     tip("Tab", "last session", Source::Key(KeyAction::LastSession)),
     Entry {
         keys: Keys::Fixed("a"),

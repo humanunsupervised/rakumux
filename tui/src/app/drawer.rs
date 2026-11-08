@@ -1,17 +1,19 @@
-//! The drawer: what shows beside the sessions on the right, with two tabs,
-//! the Feed (`feed/`) and rtop (`rtop.rs`). Every start hides it; `f` shows
-//! it on the Feed, `t` on rtop (or Settings for either). Master detail docks
+//! The drawer: what shows beside the sessions on the right, with three tabs,
+//! Pinned (`pinned.rs`), the Feed (`feed/`) and rtop (`rtop.rs`). Every start
+//! hides it; `*` shows it on Pinned, `f` on the Feed, `t` on rtop (or
+//! Settings for any). Master detail docks
 //! it as a pane on the right, a draggable line left of it, and the
 //! session's pane narrows (the session on screen takes the new size, as a
 //! dragged divider gives it). A window too narrow to keep the session usable
 //! beside it shows it in the session's place in Rakumux mode only. Tabs
 //! shows it as a tab of its own before the sessions', named by its active
 //! tab; a phone shows it alone, full screen (`layout::split_with` decides
-//! where). Its band names both tabs, the active one underlined.
+//! where). Its band names the tabs, the active one underlined.
 //!
 //! It takes Rakumux mode's keys from the list (`drawer_focused`), and its
-//! active tab handles them (`App::feed_key`, `App::rtop_key`): `f` (`t`)
-//! shows the drawer on the Feed (rtop) with the keys, switches to that tab,
+//! active tab handles them (`App::pinned_key`, `App::feed_key`,
+//! `App::rtop_key`): `*` (`f`, `t`) shows the drawer on that tab with the
+//! keys, switches to that tab,
 //! gives it the keys while the list has them, and hides the drawer while
 //! that tab has them; a click focuses the side it lands on, a click on a
 //! band's tab shows that tab; Esc gives the keys back to the list, hiding
@@ -28,6 +30,8 @@ use crate::layout::{FeedShown, SessionLayout};
 /// The drawer's tabs, in the band's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DrawerTab {
+    /// The pinned sessions, in the order the user gave them (`app/pinned.rs`).
+    Pinned,
     /// What agents said when they finished a turn (`app/feed`).
     #[default]
     Feed,
@@ -36,11 +40,12 @@ pub enum DrawerTab {
 }
 
 impl DrawerTab {
-    pub const ALL: [DrawerTab; 2] = [DrawerTab::Feed, DrawerTab::Rtop];
+    pub const ALL: [DrawerTab; 3] = [DrawerTab::Pinned, DrawerTab::Feed, DrawerTab::Rtop];
 
     /// Its name on the band and the Tabs layout's tab.
     pub fn label(self) -> &'static str {
         match self {
+            DrawerTab::Pinned => "Pinned",
             DrawerTab::Feed => "Feed",
             DrawerTab::Rtop => "rtop",
         }
@@ -86,7 +91,7 @@ impl App {
         self.drawer_open && self.session_layout() == SessionLayout::Tabs && !self.phone()
     }
 
-    /// `f` or `t` (or Settings, or the footer's Feed button): show the
+    /// `*`, `f` or `t` (or Settings, or the footer's Feed button): show the
     /// drawer on `tab` with the keys, switch to `tab`, give it the keys
     /// while the list has them, or hide the drawer while `tab` has them.
     pub fn toggle_drawer(&mut self, tab: DrawerTab) {
@@ -167,13 +172,14 @@ impl App {
     pub fn drawer_back(&mut self) {
         match self.drawer_tab {
             DrawerTab::Feed => self.feed_back(),
-            DrawerTab::Rtop => self.unfocus_drawer(),
+            DrawerTab::Pinned | DrawerTab::Rtop => self.unfocus_drawer(),
         }
     }
 
     /// `gg` while the drawer has the keys: the active tab's top.
     pub fn drawer_to_top(&mut self) {
         match self.drawer_tab {
+            DrawerTab::Pinned => self.pinned_move(isize::MIN / 2),
             DrawerTab::Feed => self.feed_to_top(),
             DrawerTab::Rtop => self.rtop_move(isize::MIN / 2),
         }
@@ -183,15 +189,17 @@ impl App {
     /// tab's cards or rows.
     pub fn move_drawer_selection(&mut self, delta: isize) {
         match self.drawer_tab {
+            DrawerTab::Pinned => self.pinned_move(delta),
             DrawerTab::Feed => self.move_feed_selection(delta),
             DrawerTab::Rtop => self.rtop_move(delta),
         }
     }
 
     /// The session the footer names while the drawer has the keys: the
-    /// selected card's, or rtop's selected row's, when it runs here.
+    /// selected row's, or the selected card's when it runs here.
     pub fn drawer_session(&self) -> Option<&session_core::model::SessionView> {
         match self.drawer_tab {
+            DrawerTab::Pinned => self.pinned_session(),
             DrawerTab::Feed => self.feed_session(),
             DrawerTab::Rtop => self.rtop_session(),
         }
@@ -201,6 +209,7 @@ impl App {
     /// to the list's handler.
     pub fn drawer_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
         match self.drawer_tab {
+            DrawerTab::Pinned => self.pinned_key(key),
             DrawerTab::Feed => self.feed_key(key),
             DrawerTab::Rtop => self.rtop_key(key),
         }

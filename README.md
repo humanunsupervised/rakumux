@@ -94,8 +94,8 @@ itself to the program, press `\` in Rakumux mode. To use another key, set
 | `Esc` | Back to the session you came from |
 | `Tab` / `1`–`9` | Last session / that session |
 | `n` | New session in the current folder |
-| `←` `→` | Switch tabs: Status, Repos, Agent, Pinned |
-| `f` / `t` | Show, focus or hide the feed / rtop |
+| `←` `→` | Switch tabs: Status, Repos, Agent |
+| `*` / `f` / `t` | Show, focus or hide your pinned sessions / the feed / rtop |
 | `P` / `/` | Filter by folder / by text |
 | `p` | Pin or unpin |
 | `w` / `W` | Where the session (every session) has worked: the git working trees where it changed files |
@@ -128,7 +128,9 @@ Tabs across the top of the list group your sessions:
 - **Folders**: by folder, with each folder's git branch. Sessions in another linked worktree go
   under it.
 - **App**: by agent or program.
-- **Pinned**: your pinned sessions (`p`), in the order you give them.
+
+`*` shows your pinned sessions (`p` pins one) in the drawer on the right, in the order you give
+them, first before the feed and rtop.
 
 `f` (or the footer's **≡ Feed** button) shows the **Feed** beside your sessions: your agents'
 replies, newest first (needs an account). It's a tab of the drawer on the right in Master detail

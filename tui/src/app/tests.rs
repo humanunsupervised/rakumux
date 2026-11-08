@@ -3151,24 +3151,6 @@ async fn shift_j_and_k_move_the_selected_session_and_the_order_survives_a_restar
     shift(&mut h, 'K').await;
     assert_eq!(visible_ids(&h), ["A", "C", "B"]);
     assert_eq!(h.selected().as_deref(), Some("A"));
-    // Under Pinned, J/K move it among the pinned sessions, saved as their
-    // order; the repository's order stays.
-    h.press(KeyCode::Char('j')).await;
-    h.press(KeyCode::Char('p')).await;
-    h.app.show_tab(grouping::Grouping::Pinned);
-    assert_eq!(visible_ids(&h), ["A", "C"]);
-    h.app.list.select(session_list::Selection::Session(id("C")));
-    shift(&mut h, 'K').await;
-    assert_eq!(visible_ids(&h), ["C", "A"]);
-    let saved: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(h.home.path().join("config.json")).unwrap())
-            .unwrap();
-    assert_eq!(
-        saved["sessions"]["section_order"]["pinned"],
-        serde_json::json!(["C", "A"])
-    );
-    h.app.show_tab(grouping::Grouping::Repo);
-    assert_eq!(visible_ids(&h), ["A", "C", "B"]);
     // On the folder filter there's nothing to move.
     h.press(KeyCode::Home).await;
     shift(&mut h, 'J').await;
@@ -3905,9 +3887,9 @@ async fn p_pins_and_unpins_and_pinned_sessions_keep_their_place() {
     pinned.pinned = true;
     h.event("B", SessionEvent::Updated { session: pinned });
     assert_eq!(visible_ids(&h), ["C", "B", "A"]);
-    // The Pinned tab lists it alone.
-    h.app.show_tab(grouping::Grouping::Pinned);
-    assert_eq!(visible_ids(&h), ["B"]);
+    // The drawer's Pinned tab lists it alone.
+    let pinned: Vec<_> = h.app.list.pinned().iter().map(|s| s.id.clone()).collect();
+    assert_eq!(pinned, [id("B")]);
     // "+ New session" selected: nothing to pin.
     h.press(KeyCode::End).await;
     h.fake.clear_calls();
@@ -4384,20 +4366,15 @@ async fn arrows_on_the_top_row_switch_tabs_and_enter_opens_the_active_ones_modal
     assert_eq!(h.app.list.grouping(), Grouping::Repo);
     h.press(KeyCode::Home).await;
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
-    // → and l go along the tabs (Status, Repos, Agent, Pinned) and stop
+    // → and l go along the tabs (Status, Repos, Agent) and stop
     // at the last; the top row stays selected; ← and h come back.
     h.press(KeyCode::Right).await;
     assert_eq!(h.app.list.grouping(), Grouping::App);
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
     assert!(h.app.list.is_grouped());
     h.press(KeyCode::Char('l')).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Pinned);
-    h.press(KeyCode::Right).await;
-    assert_eq!(h.app.list.grouping(), Grouping::Pinned);
+    assert_eq!(h.app.list.grouping(), Grouping::App);
     assert_eq!(h.app.list.selection(), &session_list::Selection::Folders);
-    // Pinned has no modal: Enter there does nothing.
-    h.press(KeyCode::Enter).await;
-    assert!(matches!(h.app.mode, AppMode::Normal));
     h.press(KeyCode::Left).await;
     h.press(KeyCode::Left).await;
     h.press(KeyCode::Char('h')).await;
@@ -5568,26 +5545,6 @@ async fn hovering_a_session_shows_a_pin_that_a_click_toggles() {
     // A click on the gold pin unpins A.
     mouse(&mut h, MouseEventKind::Down(MouseButton::Left), gold);
     assert!(h.fake.calls().contains(&"pin A false".to_string()));
-
-    // Under Pinned every row is pinned: no mark until the pointer is over
-    // one, which then unpins it.
-    let mut h = harness(vec![done("A", true), done("B", false)]);
-    h.app.show_tab(grouping::Grouping::Pinned);
-    mouse(&mut h, MouseEventKind::Moved, (100, 2));
-    let screen = screen_rows(&mut h, 160, 48);
-    let a = row_of(&h, "a");
-    assert_eq!(h.app.list.row_count(), 3, "the tabs, a, + New session");
-    assert_eq!(target(&h, Hit::PinToggle(a)), None);
-    assert!(
-        screen.iter().any(|line| line.starts_with("   a ")),
-        "{}",
-        screen.join("\n")
-    );
-    let over = target(&h, Hit::ListRow(a)).unwrap();
-    mouse(&mut h, MouseEventKind::Moved, over);
-    let screen = screen_rows(&mut h, 160, 48);
-    let pin = target(&h, Hit::PinToggle(a)).expect("the pin");
-    assert!(screen[usize::from(pin.1)].starts_with(" ★ a "));
 }
 
 #[tokio::test]
@@ -6751,4 +6708,192 @@ async fn a_sprite_set_up_shows_whats_there_then_enter_opens_the_session() {
     h.press(KeyCode::Enter).await;
     assert!(matches!(h.app.mode, AppMode::Normal));
     assert_eq!(h.fake.creates().len(), 1, "then the session");
+}
+
+/// A session `name`d after its id, pinned.
+fn pinned_view(id: &str, at: i64) -> session_core::model::SessionView {
+    let mut session = view(id, &id.to_lowercase(), at);
+    session.pinned = true;
+    session
+}
+
+fn pinned_ids(h: &Harness) -> Vec<String> {
+    h.app
+        .list
+        .pinned()
+        .iter()
+        .map(|s| s.id.to_string())
+        .collect()
+}
+
+/// The top left cell where hit `want` was last drawn.
+fn pinned_hit(h: &Harness, want: Hit) -> Option<(u16, u16)> {
+    h.app
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == want)
+        .map(|(area, _)| (area.x, area.y))
+}
+
+#[tokio::test]
+async fn star_shows_the_pinned_tab_whose_keys_preview_order_unpin_and_go_in() {
+    use drawer::DrawerTab;
+    let mut h = harness(vec![
+        pinned_view("A", 10),
+        pinned_view("B", 20),
+        view("C", "c", 30),
+    ]);
+    // C, unpinned, is selected: the tab starts on its first row and moves
+    // nothing in the list.
+    assert_eq!(h.selected().as_deref(), Some("C"));
+    h.press(KeyCode::Char('*')).await;
+    assert_eq!(h.app.drawer_tab(), DrawerTab::Pinned);
+    assert!(h.app.drawer_has_keys());
+    assert_eq!(h.selected().as_deref(), Some("C"));
+    assert_eq!(h.app.pinned_session().unwrap().id, id("A"));
+    assert_eq!(h.app.drawer_session().map(|s| s.id.clone()), Some(id("A")));
+
+    // Until the row is the list's session the list's keys do nothing: `d`
+    // never deletes the session in view for the row highlighted.
+    h.fake.clear_calls();
+    h.press(KeyCode::Char('d')).await;
+    h.press(KeyCode::Char('x')).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(h.fake.calls().is_empty(), "{:?}", h.fake.calls());
+
+    // ↓ previews the next row in the session's pane, keeping the keys.
+    h.press(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    assert_eq!(h.app.pinned_session().unwrap().id, id("B"));
+    assert!(h.app.drawer_has_keys());
+    // Now the row is the list's session, `x` closes it as the list's would.
+    h.press(KeyCode::Char('x')).await;
+    assert!(!matches!(h.app.mode, AppMode::Normal));
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+
+    // K moves it among the pinned sessions, saved as their order; the list
+    // doesn't change.
+    let listed = visible_ids(&h);
+    shift(&mut h, 'K').await;
+    assert_eq!(pinned_ids(&h), ["B", "A"]);
+    assert_eq!(visible_ids(&h), listed);
+    assert_eq!(h.app.pinned_session().unwrap().id, id("B"));
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(h.home.path().join("config.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        saved["sessions"]["section_order"]["pinned"],
+        serde_json::json!(["B", "A"])
+    );
+
+    // p unpins the row; the next takes its place.
+    h.fake.clear_calls();
+    h.press(KeyCode::Char('p')).await;
+    assert!(h.fake.calls().contains(&"pin B false".to_string()));
+    assert_eq!(pinned_ids(&h), ["A"]);
+    assert_eq!(h.app.pinned_session().unwrap().id, id("A"));
+
+    // Esc gives the list the keys, the drawer staying; `*` gives them back,
+    // and again hides it.
+    h.press(KeyCode::Esc).await;
+    assert!(!h.app.drawer_has_keys());
+    assert!(h.app.drawer_open());
+    h.press(KeyCode::Char('*')).await;
+    assert!(h.app.drawer_has_keys());
+    h.press(KeyCode::Char('*')).await;
+    assert!(!h.app.drawer_open());
+
+    // Enter goes into the row's session.
+    h.press(KeyCode::Char('*')).await;
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(h.app.focus, Focus::Session);
+    assert!(!h.app.drawer_has_keys());
+}
+
+#[tokio::test]
+async fn a_pinned_session_the_lists_filters_hide_is_gone_into_but_not_previewed() {
+    let web = folder("/web");
+    let mut h = harness(vec![view("A", "a", 10), {
+        let mut session = view_in(&web, "W", "w", 20);
+        session.pinned = true;
+        session
+    }])
+    .on_repos_tab();
+    h.app.show_folders(vec![scope()]);
+    assert_eq!(visible_ids(&h), ["A"]);
+    h.press(KeyCode::Char('*')).await;
+    h.press(KeyCode::Down).await;
+    assert_eq!(h.selected().as_deref(), Some("A"));
+    assert_eq!(h.app.pinned_session().unwrap().id, id("W"));
+    // Going in shows its folder too.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.selected().as_deref(), Some("W"));
+    assert!(visible_ids(&h).contains(&"W".to_string()));
+}
+
+#[tokio::test]
+async fn pinned_rows_click_to_select_drag_to_order_and_unpin_under_the_pointer() {
+    let mut h = harness(vec![
+        pinned_view("A", 10),
+        pinned_view("B", 20),
+        pinned_view("C", 30),
+        view("D", "d", 40),
+    ]);
+    h.press(KeyCode::Char('*')).await;
+    screen_rows(&mut h, 160, 48);
+    let press = MouseEventKind::Down(MouseButton::Left);
+    let release = MouseEventKind::Up(MouseButton::Left);
+
+    // A click on another row selects it (and previews it) without going in.
+    let (x, y) = pinned_hit(&h, Hit::PinnedRow(1)).unwrap();
+    h.app.handle_mouse(mouse(press, x, y));
+    h.app.handle_mouse(mouse(release, x, y));
+    assert_eq!(h.app.pinned_session().unwrap().id, id("B"));
+    assert_eq!(h.selected().as_deref(), Some("B"));
+    assert_eq!(h.app.focus, Focus::List);
+
+    // Dragged to the top it takes the first place, saved when let go.
+    let (top_x, top_y) = pinned_hit(&h, Hit::PinnedRow(0)).unwrap();
+    h.app.handle_mouse(mouse(press, x, y));
+    h.app
+        .handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), top_x, top_y));
+    assert_eq!(h.app.dragged_pinned(), Some(&id("B")));
+    assert_eq!(h.app.dragged_session(), None);
+    assert_eq!(pinned_ids(&h), ["B", "A", "C"]);
+    h.app.handle_mouse(mouse(release, top_x, top_y));
+    assert_eq!(h.app.focus, Focus::List, "a drag never goes in");
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(h.home.path().join("config.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        saved["sessions"]["section_order"]["pinned"],
+        serde_json::json!(["B", "A", "C"])
+    );
+
+    // The pointer over a row shows the gold pin, which unpins it.
+    screen_rows(&mut h, 160, 48);
+    let (x, y) = pinned_hit(&h, Hit::PinnedRow(2)).unwrap();
+    h.app.handle_mouse(mouse(MouseEventKind::Moved, x, y));
+    let screen = screen_rows(&mut h, 160, 48);
+    let (pin_x, pin_y) = pinned_hit(&h, Hit::PinnedToggle(2)).expect("the pin");
+    assert!(
+        screen[usize::from(pin_y)].contains('★'),
+        "{}",
+        screen.join("\n")
+    );
+    h.fake.clear_calls();
+    h.app.handle_mouse(mouse(press, pin_x, pin_y));
+    h.app.process_pending();
+    assert!(h.fake.calls().contains(&"pin C false".to_string()));
+
+    // A click on the row already selected goes in, on release.
+    screen_rows(&mut h, 160, 48);
+    let (x, y) = pinned_hit(&h, Hit::PinnedRow(0)).unwrap();
+    h.app.handle_mouse(mouse(press, x, y));
+    assert_eq!(h.app.focus, Focus::List);
+    h.app.handle_mouse(mouse(release, x, y));
+    assert_eq!(h.app.focus, Focus::Session);
+    assert_eq!(h.selected().as_deref(), Some("B"));
 }

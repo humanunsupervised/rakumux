@@ -68,10 +68,9 @@ new-session flow, and code boundaries.
   rows (`PickerRow::Suggestion`): `↑`/`↓` choose, Tab or `→` completes, Enter adds, a click
   completes.
 - `grouping.rs`: the list tabs, pure derivations over `SessionView` (no drawing). `Grouping`
-  (Status, Repos, Agent, Pinned: `ALL` is the top row's order; `Folder`, the folders' grouping,
+  (Status, Repos, Agent: `ALL` is the top row's order; `Folder`, the folders' grouping,
   is no tab, only the session tab bar's order; `step` for ←/→, no wrap; the
-  default, where every start opens, is Status; `has_filter`: all but Pinned, which has no
-  filter, modal or `▾`), `AppKey::of` (agent kind, else a
+  default, where every start opens, is Status), `AppKey::of` (agent kind, else a
   non-shell foreground program while live, else a non-shell `launch.argv[0]`, else `shell`;
   lowercase; dead sessions keep their agent), `RepoKey::of` (the git context's `repo`, from
   `origin`, else the folder's name: worktrees and branches under their repository), `StatusGroup::of` (like the
@@ -101,7 +100,11 @@ new-session flow, and code boundaries.
   `components::feed::turn_lines` (`›` prompts, quiet reasoning, `●` tool calls with the first
   lines of their output). `components/feed.rs::draw_feed` draws it under the drawer's band
   (`‹` back while reading) over the cards or the reply.
-- `drawer.rs`: the drawer, `DrawerTab` Feed or Rtop. `drawer_open` (shown; this window's, hidden
+- `pinned.rs`: the drawer's Pinned tab (`*`, Settings → Pinned; drawn by `components/pinned.rs`):
+  `SessionList::pinned` in their order, `PinnedView` the selection by id, `pinned_key` its keys
+  (moving previews, `SessionList::can_show` guarding sessions the list's filters hide),
+  `Hit::PinnedRow` / `Hit::PinnedToggle`, and `SessionDrag::pinned` for dragging a row.
+- `drawer.rs`: the drawer, `DrawerTab` Pinned, Feed or Rtop. `drawer_open` (shown; this window's, hidden
   at every start, nothing opens it by itself), `drawer_focused` (it has Rakumux mode's keys:
   `drawer_has_keys`; `drawer_lost_keys` when session mode or the terminal panel takes them) and
   `drawer_tab` go to the layout as `PaneSizes::feed` (`layout::FeedShown`), and `Screen::feed`
@@ -109,20 +112,20 @@ new-session flow, and code boundaries.
   `drag_feed_divider` saves `sessions.feed_width`), the session's place on narrower windows in
   Rakumux mode, the body under the tab bar while the Tabs layout's drawer tab is selected
   (`drawer_tab_shown`), or the screen on a phone while it has the keys. `drawer_shown` is
-  whether it's on screen. `toggle_drawer(tab)` (`f` Feed, `t` rtop): shown on that tab with the
+  whether it's on screen. `toggle_drawer(tab)` (`*` Pinned, `f` Feed, `t` rtop): shown on that tab with the
   keys, switched to it, the keys, or hidden; `show_drawer_tab` (a click on the band's tab,
   `Hit::DrawerTab`); `unfocus_drawer` (Esc, a click beside it, a grouping picked) gives the
   list the keys, hiding it where it would leave the screen; `drawer_back` is the active tab's
   Esc, `drawer_key` its keys, `drawer_session` what the footer names. Every change runs
   `drawer_moved`: the session on screen takes its new pane size (`sync_terminal_size`), and the
   tab that came on screen starts (feed read, rtop sample)
-  while the other stops. `components/drawer.rs::draw_drawer` draws the band (`≡ Feed   ▥ rtop`,
+  while the other stops. `components/drawer.rs::draw_drawer` draws the band (`★ Pinned   ≡ Feed   ▥ rtop`,
   the active one underlined, the accent while it has the keys) and the active tab;
   `components/session_tabs.rs` draws the Tabs layout's drawer tab, named by its active tab.
 - `list_tabs.rs`: `App::tab_label` (the active tab names its filter, inactive ones say Repos /
-  Agent / Status; the Repos tab names the folder filter; Pinned always says Pinned), `filter_label` (the Tabs layout's
+  Agent / Status; the Repos tab names the folder filter), `filter_label` (the Tabs layout's
   selector, after the tab's mark), `switch_tab`/`show_tab` (both give the list
-  the keys from the drawer), `open_tab_picker` (Repos: the Folders modal; Pinned: nothing),
+  the keys from the drawer), `open_tab_picker` (Repos: the Folders modal),
   `toggle_selected_section` (Space on a section's bar), and the Agent and Status modals (`AppMode::Sections(SectionPicker)`, keys in `handlers/sections.rs`): rows All
   then `picker_sections` (sessions' apps or every status but unknown, plus the filter's), typing
   narrows by name, Tab ticks (Space too while nothing is typed: status names have spaces), Enter
@@ -136,21 +139,20 @@ new-session flow, and code boundaries.
   folder's first, then by name; only the folder filter's folders' sessions), or under Agent
   and Status per agent or status when more than one is shown (`Selection::SectionHeader`; Enter
   opens that tab's modal; a click, or Space, collapses it: `toggle_collapsed`, `collapsed`,
-  this window's; a text filter shows every section open), and ends with "+ New session". Under Pinned only the pinned sessions show, without
-  headers, in their own order (`in_pinned_order`, `section_order["pinned"]`, `PINNED_ORDER`);
-  under the other tabs pinned sessions are listed like any other (the row draws their `★`).
+  this window's; a text filter shows every section open), and ends with "+ New session". Pinned sessions are listed like any other (the row draws
+  their `★`); `pinned()` is the drawer's Pinned tab, in their own order (`section_order["pinned"]`,
+  `PINNED_ORDER`), whatever the tab and filters show, `move_pinned` moves one there.
   The order never changes by itself: sessions follow the user's order
   (`sessions.session_order`), and sessions without a place go last, oldest first; inside an app
-  or status, folder by folder. Under Agent, Status and Pinned the selected session is kept shown
-  when it stops matching the filter (`kept`; unpinned, under Pinned), so a status change never
+  or status, folder by folder. Under Agent and Status the selected session is kept shown
+  when it stops matching the filter (`kept`), so a status change never
   takes away the session being worked in; filter and tab changes (`refilter`) don't keep it.
   `tab_order` is what a row of session tabs shows (`ShownAs::Tabs`: the Tabs layout, a session
   under tabs on a phone): `visible()`'s sessions in the folders' order under
-  every tab but Pinned (its own order there), so reading a session or a status change never
-  moves a tab; `move_tab` moves one there in its folder (Pinned: among them). `App::shown_as` says which
+  every tab, so reading a session or a status change never
+  moves a tab; `move_tab` moves one there in its folder. `App::shown_as` says which
   order is on screen, and cycling, `1`-`9`, `↑`/`↓`, `J`/`K`, tab clicks and drags follow it.
-  `move_session` moves one within its repository, agent or status, or under Pinned among the
-  pinned sessions (`move_pinned`) (`J`/`K`, and the drag in `sessions.rs`: `App::drag`,
+  `move_session` moves one within its repository, agent or status (`J`/`K`, and the drag in `sessions.rs`: `App::drag`,
   `SessionDrag`); `group_target` is `{`/`}` over any headers. A folder filter only sets
   `current_folder` while the Repos tab is active.
 - `screen.rs`: screen geometry for a size, layout, focus, zoom and the dragged pane sizes
@@ -253,7 +255,7 @@ new-session flow, and code boundaries.
 - `handlers/`: key handling by target (`Focus::List` = Rakumux mode, `Focus::Session` = main
   session, `Focus::Terminal` = utility shell):
   - Rakumux mode (`handlers/list.rs`): arrows and Vim keys (`j`/`k`, `gg`/`G`, `Ctrl-d`/`u`,
-    `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs; `f` the drawer's Feed and `t` its rtop:
+    `{`/`}` groups; ←/→, `h`/`l` on the tabs row switch tabs; `*` the drawer's Pinned, `f` its Feed and `t` its rtop:
     shown on that tab with the keys, switched to it, the keys, hidden; `drawer_key` while it has
     them),
     `gg` via `App::pending_key`,
@@ -355,5 +357,5 @@ timers ───────────┘                                     
   empty, live, exited and dead states in both layouts, at phone sizes (45×40, 40×20) for the
   list-then-session layout, taps and dialogs, and at narrow-window sizes (90×40, 90×20) for the
   stacked layout.
-- The drawer: `feed/tests.rs` for the Feed tab, `ui.rs` for rtop and switching tabs
+- The drawer: `feed/tests.rs` for the Feed tab, `tests.rs` for Pinned's keys and mouse, `ui.rs` for its rendering, rtop and switching tabs
   (`rtop_from_settings_…`, `the_drawer_switches_…`, `the_tabs_layout_names_the_drawer_…`).

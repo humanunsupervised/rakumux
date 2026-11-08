@@ -463,7 +463,7 @@ async fn a_click_gives_the_keys_to_the_side_it_lands_on_and_a_second_opens_a_car
     assert!(!h.app.feed_has_keys());
     assert_eq!(h.app.focus, Focus::List);
     let feed = h.app.screen().feed.unwrap();
-    click_at(&mut h, feed.x + 10, feed.y + 1);
+    click_at(&mut h, feed.right() - 2, feed.y + 1);
     assert!(h.app.feed_has_keys());
     // A card: selected; again: read whole in the cards' place.
     click_card(&mut h, 1);

@@ -181,6 +181,10 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             leave(app);
             app.terminal_panel_at(crate::layout::PanelPlacement::Below);
         }
+        KeyAction::Pinned => {
+            leave(app);
+            app.toggle_pinned();
+        }
         KeyAction::Rtop => {
             leave(app);
             app.toggle_rtop();
@@ -219,6 +223,10 @@ fn open_item(app: &mut App, item: SettingsItem) {
         SettingsItem::TerminalPanel => {
             app.mode = AppMode::Normal;
             app.show_terminal_panel();
+        }
+        SettingsItem::Pinned => {
+            app.mode = AppMode::Normal;
+            app.open_pinned();
         }
         SettingsItem::Rtop => {
             app.mode = AppMode::Normal;

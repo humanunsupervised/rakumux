@@ -1,13 +1,12 @@
 //! The left pane's state: every session the daemon listed, kept live from
 //! its event stream, grouped and filtered by the active tab of the top row
-//! (`grouping`: Status, All folders, App or Pinned) and narrowed by the
+//! (`grouping`: Status, All folders or App) and narrowed by the
 //! text filter. Under All folders the folder filter applies (none: all
 //! folders), and with more than one folder shown the sessions are grouped
 //! under a header row per folder: the launch folder first, then by folder
 //! name, then by path. Under App or Status the app or status filter applies
 //! instead, with a header row per app or status when there are several.
-//! Under Pinned only the pinned sessions show, without headers. Activity
-//! never moves a group.
+//! Activity never moves a group.
 //!
 //! The order never changes by itself: activity doesn't move a session.
 //! Inside a folder sessions follow the order the user gave them (a drag,
@@ -16,16 +15,16 @@
 //! of its folder. Each app and status has an order of its own
 //! (`sessions.section_order`), set the same ways under the App and Status
 //! tabs: that order, then the rest folder by folder, so a drag there never
-//! changes the folders' order. The Pinned tab has one too (under
-//! [`PINNED_ORDER`], set the same ways). A pinned session is listed like
-//! any other under the other tabs. The list uses the active tab's
+//! changes the folders' order. The drawer's Pinned tab has one too (under
+//! [`PINNED_ORDER`], [`SessionList::pinned`]). A pinned session is listed
+//! like any other. The list uses the active tab's
 //! order; a row of tabs ([`ShownAs::Tabs`]) shows the same sessions in the
-//! Folders tab's order (Pinned's under Pinned), so a tab keeps its place
+//! Folders tab's order, so a tab keeps its place
 //! (and number) as statuses change and sessions are read. Selection is
 //! tracked by session id (or header) so it survives moves and updates made
-//! by other clients; under App, Status or Pinned the selected session stays
-//! shown when it stops matching the filter (its status changed, it was
-//! unpinned), until something else is selected.
+//! by other clients; under App or Status the selected session stays
+//! shown when it stops matching the filter (its status changed), until
+//! something else is selected.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -42,7 +41,7 @@ use super::grouping::{
 };
 use super::text_input::TextInput;
 
-/// The key `sessions.section_order` keeps the Pinned tab's order under,
+/// The key `sessions.section_order` keeps the drawer's Pinned tab's order under,
 /// next to the apps' and statuses' (which are `app:…` and `status:…`).
 pub const PINNED_ORDER: &str = "pinned";
 
@@ -50,9 +49,8 @@ pub const PINNED_ORDER: &str = "pinned";
 /// section's header, a session, or "+ New session" (the last row).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
-    /// The top row: the tabs (Status, Folders, App, Pinned). ←/→ switch
-    /// tabs, Enter opens the active tab's modal (the Folders modal for All
-    /// folders; Pinned has none).
+    /// The top row: the tabs (Status, Folders, App). ←/→ switch tabs, Enter
+    /// opens the active tab's modal (the Folders modal for All folders).
     Folders,
     /// A folder's header row: new sessions go in that folder.
     FolderHeader(ScopeRoot),
@@ -262,7 +260,7 @@ impl SessionList {
     fn active_folder_filter(&self) -> &[ScopeRoot] {
         match self.grouping {
             Grouping::Folder | Grouping::Repo => &self.folders,
-            Grouping::App | Grouping::Status | Grouping::Pinned => &[],
+            Grouping::App | Grouping::Status => &[],
         }
     }
 
@@ -283,12 +281,11 @@ impl SessionList {
     }
 
     /// The App or Status tab's filter, as sections (none: all of them; and
-    /// always none for All folders, whose filter is `folder_filter`, and
-    /// Pinned, which has none).
+    /// always none for All folders, whose filter is `folder_filter`).
     pub fn section_filter(&self, grouping: Grouping) -> Vec<Section> {
         match grouping {
             // The Repos tab's filter is the folder filter.
-            Grouping::Folder | Grouping::Repo | Grouping::Pinned => Vec::new(),
+            Grouping::Folder | Grouping::Repo => Vec::new(),
             Grouping::App => self.apps.iter().cloned().map(Section::App).collect(),
             Grouping::Status => self.statuses.iter().copied().map(Section::Status).collect(),
         }
@@ -300,7 +297,7 @@ impl SessionList {
     pub fn set_section_filter(&mut self, grouping: Grouping, sections: Vec<Section>) {
         let sections = unique(sections);
         match grouping {
-            Grouping::Folder | Grouping::Repo | Grouping::Pinned => return,
+            Grouping::Folder | Grouping::Repo => return,
             Grouping::App => {
                 self.apps = sections
                     .into_iter()
@@ -351,7 +348,7 @@ impl SessionList {
 
     /// The sessions are shown under header rows: under Folders always (a
     /// lone folder's header names it), under App or Status when several
-    /// apps or statuses are shown, never under Pinned.
+    /// apps or statuses are shown.
     pub fn is_grouped(&self) -> bool {
         match self.grouping {
             // A lone folder still gets its header: its name and branch.
@@ -359,7 +356,6 @@ impl SessionList {
             // A lone repository still gets its bar: its name.
             Grouping::Repo => !self.sections.is_empty(),
             Grouping::App | Grouping::Status => self.sections.len() > 1,
-            Grouping::Pinned => false,
         }
     }
 
@@ -449,19 +445,24 @@ impl SessionList {
     /// the one kept shown, the text filter), as a row of tabs orders them:
     /// folder by folder (the launch folder first, then by name, then path),
     /// each in its folder's order. That's the Folders tab's order under
-    /// every tab but Pinned, which keeps its own: what a session is doing
-    /// never moves its tab, nor does reading it, so stepping through the
-    /// tabs reaches every one.
+    /// every tab: what a session is doing never moves its tab, nor does
+    /// reading it, so stepping through the tabs reaches every one.
     pub fn tab_order(&self) -> Vec<&SessionView> {
-        if self.grouping == Grouping::Pinned {
-            return self.visible();
-        }
         let shown: HashSet<&SessionId> = self.visible().into_iter().map(|s| &s.id).collect();
         self.all_folders
             .iter()
             .flat_map(|folder| self.in_folder_order(folder))
             .filter(|s| shown.contains(&s.id))
             .collect()
+    }
+
+    /// Whether selecting `id` shows it in the list: the folder filter (while
+    /// it applies) and the text filter let it through.
+    pub fn can_show(&self, id: &SessionId) -> bool {
+        let folders = self.active_folder_filter();
+        self.get(id)
+            .is_some_and(|s| folders.is_empty() || folders.contains(&s.scope))
+            && self.matches_text(id)
     }
 
     /// The visible position a drag over list row `row` aims at: a
@@ -479,8 +480,7 @@ impl SessionList {
     /// `J`/`K` take it. It stays in its part of the list: its folder (and
     /// worktree); under App or Status, its app's or status's (whatever
     /// their folders), which keep an order of their own, except ready's,
-    /// listed by when each was last read; under Pinned, among the pinned
-    /// sessions, in the Pinned tab's order. A `to` outside that part means
+    /// listed by when each was last read. A `to` outside that part means
     /// its first or last place. Returns whether it moved.
     pub fn move_session(&mut self, id: &SessionId, to: usize) -> bool {
         self.move_shown(ShownAs::List, id, to)
@@ -488,8 +488,8 @@ impl SessionList {
 
     /// Move session `id` to place `to` among the tabs ([`Self::tab_order`]),
     /// where a dragged tab drops it or `J`/`K` take it in a row of tabs: as
-    /// under the Folders tab, it stays in its folder (and worktree); under
-    /// Pinned, as in the list. Returns whether it moved.
+    /// under the Folders tab, it stays in its folder (and worktree). Returns
+    /// whether it moved.
     pub fn move_tab(&mut self, id: &SessionId, to: usize) -> bool {
         self.move_shown(ShownAs::Tabs, id, to)
     }
@@ -501,10 +501,6 @@ impl SessionList {
             return false;
         };
         let moving = visible[from];
-        if self.grouping == Grouping::Pinned {
-            let shown: Vec<SessionId> = visible.iter().map(|s| s.id.clone()).collect();
-            return self.move_pinned(&shown, from, to);
-        }
         // Tabs are in the Folders tab's order, with its parts.
         let grouping = match shown {
             ShownAs::List => self.grouping,
@@ -567,26 +563,18 @@ impl SessionList {
         true
     }
 
-    /// Move the session at visible position `from` under Pinned to `to`;
-    /// saved as the Pinned tab's order, every pinned session's place, shown
-    /// or not.
-    fn move_pinned(&mut self, shown: &[SessionId], from: usize, to: usize) -> bool {
-        let to = to.min(shown.len().saturating_sub(1));
+    /// Move pinned session `id` to place `to` among the pinned sessions (the
+    /// drawer's Pinned tab), past the last meaning the last; saved as their
+    /// order. Returns whether it moved.
+    pub fn move_pinned(&mut self, id: &SessionId, to: usize) -> bool {
+        let mut order: Vec<SessionId> = self.pinned().iter().map(|s| s.id.clone()).collect();
+        let Some(from) = order.iter().position(|s| s == id) else {
+            return false;
+        };
+        let to = to.min(order.len() - 1);
         if to == from {
             return false;
         }
-        let (id, target) = (shown[from].clone(), shown[to].clone());
-        let mut order: Vec<SessionId> = self
-            .in_pinned_order(self.kept())
-            .iter()
-            .map(|s| s.id.clone())
-            .collect();
-        let (Some(from), Some(to)) = (
-            order.iter().position(|s| s == &id),
-            order.iter().position(|s| s == &target),
-        ) else {
-            return false;
-        };
         let moved = order.remove(from);
         order.insert(to, moved);
         self.section_order.insert(PINNED_ORDER.to_owned(), order);
@@ -771,17 +759,15 @@ impl SessionList {
 
     /// Sessions of the folders (apps, statuses) shown that match the text
     /// filter, in display order: folder by folder, or app by app (status by
-    /// status) and inside each folder by folder, or under Pinned the pinned
-    /// ones in their order. Under App, Status or Pinned the selected session
-    /// is shown even when the filter no longer matches it.
+    /// status) and inside each folder by folder. Under App or Status the
+    /// selected session is shown even when the filter no longer matches it.
     pub fn visible(&self) -> Vec<&SessionView> {
         self.visible_keeping(self.kept())
     }
 
-    /// The session shown whatever the App or Status filter (or whether
-    /// it's pinned, under Pinned) says: the selected one. The folder
-    /// filter (All folders, Repos) keeps none, since a session never
-    /// changes folder.
+    /// The session shown whatever the App or Status filter says: the
+    /// selected one. The folder filter (All folders, Repos) keeps none,
+    /// since a session never changes folder.
     fn kept(&self) -> Option<&SessionId> {
         match (self.grouping, &self.selection) {
             (Grouping::Folder | Grouping::Repo, _) => None,
@@ -797,9 +783,6 @@ impl SessionList {
         let matching = |s: &&SessionView| needle.is_empty() || self.matches(s, &needle);
         let mut visible = Vec::with_capacity(self.sessions.len());
         match self.grouping {
-            Grouping::Pinned => {
-                visible.extend(self.in_pinned_order(kept).into_iter().filter(matching));
-            }
             Grouping::Folder => {
                 for group in &self.groups {
                     visible.extend(self.in_folder_order(group).into_iter().filter(matching));
@@ -824,10 +807,11 @@ impl SessionList {
         visible
     }
 
-    /// Every pinned session (and `kept`, pinned or not) in the Pinned tab's
-    /// order: the order the user gave them there, then the rest folder by
-    /// folder (launch folder first), each in its folder's order.
-    fn in_pinned_order(&self, kept: Option<&SessionId>) -> Vec<&SessionView> {
+    /// Every pinned session, whatever the list's tab and filters show, in
+    /// the drawer's Pinned tab's order: the order the user gave them there,
+    /// then the rest folder by folder (launch folder first), each in its
+    /// folder's order.
+    pub fn pinned(&self) -> Vec<&SessionView> {
         let order = self.section_order.get(PINNED_ORDER);
         let place = |s: &SessionView| {
             order
@@ -838,7 +822,7 @@ impl SessionList {
             .all_folders
             .iter()
             .flat_map(|folder| self.in_folder_order(folder))
-            .filter(|s| s.pinned || kept == Some(&s.id))
+            .filter(|s| s.pinned)
             .collect();
         // Stable: those without a place keep their folder by folder order.
         pinned.sort_by_key(|s| place(s));
@@ -1374,11 +1358,10 @@ impl SessionList {
 
     /// The apps or statuses the active tab shows, in display order: the
     /// filter's (empty ones included) and the selected session's, or with
-    /// no filter every one that has sessions. None under All folders or
-    /// Pinned.
+    /// no filter every one that has sessions. None under All folders.
     fn shown_sections(&self) -> Vec<Section> {
         let grouping = self.grouping;
-        if matches!(grouping, Grouping::Folder | Grouping::Pinned) {
+        if grouping == Grouping::Folder {
             return Vec::new();
         }
         let filter = self.section_filter(grouping);
@@ -2282,65 +2265,51 @@ mod tests {
     }
 
     #[test]
-    fn the_pinned_tab_lists_the_pinned_sessions_alone_in_their_order() {
-        let mut list = with_pins();
-        list.set_grouping(Grouping::Pinned);
-        assert!(!list.is_grouped());
-        // Folder by folder, the launch folder's first, until the user moves
-        // one; no headers.
-        assert_eq!(row_names(&list), ["^", "repo-pinned", "web-pinned", "+"]);
-        // `J`/`K` and drags move one among them, whatever its folder; the
-        // order is saved as the pinned order.
+    fn the_pinned_sessions_keep_an_order_of_their_own_whatever_the_list_shows() {
         let id = SessionId::from_string;
-        assert!(list.move_session(&id("W1"), 0));
-        assert_eq!(ids(&list), ["W1", "R1"]);
+        let pinned = |list: &SessionList| -> Vec<String> {
+            list.pinned().iter().map(|s| s.name.clone()).collect()
+        };
+        let mut list = with_pins();
+        // Folder by folder, the launch folder's first, until the user moves
+        // one.
+        assert_eq!(pinned(&list), ["repo-pinned", "web-pinned"]);
+        // Moved among themselves, whatever their folders; saved as the
+        // pinned order, and the folders' order doesn't change.
+        assert!(list.move_pinned(&id("W1"), 0));
+        assert_eq!(pinned(&list), ["web-pinned", "repo-pinned"]);
         // Past the end is the last place, which R1 has already.
-        assert!(!list.move_session(&id("R1"), 3));
+        assert!(!list.move_pinned(&id("R1"), 3));
         assert_eq!(
             list.section_order().get(PINNED_ORDER),
             Some(&vec![id("W1"), id("R1")])
         );
-        // The folders' order didn't change.
         assert!(list.session_order().is_empty());
-        // A saved order (an older release's pinned section's too) applies.
+        // A saved order (an older release's Pinned tab's too) applies.
         let mut fresh = with_pins();
         fresh.set_section_order(&SectionOrder::from([(
             PINNED_ORDER.into(),
             vec![id("W1"), id("R1")],
         )]));
-        fresh.set_grouping(Grouping::Pinned);
-        assert_eq!(names(&fresh), ["web-pinned", "repo-pinned"]);
-        // The text filter narrows it; the folder filter doesn't apply.
-        list.set_folder_filter(vec![folder("/web")]);
-        assert_eq!(names(&list), ["web-pinned", "repo-pinned"]);
+        assert_eq!(pinned(&fresh), ["web-pinned", "repo-pinned"]);
+        // The list's filters don't apply.
+        list.set_grouping(Grouping::Repo);
+        list.set_folder_filter(vec![folder("/repo")]);
         list.filter.set("repo");
-        assert_eq!(names(&list), ["repo-pinned"]);
+        assert_eq!(pinned(&list), ["web-pinned", "repo-pinned"]);
+        // But they say what selecting one can show.
+        assert!(list.can_show(&id("R1")));
+        assert!(!list.can_show(&id("W1")));
         list.filter.set("");
-        // Unpinned, the selected session stays shown until something else
-        // is selected; a new pin goes last.
-        list.select(Selection::Session(id("R1")));
+        // Unpinned, it leaves; a new pin goes last.
         let mut unpinned = list.get(&id("R1")).unwrap().clone();
         unpinned.pinned = false;
         list.upsert(unpinned);
-        assert_eq!(names(&list), ["web-pinned", "repo-pinned"]);
-        list.select(Selection::Session(id("W1")));
-        assert_eq!(names(&list), ["web-pinned"]);
-        let mut pinned = list.get(&id("W2")).unwrap().clone();
-        pinned.pinned = true;
-        list.upsert(pinned);
-        assert_eq!(names(&list), ["web-pinned", "web"]);
-    }
-
-    #[test]
-    fn the_pinned_tab_with_nothing_pinned_has_new_session_alone() {
-        let mut list = agents();
-        list.set_grouping(Grouping::Pinned);
-        assert!(list.visible().is_empty());
-        assert_eq!(row_names(&list), ["^", "+"]);
-        assert_eq!(list.selection(), &Selection::NewSession);
-        // New sessions still go where the user was.
-        list.select(Selection::Folders);
-        assert_eq!(list.group_target(1), None);
+        assert_eq!(pinned(&list), ["web-pinned"]);
+        let mut newly = list.get(&id("W2")).unwrap().clone();
+        newly.pinned = true;
+        list.upsert(newly);
+        assert_eq!(pinned(&list), ["web-pinned", "web"]);
     }
 
     #[test]
@@ -2698,7 +2667,7 @@ mod tests {
             },
         ));
         assert_eq!(tabs(&list), ["r1", "r2", "r3", "r4", "w1", "w2"]);
-        // Pinning moves nothing, under any tab but Pinned.
+        // Pinning moves nothing.
         let mut pinned = list.get(&SessionId::from_string("W1")).unwrap().clone();
         pinned.pinned = true;
         list.upsert(pinned);
@@ -2706,14 +2675,6 @@ mod tests {
         pinned.pinned = true;
         list.upsert(pinned);
         assert_eq!(tabs(&list), ["r1", "r2", "r3", "r4", "w1", "w2"]);
-        // Under Pinned the tabs are the list: the pinned order.
-        list.set_section_order(&SectionOrder::from([(
-            PINNED_ORDER.into(),
-            vec![SessionId::from_string("W1"), SessionId::from_string("R3")],
-        )]));
-        list.set_grouping(Grouping::Pinned);
-        assert_eq!(tabs(&list), names(&list));
-        assert_eq!(tabs(&list), ["w1", "r3"]);
         let mut unpinned = list.get(&SessionId::from_string("R3")).unwrap().clone();
         unpinned.pinned = false;
         list.upsert(unpinned);
@@ -2768,21 +2729,6 @@ mod tests {
         assert_eq!(
             list.session_order()[std::path::Path::new("/repo")],
             ["R4", "R1", "R2", "R3"].map(SessionId::from_string)
-        );
-        // Under Pinned they move among the pinned ones, whatever their
-        // folders, saved as the pinned order.
-        for pin in ["R2", "W2"] {
-            let mut pinned = list.get(&id(pin)).unwrap().clone();
-            pinned.pinned = true;
-            list.upsert(pinned);
-        }
-        list.set_grouping(Grouping::Pinned);
-        assert_eq!(tabs(&list), ["R2", "W2"]);
-        assert!(list.move_tab(&id("W2"), 0));
-        assert_eq!(tabs(&list), ["W2", "R2"]);
-        assert_eq!(
-            list.section_order().get(PINNED_ORDER),
-            Some(&vec![id("W2"), id("R2")])
         );
     }
 
