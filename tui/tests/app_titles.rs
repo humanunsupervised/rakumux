@@ -1,13 +1,13 @@
-//! A session's AI title once the program started at its prompt has run 5 s,
+//! A session's AI title once the program started at its prompt has run 1 s,
 //! end to end: the real daemon (`rakumux-ptyd serve`), the real account
 //! service (`rakumux status-service`, signed in as an enrolled machine, AI
 //! session titles on) and a local rakumux.com (`mid_turn/fake_cloud.rs`,
 //! HTTPS through `RAKUMUX_CLOUD_CA`). Temp dirs only; no network beyond
 //! 127.0.0.1, no real account or `~/.rakumux`.
 //!
-//! A new session starts at its login shell's prompt. A program that ends
-//! within 5 s (`sleep 2`) gets no title; the next one (`sleep 120`) gets the
-//! session's title 5 s after it started, made of its screen, and the
+//! A new session ("New session") starts at its login shell's prompt. A
+//! program (`sleep 120`) gets the session's title a second after it started,
+//! made of its screen, where the command that started it shows, and the
 //! generated name becomes that title.
 //!
 //! Runs with `cargo test --workspace` (about 15 s), or alone with
@@ -38,20 +38,21 @@ const TUI: &str = env!("CARGO_BIN_EXE_tui");
 const MACHINE: &str = "e2e-machine";
 const TITLE: &str = "Watching the build";
 /// How long a program runs before its session is titled (`APP_RUNNING`).
-const APP_RUNNING: Duration = Duration::from_secs(5);
+const APP_RUNNING: Duration = Duration::from_secs(1);
 /// The service ticks every second and reads views as the daemon publishes
 /// them: a title asked for this much sooner than `APP_RUNNING` is too soon.
-const SLACK: Duration = Duration::from_millis(1500);
+const SLACK: Duration = Duration::from_millis(500);
 /// The longest any step may take.
 const BOUND: Duration = Duration::from_secs(45);
 
 #[test]
-fn a_program_started_at_the_prompt_titles_its_session_after_five_seconds() {
+fn a_program_started_at_the_prompt_titles_its_session_after_a_second() {
     let world = World::new();
     let _daemon = world.start_daemon();
     let client = world.client();
     let session = world.start_shell(&client);
     assert!(session.auto_named, "{}", world.diagnostics());
+    assert_eq!(session.name, "New session");
     let mut service = world.start_service();
     world.wait("the account service to list the session", || {
         world.cloud.state().sessions.as_ref().is_some_and(|list| {
@@ -63,20 +64,15 @@ fn a_program_started_at_the_prompt_titles_its_session_after_five_seconds() {
         })
     });
 
-    // A program that ends within 5 s: no title.
-    client.submit(&session.id, "sleep 2").unwrap();
-    let short = world.foreground(&client, &session.id, "sleep");
-    world.wait("back at the shell's prompt", || {
-        world.foreground_is(&client, &session.id, "bash")
-    });
-    // The next runs on.
-    client.submit(&session.id, "sleep 120").unwrap();
-    let started = world.foreground(&client, &session.id, "sleep");
+    // At the shell's prompt: no title.
+    std::thread::sleep(Duration::from_secs(2));
     assert!(
         world.cloud.state().titles.is_empty(),
-        "a title was asked for before a program had run 5 s\n{}",
+        "a title was asked for at the shell's prompt\n{}",
         world.diagnostics()
     );
+    client.submit(&session.id, "sleep 120").unwrap();
+    let started = world.foreground(&client, &session.id, "sleep");
     world.wait("the session's title asked for", || {
         !world.cloud.state().titles.is_empty()
     });
@@ -84,7 +80,7 @@ fn a_program_started_at_the_prompt_titles_its_session_after_five_seconds() {
     let after = Duration::from_millis(asked.saturating_sub(started));
     assert!(
         after + SLACK >= APP_RUNNING,
-        "asked {after:?} after `sleep 120` started (the first `sleep` at {short})\n{}",
+        "asked {after:?} after `sleep 120` started\n{}",
         world.diagnostics()
     );
     assert!(

@@ -53,19 +53,20 @@ instead of sent.
   interval of continuous output, and never inside the interval. The stamp is advanced
   only when the refresh starts.
 - **Followed turns.** A session whose agent turn the daemon follows is summarised once
-  in its life (in the first chat that reaches its agent's `every` (5) messages or its
-  final reply, whichever comes first; a summary asked for that was made, or a first
-  automatic one that won't be tried again, counts as that one) and when asked, never for
+  in its life (as soon as its first chat has a prompt; a summary asked for that was made,
+  or a first automatic one that won't be tried again, counts as that one) and when asked,
+  never for
   terminal output; backoff, the budget and the two slots still apply. A summary is of the
   latest prompt and what the agent wrote about it, and stays the prompt's while the agent
   goes on, so its title still names the session when it arrives. The turn settings are
   read again every minute (`with_turn_settings`).
 - **Programs started at the prompt.** A session is also summarised, once in its life as
   above, when the program in its foreground (never a shell) has run there for
-  `APP_RUNNING` (5 s), whichever rule comes first. A program that ends or changes sooner,
-  or a session that stops being live, starts the clock again. An agent whose turns the
-  daemon follows waits for its first prompt too (`Candidate::awaits_prompt`), so it's
-  summarised from that prompt; any other program from its screen.
+  `APP_RUNNING` (1 s, for the command that started it to show on its screen), whichever
+  rule comes first. A program that ends or changes sooner, or a session that stops being
+  live, starts the clock again. An agent whose turns the daemon follows waits for its first
+  prompt instead (`Candidate::awaits_prompt`), so it's summarised from that prompt; any
+  other program from its screen.
 - **Asked for.** A summary asked for (`request`) whose attempt was interrupted (a new
   prompt or another change of the session meanwhile, a rate limit) stays asked for and
   is tried again after `INTERRUPTED_RETRY` (5 s), of what the session shows then.

@@ -156,14 +156,14 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    are on (`ai_session_summaries` in `GET /api/v1/features`, read every 2 minutes; rakumux.com
    answers on for every signed-in account): then it consents for the folders of live sessions
    (never private ones), and off it stops. **One
-   automatic title per session**: a session is titled by itself once in its life, in the first
-   agent conversation the daemon follows there (`session_turn`) whose agent has written 5
-   messages (`sessions.ai_summary.every_messages`) or whose turn finishes sooner, or once a
-   program started there (anything in its foreground but a shell: `sleep`, `npm`, an agent)
-   has run 5 s (`APP_RUNNING`), whichever comes first; a program that ends or changes sooner
-   starts the 5 s again, and an agent whose turns the daemon follows waits for its first
-   prompt as well, so it's titled from that prompt, not its empty screen; any other program
-   is titled from its screen. Its later turns and chats get none (`RefreshScheduler::plan`).
+   automatic title per session**: a session is titled by itself once in its life: an agent
+   whose turns the daemon follows (`session_turn`) as soon as it has its first prompt, of that
+   prompt, however long it ran before (never of its empty screen); any other program started
+   there (anything in its foreground but a shell: `sleep`, `npm`, `htop`) once it has run 1 s
+   (`APP_RUNNING`), of its screen, where the command that started it shows; whichever comes
+   first. A program that ends or changes sooner starts the second again. Its later turns and
+   chats get none (`RefreshScheduler::plan`; `sessions.ai_summary.every_messages` is read and
+   no longer used).
    After that only when asked: `OwnerRequest::Summarize` (the ↻
    after a hovered session's name, or `s`), which always applies; a title asked for and made
    counts as the session's one, so none comes by itself after it either. A first automatic
@@ -185,8 +185,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    are kept, a session the daemon deleted (a `removed` event, or missing from the full list,
    dead sessions included, read at each (re)subscribe) is forgotten, and turning sharing off or
    signing out clears it, as it always made every session's title due again: signed in again,
-   a session gets one more automatic title (as soon as its agent's current turn has 5 messages
-   or has finished, or its program has run 5 s), which renames it only while its name is still the generated one or the
+   a session gets one more automatic title (as soon as its agent has a prompt, or its program
+   has run 1 s), which renames it only while its name is still the generated one or the
    title the service last gave it. Nothing refreshes on
    a timer. **The title names the session** (`refresh/titles.rs`): a worker renames it through
    the daemon (`session_rename`, as the user) only while its name is the generated one
@@ -1739,7 +1739,8 @@ on the active one opens its modal; `P` opens the Folders modal from any tab and 
 there makes the Folders tab active. New sessions still go in `App::current_folder`; a folder filter
 only counts while the Folders tab is active.
 
-New session (`n`, "+ New session", Enter on a folder header) creates immediately with a generated name,
+New session (`n`, "+ New session", Enter on a folder header) creates immediately with the generated name
+(`New session`, `New session 2`, … within its folder, until its AI title or the user names it),
 selects the new session and enters session mode at its login-shell prompt, without a naming modal.
 A single click on "+ New session" creates and enters it on desktop and phones; it never just selects
 the action row. The

@@ -7,15 +7,12 @@ use session_core::model::AgentTurn;
 
 use crate::source::Candidate;
 
-/// The agent's messages after which a session's one automatic summary is made,
-/// in the chat it shows then, when its turn hasn't finished sooner, unless the
-/// turn settings say otherwise (`TurnSettings::every`).
-pub const AUTO_STEPS: u32 = 5;
-/// How long a program started in a session (anything but a shell) runs in its
-/// foreground before the session's one automatic summary is made, if its agent
-/// hasn't earned it sooner. An agent whose turns the daemon follows waits for
-/// its first prompt as well.
-pub const APP_RUNNING: Duration = Duration::from_secs(5);
+/// How long a program started in a session (anything but a shell, and not an
+/// agent whose turns the daemon follows) runs in its foreground before the
+/// session's one automatic summary is made of its screen: long enough for the
+/// command that started it to show there. An agent whose turns the daemon
+/// follows is summarised at its first prompt instead.
+pub const APP_RUNNING: Duration = Duration::from_secs(1);
 /// A session whose read or request failed waits this long before another attempt,
 /// doubling with each further failure in a row up to `MAX_ERROR_BACKOFF`.
 pub const ERROR_BACKOFF: Duration = Duration::from_secs(60);
@@ -107,10 +104,10 @@ impl Timing {
     }
 }
 
-/// When to summarise which session: once in its life, in the first chat whose
-/// agent reaches its [`AUTO_STEPS`]th output or finishes sooner, or once a
-/// program started there has run [`APP_RUNNING`] (an agent given its first
-/// prompt), whichever comes first, and whenever
+/// When to summarise which session: once in its life, as soon as an agent
+/// whose turns the daemon follows has its first prompt (in the chat it shows
+/// then), or once any other program started there has run [`APP_RUNNING`],
+/// whichever comes first, and whenever
 /// the user asks (a summary asked for that's made counts as that one too);
 /// never on a timer. Error backoff, a rate-limit pause and a global start
 /// budget still apply. Pure state over an injected monotonic `now`; the dispatch
@@ -121,8 +118,6 @@ pub(crate) struct RefreshScheduler {
     starts: VecDeque<Duration>,
     paused_until: Option<Duration>,
     unauthorized: bool,
-    /// The messages after which a session's automatic summary is made.
-    auto_at: u32,
 }
 
 /// The conversation a turn belongs to; one with no known id is one chat.
@@ -132,16 +127,7 @@ pub(crate) fn conversation(turn: &AgentTurn) -> String {
 
 impl RefreshScheduler {
     pub fn new() -> Self {
-        Self {
-            auto_at: AUTO_STEPS,
-            ..Self::default()
-        }
-    }
-
-    /// Make sessions' automatic summaries after `messages` of their agent's
-    /// (at least one).
-    pub fn set_auto_at(&mut self, messages: u32) {
-        self.auto_at = messages.max(1);
+        Self::default()
     }
 
     /// The user asked for a summary of `session`: it's due at once, even
@@ -198,11 +184,8 @@ impl RefreshScheduler {
             if running.contains(&candidate.session) {
                 continue;
             }
-            let ready = ran
-                || candidate
-                    .turn
-                    .as_ref()
-                    .is_some_and(|turn| turn.messages >= self.auto_at || candidate.finished);
+            // A followed agent's turn: it was given a prompt.
+            let ready = ran || candidate.turn.is_some();
             let auto = ready && !timing.summarized;
             if !timing.requested && !auto {
                 continue;

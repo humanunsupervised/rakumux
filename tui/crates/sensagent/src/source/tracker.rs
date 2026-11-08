@@ -65,8 +65,8 @@ pub(crate) struct Candidate {
 /// terminal output is summarized, when asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TurnSettings {
-    /// A session's one automatic summary is made once its agent has written
-    /// this many messages, or when its turn finishes sooner.
+    /// Read from older configurations and kept; unused since a session's
+    /// one automatic summary is made at its agent's first prompt.
     pub every: u32,
     /// The newest messages a working turn's summary reads, after the prompt.
     pub recent: u32,

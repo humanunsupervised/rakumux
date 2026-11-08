@@ -453,7 +453,7 @@ fn an_agent_turn_is_summarised_from_its_prompt_and_messages_not_the_screen() {
 }
 
 #[test]
-fn a_chat_finished_before_its_fifth_output_is_summarised_then() {
+fn a_chat_is_summarised_at_its_first_prompt_and_not_again_when_it_finishes() {
     let mut early = tracked_view(2);
     early.agent_turn = Some(AgentTurn {
         id: 1,
@@ -464,14 +464,16 @@ fn a_chat_finished_before_its_fifth_output_is_summarised_then() {
     api.set_turn(turn(2));
     let mut harness = Harness::enabled(ReplyMode::Success);
     harness.resync(&api, vec![early.clone()], 0);
-    assert_eq!(harness.round(&api, 0), 0);
+    // Its prompt is there: summarised while it works, of the prompt and
+    // what the agent wrote so far.
+    assert_eq!(harness.round(&api, 0), 1);
+    assert!(ready(&harness.status(2)));
     let mut done = early;
     done.lifecycle = Lifecycle::Done;
     api.set_listed(vec![done.clone()]);
     harness.event(event(2, SessionEvent::Updated { session: done }), 1);
-    assert_eq!(harness.round(&api, 1), 1);
-    assert!(ready(&harness.status(2)));
-    assert_eq!(sent_lifecycles(&harness), ["done"]);
+    assert_eq!(harness.round(&api, 1), 0);
+    assert_eq!(sent_lifecycles(&harness).len(), 1);
 }
 
 fn sent_lifecycles(harness: &Harness) -> Vec<String> {

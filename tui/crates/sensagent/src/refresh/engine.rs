@@ -429,7 +429,6 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         {
             let settings = read().bounded();
             self.service.set_turn_settings(settings);
-            self.scheduler.set_auto_at(settings.every);
             self.settings_due = now.saturating_add(SETTINGS_INTERVAL);
         }
         if self.connected {

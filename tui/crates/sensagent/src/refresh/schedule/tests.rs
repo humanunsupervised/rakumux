@@ -55,22 +55,17 @@ fn auto(number: u8, conversation: &str) -> Due {
 }
 
 #[test]
-fn a_session_is_summarised_once_at_its_first_chats_fifth_output() {
+fn a_session_is_summarised_once_at_its_agents_first_prompt() {
     let mut scheduler = RefreshScheduler::new();
     assert!(plan(&mut scheduler, secs(0), vec![candidate(1, None, false)]).is_empty());
-    assert!(plan(
-        &mut scheduler,
-        secs(0),
-        vec![candidate(1, turn("c1", 4), false)]
-    )
-    .is_empty());
+    // Its first prompt: at once, before the agent wrote anything.
     let due = plan(
         &mut scheduler,
-        secs(1),
-        vec![candidate(1, turn("c1", 5), false)],
+        secs(0),
+        vec![candidate(1, turn("c1", 0), false)],
     );
     assert_eq!(due, [auto(1, "c1")]);
-    scheduler.started(&due[0], secs(1));
+    scheduler.started(&due[0], secs(0));
     assert_eq!(
         scheduler
             .finished(&session(1), Outcome::Done, secs(2))
@@ -86,7 +81,7 @@ fn a_session_is_summarised_once_at_its_first_chats_fifth_output() {
         plan(
             &mut scheduler,
             secs(3),
-            vec![candidate(2, turn("c4", 5), false)]
+            vec![candidate(2, turn("c4", 1), false)]
         ),
         [auto(2, "c4")]
     );
@@ -105,37 +100,19 @@ fn a_session_is_summarised_once_at_its_first_chats_fifth_output() {
 #[test]
 fn a_summary_asked_for_and_made_is_the_sessions_one() {
     let mut scheduler = RefreshScheduler::new();
-    // Asked for before its chat's fifth output: not the automatic one, but
-    // made, it counts as the session's.
-    scheduler.request(&session(1));
-    let due = plan(
-        &mut scheduler,
-        secs(0),
-        vec![candidate(1, turn("c1", 2), false)],
-    );
+    // Asked for of a program whose turns the daemon doesn't follow (from its
+    // screen), before it ran long enough: not the automatic one, but made, it
+    // counts as the session's, and its agent, started later, gets none.
+    scheduler.request(&session(2));
+    let due = plan(&mut scheduler, secs(0), vec![candidate(2, None, false)]);
     assert_eq!(
         due,
         [Due {
-            session: session(1),
-            chat: "c1".into(),
+            session: session(2),
+            chat: String::new(),
             auto: false,
         }]
     );
-    scheduler.started(&due[0], secs(0));
-    assert_eq!(
-        scheduler
-            .finished(&session(1), Outcome::Done, secs(1))
-            .as_deref(),
-        Some("c1")
-    );
-    for later in [turn("c1", 5), turn("c2", 5)] {
-        assert!(plan(&mut scheduler, secs(2), vec![candidate(1, later, true)]).is_empty());
-    }
-
-    // Of a program whose turns the daemon doesn't follow (from its screen):
-    // its agent, started later, gets none either.
-    scheduler.request(&session(2));
-    let due = plan(&mut scheduler, secs(0), vec![candidate(2, None, false)]);
     scheduler.started(&due[0], secs(0));
     assert_eq!(
         scheduler
@@ -152,11 +129,7 @@ fn a_summary_asked_for_and_made_is_the_sessions_one() {
 
     // One asked for that couldn't be sent isn't: the automatic one still comes.
     scheduler.request(&session(3));
-    let due = plan(
-        &mut scheduler,
-        secs(0),
-        vec![candidate(3, turn("c3", 1), false)],
-    );
+    let due = plan(&mut scheduler, secs(0), vec![candidate(3, None, false)]);
     scheduler.started(&due[0], secs(0));
     assert_eq!(
         scheduler.finished(
@@ -170,30 +143,16 @@ fn a_summary_asked_for_and_made_is_the_sessions_one() {
         plan(
             &mut scheduler,
             secs(2),
-            vec![candidate(3, turn("c3", 5), false)]
+            vec![candidate(3, turn("c3", 0), false)]
         ),
         [auto(3, "c3")]
     );
 }
 
 #[test]
-fn a_chat_that_finishes_sooner_is_summarised_when_it_finishes() {
+fn a_finished_session_without_a_turn_is_not_summarised_by_itself() {
     let mut scheduler = RefreshScheduler::new();
-    assert!(plan(
-        &mut scheduler,
-        secs(0),
-        vec![candidate(1, turn("c1", 2), false)]
-    )
-    .is_empty());
-    assert_eq!(
-        plan(
-            &mut scheduler,
-            secs(1),
-            vec![candidate(1, turn("c1", 2), true)]
-        ),
-        [auto(1, "c1")]
-    );
-    // A finished session with no turn (not an agent the daemon reads) isn't.
+    // Not an agent the daemon reads, and no program in its foreground.
     assert!(plan(&mut scheduler, secs(1), vec![candidate(2, None, true)]).is_empty());
 }
 
@@ -395,31 +354,6 @@ fn a_rate_limit_pauses_everything_and_a_refusal_stops_until_reset() {
 }
 
 #[test]
-fn the_automatic_summary_follows_the_turn_settings() {
-    let mut scheduler = RefreshScheduler::new();
-    scheduler.set_auto_at(2);
-    assert_eq!(
-        plan(
-            &mut scheduler,
-            secs(0),
-            vec![candidate(1, turn("c1", 2), false)]
-        )
-        .len(),
-        1
-    );
-    scheduler.set_auto_at(0);
-    assert_eq!(
-        plan(
-            &mut scheduler,
-            secs(0),
-            vec![candidate(2, turn("c2", 1), false)]
-        )
-        .len(),
-        1
-    );
-}
-
-#[test]
 fn the_global_budget_bounds_starts_per_window() {
     let mut scheduler = RefreshScheduler::new();
     for number in 0..BUDGET_STARTS as u8 {
@@ -438,33 +372,28 @@ fn the_global_budget_bounds_starts_per_window() {
 }
 
 #[test]
-fn a_program_started_at_the_prompt_is_summarised_once_it_ran_five_seconds() {
+fn a_program_started_at_the_prompt_is_summarised_once_it_ran_a_second() {
     let mut scheduler = RefreshScheduler::new();
     assert!(plan(&mut scheduler, secs(0), vec![candidate(1, None, false)]).is_empty());
+    // Just started: the command that started it isn't on its screen yet.
     assert!(plan(
         &mut scheduler,
         secs(3),
         vec![running(1, "htop", None, false)]
     )
     .is_empty());
-    assert!(plan(
-        &mut scheduler,
-        secs(7),
-        vec![running(1, "htop", None, false)]
-    )
-    .is_empty());
     assert_eq!(
         plan(
             &mut scheduler,
-            secs(8),
+            secs(4),
             vec![running(1, "htop", None, false)]
         ),
         vec![auto(1, "")]
     );
     let due = auto(1, "");
-    scheduler.started(&due, secs(8));
+    scheduler.started(&due, secs(4));
     assert_eq!(
-        scheduler.finished(&due.session, Outcome::Done, secs(9)),
+        scheduler.finished(&due.session, Outcome::Done, secs(5)),
         Some(String::new())
     );
     // Its one: no other program gets another.
@@ -483,7 +412,7 @@ fn a_program_started_at_the_prompt_is_summarised_once_it_ran_five_seconds() {
 }
 
 #[test]
-fn a_program_that_ends_or_changes_starts_the_five_seconds_again() {
+fn a_program_that_ends_or_changes_starts_its_second_again() {
     let mut scheduler = RefreshScheduler::new();
     assert!(plan(&mut scheduler, secs(0), vec![running(1, "ls", None, false)]).is_empty());
     // Back at the shell's prompt.
@@ -494,36 +423,25 @@ fn a_program_that_ends_or_changes_starts_the_five_seconds_again() {
         vec![running(1, "npm", None, false)]
     )
     .is_empty());
+    // Another program, before `npm` ran a second: its own second starts.
     assert!(plan(
         &mut scheduler,
-        secs(13),
-        vec![running(1, "vim", None, false)]
-    )
-    .is_empty());
-    assert!(plan(
-        &mut scheduler,
-        secs(17),
+        secs(10) + Duration::from_millis(500),
         vec![running(1, "vim", None, false)]
     )
     .is_empty());
     // Not live meanwhile: its clock starts again.
-    assert!(plan(&mut scheduler, secs(18), vec![]).is_empty());
+    assert!(plan(&mut scheduler, secs(11), vec![]).is_empty());
     assert!(plan(
         &mut scheduler,
-        secs(19),
-        vec![running(1, "vim", None, false)]
-    )
-    .is_empty());
-    assert!(plan(
-        &mut scheduler,
-        secs(23),
+        secs(12),
         vec![running(1, "vim", None, false)]
     )
     .is_empty());
     assert_eq!(
         plan(
             &mut scheduler,
-            secs(24),
+            secs(13),
             vec![running(1, "vim", None, false)]
         ),
         vec![auto(1, "")]
@@ -531,22 +449,18 @@ fn a_program_that_ends_or_changes_starts_the_five_seconds_again() {
 }
 
 #[test]
-fn an_agent_is_summarised_at_five_seconds_only_once_it_has_a_prompt() {
+fn an_agent_is_summarised_at_its_first_prompt_and_not_before() {
     let mut scheduler = RefreshScheduler::new();
-    assert!(plan(
-        &mut scheduler,
-        secs(0),
-        vec![running(1, "claude", None, true)]
-    )
-    .is_empty());
-    assert!(plan(
-        &mut scheduler,
-        secs(40),
-        vec![running(1, "claude", None, true)]
-    )
-    .is_empty());
-    // The first prompt: the agent has run 5 s, so its title is made of it
-    // without waiting for five messages.
+    // Waiting for its first prompt, however long it runs.
+    for at in [0, 1, 40] {
+        assert!(plan(
+            &mut scheduler,
+            secs(at),
+            vec![running(1, "claude", None, true)]
+        )
+        .is_empty());
+    }
+    // The first prompt: its title is made of it at once.
     assert_eq!(
         plan(
             &mut scheduler,
@@ -555,25 +469,13 @@ fn an_agent_is_summarised_at_five_seconds_only_once_it_has_a_prompt() {
         ),
         vec![auto(1, "c1")]
     );
-    // Prompted at once: it waits for the 5 s.
+    // Prompted as it starts (`claude "…"`): at once too.
     let mut scheduler = RefreshScheduler::new();
-    assert!(plan(
-        &mut scheduler,
-        secs(0),
-        vec![running(2, "claude", turn("c1", 1), false)]
-    )
-    .is_empty());
-    assert!(plan(
-        &mut scheduler,
-        secs(4),
-        vec![running(2, "claude", turn("c1", 1), false)]
-    )
-    .is_empty());
     assert_eq!(
         plan(
             &mut scheduler,
-            secs(5),
-            vec![running(2, "claude", turn("c1", 1), false)]
+            secs(0),
+            vec![running(2, "claude", turn("c1", 0), false)]
         ),
         vec![auto(2, "c1")]
     );

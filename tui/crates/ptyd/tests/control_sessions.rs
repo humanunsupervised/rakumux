@@ -307,7 +307,7 @@ fn create_builds_argv_env_cwd_and_startup_input() {
     assert_eq!(view.created_by, Creator::User);
     assert_eq!(view.launch.argv, None, "login shell is recorded as None");
     assert_eq!(view.launch.startup_cmds.len(), 2);
-    assert_eq!(view.name.split('-').count(), 2, "generated two-word name");
+    assert_eq!(view.name, "New session", "the generated name");
     assert_eq!(view.lifecycle, Lifecycle::None);
     assert_eq!(view.terminal.as_ref().unwrap().cols, 120);
 
