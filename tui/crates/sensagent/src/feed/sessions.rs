@@ -31,8 +31,11 @@ const MAX_SESSIONS: usize = 200;
 /// The most places a session lists: its most recent (the contract's bound).
 const MAX_PLACES: usize = 8;
 /// The largest upload the contract takes (`x-maxBodyBytes`): a list that
-/// would be larger goes without its places.
+/// would be larger goes without its places and its agents' latest steps.
 const MAX_BODY_BYTES: usize = 262_144;
+/// The most characters of an agent's latest step (`output`; the contract's
+/// bound).
+const MAX_OUTPUT: usize = 300;
 
 /// One session as the website lists it (`contracts/feed/` `sessionState`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -58,6 +61,9 @@ pub(crate) struct SessionState {
     last_active_at: i64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     places: Vec<PlaceState>,
+    /// A live session's agent's latest step, one line, masked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<String>,
 }
 
 /// A place a session worked in, as the website lists it (`contracts/feed/`
@@ -185,8 +191,30 @@ impl SessionState {
                 .filter_map(|place| PlaceState::of(&view.scope, place))
                 .take(MAX_PLACES)
                 .collect(),
+            output: if status == "live" && agent.is_some() {
+                view.agent_output.as_deref().and_then(output_line)
+            } else {
+                None
+            },
         })
     }
+}
+
+/// An agent's latest step as the feed takes it (`output`): escapes and
+/// controls removed, keys, credential assignments and tokens masked as chat
+/// text is, its lines and spaces run into one line, cut to [`MAX_OUTPUT`]
+/// characters with `…`; `None` when nothing visible is left.
+fn output_line(text: &str) -> Option<String> {
+    let text = crate::cloud::chat_text(text)?;
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line = if line.chars().count() > MAX_OUTPUT {
+        let mut cut: String = line.chars().take(MAX_OUTPUT - 1).collect();
+        cut.push('…');
+        cut
+    } else {
+        line
+    };
+    wire::label(&line, MAX_OUTPUT)
 }
 
 /// Shells, which the App tab files as `shell` (the TUI's `grouping::is_shell`).
@@ -242,6 +270,8 @@ pub(crate) struct SessionSync {
     places: bool,
     /// The cloud's last answer said it takes subagents' messages in chats.
     subagents: bool,
+    /// The cloud's last answer said it takes agents' latest steps.
+    output: bool,
     /// rakumux.com answered a list under this name with anything but
     /// `machine_taken` (or a failure for now) since the switch was turned on:
     /// the name is this machine's, and its replies may be read.
@@ -275,6 +305,7 @@ impl SessionSync {
             enabled: false,
             places: false,
             subagents: false,
+            output: false,
             confirmed: false,
             sessions: BTreeMap::new(),
             sent: None,
@@ -303,6 +334,7 @@ impl SessionSync {
         self.enabled = enabled;
         self.places = false;
         self.subagents = false;
+        self.output = false;
         self.confirmed = false;
         self.sent = None;
         self.retry = RETRY_MIN;
@@ -403,13 +435,17 @@ impl SessionSync {
     }
 
     /// The list as it stands, the most recently used first, within the
-    /// contract's bound; with places when the cloud takes them.
+    /// contract's bound; with places and agents' latest steps when the
+    /// cloud takes them.
     fn list(&self) -> Vec<SessionState> {
         let mut list: Vec<SessionState> = self.sessions.values().cloned().collect();
         list.sort_by(|a, b| (b.last_active_at, &a.id).cmp(&(a.last_active_at, &b.id)));
         list.truncate(MAX_SESSIONS);
         if !self.places {
             without_places(&mut list);
+        }
+        if !self.output {
+            without_output(&mut list);
         }
         list
     }
@@ -429,10 +465,12 @@ impl SessionSync {
         let capabilities = &self.capabilities;
         let mut request = wire::sessions_upload(&self.machine, &list, wall_ms, capabilities)?;
         if matches!(&request, FeedRequest::Sessions { body } if body.len() > MAX_BODY_BYTES) {
-            // Too large with them: the same list without places (and it
-            // counts as sent, so it isn't sent again until it changes).
+            // Too large with them: the same list without places or agents'
+            // latest steps (and it counts as sent, so it isn't sent again
+            // until it changes).
             let mut smaller = list.clone();
             without_places(&mut smaller);
+            without_output(&mut smaller);
             request = wire::sessions_upload(&self.machine, &smaller, wall_ms, capabilities)?;
         }
         self.sending = Some(list);
@@ -465,6 +503,7 @@ impl SessionSync {
             Ok(stored) => {
                 self.places = stored.places;
                 self.subagents = stored.subagents;
+                self.output = stored.output;
                 self.sent = sent;
                 self.retry = RETRY_MIN;
                 self.next_send = now + SETTLE;
@@ -487,6 +526,13 @@ impl SessionSync {
 fn without_places(list: &mut [SessionState]) {
     for session in list {
         session.places.clear();
+    }
+}
+
+/// `list` without its sessions' agents' latest steps.
+fn without_output(list: &mut [SessionState]) {
+    for session in list {
+        session.output = None;
     }
 }
 

@@ -98,11 +98,13 @@ conformance tests, not an HTTP server, database or local runtime.
   that conversation and the agent waits for input (or works, for an agent that takes what's
   typed during a turn; never while it asks something), and reports `delivered` once the agent took
   it as a prompt or `failed` with a `failure` code (`reply-status`; only the reply's own machine,
-  only a pending reply): `not_taken` when it was typed in but the agent's chat showed no new
+  only a pending reply, or one that expired while the machine had it): `not_taken` when it was typed in but the agent's chat showed no new
   prompt within 30 seconds (typed while the agent worked: 30 seconds after the agent waited
   again), or another one (its Enter lost, the text in a menu). The
   agent's next finished reply there is uploaded with `reply_to`, and the cloud records it as
-  the reply's `response`; page entries carry `reply_to` and `thread`. A signed-in machine takes
+  the reply's `response` (once, and then delivered, even after it failed `not_taken`; another
+  entry naming that reply is stored as an entry of its own, without `reply_to` or `thread`); page
+  entries carry `reply_to` and `thread`. A signed-in machine takes
   replies wherever they were written; `not_accepted` comes only from older releases, which took
   replies written elsewhere only while a setting of theirs was on. `from` names the machine a
   reply was written on, for showing.
@@ -176,7 +178,10 @@ conformance tests, not an HTTP server, database or local runtime.
   working tree where it changed files; no `branch` while its HEAD is detached), most recent first, each `{name, inside,
   branch?, worktree?, edited, last_at}`: `name` is its path in the session's folder when it's
   there (`inside`; `.` for the folder itself), else its last path component, never an absolute
-  path; and **`subagents`**, subagents' messages in chat uploads (below). The upload also says what the machine
+  path; **`output`**, a live session's agent's latest step as Rakumux's session row shows it
+  (its reasoning, a tool call or its reply), one line of at most 300 characters, masked as chat
+  text is, only for an agent the feed takes: it changes the list, which goes when it changes, at
+  most every 3 s; and **`subagents`**, subagents' messages in chat uploads (below). The upload also says what the machine
   handles beyond the first version of this contract (`capabilities`, at most 16 unique names
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
   fetches a reply's attachments and gives the agent their paths; `resources`, it sends what it
@@ -216,7 +221,8 @@ conformance tests, not an HTTP server, database or local runtime.
   it lists, by name (`folder_session`, a session the website listed in that folder, picks one of
   two folders with one name), never a private session's, and starts the agent as its own user
   would. It reports `new-session-status` (only the request's own machine, only a pending
-  request): `created` with the session it started (`{id, name}`), which its next session list
+  request, or one that expired while the machine was starting it, whose first prompt went
+  when it expired): `created` with the session it started (`{id, name}`), which its next session list
   shows, or `failed` with why: `folder_unknown` (no listed folder of that name now, or several
   and `folder_session` doesn't say which) or `refused` (its daemon couldn't start it);
   `not_accepted` comes only from older releases, which started none while a setting of theirs
@@ -248,7 +254,8 @@ conformance tests, not an HTTP server, database or local runtime.
   a session list under a name holds that name. A request from another id that names it (`machine`
   in an upload, a reply status or the replies read) is `machine_taken` (409) and changes nothing;
   that machine then takes another name. A request without the header (an older machine) is never
-  checked, and an id that isn't a ULID is `invalid_request`.
+  checked, and an id that isn't a ULID is `invalid_request`. An enrolled machine (below) takes a
+  name only while no machine holds it, not one an older machine listed under without an id.
 - **Enrolled machines:** a machine with no sign-in of its own (the user's Fly Sprite) gets one
   from a signed-in machine of the account. That machine enrols it (`machine-enrol`: the id and
   name it will use, and optionally a `wake_url`) with its Clerk token and gets its **machine

@@ -431,8 +431,12 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    conversation from the uploaded chats, and tell a machine that's away. Each session's 8 most
    recent places go too, as names only (`PlaceState`: a path in the session's folder, `.` for
    the folder itself, else its last component; branch, worktree, `edited`, `last_at`), and
-   only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`); a
-   list that would pass the contract's 256 KiB goes without them. The list says
+   only once the cloud's answer said it takes them (`sessions-stored` `accepts: ["places"]`).
+   A live session whose agent the feed takes sends its agent's latest step too (`output`: its
+   `agent_output`, the line its row shows, cleaned and masked as chat text is, run into one
+   line, at most 300 characters), only once the answer `accepts` `output`; as it changes the
+   list, it goes with it, at most every 3 s, so rakumux.com shows what each agent is doing. A
+   list that would pass the contract's 256 KiB goes without places and outputs. The list says
    `capabilities: ["reply_attachments", "new_sessions", "new_session_agents"]`, and `resources`
    as below.
    **rtop on rakumux.com** (`feed/resources.rs`, `ResourceSync`; contract `contracts/feed/`,

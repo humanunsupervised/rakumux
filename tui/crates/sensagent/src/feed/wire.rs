@@ -385,6 +385,9 @@ pub(crate) struct SessionsStored {
     pub places: bool,
     /// It takes subagents' messages in chats (`accepts` has `subagents`).
     pub subagents: bool,
+    /// It takes each live session's agent's latest step (`accepts` has
+    /// `output`).
+    pub output: bool,
 }
 
 /// How many sessions rakumux.com holds for this machine now, and whether it
@@ -402,6 +405,7 @@ pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<SessionsStored, F
         stored: stored.stored,
         places: stored.accepts.iter().any(|name| name == "places"),
         subagents: stored.accepts.iter().any(|name| name == "subagents"),
+        output: stored.accepts.iter().any(|name| name == "output"),
     })
 }
 

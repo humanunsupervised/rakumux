@@ -18,6 +18,7 @@
             "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
             "pinned": true,
             "last_active_at": 1761219990000,
+            "output": "Bash: cargo test -p rakumux-sensagent --locked",
             "places": [
               {
                 "name": "worktrees/web-session",
@@ -97,7 +98,11 @@
       {
         "note": "a worktree path",
         "session": { "places": [{ "name": "x", "inside": false, "worktree": "a/b", "edited": false, "last_at": 1761210000000 }] }
-      }
+      },
+      { "note": "an empty output", "session": { "output": "" } },
+      { "note": "an output of two lines", "session": { "output": "Read src/main.rs\nEdit src/main.rs" } },
+      { "note": "an output with a terminal control", "session": { "output": "Bash: ls \u001b[31m" } },
+      { "note": "an output over 300 characters", "session": { "output": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" } }
     ]
   },
   "capabilities": {
@@ -115,7 +120,8 @@
       { "version": 1, "stored": 2 },
       { "version": 1, "stored": 0 },
       { "version": 1, "stored": 2, "accepts": ["places"] },
-      { "version": 1, "stored": 2, "accepts": ["places", "a_later_one"] }
+      { "version": 1, "stored": 2, "accepts": ["places", "a_later_one"] },
+      { "version": 1, "stored": 2, "accepts": ["places", "subagents", "output"] }
     ],
     "invalid": [
       { "version": 1, "stored": -1 },

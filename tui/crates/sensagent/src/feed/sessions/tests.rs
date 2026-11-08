@@ -40,6 +40,7 @@ fn stored(places: bool) -> wire::SessionsStored {
         stored: 1,
         places,
         subagents: false,
+        output: false,
     }
 }
 
@@ -61,6 +62,10 @@ fn body(request: Option<FeedRequest>) -> serde_json::Value {
 fn the_list_says_what_the_tuis_status_and_folders_tabs_group_by() {
     let mut working = agent(view("01K89ZQ4D2F6H8J0K2M4N6P8R0"));
     working.pinned = true;
+    working.agent_output = Some(
+        "Bash: \u{1b}[1mexport OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123456789\u{1b}[0m\n  && cargo test"
+            .into(),
+    );
     working.activity = Some(AgentActivity {
         phase: ActivityPhase::WaitingForResponse,
         active_subagents: 0,
@@ -74,12 +79,16 @@ fn the_list_says_what_the_tuis_status_and_folders_tabs_group_by() {
     exited.status = SessionStatus::Exited;
     exited.lifecycle = Lifecycle::None;
     exited.last_active_at = 1_761_210_000;
-    let mut sessions = on(&[working, private, dead, exited]);
+    exited.agent_output = Some("Read src/main.rs".into());
+    let mut long = agent(view("01K89ZQ4D2F6H8J0K2M4N6P8R4"));
+    long.last_active_at = 1_761_200_000;
+    long.agent_output = Some("thinking ".repeat(60));
+    let mut sessions = on(&[working, private, dead, exited, long]);
     let upload = body(sessions.next_request(NOW, WALL));
     assert_eq!(upload["machine"], "studio");
     assert_eq!(upload["at"], WALL);
     let listed = upload["sessions"].as_array().unwrap();
-    assert_eq!(listed.len(), 2, "private and dead sessions aren't listed");
+    assert_eq!(listed.len(), 3, "private and dead sessions aren't listed");
     assert_eq!(
         listed[0],
         serde_json::json!({
@@ -92,6 +101,26 @@ fn the_list_says_what_the_tuis_status_and_folders_tabs_group_by() {
     assert_eq!(listed[1]["status"], "exited");
     assert_eq!(listed[1]["lifecycle"], "none");
     assert!(listed[1].get("agent").is_none());
+
+    // Agents' latest steps go once rakumux.com says it takes them: one line,
+    // escapes gone and keys masked, cut to 300 characters; never an ended
+    // session's.
+    sessions.done(
+        true,
+        Ok(wire::SessionsStored {
+            output: true,
+            ..stored(false)
+        }),
+        NOW,
+    );
+    let upload = body(sessions.next_request(NOW + SETTLE, WALL));
+    let listed = upload["sessions"].as_array().unwrap();
+    // The key's assignment masked as chat text masks it.
+    assert_eq!(listed[0]["output"], "Bash: export [REDACTED] && cargo test");
+    assert!(listed[1].get("output").is_none(), "{upload}");
+    let cut = listed[2]["output"].as_str().unwrap();
+    assert_eq!(cut.chars().count(), 300);
+    assert!(cut.ends_with('…'), "{cut}");
 }
 
 #[test]
@@ -175,6 +204,7 @@ fn rakumux_com_says_how_many_it_holds() {
             stored: 2,
             places: false,
             subagents: false,
+            output: false,
         })
     );
     // A cloud that takes places says so; names it doesn't know are ignored.
@@ -187,6 +217,7 @@ fn rakumux_com_says_how_many_it_holds() {
             stored: 2,
             places: true,
             subagents: false,
+            output: false,
         })
     );
     // One that takes subagents' messages in chats says that too.
@@ -199,6 +230,20 @@ fn rakumux_com_says_how_many_it_holds() {
             stored: 2,
             places: true,
             subagents: true,
+            output: false,
+        })
+    );
+    // And one that takes agents' latest steps.
+    assert_eq!(
+        wire::sessions_stored(&reply(
+            200,
+            r#"{"version":1,"stored":2,"accepts":["places","subagents","output"]}"#
+        )),
+        Ok(wire::SessionsStored {
+            stored: 2,
+            places: true,
+            subagents: true,
+            output: true,
         })
     );
     assert_eq!(
