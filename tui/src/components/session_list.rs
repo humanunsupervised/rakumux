@@ -34,8 +34,8 @@ use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
 use super::format::{
     activity_badge_at, branch_label, facts_line, last_activity, place_label, read_period_style,
-    relative_time, repo_label, status_glyph, status_group_glyph, truncate, truncate_start,
-    PIN_MARK,
+    relative_time, repo_label, session_program, session_repos, status_glyph, status_group_glyph,
+    truncate, truncate_start, PIN_MARK,
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
@@ -501,19 +501,39 @@ fn session_content(
     // The lines under the name end where the right column starts.
     let column = width.saturating_sub(2 + RIGHT_COLUMN);
     let mut second = vec![Span::raw("  ")];
-    // The branch is on the place line (`place_content`).
-    second.extend(
-        facts_line(
-            session,
-            column,
-            app.icons(),
-            Style::default().fg(detail_color),
-            false,
-        )
-        .spans,
-    );
+    let detail = Style::default().fg(detail_color);
+    // The repositories it works in first, in bold; then the app and the
+    // rest, in what's left. The branch is on the place line (`place_content`).
+    let folder_git = app
+        .folders
+        .get(&session.scope)
+        .and_then(|folder| folder.git.as_ref());
+    let repos = session_repos(session, folder_git).join(", ");
+    let mut facts_width = column;
+    if !repos.is_empty() {
+        // Room for the app's name after them, while that leaves them some.
+        let app_room = session_program(session).map_or(0, |app| str_width(app) + REPOS_GAP.len());
+        let most = column.saturating_sub(app_room).max(REPOS_MIN).min(column);
+        let repos = truncate(&repos, most);
+        facts_width = column.saturating_sub(str_width(&repos) + REPOS_GAP.len());
+        second.push(Span::styled(repos, detail.add_modifier(Modifier::BOLD)));
+        if facts_width >= FACTS_MIN {
+            second.push(Span::styled(REPOS_GAP, detail));
+        }
+    }
+    if repos.is_empty() || facts_width >= FACTS_MIN {
+        second.extend(facts_line(session, facts_width, app.icons(), detail, false).spans);
+    }
     vec![first, second]
 }
+
+/// Columns the repositories keep on the details line however long the
+/// app's name.
+const REPOS_MIN: usize = 8;
+/// Between the repositories and the rest of the details line.
+const REPOS_GAP: &str = " · ";
+/// Columns the app and the rest need after the repositories to be shown.
+const FACTS_MIN: usize = 4;
 
 /// In the gutter of the place a session works now when it has worked
 /// elsewhere too: `▸` while its other places are closed, `▾` while they're
@@ -1492,11 +1512,14 @@ mod tests {
         for selected in [false, true] {
             let lines = session_content(&h.app, &session, 40, selected, 0);
             let second = &lines[1];
-            assert_eq!(second[1].content, "opencode");
-            assert_eq!(second[1].style.fg, Some(p.label_slate_blue));
+            // Its repository first, in bold, then the app in its colour.
+            assert_eq!(second[1].content, "repo");
+            assert!(second[1].style.add_modifier.contains(Modifier::BOLD));
+            assert_eq!(second[3].content, "opencode");
+            assert_eq!(second[3].style.fg, Some(p.label_slate_blue));
             // The branch is on the place line, in the details' colour.
             let facts: String = second.iter().map(|span| span.content.as_ref()).collect();
-            assert_eq!(facts, "  opencode");
+            assert_eq!(facts, "  repo · opencode");
             let places = place_content(&h.app, &session, 40, selected, None, 0).lines;
             let branch = places[0].last().unwrap();
             assert_eq!(branch.content, "⎇ main");

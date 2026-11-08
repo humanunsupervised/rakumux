@@ -36,6 +36,27 @@ pub fn repo_label(git: &GitInfo) -> Option<&str> {
     (!folder.is_some_and(|folder| folder.eq_ignore_ascii_case(repo))).then_some(repo)
 }
 
+/// The repositories a session works in, by name (its `origin` remote's, else
+/// its main checkout's folder name), each once: the one of the folder it
+/// started in first, then the one it works in now, then where it changed
+/// files, most recent first.
+pub fn session_repos(session: &SessionView, folder: Option<&GitInfo>) -> Vec<String> {
+    let mut repos: Vec<String> = Vec::new();
+    let gits = folder
+        .into_iter()
+        .chain(session.git.as_ref())
+        .chain(session.places.iter().filter_map(|place| place.git.as_ref()));
+    for git in gits {
+        let Some(repo) = git.repo.as_deref().map(str::trim).filter(|r| !r.is_empty()) else {
+            continue;
+        };
+        if !repos.iter().any(|known| known.eq_ignore_ascii_case(repo)) {
+            repos.push(repo.to_string());
+        }
+    }
+    repos
+}
+
 /// Unix seconds now.
 pub fn now_secs() -> i64 {
     std::time::SystemTime::now()
@@ -302,7 +323,7 @@ fn session_facts(session: &SessionView, icons: Icons, branch: bool) -> Vec<Strin
 
 /// Prefer a detected agent over its host process. Ended sessions don't
 /// advertise a stale running app, and ordinary shells need no app label.
-fn session_program(session: &SessionView) -> Option<&str> {
+pub fn session_program(session: &SessionView) -> Option<&str> {
     if matches!(session.status, SessionStatus::Dead | SessionStatus::Exited) {
         return None;
     }

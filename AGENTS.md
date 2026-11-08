@@ -1696,7 +1696,11 @@ passes. Nothing there can be moved (`J`/`K` say so). A ready session's mark (`�
 shown) is amber like an unread reply's `●` but quieter (`format::read_period_style`: the amber
 faded 30% when read within the hour, 50% within the day, then muted), and ready's header has the
 last hour's. A row's details line has no status words
-(its mark on the right says it): the app, subagents and report; an ended session still
+(its mark on the right says it): first, in bold, the repositories the session works in,
+comma-separated, by name (`format::session_repos`: its git context's `repo`, the `origin`
+remote's name, else the main checkout's folder name), each once: its folder's first, then
+the one it works in now, then its places', most recent first, cut to leave the app's name
+room; then the app, subagents and report; an ended session still
 says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's places
 (`components/session_list.rs::place_content`, `app/places.rs`). First the folder the session
 works in now (`PlaceRef::Current`: its git context's working tree, else its cwd; its path in the
