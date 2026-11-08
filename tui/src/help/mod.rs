@@ -608,14 +608,16 @@ impl KeyAction {
             }
             KeyAction::Restart => {
                 "Asks before reloading this UI through its launcher to pick up the latest build. \
-                 Confirm with y or Enter; Esc cancels. The daemon and sessions stay up. \
-                 Ctrl-r only reconnects or reloads the list."
+                 Confirm with y or Enter; Esc cancels. The daemon and sessions stay up; after \
+                 an update, the server and its services restart in place with it. Ctrl-r only \
+                 reconnects or reloads the list."
                     .into()
             }
             KeyAction::RestartServer => {
-                "Asks first, then restarts the Rakumux server in place with this build (after an \
-                 update, say): sessions and their programs keep running and every window \
-                 reconnects. Same as `rakumux daemon restart`. R reloads only this UI."
+                "Asks first, then restarts the Rakumux server in place with this build: \
+                 sessions and their programs keep running and every window reconnects. An \
+                 update restarts it by itself. Same as `rakumux daemon restart`. R reloads only \
+                 this UI."
                     .into()
             }
             KeyAction::HideList => "Master detail, with the list beside the session: the \

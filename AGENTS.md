@@ -1140,7 +1140,8 @@ accidents; they don't stop a hostile process running as the same user.
   the folder and branch marks), welcome_seen (false: the welcome tour shows on startup until
   its "Don't show this on startup" box is ticked), phone_offer_seen (false: "Use Rakumux from your
   phone?" was asked; it's asked once, when Tailscale runs here and `remote.json` doesn't exist yet),
-  auto_update (true: new releases install by themselves and the UI reloads once idle, see
+  auto_update (true: new releases install by themselves and the UI reloads, the server and
+  its services restarting in place with it, once idle, see
   "Updates"; Settings → Update automatically; only false is written), sidebar_width (dragged divider),
   feed_width (the docked feed pane's width, set by dragging the line left of it; left out until
   dragged), sprite_folders (folders whose new sessions run on your Sprite), sprite_env_copy
@@ -1314,12 +1315,16 @@ a minute later, when its install finds every binary already at that version and 
 nothing. Unwritable or unsupported installs fail without changing the old bundle; the window
 says so once (`Couldn't update to X: …`; an unwritable one, as `install.sh` put in root's
 `/usr/local` before 0.1.43, names the installer, which moves it to `~/.local` when run again) and doesn't try that version (`failed_version`) again
-until the next daily check finds it. Installed, the window reloads only its UI through the new
-launcher (stripping `--new-server`) at a safe moment: Rakumux mode, no dialog, half-typed filter
+until the next daily check finds it. Installed, the window reloads through the new launcher
+(stripping `--new-server`) at a safe moment: Rakumux mode, no dialog, half-typed filter
 or pending key, no terminal panel shell (a reload ends it), and no key, click, paste or focus
 for 60 s. Until then the footer says `Updated to X · reloads when idle (R now)`; `R` reloads at
-once. The daemon/API and all sessions stay running, and the server is never restarted
-automatically: after the reload the capability check below offers `S` as ever. Otherwise (the
+once. **One restart for both**: a reload into an installed update (this, `R` while one waits,
+or `U`'s) passes the hidden `--after-update` (`restart.rs`; never repeated by a later reload),
+and the new UI, once connected, restarts a server of another version in place with its own
+`rakumux-ptyd` (`App::server_after_update`; only with `daemon.restart`, so sessions keep
+running), then the account service and the local API as `S` does; a server already on its
+version (another window's reload restarted it) is left alone. Otherwise (the
 setting off, a failed install, npm, Homebrew, a source build) a newer release is told once per
 version (`notified_version`, shared by the windows), as a footer message, then as the footer's
 quiet line while it has nothing else to say: `Update X available · U to install`, `…: npm
@@ -1699,40 +1704,31 @@ the list's clock (`SessionList::set_clock`, every tick), so sessions move down t
 passes. Nothing there can be moved (`J`/`K` say so). A ready session's mark (`○`, wherever it's
 shown) is amber like an unread reply's `●` but quieter (`format::read_period_style`: the amber
 faded 30% when read within the hour, 50% within the day, then muted), and ready's header has the
-last hour's. A row's details line has no status words
-(its mark on the right says it): first, in bold, the repositories the session works in,
-comma-separated, by name (`format::session_repos`: its git context's `repo`, the `origin`
-remote's name, else the main checkout's folder name), each once: its folder's first, then
-the one it works in now, then its places', most recent first, cut to leave the app's name
-room; then the app, subagents and report; an ended session still
-says `exited · ⏎ restart` or `dead · ⏎ revive`. Under it, the row's places
-(`components/session_list.rs::place_content`, `app/places.rs`). First the folder the session
-works in now (`PlaceRef::Current`: its git context's working tree, else its cwd; its path in the
-session's folder, the folder's name, or `~/…`), one line in the row's text column: its path, then
-its repository's name (bold; `format::repo_label`: not when its folder has that name) and branch
-(`focal-md ⎇ paper-links`), even before it changed anything
-there; short of room the path is cut at its start first (down to half the line), then the
-repository's name (to 6 columns, then gone), then the branch at its end, never wrapped
-(`fit_place`). When it has other places, `▸` sits in the gutter left
-of it, and after its text, in the same quiet colour, how many places it has, this one included
-(`…  focal-md ⎇ paper-links  4`: one more than the pairs it opens; on this line only, so it
-shows while they're closed). Short of room the count outlasts the path's cut and the
-repository's name, and goes before the branch would (where the branch can't fit anyway it
-stays, while it takes at most half the line); `w`, `W` or a click
-or tap on it (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per window, not
-saved; `app::places::listed_places`, never the current one): each one, most recent first, a pair
-of lines two columns further in: its path, then its repository's name, branch and its age at the
-right; a muted rule
-(`─`) above each. No place has a mark or bar left of it. The list is the daemon's places, so a checkout the session only started in or
-read from isn't among them. Paths are cut at their
-start when narrow, the same on phones. `↓`/`↑` (`j`/`k`) step through the selected session's
-open places pair by pair as if each were a row under it (`App::step`;
-`SessionList::selected_place`, dropped by any other selection), and `y` copies the path of the
-one they're on, else of the folder the session works in now, over OSC 52 (`App::copy_place`).
-The place under the pointer (on any of its lines, not over the `▸`), and the one the keys are
-on, shows `⧉` in its gutter (the current one's just left of its `▸`) and its path brighter (bold
-for the keys). A click or tap on any of their lines copies its path (`Hit::Place`) without
-selecting the row. A session taller than the list (its places open) shows the part around the
+last hour's. Under a row's name, its places
+(`components/session_list.rs::place_content`, `app/places.rs`): closed, one line, in bold, the
+repositories the session works in, comma-separated, by name (`format::session_repos`: its git
+context's `repo`, the `origin` remote's name, else the main checkout's folder name), each once:
+its folder's first, then the one it works in now, then its places', most recent first; no folder,
+worktree path or branch (outside any repository, the folder it works in, not bold); cut at its
+end where the age and mark above end, `▸` in the gutter left of it. `w`, `W` or a click or tap on
+the `▸` or the names (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per
+window, not saved): each place a pair of lines two columns further in, a muted rule (`─`) above
+each: first where it works now (`PlaceRef::Current`: its git context's working tree, else its
+cwd), then every other (`app::places::listed_places`), most recent first: its path (in the
+session's folder, the folder's name, or `~/…`), then its repository's name (`format::repo_label`:
+not when its folder has that name) and branch, and its age at the right (where it works now: its
+place's, when it changed files there). Under them, the last line, the app alone in its colour
+(`AppKey::of`, as the App tab files it: an ended session keeps its agent; else `shell`); no
+status words (its mark on the right says it), subagents or report. No place has a mark or bar
+left of it. The list is the daemon's places, so a checkout the session only started in or read
+from isn't among them. Paths are cut at their start when narrow, the same on phones. `↓`/`↑`
+(`j`/`k`) step through the selected session's open places pair by pair as if each were a row
+under it, where it works now first (`App::step`; `SessionList::selected_place`, dropped by any
+other selection), and `y` copies the path of the one they're on, else of the folder the session
+works in now, over OSC 52 (`App::copy_place`). The place under the pointer (on either of its
+lines), and the one the keys are on, shows `⧉` in its gutter and its path brighter (bold for the
+keys). A click or tap on either of their lines copies its path (`Hit::Place`) without selecting
+the row. A session taller than the list (its places open) shows the part around the
 place the keys are on. A status
 change moves a session to another header, but the selected session stays shown when it stops
 matching the filter (an answered question), until something else is selected. Their modals

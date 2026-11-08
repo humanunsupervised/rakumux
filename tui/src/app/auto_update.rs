@@ -91,6 +91,11 @@ impl App {
         ))
     }
 
+    /// An update was installed and the UI waits to reload into it.
+    pub(super) fn update_installed(&self) -> bool {
+        self.auto_update.ready.is_some()
+    }
+
     /// Read the shared state at the next tick (the setting changed).
     pub(super) fn look_for_update_soon(&mut self) {
         self.auto_update.look_at = None;
@@ -104,7 +109,9 @@ impl App {
                 && !self.restart_requested
                 && self.safe_to_reload(now)
             {
-                // Through the launcher the install gave (`restart_launcher`).
+                // Through the launcher the install gave (`restart_launcher`);
+                // the new UI restarts the server and its services too.
+                self.restart_after_update = true;
                 self.restart_requested = true;
                 return true;
             }

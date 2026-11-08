@@ -56,12 +56,14 @@ const TICK_ANIMATING: Duration = components::utils::SPINNER_FRAME;
 
 enum RunOutcome {
     Exit,
-    Restart(Option<std::path::PathBuf>),
+    /// Reload the UI through this launcher (else its own), after an
+    /// installed update when the flag says so.
+    Restart(Option<std::path::PathBuf>, bool),
     SwitchDirectory(String),
 }
 
-fn restart_current_process(launcher: Option<&std::path::Path>) -> Result<()> {
-    restart::current_process(launcher).map_err(Into::into)
+fn restart_current_process(launcher: Option<&std::path::Path>, after_update: bool) -> Result<()> {
+    restart::current_process(launcher, after_update).map_err(Into::into)
 }
 
 fn print_cli_help() {
@@ -105,6 +107,11 @@ struct Cli {
     /// running sessions)
     #[arg(long)]
     new_server: bool,
+
+    /// Reloaded for an installed update: restart the server and its
+    /// services too (in place)
+    #[arg(long, hide = true)]
+    after_update: bool,
 
     /// Ignored (older launchers pass it)
     #[arg(long, value_name = "PATH", hide = true)]
@@ -214,6 +221,7 @@ async fn main() -> Result<()> {
         debug,
     });
     app.ptyd_path = cli.ptyd_path.clone();
+    app.server_after_update = cli.after_update;
     app.clipboard_mux = clipboard::Mux::from_env(|name| std::env::var_os(name));
     app.load_update_state();
     if !app.settings.sessions.welcome_seen {
@@ -279,7 +287,9 @@ async fn main() -> Result<()> {
 
     match outcome {
         RunOutcome::Exit => Ok(()),
-        RunOutcome::Restart(launcher) => restart_current_process(launcher.as_deref()),
+        RunOutcome::Restart(launcher, after_update) => {
+            restart_current_process(launcher.as_deref(), after_update)
+        }
         RunOutcome::SwitchDirectory(path) => {
             // The shell wrapper evaluates this line; a folder name with a
             // control character in it would be printed as is.
@@ -633,7 +643,10 @@ async fn run_app<B: ratatui::backend::Backend + Write>(
             dirty = false;
         }
         if app.restart_requested {
-            return Ok(RunOutcome::Restart(app.restart_launcher.clone()));
+            return Ok(RunOutcome::Restart(
+                app.restart_launcher.clone(),
+                app.restart_after_update,
+            ));
         }
     }
 }

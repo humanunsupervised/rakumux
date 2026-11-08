@@ -28,7 +28,8 @@ new-session flow, and code boundaries.
   stream event (`sessions.rs::on_stream_event`); one ending in the background stays `exited`.
 - `upgrade.rs`: `U` / Settings' Update action, behind `updater::UpdateService` (a fake in tests).
   Jobs run off the UI thread; a generation drops cancelled/stale results. Installation needs
-  Enter and cannot be started twice. Success reloads only the UI through the updated launcher.
+  Enter and cannot be started twice. Success reloads the UI through the updated launcher, and the
+  reloaded UI restarts the server in place and its services (`--after-update`).
   Cache writes use `App::paths`, never the real user's home in tests.
 - `auto_update.rs`: automatic updates (`sessions.auto_update`): `update_timers` reads the shared
   `update_state.json` every minute, runs the daily check, installs a binary install's newer

@@ -440,6 +440,12 @@ pub struct App {
     /// stop or restart the daemon.
     pub restart_requested: bool,
     pub restart_launcher: Option<std::path::PathBuf>,
+    /// The restart asked for loads an installed update: the new UI then
+    /// restarts the server and its services too (`--after-update`).
+    pub restart_after_update: bool,
+    /// Started by such a restart: once connected, a server of another
+    /// version is restarted in place with this build, then its services.
+    pub server_after_update: bool,
     pub auth: AuthService,
 }
 
@@ -542,6 +548,8 @@ impl App {
             update_install_method: None,
             restart_requested: false,
             restart_launcher: None,
+            restart_after_update: false,
+            server_after_update: false,
             auth: AuthService::new_from_env(),
             settings: options.settings,
             config_path: options.config_path,
@@ -1361,6 +1369,18 @@ impl App {
         self.was_connected = true;
         self.reconnect_attempts = 0;
         self.reconnect_at = None;
+        // Reloaded for an update: the server (and then its services) too, in
+        // place, so sessions keep running. Not one already on this version
+        // (another window restarted it first).
+        if std::mem::take(&mut self.server_after_update)
+            && self.server_version.as_deref() != Some(app_version())
+            && api_restarts_in_place(self.api().as_deref())
+        {
+            self.checked_daemon_features = true;
+            self.set_status("Updated. Restarting the Rakumux server; your sessions keep running.");
+            self.restart_daemon_in_place();
+            return;
+        }
         // The account service follows the daemon, so it starts once one runs.
         if self.account == AccountStatus::Unknown {
             self.check_account();
@@ -1460,7 +1480,9 @@ impl App {
     fn on_daemon_restarted(&mut self, result: Result<ServerRestart, String>) {
         match result {
             Ok(restart) => {
-                self.mode = AppMode::Normal;
+                if matches!(self.mode, AppMode::DaemonRestart(_)) {
+                    self.mode = AppMode::Normal;
+                }
                 self.set_status(match restart {
                     ServerRestart::InPlace => "Restarting the Rakumux server…",
                     ServerRestart::Replaced => "Stopped the old server; starting a new one…",
@@ -1524,21 +1546,12 @@ impl App {
     /// can, otherwise stop it so a new one starts.
     fn restart_daemon(&mut self) {
         let in_place = matches!(&self.mode, AppMode::DaemonRestart(d) if d.in_place);
-        if let (true, Some(api)) = (in_place, self.api()) {
+        if in_place && self.api().is_some() {
             if let AppMode::DaemonRestart(dialog) = &mut self.mode {
                 dialog.restarting = true;
                 dialog.error = None;
             }
-            self.let_go_of_daemon();
-            let binary = session_core::paths::find_ptyd_binary(self.ptyd_path.as_deref())
-                .and_then(|path| std::path::absolute(path).ok());
-            self.exec.job(move || {
-                AppEvent::DaemonRestarted(
-                    api.restart_daemon(binary.as_deref())
-                        .map(|()| ServerRestart::InPlace)
-                        .map_err(|error| error.message),
-                )
-            });
+            self.restart_daemon_in_place();
             return;
         }
         if in_place {
@@ -1565,6 +1578,25 @@ impl App {
         self.exec.job(move || {
             AppEvent::DaemonRestarted(
                 connection::stop_daemon(&paths).map(|()| ServerRestart::Replaced),
+            )
+        });
+    }
+
+    /// Restart the connected daemon in place with this build's
+    /// `rakumux-ptyd` (sessions keep running); once it answers, its
+    /// services too ([`Self::restart_services`]).
+    fn restart_daemon_in_place(&mut self) {
+        let Some(api) = self.api() else {
+            return;
+        };
+        self.let_go_of_daemon();
+        let binary = session_core::paths::find_ptyd_binary(self.ptyd_path.as_deref())
+            .and_then(|path| std::path::absolute(path).ok());
+        self.exec.job(move || {
+            AppEvent::DaemonRestarted(
+                api.restart_daemon(binary.as_deref())
+                    .map(|()| ServerRestart::InPlace)
+                    .map_err(|error| error.message),
             )
         });
     }

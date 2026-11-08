@@ -684,8 +684,10 @@ mod tests {
         assert!(wide.contains("saved line two"), "{wide}");
         assert!(wide.contains("Dead · Enter to revive"), "{wide}");
         assert!(wide.contains("○ old-spike"), "{wide}");
+        // Its row names its app alone; the detail says how to revive it.
         let narrow = render(&mut h.app, 80, 24);
-        assert!(narrow.contains("dead · ⏎ revive"), "{narrow}");
+        assert!(narrow.contains("old-spike"), "{narrow}");
+        assert!(!narrow.contains("⏎ revive"), "{narrow}");
     }
 
     #[test]
@@ -1604,8 +1606,8 @@ mod tests {
             list[1].ends_with("▤ Folders ▾  ◇ App    ★ Pinned"),
             "{wide}"
         );
-        // A pinned session in its place, its gold pin in the gutter;
-        // subtext is program, then the folder it works in and its branch.
+        // A pinned session in its place, its gold pin in the gutter; under
+        // its name its repositories, then its app.
         let docs = list.iter().position(|l| l.contains("docs")).unwrap();
         let refactor = list
             .iter()
@@ -1614,10 +1616,17 @@ mod tests {
         assert!(docs < refactor, "{wide}");
         assert!(list[docs].contains(" docs "), "{wide}");
         assert!(list[docs].starts_with(" ★ docs "), "{wide}");
-        // Where it works now: one line, in line with the row's text.
-        assert!(list[docs + 2].starts_with("   repo  ⎇ main"), "{wide}");
-        assert!(list[refactor + 1].contains("claude"), "{wide}");
-        assert!(list[refactor + 2].contains("⎇ sessions-refactor"), "{wide}");
+        // Its repositories, the toggle in the gutter; no folder or branch.
+        assert!(list[docs + 1].starts_with(" ▸ repo"), "{wide}");
+        assert!(list[refactor + 2].contains("claude"), "{wide}");
+        // The branch only on the folder's header.
+        assert_eq!(
+            list.iter()
+                .filter(|l| l.contains("⎇ sessions-refactor"))
+                .count(),
+            1,
+            "{wide}"
+        );
         assert!(!wide.contains("worktree"), "branch only: {wide}");
         // The lone folder still has its header, with its name.
         assert!(wide.contains("──"), "the folder's header: {wide}");
@@ -1661,14 +1670,12 @@ mod tests {
             .unwrap();
         assert!(main < header && header < work, "{wide}");
         // The folder's own sessions in line with its name; the worktree's
-        // a step in, in line with its header's words, their place lines too.
+        // a step in, in line with its header's words, their repositories'
+        // lines too.
         assert!(list.iter().any(|l| l.starts_with("   repo ─")), "{wide}");
         assert!(list[main].starts_with("   main-work "), "{wide}");
         assert!(list[work].starts_with("     feature-work "), "{wide}");
-        assert!(
-            list[work + 2].starts_with("     worktrees/feature  ⎇ feat/login"),
-            "{wide}"
-        );
+        assert!(list[work + 1].starts_with("   ▸ "), "{wide}");
     }
 
     #[test]
@@ -1791,16 +1798,11 @@ mod tests {
             web < at("storybook") && at("storybook") < at("frontend"),
             "{wide}"
         );
-        // The program and state, then the folder and its branch.
-        assert!(list[at("frontend") + 1].contains("codex"), "{wide}");
-        assert!(
-            list[at("frontend") + 2].contains("⎇ feature/login"),
-            "{wide}"
-        );
-        assert!(list[at("storybook") + 1].contains("dead"), "{wide}");
-        assert!(list[at("storybook") + 2].contains("⎇ main"), "{wide}");
-        assert!(list[at("server") + 1].contains("cargo"), "{wide}");
-        assert!(list[at("server") + 2].contains("⎇ @1a2b3c4"), "{wide}");
+        // The repositories, then the app alone.
+        assert!(list[at("frontend") + 1].contains("▸ "), "{wide}");
+        assert!(list[at("frontend") + 2].contains("codex"), "{wide}");
+        assert!(!wide.contains("⎇ feature/login"), "{wide}");
+        assert!(list[at("server") + 2].contains("cargo"), "{wide}");
         // A selected header stands out: its rule turns blue.
         h.app
             .list
@@ -3390,8 +3392,9 @@ mod tests {
                 assert_eq!(control, None, "{layout:?} {width}x{height}:\n{screen}");
             }
         }
-        // Each shows as `?`, in its place.
-        let mut h = with_layout(vec![session], SessionLayout::Sidebar);
+        // Each shows as `?`, in its place (its places open).
+        let mut h = with_layout(vec![session.clone()], SessionLayout::Sidebar);
+        h.app.places_open.insert(session.id.clone());
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("evil?]0;PWNED?dir"), "{screen}");
         assert!(screen.contains("main?]52;c;SGk=??31m"), "{screen}");

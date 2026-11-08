@@ -33,13 +33,13 @@ use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 
 use super::folder_picker::{count_label, folder_branch, tab_icon, tab_picker_open};
 use super::format::{
-    activity_badge_at, branch_label, facts_line, last_activity, place_label, read_period_style,
-    relative_time, repo_label, session_program, session_repos, status_glyph, status_group_glyph,
-    truncate, truncate_start, PIN_MARK,
+    activity_badge_at, branch_label, last_activity, place_label, program_color, read_period_style,
+    relative_time, repo_label, session_repos, status_glyph, status_group_glyph, truncate,
+    truncate_start, PIN_MARK,
 };
 use super::section_picker::{section_count, sessions_label};
 use super::utils::get_spinner_char;
-use crate::app::grouping::{Grouping, ReadPeriod, Section};
+use crate::app::grouping::{AppKey, Grouping, ReadPeriod, Section};
 use crate::app::places::PlaceRef;
 use crate::app::{App, Connection, Hit, ListRow};
 use crate::layout::str_width;
@@ -469,12 +469,11 @@ fn session_content(
     };
     let name = truncate(&name, width.saturating_sub(right_width + 3 + slot));
     let pad = width.saturating_sub(2 + str_width(&name) + slot + right_width);
-    let (name_style, detail_color, age_color) = if selected {
+    let (name_style, age_color) = if selected {
         (
             Style::default()
                 .fg(p.text_bright)
                 .add_modifier(Modifier::BOLD),
-            p.text_primary,
             p.neutral_gray,
         )
     } else {
@@ -482,7 +481,6 @@ fn session_content(
             Style::default()
                 .fg(p.text_unselected)
                 .add_modifier(Modifier::BOLD),
-            p.text_muted,
             p.text_muted,
         )
     };
@@ -498,61 +496,31 @@ fn session_content(
         first.push(Span::raw(" "));
         first.push(badge);
     }
-    // The lines under the name end where the right column starts.
+    // Under the name and its places (`place_content`), the app it runs,
+    // alone, in its colour, ending where the right column starts.
     let column = width.saturating_sub(2 + RIGHT_COLUMN);
-    let mut second = vec![Span::raw("  ")];
-    let detail = Style::default().fg(detail_color);
-    // The repositories it works in first, in bold; then the app and the
-    // rest, in what's left. The branch is on the place line (`place_content`).
-    let folder_git = app
-        .folders
-        .get(&session.scope)
-        .and_then(|folder| folder.git.as_ref());
-    let repos = session_repos(session, folder_git).join(", ");
-    let mut facts_width = column;
-    if !repos.is_empty() {
-        // Room for the app's name after them, while that leaves them some.
-        let app_room = session_program(session).map_or(0, |app| str_width(app) + REPOS_GAP.len());
-        let most = column.saturating_sub(app_room).max(REPOS_MIN).min(column);
-        let repos = truncate(&repos, most);
-        facts_width = column.saturating_sub(str_width(&repos) + REPOS_GAP.len());
-        second.push(Span::styled(repos, detail.add_modifier(Modifier::BOLD)));
-        if facts_width >= FACTS_MIN {
-            second.push(Span::styled(REPOS_GAP, detail));
-        }
-    }
-    if repos.is_empty() || facts_width >= FACTS_MIN {
-        second.extend(facts_line(session, facts_width, app.icons(), detail, false).spans);
-    }
+    let app_key = AppKey::of(session);
+    let program = app_key.as_str();
+    let app_style = Style::default().fg(program_color(program));
+    let second = vec![
+        Span::raw("  "),
+        Span::styled(truncate(program, column), app_style),
+    ];
     vec![first, second]
 }
 
-/// Columns the repositories keep on the details line however long the
-/// app's name.
-const REPOS_MIN: usize = 8;
-/// Between the repositories and the rest of the details line.
-const REPOS_GAP: &str = " · ";
-/// Columns the app and the rest need after the repositories to be shown.
-const FACTS_MIN: usize = 4;
-
-/// In the gutter of the place a session works now when it has worked
-/// elsewhere too: `▸` while its other places are closed, `▾` while they're
-/// open.
+/// In the gutter of a session's repositories: `▸` while its places are
+/// closed, `▾` while they're open.
 const PLACES_CLOSED: &str = "▸";
 const PLACES_OPEN: &str = "▾";
-/// In the gutter of a place under the pointer or the list keys (just left
-/// of the current place's `▸`): a click or tap (`y`) copies its path.
+/// In the gutter of a place under the pointer or the list keys: a click or
+/// tap (`y`) copies its path.
 const COPY_MARK: &str = "⧉";
-/// How much further in than the row's text (where the current place is)
-/// its other places and the rules between them start.
+/// How much further in than the row's text its places and the rules
+/// between them start.
 const PLACE_INDENT: usize = 2;
-/// Between the current place's path and its repository's name and branch.
-const PLACE_GAP: &str = "  ";
 /// Between a place's repository's name and its branch.
 const REPO_GAP: &str = " ";
-/// The fewest columns the current place's branch is cut to (`⎇ fea…`);
-/// with less room, it goes.
-const BRANCH_MIN: usize = 6;
 /// The fewest columns a place's repository's name is cut to (`focal…`);
 /// with less room, it goes.
 const REPO_MIN: usize = 6;
@@ -562,77 +530,11 @@ const PLACE_RULE: &str = "─";
 /// A session's place lines.
 struct PlaceLines {
     lines: Vec<Vec<Span<'static>>>,
-    /// Where its `▸`/`▾` is (its columns from the gutter's start, on the
-    /// first line), which opens and closes its other places; none when there
-    /// are none.
-    toggle: Option<std::ops::Range<usize>>,
-    /// The copy mark goes just left of the `▸`/`▾`, in the column before the
-    /// gutter: the current place is under the pointer.
-    copy_beside_toggle: bool,
-    /// The line of the place it works in now.
-    current: std::ops::Range<usize>,
-    /// Each open place's two lines, in the order of the session's
-    /// [`crate::app::places::listed_places`].
+    /// Each open place's two lines: where it works now first, then the
+    /// others in the order of [`crate::app::places::listed_places`].
     places: Vec<std::ops::Range<usize>>,
     /// The open place the list keys are on (its index in `places`).
     focus: Option<usize>,
-}
-
-/// The current place's `path`, its repository's name `repo` and its
-/// `branch` on one line of `room` columns: the path is cut at its start
-/// first, down to half the line, then the name at its end, down to
-/// [`REPO_MIN`] columns, then it goes (the path taking back what it can),
-/// then the branch as [`fit_label`] cuts it.
-fn fit_place(path: &str, repo: &str, branch: &str, room: usize) -> (String, String, String) {
-    if repo.is_empty() || branch.is_empty() {
-        let (path, label) = fit_label(path, if branch.is_empty() { repo } else { branch }, room);
-        return if branch.is_empty() {
-            (path, label, String::new())
-        } else {
-            (path, String::new(), label)
-        };
-    }
-    let (gap, between) = (str_width(PLACE_GAP), str_width(REPO_GAP));
-    let (path_width, branch_width) = (str_width(path), str_width(branch));
-    let git_width = str_width(repo) + between + branch_width;
-    if path_width + gap + git_width <= room {
-        return (path.to_string(), repo.to_string(), branch.to_string());
-    }
-    let path_room = room
-        .saturating_sub(gap + git_width)
-        .max(path_width.min(room / 2));
-    let cut = truncate_start(path, path_room);
-    let repo_room = room.saturating_sub(str_width(&cut) + gap + between + branch_width);
-    if repo_room >= REPO_MIN.min(str_width(repo)) {
-        return (cut, truncate(repo, repo_room), branch.to_string());
-    }
-    let (path, branch) = fit_label(path, branch, room);
-    (path, String::new(), branch)
-}
-
-/// A place's `path` and one label after it (its branch, or its
-/// repository's name alone) on one line of `room` columns: the path is cut
-/// at its start first, down to half the line, then the label at its end; a
-/// label it would cut to fewer than [`BRANCH_MIN`] columns goes, and the
-/// path takes the line.
-fn fit_label(path: &str, branch: &str, room: usize) -> (String, String) {
-    let (path_width, branch_width) = (str_width(path), str_width(branch));
-    let gap = str_width(PLACE_GAP);
-    if branch.is_empty() {
-        return (truncate_start(path, room), String::new());
-    }
-    if path_width + gap + branch_width <= room {
-        return (path.to_string(), branch.to_string());
-    }
-    let path_room = room
-        .saturating_sub(gap + branch_width)
-        .max(path_width.min(room / 2));
-    let cut = truncate_start(path, path_room);
-    let branch_room = room.saturating_sub(str_width(&cut) + gap);
-    if branch_room < BRANCH_MIN.min(branch_width) {
-        return (truncate_start(path, room), String::new());
-    }
-    (cut, truncate(branch, branch_room))
 }
 
 /// A place's repository's name and branch in `room` columns: the name is
@@ -666,18 +568,16 @@ fn git_spans(repo: String, branch: String, style: Style) -> Vec<Span<'static>> {
     spans
 }
 
-/// A session's place lines, under its facts, after the gutter. First the
-/// place it works in now, one line in the row's text column: its path, then
-/// its repository's name (unless its folder has that name) and branch (`▸`
-/// in the gutter when it has worked in other places, and at the line's end
-/// how many places it has, this one included). While its places are
-/// open (`▾`), each of the others (where it changed files: every place is),
-/// most recent first, a pair of lines [`PLACE_INDENT`] further in: its path,
-/// then its repository's name, branch and when; a rule above each. No
-/// place has a mark or bar left of it. The place the list keys are on (in
-/// the `selected` session) and the `hovered` one show the copy mark in their
-/// gutter (the current one's left of its `▸`) and their path brighter; the
-/// list keys' path is bold.
+/// A session's place lines, under its name, after the gutter. First the
+/// repositories it works in, in bold and comma-separated
+/// ([`session_repos`]; outside any, the folder it works in now), with `▸` in
+/// the gutter. While they're open (`▾`), its places, each a pair of lines
+/// [`PLACE_INDENT`] further in with a rule above: where it works now first
+/// (its working tree, else its directory), then where else it changed
+/// files, most recent first; its path, then its repository's name, branch
+/// and when. The place the list keys are on (in the `selected` session) and
+/// the `hovered` one show the copy mark in their gutter and their path
+/// brighter; the list keys' path is bold.
 fn place_content(
     app: &App,
     session: &SessionView,
@@ -688,7 +588,7 @@ fn place_content(
 ) -> PlaceLines {
     let p = theme::palette();
     let icons = app.icons();
-    // The current place's room, after the gutter, and the others', a step
+    // The repositories' room, after the gutter, and the places', a step
     // further in.
     let text = width.saturating_sub(GUTTER);
     let inner = text.saturating_sub(PLACE_INDENT);
@@ -702,7 +602,6 @@ fn place_content(
     // A place's path under the pointer or the list keys.
     let marked_style = Style::default().fg(p.text_bright);
     let blank_slot = || Span::raw(" ".repeat(GUTTER));
-    // The others' step in.
     let indent = || Span::raw(" ".repeat(PLACE_INDENT));
     let copy_slot = || {
         Span::styled(
@@ -722,86 +621,77 @@ fn place_content(
         .unwrap_or_default()
     };
 
-    // Where it works now, with the toggle when there are others.
+    // The repositories, with the toggle.
+    let open = app.places_open(&session.id);
+    let mark = if open { PLACES_OPEN } else { PLACES_CLOSED };
+    let toggle = Span::styled(
+        format!("{mark:<GUTTER$}"),
+        Style::default().fg(p.accent_primary),
+    );
+    let folder_git = app
+        .folders
+        .get(&session.scope)
+        .and_then(|folder| folder.git.as_ref());
+    let repos = session_repos(session, folder_git).join(", ");
     let current = crate::app::places::current_place(session);
-    let listed: Vec<_> = crate::app::places::listed_places(session).collect();
-    let others = listed.len();
-    let open = app.places_open(&session.id) && others > 0;
-    let hovered_current = hovered == Some(PlaceRef::Current);
-    let slot = if others > 0 {
-        let mark = if open { PLACES_OPEN } else { PLACES_CLOSED };
+    // Ending where the right column starts, as the app line under it does.
+    let summary_room = width.saturating_sub(GUTTER + RIGHT_COLUMN);
+    let summary = if repos.is_empty() {
         Span::styled(
-            format!("{mark:<GUTTER$}"),
-            Style::default().fg(p.accent_primary),
+            truncate_start(&place_label(&session.scope, current), summary_room),
+            label_style,
         )
-    } else if hovered_current {
-        copy_slot()
     } else {
-        blank_slot()
+        Span::styled(
+            truncate(&repos, summary_room),
+            label_style.add_modifier(Modifier::BOLD),
+        )
     };
-    // At its end, when it has worked elsewhere too, how many places it has
-    // (this one and those its ▸ opens), while that takes at most half the
-    // line. Short of room the path and the repository's name give way
-    // first, then the count, so the branch stays; where the branch can't
-    // fit anyway, the count does.
-    let mut count = (others > 0)
-        .then(|| (others + 1).to_string())
-        .filter(|count| 2 * (str_width(PLACE_GAP) + str_width(count)) <= text);
-    let count_width = count
-        .as_ref()
-        .map_or(0, |count| str_width(PLACE_GAP) + str_width(count));
-    let (repo, branch) = git_of(session.git.as_ref());
-    let label = place_label(&session.scope, current);
-    let mut fitted = fit_place(&label, &repo, &branch, text.saturating_sub(count_width));
-    if count.is_some() && !branch.is_empty() && fitted.2.is_empty() {
-        let without = fit_place(&label, &repo, &branch, text);
-        if !without.2.is_empty() {
-            count = None;
-            fitted = without;
-        }
-    }
-    let (path, repo, branch) = fitted;
-    let path_style = if hovered_current {
-        marked_style
-    } else {
-        label_style
-    };
-    let mut line = vec![slot, Span::styled(path, path_style)];
-    if !repo.is_empty() || !branch.is_empty() {
-        line.push(Span::raw(PLACE_GAP));
-        line.extend(git_spans(repo, branch, branch_style));
-    }
-    if let Some(count) = count {
-        line.push(Span::raw(PLACE_GAP));
-        line.push(Span::styled(count, branch_style));
-    }
-    let mut lines = vec![line];
-    let toggle = (others > 0).then_some(0..GUTTER);
-    let copy_beside_toggle = others > 0 && hovered_current;
+    let mut lines = vec![vec![toggle, summary]];
     let mut places = Vec::new();
     if !open {
         return PlaceLines {
             lines,
-            toggle,
-            copy_beside_toggle,
-            current: 0..1,
             places,
             focus: None,
         };
     }
 
-    // Under it, the others.
+    // Under it, where it works now, then the others.
+    let listed: Vec<_> = crate::app::places::listed_places(session).collect();
+    let current_at = session
+        .places
+        .iter()
+        .find(|place| place.path == current)
+        .map(|place| place.last_at);
+    let all = std::iter::once((current, session.git.as_ref(), current_at)).chain(
+        listed.iter().map(|place| {
+            (
+                place.path.as_path(),
+                place.git.as_ref(),
+                Some(place.last_at),
+            )
+        }),
+    );
     let focus = selected
         .then(|| app.list.selected_place())
         .flatten()
-        .and_then(|focus| listed.iter().position(|p| p.path == focus));
-    for (index, place) in listed.into_iter().enumerate() {
+        .and_then(|focus| {
+            std::iter::once(current)
+                .chain(listed.iter().map(|place| place.path.as_path()))
+                .position(|path| path == focus)
+        });
+    for (index, (path, git, last_at)) in all.enumerate() {
         lines.push(vec![
             Span::raw(" ".repeat(GUTTER + PLACE_INDENT)),
             Span::styled(PLACE_RULE.repeat(inner), Style::default().fg(p.border_dim)),
         ]);
         let start = lines.len();
-        let marked = focus == Some(index) || hovered == Some(PlaceRef::Listed(index));
+        let place_ref = match index {
+            0 => PlaceRef::Current,
+            index => PlaceRef::Listed(index - 1),
+        };
+        let marked = focus == Some(index) || hovered == Some(place_ref);
         let path_style = if focus == Some(index) {
             marked_style.add_modifier(Modifier::BOLD)
         } else if marked {
@@ -809,7 +699,7 @@ fn place_content(
         } else {
             label_style
         };
-        let label = place_label(&session.scope, &place.path);
+        let label = place_label(&session.scope, path);
         lines.push(vec![
             if marked { copy_slot() } else { blank_slot() },
             indent(),
@@ -818,9 +708,12 @@ fn place_content(
         // Under it its repository's name and branch, and at the right its
         // age; short of room the name is cut first, then the branch, then
         // the age.
-        let age = truncate(&relative_time(now, place.last_at), inner);
-        let (repo, branch) = git_of(place.git.as_ref());
-        let (repo, branch) = fit_git(&repo, &branch, inner.saturating_sub(str_width(&age) + 1));
+        let age = last_at
+            .map(|at| truncate(&relative_time(now, at), inner))
+            .unwrap_or_default();
+        let (repo, branch) = git_of(git);
+        let room = inner.saturating_sub(str_width(&age) + usize::from(!age.is_empty()));
+        let (repo, branch) = fit_git(&repo, &branch, room);
         let git = git_spans(repo, branch, branch_style);
         let used: usize = git.iter().map(|span| str_width(&span.content)).sum();
         let gap = inner.saturating_sub(used + str_width(&age));
@@ -833,9 +726,6 @@ fn place_content(
     }
     PlaceLines {
         lines,
-        toggle,
-        copy_beside_toggle,
-        current: 0..1,
         places,
         focus,
     }
@@ -1370,7 +1260,7 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 // gutter before it.
                 let indent = row_indent(nested[index]);
                 let width = width_of(nested[index]);
-                let mut content = session_content(app, session, width, is_selected, now);
+                let content = session_content(app, session, width, is_selected, now);
                 let hovered = app.hovered_row == Some(index);
                 let dragged = app.dragged_session() == Some(&session.id);
                 let hovered_place = app
@@ -1378,25 +1268,25 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                     .filter(|(row, _)| *row == index && !dragged)
                     .map(|(_, place)| place);
                 let places = place_content(app, session, width, is_selected, hovered_place, now);
-                let places_at = content.len();
-                content.extend(places.lines);
+                // The repositories' line's `▸` and names (not the blank after
+                // them, which a tap meant for the row lands on).
+                let summary_width: usize = places
+                    .lines
+                    .first()
+                    .map_or(0, |line| line.iter().map(|span| span.width()).sum());
+                // The name, its repositories and places, then its app.
+                let places_at = 1;
+                let mut content = content.into_iter();
+                let mut cell: Vec<_> = content.next().into_iter().collect();
+                cell.extend(places.lines);
+                cell.extend(content);
+                let content = cell;
                 // The cell's content is at its bottom, after blank rows.
                 let top = (height as usize).saturating_sub(content.len());
                 let mut lines = cell_lines(content, height, indent);
-                // The current place under the pointer: its copy mark just
-                // left of its ▸, in the indent's last column.
-                if places.copy_beside_toggle {
-                    if let Some(line) = lines.get_mut(top + places_at + places.current.start) {
-                        line.spans[0] = Span::styled(
-                            format!("{}{COPY_MARK}", " ".repeat(indent.saturating_sub(1))),
-                            Style::default().fg(p.accent_primary),
-                        );
-                    }
-                }
                 // The whole row, of which `row_area` shows `skip` rows on.
                 let full = Rect { height, ..row_area };
-                // A place's lines, from the column left of its gutter (where
-                // the current one's copy mark can be).
+                // A place's lines, from the column left of its gutter.
                 let from = indent.saturating_sub(1) as u16;
                 let line_area = |line: usize, count: usize| {
                     Rect {
@@ -1409,7 +1299,7 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                 };
                 if height > row_area.height {
                     let focus = places.focus.and_then(|at| places.places.get(at));
-                    let end = top + places_at + focus.unwrap_or(&places.current).end;
+                    let end = top + places_at + focus.map_or(1, |range| range.end);
                     skip = (end as u16).saturating_sub(row_area.height);
                 }
                 // After the name, with AI session titles on: the ↻ makes a
@@ -1423,25 +1313,23 @@ pub fn draw_session_list(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(R
                     }
                 }
                 if !dragged {
-                    // The current place's ▸ opens and closes the places
-                    // under it, before its own target.
-                    if let Some(columns) = &places.toggle {
-                        let area = Rect {
-                            x: full.x + (indent + columns.start) as u16,
-                            y: full.y.saturating_add((top + places_at) as u16),
-                            width: columns.len() as u16,
-                            height: 1,
-                        }
-                        .intersection(full);
-                        row_hits.push((area, Hit::PlacesToggle(index)));
+                    // The repositories' `▸` and names open and close the
+                    // places under them; a click on a place copies its path.
+                    let area = Rect {
+                        x: full.x + indent as u16,
+                        y: full.y.saturating_add((top + places_at) as u16),
+                        width: summary_width as u16,
+                        height: 1,
                     }
-                    // A click on a place copies its path.
-                    let current = &places.current;
-                    let area = line_area(top + places_at + current.start, current.len());
-                    row_hits.push((area, Hit::Place(index, PlaceRef::Current)));
+                    .intersection(full);
+                    row_hits.push((area, Hit::PlacesToggle(index)));
                     for (place, range) in places.places.iter().enumerate() {
                         let area = line_area(top + places_at + range.start, range.len());
-                        row_hits.push((area, Hit::Place(index, PlaceRef::Listed(place))));
+                        let place = match place {
+                            0 => PlaceRef::Current,
+                            place => PlaceRef::Listed(place - 1),
+                        };
+                        row_hits.push((area, Hit::Place(index, place)));
                     }
                 }
                 if dragged {
@@ -1498,7 +1386,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_colours_stay_visible_in_selected_and_unselected_session_items() {
+    fn the_app_line_names_the_app_alone_in_its_colour() {
         use crate::app::testing::{harness, on_branch, view};
 
         let h = harness(vec![]);
@@ -1511,27 +1399,16 @@ mod tests {
         let p = theme::palette();
         for selected in [false, true] {
             let lines = session_content(&h.app, &session, 40, selected, 0);
-            let second = &lines[1];
-            // Its repository first, in bold, then the app in its colour.
-            assert_eq!(second[1].content, "repo");
-            assert!(second[1].style.add_modifier.contains(Modifier::BOLD));
-            assert_eq!(second[3].content, "opencode");
-            assert_eq!(second[3].style.fg, Some(p.label_slate_blue));
-            // The branch is on the place line, in the details' colour.
-            let facts: String = second.iter().map(|span| span.content.as_ref()).collect();
-            assert_eq!(facts, "  repo · opencode");
-            let places = place_content(&h.app, &session, 40, selected, None, 0).lines;
-            let branch = places[0].last().unwrap();
-            assert_eq!(branch.content, "⎇ main");
-            assert_eq!(
-                branch.style.fg,
-                Some(if selected {
-                    p.neutral_gray
-                } else {
-                    p.text_muted
-                })
-            );
+            assert_eq!(text(&lines[1..]), ["  opencode"]);
+            assert_eq!(lines[1][1].style.fg, Some(p.label_slate_blue));
         }
+        // An ended session keeps its agent; a shell says so.
+        session.status = SessionStatus::Dead;
+        let lines = session_content(&h.app, &session, 40, false, 0);
+        assert_eq!(text(&lines[1..]), ["  opencode"]);
+        session.agent = None;
+        let lines = session_content(&h.app, &session, 40, false, 0);
+        assert_eq!(text(&lines[1..]), ["  shell"]);
     }
 
     /// `session` with `places` (paths in its folder `/repo`, a branch each,
@@ -1565,387 +1442,44 @@ mod tests {
     }
 
     #[test]
-    fn where_a_session_works_now_is_one_line_in_the_rows_text_column_with_its_toggle() {
+    fn closed_places_are_the_repositories_alone_in_bold() {
         use crate::app::testing::harness;
         let p = theme::palette();
-        let mut h = harness(vec![]);
-        // Nowhere else: its path and branch on one line, no toggle in the
-        // gutter.
-        let alone = with_places(&[("/repo", "main", 5, false)]);
-        let PlaceLines {
-            lines,
-            toggle,
-            copy_beside_toggle,
-            current,
-            places,
-            ..
-        } = place_content(&h.app, &alone, 40, false, None, 1000);
-        assert_eq!(text(&lines), ["  repo  ⎇ main"]);
-        assert_eq!(toggle, None);
-        assert!(!copy_beside_toggle);
-        assert_eq!(current, 0..1);
-        assert!(places.is_empty());
-        // Nothing left of its path but the gutter.
-        assert_eq!(lines[0][1].content, "repo");
-        assert_eq!(lines[0][1].style.fg, Some(p.text_muted));
-        // Under the pointer, the copy mark in the gutter and its path
-        // brighter.
-        let PlaceLines {
-            lines,
-            copy_beside_toggle,
-            ..
-        } = place_content(&h.app, &alone, 40, false, Some(PlaceRef::Current), 1000);
-        assert_eq!(text(&lines), ["⧉ repo  ⎇ main"]);
-        assert!(!copy_beside_toggle);
-        assert_eq!(lines[0][0].style.fg, Some(p.accent_primary));
-        assert_eq!(lines[0][1].style.fg, Some(p.text_bright));
-        // Opened, it stays alone: there's nothing else to list.
-        h.app.places_open.insert(alone.id.clone());
-        let lines = place_content(&h.app, &alone, 40, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["  repo  ⎇ main"]);
-        h.app.places_open.clear();
-
-        // Elsewhere too: ▸ in the gutter, which opens and closes the list,
-        // and after the line's text how many places it has (this one and
-        // the two it opens); under the pointer, the copy mark goes left of
-        // the ▸.
-        let mut moved = with_places(&[
-            ("/repo/worktrees/fix", "fix", 5, true),
-            ("/repo", "main", 300, false),
-            ("/srv/other", "dev", 7200, false),
-        ]);
-        moved.git = Some(session_core::model::GitInfo {
-            repo_root: "/repo/worktrees/fix".into(),
-            branch: Some("fix".into()),
-            ..Default::default()
-        });
-        let PlaceLines {
-            lines,
-            toggle,
-            copy_beside_toggle,
-            ..
-        } = place_content(&h.app, &moved, 40, false, None, 1000);
-        assert_eq!(text(&lines), ["▸ worktrees/fix  ⎇ fix  3"]);
-        assert_eq!(toggle, Some(0..2));
-        assert!(!copy_beside_toggle);
-        assert_eq!(lines[0][0].style.fg, Some(p.accent_primary));
-        let PlaceLines {
-            lines,
-            copy_beside_toggle,
-            ..
-        } = place_content(&h.app, &moved, 40, false, Some(PlaceRef::Current), 1000);
-        assert_eq!(text(&lines), ["▸ worktrees/fix  ⎇ fix  3"]);
-        assert!(copy_beside_toggle);
-        // Narrow: the path is cut at its start first, then the branch goes;
-        // the count stays.
-        let lines = place_content(&h.app, &moved, 20, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ …ees/fix  ⎇ fix  3"]);
-        let lines = place_content(&h.app, &moved, 14, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ …rees/fix  3"]);
-        // Working somewhere none of its places is (its terminal's
-        // directory, outside a repository): every place is another.
-        let mut away = moved.clone();
-        away.git = None;
-        away.cwd = "/srv/scratch".into();
-        let lines = place_content(&h.app, &away, 40, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ /srv/scratch  4"]);
-        for width in [8, 12, 16, 24, 40, 80] {
-            let lines = place_content(&h.app, &moved, width, true, None, 1000).lines;
-            assert_eq!(lines.len(), 1, "{width}");
-            for line in &lines {
-                assert!(
-                    Line::from(line.clone()).width() <= width.max(6),
-                    "{width}: {:?}",
-                    text(&lines)
-                );
-            }
-        }
-        assert_eq!(
-            row_height_in(&h.app, &ListRow::Session(&moved), 40, 1000),
-            4
-        );
-    }
-
-    #[test]
-    fn a_places_repository_goes_before_its_branch_in_the_same_colour() {
-        use crate::app::testing::harness;
-        let p = theme::palette();
-        let mut h = harness(vec![]);
-        // Working in a worktree of `focal-md`, and earlier in the folder's
-        // main checkout, named like its repository.
-        let mut session = with_places(&[
-            ("/repo/worktrees/fix", "fix", 5, true),
-            ("/repo", "main", 300, true),
-        ]);
+        let h = harness(vec![]);
+        // Working in `focal-md`, having changed files in `other` too.
+        let mut session =
+            with_places(&[("/repo", "main", 5, true), ("/srv/other", "dev", 300, true)]);
         let named = |git: &mut Option<session_core::model::GitInfo>, repo: &str| {
             if let Some(git) = git.as_mut() {
                 git.repo = Some(repo.into());
             }
         };
-        session.git = session.places[0].git.clone();
         named(&mut session.git, "focal-md");
         named(&mut session.places[0].git, "focal-md");
-        named(&mut session.places[1].git, "repo");
-        h.app.places_open.insert(session.id.clone());
+        named(&mut session.places[1].git, "other");
         for selected in [false, true] {
-            let lines = place_content(&h.app, &session, 40, selected, None, 1000).lines;
-            assert_eq!(
-                text(&lines),
-                [
-                    "▾ worktrees/fix  focal-md ⎇ fix  2".to_string(),
-                    format!("    {}", "─".repeat(36)),
-                    "    repo".into(),
-                    format!("    ⎇ main{}5m", " ".repeat(28)),
-                ]
-            );
-            let quiet = Some(if selected {
-                p.neutral_gray
-            } else {
-                p.text_muted
-            });
-            let repo = &lines[0][3];
-            assert_eq!(repo.content, "focal-md");
-            assert_eq!(repo.style.fg, quiet);
-            assert_eq!(lines[0][4].content, " ");
-            assert_eq!(lines[0][5].content, "⎇ fix");
-            assert_eq!(lines[0][5].style.fg, quiet);
-            // The count after them, as quiet.
-            assert_eq!(lines[0][6].content, "  ");
-            assert_eq!(lines[0][7].content, "2");
-            assert_eq!(lines[0][7].style.fg, quiet);
+            let PlaceLines { lines, places, .. } =
+                place_content(&h.app, &session, 40, selected, None, 1000);
+            // No folder or worktree, no branch: the toggle and the names.
+            assert_eq!(text(&lines), ["▸ focal-md, other"]);
+            assert!(places.is_empty());
+            assert_eq!(lines[0][0].style.fg, Some(p.accent_primary));
+            assert!(lines[0][1].style.add_modifier.contains(Modifier::BOLD));
         }
-    }
-
-    #[test]
-    fn the_current_place_ends_with_how_many_places_the_session_has() {
-        use crate::app::testing::harness;
-        let p = theme::palette();
-        let mut h = harness(vec![]);
-        // Nowhere else (its one place is where it works now): no ▸, no
-        // count.
-        let alone = with_places(&[("/repo", "main", 5, true)]);
-        let lines = place_content(&h.app, &alone, 40, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["  repo  ⎇ main"]);
-
-        // Two other places: this one and those, after the path and the
-        // branch, in their quiet colour; the current place isn't counted
-        // twice.
-        let session = with_places(&[
-            ("/repo/worktrees/fix", "fix", 5, true),
-            ("/repo", "main", 300, true),
-            ("/srv/other", "dev", 7200, true),
-        ]);
-        for selected in [false, true] {
-            let lines = place_content(&h.app, &session, 40, selected, None, 1000).lines;
-            assert_eq!(text(&lines), ["▸ repo  ⎇ main  3"]);
-            let line = &lines[0];
-            assert_eq!(line[line.len() - 2].content, PLACE_GAP);
-            let count = line.last().unwrap();
-            assert_eq!(count.content, "3");
-            let quiet = if selected {
-                p.neutral_gray
-            } else {
-                p.text_muted
-            };
-            assert_eq!(count.style.fg, Some(quiet));
-            assert_eq!(count.style.bg, None);
-        }
-        // Open, the same on the first line only: one more than the places
-        // under it.
-        h.app.places_open.insert(session.id.clone());
-        let PlaceLines { lines, places, .. } =
-            place_content(&h.app, &session, 40, false, None, 1000);
-        assert_eq!(text(&lines)[0], "▾ repo  ⎇ main  3");
-        assert_eq!(places.len() + 1, 3);
-        for line in &text(&lines)[1..] {
-            assert!(!line.ends_with(" 3"), "{line:?}");
-        }
-        h.app.places_open.clear();
-        // Without a branch: right after the path. Two digits.
-        let mut many = session.clone();
-        many.git = None;
-        many.cwd = "/repo".into();
-        many.places = (0..11)
-            .map(|i| session_core::model::SessionPlace {
-                path: format!("/srv/w{i}").into(),
-                git: None,
-                last_at: 0,
-                edited: true,
-            })
-            .collect();
-        let lines = place_content(&h.app, &many, 40, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ repo  12"]);
-
-        // Short of room the path is cut first, then the count goes before
-        // the branch would; where the branch can't fit anyway, the count
-        // stays, while it takes at most half the line.
-        for (width, line) in [
-            (18, "▸ repo  ⎇ main  3"),
-            (17, "▸ repo  ⎇ main  3"),
-            (16, "▸ repo  ⎇ main"),
-            (12, "▸ repo  3"),
-            (6, "▸ repo"),
-        ] {
-            let lines = place_content(&h.app, &session, width, false, None, 1000).lines;
-            assert_eq!(text(&lines), [line], "{width}");
-        }
-        let mut long = session.clone();
-        long.git = Some(session_core::model::GitInfo {
-            repo_root: "/repo/worktrees/fix".into(),
-            branch: Some("fix".into()),
-            repo: Some("focal-md".into()),
-            ..Default::default()
-        });
-        for width in 4..60 {
-            let lines = place_content(&h.app, &long, width, false, None, 1000).lines;
-            let line = &text(&lines)[0];
-            assert!(str_width(line) <= width.max(6), "{width}: {line:?}");
-            let count = lines[0].last().filter(|span| span.content == "3");
-            assert!(
-                count.is_none() || line.ends_with("  3"),
-                "{width}: {line:?}"
-            );
-        }
-        let wide = place_content(&h.app, &long, 40, false, None, 1000).lines;
-        assert_eq!(text(&wide), ["▸ worktrees/fix  focal-md ⎇ fix  3"]);
-        // The repository's name is bold; the branch isn't.
-        let style_of = |content: &str| {
-            wide[0]
-                .iter()
-                .find(|span| span.content == content)
-                .map(|span| span.style.add_modifier)
-        };
-        assert_eq!(style_of("focal-md"), Some(Modifier::BOLD));
-        assert_eq!(style_of("⎇ fix"), Some(Modifier::empty()));
-        // The repository's name is cut, then goes, before the count.
+        // Cut at their end, never wrapped, where the right column (the age and mark above) starts.
+        let lines = place_content(&h.app, &session, 24, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["▸ focal-md, o…"]);
+        // Outside any repository: the folder it works in, not bold.
+        let mut plain = crate::app::testing::view("B", "b", 0);
+        plain.cwd = "/repo/notes".into();
+        let lines = place_content(&h.app, &plain, 40, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["▸ notes"]);
+        assert!(!lines[0][1].style.add_modifier.contains(Modifier::BOLD));
+        // A session row is its name, its repositories and its app.
         assert_eq!(
-            text(&place_content(&h.app, &long, 32, false, None, 1000).lines),
-            ["▸ worktrees/fix  focal… ⎇ fix  3"]
+            row_height_in(&h.app, &ListRow::Session(&session), 40, 1000),
+            4
         );
-        assert_eq!(
-            text(&place_content(&h.app, &long, 28, false, None, 1000).lines),
-            ["▸ worktrees/fix  ⎇ fix  3"]
-        );
-    }
-
-    #[test]
-    fn the_current_places_path_is_cut_before_its_branch_and_never_wraps() {
-        let fit = |path: &str, branch: &str, room| {
-            let (path, repo, branch) = fit_place(path, "", branch, room);
-            assert_eq!(repo, "");
-            assert!(
-                str_width(&path) + str_width(&branch) + if branch.is_empty() { 0 } else { 2 }
-                    <= room,
-                "{room}: {path:?} {branch:?}"
-            );
-            (path, branch)
-        };
-        let path = "/work/focal-md-pubmed-pmc-audit";
-        let branch = "⎇ audit/pubmed-pmc-ingest-20261008";
-        // Room for both, whole.
-        assert_eq!(fit(path, branch, 80), (path.into(), branch.into()));
-        // The path first, from its start, down to half the line.
-        assert_eq!(
-            fit(path, "⎇ main", 34),
-            ("…focal-md-pubmed-pmc-audit".into(), "⎇ main".into())
-        );
-        // Then the branch, from its end.
-        assert_eq!(
-            fit(path, branch, 34),
-            ("…pubmed-pmc-audit".into(), "⎇ audit/pubmed…".into())
-        );
-        // Too little left for it, the branch goes and the path takes the
-        // line.
-        assert_eq!(
-            fit(path, branch, 12),
-            ("…d-pmc-audit".into(), String::new())
-        );
-        // Without a branch, the path alone.
-        assert_eq!(fit(path, "", 12), ("…d-pmc-audit".into(), String::new()));
-        for room in 0..90 {
-            fit(path, branch, room);
-        }
-    }
-
-    #[test]
-    fn short_of_room_the_path_goes_first_then_the_repository_then_the_branch() {
-        let fit = |path: &str, repo: &str, branch: &str, room| {
-            let fitted = fit_place(path, repo, branch, room);
-            let (path, repo, branch) = &fitted;
-            let git = match (repo.is_empty(), branch.is_empty()) {
-                (true, true) => 0,
-                (false, false) => str_width(repo) + 1 + str_width(branch) + 2,
-                _ => str_width(repo) + str_width(branch) + 2,
-            };
-            assert!(str_width(path) + git <= room, "{room}: {fitted:?}");
-            fitted
-        };
-        let s = |text: &str| text.to_string();
-        let path = "/work/focal-md-pubmed-pmc-audit";
-        let (repo, branch) = ("focal-md", "⎇ audit/pubmed-pmc-ingest-20261008");
-        // Room for all three, whole.
-        assert_eq!(fit(path, repo, branch, 80), (s(path), s(repo), s(branch)));
-        // The path first, from its start, down to half the line.
-        assert_eq!(
-            fit(path, repo, "⎇ main", 36),
-            (s("…d-pubmed-pmc-audit"), s(repo), s("⎇ main"))
-        );
-        // Then the repository's name, from its end, to six columns.
-        assert_eq!(
-            fit(path, "focal-md-research", "⎇ main", 34),
-            (s("…pubmed-pmc-audit"), s("focal-m…"), s("⎇ main"))
-        );
-        assert_eq!(
-            fit(path, "focal-md-research", "⎇ main-line", 39),
-            (s("…d-pubmed-pmc-audit"), s("focal…"), s("⎇ main-line"))
-        );
-        // Then it goes, and the path takes back what it can.
-        assert_eq!(
-            fit(path, "focal-md-research", "⎇ main-line", 38),
-            (s("…ocal-md-pubmed-pmc-audit"), s(""), s("⎇ main-line"))
-        );
-        // Then the branch is cut from its end.
-        assert_eq!(
-            fit(path, repo, branch, 50),
-            (
-                s("…ocal-md-pubmed-pmc-audit"),
-                s(""),
-                s("⎇ audit/pubmed-pmc-ing…")
-            )
-        );
-        assert_eq!(
-            fit(path, repo, branch, 12),
-            (s("…d-pmc-audit"), s(""), s(""))
-        );
-        // Without a branch (a repository whose HEAD isn't in its `HEAD`
-        // file), the name alone in the branch's place.
-        assert_eq!(fit(path, repo, "", 80), (s(path), s(repo), s("")));
-        assert_eq!(
-            fit(path, repo, "", 28),
-            (s("…-pubmed-pmc-audit"), s(repo), s(""))
-        );
-        assert_eq!(fit(path, repo, "", 14), (s("…med-pmc-audit"), s(""), s("")));
-        // A detached HEAD keeps its commit.
-        assert_eq!(
-            fit("/code/x", repo, "⎇ @1a2b3c4", 40),
-            (s("/code/x"), s(repo), s("⎇ @1a2b3c4"))
-        );
-        for room in 0..90 {
-            fit(path, repo, branch, room);
-            fit(path, "focal-md-research", "⎇ main", room);
-            fit(path, repo, "", room);
-        }
-        // An open place's second line: the name is cut first, then goes,
-        // then the branch is cut.
-        assert_eq!(fit_git(repo, "⎇ main", 20), (s(repo), s("⎇ main")));
-        assert_eq!(
-            fit_git("focal-md-research", "⎇ main", 16),
-            (s("focal-md…"), s("⎇ main"))
-        );
-        assert_eq!(fit_git(repo, "⎇ main", 12), (s(""), s("⎇ main")));
-        assert_eq!(fit_git(repo, "⎇ main", 4), (s(""), s("⎇ m…")));
-        assert_eq!(fit_git(repo, "", 6), (s("focal…"), s("")));
-        assert_eq!(fit_git("", "", 6), (s(""), s("")));
     }
 
     #[test]
@@ -1979,7 +1513,7 @@ mod tests {
     }
 
     #[test]
-    fn open_places_are_pairs_under_the_current_one_with_a_rule_between() {
+    fn open_places_are_pairs_where_it_works_now_first_with_a_rule_between() {
         use crate::app::testing::harness;
         use crate::app::Selection;
         let p = theme::palette();
@@ -1992,22 +1526,21 @@ mod tests {
         h.app.places_open.insert(session.id.clone());
         let PlaceLines {
             lines,
-            toggle,
-            current,
             places,
             focus,
-            ..
         } = place_content(&h.app, &session, 40, false, None, 1000);
-        // The place it works in now is the first line, not again under it,
-        // its path in the row's text column; the others a step further in,
-        // with nothing left of them.
+        // The repositories, then where it works now (its checkout, `/repo`)
+        // and the others, each a pair a step further in.
         let rule = |room: usize| format!("    {}", "─".repeat(room));
         let branch =
             |left: &str, gap: usize, age: &str| format!("    {left}{}{age}", " ".repeat(gap));
         assert_eq!(
             text(&lines),
             [
-                "▾ repo  ⎇ main  3".to_string(),
+                "▾ repo".to_string(),
+                rule(36),
+                "    repo".into(),
+                branch("⎇ main", 28, "5m"),
                 rule(36),
                 "    worktrees/fix".into(),
                 branch("⎇ fix", 28, "now"),
@@ -2016,22 +1549,14 @@ mod tests {
                 branch("⎇ dev", 29, "2h"),
             ]
         );
-        assert_eq!(toggle, Some(0..2));
-        assert_eq!(current, 0..1);
-        assert_eq!(places, [2..4, 5..7]);
+        assert_eq!(places, [2..4, 5..7, 8..10]);
         assert_eq!(focus, None);
-        // Nothing left of any place's text but the gutter and, for the
-        // others, blanks.
+        // Nothing left of any place's text but the gutter and blanks.
         let blank_beside = |lines: &[Vec<Span>], line: usize| {
             let span = &lines[line][1];
             span.content == "  " && span.style == Style::default()
         };
-        assert_eq!(
-            lines[0].len(),
-            6,
-            "the toggle, path, gap, branch, gap and count"
-        );
-        for line in [2, 3, 5, 6] {
+        for line in [2, 3, 5, 6, 8, 9] {
             assert!(blank_beside(&lines, line), "{line}");
         }
         let rule_span = lines[1].iter().find(|span| span.content.starts_with('─'));
@@ -2041,32 +1566,36 @@ mod tests {
         let lines =
             place_content(&h.app, &session, 40, false, Some(PlaceRef::Listed(1)), 1000).lines;
         let marked = text(&lines);
-        assert_eq!(marked[5], "⧉   /srv/other");
-        assert_eq!(marked[6], branch("⎇ dev", 29, "2h"));
-        assert!(!marked[2].contains('⧉'));
-        assert_eq!(lines[5][0].style.fg, Some(p.accent_primary));
-        assert_eq!(lines[5][2].style.fg, Some(p.text_bright));
-        assert!(!lines[5][2].style.add_modifier.contains(Modifier::BOLD));
-        assert!(blank_beside(&lines, 5) && blank_beside(&lines, 6));
+        assert_eq!(marked[8], "⧉   /srv/other");
+        assert!(!marked[5].contains('⧉') && !marked[2].contains('⧉'));
+        assert_eq!(lines[8][0].style.fg, Some(p.accent_primary));
+        assert_eq!(lines[8][2].style.fg, Some(p.text_bright));
+        assert!(!lines[8][2].style.add_modifier.contains(Modifier::BOLD));
+        let lines = place_content(&h.app, &session, 40, false, Some(PlaceRef::Current), 1000).lines;
+        assert_eq!(text(&lines)[2], "⧉   repo");
         // The one the list keys are on (in the selected session) too, its
         // path bright and bold.
         h.app.list.select(Selection::Session(session.id.clone()));
         h.app.list.select_place(Some("/repo/worktrees/fix".into()));
         let PlaceLines { lines, focus, .. } = place_content(&h.app, &session, 40, true, None, 1000);
-        assert_eq!(focus, Some(0));
-        assert_eq!(text(&lines)[2], "⧉   worktrees/fix");
-        assert!(blank_beside(&lines, 2) && blank_beside(&lines, 3));
-        let path = lines[2].last().unwrap();
+        assert_eq!(focus, Some(1));
+        assert_eq!(text(&lines)[5], "⧉   worktrees/fix");
+        let path = lines[5].last().unwrap();
         assert_eq!(path.style.fg, Some(p.text_bright));
         assert!(path.style.add_modifier.contains(Modifier::BOLD));
-        // Narrow: the same pairs, paths cut at their start, the branch cut
-        // before the age.
+        h.app.list.select_place(Some("/repo".into()));
+        let PlaceLines { focus, .. } = place_content(&h.app, &session, 40, true, None, 1000);
+        assert_eq!(focus, Some(0));
+        // Narrow: the same pairs, paths cut at their start.
         let PlaceLines { lines, places, .. } =
             place_content(&h.app, &session, 16, false, None, 1000);
         assert_eq!(
             text(&lines),
             [
-                "▾ repo  ⎇ main".to_string(),
+                "▾ repo".to_string(),
+                rule(12),
+                "    repo".into(),
+                branch("⎇ main", 4, "5m"),
                 rule(12),
                 "    …rktrees/fix".into(),
                 branch("⎇ fix", 4, "now"),
@@ -2075,7 +1604,7 @@ mod tests {
                 branch("⎇ dev", 5, "2h"),
             ]
         );
-        assert_eq!(places, [2..4, 5..7]);
+        assert_eq!(places, [2..4, 5..7, 8..10]);
         for width in [8, 12, 16, 24, 40, 80] {
             let PlaceLines { lines, places, .. } =
                 place_content(&h.app, &session, width, false, None, 1000);
@@ -2090,7 +1619,7 @@ mod tests {
         }
         assert_eq!(
             row_height_in(&h.app, &ListRow::Session(&session), 40, 1000),
-            10
+            13
         );
     }
 

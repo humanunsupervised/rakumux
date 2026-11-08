@@ -8,8 +8,10 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Replace the UI process. Returns only when the new UI could not start.
-pub fn current_process(updated_launcher: Option<&Path>) -> io::Result<()> {
+/// Replace the UI process; `after_update`, the new one restarts the server
+/// and its services too (`--after-update`). Returns only when the new UI
+/// could not start.
+pub fn current_process(updated_launcher: Option<&Path>, after_update: bool) -> io::Result<()> {
     let executable = match updated_launcher {
         Some(path) => path.to_path_buf(),
         None => std::env::current_exe()?,
@@ -23,8 +25,14 @@ pub fn current_process(updated_launcher: Option<&Path>) -> io::Result<()> {
             std::env::args_os().skip(1),
         ),
     };
+    if after_update {
+        command.arg(AFTER_UPDATE);
+    }
     Err(command.exec())
 }
+
+/// Tells the reloaded UI an update was installed.
+const AFTER_UPDATE: &str = "--after-update";
 
 fn command(
     executable: &Path,
@@ -35,8 +43,13 @@ fn command(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| replacement_executable(executable));
     let mut command = Command::new(target);
-    // A UI restart must not repeat the initial daemon-replacement request.
-    command.args(arguments.into_iter().filter(|arg| arg != "--new-server"));
+    // A UI restart must not repeat the initial daemon-replacement request,
+    // nor an earlier update's server restart.
+    command.args(
+        arguments
+            .into_iter()
+            .filter(|arg| arg != "--new-server" && arg != AFTER_UPDATE),
+    );
     command
 }
 
@@ -95,6 +108,13 @@ mod tests {
             ["--new-server", "--debug"].map(OsString::from),
         );
         assert_eq!(command.get_program(), "/installed/rakumux.sh");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["--debug"]);
+        // Nor an earlier update's server restart.
+        let command = updated_command(
+            Path::new("/removed/old/rakumux"),
+            Path::new("/installed/rakumux.sh"),
+            ["--after-update", "--debug"].map(OsString::from),
+        );
         assert_eq!(command.get_args().collect::<Vec<_>>(), ["--debug"]);
         let environment: std::collections::BTreeMap<_, _> = command.get_envs().collect();
         assert_eq!(

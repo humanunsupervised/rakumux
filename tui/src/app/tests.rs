@@ -1944,7 +1944,7 @@ async fn shift_r_still_types_in_a_session_and_in_the_list_filter() {
 }
 
 #[tokio::test]
-async fn shift_u_updates_after_confirmation_and_restarts_only_the_ui() {
+async fn shift_u_updates_after_confirmation_and_reloads_to_restart_the_server_too() {
     let mut h = harness(vec![view("A", "a", 20)]);
     let updater = Arc::new(testing::FakeUpdater::default());
     *updater.latest.lock().unwrap() = Some("99.1.0".into());
@@ -1967,6 +1967,8 @@ async fn shift_u_updates_after_confirmation_and_restarts_only_the_ui() {
     h.press(KeyCode::Enter).await;
     assert_eq!(*updater.calls.lock().unwrap(), ["check", "install 99.1.0"]);
     assert!(h.app.restart_requested);
+    // The reloaded UI restarts the server and its services (`--after-update`).
+    assert!(h.app.restart_after_update);
     assert_eq!(
         h.app.restart_launcher.as_deref(),
         Some(std::path::Path::new("/updated/rakumux.sh"))
@@ -1974,8 +1976,61 @@ async fn shift_u_updates_after_confirmation_and_restarts_only_the_ui() {
     assert_eq!(
         h.fake.calls(),
         calls_before,
-        "updates never stop/restart the daemon or mutate sessions"
+        "the old UI never stops or restarts the daemon, nor touches sessions"
     );
+}
+
+/// Reloaded for an installed update (`--after-update`), the UI restarts a
+/// server of another version in place, then its services: one restart for
+/// both, sessions running on.
+#[tokio::test]
+async fn after_an_update_the_reloaded_ui_restarts_the_server_and_its_services() {
+    let fake = FakeApi::new(vec![view("A", "a", 10)]);
+    fake.state.lock().unwrap().restarts_in_place = true;
+    let dir = tempfile::tempdir().unwrap();
+    let mut options = options(&fake, scope(), &dir);
+    let account = Arc::new(testing::FakeAccount::signed_in());
+    let phone = Arc::new(testing::FakePhone::default());
+    options.account = account.clone();
+    options.phone = phone.clone();
+    let mut app = App::new(options);
+    app.resize(160, 48);
+    app.server_after_update = true;
+    app.start();
+    app.process_pending();
+    let mut h = Harness {
+        app,
+        fake,
+        home: dir,
+    };
+    let restarts = |h: &Harness| {
+        h.fake
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("restart_daemon"))
+            .count()
+    };
+    assert_eq!(restarts(&h), 1, "{:?}", h.fake.calls());
+    assert!(
+        account.calls().contains(&"restart"),
+        "{:?}",
+        account.calls()
+    );
+    assert!(
+        phone.calls().contains(&"restart_api"),
+        "{:?}",
+        phone.calls()
+    );
+    assert!(h.app.connection.is_connected());
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(
+        h.app.status(),
+        Some("Restarted the Rakumux server and its services; your sessions kept running.")
+    );
+    // Once: reconnecting later restarts nothing.
+    h.app.refresh();
+    h.app.process_pending();
+    assert_eq!(restarts(&h), 1);
 }
 
 #[tokio::test]
@@ -5489,28 +5544,32 @@ async fn a_sessions_details_follow_its_name_with_no_message_or_description_betwe
 
 #[tokio::test]
 async fn the_lines_under_a_name_stop_short_of_its_age_and_mark() {
+    // A long app name and long repositories' names.
     let mut long = view("A", "api", 20);
-    long.reported = Some(session_core::model::Reported {
-        state: None,
-        text: Some("word ".repeat(60)),
-        result: None,
-        at: 0,
+    long.agent = Some(session_core::model::AgentInfo {
+        kind: "agent".repeat(30),
+        ..Default::default()
     });
+    long.git = on_branch("main");
+    if let Some(git) = long.git.as_mut() {
+        git.repo = Some("repository".repeat(20));
+    }
     let mut h = harness(vec![long]).on_folders_tab();
     let screen = screen_rows(&mut h, 160, 48);
     let title = screen.iter().position(|row| row.contains(" api ")).unwrap();
     let list_width = usize::from(crate::layout::sidebar_width(160));
     let row = |line: &str| -> String { line.chars().take(list_width).collect() };
     let mark_end = row(&screen[title]).trim_end().chars().count();
-    let below = title + 1;
-    let end = row(&screen[below]).trim_end().chars().count();
-    assert!(end > 20, "{:?}", row(&screen[below]));
-    assert!(
-        end + 9 <= mark_end,
-        "{:?}\n{:?}",
-        row(&screen[title]),
-        row(&screen[below])
-    );
+    for below in [title + 1, title + 2] {
+        let end = row(&screen[below]).trim_end().chars().count();
+        assert!(end > 20, "{:?}", row(&screen[below]));
+        assert!(
+            end + 9 <= mark_end,
+            "{:?}\n{:?}",
+            row(&screen[title]),
+            row(&screen[below])
+        );
+    }
 }
 
 #[tokio::test]
@@ -5569,10 +5628,10 @@ async fn ai_titles_off_for_the_account_clear_the_spinners_and_the_refresh() {
     );
 }
 
-/// Where a session has worked opens under its row: `w` for the selected
-/// one, `W` for all of them, a click on the `▸` of the place it works in
-/// now (a click on its path copies it); a session that has worked nowhere
-/// else says so.
+/// A session's repositories are one line under its name, `▸` in the gutter
+/// left of them; its places open under it with `w` for the selected one,
+/// `W` for all of them, or a click on the `▸` or the names: where it works
+/// now first, then the others.
 #[tokio::test]
 async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
@@ -5607,82 +5666,64 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     };
     // The column `needle` starts in on `line`.
     let column = |line: &str, needle: &str| line.find(needle).map(|at| line[..at].chars().count());
-    // Where it works now: one line, ▸ in the gutter left of it, its path
-    // under the row's name, and at its end how many places it has.
-    let current = |screen: &[String], mark: &str| {
-        let at = screen
-            .iter()
-            .position(|line| line.contains(&format!("{mark} repo  ⎇ main")))
-            .unwrap_or_else(|| panic!("{mark} repo: {}", screen.join("\n")));
-        assert!(
-            in_list(&screen[at]).ends_with(" repo  ⎇ main  2"),
-            "{:?}",
-            screen[at]
-        );
-        let name = screen
-            .iter()
-            .find(|line| line.contains(" agent "))
-            .expect("its name");
-        assert_eq!(column(&screen[at], "repo  ⎇"), column(name, "agent"));
-        assert_eq!(column(&screen[at], mark), Some(1), "{:?}", screen[at]);
-    };
+    // Closed: the repository alone, under the name, the toggle left of it.
     let screen = screen_rows(&mut h, 160, 48);
-    current(&screen, "▸");
     let text = screen.join("\n");
-    assert!(!text.contains("worktrees/fix"), "closed: {text}");
-    // B, nowhere else, has neither ▸ nor a count.
-    assert!(
-        screen.iter().any(|line| in_list(line) == "   repo"),
-        "B's place: {text}"
+    let name = screen
+        .iter()
+        .position(|line| line.contains(" agent "))
+        .expect("its name");
+    assert_eq!(in_list(&screen[name + 1]), " ▸ repo", "{text}");
+    assert_eq!(
+        column(&screen[name + 1], "repo"),
+        column(&screen[name], "agent")
     );
+    assert!(!text.contains("worktrees/fix"), "closed: {text}");
+    assert!(!text.contains("⎇ main"), "closed: {text}");
 
-    // Open, the current line stays, and under it the one other place: its
-    // path, then its branch and age, with nothing left of them.
+    // Open: where it works now, then the other place, each its path, then
+    // its branch and age, a step further in.
     h.press(KeyCode::Char('w')).await;
     let screen = screen_rows(&mut h, 160, 48);
-    current(&screen, "▾");
     let text = screen.join("\n");
-    let fix = screen
-        .iter()
-        .position(|line| in_list(line).trim_start() == "worktrees/fix")
-        .unwrap_or_else(|| panic!("the worktree: {text}"));
+    assert_eq!(in_list(&screen[name + 1]), " ▾ repo", "{text}");
+    let pair = |path: &str| {
+        screen
+            .iter()
+            .position(|line| in_list(line).trim_start() == path)
+            .unwrap_or_else(|| panic!("{path}: {text}"))
+    };
+    let (here, fix) = (pair("repo"), pair("worktrees/fix"));
+    assert!(name + 1 < here && here < fix, "{text}");
+    let branch = in_list(&screen[here + 1]);
+    assert!(branch.trim_start().starts_with("⎇ main"), "{branch:?}");
+    assert!(branch.ends_with(" 10m"), "{branch:?}");
     let branch = in_list(&screen[fix + 1]);
     assert!(branch.trim_start().starts_with("⎇ fix"), "{branch:?}");
     assert!(branch.ends_with(" 30s"), "{branch:?}");
-    // Its text a step further in than the current one's path.
-    let now_at = screen
-        .iter()
-        .find(|line| line.contains("▾ repo"))
-        .expect("the current place");
-    let step_in = column(now_at, "repo").map(|at| at + 2);
+    let step_in = column(&screen[name], "agent").map(|at| at + 2);
+    assert_eq!(column(&screen[here], "repo"), step_in);
     assert_eq!(column(&screen[fix], "worktrees"), step_in);
-    assert_eq!(column(&screen[fix + 1], "⎇ fix"), step_in);
-    // (B's place, without a branch, is `repo` in its text column.)
-    assert!(
-        !screen.iter().any(|line| in_list(line) == "     repo"),
-        "where it works now isn't listed again: {text}"
-    );
+    // Its app under them.
     h.press(KeyCode::Char('w')).await;
     assert!(!h.app.places_open(&a));
 
-    // B has worked nowhere else.
+    // B, which changed files nowhere, opens too: where it works now.
     let b = SessionId::from_string("B");
     h.app.list.select(Selection::Session(b.clone()));
     h.press(KeyCode::Char('w')).await;
+    assert!(h.app.places_open(&b));
+    h.press(KeyCode::Char('w')).await;
     assert!(!h.app.places_open(&b));
-    assert_eq!(
-        h.app.status(),
-        Some("plain hasn't changed files anywhere else yet.")
-    );
 
-    // W opens every session's that has somewhere else, then closes them.
+    // W opens every session's, then closes them.
     h.press(KeyCode::Char('W')).await;
-    assert!(h.app.places_open(&a) && !h.app.places_open(&b));
+    assert!(h.app.places_open(&a) && h.app.places_open(&b));
     h.press(KeyCode::Char('W')).await;
-    assert!(!h.app.places_open(&a));
+    assert!(!h.app.places_open(&a) && !h.app.places_open(&b));
 
-    // A click on A's ▸ opens its places, another closes them, and B
-    // stays selected; one on its path copies it.
+    // A click on A's ▸ or its names opens its places, another closes
+    // them, and B stays selected.
     screen_rows(&mut h, 160, 48);
     let row = h
         .app
@@ -5698,7 +5739,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         .filter(|(_, hit)| *hit == Hit::PlacesToggle(row))
         .map(|(area, _)| *area)
         .collect();
-    assert_eq!(toggles.len(), 1, "its ▸");
+    assert_eq!(toggles.len(), 1, "its ▸ and names");
     let click = |h: &mut Harness, column: u16, row: u16| {
         for kind in [
             MouseEventKind::Down(MouseButton::Left),
@@ -5714,23 +5755,24 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     };
     let screen = screen_rows(&mut h, 160, 48);
     let mark = toggles[0];
+    assert_eq!(usize::from(mark.width), "▸ repo".chars().count());
     assert!(screen[usize::from(mark.y)][..].contains("▸ repo"));
     click(&mut h, mark.x, mark.y);
     assert!(h.app.places_open(&a));
     assert_eq!(h.app.list.selection(), &Selection::Session(b.clone()));
     let screen = screen_rows(&mut h, 160, 48);
     assert!(screen[usize::from(mark.y)][..].contains("▾ repo"));
-    click(&mut h, mark.x + 1, mark.y);
-    assert!(!h.app.places_open(&a));
+    // A click on where it works now copies its path.
     let (path, _) = *h
         .app
         .hits
         .iter()
         .find(|(_, hit)| *hit == Hit::Place(row, places::PlaceRef::Current))
         .expect("A's current place");
-    assert_eq!(path.height, 1, "its one line");
+    assert_eq!(path.height, 2, "its two lines");
     click(&mut h, path.x + 6, path.y);
     assert_eq!(copied(&mut h), "/repo");
+    click(&mut h, mark.x + 3, mark.y);
     assert!(!h.app.places_open(&a));
     assert_eq!(h.app.list.selection(), &Selection::Session(b));
 }
@@ -5792,9 +5834,12 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     assert_eq!(copied(&mut h), "/repo");
     assert_eq!(h.app.status(), Some("Copied /repo"));
 
+    // Open, where it works now comes first, then the others.
     h.press(KeyCode::Char('w')).await;
     h.press(KeyCode::Char('j')).await;
     assert_eq!(h.app.list.selected_id(), Some(&a));
+    assert_eq!(place(&h).as_deref(), Some("/repo"));
+    h.press(KeyCode::Char('j')).await;
     assert_eq!(place(&h).as_deref(), Some("/repo/worktrees/fix"));
     let screen = screen_rows(&mut h, 160, 48).join("\n");
     assert!(screen.contains("⧉   worktrees/fix"), "{screen}");
@@ -5812,6 +5857,8 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     assert_eq!(h.app.list.selected_id(), Some(&a));
     assert_eq!(place(&h).as_deref(), Some("/srv/other"));
     h.press(KeyCode::Char('k')).await;
+    h.press(KeyCode::Char('k')).await;
+    assert_eq!(place(&h).as_deref(), Some("/repo"));
     h.press(KeyCode::Char('k')).await;
     assert_eq!((h.app.list.selected_id(), place(&h)), (Some(&a), None));
     // Another selection forgets the place.
@@ -5879,16 +5926,15 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     assert_eq!(copied(&mut h), "/repo/worktrees/fix");
     assert!(h.app.places_open(&a));
 
-    // The place it works in now too: under the pointer, its copy mark
-    // just left of its ▾ (not over the ▾ itself, which closes the list),
-    // where a click copies it too.
+    // The place it works in now too, the first pair: under the pointer,
+    // its copy mark, and a click copies it.
     let (current, _) = *h
         .app
         .hits
         .iter()
         .find(|(_, hit)| *hit == Hit::Place(row, places::PlaceRef::Current))
         .expect("A's current place");
-    assert_eq!(current.height, 1, "its one line");
+    assert_eq!(current.height, 2, "its two lines");
     let hover = |h: &mut Harness, column: u16, row: u16| {
         h.app.handle_mouse(MouseEvent {
             kind: MouseEventKind::Moved,
@@ -5901,32 +5947,10 @@ async fn an_open_places_path_copies_with_y_or_a_click() {
     let screen = hover(&mut h, current.x + 6, current.y);
     assert_eq!(h.app.hovered_place, Some((row, places::PlaceRef::Current)));
     let at = usize::from(current.y);
-    assert!(
-        screen[at].starts_with("⧉▾ repo  ⎇ main"),
-        "{:?}",
-        screen[at]
-    );
+    assert!(screen[at].starts_with(" ⧉   repo"), "{:?}", screen[at]);
     click(&mut h, current.y);
     assert_eq!(copied(&mut h), "/repo");
-    let screen = hover(&mut h, current.x, current.y);
-    assert_eq!(h.app.hovered_place, Some((row, places::PlaceRef::Current)));
-    assert!(screen[at].starts_with("⧉▾ repo"), "{:?}", screen[at]);
-    for kind in [
-        MouseEventKind::Down(MouseButton::Left),
-        MouseEventKind::Up(MouseButton::Left),
-    ] {
-        h.app.handle_mouse(MouseEvent {
-            kind,
-            column: current.x,
-            row: current.y,
-            modifiers: KeyModifiers::NONE,
-        });
-    }
-    assert_eq!(copied(&mut h), "/repo");
     assert!(h.app.places_open(&a));
-    let screen = hover(&mut h, current.x + 1, current.y);
-    assert_eq!(h.app.hovered_place, None, "over its ▾");
-    assert!(!screen[at].contains('⧉'), "{:?}", screen[at]);
 }
 
 /// A session whose open places make it taller than the list still shows,
@@ -5945,7 +5969,8 @@ async fn a_session_taller_than_the_list_scrolls_to_its_place() {
     assert!(screen.contains("agent"), "{screen}");
     assert!(screen.contains("place01"), "{screen}");
     assert!(!screen.contains("place12"), "{screen}");
-    for _ in 0..12 {
+    // Where it works now, then the twelve others.
+    for _ in 0..13 {
         h.press(KeyCode::Char('j')).await;
     }
     let screen = list(&mut h);
@@ -6029,10 +6054,11 @@ fn paper_links(now: i64) -> session_core::model::SessionView {
 /// A session that started in its folder's main checkout, then made
 /// worktrees and changed files in them, on a phone's 60 and 40 columns. The
 /// daemon lists only the worktrees where files were changed, not the main
-/// checkout it only started in. The place it works in now is one line in
-/// line with the row's app line, `▸` in the gutter left of it; opened
-/// (`▾`), the three others are pairs a step further in with nothing left of
-/// them, a rule above each, the one the keys are on with ⧉.
+/// checkout it only started in. Closed, the row's repositories are one line
+/// in line with its name, `▸` in the gutter left of them, its app under
+/// them; opened (`▾`), where it works now and the three others are pairs a
+/// step further in with nothing left of them, a rule above each, the one
+/// the keys are on with ⧉.
 #[tokio::test]
 async fn open_places_read_as_pairs_on_a_phone() {
     let now = 1_000_000_000;
@@ -6044,34 +6070,32 @@ async fn open_places_read_as_pairs_on_a_phone() {
         let screen = screen_rows(h, width, 24);
         let first = screen
             .iter()
-            .position(|line| line.contains("⎇ paper-links"))
+            .position(|line| line.contains("Paper links"))
             .unwrap_or_else(|| panic!("{}", screen.join("\n")));
-        let block: Vec<String> = screen[first.saturating_sub(2)..]
+        let block: Vec<String> = screen[first..]
             .iter()
             .map(|line| line.trim_end().to_string())
             .take_while(|line| !line.is_empty())
             .collect();
-        // The whole row, for `--nocapture`; the place lines are checked.
+        // The whole row, for `--nocapture`; the lines under its name are
+        // checked.
         eprintln!("{width} columns:\n{}\n", block.join("\n"));
-        block[2.min(block.len())..].to_vec()
+        block[1.min(block.len())..].to_vec()
     };
-    assert_eq!(
-        places(&mut h, 60),
-        [" ▸ /work/focal-md-paper-links  focal-md ⎇ paper-links  4"]
-    );
-    // Short of room, the path is cut at its start, then the repository's
-    // name goes before the branch; the count of places stays at the end.
-    assert_eq!(
-        places(&mut h, 40),
-        [" ▸ …al-md-paper-links  ⎇ paper-links  4"]
-    );
+    assert_eq!(places(&mut h, 60), [" ▸ focal-md", "   claude"]);
+    assert_eq!(places(&mut h, 40), [" ▸ focal-md", "   claude"]);
     h.app.places_open.insert(a);
+    // Past where it works now, onto the second of the others.
+    h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     assert_eq!(
         places(&mut h, 60),
         [
-            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links  4",
+            " ▾ focal-md",
+            "     ──────────────────────────────────────────────────────",
+            "     /work/focal-md-paper-links",
+            "     focal-md ⎇ paper-links                              9d",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
@@ -6081,12 +6105,16 @@ async fn open_places_read_as_pairs_on_a_phone() {
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-citations",
             "     focal-md ⎇ fix/citation-format                     11d",
+            "   claude",
         ]
     );
     assert_eq!(
         places(&mut h, 40),
         [
-            " ▾ …al-md-paper-links  ⎇ paper-links  4",
+            " ▾ focal-md",
+            "     ──────────────────────────────────",
+            "     /work/focal-md-paper-links",
+            "     focal-md ⎇ paper-links          9d",
             "     ──────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
@@ -6096,6 +6124,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
             "     ──────────────────────────────────",
             "     /work/focal-md-citations",
             "     focal-md ⎇ fix/citation-format 11d",
+            "   claude",
         ]
     );
     assert_eq!(
@@ -6173,6 +6202,8 @@ async fn places_name_their_repository_before_the_branch() {
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
     h.app.places_open.insert(a);
+    // Past where it works now, onto the second of the others.
+    h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     assert_eq!(
@@ -6202,8 +6233,10 @@ async fn places_name_their_repository_before_the_branch() {
             "   focal-md ────────────────────────────────────── 3/3 live",
             "",
             "   Paper links                                         1h ○",
-            "   focal-md, rakumux · claude",
-            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links  4",
+            " ▾ focal-md, rakumux",
+            "     ──────────────────────────────────────────────────────",
+            "     /work/focal-md-paper-links",
+            "     focal-md ⎇ paper-links                              9d",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
@@ -6213,14 +6246,15 @@ async fn places_name_their_repository_before_the_branch() {
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-citations",
             "     focal-md ⎇ fix/citation-format                     11d",
+            "   claude",
             "",
             "   Citations                                          10m ○",
-            "   focal-md · codex",
-            " ▸ /work/focal-md-citations  ⎇ fix/citation-format  2",
+            " ▸ focal-md",
+            "   codex",
             "",
             "   Release notes                                       2m ○",
-            "   focal-md · claude",
-            "   focal-md  ⎇ main",
+            " ▸ focal-md",
+            "   claude",
             "",
             " + New session                                     ☁ Sprite",
         ]
@@ -6234,8 +6268,10 @@ async fn places_name_their_repository_before_the_branch() {
             "   focal-md ────────────────── 3/3 live",
             "",
             "   Paper links                     1h ○",
-            "   focal-md, rakum… · claude",
-            " ▾ …al-md-paper-links  ⎇ paper-links  4",
+            " ▾ focal-md, rakumux",
+            "     ──────────────────────────────────",
+            "     /work/focal-md-paper-links",
+            "     focal-md ⎇ paper-links          9d",
             "     ──────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
@@ -6245,14 +6281,15 @@ async fn places_name_their_repository_before_the_branch() {
             "     ──────────────────────────────────",
             "     /work/focal-md-citations",
             "     focal-md ⎇ fix/citation-format 11d",
+            "   claude",
             "",
             "   Citations                      10m ○",
-            "   focal-md · codex",
-            " ▸ …al-md-citations  ⎇ fix/citation…  2",
+            " ▸ focal-md",
+            "   codex",
             "",
             "   Release notes                   2m ○",
-            "   focal-md · claude",
-            "   focal-md  ⎇ main",
+            " ▸ focal-md",
+            "   claude",
             "",
             " + New session                 ☁ Sprite",
         ]
@@ -6288,6 +6325,8 @@ async fn session_rows_line_up_with_their_headers_text() {
     let a = SessionId::from_string("A");
     h.app.list.select(Selection::Session(a.clone()));
     h.app.places_open.insert(a);
+    // Past where it works now, onto the second of the others.
+    h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     h.press(KeyCode::Char('j')).await;
     // The list, from its first header to `+ New session`.
@@ -6314,8 +6353,10 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   focal-md ────────────────────────────────────── 2/2 live",
             "",
             "   Paper links                                         1h ○",
-            "   focal-md · claude",
-            " ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links  4",
+            " ▾ focal-md",
+            "     ──────────────────────────────────────────────────────",
+            "     /work/focal-md-paper-links",
+            "     focal-md ⎇ paper-links                              9d",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     focal-md ⎇ audit/pubmed-pmc-ingest-20261008        10d",
@@ -6325,10 +6366,11 @@ async fn session_rows_line_up_with_their_headers_text() {
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-citations",
             "     focal-md ⎇ fix/citation-format                     11d",
+            "   claude",
             "",
             "   Citations                                          10m ●",
-            "   focal-md · codex",
-            " ▸ /work/focal-md-citations  ⎇ fix/citation-format  2",
+            " ▸ focal-md",
+            "   codex",
             "",
             " + New session                                     ☁ Sprite",
         ]
@@ -6341,8 +6383,10 @@ async fn session_rows_line_up_with_their_headers_text() {
             "   focal-md ────────────────── 2/2 live",
             "",
             "   Paper links                     1h ○",
-            "   focal-md · claude",
-            " ▾ …al-md-paper-links  ⎇ paper-links  4",
+            " ▾ focal-md",
+            "     ──────────────────────────────────",
+            "     /work/focal-md-paper-links",
+            "     focal-md ⎇ paper-links          9d",
             "     ──────────────────────────────────",
             "     /work/focal-md-pubmed-pmc-audit",
             "     ⎇ audit/pubmed-pmc-ingest-202… 10d",
@@ -6352,10 +6396,11 @@ async fn session_rows_line_up_with_their_headers_text() {
             "     ──────────────────────────────────",
             "     /work/focal-md-citations",
             "     focal-md ⎇ fix/citation-format 11d",
+            "   claude",
             "",
             "   Citations                      10m ●",
-            "   focal-md · codex",
-            " ▸ …al-md-citations  ⎇ fix/citation…  2",
+            " ▸ focal-md",
+            "   codex",
             "",
             " + New session                 ☁ Sprite",
         ]
@@ -6395,16 +6440,18 @@ async fn session_rows_line_up_with_their_headers_text() {
             " ● unread ─────────────────────────────────────── 1 session",
             "",
             "   Citations                                          10m ●",
-            "   focal-md · codex",
-            " ▸ /work/focal-md-citations  ⎇ fix/citation-format  2",
+            " ▸ focal-md",
+            "   codex",
             "",
             " ○ ready ──────────────────────────────────────── 1 session",
             "",
             "  ◷ last hour ─────────────────────────────────── 1 session",
             "",
             "    Paper links                                        1h ○",
-            "    focal-md · claude",
-            "  ▾ /work/focal-md-paper-links  focal-md ⎇ paper-links  4",
+            "  ▾ focal-md",
+            "      ─────────────────────────────────────────────────────",
+            "      /work/focal-md-paper-links",
+            "      focal-md ⎇ paper-links                             9d",
             "      ─────────────────────────────────────────────────────",
             "      /work/focal-md-pubmed-pmc-audit",
             "      focal-md ⎇ audit/pubmed-pmc-ingest-20261008       10d",
@@ -6414,6 +6461,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "      ─────────────────────────────────────────────────────",
             "      /work/focal-md-citations",
             "      focal-md ⎇ fix/citation-format                    11d",
+            "    claude",
             "",
             " + New session                                     ☁ Sprite",
         ]

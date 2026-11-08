@@ -143,12 +143,13 @@ impl App {
                 self.pending_update_version = None;
                 self.update_install_method = None;
                 self.restart_launcher = launcher;
+                self.restart_after_update = true;
                 self.restart_requested = true;
-                self.set_status("Update installed. Restarting only the UI; sessions keep running.");
+                self.set_status("Update installed. Restarting Rakumux; sessions keep running.");
                 if let AppMode::Upgrade(dialog) = &mut self.mode {
                     dialog.installing = false;
                     dialog.update_available = false;
-                    dialog.info_message = Some("Update installed. Restarting the UI…".into());
+                    dialog.info_message = Some("Update installed. Restarting Rakumux…".into());
                 }
             }
             UpgradeMessage::InstallError(error) => {

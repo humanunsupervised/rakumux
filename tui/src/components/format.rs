@@ -3,10 +3,10 @@
 use std::path::Path;
 
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+
 use session_core::model::{GitInfo, Lifecycle, ScopeRoot, SessionStatus, SessionView};
 
-use crate::app::grouping::{is_shell, ReadPeriod, StatusGroup};
+use crate::app::grouping::{ReadPeriod, StatusGroup};
 use crate::icons::Icons;
 use crate::layout::{char_width, str_width};
 use crate::theme;
@@ -181,17 +181,6 @@ pub fn needs_attention(session: &SessionView) -> bool {
         && matches!(session.lifecycle, Lifecycle::Blocked | Lifecycle::Done)
 }
 
-/// The subagents a running agent has working, as an agent mark and their
-/// number (`◈ 3`, after the app and branch); nothing without any.
-pub fn subagent_badge(session: &SessionView, icons: Icons) -> Option<String> {
-    let count = session
-        .activity
-        .as_ref()
-        .filter(|_| session.status == SessionStatus::Live)
-        .map_or(0, |activity| activity.active_subagents);
-    (count > 0).then(|| format!("{} {count}", icons.agents()))
-}
-
 /// `~/…` for paths under the home directory.
 pub fn abbreviate_home(path: &Path) -> String {
     if let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
@@ -242,107 +231,12 @@ pub fn truncate_start(text: &str, width: usize) -> String {
     std::iter::once('…').chain(tail.into_iter().rev()).collect()
 }
 
-/// Columns the reported text needs before it's worth adding to a row.
-const REPORT_MIN: usize = 12;
-
-/// Second line of a list row: the colour-coded app first, then its git
-/// branch (`branch`; the session list says it on the session's place line
-/// instead), state and report. Only the app name gets its identifying colour.
-pub fn facts_line(
-    session: &SessionView,
-    width: usize,
-    icons: Icons,
-    detail_style: Style,
-    branch: bool,
-) -> Line<'static> {
-    let text = secondary_text(session, width, icons, branch);
-    let Some(program) = session_program(session) else {
-        return Line::styled(text, detail_style);
-    };
-    let program_style = detail_style.fg(program_color(program));
-    match text.strip_prefix(program) {
-        Some(rest) => Line::from(vec![
-            Span::styled(program.to_string(), program_style),
-            Span::styled(rest.to_string(), detail_style),
-        ]),
-        // The app is first, so a line cut before its name ends is all app.
-        None => Line::from(Span::styled(text, program_style)),
-    }
-}
-
 /// App labels in their agent's own colour (a quiet blue for other apps),
 /// independent of lifecycle and its status colours (rows, and the App tab's
 /// headers and modal).
 pub fn program_color(program: &str) -> Color {
     let p = theme::palette();
     agents::color(&program.to_ascii_lowercase()).unwrap_or(p.label_blue)
-}
-
-/// Description fitted to `width` columns. A plain shell with nothing to
-/// say shows "shell"; reports are included only when there's room.
-fn secondary_text(session: &SessionView, width: usize, icons: Icons, branch: bool) -> String {
-    let base = session_facts(session, icons, branch);
-    let report = session
-        .reported
-        .as_ref()
-        .and_then(|r| r.text.as_deref())
-        .map(str::trim)
-        .filter(|t| !t.is_empty());
-    let line = match (base.is_empty(), report) {
-        (true, None) => "shell".to_string(),
-        (true, Some(report)) => report.to_string(),
-        (false, None) => base.join(" · "),
-        (false, Some(report)) => {
-            let base = base.join(" · ");
-            let room = width.saturating_sub(str_width(&base) + 3);
-            if room >= REPORT_MIN.min(str_width(report)) {
-                format!("{base} · {}", truncate(report, room))
-            } else {
-                base
-            }
-        }
-    };
-    truncate(&line, width)
-}
-
-/// Agent or program, branch (when `branch`), state. (The worktree isn't
-/// shown for now.)
-fn session_facts(session: &SessionView, icons: Icons, branch: bool) -> Vec<String> {
-    let mut parts = Vec::new();
-    if let Some(program) = session_program(session) {
-        parts.push(program.to_string());
-    }
-    if let Some(git) = session.git.as_ref().filter(|_| branch) {
-        parts.extend(branch_label(git, icons));
-    }
-    match session.status {
-        SessionStatus::Dead => parts.push("dead · ⏎ revive".into()),
-        SessionStatus::Exited => parts.push("exited · ⏎ restart".into()),
-        // A live session's status is its mark on the right; only
-        // subagents are said here.
-        _ => parts.extend(subagent_badge(session, icons)),
-    }
-    parts
-}
-
-/// Prefer a detected agent over its host process. Ended sessions don't
-/// advertise a stale running app, and ordinary shells need no app label.
-pub fn session_program(session: &SessionView) -> Option<&str> {
-    if matches!(session.status, SessionStatus::Dead | SessionStatus::Exited) {
-        return None;
-    }
-    session
-        .agent
-        .as_ref()
-        .map(|agent| agent.kind.as_str())
-        .filter(|kind| !kind.is_empty())
-        .or_else(|| {
-            session
-                .terminal
-                .as_ref()
-                .and_then(|terminal| terminal.foreground_process.as_deref())
-                .filter(|process| !process.is_empty() && !is_shell(process))
-        })
 }
 
 /// `text` in at most `width` columns, cut in the middle with `…` (paths
@@ -392,7 +286,6 @@ pub fn truncate(text: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::app::testing::view;
-    use session_core::model::Reported;
 
     #[test]
     fn relative_times() {
@@ -471,33 +364,6 @@ mod tests {
     }
 
     #[test]
-    fn secondary_text_shows_program_then_git_and_never_the_folder_or_a_live_status() {
-        let mut session = view("A", "a", 0);
-        session.cwd = "/repo/docs".into();
-        // Working: the mark on the right says so, the line doesn't.
-        session.lifecycle = Lifecycle::Working;
-        assert_eq!(secondary_text(&session, 80, Icons::Plain, true), "shell");
-        // The branch, not the worktree.
-        session.git = Some(git(Some("main"), None, None));
-        assert_eq!(secondary_text(&session, 80, Icons::Plain, true), "⎇ main");
-        session.git = Some(git(None, Some("1a2b3c4"), Some("feature-x")));
-        session.agent = Some(session_core::model::AgentInfo {
-            kind: "claude".into(),
-            ..Default::default()
-        });
-        assert_eq!(
-            secondary_text(&session, 80, Icons::Plain, true),
-            "claude · ⎇ @1a2b3c4"
-        );
-        // An ended session, with no mark on the right, says so.
-        session.status = SessionStatus::Dead;
-        assert_eq!(
-            secondary_text(&session, 80, Icons::Plain, true),
-            "⎇ @1a2b3c4 · dead · ⏎ revive"
-        );
-    }
-
-    #[test]
     fn places_are_named_in_their_folder_else_from_home_and_cut_at_their_start() {
         let folder = ScopeRoot::from_canonical("/srv/repo".into());
         assert_eq!(place_label(&folder, Path::new("/srv/repo")), "repo");
@@ -510,94 +376,6 @@ mod tests {
         assert_eq!(truncate_start("worktrees/fix", 6), "…s/fix");
         assert_eq!(truncate_start("界界界", 4), "…界");
         assert_eq!(truncate_start("abc", 0), "");
-        let mut session = view("A", "a", 0);
-        session.git = Some(git(Some("main"), None, None));
-        assert_eq!(secondary_text(&session, 80, Icons::Plain, false), "shell");
-    }
-
-    #[test]
-    fn app_names_use_their_agents_colours_without_colouring_the_branch_or_state() {
-        let p = theme::palette();
-        let detail_style = Style::default().fg(p.text_muted);
-        let mut session = view("A", "a", 0);
-        session.git = Some(git(Some("main"), None, None));
-        session.lifecycle = Lifecycle::Working;
-        for (program, color) in [
-            ("claude", p.label_blue),
-            ("codex", p.label_steel_blue),
-            ("opencode", p.label_slate_blue),
-            ("copilot", p.label_violet),
-            ("cursor-agent", p.label_stone),
-            ("pi", p.label_teal),
-            ("grok", p.label_graphite),
-            ("kimi", p.label_azure),
-            ("droid", p.label_cyan),
-            ("amp", p.label_orchid),
-            ("gemini", p.label_blue),
-            ("cargo", p.label_blue),
-            ("OpenCode", p.label_slate_blue),
-        ] {
-            session.terminal.as_mut().unwrap().foreground_process = Some(program.into());
-            let line = facts_line(&session, 80, Icons::Plain, detail_style, true);
-            assert_eq!(line.spans[0].content, program);
-            assert_eq!(line.spans[0].style.fg, Some(color));
-            assert_eq!(line.spans[1].content, " · ⎇ main");
-            assert_eq!(line.spans[1].style, detail_style);
-        }
-    }
-
-    #[test]
-    fn app_first_descriptions_fit_even_when_the_app_name_is_truncated() {
-        let mut session = view("A", "a", 0);
-        session.git = Some(git(Some("長い-branch-name"), None, None));
-        session.agent = Some(session_core::model::AgentInfo {
-            kind: "opencode".into(),
-            ..Default::default()
-        });
-        let style = Style::default().fg(theme::palette().text_muted);
-        for icons in Icons::ALL {
-            for width in 0..80 {
-                let line = facts_line(&session, width, icons, style, true);
-                assert!(line.width() <= width);
-                assert_eq!(
-                    line.spans[0].style.fg,
-                    Some(theme::palette().label_slate_blue)
-                );
-            }
-        }
-        let line = facts_line(&session, 5, Icons::Plain, style, true);
-        assert_eq!(line.spans[0].content, "open…");
-    }
-
-    #[test]
-    fn reported_text_follows_when_there_is_room() {
-        let mut session = view("A", "a", 0);
-        session.git = Some(git(Some("main"), None, None));
-        session.lifecycle = Lifecycle::Done;
-        session.reported = Some(Reported {
-            state: None,
-            text: Some("Tests green, ready for review".into()),
-            result: None,
-            at: 0,
-        });
-        assert_eq!(
-            secondary_text(&session, 80, Icons::Plain, true),
-            "⎇ main · Tests green, ready for review"
-        );
-        assert_eq!(
-            secondary_text(&session, 23, Icons::Plain, true),
-            "⎇ main · Tests green, …"
-        );
-        // Too little room for the report: the facts alone.
-        assert_eq!(secondary_text(&session, 15, Icons::Plain, true), "⎇ main");
-        assert_eq!(secondary_text(&session, 5, Icons::Plain, true), "⎇ ma…");
-        // With nothing else, the report is the whole line.
-        session.git = None;
-        session.lifecycle = Lifecycle::None;
-        assert_eq!(
-            secondary_text(&session, 12, Icons::Plain, true),
-            "Tests green…"
-        );
     }
 
     #[test]
@@ -635,61 +413,12 @@ mod tests {
             active_subagents: 3,
             updated_at: 1,
         });
-        assert_eq!(
-            subagent_badge(&session, Icons::Plain).as_deref(),
-            Some("◈ 3")
-        );
         assert!("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(status_glyph(&session).0));
         session.lifecycle = Lifecycle::Blocked;
         assert_eq!(status_glyph(&session).0, "?");
         session.lifecycle = Lifecycle::Done;
         session.activity = None;
         assert_eq!(status_glyph(&session).0, "●");
-    }
-
-    #[test]
-    fn the_description_says_no_status_and_the_subagent_badge_follows_the_app() {
-        use session_core::activity::{ActivityPhase, AgentActivity};
-        let mut session = view("A", "agent", 0);
-        session.agent = Some(session_core::model::AgentInfo {
-            kind: "claude".into(),
-            ..Default::default()
-        });
-        session.lifecycle = Lifecycle::Working;
-        let style = Style::default();
-        let text = |session: &SessionView, icons: Icons| -> String {
-            facts_line(session, 80, icons, style, true)
-                .spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect()
-        };
-        // None running: no badge, and no status words (the mark on the
-        // right says it).
-        assert_eq!(text(&session, Icons::Plain), "claude");
-        assert_eq!(subagent_badge(&session, Icons::Plain), None);
-        session.activity = Some(AgentActivity {
-            phase: ActivityPhase::RunningTool,
-            active_subagents: 2,
-            updated_at: 1,
-        });
-        assert_eq!(text(&session, Icons::Plain), "claude · ◈ 2");
-        assert_eq!(text(&session, Icons::Emoji), "claude · 🤖 2");
-        assert!(text(&session, Icons::Nerd).ends_with("\u{f06a9} 2"));
-        // A report comes after it, room allowing.
-        session.reported = Some(session_core::model::Reported {
-            state: None,
-            text: Some("reviewing the diff".into()),
-            result: None,
-            at: 1,
-        });
-        assert_eq!(
-            text(&session, Icons::Plain),
-            "claude · ◈ 2 · reviewing the diff"
-        );
-        // An ended session has nothing running.
-        session.status = SessionStatus::Exited;
-        assert_eq!(subagent_badge(&session, Icons::Plain), None);
     }
 
     #[test]
@@ -751,30 +480,5 @@ mod tests {
             session.status = status;
             assert!(activity_badge(&session).is_none());
         }
-    }
-
-    #[test]
-    fn secondary_text_falls_back_to_shell_and_shows_the_program() {
-        let mut session = view("A", "a", 0);
-        session.cwd = "/repo/deep/inside".into();
-        assert_eq!(secondary_text(&session, 40, Icons::Plain, true), "shell");
-        session.terminal = None;
-        assert_eq!(secondary_text(&session, 40, Icons::Plain, true), "shell");
-        session.terminal = Some(session_core::model::TerminalView {
-            pid: Some(1),
-            foreground_process: Some("htop".into()),
-            title: String::new(),
-            cols: 80,
-            rows: 24,
-            controlled: false,
-            alternate_screen: true,
-        });
-        assert_eq!(secondary_text(&session, 40, Icons::Plain, true), "htop");
-        session.agent = Some(session_core::model::AgentInfo {
-            kind: "claude".into(),
-            ..Default::default()
-        });
-        session.lifecycle = Lifecycle::Blocked;
-        assert_eq!(secondary_text(&session, 40, Icons::Plain, true), "claude");
     }
 }

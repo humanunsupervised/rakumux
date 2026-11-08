@@ -2127,7 +2127,12 @@ impl App {
     pub(super) fn run_confirmed(&mut self, action: ConfirmAction) {
         self.mode = AppMode::Normal;
         match action {
-            ConfirmAction::RestartUi => self.restart_requested = true,
+            ConfirmAction::RestartUi => {
+                // An update installed and waiting: the server and its
+                // services restart with it.
+                self.restart_after_update = self.update_installed();
+                self.restart_requested = true;
+            }
             ConfirmAction::DeleteSession { id, name } => {
                 let Some(api) = self.api() else {
                     self.set_status("Not connected to the daemon.");

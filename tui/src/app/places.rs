@@ -1,14 +1,14 @@
 //! Where sessions have worked (`SessionView::places`: the git working trees
 //! where the daemon saw them change files), shown in the session list: each
-//! row has a line for the directory it works in now (ending in how many
-//! places it has, when it has others), and under it, when opened, a pair of
-//! lines for every other place, most recent first
-//! ([`listed_places`]). Closed by default, and per window: `w` opens or
-//! closes the selected session's, `W` every one's, a click or tap on its
-//! `▸`/`▾` too. Not saved. The list keys step through the selected
-//! session's open places as if each were a row under it, and `y` copies the
-//! path of the one they are on (else of where the session works now); a
-//! click or tap on a place, the current one too, copies its path.
+//! row has a line naming the repositories it works in, and under it, when
+//! opened, a pair of lines for the directory it works in now, then for
+//! every other place, most recent first ([`listed_places`]). Closed by
+//! default, and per window: `w` opens or closes the selected session's, `W`
+//! every one's, a click or tap on its repositories' line too. Not saved.
+//! The list keys step through the selected session's open places as if
+//! each were a row under it, and `y` copies the path of the one they are on
+//! (else of where the session works now); a click or tap on a place copies
+//! its path.
 
 use session_core::ids::SessionId;
 use session_core::model::{SessionPlace, SessionView};
@@ -21,7 +21,8 @@ use crate::layout::SessionLayout;
 /// a line, each other a pair of lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlaceRef {
-    /// Where the session works now ([`current_place`]), under its facts.
+    /// Where the session works now ([`current_place`]), first while its
+    /// places are open.
     Current,
     /// That index in its [`listed_places`], under the current one while
     /// they're open.
@@ -37,19 +38,14 @@ pub fn current_place(session: &SessionView) -> &Path {
         .map_or(session.cwd.as_path(), |git| git.repo_root.as_path())
 }
 
-/// The places `session`'s open list shows: every one but
-/// [`current_place`] (its place line says that one), most recent first.
+/// The places `session`'s open list shows after [`current_place`]: every
+/// one but that, most recent first.
 pub fn listed_places(session: &SessionView) -> impl Iterator<Item = &SessionPlace> {
     let current = current_place(session);
     session
         .places
         .iter()
         .filter(move |place| place.path != current)
-}
-
-/// How many places `session` has worked in besides [`current_place`].
-pub fn other_places(session: &SessionView) -> usize {
-    listed_places(session).count()
 }
 
 impl App {
@@ -65,34 +61,26 @@ impl App {
             return;
         };
         let id = session.id.clone();
-        if !self.places_open(&id) && other_places(session) == 0 {
-            let name = session.name.clone();
-            self.set_status(format!("{name} hasn't changed files anywhere else yet."));
-            return;
-        }
         self.toggle_places_of(id);
     }
 
     /// `W`: open where every session has worked, or close them all when
-    /// every one with somewhere else is open.
+    /// every one is open.
     pub fn toggle_all_places(&mut self) {
-        let elsewhere: Vec<SessionId> = self
+        let all: Vec<SessionId> = self
             .list
             .sessions()
             .iter()
-            .filter(|session| other_places(session) > 0)
             .map(|session| session.id.clone())
             .collect();
-        if !elsewhere.is_empty() && elsewhere.iter().all(|id| self.places_open(id)) {
+        if !all.is_empty() && all.iter().all(|id| self.places_open(id)) {
             self.places_open.clear();
-        } else if elsewhere.is_empty() && self.places_open.is_empty() {
-            self.set_status("No session has changed files anywhere else yet.");
         } else {
-            self.places_open.extend(elsewhere);
+            self.places_open.extend(all);
         }
     }
 
-    /// Open or close `id`'s places (a click on its place line).
+    /// Open or close `id`'s places (a click on its repositories' line).
     pub(super) fn toggle_places_of(&mut self, id: SessionId) {
         if !self.places_open.remove(&id) {
             self.places_open.insert(id);
@@ -106,8 +94,10 @@ impl App {
             return None;
         }
         let session = self.list.selected_session()?;
-        let paths: Vec<PathBuf> = listed_places(session).map(|p| p.path.clone()).collect();
-        (self.places_open(&session.id) && !paths.is_empty()).then_some(paths)
+        let paths: Vec<PathBuf> = std::iter::once(current_place(session).to_path_buf())
+            .chain(listed_places(session).map(|p| p.path.clone()))
+            .collect();
+        self.places_open(&session.id).then_some(paths)
     }
 
     /// `↓`/`↑` (`j`/`k`): one row, the selected session's open places
