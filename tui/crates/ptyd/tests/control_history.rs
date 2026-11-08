@@ -338,14 +338,15 @@ fn sessions_leave_the_history_with_their_files_after_ninety_days() {
     assert_eq!(names(&history(&h, None)), ["recent", "old"]);
 
     skip.store(91 * DAY_MS, Ordering::SeqCst);
-    eventually("the old session purged", || {
-        (names(&history(&h, None)) == ["recent"]).then_some(())
+    // Its record goes first, then its files: wait for all of them.
+    eventually("the old session purged with its files", || {
+        let files_gone = ScrollbackStore::new(h.layout.clone())
+            .load(&old.id)
+            .unwrap()
+            .is_none()
+            && !history_file.exists();
+        (names(&history(&h, None)) == ["recent"] && files_gone).then_some(())
     });
-    assert!(ScrollbackStore::new(h.layout.clone())
-        .load(&old.id)
-        .unwrap()
-        .is_none());
-    assert!(!history_file.exists());
     assert_eq!(
         count(
             &h,
