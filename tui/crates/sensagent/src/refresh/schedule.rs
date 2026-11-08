@@ -81,9 +81,12 @@ struct Timing {
     auto: bool,
     /// The chat the running job is of.
     chat: String,
-    /// The session had its one automatic summary, or one asked for was made:
-    /// it gets no automatic one again.
+    /// The session has had a summary (automatic, or asked for and made): a
+    /// program whose turns the daemon doesn't follow gets no automatic one.
     summarized: bool,
+    /// The agent chats summarised (automatic, or asked for and made): each
+    /// gets its automatic one once, at its first prompt.
+    chats: HashSet<String>,
     /// The program in its foreground, never a shell, and when it was first
     /// seen there (for [`APP_RUNNING`]).
     program: Option<(String, Duration)>,
@@ -104,11 +107,11 @@ impl Timing {
     }
 }
 
-/// When to summarise which session: once in its life, as soon as an agent
-/// whose turns the daemon follows has its first prompt (in the chat it shows
-/// then), or once any other program started there has run [`APP_RUNNING`],
-/// whichever comes first, and whenever
-/// the user asks (a summary asked for that's made counts as that one too);
+/// When to summarise which session: each chat of an agent whose turns the
+/// daemon follows once, as soon as it has its first prompt (its title replaces
+/// the AI title the session had); a session with no summary yet once any other
+/// program started there has run [`APP_RUNNING`]; and whenever
+/// the user asks (a summary asked for that's made counts as its chat's);
 /// never on a timer. Error backoff, a rate-limit pause and a global start
 /// budget still apply. Pure state over an injected monotonic `now`; the dispatch
 /// coordinator's two slots bound concurrency.
@@ -153,10 +156,12 @@ impl RefreshScheduler {
             .is_some_and(|timing| timing.asked)
     }
 
-    /// `session` has had its summary already (made before this service
-    /// started): it gets no automatic one.
-    pub fn summarized(&mut self, session: &SessionId) {
-        self.sessions.entry(session.clone()).or_default().summarized = true;
+    /// `session` has had a summary already, in `chat` (made before this
+    /// service started): that chat gets no automatic one.
+    pub fn summarized(&mut self, session: &SessionId, chat: &str) {
+        let timing = self.sessions.entry(session.clone()).or_default();
+        timing.summarized = true;
+        timing.chats.insert(chat.to_owned());
     }
 
     /// Sessions due now, asked-for ones first. Sessions in `running` are skipped.
@@ -184,9 +189,11 @@ impl RefreshScheduler {
             if running.contains(&candidate.session) {
                 continue;
             }
-            // A followed agent's turn: it was given a prompt.
-            let ready = ran || candidate.turn.is_some();
-            let auto = ready && !timing.summarized;
+            let auto = match candidate.turn.as_ref().map(conversation) {
+                // A followed agent's turn: this chat was given a prompt.
+                Some(chat) => !timing.chats.contains(&chat),
+                None => ran && !timing.summarized,
+            };
             if !timing.requested && !auto {
                 continue;
             }
@@ -242,13 +249,14 @@ impl RefreshScheduler {
             return None;
         }
         timing.summarized = true;
+        timing.chats.insert(due.chat.clone());
         Some(due.chat.clone())
     }
 
     /// An attempt ended. A session removed meanwhile is not tracked again, but a
     /// rate limit or refusal still applies to every session. Returns the chat
-    /// of the session's one summary when it settles now: one made (automatic or
-    /// asked for), or an automatic one not to be tried again.
+    /// whose summary settles now: one made (automatic or asked for), or an
+    /// automatic one not to be tried again.
     pub fn finished(
         &mut self,
         session: &SessionId,
@@ -271,9 +279,10 @@ impl RefreshScheduler {
             Outcome::Done => {
                 timing.failure = None;
                 timing.failures = 0;
-                // Automatic or asked for, it's the session's summary: no
-                // later chat gets an automatic one.
+                // Automatic or asked for, it's this chat's summary; a later
+                // chat gets its own.
                 timing.summarized = true;
+                timing.chats.insert(chat.clone());
                 return Some(chat);
             }
             Outcome::Interrupted => {
@@ -285,7 +294,10 @@ impl RefreshScheduler {
             Outcome::Failed(RefreshFailure::Rejected) => {
                 // Can't be sent: not tried again unless asked.
                 timing.failure = Some(RefreshFailure::Rejected);
-                timing.summarized |= auto;
+                if auto {
+                    timing.summarized = true;
+                    timing.chats.insert(chat.clone());
+                }
                 return auto.then_some(chat);
             }
             Outcome::Failed(
@@ -310,6 +322,7 @@ impl RefreshScheduler {
     pub fn forget_summaries(&mut self) {
         for timing in self.sessions.values_mut() {
             timing.summarized = false;
+            timing.chats.clear();
         }
     }
 

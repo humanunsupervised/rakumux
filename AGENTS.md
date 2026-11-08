@@ -156,17 +156,18 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    are on (`ai_session_summaries` in `GET /api/v1/features`, read every 2 minutes; rakumux.com
    answers on for every signed-in account): then it consents for the folders of live sessions
    (never private ones), and off it stops. **One
-   automatic title per session**: a session is titled by itself once in its life: an agent
-   whose turns the daemon follows (`session_turn`) as soon as it has its first prompt, of that
-   prompt, however long it ran before (never of its empty screen); any other program started
-   there (anything in its foreground but a shell: `sleep`, `npm`, `htop`) once it has run 1 s
-   (`APP_RUNNING`), of its screen, where the command that started it shows; whichever comes
-   first. A program that ends or changes sooner starts the second again. Its later turns and
-   chats get none (`RefreshScheduler::plan`; `sessions.ai_summary.every_messages` is read and
-   no longer used).
+   automatic title per chat**: each chat of an agent whose turns the daemon follows
+   (`session_turn`) titles its session once, as soon as it has its first prompt, of that
+   prompt, however long the agent ran before (never of its empty screen), replacing the AI
+   title the session had; a chat's later turns get none. A session with no title yet running
+   any other program (anything in its foreground but a shell: `sleep`, `npm`, `htop`) is
+   titled once that has run 1 s (`APP_RUNNING`), of its screen, where the command that started
+   it shows; a program that ends or changes sooner starts the second again
+   (`RefreshScheduler::plan`; `sessions.ai_summary.every_messages` is read and no longer
+   used).
    After that only when asked: `OwnerRequest::Summarize` (the ↻
    after a hovered session's name, or `s`), which always applies; a title asked for and made
-   counts as the session's one, so none comes by itself after it either. A first automatic
+   counts as its chat's, so none comes by itself in that chat after it. A first automatic
    attempt that won't be tried again (its input can't be sent or holds nothing to describe, or
    the policy declined it) counts too. The AI description comes with the title, so it is made
    as often. **A title is made from the latest prompt** and what the
@@ -176,11 +177,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    followed turn is one source from its prompt to the next (`source/tracker.rs`, `Facts::same`):
    its messages and lifecycle moving on while a title is made don't discard it; a new prompt
    (or chat) does, and one asked for is then made again of the new prompt
-   (`RefreshScheduler::finished`). Which sessions had their title is kept in
+   (`RefreshScheduler::finished`). Which chats had their title is kept in
    `sensagent/status/titled-chats.json` (0600; per session, the agents' conversation ids it and
-   titles asked for were made in, `""` without one, which a restart keeps; a session with any
-   listed has had it, so the file of a release that titled each chat reads the same, and that
-   release reads this one's), so neither a restarted service nor a daemon restarted in place
+   titles asked for were made in, `""` without one, which a restart keeps), so neither a restarted service nor a daemon restarted in place
    titles them again; a session's newest 16 chats and the 256 most recently titled sessions
    are kept, a session the daemon deleted (a `removed` event, or missing from the full list,
    dead sessions included, read at each (re)subscribe) is forgotten, and turning sharing off or
@@ -1116,8 +1115,8 @@ accidents; they don't stop a hostile process running as the same user.
   sensagent/                     the account service (`rakumux status-service`): credentials/
                                  (the sign-in, 0600), status/ (descriptions and sharing consent,
                                  SQLite; titles.json: the title it last gave each session;
-                                 titled-chats.json: the sessions whose one automatic title
-                                 was made, by chat;
+                                 titled-chats.json: the chats whose automatic title was
+                                 made, by session;
                                  chats.json; replies.json: replies typed in or decided
                                  here, where each still going in went, answers to questions
                                  handed to the daemon, and reports not yet taken;

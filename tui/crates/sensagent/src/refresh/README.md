@@ -52,9 +52,9 @@ instead of sent.
   visible. It is refreshed once output pauses for `QUIET_PERIOD` (5 s), or after a whole
   interval of continuous output, and never inside the interval. The stamp is advanced
   only when the refresh starts.
-- **Followed turns.** A session whose agent turn the daemon follows is summarised once
-  in its life (as soon as its first chat has a prompt; a summary asked for that was made,
-  or a first automatic one that won't be tried again, counts as that one) and when asked,
+- **Followed turns.** Each chat of a session whose agent turn the daemon follows is
+  summarised once (as soon as it has a prompt; a summary asked for that was made, or an
+  automatic one that won't be tried again, counts as that chat's) and when asked,
   never for
   terminal output; backoff, the budget and the two slots still apply. A summary is of the
   latest prompt and what the agent wrote about it, and stays the prompt's while the agent

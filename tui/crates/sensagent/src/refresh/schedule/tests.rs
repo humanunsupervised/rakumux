@@ -72,10 +72,35 @@ fn a_session_is_summarised_once_at_its_agents_first_prompt() {
             .as_deref(),
         Some("c1")
     );
-    // Never again: not the same chat, nor a new chat in the same session.
-    for later in [turn("c1", 40), turn("c2", 5), turn("c3", 9)] {
-        assert!(plan(&mut scheduler, secs(3), vec![candidate(1, later, true)]).is_empty());
-    }
+    // Never again in that chat.
+    assert!(plan(
+        &mut scheduler,
+        secs(3),
+        vec![candidate(1, turn("c1", 40), true)]
+    )
+    .is_empty());
+    // A new chat in the same session: its own, at its first prompt.
+    let due = plan(
+        &mut scheduler,
+        secs(3),
+        vec![candidate(1, turn("c2", 0), false)],
+    );
+    assert_eq!(due, [auto(1, "c2")]);
+    scheduler.started(&due[0], secs(3));
+    scheduler.finished(&session(1), Outcome::Done, secs(4));
+    assert!(plan(
+        &mut scheduler,
+        secs(5),
+        vec![candidate(1, turn("c2", 9), true)]
+    )
+    .is_empty());
+    // Back in the first chat: nothing more.
+    assert!(plan(
+        &mut scheduler,
+        secs(5),
+        vec![candidate(1, turn("c1", 41), false)]
+    )
+    .is_empty());
     // Another session has its own.
     assert_eq!(
         plan(
@@ -91,9 +116,9 @@ fn a_session_is_summarised_once_at_its_agents_first_prompt() {
         plan(
             &mut scheduler,
             secs(4),
-            vec![candidate(1, turn("c2", 5), false)]
+            vec![candidate(1, turn("c1", 5), false)]
         ),
-        [auto(1, "c2")]
+        [auto(1, "c1")]
     );
 }
 
@@ -101,8 +126,8 @@ fn a_session_is_summarised_once_at_its_agents_first_prompt() {
 fn a_summary_asked_for_and_made_is_the_sessions_one() {
     let mut scheduler = RefreshScheduler::new();
     // Asked for of a program whose turns the daemon doesn't follow (from its
-    // screen), before it ran long enough: not the automatic one, but made, it
-    // counts as the session's, and its agent, started later, gets none.
+    // screen), before it ran long enough: not the automatic one, but made, no
+    // program gets one after it; an agent started later still titles its chat.
     scheduler.request(&session(2));
     let due = plan(&mut scheduler, secs(0), vec![candidate(2, None, false)]);
     assert_eq!(
@@ -122,8 +147,31 @@ fn a_summary_asked_for_and_made_is_the_sessions_one() {
     );
     assert!(plan(
         &mut scheduler,
-        secs(2),
-        vec![candidate(2, turn("c2", 5), false)]
+        secs(9),
+        vec![running(2, "htop", None, false)]
+    )
+    .is_empty());
+    assert!(plan(
+        &mut scheduler,
+        secs(11),
+        vec![running(2, "htop", None, false)]
+    )
+    .is_empty());
+    assert_eq!(
+        plan(
+            &mut scheduler,
+            secs(12),
+            vec![candidate(2, turn("c2", 0), false)]
+        ),
+        [auto(2, "c2")]
+    );
+
+    // One asked for in a chat counts as that chat's.
+    scheduler.summarized(&session(4), "c4");
+    assert!(plan(
+        &mut scheduler,
+        secs(0),
+        vec![candidate(4, turn("c4", 1), false)]
     )
     .is_empty());
 
@@ -159,7 +207,7 @@ fn a_finished_session_without_a_turn_is_not_summarised_by_itself() {
 #[test]
 fn asking_summarises_any_session_at_once_and_first() {
     let mut scheduler = RefreshScheduler::new();
-    scheduler.summarized(&session(1));
+    scheduler.summarized(&session(1), "c9");
     scheduler.request(&session(2));
     assert!(scheduler.requested(&session(2)));
     let due = plan(
@@ -175,7 +223,7 @@ fn asking_summarises_any_session_at_once_and_first() {
     assert_eq!(
         sessions,
         [session(2), session(3)],
-        "asked first; session 1 already summarised, in any chat"
+        "asked first; session 1's chat already summarised"
     );
     scheduler.started(&due[0], secs(0));
     assert!(!scheduler.requested(&session(2)));
@@ -271,9 +319,21 @@ fn a_rejected_or_declined_automatic_summary_is_not_retried() {
         vec![candidate(2, turn("c2", 5), false)],
     );
     assert_eq!(scheduler.settle(&due[0]).as_deref(), Some("c2"));
-    for later in [turn("c2", 5), turn("c5", 5)] {
-        assert!(plan(&mut scheduler, secs(1), vec![candidate(2, later, false)]).is_empty());
-    }
+    assert!(plan(
+        &mut scheduler,
+        secs(1),
+        vec![candidate(2, turn("c2", 5), false)]
+    )
+    .is_empty());
+    // Another chat is another first prompt.
+    assert_eq!(
+        plan(
+            &mut scheduler,
+            secs(1),
+            vec![candidate(2, turn("c5", 5), false)]
+        ),
+        [auto(2, "c5")]
+    );
 }
 
 #[test]
@@ -306,7 +366,7 @@ fn an_interrupted_summary_is_tried_again_shortly() {
 #[test]
 fn an_interrupted_summary_asked_for_is_still_asked_for() {
     let mut scheduler = RefreshScheduler::new();
-    scheduler.summarized(&session(1));
+    scheduler.summarized(&session(1), "c1");
     scheduler.request(&session(1));
     let due = plan(
         &mut scheduler,

@@ -261,10 +261,7 @@ impl fmt::Debug for Titles {
 /// The sessions whose one automatic title was made, each with the chats
 /// (agent conversations) it and titles asked for were made in, kept in a file
 /// (0600) when given one, so a restarted service, or one following a daemon
-/// restarted in place, doesn't title them again. A session with any chat
-/// listed has had its title: a file an older release wrote, which listed every
-/// chat it titled, reads the same, and that release reads this one's as
-/// before. Conversation ids are the agents' own, the same across restarts; a
+/// restarted in place, doesn't title them again. Conversation ids are the agents' own, the same across restarts; a
 /// chat without one, or a program whose turns the daemon doesn't follow, is
 /// `""`. A session's newest [`MAX_CHATS`] are kept, and the [`MAX_TITLES`]
 /// most recently titled sessions; a session the daemon deleted is forgotten.

@@ -236,14 +236,12 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         self
     }
 
-    /// Remember in `path` which sessions had their one automatic title, so a
+    /// Remember in `path` which chats had their automatic title, so a
     /// restarted service doesn't title them again (memory only without it).
-    /// A session with any titled chat there has had it: an older release's
-    /// file, which listed each chat it titled, reads the same.
     pub fn with_titled_chats(mut self, path: std::path::PathBuf) -> Self {
         self.titled = TitledChats::load(Some(path));
-        for (session, _) in self.titled.iter() {
-            self.scheduler.summarized(&session);
+        for (session, chat) in self.titled.iter() {
+            self.scheduler.summarized(&session, chat);
         }
         self
     }
@@ -405,8 +403,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     }
 
     /// Apply a fresh daemon `list` after (re)subscribing; refreshing may start.
-    /// A session that shows a summary already (this service restarted) gets
-    /// no automatic one.
+    /// The chat of a session that shows a summary already (this service
+    /// restarted) gets no automatic one.
     pub fn resync(&mut self, views: &[SessionView], _now: Duration) -> Result<(), DispatchError> {
         let result = self.service.resync(views);
         self.observed.extend(self.running.iter().cloned());
@@ -418,7 +416,8 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
                 self.service.view(&candidate.session),
                 Ok(StatusView::Ready(_))
             ) {
-                self.scheduler.summarized(&candidate.session);
+                self.scheduler
+                    .summarized(&candidate.session, &conversation(turn));
                 self.titled(&candidate.session, Some(conversation(turn)));
             }
         }
