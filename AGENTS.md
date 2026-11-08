@@ -756,7 +756,7 @@ last_active_at, added_at, git}` on the wire.
   on after it (`Follower::moved_at`, by the log's own clock: a prompt, an agent message or what
   the user's side adds, as Claude Code's tool result on an answer and the refused result and the
   interruption on an Esc; never its bookkeeping), then goes stale as hooks do; its log is read
-  meanwhile though the screen is quiet. Without a followed conversation it goes stale at 2
+  meanwhile though the screen is quiet, as any agent's is while it's `blocked`. Without a followed conversation it goes stale at 2
   minutes. Without hook activity, what an agent's program
   says through OSC 7501, the Program Status Protocol (Pi, Kimi Code: `idle`, `working`, `blocked`,
   `done`, `error`, `clear`, and child records counted as subagents), wins over the screen; the

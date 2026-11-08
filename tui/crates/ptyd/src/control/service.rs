@@ -2537,11 +2537,17 @@ impl Inner {
             inner.git.poll_due(now, |id| live.contains_key(id))
         };
         // Logs read on while their screen may be quiet: a finished turn's
-        // reply, a question's answer or dismissal.
+        // reply, a question's answer or dismissal, and whatever an agent
+        // asking something logs meanwhile (a prompt it took while its dialog
+        // shows).
         let replies: Vec<(SessionId, TerminalId)> = state
             .live
             .iter()
-            .filter(|(_, live)| live.reply_due.is_some() || live.tracker.hook_asks(now))
+            .filter(|(_, live)| {
+                live.reply_due.is_some()
+                    || live.tracker.hook_asks(now)
+                    || live.tracker.current() == Lifecycle::Blocked
+            })
             .map(|(id, live)| (id.clone(), live.terminal))
             .collect();
         // Output a check skipped for coming too soon after the last one, then

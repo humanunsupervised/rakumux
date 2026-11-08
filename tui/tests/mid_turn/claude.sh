@@ -199,13 +199,14 @@ step() {
     taken=$((taken + 1))
     if ((taken == ask_after && !approved)); then
       # Its next call needs permission: the prompt comes up, and the take
-      # is logged a moment later, while it shows.
+      # is logged while it shows, the screen quiet, later than a settling
+      # screen's last read (the daemon's 5 s resume check).
       state=asking
       draw "$asking"
       event asking
       pending=$text
       clock
-      take_at=$((now + 1200))
+      take_at=$((now + 6000))
       return
     fi
     queued "$text"
