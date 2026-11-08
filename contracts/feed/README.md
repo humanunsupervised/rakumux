@@ -22,6 +22,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
 | `POST /api/v1/feed/resources` | [resources-upload](resources-upload.schema.json) | [resources-stored](resources-stored.schema.json) |
 | `POST /api/v1/feed/new-sessions/status` | [new-session-status](new-session-status.schema.json) | [new-session](new-session.schema.json) |
+| `POST /api/v1/feed/updates/status` | [update-status](update-status.schema.json) | [machine-update](machine-update.schema.json) |
 | `GET /api/v1/feed/realtime` | header only | [realtime](realtime.schema.json) |
 | WebSocket at the realtime `url` | bearer `token` | [poke](poke.schema.json) messages |
 | `POST /api/v1/machines/credentials` | [machine-enrol](machine-enrol.schema.json) | [machine-credential](machine-credential.schema.json) |
@@ -234,6 +235,22 @@ conformance tests, not an HTTP server, database or local runtime.
   prompt with a request that names an agent; it never goes to the machine with the request: once
   the machine reports the session `created`, the cloud writes it to that session as a session
   message (above), which the machine types in like any other.
+- **Releases and updates:** every replies read may say `release` (`{version}`), the newest
+  stable Rakumux release rakumux.com knows of: GitHub's latest release, read again every few
+  minutes and as one is published. A machine's account service passes it to the TUIs, which offer
+  the update. A session list says the machine's own `rakumux_version` (absent from a development
+  build), and `remote_update` in `capabilities` once the machine installs releases asked of it.
+  On rakumux.com the user can ask such a machine to update; the cloud stores the request
+  (`machineUpdateState` in common: one open per machine, `pending`), pokes the account's
+  machines, and gives it to that machine only (`updates` in its replies read, `{id, version}`,
+  at most one, with every read until done or expired). It carries no command and no URL: the
+  machine installs that version through its own verified path (signed GitHub releases), restarts
+  its server in place (sessions keep running) and its services, and reports `update-status`:
+  `installing` as it starts, then `updated`, or `failed` with why (`unsupported`: npm, Homebrew
+  or a source build; `install_failed`; `restart_failed`), each at most once and only for its own
+  machine; the answer is the stored update (`machine-update`). One not reported done within 15
+  minutes is `expired`. A machine marks an id handled before installing, so it installs at most
+  once whatever happens to it meanwhile.
 - **Pokes:** instead of reading its replies every few seconds, a machine can be told when to.
   `GET /api/v1/feed/realtime` (the machine id header required, else `invalid_request`) gives a
   WebSocket `url` and a `token` that admits that machine of the account once, before

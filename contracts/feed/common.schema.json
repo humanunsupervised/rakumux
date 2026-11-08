@@ -611,6 +611,65 @@
           }
         }
       ]
+    },
+    "rakumuxVersion": {
+      "description": "A stable Rakumux release's version, as its tag names it without the `v` (`0.1.48`).",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$"
+    },
+    "release": {
+      "description": "The newest stable Rakumux release rakumux.com knows of: GitHub's latest release of `humanunsupervised/rakumux`, read every few minutes and as soon as one is published. A machine's account service passes it to the TUIs, which offer the update.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": { "$ref": "#/$defs/rakumuxVersion" }
+      }
+    },
+    "machineUpdate": {
+      "description": "An update to `version` asked of a machine on rakumux.com, as the replies read brings it to that machine (only to one whose session list says `remote_update`): the machine installs that release through its verified update path, restarts its server in place (its sessions keep running) and its services, and reports how that went (`update-status`).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {
+          "description": "The ULID rakumux.com gave the request: a machine installs at most once for an id.",
+          "$ref": "#/$defs/ulid"
+        },
+        "version": { "$ref": "#/$defs/rakumuxVersion" }
+      }
+    },
+    "machineUpdateState": {
+      "description": "An update asked of a machine on rakumux.com, as rakumux.com keeps it: the release, where it is, and why it failed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "machine", "version", "status", "created_at", "status_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/ulid" },
+        "machine": { "$ref": "#/$defs/machine" },
+        "version": { "$ref": "#/$defs/rakumuxVersion" },
+        "status": { "$ref": "#/$defs/machineUpdateStatus" },
+        "failure": { "$ref": "#/$defs/machineUpdateFailure" },
+        "created_at": { "$ref": "#/$defs/timestampMs" },
+        "status_at": {
+          "description": "When its status last changed (`created_at` while pending).",
+          "$ref": "#/$defs/timestampMs"
+        }
+      },
+      "oneOf": [
+        { "properties": { "status": { "enum": ["pending", "installing", "updated", "expired"] }, "failure": false } },
+        { "required": ["failure"], "properties": { "status": { "const": "failed" } } }
+      ]
+    },
+    "machineUpdateStatus": {
+      "description": "Where an update asked of a machine is: waiting for the machine to read it (`pending`), being installed (`installing`), installed with the server and its services restarted in place (`updated`), not done (`failed`, with why), or not reported done within 15 minutes (`expired`).",
+      "type": "string",
+      "enum": ["pending", "installing", "updated", "failed", "expired"]
+    },
+    "machineUpdateFailure": {
+      "description": "Why a machine didn't update: its installation can't update itself (`unsupported`: npm, Homebrew or a source build, updated there by hand), the release couldn't be installed (`install_failed`: a download, signature or checksum failure, an installation it can't write), or it was installed but the server couldn't restart in place (`restart_failed`: the new version runs once Rakumux restarts). Readers take a value they don't know as a failure without a reason.",
+      "type": "string",
+      "enum": ["unsupported", "install_failed", "restart_failed"]
     }
   }
 }

@@ -26,6 +26,16 @@
       "type": "array",
       "maxItems": 20,
       "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/newSession" }
+    },
+    "release": {
+      "description": "The newest stable Rakumux release rakumux.com knows of; absent while it knows none (and from an older rakumux.com).",
+      "$ref": "urn:rakumux:feed:v1:common#/$defs/release"
+    },
+    "updates": {
+      "description": "Only for a reader that names itself (`machine`) and whose latest session list advertises `remote_update`: the update asked of that machine on rakumux.com that isn't done (at most one), with every read until the machine reports it `updated` or `failed` or it expires; absent otherwise.",
+      "type": "array",
+      "maxItems": 1,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machineUpdate" }
     }
   }
 }

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:update-status",
+  "title": "POST /api/v1/feed/updates/status request",
+  "description": "The machine an update was asked of says it's installing it, has installed it (its server and services restarted in place), or couldn't (with why). Only an update that isn't done changes (`pending` → `installing` → `updated` or `failed`), and only for the machine it names; the answer is the stored update (`machine-update`).",
+  "x-maxBodyBytes": 4096,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "machine", "status"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "status": { "type": "string", "enum": ["installing", "updated", "failed"] },
+    "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machineUpdateFailure" }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": { "enum": ["installing", "updated"] },
+        "failure": false
+      }
+    },
+    {
+      "required": ["failure"],
+      "properties": {
+        "status": { "const": "failed" }
+      }
+    }
+  ]
+}

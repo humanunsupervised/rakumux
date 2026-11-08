@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:machine-update",
+  "title": "POST /api/v1/feed/updates/status response",
+  "description": "The update as rakumux.com keeps it after the report: changed when the report moved it on, else as it was.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "update"],
+  "properties": {
+    "version": { "const": 1 },
+    "update": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machineUpdateState" }
+  }
+}
