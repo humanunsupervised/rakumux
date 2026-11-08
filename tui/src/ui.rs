@@ -1678,7 +1678,7 @@ mod tests {
 
     #[test]
     fn a_worktree_goes_under_its_repository_named_by_its_origin() {
-        // The folder `/repo` is a checkout of `orchestrator` (its origin);
+        // The folder `/repo` is a checkout of `monorepo` (its origin);
         // one session works in its main checkout, one in a worktree of it.
         let repo = |root: &str, branch: &str, worktree: Option<&str>| {
             Some(session_core::model::GitInfo {
@@ -1686,7 +1686,7 @@ mod tests {
                 branch: Some(branch.into()),
                 detached_at: None,
                 worktree: worktree.map(Into::into),
-                repo: Some("orchestrator".into()),
+                repo: Some("monorepo".into()),
                 origin: None,
             })
         };
@@ -1701,7 +1701,7 @@ mod tests {
         // same depth; no worktree header, no folder name.
         let bars: Vec<&String> = list.iter().filter(|l| l.ends_with('▾')).collect();
         assert_eq!(bars.len(), 1, "{wide}");
-        assert!(bars[0].starts_with("   orchestrator "), "{wide}");
+        assert!(bars[0].starts_with("   monorepo "), "{wide}");
         assert!(bars[0].ends_with(" 2/2 live ▾"), "{wide}");
         assert!(!wide.contains("⎇ worktrees/feature"), "{wide}");
         let main = list.iter().position(|l| l.contains("main-work")).unwrap();
@@ -1711,7 +1711,7 @@ mod tests {
             .unwrap();
         assert!(list[main].starts_with("   main-work "), "{wide}");
         assert!(list[work].starts_with("   feature-work "), "{wide}");
-        assert!(list[work + 1].starts_with(" ▸ orchestrator"), "{wide}");
+        assert!(list[work + 1].starts_with(" ▸ monorepo"), "{wide}");
     }
 
     #[test]

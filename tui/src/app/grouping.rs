@@ -493,31 +493,31 @@ mod tests {
         let mut session = view("A", "a", 0);
         // Outside any repository: its folder's name.
         assert_eq!(RepoKey::of(&session).as_str(), "repo");
-        // In a worktree or on a branch of `orchestrator` (its `origin`), from a
-        // folder named otherwise: under `orchestrator`.
+        // In a worktree or on a branch of `monorepo` (its `origin`), from a
+        // folder named otherwise: under `monorepo`.
         session.git = Some(session_core::model::GitInfo {
             repo_root: "/repo/worktrees/fix".into(),
             branch: Some("fix".into()),
             worktree: Some("fix".into()),
-            repo: Some("orchestrator".into()),
+            repo: Some("monorepo".into()),
             ..Default::default()
         });
-        assert_eq!(RepoKey::of(&session).as_str(), "orchestrator");
+        assert_eq!(RepoKey::of(&session).as_str(), "monorepo");
         assert_eq!(
             Section::of(Grouping::Repo, &session)
                 .map(|s| s.key())
                 .as_deref(),
-            Some("repo:orchestrator")
+            Some("repo:monorepo")
         );
         // A repository's sections by name, ignoring case.
         let mut sections = vec![
             Section::Repo(RepoKey("web".into())),
             Section::Repo(RepoKey("Api".into())),
-            Section::Repo(RepoKey("orchestrator".into())),
+            Section::Repo(RepoKey("monorepo".into())),
         ];
         sort_sections(&mut sections, &[]);
         let names: Vec<&str> = sections.iter().map(|s| s.label()).collect();
-        assert_eq!(names, ["Api", "orchestrator", "web"]);
+        assert_eq!(names, ["Api", "monorepo", "web"]);
     }
 
     #[test]
