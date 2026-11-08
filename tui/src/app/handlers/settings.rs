@@ -278,12 +278,17 @@ fn handle_upgrade_key(app: &mut App, key: KeyEvent) {
         return;
     }
     match key.code {
-        KeyCode::Esc => app.close_upgrade_dialog(),
+        // Opened by itself: Esc is `Later`.
+        KeyCode::Esc => app.update_later(),
         KeyCode::Up | KeyCode::Char('k') => dialog.selection = dialog.selection.saturating_sub(1),
         KeyCode::Down | KeyCode::Char('j') => dialog.selection = (dialog.selection + 1).min(1),
         KeyCode::Enter => {
             if !dialog.update_available || dialog.selection != 0 {
-                app.close_upgrade_dialog();
+                app.update_later();
+                return;
+            }
+            if dialog.installed {
+                app.restart_into_update();
                 return;
             }
             match (dialog.latest_version.clone(), dialog.install_method) {

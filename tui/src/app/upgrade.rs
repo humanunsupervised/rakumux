@@ -46,6 +46,7 @@ impl App {
             error_message: None,
             info_message: None,
             selection: 0,
+            ..UpgradeDialog::default()
         });
         let updater = self.updater.clone();
         let generation = self.update_generation;
@@ -60,6 +61,71 @@ impl App {
                 Err(error) => UpgradeMessage::CheckError(format!("{error:#}")),
             },
         });
+    }
+
+    /// The update modal, opened by itself: `version` is out (`installed`:
+    /// automatic updates installed it already), with what's new read from
+    /// its release notes. `Later` isn't asked again for that version.
+    pub(super) fn open_update_prompt(
+        &mut self,
+        version: String,
+        method: InstallMethod,
+        installed: bool,
+    ) {
+        self.update_generation = self.update_generation.wrapping_add(1);
+        self.update_prompted = Some(version.clone());
+        self.mode = AppMode::Upgrade(UpgradeDialog {
+            current_version: app_version().into(),
+            latest_version: Some(version.clone()),
+            install_method: Some(method),
+            update_available: true,
+            prompted: true,
+            installed,
+            ..UpgradeDialog::default()
+        });
+        self.read_release_notes(version);
+    }
+
+    /// What's new in `version`, off the UI thread, for the open dialog.
+    fn read_release_notes(&mut self, version: String) {
+        let updater = self.updater.clone();
+        let generation = self.update_generation;
+        self.exec.job(move || AppEvent::Upgrade {
+            generation,
+            message: UpgradeMessage::Notes {
+                notes: updater.release_notes(&version).ok().flatten(),
+                version,
+            },
+        });
+    }
+
+    /// `Later` (or Esc) on the update modal: not opened by itself again for
+    /// that version (nor for restarting into it, once installed).
+    pub(super) fn update_later(&mut self) {
+        if let AppMode::Upgrade(dialog) = &self.mode {
+            if let (true, Some(version)) = (dialog.prompted, dialog.latest_version.clone()) {
+                let installed = dialog.installed;
+                if let Some(path) = self.update_state_path() {
+                    let mut state = UpdateState::load_from(&path).unwrap_or_default();
+                    if installed {
+                        state.dismissed_installed = Some(version);
+                    } else {
+                        state.dismissed_version = Some(version);
+                    }
+                    let _ = state.save_to(&path);
+                }
+            }
+        }
+        self.close_upgrade_dialog();
+    }
+
+    /// `Restart now` on the update modal of an installed release: the one
+    /// restart (this UI, then the server and its services, in place).
+    pub(super) fn restart_into_update(&mut self) {
+        self.close_upgrade_dialog();
+        self.restart_after_update = true;
+        self.restart_requested = true;
+        self.set_status("Restarting Rakumux; sessions keep running.");
     }
 
     pub(super) fn close_upgrade_dialog(&mut self) {
@@ -81,6 +147,13 @@ impl App {
 
     pub(super) fn handle_upgrade_message(&mut self, message: UpgradeMessage) {
         match message {
+            UpgradeMessage::Notes { version, notes } => {
+                if let AppMode::Upgrade(dialog) = &mut self.mode {
+                    if dialog.latest_version.as_deref() == Some(version.as_str()) {
+                        dialog.notes = notes;
+                    }
+                }
+            }
             UpgradeMessage::CheckAvailable {
                 latest_version,
                 method: InstallMethod::Source,
@@ -116,6 +189,7 @@ impl App {
                         install_method_display(method)
                     ));
                     dialog.selection = 0;
+                    self.read_release_notes(latest_version);
                 }
             }
             UpgradeMessage::CheckNoUpdate => {

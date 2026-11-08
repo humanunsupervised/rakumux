@@ -66,6 +66,38 @@ pub(super) fn latest(source: &dyn ReleaseSource) -> Result<String> {
     Ok(version.to_string())
 }
 
+#[derive(Deserialize)]
+struct Notes {
+    draft: bool,
+    prerelease: bool,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+/// The most of a release's notes the update modal shows.
+pub(super) const NOTES_MAX_CHARS: usize = 4_000;
+
+/// What's new in `version`: its GitHub release's notes (Markdown), cut to
+/// [`NOTES_MAX_CHARS`]; none for a release without notes.
+pub(super) fn notes(source: &dyn ReleaseSource, version: &str) -> Result<Option<String>> {
+    let version = stable_version(version)?;
+    let url =
+        format!("https://api.github.com/repos/humanunsupervised/rakumux/releases/tags/v{version}");
+    let release: Notes = serde_json::from_slice(&source.fetch(&url, 1_048_576)?)?;
+    if release.draft || release.prerelease {
+        bail!("GitHub did not return a stable public release");
+    }
+    Ok(release
+        .body
+        .map(|body| {
+            body.trim()
+                .chars()
+                .take(NOTES_MAX_CHARS)
+                .collect::<String>()
+        })
+        .filter(|body| !body.is_empty()))
+}
+
 pub(super) fn stable_version(value: &str) -> Result<semver::Version> {
     let version = semver::Version::parse(value.strip_prefix('v').unwrap_or(value))
         .context("release has an invalid version")?;

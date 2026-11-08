@@ -461,7 +461,7 @@ impl SettingsItem {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct UpgradeDialog {
     pub current_version: String,
     pub latest_version: Option<String>,
@@ -472,10 +472,23 @@ pub struct UpgradeDialog {
     pub error_message: Option<String>,
     pub info_message: Option<String>,
     pub selection: usize,
+    /// What's new in `latest_version` (its release notes, Markdown), once read.
+    pub notes: Option<String>,
+    /// Opened by itself for a newer release (the update modal), not by `U`:
+    /// `Later` (or Esc) isn't asked again for that version.
+    pub prompted: bool,
+    /// `latest_version` is installed already (automatic updates): the
+    /// choice is restarting into it now or later.
+    pub installed: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum UpgradeMessage {
+    /// What's new in `version`, read for the dialog.
+    Notes {
+        version: String,
+        notes: Option<String>,
+    },
     CheckError(String),
     CheckNoUpdate,
     CheckAvailable {

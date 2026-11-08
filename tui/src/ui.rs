@@ -641,25 +641,34 @@ mod tests {
     }
 
     #[test]
-    fn update_states_are_readable_and_explain_ui_only_restart_at_phone_and_desktop_sizes() {
+    fn update_states_are_readable_and_say_sessions_keep_running_at_phone_and_desktop_sizes() {
         use crate::app::types::UpgradeDialog;
-        for state in ["checking", "available", "installing", "error", "current"] {
+        let notes = "## Session list\n\n- Repositories first, then the app.";
+        for state in [
+            "checking",
+            "available",
+            "installing",
+            "error",
+            "current",
+            "installed",
+        ] {
             for (width, height) in [(40, 20), (90, 20), (160, 48)] {
                 let mut h = harness(vec![view("A", "api", 10)]);
                 h.app.mode = AppMode::Upgrade(UpgradeDialog {
                     current_version: "0.1.4".into(), latest_version: Some("0.1.5".into()),
                     install_method: Some(crate::updater::InstallMethod::Binary),
                     checking: state == "checking", installing: state == "installing",
-                    update_available: matches!(state, "available" | "installing"),
+                    update_available: matches!(state, "available" | "installing" | "installed"),
                     error_message: (state == "error").then(|| "Cannot write the installation. Use the installer outside Rakumux with your original PREFIX; administrator permission may be required.".into()),
-                    info_message: (state == "current").then(|| "You're already on the latest version.".into()), selection: 0,
+                    info_message: (state == "current").then(|| "You're already on the latest version.".into()),
+                    notes: matches!(state, "available" | "installed").then(|| notes.into()),
+                    prompted: matches!(state, "available" | "installed"),
+                    installed: state == "installed",
+                    ..UpgradeDialog::default()
                 });
                 let text = render(&mut h.app, width, height);
-                assert!(text.contains("Update Rakumux"), "{state}: {text}");
-                assert!(
-                    text.contains("daemon") && text.contains("sessions"),
-                    "{state}: {text}"
-                );
+                assert!(text.contains("Rakumux"), "{state}: {text}");
+                assert!(text.contains("sessions keep"), "{state}: {text}");
                 if state == "error" {
                     assert!(
                         text.contains("administrator") && text.contains("PREFIX"),
@@ -667,7 +676,22 @@ mod tests {
                     );
                 }
                 if state == "available" {
-                    assert!(text.contains("Install update and restart"), "{text}");
+                    assert!(
+                        text.contains("Update now") && text.contains("Later"),
+                        "{text}"
+                    );
+                    assert!(text.contains("0.1.5 is out"), "{text}");
+                }
+                if state == "installed" {
+                    assert!(
+                        text.contains("Restart now") && text.contains("Later"),
+                        "{text}"
+                    );
+                    assert!(text.contains("Updated to 0.1.5"), "{text}");
+                }
+                if matches!(state, "available" | "installed") && height >= 40 {
+                    // What's new, its Markdown drawn.
+                    assert!(text.contains("Repositories first, then the app."), "{text}");
                 }
             }
         }
@@ -2078,6 +2102,7 @@ mod tests {
                 error_message: None,
                 info_message: Some("Version 0.7.0 is available".into()),
                 selection: 0,
+                ..UpgradeDialog::default()
             }),
             other => panic!("no dialog {other}"),
         };
@@ -2104,9 +2129,11 @@ mod tests {
             (
                 "upgrade",
                 &[
-                    "Install update and restart",
+                    "Update now",
+                    "Later",
+                    "sessions keep",
                     "[Enter] Confirm",
-                    "[Esc] Cancel",
+                    "[Esc] Later",
                 ],
             ),
         ];

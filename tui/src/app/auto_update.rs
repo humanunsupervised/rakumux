@@ -101,8 +101,9 @@ impl App {
         self.auto_update.look_at = None;
     }
 
-    /// Timers: the shared state every minute, and the reload once idle.
-    /// Returns whether to redraw.
+    /// Timers: the shared state every minute, the update modal when a
+    /// release is due one, and the reload once idle. Returns whether to
+    /// redraw.
     pub(super) fn update_timers(&mut self, now: Instant) -> bool {
         if self.auto_update.ready.is_some() {
             if self.settings.sessions.auto_update
@@ -115,21 +116,74 @@ impl App {
                 self.restart_requested = true;
                 return true;
             }
-            return false;
+            return self.prompt_update();
         }
+        let prompted = self.prompt_update();
         if self.auto_update.look_at.is_some_and(|at| now < at) {
-            return false;
+            return prompted;
         }
         self.auto_update.look_at = Some(now + LOOK_EVERY);
-        self.look_for_update(now)
+        self.look_for_update(now) || prompted
+    }
+
+    /// The update modal, by itself, in Rakumux mode with nothing else open:
+    /// a newer release this window would only tell of (automatic updates off,
+    /// npm, Homebrew, an install that failed), or one automatic updates
+    /// installed, to restart into. Once per version: not again in this run,
+    /// nor after `Later`. Returns whether it opened.
+    fn prompt_update(&mut self) -> bool {
+        if !matches!(self.mode, AppMode::Normal)
+            || self.focus != Focus::List
+            || self.list.filter_editing
+            || self.pending_key.is_some()
+            || self.auto_update.installing
+        {
+            return false;
+        }
+        let method = self.updater.method();
+        let (version, installed) = match (&self.auto_update.ready, &self.pending_update_version) {
+            (Some(ready), _) => (ready.clone(), true),
+            (None, Some(pending)) => (pending.clone(), false),
+            (None, None) => return false,
+        };
+        if self.update_prompted.as_deref() == Some(version.as_str()) {
+            return false;
+        }
+        let Some(path) = self.update_state_path() else {
+            return false;
+        };
+        let state = UpdateState::load_from(&path).unwrap_or_default();
+        let answered = if installed {
+            &state.dismissed_installed
+        } else {
+            &state.dismissed_version
+        };
+        // This window installs it by itself: the modal waits for the install.
+        let installs_itself = !installed
+            && self.settings.sessions.auto_update
+            && method == InstallMethod::Binary
+            && state.failed_version.as_deref() != Some(version.as_str());
+        if answered.as_deref() == Some(version.as_str()) {
+            self.update_prompted = Some(version);
+            return false;
+        }
+        if installs_itself {
+            return false;
+        }
+        self.open_update_prompt(version, method, installed);
+        true
     }
 
     /// Nothing would be lost or interrupted by reloading now: Rakumux mode
     /// with nothing open or half typed, no terminal panel shell (a reload
     /// ends it), and nobody has used the window for [`RELOAD_IDLE`].
     fn safe_to_reload(&self, now: Instant) -> bool {
+        // The update modal offering the restart into this install doesn't
+        // hold it back: nobody answered it.
+        let modal =
+            matches!(&self.mode, AppMode::Upgrade(dialog) if dialog.prompted && dialog.installed);
         self.focus == Focus::List
-            && matches!(self.mode, AppMode::Normal)
+            && (matches!(self.mode, AppMode::Normal) || modal)
             && !self.list.filter_editing
             && self.pending_key.is_none()
             && !self.creating_session

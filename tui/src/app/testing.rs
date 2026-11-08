@@ -1191,6 +1191,10 @@ pub struct FakeUpdater {
     /// How this app is installed; `None`: a binary installation.
     pub method: Mutex<Option<crate::updater::InstallMethod>>,
     pub launcher: Mutex<Option<std::path::PathBuf>>,
+    /// The release notes of every version.
+    pub notes: Mutex<Option<String>>,
+    /// The versions whose notes were read.
+    pub notes_read: Mutex<Vec<String>>,
     pub calls: Mutex<Vec<String>>,
 }
 
@@ -1246,6 +1250,11 @@ impl crate::updater::UpdateService for FakeUpdater {
             anyhow::bail!("{error}");
         }
         Ok(self.launcher.lock().unwrap().clone())
+    }
+    fn release_notes(&self, version: &str) -> anyhow::Result<Option<String>> {
+        // Not in `calls`: reading notes neither checks nor installs.
+        self.notes_read.lock().unwrap().push(version.into());
+        Ok(self.notes.lock().unwrap().clone())
     }
 }
 

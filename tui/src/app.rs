@@ -443,6 +443,9 @@ pub struct App {
     /// The restart asked for loads an installed update: the new UI then
     /// restarts the server and its services too (`--after-update`).
     pub restart_after_update: bool,
+    /// The version the update modal opened by itself for in this run (or
+    /// found answered `Later`): it doesn't open again for it.
+    pub update_prompted: Option<String>,
     /// Started by such a restart: once connected, a server of another
     /// version is restarted in place with this build, then its services.
     pub server_after_update: bool,
@@ -549,6 +552,7 @@ impl App {
             restart_requested: false,
             restart_launcher: None,
             restart_after_update: false,
+            update_prompted: None,
             server_after_update: false,
             auth: AuthService::new_from_env(),
             settings: options.settings,

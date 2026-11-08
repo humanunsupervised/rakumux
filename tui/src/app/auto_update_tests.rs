@@ -45,6 +45,22 @@ fn footer(h: &Harness) -> String {
         .collect()
 }
 
+/// The window drawn at `width` × `height`, as text.
+fn screen(app: &mut crate::app::App, width: u16, height: u16) -> String {
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let mut out = String::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            out.push_str(buffer.get(x, y).symbol());
+        }
+        out.push('\n');
+    }
+    out
+}
+
 fn state(h: &Harness) -> UpdateState {
     UpdateState::load_from(&h.home.path().join("update_state.json")).unwrap()
 }
@@ -191,8 +207,17 @@ async fn with_the_setting_off_a_new_release_is_told_once_and_u_still_asks() {
         h.app.status(),
         Some("Update 99.1.0 available · U to install")
     );
-    // Once the message is gone, the footer keeps a quiet line.
+    // Then the update modal asks; `Later` leaves it for that version.
     tick(&mut h, start + secs(10));
+    assert!(
+        matches!(&h.app.mode, AppMode::Upgrade(dialog) if dialog.prompted && !dialog.installed),
+        "{:?}",
+        h.app.mode
+    );
+    h.press(KeyCode::Esc).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert_eq!(state(&h).dismissed_version.as_deref(), Some(NEWER));
+    // Once the message is gone, the footer keeps a quiet line.
     assert!(h.app.status().is_none());
     assert!(
         footer(&h).contains("Update 99.1.0 available · U to install"),
@@ -203,13 +228,16 @@ async fn with_the_setting_off_a_new_release_is_told_once_and_u_still_asks() {
     for minute in 1..=5 {
         tick(&mut h, start + secs(60 * minute + 1));
         assert!(h.app.status().is_none(), "minute {minute}");
+        assert!(matches!(h.app.mode, AppMode::Normal), "minute {minute}");
     }
     let mut other = other_window(&h, &updater);
     other.settings.sessions.auto_update = false;
     tick_app(&mut other, Instant::now());
+    tick_app(&mut other, Instant::now() + secs(1));
     assert!(other.status().is_none());
+    assert!(matches!(other.mode, AppMode::Normal), "answered Later");
     assert_eq!(other.pending_update_version.as_deref(), Some(NEWER));
-    assert_eq!(updater.calls(), ["check"], "checked once a day");
+    assert_eq!(updater.calls(), ["check"], "checked once an hour");
     // `U` asks before installing, as ever.
     h.press(KeyCode::Char('U')).await;
     assert!(matches!(&h.app.mode, AppMode::Upgrade(dialog) if dialog.update_available));
@@ -229,6 +257,106 @@ async fn with_the_setting_off_a_new_release_is_told_once_and_u_still_asks() {
         Some("Update 99.2.0 available · U to install")
     );
     assert_eq!(state(&h).notified_version.as_deref(), Some("99.2.0"));
+}
+
+/// A newer release this window doesn't install by itself opens the update
+/// modal in Rakumux mode: what's new from its release notes, then `Update
+/// now` (installed, then the one restart: UI, server and services) or
+/// `Later`. Never over session mode or another dialog.
+#[tokio::test]
+async fn a_new_release_opens_the_update_modal_with_whats_new_and_update_now_installs() {
+    let updater = FakeUpdater::with_latest(NEWER);
+    *updater.notes.lock().unwrap() = Some("## Session list\n\n- Repositories first.".into());
+    *updater.launcher.lock().unwrap() = Some("/updated/rakumux.sh".into());
+    let mut h = window(&updater);
+    h.app.settings.sessions.auto_update = false;
+    // In session mode the program has the keys: no modal.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(h.app.focus, Focus::Session);
+    let start = Instant::now();
+    tick(&mut h, start);
+    tick(&mut h, start + secs(1));
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    h.rakumux().await;
+    tick(&mut h, start + secs(2));
+    match &h.app.mode {
+        AppMode::Upgrade(dialog) => {
+            assert!(dialog.prompted && dialog.update_available && !dialog.installed);
+            assert_eq!(dialog.latest_version.as_deref(), Some(NEWER));
+            assert_eq!(
+                dialog.notes.as_deref(),
+                Some("## Session list\n\n- Repositories first.")
+            );
+        }
+        mode => panic!("no update modal: {mode:?}"),
+    }
+    assert_eq!(*updater.notes_read.lock().unwrap(), [NEWER]);
+    let screen = screen(&mut h.app, 100, 40);
+    assert!(screen.contains("Rakumux 99.1.0 is out"), "{screen}");
+    assert!(screen.contains("Repositories first."), "{screen}");
+    assert!(
+        screen.contains("Update now") && screen.contains("Later"),
+        "{screen}"
+    );
+    // Update now: installed, then the one restart.
+    h.press(KeyCode::Enter).await;
+    assert_eq!(updater.calls(), ["check", "install 99.1.0"]);
+    assert!(h.app.restart_requested && h.app.restart_after_update);
+    assert_eq!(
+        h.app.restart_launcher.as_deref(),
+        Some(std::path::Path::new("/updated/rakumux.sh"))
+    );
+}
+
+/// With automatic updates on, the release installs by itself; the modal
+/// then offers the restart into it: `Restart now` is the one restart, `Later`
+/// leaves it to the idle reload and isn't asked again for that version.
+#[tokio::test]
+async fn an_automatic_install_offers_the_restart_now_or_later() {
+    let updater = FakeUpdater::with_latest(NEWER);
+    let (mut h, start) = installed(&updater);
+    tick(&mut h, start + secs(5));
+    assert!(
+        matches!(&h.app.mode, AppMode::Upgrade(dialog) if dialog.prompted && dialog.installed),
+        "{:?}",
+        h.app.mode
+    );
+    let screen = screen(&mut h.app, 100, 40);
+    assert!(screen.contains("Updated to 99.1.0"), "{screen}");
+    assert!(screen.contains("Restart now"), "{screen}");
+    // Restart now.
+    h.press(KeyCode::Enter).await;
+    assert!(h.app.restart_requested && h.app.restart_after_update);
+    assert_eq!(
+        updater.calls(),
+        ["check", "install 99.1.0"],
+        "installed once"
+    );
+
+    // Later: no modal again, and the idle reload still comes.
+    let (mut h, start) = installed(&updater);
+    tick(&mut h, start + secs(5));
+    h.press(KeyCode::Down).await;
+    h.press(KeyCode::Enter).await;
+    assert!(matches!(h.app.mode, AppMode::Normal));
+    assert!(!h.app.restart_requested);
+    assert_eq!(state(&h).dismissed_installed.as_deref(), Some(NEWER));
+    tick(&mut h, start + secs(10));
+    assert!(matches!(h.app.mode, AppMode::Normal), "not asked again");
+    tick(&mut h, Instant::now() + RELOAD_IDLE + secs(1));
+    assert!(h.app.restart_requested, "the idle reload");
+
+    // Left open, the modal doesn't hold the idle reload back.
+    let (mut h, start) = installed(&updater);
+    let mut fresh = state(&h);
+    fresh.dismissed_installed = None;
+    fresh
+        .save_to(&h.home.path().join("update_state.json"))
+        .unwrap();
+    tick(&mut h, start + secs(5));
+    assert!(matches!(h.app.mode, AppMode::Upgrade(_)));
+    tick(&mut h, start + RELOAD_IDLE + secs(1));
+    assert!(h.app.restart_requested);
 }
 
 #[tokio::test]

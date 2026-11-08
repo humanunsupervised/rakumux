@@ -321,6 +321,49 @@ fn native_platform_names_and_stable_release_metadata_are_validated() {
     }
 }
 
+/// The update modal's "what's new": the release's notes from GitHub, cut to
+/// their bound; none for a release without notes; never a prerelease's.
+#[test]
+fn release_notes_are_the_releases_body_bounded() {
+    let url = "https://api.github.com/repos/humanunsupervised/rakumux/releases/tags/v0.1.5";
+    let source = |body: serde_json::Value, prerelease: bool| {
+        Source(
+            HashMap::from([(
+                url.into(),
+                serde_json::to_vec(&serde_json::json!({
+                    "tag_name": "v0.1.5", "draft": false, "prerelease": prerelease, "body": body,
+                }))
+                .unwrap(),
+            )]),
+            RefCell::default(),
+        )
+    };
+    let notes = "# Rakumux 0.1.5\n\n- Repositories first.";
+    assert_eq!(
+        releases::notes(&source(notes.into(), false), "0.1.5")
+            .unwrap()
+            .as_deref(),
+        Some(notes)
+    );
+    assert_eq!(
+        releases::notes(&source("  ".into(), false), "v0.1.5").unwrap(),
+        None
+    );
+    assert_eq!(
+        releases::notes(&source(serde_json::Value::Null, false), "0.1.5").unwrap(),
+        None
+    );
+    let long = "x".repeat(releases::NOTES_MAX_CHARS + 50);
+    assert_eq!(
+        releases::notes(&source(long.into(), false), "0.1.5")
+            .unwrap()
+            .map(|n| n.len()),
+        Some(releases::NOTES_MAX_CHARS)
+    );
+    assert!(releases::notes(&source(notes.into(), true), "0.1.5").is_err());
+    assert!(releases::notes(&source(notes.into(), false), "0.1.5-rc.1").is_err());
+}
+
 #[test]
 fn an_unsigned_or_wrongly_signed_release_is_refused_before_its_package_is_downloaded() {
     let package_url = format!("{RELEASES}/v0.1.5/rakumux-linux-x64.tar.gz");

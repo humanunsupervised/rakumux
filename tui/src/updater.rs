@@ -60,6 +60,10 @@ pub trait UpdateService: Send + Sync {
     /// The replacement launcher, when installation changed the running executable's path.
     /// Installing the version the installation already has changes nothing and succeeds.
     fn install(&self, version: &str, method: InstallMethod) -> Result<Option<PathBuf>>;
+    /// What's new in `version`: its release notes (Markdown), when known.
+    fn release_notes(&self, _version: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 pub struct SystemUpdateService;
@@ -98,6 +102,9 @@ impl UpdateService for SystemUpdateService {
         }
         Ok(None)
     }
+    fn release_notes(&self, version: &str) -> Result<Option<String>> {
+        releases::notes(&releases::GithubReleases::new()?, version)
+    }
 }
 
 /// `update_state.json`, shared by every window of a Rakumux home.
@@ -119,9 +126,16 @@ pub struct UpdateState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notified_version: Option<String>,
     /// An automatic install of this version failed: not tried again until
-    /// the next daily check finds it.
+    /// the next check finds it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed_version: Option<String>,
+    /// The user answered `Later` to this version's update modal: it doesn't
+    /// open by itself for it again (the footer still says it's out).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dismissed_version: Option<String>,
+    /// The user answered `Later` to restarting into this installed version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dismissed_installed: Option<String>,
 }
 
 impl UpdateState {
@@ -167,9 +181,13 @@ impl UpdateState {
     }
     pub fn should_check_for_updates(&self) -> bool {
         self.last_check
-            .is_none_or(|last| now().saturating_sub(last) > 24 * 3600)
+            .is_none_or(|last| now().saturating_sub(last) > CHECK_EVERY_SECS)
     }
 }
+
+/// How often one window of a home checks GitHub for a release: hourly (a
+/// signed-in machine also hears of one from rakumux.com as it's published).
+pub const CHECK_EVERY_SECS: u64 = 3600;
 
 fn now() -> u64 {
     SystemTime::now()

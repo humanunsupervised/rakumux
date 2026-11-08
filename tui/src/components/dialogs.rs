@@ -415,40 +415,94 @@ pub fn draw_upgrade_dialog(f: &mut Frame, dialog: &UpgradeDialog, area: Rect) {
     } else if dialog.checking {
         &[("Esc", "Cancel")]
     } else if dialog.update_available {
-        &[("↑/↓", "Select"), ("Enter", "Confirm"), ("Esc", "Cancel")]
+        &[("↑/↓", "Select"), ("Enter", "Confirm"), ("Esc", "Later")]
     } else {
         &[("Enter/Esc", "Close")]
     };
-    let width = popup_width(area.width, 60);
+    let width = popup_width(area.width, 64);
     let content_width = usize::from(width.saturating_sub(2));
+    let latest = dialog.latest_version.as_deref().unwrap_or("");
+    // The modal a newer release opens: what it is and what's new.
+    let headline = match (dialog.update_available, dialog.installed) {
+        (true, true) => format!("Updated to {latest}"),
+        (true, false) => format!("Rakumux {latest} is out"),
+        _ => format!("Current version: {}", dialog.current_version),
+    };
     let status_text = dialog
         .error_message
         .as_deref()
         .or(dialog.info_message.as_deref())
-        .unwrap_or("Checking for updates…");
-    let status_rows = wrapped_rows(status_text, content_width).max(2) as u16;
-    let policy = "Restarts this UI only. The daemon and all sessions stay running.";
+        .unwrap_or(if dialog.update_available {
+            ""
+        } else {
+            "Checking for updates…"
+        });
+    let status_rows = if dialog.update_available && status_text.is_empty() && !dialog.installing {
+        0
+    } else {
+        wrapped_rows(status_text, content_width).max(2) as u16
+    };
+    let policy = if dialog.installed {
+        "Restarts Rakumux (this window, the server and its services) in place: your sessions keep running."
+    } else {
+        "Installs it, then restarts Rakumux in place: your sessions keep running."
+    };
     let policy_rows = wrapped_rows(policy, content_width) as u16;
     let action_rows = if dialog.update_available { 3 } else { 0 };
-    let height = 5 + key_rows(keys, width) + status_rows + policy_rows + action_rows;
-    let popup = popup_area_fixed_height(area, 60, height);
+    let notes: Vec<Line<'static>> = dialog
+        .notes
+        .as_deref()
+        .filter(|_| dialog.update_available)
+        .map(|notes| {
+            crate::components::markdown::render(
+                notes,
+                content_width,
+                Style::default().fg(p.text_primary),
+            )
+        })
+        .unwrap_or_default();
+    let fixed = 5 + key_rows(keys, width) + status_rows + policy_rows + action_rows;
+    // What's new takes what the screen leaves, cut at its end.
+    let room = area.height.saturating_sub(fixed + 3);
+    let notes_rows = (notes.len() as u16).min(room);
+    let height = fixed + notes_rows + u16::from(notes_rows > 0);
+    let popup = popup_area_fixed_height(area, 64, height);
     let inner = dialog_frame(f, popup, "Update Rakumux", p.accent_primary);
     let above = draw_keys(f, inner, keys);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2),
-            Constraint::Min(2),
+            Constraint::Length(notes_rows + u16::from(notes_rows > 0)),
+            Constraint::Length(status_rows),
             Constraint::Length(policy_rows + 1),
             Constraint::Length(action_rows),
         ])
         .split(above);
     f.render_widget(
-        Paragraph::new(format!("Current version: {}", dialog.current_version))
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(p.text_primary)),
+        Paragraph::new(headline).alignment(Alignment::Center).style(
+            Style::default()
+                .fg(p.text_primary)
+                .add_modifier(if dialog.update_available {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        ),
         rows[0],
     );
+    if notes_rows > 0 {
+        f.render_widget(
+            Paragraph::new(
+                notes
+                    .into_iter()
+                    .take(notes_rows as usize)
+                    .collect::<Vec<_>>(),
+            ),
+            rows[1],
+        );
+    }
+    let rows = [rows[0], rows[2], rows[3], rows[4]];
     let status = if dialog.checking {
         Line::from(Span::styled(
             format!("{} Checking for updates...", get_spinner_char()),
@@ -484,7 +538,12 @@ pub fn draw_upgrade_dialog(f: &mut Frame, dialog: &UpgradeDialog, area: Rect) {
     );
     if dialog.update_available {
         let enabled = !(dialog.checking || dialog.installing);
-        let items: Vec<ListItem> = ["Install update and restart", "Cancel"]
+        let choices = if dialog.installed {
+            ["Restart now", "Later"]
+        } else {
+            ["Update now", "Later"]
+        };
+        let items: Vec<ListItem> = choices
             .iter()
             .enumerate()
             .map(|(i, label)| {
