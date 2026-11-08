@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:logs-stored",
+  "title": "POST /api/v1/feed/logs success",
+  "description": "How many of the events were new. `wanted` says whether to keep sending; a machine stops at false until its features read says `logs` again.",
+  "x-maxBodyBytes": 1024,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "stored", "wanted"],
+  "properties": {
+    "version": { "const": 1 },
+    "stored": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "wanted": { "type": "boolean" }
+  }
+}

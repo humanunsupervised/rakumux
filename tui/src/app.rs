@@ -1500,6 +1500,15 @@ impl App {
 
     /// The subscription (and so presumably the daemon) went away.
     fn connection_lost(&mut self, reason: String) {
+        if let Ok(layout) = session_core::paths::Layout::from_env() {
+            session_core::logfile::append(
+                &layout,
+                "tui.log",
+                session_core::logfile::Level::Warn,
+                "connection",
+                &format!("lost the daemon: {reason}"),
+            );
+        }
         self.terminal_panels_disconnected();
         if let Some(cancel) = self.sync_cancel.take() {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);

@@ -31,9 +31,9 @@ use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
     ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
-    FeedResult, FeedSync, Fetch, Fetched, NewSessionSync, NewSessionWork, PokeEvent, PokeSync,
-    RealtimeToken, ReplySync, ReplyWork, ResourceSync, ResourceWork, SessionMessage, SessionSync,
-    TurnRead, UpdateSync, UpdateWork, Uploads,
+    FeedResult, FeedSync, Fetch, Fetched, LogSync, NewSessionSync, NewSessionWork, PokeEvent,
+    PokeSync, RealtimeToken, ReplySync, ReplyWork, ResourceSync, ResourceWork, SessionMessage,
+    SessionSync, TurnRead, UpdateSync, UpdateWork, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -173,6 +173,8 @@ enum Message {
     Resources(Result<ResourceSample, ErrorCode>),
     /// A reading's upload finished.
     ResourcesDone(FeedCompletion),
+    /// This machine's logs' upload finished.
+    LogsDone(FeedCompletion),
     /// The realtime token request finished.
     RealtimeDone(FeedCompletion),
     /// What realtime connection `generation` did.
@@ -239,6 +241,8 @@ enum Work<A, C> {
     ReadResources,
     /// Upload what this machine uses.
     ResourcesUpload(FeedJob<A, C>),
+    /// Upload this machine's warnings and errors.
+    LogsUpload(FeedJob<A, C>),
     /// Ask where to connect to be poked.
     Realtime(FeedJob<A, C>),
     /// Type a reply (its id) into a session while the program seen in its
@@ -676,6 +680,10 @@ fn own<S, A, C>(
         sessions = sessions.handling(crate::feed::REMOTE_UPDATE);
     }
     let mut resources = ResourceSync::new();
+    let mut logs = refresher.log_files().map(|(directory, state)| {
+        let version = refresher.version().unwrap_or_default();
+        LogSync::new(directory, state, machine.clone(), &version)
+    });
     let mut pokes = PokeSync::new();
     // The running realtime connection's stop, if one runs.
     let mut poke_stop: Option<Arc<AtomicBool>> = None;
@@ -724,6 +732,9 @@ fn own<S, A, C>(
             );
             follow_sessions(&refresher, &mut sessions, work, now);
             follow_resources(&refresher, &mut resources, &sessions, work, now);
+            if let Some(logs) = logs.as_mut() {
+                follow_logs(&refresher, logs, &sessions, work, now);
+            }
             let confirmed = sessions.confirmed();
             follow_new_sessions(&refresher, &mut new_sessions, confirmed, work, now);
             follow_updates(
@@ -887,6 +898,16 @@ fn own<S, A, C>(
                 });
                 resources.done(current, outcome, now);
                 follow_resources(&refresher, &mut resources, &sessions, work, now);
+            }
+            Message::LogsDone(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::LogsStored(wanted) => Ok(wanted),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                if let Some(logs) = logs.as_mut() {
+                    logs.done(current, outcome, now);
+                }
             }
             Message::ReplyDone(mut completion) => {
                 let current = refresher.is_current(completion.revision);
@@ -1760,6 +1781,36 @@ fn follow_resources<S, A, C>(
     }
 }
 
+/// Start the upload of this machine's warnings and errors when one is due: only signed in, with
+/// its name confirmed, and while the account's features read asks for them.
+fn follow_logs<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    logs: &mut LogSync,
+    sessions: &SessionSync,
+    work: &Workers<A, C>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let level = if sessions.confirmed() {
+        refresher.logs_level()
+    } else {
+        None
+    };
+    logs.rename(sessions.machine().to_owned());
+    logs.set_level(level, now);
+    if let Some(request) = logs.next_work(now) {
+        match refresher.feed_job(request) {
+            Some(job) => {
+                let _ = work.send(Work::LogsUpload(job));
+            }
+            None => logs.done(false, Err(FeedFailure::Unauthorized), now),
+        }
+    }
+}
+
 /// The wall clock in Unix milliseconds, as replies' times are.
 fn wall_ms() -> i64 {
     SystemTime::now()
@@ -1941,6 +1992,16 @@ where
                 match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
                     Ok(completion) => Message::ResourcesDone(completion),
                     Err(_) => Message::ResourcesDone(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
+            }
+            Ok(Work::LogsUpload(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::LogsDone(completion),
+                    Err(_) => Message::LogsDone(FeedCompletion {
                         revision,
                         outcome: Err(FeedFailure::Unavailable(None)),
                     }),

@@ -128,6 +128,8 @@ pub(crate) enum FeedRequest {
     Sessions { body: Vec<u8> },
     /// Upload what this machine uses now (rtop), as `body`.
     Resources { body: Vec<u8> },
+    /// Warnings and errors from this machine's programs, for the owner's log viewer.
+    Logs { body: Vec<u8> },
     /// Fetch a file attached to a reply: `size` bytes, as the reply says.
     Attachment { id: String, size: u64 },
     /// Ask where to connect to be poked, and a token for it.
@@ -420,6 +422,52 @@ pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<SessionsStored, F
 pub(crate) fn resources_upload(upload: &super::resources::Upload<'_>) -> Option<FeedRequest> {
     let body = serde_json::to_vec(upload).ok()?;
     (body.len() <= MAX_RESOURCES_BODY_BYTES).then_some(FeedRequest::Resources { body })
+}
+
+/// `logs-upload`'s `x-maxBodyBytes`.
+const MAX_LOGS_BODY_BYTES: usize = 131_072;
+
+/// This machine's warnings and errors (`logs-upload`); `None` when they don't fit the contract's cap.
+pub(crate) fn logs_upload<T: serde::Serialize>(
+    machine: &str,
+    release: &str,
+    platform: &str,
+    events: &[T],
+) -> Option<FeedRequest> {
+    let mut upload = serde_json::json!({
+        "version": 1,
+        "machine": machine,
+        "platform": platform,
+        "events": events,
+    });
+    // A local build has no release to name.
+    if !release.is_empty() {
+        upload["release"] = release.into();
+    }
+    let body = serde_json::to_vec(&upload).ok()?;
+    (body.len() <= MAX_LOGS_BODY_BYTES).then_some(FeedRequest::Logs { body })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LogsStoredWire {
+    version: u8,
+    #[allow(dead_code)]
+    stored: u32,
+    wanted: bool,
+}
+
+/// Whether rakumux.com still wants this machine's logs (`logs-stored`).
+pub(crate) fn logs_stored(reply: &FeedHttpReply) -> Result<bool, FeedFailure> {
+    if reply.status != 200 {
+        return Err(failure(reply));
+    }
+    let stored: LogsStoredWire =
+        serde_json::from_slice(&reply.body).map_err(|_| FeedFailure::Invalid)?;
+    if stored.version != 1 {
+        return Err(FeedFailure::Invalid);
+    }
+    Ok(stored.wanted)
 }
 
 #[derive(Deserialize)]

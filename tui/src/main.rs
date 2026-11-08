@@ -119,12 +119,33 @@ struct Cli {
     services_path: Option<String>,
 }
 
+/// A panic in this window also goes to `logs/tui.log`, the one log the account service reads for
+/// the TUI; the terminal shows it as before.
+fn log_panics() {
+    let Ok(layout) = session_core::paths::Layout::from_env() else {
+        return;
+    };
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        session_core::logfile::append(
+            &layout,
+            "tui.log",
+            session_core::logfile::Level::Error,
+            "panic",
+            &info.to_string(),
+        );
+        previous(info);
+    }));
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // CLI subcommands (`rakumux new`, `ls`, `session …`) run without the TUI.
     if let Some(code) = cli::dispatch(&std::env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }
+
+    log_panics();
 
     let args: Vec<String> = std::env::args().collect();
     let force_debug = std::env::var("RAKUMUX_DEBUG").is_ok();

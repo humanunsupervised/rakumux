@@ -390,6 +390,11 @@ impl SessionSync {
         self.sent = None;
     }
 
+    /// The name this machine goes by in the feed now.
+    pub fn machine(&self) -> &str {
+        &self.machine
+    }
+
     /// Whether rakumux.com took a list under this machine's name (see
     /// `confirmed`): until then its replies aren't read, so a machine sharing
     /// another's name never takes (and fails) that one's replies.

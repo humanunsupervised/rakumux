@@ -86,6 +86,7 @@ fn main() -> ExitCode {
              every call will be refused"
         );
     }
+    let logs = layout.clone();
     let api = match ApiClient::new(layout, identity, Launcher::from_env()) {
         Ok(api) => api,
         Err(error) => {
@@ -106,6 +107,13 @@ fn main() -> ExitCode {
     match runtime.block_on(RakumuxServer::new(api, VERSION).serve_stdio()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            session_core::logfile::append(
+                &logs,
+                "mcp.log",
+                session_core::logfile::Level::Error,
+                "server",
+                &error.to_string(),
+            );
             eprintln!("rakumux-mcp: {error}");
             ExitCode::FAILURE
         }

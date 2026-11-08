@@ -21,6 +21,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `GET /api/v1/feed/replies/attachments/{id}` | path only | the file's bytes, not JSON (below) |
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
 | `POST /api/v1/feed/resources` | [resources-upload](resources-upload.schema.json) | [resources-stored](resources-stored.schema.json) |
+| `POST /api/v1/feed/logs` | [logs-upload](logs-upload.schema.json) | [logs-stored](logs-stored.schema.json) |
 | `POST /api/v1/feed/new-sessions/status` | [new-session-status](new-session-status.schema.json) | [new-session](new-session.schema.json) |
 | `POST /api/v1/feed/updates/status` | [update-status](update-status.schema.json) | [machine-update](machine-update.schema.json) |
 | `GET /api/v1/feed/realtime` | header only | [realtime](realtime.schema.json) |
@@ -30,6 +31,12 @@ conformance tests, not an HTTP server, database or local runtime.
 | `DELETE /api/v1/machines/credentials/{machine_id}` | path only | 204, no body |
 | `POST /api/v1/machines/token` | no body; bearer: the machine secret | [machine-token](machine-token.schema.json) |
 
+- **Logs:** a machine's own programs' warnings and errors, for the owner's log viewer:
+  `{version:1, machine, release?, platform?, events}`, 1–100 events, each `{id, at, source (tui |
+  daemon | api | mcp | account_service), level, component?, message}`, `message` at most 2048
+  characters, masked on the machine and again by the cloud. Sent only while `GET /api/v1/features`
+  says `logs: {level}`, which older releases ignore; an answer's `wanted: false` stops them. `id` is
+  a ULID the machine made, so a retried upload stores nothing twice.
 - **Upload:** `{version:1, machine, entries}` with 1–50 entries. Each entry is
   `{id, session:{id, name, folder?, branch?}, agent, conversation_id?, text, truncated,
   finished_at, position?}`; `position` is the turn's last message's in its chat (below).

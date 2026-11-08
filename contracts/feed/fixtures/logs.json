@@ -1,0 +1,29 @@
+{
+  "upload": {
+    "valid": [
+      {
+        "version": 1,
+        "machine": "studio",
+        "release": "0.1.50",
+        "platform": "linux-x86_64",
+        "events": [
+          { "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8B", "at": 1761800000000, "source": "daemon", "level": "error", "component": "control", "message": "cannot open the session registry: disk full" },
+          { "id": "01K8A0RZ0V3X5Q2N9T7W4Y6M8C", "at": 1761800000100, "source": "account_service", "level": "warn", "message": "rakumux-status: saving session titles failed" }
+        ]
+      }
+    ],
+    "invalid": [
+      { "note": "no events", "patch": { "events": [] } },
+      { "note": "no machine", "patch": { "machine": null } },
+      { "note": "web is not a machine's source", "event": { "source": "web" } },
+      { "note": "unknown level", "event": { "level": "fatal" } },
+      { "note": "empty message", "event": { "message": "" } },
+      { "note": "unknown member", "event": { "text": "x" } },
+      { "note": "bad id", "event": { "id": "nope" } }
+    ]
+  },
+  "stored": {
+    "valid": [{ "version": 1, "stored": 2, "wanted": true }],
+    "invalid": [{ "version": 1, "stored": 2 }]
+  }
+}

@@ -15,6 +15,7 @@ pub mod api;
 pub mod client;
 pub mod frame;
 pub mod ids;
+pub mod logfile;
 pub mod model;
 pub mod paths;
 pub mod remote;

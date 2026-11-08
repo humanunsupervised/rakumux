@@ -17,6 +17,7 @@ mod agents;
 mod cache;
 mod chats;
 mod job;
+mod logs;
 mod machine;
 mod new_sessions;
 mod poke;
@@ -37,6 +38,7 @@ pub use cache::{
 pub(crate) use chats::{write_private, ChatSync, ChatWork, READ_BYTES};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
+pub(crate) use logs::LogSync;
 pub(crate) use machine::MachineIdentity;
 pub(crate) use new_sessions::{NewSessionSync, NewSessionWork, NEW_SESSIONS, NEW_SESSION_AGENTS};
 pub(crate) use poke::{listen, PokeEvent, PokeSync};

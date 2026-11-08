@@ -167,6 +167,7 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     chat_cursors: Option<std::path::PathBuf>,
     /// Where files attached to replies are saved, if anywhere.
     uploads: Option<std::path::PathBuf>,
+    log_files: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// Where replies keep what was typed in across a restart.
     reply_state: Option<std::path::PathBuf>,
     /// Where new sessions keep which were started across a restart.
@@ -215,6 +216,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             settings_due: Duration::ZERO,
             chat_cursors: None,
             uploads: None,
+            log_files: None,
             reply_state: None,
             new_session_state: None,
             update_state: None,
@@ -359,6 +361,22 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where files attached to replies are saved, if anywhere.
     pub(crate) fn uploads(&self) -> Option<std::path::PathBuf> {
         self.uploads.clone()
+    }
+
+    /// Follow this home's log files in `directory` (for the owner's log viewer, while the account's
+    /// features read asks), keeping where they're read up to in `state`.
+    pub fn with_log_files(
+        mut self,
+        directory: std::path::PathBuf,
+        state: std::path::PathBuf,
+    ) -> Self {
+        self.log_files = Some((directory, state));
+        self
+    }
+
+    /// The log files' directory and the file of where they're read up to, if followed.
+    pub(crate) fn log_files(&self) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+        self.log_files.clone()
     }
 
     /// This is an enrolled machine (the user's Sprite): `tokens` sign it in
@@ -730,6 +748,14 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             self.features = shown;
             self.reconcile = true;
         }
+    }
+
+    /// From what level this machine's logs are asked for; `None` when they aren't, or signed out.
+    pub fn logs_level(&self) -> Option<crate::cloud::LogLevel> {
+        self.service
+            .account_session()
+            .and(self.features)
+            .and_then(|features| features.logs)
     }
 
     /// The account's feed, once read; `None` when signed out or not yet known.

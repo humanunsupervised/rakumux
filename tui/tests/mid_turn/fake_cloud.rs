@@ -113,6 +113,10 @@ pub struct State {
     pub summaries: bool,
     /// The title each AI session-status request is answered with.
     pub title: String,
+    /// The level the features read asks this machine's logs from (`logs`); none: not asked.
+    pub logs_level: Option<&'static str>,
+    /// Log uploads (`POST /api/v1/feed/logs`), as sent.
+    pub logs: Vec<Value>,
     /// AI session-status requests (`POST /api/v1/ai/session-status`): when
     /// (Unix ms), and the body as sent.
     pub titles: Vec<(u64, Value)>,
@@ -392,11 +396,19 @@ impl Served {
         }
         let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
         match (request.method.as_str(), request.path.as_str()) {
-            ("GET", "/api/v1/features") => answer(
-                200,
-                json!({"version": 1, "features":
-                    {"ai_session_summaries": state.summaries, "feed": true}}),
-            ),
+            ("GET", "/api/v1/features") => {
+                let mut features = json!({"version": 1, "features":
+                    {"ai_session_summaries": state.summaries, "feed": true}});
+                if let Some(level) = state.logs_level {
+                    features["logs"] = json!({"level": level});
+                }
+                answer(200, features)
+            }
+            ("POST", "/api/v1/feed/logs") => {
+                let stored = body["events"].as_array().map_or(0, Vec::len);
+                state.logs.push(body);
+                answer(200, json!({"version": 1, "stored": stored, "wanted": true}))
+            }
             ("POST", "/api/v1/ai/session-status") if state.summaries => {
                 let request_id = body["request_id"].clone();
                 let title = state.title.clone();

@@ -5,7 +5,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 /** Canonical schema documents, loaded locally without resolving network references. */
 export const schemas = Object.freeze(
   Object.fromEntries(
-    ["common", "upload", "accepted", "page", "error", "chat-upload", "chat-accepted", "turn", "reply-upload", "reply-status", "reply", "replies", "sessions-upload", "sessions-stored", "realtime", "poke", "machine-enrol", "machine-credential", "machine-credentials", "machine-token", "resources-upload", "resources-stored", "new-session-status", "new-session", "update-status", "machine-update"].map((name) => [
+    ["common", "upload", "accepted", "page", "error", "chat-upload", "chat-accepted", "turn", "reply-upload", "reply-status", "reply", "replies", "sessions-upload", "sessions-stored", "realtime", "poke", "machine-enrol", "machine-credential", "machine-credentials", "machine-token", "resources-upload", "resources-stored", "new-session-status", "new-session", "update-status", "machine-update", "logs-upload", "logs-stored"].map((name) => [
       name,
       JSON.parse(readFileSync(new URL(`../${name}.schema.json`, import.meta.url), "utf8")),
     ]),
@@ -58,6 +58,8 @@ export const validators = Object.freeze({
   sessionsStored: ajv.compile(schemas["sessions-stored"]),
   realtime: ajv.compile(schemas.realtime),
   poke: ajv.compile(schemas.poke),
+  logsUpload: ajv.compile(schemas["logs-upload"]),
+  logsStored: ajv.compile(schemas["logs-stored"]),
   resourcesUpload: ajv.compile(schemas["resources-upload"]),
   resourcesStored: ajv.compile(schemas["resources-stored"]),
   machineEnrol: ajv.compile(schemas["machine-enrol"]),

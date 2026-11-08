@@ -8,7 +8,9 @@ mod wire;
 
 #[cfg(test)]
 pub(crate) use client::Asked;
-pub use client::{AccountFeatures, Cancellation, CloudAIClient, CloudAIConfig, FeatureChange};
+pub use client::{
+    AccountFeatures, Cancellation, CloudAIClient, CloudAIConfig, FeatureChange, LogLevel,
+};
 pub(crate) use client::{FeedHttp, FeedHttpReply};
 pub(crate) use context::{chat_text, feed_text, prompt_text, MAX_INSPECTION_BYTES};
 pub use context::{CaptureInput, CaptureMetadata, ContextBuilder};

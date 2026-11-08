@@ -493,6 +493,17 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    (before its `created` event) and, on a Sprite, held up 20 s. A first prompt asked for with
    it never reaches the machine with the request: rakumux.com writes it to the new session as
    a session message once it's `created`, typed in like any.
+   **Logs for the owner's viewer** (`feed/logs.rs`, `LogSync`; contract `contracts/feed/`, "Logs"):
+   while `GET /api/v1/features` says `logs: {level}` (rakumux.com decides per account, owners only
+   unless the deployment says otherwise) and this machine's name is confirmed, the service follows
+   the home's `logs/` files (`ptyd.log`, `api.log`, `status-service.log`, `tui.log`, `mcp.log`; never
+   `tui-input.log`), masks each line at or above that level (`chat_text`, the home directory as `~`,
+   at most 2048 characters) and uploads batches of up to 100 (`POST /api/v1/feed/logs`), scanning
+   every 15 s; the same line again within a minute is dropped. The daemon, API, TUI and MCP server
+   only write their files and never talk to rakumux.com. Where each file is read up to is kept in
+   `sensagent/status/logs.json` (0600); a file it has no record of is followed from its end, so
+   nothing from before it was asked goes up. `session_core::logfile` writes `tui.log` (panics, the
+   daemon connection lost) and `mcp.log` (the server failing).
    **Enrolled machines** (`rakumux_sensagent::enrolment`, contract `contracts/feed/`, "Enrolled
    machines"): a machine with no sign-in of its own (your Sprite) gets one from a signed-in
    machine of the account: `OwnerRequest::MachineEnrol {machine_id, name, wake_url}` →
@@ -1088,6 +1099,8 @@ accidents; they don't stop a hostile process running as the same user.
   history/<id>.log               command history written by shell/rakumux-command-hook.sh
   logs/ptyd.log                  daemon log (1 MiB, rotated; level RAKUMUX_PTYD_LOG)
   logs/api.log                   log of a detached rakumux-api (RAKUMUX_API_LOG=debug: every request)
+  logs/tui.log, logs/mcp.log     the TUI's and MCP server's warnings and errors (1 MiB, rotated):
+                                 `session_core::logfile`
   logs/tui-input.log             terminal events read and handled, with the app's state (session-mode keys
                                  not logged): the last 500 written on quit and on `kill -USR1 <tui pid>`,
                                  every one live with `--debug`; for terminal apps that send keys unusually

@@ -28,6 +28,7 @@ const FEED_REPLY_STATUS_PATH: &str = "/api/v1/feed/replies/status";
 const FEED_SESSIONS_PATH: &str = "/api/v1/feed/sessions";
 /// What this machine uses now, for rtop on rakumux.com.
 const FEED_RESOURCES_PATH: &str = "/api/v1/feed/resources";
+const FEED_LOGS_PATH: &str = "/api/v1/feed/logs";
 const FEED_NEW_SESSION_STATUS_PATH: &str = "/api/v1/feed/new-sessions/status";
 const FEED_UPDATE_STATUS_PATH: &str = "/api/v1/feed/updates/status";
 const FEED_REALTIME_PATH: &str = "/api/v1/feed/realtime";
@@ -60,6 +61,7 @@ pub struct CloudAIConfig {
     feed_reply_status: Url,
     feed_sessions: Url,
     feed_resources: Url,
+    feed_logs: Url,
     feed_new_session_status: Url,
     feed_update_status: Url,
     feed_attachments: Url,
@@ -84,11 +86,24 @@ const SIGNED_OUT_HEADER: &str = "x-rakumux-signed-out";
 /// The account's feature switches, as the destination reports them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AccountFeatures {
+    /// From what level this machine's warnings and errors are sent for the owner's log viewer
+    /// (`logs` on the wire); `None`: none are.
+    pub logs: Option<LogLevel>,
     /// AI session titles (`ai_session_summaries` on the wire): on unless the
     /// user turned them off on the website.
     pub ai_session_summaries: bool,
     /// The agent feed: off unless the user turned it on on the website.
     pub feed: bool,
+}
+
+/// How much of its logs a machine is asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
 }
 
 /// Feature switches to change for the signed-in account; `None` leaves one as it is.
@@ -107,6 +122,7 @@ impl FeatureChange {
     /// `features` with this change made.
     pub fn apply(&self, features: AccountFeatures) -> AccountFeatures {
         AccountFeatures {
+            logs: features.logs,
             ai_session_summaries: self
                 .ai_session_summaries
                 .unwrap_or(features.ai_session_summaries),
@@ -144,6 +160,8 @@ pub(crate) enum FeedHttp<'a> {
     Sessions(&'a [u8]),
     /// `POST /api/v1/feed/resources` with what this machine uses now (rtop).
     Resources(&'a [u8]),
+    /// `POST /api/v1/feed/logs` with this machine's warnings and errors.
+    Logs(&'a [u8]),
     /// `POST /api/v1/feed/new-sessions/status` with a new session's status.
     NewSessionStatus(&'a [u8]),
     /// `POST /api/v1/feed/updates/status` with an update's status.
@@ -219,6 +237,7 @@ impl CloudAIConfig {
             (path(FEED_REPLIES_PATH), path(FEED_REPLY_STATUS_PATH));
         let feed_sessions = path(FEED_SESSIONS_PATH);
         let feed_resources = path(FEED_RESOURCES_PATH);
+        let feed_logs = path(FEED_LOGS_PATH);
         let feed_new_session_status = path(FEED_NEW_SESSION_STATUS_PATH);
         let feed_update_status = path(FEED_UPDATE_STATUS_PATH);
         let feed_realtime = path(FEED_REALTIME_PATH);
@@ -238,6 +257,7 @@ impl CloudAIConfig {
             feed_reply_status,
             feed_sessions,
             feed_resources,
+            feed_logs,
             feed_new_session_status,
             feed_update_status,
             feed_attachments,
@@ -472,6 +492,7 @@ impl CloudAIClient {
             | FeedHttp::ReplyStatus(body)
             | FeedHttp::Sessions(body)
             | FeedHttp::Resources(body)
+            | FeedHttp::Logs(body)
             | FeedHttp::NewSessionStatus(body)
             | FeedHttp::UpdateStatus(body) => {
                 let url = match request {
@@ -480,6 +501,7 @@ impl CloudAIClient {
                     FeedHttp::ReplyStatus(_) => &self.config.feed_reply_status,
                     FeedHttp::Sessions(_) => &self.config.feed_sessions,
                     FeedHttp::Resources(_) => &self.config.feed_resources,
+                    FeedHttp::Logs(_) => &self.config.feed_logs,
                     FeedHttp::NewSessionStatus(_) => &self.config.feed_new_session_status,
                     FeedHttp::UpdateStatus(_) => &self.config.feed_update_status,
                     _ => &self.config.feed_entries,
@@ -707,6 +729,13 @@ fn decode_features(body: &[u8]) -> Result<AccountFeatures, CloudAIError> {
     struct Wire {
         version: u32,
         features: Features,
+        // Absent from a cloud that doesn't want logs; an unknown level is the same.
+        #[serde(default)]
+        logs: Option<serde_json::Value>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Logs {
+        level: LogLevel,
     }
     #[derive(serde::Deserialize)]
     struct Features {
@@ -724,6 +753,10 @@ fn decode_features(body: &[u8]) -> Result<AccountFeatures, CloudAIError> {
         return Err(CloudAIError::InvalidResponse);
     }
     Ok(AccountFeatures {
+        logs: wire
+            .logs
+            .and_then(|logs| serde_json::from_value::<Logs>(logs).ok())
+            .map(|logs| logs.level),
         ai_session_summaries: wire.features.ai_session_summaries,
         feed: wire.features.feed,
     })

@@ -244,6 +244,10 @@ pub fn serve(
         .with_titles(layout.status_dir().join("titles.json"))
         .with_titled_chats(layout.status_dir().join("titled-chats.json"))
         .with_uploads(uploads)
+        .with_log_files(
+            home.home.join("logs"),
+            layout.status_dir().join("logs.json"),
+        )
         .with_machine(machine);
     if let Some(tokens) = tokens {
         refresher = refresher.with_machine_tokens(tokens);
