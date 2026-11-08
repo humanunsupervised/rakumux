@@ -437,8 +437,20 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    line, at most 300 characters), only once the answer `accepts` `output`; as it changes the
    list, it goes with it, at most every 3 s, so rakumux.com shows what each agent is doing. A
    list that would pass the contract's 256 KiB goes without places and outputs. The list says
-   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents"]`, and `resources`
-   as below.
+   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents", "remote_update"]`,
+   and `resources` as below, and this Rakumux's version (`rakumux_version`).
+   **Releases and updates from rakumux.com** (`feed/updates.rs`, `UpdateSync`; contract
+   `contracts/feed/`, "Releases and updates"): each replies read may say the newest release
+   (`release`), which every feed page gives TUIs (`FeedPage.release`), so they offer it within a
+   feed read of its publication. On rakumux.com or in the app the user can ask this machine to
+   update: the read brings it (`updates`, `{id, version}`); the service marks the id handled
+   (`sensagent/status/updates.json`, 0600, so it installs at most once), reports `installing`,
+   and has the binary's updater (`service::Updater`, `account.rs`'s `MachineUpdater`) install that
+   version through `U`'s verified path (a binary installation only, else `unsupported`), restart
+   the server in place with the new `rakumux-ptyd` (sessions keep running) and the local API;
+   it reports `updated` (or `failed`: `install_failed`, `restart_failed`), then hands over to the
+   new release's service (`rakumux account restart-service`, hidden, detached). Open TUIs find
+   the install there and reload (or offer `Restart now`).
    **rtop on rakumux.com** (`feed/resources.rs`, `ResourceSync`; contract `contracts/feed/`,
    "Resources"): the list says `capabilities: ["resources"]` only while the daemon announces
    `resources` (read at each connect; an `unsupported` answer drops it too), so rakumux.com tells
@@ -1294,7 +1306,7 @@ and renames the session if a name comes back.
 
 `rakumux.sh` runs `shell/gwr/check-updates.sh` silently in the background (at most daily). The
 TUI checks for itself (`app/auto_update.rs`): every minute each window reads the home's
-`update_state.json`; once its `last_check` is a day old, one window asks `UpdateService::check`
+`update_state.json`; once its `last_check` is an hour old, one window asks `UpdateService::check`
 off the UI thread (the GitHub release, or the npm or Homebrew channel; a source build asks
 GitHub too, only to say a release is out; never a prerelease) and records a newer release
 there, where the other windows find it. A recorded release stays after a window installs it, so
@@ -1315,7 +1327,7 @@ a minute later, when its install finds every binary already at that version and 
 nothing. Unwritable or unsupported installs fail without changing the old bundle; the window
 says so once (`Couldn't update to X: …`; an unwritable one, as `install.sh` put in root's
 `/usr/local` before 0.1.43, names the installer, which moves it to `~/.local` when run again) and doesn't try that version (`failed_version`) again
-until the next daily check finds it. Installed, the window reloads through the new launcher
+until the next check finds it. Installed, the window reloads through the new launcher
 (stripping `--new-server`) at a safe moment: Rakumux mode, no dialog, half-typed filter
 or pending key, no terminal panel shell (a reload ends it), and no key, click, paste or focus
 for 60 s. Until then the footer says `Updated to X · reloads when idle (R now)`; `R` reloads at
@@ -1324,7 +1336,17 @@ or `U`'s) passes the hidden `--after-update` (`restart.rs`; never repeated by a 
 and the new UI, once connected, restarts a server of another version in place with its own
 `rakumux-ptyd` (`App::server_after_update`; only with `daemon.restart`, so sessions keep
 running), then the account service and the local API as `S` does; a server already on its
-version (another window's reload restarted it) is left alone. Otherwise (the
+version (another window's reload restarted it) is left alone. **The update modal**
+(`App::prompt_update`, the `U` dialog opened by itself, `UpgradeDialog::prompted`): in Rakumux
+mode with nothing else open, a newer release this window won't install by itself (the setting
+off, a failed install, npm, Homebrew) opens it with what's new (the release's GitHub notes,
+`UpdateService::release_notes`, Markdown) and `Update now` (installed, then the one restart) or
+`Later` (Esc too); a release automatic updates installed opens it as `Updated to X` with `Restart
+now` or `Later` (left open, it doesn't hold back the idle reload). `Later` is kept per version in
+`update_state.json` (`dismissed_version`, `dismissed_installed`), and the modal opens once per
+version in a run. A signed-in window also learns of a release from rakumux.com as it's published
+(`FeedPage.release`, component 10; `App::release_known` records it for the home's windows); every
+window checks GitHub hourly (`CHECK_EVERY_SECS`). Otherwise (the
 setting off, a failed install, npm, Homebrew, a source build) a newer release is told once per
 version (`notified_version`, shared by the windows), as a footer message, then as the footer's
 quiet line while it has nothing else to say: `Update X available · U to install`, `…: npm
