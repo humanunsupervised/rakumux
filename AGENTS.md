@@ -1753,12 +1753,15 @@ passes. Nothing there can be moved (`J`/`K` say so). Sub-group headers, ready's 
 shown) is amber like an unread reply's `●` but quieter (`format::read_period_style`: the amber
 faded 30% when read within the hour, 50% within the day, then muted), and ready's header has the
 last hour's. Under a row's name, its places
-(`components/session_list.rs::place_content`, `app/places.rs`): closed, one line, in bold, the
-repositories the session works in, comma-separated, by name (`format::session_repos`: its git
+(`components/session_list.rs::place_content`, `app/places.rs`): closed, one line, the
+repositories the session works in, each a label (bold, on a background of that repository's
+colour, a column apart; `format::RepoColors`, out of `Palette::repo_labels`: its name's own
+colour, else the next free one, worked out from every session's repositories in sorted order, so
+they differ while there are at most ten and every window and start agrees), by name (`format::session_repos`: its git
 context's `repo`, the `origin` remote's name, else the main checkout's folder name), each once:
 its folder's first, then the one it works in now, then its places', most recent first; no folder,
-worktree path or branch (outside any repository, the folder it works in, not bold); cut at its
-end where the age and mark above end, `▸` in the gutter left of it. `w`, `W` or a click or tap on
+worktree path or branch (outside any repository, the folder it works in, plain text); cut at its
+end, the last label that fits and `…` for any after it, where the age and mark above end, `▸` in the gutter left of it. `w`, `W` or a click or tap on
 the `▸` or the names (`Hit::PlacesToggle`) opens them under it (`▾`; closed by default, per
 window, not saved): each place a pair of lines two columns further in, a muted rule (`─`) above
 each: first where it works now (`PlaceRef::Current`: its git context's working tree, else its

@@ -65,6 +65,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // Tokyo Night text on its background everywhere, so nothing shows the
     // outer terminal's own colours.
     f.render_widget(Block::default().style(theme::palette().base()), area);
+    app.assign_repo_colors();
     let screen = app.screen();
     // Keep the mode bar visible while dialogs are open, including
     // short windows where the modal otherwise reaches the last row.
@@ -1628,7 +1629,7 @@ mod tests {
         assert!(list[docs].contains(" docs "), "{wide}");
         assert!(list[docs].starts_with("  ★ docs "), "{wide}");
         // Its repositories, the toggle in the gutter; no folder or branch.
-        assert!(list[docs + 1].starts_with("  ▸ repo"), "{wide}");
+        assert!(list[docs + 1].starts_with("  ▸  repo"), "{wide}");
         assert!(list[refactor + 2].contains("claude"), "{wide}");
         // No branch while the places are closed.
         assert!(!wide.contains("⎇ sessions-refactor"), "{wide}");
@@ -1682,7 +1683,7 @@ mod tests {
             .unwrap();
         assert!(list[main].starts_with("    main-work "), "{wide}");
         assert!(list[work].starts_with("    feature-work "), "{wide}");
-        assert!(list[work + 1].starts_with("  ▸ monorepo"), "{wide}");
+        assert!(list[work + 1].starts_with("  ▸  monorepo"), "{wide}");
     }
 
     #[test]
@@ -1809,7 +1810,7 @@ mod tests {
         );
         assert!(!wide.contains("worktree"), "{wide}");
         // Under a name, the repositories, then the program and state.
-        assert!(list[at("frontend") + 1].contains(", web"), "{wide}");
+        assert!(list[at("frontend") + 1].contains(" web"), "{wide}");
         assert!(list[at("frontend") + 2].contains("codex"), "{wide}");
         assert!(list[at("storybook") + 2].contains("dead"), "{wide}");
         assert!(list[at("server") + 2].contains("cargo"), "{wide}");

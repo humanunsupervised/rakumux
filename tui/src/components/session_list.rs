@@ -143,6 +143,9 @@ fn nesting(rows: &[ListRow]) -> Vec<usize> {
 /// gap so a long line doesn't run up against them.
 const RIGHT_COLUMN: usize = 10;
 
+/// Blank columns inside a repository's label, each side of its name.
+const LABEL_PADDING: usize = 1;
+
 /// Shown left of a session while it's dragged.
 const DRAG_MARK: &str = "▎";
 
@@ -623,9 +626,45 @@ fn git_spans(repo: String, branch: String, style: Style) -> Vec<Span<'static>> {
     spans
 }
 
+/// `repos` as labels, in at most `room` columns: each name on a background
+/// of its repository's colour, a column apart. Short of room the last one
+/// that fits is cut at its end and `…` stands for any after it.
+fn repo_labels(app: &App, repos: &[String], room: usize) -> Vec<Span<'static>> {
+    let p = theme::palette();
+    let colors = p.repo_labels();
+    let mut spans = Vec::new();
+    let mut left = room;
+    for repo in repos {
+        let gap = usize::from(!spans.is_empty());
+        let name_room = left.saturating_sub(gap + 2 * LABEL_PADDING);
+        // Not even a letter and its `…`.
+        if name_room < str_width(repo).min(2) {
+            if gap == 1 && left >= 2 {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled("…", Style::default().fg(p.text_muted)));
+            }
+            break;
+        }
+        if gap == 1 {
+            spans.push(Span::raw(" "));
+        }
+        let name = truncate(repo, name_room);
+        left = left.saturating_sub(gap + 2 * LABEL_PADDING + str_width(&name));
+        let color = colors[app.repo_colors.of(repo, colors.len())];
+        spans.push(Span::styled(
+            format!(" {name} "),
+            Style::default()
+                .fg(p.background)
+                .bg(color)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    spans
+}
+
 /// A session's place lines, under its name, after the gutter. First the
-/// repositories it works in, in bold and comma-separated
-/// ([`session_repos`]; outside any, the folder it works in now), with `▸` in
+/// repositories it works in, as coloured labels ([`repo_labels`],
+/// [`session_repos`]; outside any, the folder it works in now), with `▸` in
 /// the gutter. While they're open (`▾`), its places, each a pair of lines
 /// [`PLACE_INDENT`] further in with a rule above: where it works now first
 /// (its working tree, else its directory), then where else it changed
@@ -687,22 +726,20 @@ fn place_content(
         .folders
         .get(&session.scope)
         .and_then(|folder| folder.git.as_ref());
-    let repos = session_repos(session, folder_git).join(", ");
+    let repos = session_repos(session, folder_git);
     let current = crate::app::places::current_place(session);
     // Ending where the right column starts, as the app line under it does.
     let summary_room = width.saturating_sub(GUTTER + RIGHT_COLUMN);
-    let summary = if repos.is_empty() {
-        Span::styled(
+    let mut summary = vec![toggle];
+    if repos.is_empty() {
+        summary.push(Span::styled(
             truncate_start(&place_label(&session.scope, current), summary_room),
             label_style,
-        )
+        ));
     } else {
-        Span::styled(
-            truncate(&repos, summary_room),
-            label_style.add_modifier(Modifier::BOLD),
-        )
-    };
-    let mut lines = vec![vec![toggle, summary]];
+        summary.extend(repo_labels(app, &repos, summary_room));
+    }
+    let mut lines = vec![summary];
     let mut places = Vec::new();
     if !open {
         return PlaceLines {
@@ -1527,10 +1564,14 @@ mod tests {
     }
 
     #[test]
-    fn closed_places_are_the_repositories_alone_in_bold() {
+    fn closed_places_are_the_repositories_alone_as_labels() {
         use crate::app::testing::harness;
         let p = theme::palette();
-        let h = harness(vec![]);
+        let mut h = harness(vec![]);
+        h.app.repo_colors = crate::components::format::RepoColors::assign(
+            ["focal-md".to_string(), "other".to_string()],
+            p.repo_labels().len(),
+        );
         // Working in `focal-md`, having changed files in `other` too.
         let mut session =
             with_places(&[("/repo", "main", 5, true), ("/srv/other", "dev", 300, true)]);
@@ -1546,20 +1587,44 @@ mod tests {
             let PlaceLines { lines, places, .. } =
                 place_content(&h.app, &session, 40, selected, None, 1000);
             // No folder or worktree, no branch: the toggle and the names.
-            assert_eq!(text(&lines), ["▸ focal-md, other"]);
+            assert_eq!(text(&lines), ["▸  focal-md   other "]);
             assert!(places.is_empty());
             assert_eq!(lines[0][0].style.fg, Some(p.accent_primary));
-            assert!(lines[0][1].style.add_modifier.contains(Modifier::BOLD));
+            // Each on a background of its own, the column between them bare.
+            let (first, gap, second) = (&lines[0][1], &lines[0][2], &lines[0][3]);
+            assert_eq!(gap.style, Style::default());
+            for label in [first, second] {
+                assert!(label.style.add_modifier.contains(Modifier::BOLD));
+                assert_eq!(label.style.fg, Some(p.background));
+                assert!(p.repo_labels().contains(&label.style.bg.unwrap()));
+            }
+            assert_ne!(first.style.bg, second.style.bg);
         }
-        // Cut at their end, never wrapped, where the right column (the age and mark above) starts.
-        let lines = place_content(&h.app, &session, 24, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸ focal-md, o…"]);
+        // The same repository is the same colour in any session.
+        let mut alone = with_places(&[]);
+        named(&mut alone.git, "other");
+        let lines_alone = place_content(&h.app, &alone, 40, false, None, 1000).lines;
+        let lines = place_content(&h.app, &session, 40, false, None, 1000).lines;
+        assert_eq!(lines_alone[0][1].style.bg, lines[0][3].style.bg);
+        // Cut at their end, never wrapped, where the right column (the age
+        // and mark above) starts: the last that fits, then `…` for the rest.
+        let lines = place_content(&h.app, &session, 26, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["▸  focal-md  …"]);
+        let lines = place_content(&h.app, &session, 18, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["▸  foc… "]);
+        for width in 0..50 {
+            let lines = place_content(&h.app, &session, width, false, None, 1000).lines;
+            let room = width.saturating_sub(GUTTER + RIGHT_COLUMN);
+            let labels: usize = lines[0][1..].iter().map(|span| span.width()).sum();
+            assert!(labels <= room, "{width}: {:?}", text(&lines));
+        }
         // Outside any repository: the folder it works in, not bold.
         let mut plain = crate::app::testing::view("B", "b", 0);
         plain.cwd = "/repo/notes".into();
         let lines = place_content(&h.app, &plain, 40, false, None, 1000).lines;
         assert_eq!(text(&lines), ["▸ notes"]);
         assert!(!lines[0][1].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(lines[0][1].style.bg, None);
         // A session row is its name, its repositories and its app.
         assert_eq!(
             row_height_in(&h.app, &ListRow::Session(&session), 40, 1000),
@@ -1622,7 +1687,7 @@ mod tests {
         assert_eq!(
             text(&lines),
             [
-                "▾ repo".to_string(),
+                "▾  repo ".to_string(),
                 rule(36),
                 "    repo".into(),
                 branch("⎇ main", 28, "5m"),
@@ -1677,7 +1742,7 @@ mod tests {
         assert_eq!(
             text(&lines),
             [
-                "▾ repo".to_string(),
+                "▾  r… ".to_string(),
                 rule(12),
                 "    repo".into(),
                 branch("⎇ main", 4, "5m"),

@@ -407,6 +407,8 @@ pub struct App {
     pub hovered_place: Option<(usize, places::PlaceRef)>,
     /// Sessions whose places are open under their row (`places`).
     pub places_open: HashSet<SessionId>,
+    /// Each repository's label colour in the list, as of the last frame.
+    pub repo_colors: crate::components::format::RepoColors,
     pub mode: AppMode,
     /// Whole terminal area (kept current by the event loop and `draw`).
     pub area: Rect,
@@ -534,6 +536,7 @@ impl App {
             hovered_row: None,
             hovered_place: None,
             places_open: HashSet::new(),
+            repo_colors: Default::default(),
             mode: AppMode::Normal,
             area: Rect::new(0, 0, 80, 24),
             hits: Vec::new(),

@@ -61,6 +61,24 @@ pub struct Palette {
 }
 
 impl Palette {
+    /// The colours a repository's label can have in the session list
+    /// ([`crate::components::format::RepoColors`]), far apart in hue, each
+    /// with [`Self::background`] as its text.
+    pub fn repo_labels(&self) -> [Color; 10] {
+        [
+            self.label_blue,
+            self.accent_green,
+            self.accent_orange,
+            self.label_violet,
+            self.label_teal,
+            self.accent_pink,
+            self.accent_gold,
+            self.label_orchid,
+            self.label_cyan,
+            self.label_stone,
+        ]
+    }
+
     /// Text on the app background: what every area starts from, so text
     /// and cells without colours of their own never show the outer
     /// terminal's defaults.
@@ -602,6 +620,21 @@ mod tests {
             Color::Rgb(0x4f, 0xa8, 0xff),
             "Kimi's brand blue"
         );
+    }
+
+    #[test]
+    fn repository_labels_differ_and_their_text_is_readable() {
+        for p in [
+            Theme::tokyo_night().palette,
+            Theme::basic(ColorSupport::Ansi256).palette,
+        ] {
+            let labels = p.repo_labels();
+            for (i, label) in labels.iter().enumerate() {
+                assert!(!labels[i + 1..].contains(label), "{label:?}");
+                let contrast = (luminance(*label) + 0.05) / (luminance(p.background) + 0.05);
+                assert!(contrast >= 4.5, "{label:?}: {contrast}");
+            }
+        }
     }
 
     #[test]

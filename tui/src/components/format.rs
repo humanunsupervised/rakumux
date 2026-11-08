@@ -1,5 +1,6 @@
 //! Presentation helpers shared by the session list, tab bar and detail.
 
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use ratatui::style::{Color, Modifier, Style};
@@ -55,6 +56,52 @@ pub fn session_repos(session: &SessionView, folder: Option<&GitInfo>) -> Vec<Str
         }
     }
     repos
+}
+
+/// Which of the palette's label colours each repository has in the list:
+/// its name's own colour, or the next free one when another repository
+/// took that, so repositories only share a colour once there are more of
+/// them than colours. Worked out from the names alone, in sorted order, so
+/// every window and every start agrees.
+#[derive(Debug, Default)]
+pub struct RepoColors(HashMap<String, usize>);
+
+impl RepoColors {
+    /// The colours of `repos`, out of `count`.
+    pub fn assign(repos: impl IntoIterator<Item = String>, count: usize) -> Self {
+        let names: BTreeSet<String> = repos.into_iter().map(|r| r.to_lowercase()).collect();
+        let mut taken = vec![false; count];
+        let mut colors = HashMap::with_capacity(names.len());
+        for name in names {
+            let own = own_color(&name, count);
+            let free = (0..count)
+                .map(|step| (own + step) % count)
+                .find(|color| !taken[*color]);
+            let color = free.unwrap_or(own);
+            if let Some(slot) = taken.get_mut(color) {
+                *slot = true;
+            }
+            colors.insert(name, color);
+        }
+        RepoColors(colors)
+    }
+
+    /// `repo`'s colour, out of `count`.
+    pub fn of(&self, repo: &str, count: usize) -> usize {
+        let name = repo.to_lowercase();
+        self.0
+            .get(&name)
+            .copied()
+            .unwrap_or_else(|| own_color(&name, count))
+    }
+}
+
+/// The colour `name` asks for (FNV-1a, the same in every release).
+fn own_color(name: &str, count: usize) -> usize {
+    let hash = name.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    usize::try_from(hash % count.max(1) as u64).unwrap_or(0)
 }
 
 /// Unix seconds now.
@@ -393,6 +440,25 @@ mod tests {
     use super::*;
     use crate::app::testing::view;
     use session_core::model::Reported;
+
+    #[test]
+    fn repositories_get_colours_of_their_own_while_there_are_enough() {
+        let names = |n: usize| (0..n).map(|i| format!("repo-{i}"));
+        let colors = RepoColors::assign(names(10), 10);
+        let used: BTreeSet<usize> = names(10).map(|name| colors.of(&name, 10)).collect();
+        assert_eq!(used.len(), 10, "ten repositories, ten colours");
+        // Whatever order they're met in, whatever the case.
+        let again = RepoColors::assign(names(10).rev(), 10);
+        for name in names(10) {
+            assert_eq!(colors.of(&name, 10), again.of(&name.to_uppercase(), 10));
+        }
+        // More repositories than colours still get one each.
+        let many = RepoColors::assign(names(25), 10);
+        assert!(names(25).all(|name| many.of(&name, 10) < 10));
+        // One not assigned yet asks for its own.
+        let none = RepoColors::default();
+        assert_eq!(none.of("x", 10), own_color("x", 10));
+    }
 
     #[test]
     fn relative_times() {

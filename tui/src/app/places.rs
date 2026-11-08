@@ -15,6 +15,7 @@ use session_core::model::{SessionPlace, SessionView};
 use std::path::{Path, PathBuf};
 
 use super::App;
+use crate::components::format::{session_repos, RepoColors};
 use crate::layout::SessionLayout;
 
 /// One of a session row's places, as the list shows them: the current one
@@ -49,6 +50,18 @@ pub fn listed_places(session: &SessionView) -> impl Iterator<Item = &SessionPlac
 }
 
 impl App {
+    /// The repositories of every session, shown or filtered out, and the
+    /// colours of their labels: moving between tabs and filters changes
+    /// none of them.
+    pub fn assign_repo_colors(&mut self) {
+        let repos = self.list.sessions().iter().flat_map(|session| {
+            let folder = self.folders.get(&session.scope);
+            session_repos(session, folder.and_then(|folder| folder.git.as_ref()))
+        });
+        let count = crate::theme::palette().repo_labels().len();
+        self.repo_colors = RepoColors::assign(repos, count);
+    }
+
     /// Whether the session's places are open under its row.
     pub fn places_open(&self, id: &SessionId) -> bool {
         self.places_open.contains(id)
