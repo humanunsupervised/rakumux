@@ -21,7 +21,7 @@ set -euo pipefail
 
 REPO="humanunsupervised/rakumux"
 # Release signing keys, from install/release-keys.pub (release-keys.sh sync).
-RELEASE_KEYS="RWSbAhedaBF6C8DldJ7V1E44o4xiwGcF5k8uNDRmH0+k4drHtANpaq2E"
+RELEASE_KEYS="RWSbAhedaBF6C8DldJ7V1E44o4xiwGcF5k8uNDRmH0+k4drHtANpaq2E RWRRcIUOrPc6Gvdn4Iads7bgkPZVPZrugj6rvo9CMxi6lX+5RBvWWTlD"
 # The last release made before releases were signed.
 LAST_UNSIGNED="0.1.40"
 
