@@ -907,7 +907,8 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   `question_gone`), that `answers` fit its questions in order, by their text, with options they
   offer, one for a question that takes one (else `invalid_argument`; a call whose questions the
   driver can't answer has none), that its screen shows that question's dialog (its text and its
-  options in order, where the agent draws them) and that the agent asks something (lifecycle
+  options in order, where the agent draws them; Claude Code's, taller than the terminal, by what's
+  left of its text and its options, and only when just one of the questions fits that) and that the agent asks something (lifecycle
   `blocked`, or detection reading its screen so: else `question_gone`), and that nobody typed
   there within `quiet_ms` (else `session_in_use`). It then works the dialog a step at a time
   (`host::TerminalHost::send_keys_when_quiet`, one key or the text per write), each planned from

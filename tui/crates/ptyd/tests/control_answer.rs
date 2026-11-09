@@ -95,6 +95,8 @@ struct Stand {
     /// The keys it takes before it stops answering any.
     frozen_after: Option<usize>,
     steps: usize,
+    /// Taller than its terminal: the page's top is above the screen.
+    cut: bool,
 }
 
 impl Stand {
@@ -107,6 +109,7 @@ impl Stand {
             cursor: vec![0; n + 1],
             typed: vec![String::new(); n],
             chosen: vec![None; n],
+            cut: false,
             closed: false,
             frozen_after: None,
             steps: 0,
@@ -124,7 +127,32 @@ impl Stand {
         self.asked.len() > 1 || self.asked[0].multi
     }
 
+    /// What the screen shows of the page.
     fn render(&self) -> String {
+        let page = self.page_text();
+        if !self.cut || self.closed {
+            return page;
+        }
+        let lines: Vec<&str> = page.lines().collect();
+        if self.page == self.asked.len() {
+            // From the second answer on, as a review too tall to fit.
+            let from = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| line.starts_with(" ● "))
+                .nth(1)
+                .map_or(0, |(at, _)| at);
+            return format!("[blocked]\n{}", lines[from..].join("\n"));
+        }
+        // From its first option on: the rule, the tabs and the question are gone.
+        let from = lines
+            .iter()
+            .position(|line| line.contains(" 1. "))
+            .unwrap_or(0);
+        format!("{}\n[blocked]", lines[from..].join("\n"))
+    }
+
+    fn page_text(&self) -> String {
         if self.closed {
             return "[working]\n✻ Thinking…\n".into();
         }
@@ -511,6 +539,30 @@ fn three_questions_are_answered_through_the_dialog_and_its_result_read() {
     assert!(
         !detail.contains("parrot") && !detail.contains("Mango"),
         "{detail}"
+    );
+}
+
+#[test]
+fn a_dialog_taller_than_its_terminal_is_answered_question_by_question() {
+    let claude = Claude::asking(vec![COLOUR, FRUITS, PET], None);
+    claude.stand.lock().unwrap().cut = true;
+    std::thread::sleep(Duration::from_millis(100));
+    let answered = claude.answer(
+        "toolu_1",
+        vec![
+            answer(COLOUR.question, &["Blue"], None),
+            answer(FRUITS.question, &["Cherry", "Apple"], Some("Mango")),
+            answer(PET.question, &[], Some("A parrot")),
+        ],
+    );
+    assert_eq!(answered, Response::Ok);
+    assert_eq!(
+        claude.stand.lock().unwrap().answers(),
+        json!({
+            "Which colour do you prefer?": "Blue",
+            "Which fruits do you like?": "Apple, Cherry, Mango",
+            "Which pet would you keep?": "A parrot",
+        })
     );
 }
 

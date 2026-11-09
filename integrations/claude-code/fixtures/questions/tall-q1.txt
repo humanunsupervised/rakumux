@@ -1,0 +1,24 @@
+│ the privacy notes in AGENTS.md all say so. A custom
+│ script ends that rule, so a compromised rakumux.com or a
+│ stolen web sign-in could run shell commands on the
+│ machine. How should it work?
+
+❯ 1. Machine opts in (Recommended)
+     The Custom script option appears only for machines
+     where the user turned it on locally. A rakumux.com
+     compromise can't reach any other machine. Adds one
+     local setting.
+  2. On for every machine
+     Every signed-in account can send a script to any of
+     its machines once they update. Matches the 'no
+     switches' approach, but removes the boundary for all
+     users.
+  3. Leave it out for now
+     Ship the required agent list without Custom script,
+     and keep the 'never a command' rule as it is.
+  4. Type something.
+───────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to
+cancel

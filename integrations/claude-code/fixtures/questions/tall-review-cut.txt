@@ -1,0 +1,20 @@
+   → Machine opts in (Recommended)
+ │ ● Custom script and swipe-to-Delete
+ │   both need the machine to do
+ │   something new, and rakumux.com has
+ │   no way to ask a machine to delete a
+ │   session today. That needs a
+ │   contract change and Rust work in
+ │   the public rakumux repo, plus a
+ │   release. It also needs new SQL
+ │   migrations, which I would write but
+ │   not run. You asked for this work
+ │   in rakumux-cloud, so how far should
+ │   I go?
+   → Add a public branch too
+   (Recommended)
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel

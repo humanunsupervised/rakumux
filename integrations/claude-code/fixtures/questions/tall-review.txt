@@ -1,0 +1,24 @@
+Review your answers
+
+ │ ● Custom script: today rakumux.com can never send a
+ │   command to a machine. A new-session request names only
+ │   an agent from a fixed list, and the contract, the
+ │   Rust service and the privacy notes in AGENTS.md all
+ │   say so. A custom script ends that rule, so a
+ │   compromised rakumux.com or a stolen web sign-in could
+ │   run shell commands on the machine. How should it work?
+   → Machine opts in (Recommended)
+ │ ● Custom script and swipe-to-Delete both need the
+ │   machine to do something new, and rakumux.com has no
+ │   way to ask a machine to delete a session today. That
+ │   needs a contract change and Rust work in the public
+ │   rakumux repo, plus a release. It also needs new SQL
+ │   migrations, which I would write but not run. You asked
+ │   for this work in rakumux-cloud, so how far should I
+ │   go?
+   → Add a public branch too (Recommended)
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel

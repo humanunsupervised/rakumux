@@ -1,0 +1,24 @@
+│ Custom script and swipe-to-Delete both need the machine
+│ to do something new, and rakumux.com has no way to ask a
+│ machine to delete a session today. That needs a contract
+│ change and Rust work in the public rakumux repo, plus a
+│ release. It also needs new SQL migrations, which I would
+│ write but not run. You asked for this work in
+│ rakumux-cloud, so how far should I go?
+
+❯ 1. Add a public branch too (Recommended)
+     Do the cloud work on the rakumux-cloud branch, and the
+     contract and machine side on a matching branch in
+     public rakumux, tested end to end. Nothing is pushed
+     or released.
+  2. rakumux-cloud only
+     Build the screens and routes here, hidden behind a
+     machine capability no release advertises yet.
+     Swipe-to-Delete and scripts stay invisible, and can't
+     be tested end to end, until the machine side exists.
+  3. Type something.
+───────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to
+cancel

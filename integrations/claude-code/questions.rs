@@ -20,6 +20,11 @@
 //!   `Ready to submit your answers?` over `1. Submit answers` and
 //!   `2. Cancel`: `enter` on the first submits.
 //!
+//! A dialog taller than the terminal (long questions, a phone's screen) has
+//! its top cut off: the rule, the tab bar and the start of the question, or
+//! on the review page its title and first answers. Such a page is read from
+//! what's left, the options all there or none of it. Captured on 2.1.319.
+//!
 //! Every step is planned from the screen just read, and moves the dialog one
 //! row, box, text or page on; the driver stops when the screen shows anything
 //! it doesn't expect: another question, an option it doesn't know, a free
@@ -155,17 +160,21 @@ impl Row {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum View {
     /// A question's page: its text (squashed), its rows down to `Chat about
-    /// this`, and which row the cursor is on.
+    /// this`, and which row the cursor is on. `cut`: the page's top is above
+    /// the screen, so `question` is only the end of its text, maybe nothing.
     Question {
         question: String,
         rows: Vec<Row>,
         cursor: Option<usize>,
+        cut: bool,
     },
     /// The review page: each question (squashed) with its answer (squashed),
-    /// and whether the cursor is on `Submit answers` (else `Cancel`).
+    /// and whether the cursor is on `Submit answers` (else `Cancel`). `cut`:
+    /// the page's top is above the screen, so these are its last answers.
     Review {
         answers: Vec<(String, String)>,
         on_submit: bool,
+        cut: bool,
     },
     /// No dialog Rakumux reads.
     Gone,
@@ -218,23 +227,27 @@ impl View {
     }
 
     /// A question's page: up from `Chat about this`, the rule over it, the
-    /// rule over the dialog, its tab bar, the question and its rows.
+    /// rule over the dialog, its tab bar, the question and its rows; with
+    /// the rule over the dialog above the screen, what's left of them.
     fn question(lines: &[&str]) -> Option<Self> {
         let chat = lines.iter().rposition(|line| {
             numbered(line).is_some_and(|(_, _, _, label)| squash(&label) == CHAT)
         })?;
         let under = lines[..chat].iter().rposition(|line| is_rule(line))?;
-        let top = lines[..under].iter().rposition(|line| is_rule(line))?;
-        let mut body = lines[top + 1..under]
-            .iter()
-            .skip_while(|line| line.trim().is_empty());
-        let tabs = body.next()?;
-        if !tabs.contains(['☐', '☒']) {
+        let top = lines[..under].iter().rposition(|line| is_rule(line));
+        let cut = top.is_none();
+        let shown = &lines[top.map_or(0, |top| top + 1)..under];
+        let first = shown.iter().position(|line| !line.trim().is_empty())?;
+        let tabbed = shown[first].contains(['☐', '☒']);
+        if !tabbed && !cut {
             return None;
         }
         // A tab bar too long for a narrow screen wraps: the question starts
-        // after the blank line under it.
-        let body = body.skip_while(|line| !line.trim().is_empty());
+        // after the blank line under it. Cut, it may be gone already.
+        let body = shown[first..]
+            .iter()
+            .skip(usize::from(tabbed))
+            .skip_while(|line| tabbed && !line.trim().is_empty());
         let mut question = String::new();
         let mut rows: Vec<Row> = Vec::new();
         let mut cursor = None;
@@ -277,6 +290,7 @@ impl View {
             question: squash(&question),
             rows,
             cursor,
+            cut,
         })
     }
 
@@ -289,7 +303,7 @@ impl View {
             .rposition(|line| line.trim() == "Ready to submit your answers?")?;
         let title = lines[..ready]
             .iter()
-            .rposition(|line| line.trim() == "Review your answers")?;
+            .rposition(|line| line.trim() == "Review your answers");
         let options: Vec<(bool, usize, String)> = lines[ready + 1..]
             .iter()
             .filter(|line| !line.trim().is_empty())
@@ -304,7 +318,7 @@ impl View {
         let mut answers: Vec<(String, String)> = Vec::new();
         // Whether the lines read go to the last question's answer yet.
         let mut answering = false;
-        for line in &lines[title + 1..ready] {
+        for line in &lines[title.map_or(0, |title| title + 1)..ready] {
             let text = line.trim_start().trim_start_matches('│').trim();
             if let Some(question) = text.strip_prefix('●') {
                 answers.push((squash(question), String::new()));
@@ -326,6 +340,7 @@ impl View {
         Some(View::Review {
             answers,
             on_submit: *submit,
+            cut: title.is_none(),
         })
     }
 }
@@ -354,9 +369,12 @@ impl Dialog {
         }
     }
 
-    /// The question a page shows, when its rows are that question's.
-    fn which(&self, question: &str, rows: &[Row]) -> Option<usize> {
-        self.questions.iter().position(|asked| {
+    /// The question a page shows, when its rows are that question's. A page
+    /// cut at the top shows only the end of its text, so two questions may
+    /// fit it: then it's neither, never the wrong one.
+    fn which(&self, question: &str, rows: &[Row], cut: bool) -> Option<usize> {
+        let mut fits = (0..self.questions.len()).filter(|index| {
+            let asked = &self.questions[*index];
             let options = asked.options.len();
             let numbered = rows
                 .iter()
@@ -364,7 +382,8 @@ impl Dialog {
                 .count();
             // Its options, the free answer, `Chat about this`; with boxes
             // and `Next` for a question that takes several.
-            squash(&asked.question) == question
+            let text = squash(&asked.question);
+            (text == question || (cut && text.ends_with(question)))
                 && numbered == options + 2
                 && rows.len() == numbered + usize::from(asked.multi_select)
                 && asked
@@ -375,29 +394,43 @@ impl Dialog {
                 && rows[..options + 1]
                     .iter()
                     .all(|row| row.checked().is_some() == asked.multi_select)
-        })
+        });
+        let first = fits.next()?;
+        (!cut || fits.next().is_none()).then_some(first)
     }
 
-    /// Whether the review page's answers are the ones given, question by question.
-    fn reviewed(&self, shown: &[(String, String)]) -> bool {
-        shown.len() == self.questions.len()
-            && self.questions.iter().zip(&self.answers).zip(shown).all(
-                |((asked, answer), (question, said))| {
-                    *question == squash(&asked.question)
-                        && answer
-                            .choices
-                            .iter()
-                            .map(|choice| squash(&asked.options[*choice]))
-                            .chain(answer.text.iter().map(|text| squash(text)))
-                            .all(|piece| said.contains(&piece))
-                },
-            )
+    /// Whether the review page's answers are the ones given, question by
+    /// question; `cut`, the last ones, which is what's left to read of them.
+    fn reviewed(&self, shown: &[(String, String)], cut: bool) -> bool {
+        let skipped = self.questions.len().checked_sub(shown.len());
+        let Some(skipped) = skipped.filter(|skipped| *skipped == 0 || (cut && !shown.is_empty()))
+        else {
+            return false;
+        };
+        self.questions[skipped..]
+            .iter()
+            .zip(&self.answers[skipped..])
+            .zip(shown)
+            .all(|((asked, answer), (question, said))| {
+                *question == squash(&asked.question)
+                    && answer
+                        .choices
+                        .iter()
+                        .map(|choice| squash(&asked.options[*choice]))
+                        .chain(answer.text.iter().map(|text| squash(text)))
+                        .all(|piece| said.contains(&piece))
+            })
     }
 
     pub(super) fn shown(&self, screen: &str) -> bool {
         match View::read(screen) {
-            View::Question { question, rows, .. } => self.which(&question, &rows).is_some(),
-            View::Review { answers, .. } => self.reviewed(&answers),
+            View::Question {
+                question,
+                rows,
+                cut,
+                ..
+            } => self.which(&question, &rows, cut).is_some(),
+            View::Review { answers, cut, .. } => self.reviewed(&answers, cut),
             View::Gone => false,
         }
     }
@@ -416,7 +449,12 @@ impl Dialog {
         }
         if let Some(left) = self.leaving.take() {
             let stayed = match &view {
-                View::Question { question, rows, .. } => self.which(question, rows) == Some(left),
+                View::Question {
+                    question,
+                    rows,
+                    cut,
+                    ..
+                } => self.which(question, rows, *cut) == Some(left),
                 _ => false,
             };
             if stayed {
@@ -426,8 +464,12 @@ impl Dialog {
         }
         match view {
             View::Gone => Next::Stop("no question dialog on screen"),
-            View::Review { answers, on_submit } => {
-                if self.completed < self.questions.len() || !self.reviewed(&answers) {
+            View::Review {
+                answers,
+                on_submit,
+                cut,
+            } => {
+                if self.completed < self.questions.len() || !self.reviewed(&answers, cut) {
                     Next::Stop("the review shows other answers")
                 } else if !on_submit {
                     Next::Keys(vec!["up"])
@@ -440,8 +482,9 @@ impl Dialog {
                 question,
                 rows,
                 cursor,
+                cut,
             } => {
-                let Some(shown) = self.which(&question, &rows) else {
+                let Some(shown) = self.which(&question, &rows, cut) else {
                     return Next::Stop("another dialog is on screen");
                 };
                 if shown < self.completed {
@@ -620,6 +663,7 @@ mod tests {
             question,
             rows,
             cursor,
+            cut: false,
         } = View::read(&screen("one-question"))
         else {
             panic!("not a question page");
@@ -806,6 +850,82 @@ mod tests {
             dialog.next(&screen("long-review")),
             Next::Keys(vec!["enter"])
         );
+    }
+
+    /// The two questions of the dialog captured taller than its terminal.
+    fn tall() -> Vec<Question> {
+        vec![
+            question(
+                "Custom script: today rakumux.com can never send a command to a machine. A new-session request names only an agent from a fixed list, and the contract, the Rust service and the privacy notes in AGENTS.md all say so. A custom script ends that rule, so a compromised rakumux.com or a stolen web sign-in could run shell commands on the machine. How should it work?",
+                "Script risk",
+                &["Machine opts in (Recommended)", "On for every machine", "Leave it out for now"],
+                false,
+            ),
+            question(
+                "Custom script and swipe-to-Delete both need the machine to do something new, and rakumux.com has no way to ask a machine to delete a session today. That needs a contract change and Rust work in the public rakumux repo, plus a release. It also needs new SQL migrations, which I would write but not run. You asked for this work in rakumux-cloud, so how far should I go?",
+                "Repo scope",
+                &["Add a public branch too (Recommended)", "rakumux-cloud only"],
+                false,
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_dialog_taller_than_the_terminal_is_answered_question_by_question() {
+        let mut dialog = Dialog::new(tall(), vec![answer(&[0], None), answer(&[0], None)]);
+        assert!(dialog.shown(&screen("tall-q1")));
+        assert_eq!(dialog.next(&screen("tall-q1")), Next::Keys(vec!["enter"]));
+        assert_eq!(dialog.next(&screen("tall-q2")), Next::Keys(vec!["enter"]));
+        assert_eq!(
+            dialog.next(&screen("tall-review")),
+            Next::Keys(vec!["enter"])
+        );
+        assert_eq!(dialog.next(&screen("working")), Next::Done);
+    }
+
+    #[test]
+    fn a_cut_page_goes_to_the_option_given_on_the_question_it_shows() {
+        let mut dialog = Dialog::new(tall(), vec![answer(&[1], None), answer(&[0], None)]);
+        assert_eq!(dialog.next(&screen("tall-q1")), Next::Keys(vec!["down"]));
+        // The second question's page, due only once the first is answered.
+        let mut early = Dialog::new(tall(), vec![answer(&[0], None), answer(&[0], None)]);
+        assert_eq!(early.next(&screen("tall-q2")), Next::Keys(vec!["left"]));
+    }
+
+    #[test]
+    fn a_cut_review_is_checked_by_the_answers_left_on_it() {
+        let mut dialog = Dialog::new(tall(), vec![answer(&[0], None), answer(&[0], None)]);
+        dialog.completed = 2;
+        assert_eq!(
+            dialog.next(&screen("tall-review-cut")),
+            Next::Keys(vec!["enter"])
+        );
+        let mut other = Dialog::new(tall(), vec![answer(&[0], None), answer(&[1], None)]);
+        other.completed = 2;
+        assert_eq!(
+            other.next(&screen("tall-review-cut")),
+            Next::Stop("the review shows other answers")
+        );
+    }
+
+    #[test]
+    fn a_cut_page_two_questions_could_be_is_neither() {
+        let same = |text: &str| question(text, "Q", &["Yes", "No"], false);
+        let page = "  (a line of the question)\n\n❯ 1. Yes\n  2. No\n  3. Type something.\n──────────\n  4. Chat about this\n";
+        let page = page.replace("  (a line of the question)\n", "");
+        let dialog = Dialog::new(
+            vec![same("First?"), same("Second?")],
+            vec![answer(&[0], None), answer(&[0], None)],
+        );
+        assert!(!dialog.shown(&page));
+        let one = Dialog::new(vec![same("First?")], vec![answer(&[0], None)]);
+        assert!(one.shown(&page));
+    }
+
+    #[test]
+    fn a_page_with_its_options_cut_off_is_not_answered() {
+        let dialog = Dialog::new(tall(), vec![answer(&[0], None), answer(&[0], None)]);
+        assert!(!dialog.shown(&screen("tall-options-cut")));
     }
 
     #[test]
