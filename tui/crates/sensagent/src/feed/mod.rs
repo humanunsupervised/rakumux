@@ -6,7 +6,8 @@
 //! the files attached to them saved for the agent (`uploads`); the
 //! machine's session list, for the website's Status and Folder (`sessions`);
 //! while someone has rtop open there, what the machine uses (`resources`);
-//! and the new sessions asked of it there (`new_sessions`).
+//! and the new sessions asked of it there (`new_sessions`) and the deletions
+//! (`session_deletions`).
 //!
 //! The cache and the upload queue are memory only, gone when the status
 //! service stops; where each chat's upload is up to is kept in the status
@@ -23,6 +24,7 @@ mod new_sessions;
 mod poke;
 mod replies;
 mod resources;
+mod session_deletions;
 mod sessions;
 mod sync;
 mod turn;
@@ -45,6 +47,7 @@ pub(crate) use poke::{listen, PokeEvent, PokeSync};
 pub(crate) use replies::{Fetch, Fetched, ReplySync, ReplyWork, TYPING_QUIET};
 pub use replies::{ReplyWrite, ReplyWriteStatus};
 pub(crate) use resources::{ResourceSync, ResourceWork};
+pub(crate) use session_deletions::{DeletionWork, SessionDeletionSync, DELETE_SESSIONS};
 pub(crate) use sessions::is_shell;
 pub(crate) use sessions::SessionSync;
 pub use sync::machine_name;

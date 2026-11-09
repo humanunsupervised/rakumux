@@ -612,6 +612,58 @@
         }
       ]
     },
+    "sessionDeletionStatus": {
+      "description": "`pending` until its machine deletes the session (`deleted`) or can't (`failed`); `expired` when it stayed pending 10 minutes.",
+      "type": "string",
+      "enum": ["pending", "deleted", "failed", "expired"]
+    },
+    "sessionDeletionFailure": {
+      "description": "Why a machine didn't delete a session asked of it on rakumux.com: it doesn't list that session now (`not_listed`: gone already, or private) or its daemon couldn't delete it (`refused`). Readers take a value they don't know as a failure without a reason.",
+      "type": "string",
+      "enum": ["not_listed", "refused"]
+    },
+    "sessionDeletion": {
+      "description": "A session asked on rakumux.com to be deleted, for the machine that lists it. It names the session by its id, never a path or a command. The machine deletes only a session it lists to rakumux.com, into its session history, and reports it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "machine", "session", "status", "created_at", "status_at"],
+      "properties": {
+        "id": {
+          "description": "The ULID the page made for the request: a machine carries out at most one deletion for an id.",
+          "$ref": "#/$defs/ulid"
+        },
+        "machine": {
+          "description": "The machine the session is on, as its session list names it.",
+          "$ref": "#/$defs/machine"
+        },
+        "session": {
+          "description": "The session to delete, by the id the machine's session list gives it.",
+          "$ref": "#/$defs/ulid"
+        },
+        "status": { "$ref": "#/$defs/sessionDeletionStatus" },
+        "failure": { "$ref": "#/$defs/sessionDeletionFailure" },
+        "created_at": { "$ref": "#/$defs/timestampMs" },
+        "status_at": {
+          "description": "When its status last changed (`created_at` while pending).",
+          "$ref": "#/$defs/timestampMs"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": { "enum": ["pending", "deleted", "expired"] },
+            "failure": false
+          }
+        },
+        {
+          "required": ["failure"],
+          "properties": {
+            "status": { "const": "failed" },
+            "failure": { "$ref": "#/$defs/sessionDeletionFailure" }
+          }
+        }
+      ]
+    },
     "rakumuxVersion": {
       "description": "A stable Rakumux release's version, as its tag names it without the `v` (`0.1.48`).",
       "type": "string",

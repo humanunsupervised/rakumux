@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:session-deletion-answer",
+  "title": "A session deletion request, as stored",
+  "description": "The answer to a session deletion's status report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "session_deletion"],
+  "properties": {
+    "version": { "const": 1 },
+    "session_deletion": { "$ref": "urn:rakumux:feed:v1:common#/$defs/sessionDeletion" }
+  }
+}

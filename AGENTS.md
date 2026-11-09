@@ -436,7 +436,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    line, at most 300 characters), only once the answer `accepts` `output`; as it changes the
    list, it goes with it, at most every 3 s, so rakumux.com shows what each agent is doing. A
    list that would pass the contract's 256 KiB goes without places and outputs. The list says
-   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents", "remote_update"]`,
+   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents", "delete_sessions", "remote_update"]`,
    and `resources` as below, and this Rakumux's version (`rakumux_version`).
    **Releases and updates from rakumux.com** (`feed/updates.rs`, `UpdateSync`; contract
    `contracts/feed/`, "Releases and updates"): each replies read may say the newest release
@@ -493,6 +493,15 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    (before its `created` event) and, on a Sprite, held up 20 s. A first prompt asked for with
    it never reaches the machine with the request: rakumux.com writes it to the new session as
    a session message once it's `created`, typed in like any.
+   **Sessions deleted from rakumux.com** (`feed/session_deletions.rs`, `SessionDeletionSync`; contract
+   `contracts/feed/`, "Deleting sessions"): because its list says `delete_sessions`, the machine's
+   replies read brings the deletions asked of it (`session_deletions`, with every read until reported),
+   while the feed is on and its name is confirmed. The service deletes each through the daemon as the
+   user (`session_delete`, so into the session history), only a session it lists to rakumux.com (live or
+   exited, never private or another machine's), and reports `deleted`, or `failed`: `not_listed`,
+   `refused` (`POST /api/v1/feed/session-deletions/status`). One at a time; each id is marked handled
+   before the daemon is asked and kept with the reports not yet taken in
+   `sensagent/status/session-deletions.json` (0600, an hour), so a request is carried out at most once.
    **Logs for the owner's viewer** (`feed/logs.rs`, `LogSync`; contract `contracts/feed/`, "Logs"):
    while `GET /api/v1/features` says `logs: {level}` (rakumux.com decides per account, owners only
    unless the deployment says otherwise) and this machine's name is confirmed, the service follows
@@ -1135,7 +1144,8 @@ accidents; they don't stop a hostile process running as the same user.
                                  handed to the daemon, and reports not yet taken;
                                  new-sessions.json:
                                  new sessions from rakumux.com started or decided here and
-                                 reports not yet taken), machine.json (this
+                                 reports not yet taken; session-deletions.json: the same for
+                                 sessions deleted from rakumux.com), machine.json (this
                                  machine's feed name and id), its registration and private socket
   uploads/<reply id>/            0700: files attached to feed replies (0600), fetched by the
                                  account service and typed to the agent as paths; kept 7 days

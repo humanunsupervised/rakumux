@@ -33,7 +33,7 @@ use session_core::model::{ScopeRoot, SessionStatus, SessionView};
 use super::wire::{self, FeedFailure, FeedRequest};
 use crate::cloud::FeedHttpReply;
 
-mod kept;
+pub(super) mod kept;
 use kept::Kept;
 
 /// What this machine says with its session list when it takes new sessions
@@ -267,6 +267,13 @@ pub(crate) enum NewSessionWork {
     Report(FeedRequest),
 }
 
+/// Whether this machine lists `view` to rakumux.com: live or exited, never
+/// private or another machine's.
+pub(super) fn listed_here(view: &SessionView) -> bool {
+    !crate::shared_elsewhere(view)
+        && matches!(view.status, SessionStatus::Live | SessionStatus::Exited)
+}
+
 /// A folder this machine lists to rakumux.com, through one of its sessions.
 struct Listed {
     scope: ScopeRoot,
@@ -277,9 +284,7 @@ struct Listed {
 impl Listed {
     /// `view`'s folder, while `view` is listed (as the session list lists it).
     fn of(view: &SessionView) -> Option<Self> {
-        let listed = !crate::shared_elsewhere(view)
-            && matches!(view.status, SessionStatus::Live | SessionStatus::Exited);
-        listed.then_some(())?;
+        listed_here(view).then_some(())?;
         Some(Self {
             scope: view.scope.clone(),
             folder: super::sync::folder_of(view)?,
@@ -297,7 +302,7 @@ pub(crate) struct NewSessionSync {
     asked: Vec<NewSessionAsk>,
     /// The request whose session the daemon is starting.
     creating: Option<String>,
-    kept: Kept,
+    kept: Kept<Outcome>,
     /// A report is out.
     reporting: bool,
     retry_at: Duration,

@@ -1,8 +1,9 @@
-//! What new sessions keep across a restart of the service, in a file (0600)
-//! when given one: the requests handled here (started, being started, or
-//! decided: never started again) and the reports rakumux.com hasn't taken
-//! yet. Written before the daemon is asked to start a session, so a stop at
-//! any point leaves a request started at most once. One the service stopped
+//! What requests from rakumux.com (new sessions, deletions) keep across a
+//! restart of the service, in a file (0600) when given one: the requests
+//! handled here (carried out, being carried out, or decided: never carried
+//! out again) and the reports rakumux.com hasn't taken yet. Written before
+//! the daemon is asked, so a stop at any point leaves a request carried out
+//! at most once. One the service stopped
 //! starting before the daemon answered is never reported: rakumux.com
 //! expires it, and the session, if the daemon made it, is listed as any.
 
@@ -10,9 +11,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-
-use super::Outcome;
 
 /// Ids are kept this long: rakumux.com expires a request pending 10 minutes,
 /// and reads after that never bring it.
@@ -24,36 +24,47 @@ const REPORT_KEEP_MS: i64 = 60 * 60 * 1000;
 const MAX_IDS: usize = 500;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct Report {
+pub(in crate::feed) struct Report<O> {
     pub id: String,
-    pub outcome: Outcome,
+    pub outcome: O,
     /// When it was decided (Unix ms).
     pub at: i64,
 }
 
-#[derive(Default, Serialize, Deserialize)]
-struct KeptFile {
+#[derive(Serialize, Deserialize)]
+#[serde(bound(serialize = "O: Serialize", deserialize = "O: DeserializeOwned"))]
+struct KeptFile<O> {
     version: u8,
     /// Requests started, being started or decided here, by id: when (Unix ms).
     #[serde(default)]
     handled: BTreeMap<String, i64>,
     /// Reports not yet taken by rakumux.com, oldest first.
     #[serde(default)]
-    reports: VecDeque<Report>,
+    reports: VecDeque<Report<O>>,
 }
 
-pub(super) struct Kept {
+impl<O> Default for KeptFile<O> {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            handled: BTreeMap::new(),
+            reports: VecDeque::new(),
+        }
+    }
+}
+
+pub(in crate::feed) struct Kept<O> {
     path: Option<PathBuf>,
-    file: KeptFile,
+    file: KeptFile<O>,
 }
 
-impl Kept {
+impl<O: Serialize + DeserializeOwned> Kept<O> {
     /// What `path` holds (nothing without it, or when it can't be read).
     pub fn load(path: Option<PathBuf>) -> Self {
         let file = path
             .as_ref()
             .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice::<KeptFile>(&bytes).ok())
+            .and_then(|bytes| serde_json::from_slice::<KeptFile<O>>(&bytes).ok())
             .filter(|file| file.version == 1)
             .unwrap_or_default();
         Self { path, file }
@@ -72,7 +83,7 @@ impl Kept {
     }
 
     /// Decided: never started (again), and rakumux.com is to hear `outcome`.
-    pub fn decided(&mut self, id: &str, outcome: Outcome) {
+    pub fn decided(&mut self, id: &str, outcome: O) {
         let now = now_ms();
         self.file.handled.insert(id.to_owned(), now);
         self.file.reports.retain(|report| report.id != id);
@@ -85,7 +96,7 @@ impl Kept {
     }
 
     /// The next report to send, if any.
-    pub fn next_report(&self) -> Option<&Report> {
+    pub fn next_report(&self) -> Option<&Report<O>> {
         self.file.reports.front()
     }
 
@@ -120,7 +131,7 @@ impl Kept {
             return;
         };
         if crate::feed::write_private(path, &bytes).is_err() {
-            eprintln!("rakumux-status: saving which new sessions were started failed");
+            eprintln!("rakumux-status: saving which requests from rakumux.com were handled failed");
         }
     }
 }

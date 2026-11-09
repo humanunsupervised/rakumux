@@ -5,7 +5,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 /** Canonical schema documents, loaded locally without resolving network references. */
 export const schemas = Object.freeze(
   Object.fromEntries(
-    ["common", "upload", "accepted", "page", "error", "chat-upload", "chat-accepted", "turn", "reply-upload", "reply-status", "reply", "replies", "sessions-upload", "sessions-stored", "realtime", "poke", "machine-enrol", "machine-credential", "machine-credentials", "machine-token", "resources-upload", "resources-stored", "new-session-status", "new-session", "update-status", "machine-update", "logs-upload", "logs-stored"].map((name) => [
+    ["common", "upload", "accepted", "page", "error", "chat-upload", "chat-accepted", "turn", "reply-upload", "reply-status", "reply", "replies", "sessions-upload", "sessions-stored", "realtime", "poke", "machine-enrol", "machine-credential", "machine-credentials", "machine-token", "resources-upload", "resources-stored", "new-session-status", "new-session", "session-deletion-status", "session-deletion", "update-status", "machine-update", "logs-upload", "logs-stored"].map((name) => [
       name,
       JSON.parse(readFileSync(new URL(`../${name}.schema.json`, import.meta.url), "utf8")),
     ]),
@@ -68,6 +68,8 @@ export const validators = Object.freeze({
   machineToken: ajv.compile(schemas["machine-token"]),
   newSessionStatus: ajv.compile(schemas["new-session-status"]),
   newSession: ajv.compile(schemas["new-session"]),
+  sessionDeletionStatus: ajv.compile(schemas["session-deletion-status"]),
+  sessionDeletion: ajv.compile(schemas["session-deletion"]),
   updateStatus: ajv.compile(schemas["update-status"]),
   machineUpdate: ajv.compile(schemas["machine-update"]),
 });

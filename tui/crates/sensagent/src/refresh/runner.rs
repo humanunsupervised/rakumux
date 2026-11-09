@@ -30,10 +30,10 @@ use crate::auth::{
 use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
-    ChatSync, ChatWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply, FeedRequest,
-    FeedResult, FeedSync, Fetch, Fetched, LogSync, NewSessionSync, NewSessionWork, PokeEvent,
-    PokeSync, RealtimeToken, ReplySync, ReplyWork, ResourceSync, ResourceWork, SessionMessage,
-    SessionSync, TurnRead, UpdateSync, UpdateWork, Uploads,
+    ChatSync, ChatWork, DeletionWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply,
+    FeedRequest, FeedResult, FeedSync, Fetch, Fetched, LogSync, NewSessionSync, NewSessionWork,
+    PokeEvent, PokeSync, RealtimeToken, ReplySync, ReplyWork, ResourceSync, ResourceWork,
+    SessionDeletionSync, SessionMessage, SessionSync, TurnRead, UpdateSync, UpdateWork, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -207,6 +207,11 @@ enum Message {
     NewSessionCreated(String, Result<SessionView, ErrorCode>),
     /// A new session's status report finished.
     NewSessionReported(FeedCompletion),
+    /// The daemon deleted the session a request from rakumux.com (its id)
+    /// named, or refused.
+    SessionDeleted(String, Result<(), ErrorCode>),
+    /// A deletion's status report finished.
+    SessionDeletionReported(FeedCompletion),
     /// The updater finished an update asked of this machine (its id).
     UpdateInstalled(String, Result<(), crate::service::UpdateFailure>),
     /// An update's status report finished.
@@ -278,6 +283,10 @@ enum Work<A, C> {
     CreateSession(String, CreateSession),
     /// Report a new session's status.
     NewSessionReport(FeedJob<A, C>),
+    /// Delete the session a request from rakumux.com (its id) names.
+    DeleteSession(String, SessionId),
+    /// Report a deletion's status.
+    SessionDeletionReport(FeedJob<A, C>),
     /// Report an update's status.
     UpdateReport(FeedJob<A, C>),
 }
@@ -304,7 +313,8 @@ impl<A, C> Workers<A, C> {
             | Work::Revoke(..)
             | Work::ReadResources
             | Work::ResourcesUpload(..)
-            | Work::CreateSession(..) => self.replies.send(work),
+            | Work::CreateSession(..)
+            | Work::DeleteSession(..) => self.replies.send(work),
             work => self.shared.send(work),
         }
     }
@@ -669,12 +679,15 @@ fn own<S, A, C>(
     let mut chats = ChatSync::new(machine.clone(), refresher.chat_cursors());
     let mut replies = ReplySync::new(machine.clone(), refresher.reply_state());
     let mut new_sessions = NewSessionSync::new(machine.clone(), refresher.new_session_state());
+    let mut deletions =
+        SessionDeletionSync::new(machine.clone(), refresher.session_deletion_state());
     let updater = refresher.updater();
     let mut updates = UpdateSync::new(machine.clone(), updater.is_some(), refresher.update_state());
     let uploads = refresher.uploads().map(Uploads::new);
     let mut sessions = SessionSync::new(machine.clone(), uploads.is_some())
         .handling(crate::feed::NEW_SESSIONS)
         .handling(crate::feed::NEW_SESSION_AGENTS)
+        .handling(crate::feed::DELETE_SESSIONS)
         .with_version(refresher.version());
     if updater.is_some() {
         sessions = sessions.handling(crate::feed::REMOTE_UPDATE);
@@ -737,6 +750,7 @@ fn own<S, A, C>(
             }
             let confirmed = sessions.confirmed();
             follow_new_sessions(&refresher, &mut new_sessions, confirmed, work, now);
+            follow_deletions(&refresher, &mut deletions, confirmed, work, now);
             follow_updates(
                 &refresher,
                 &mut updates,
@@ -822,6 +836,7 @@ fn own<S, A, C>(
                 sessions.connected(&views);
                 resources.connected();
                 new_sessions.connected(&views);
+                deletions.connected(&views);
                 let _ = work.send(Work::Replies(after));
             }
             Message::Event(event) => {
@@ -836,6 +851,7 @@ fn own<S, A, C>(
                         replies.observe(session);
                         sessions.observe(session);
                         new_sessions.observe(session);
+                        deletions.observe(session);
                     }
                     SessionEvent::Removed => {
                         feed.forget(&event.session_id);
@@ -843,6 +859,7 @@ fn own<S, A, C>(
                         replies.forget(&event.session_id);
                         sessions.forget(&event.session_id);
                         new_sessions.forget(&event.session_id);
+                        deletions.forget(&event.session_id);
                     }
                     _ => {}
                 }
@@ -877,6 +894,7 @@ fn own<S, A, C>(
                         &mut replies,
                         &mut sessions,
                         &mut new_sessions,
+                        &mut deletions,
                         now,
                     );
                 }
@@ -914,6 +932,7 @@ fn own<S, A, C>(
                 // New sessions asked of this machine come with its replies read.
                 if let Ok(FeedResult::Replies(read)) = &mut completion.outcome {
                     new_sessions.read(current, std::mem::take(&mut read.new_sessions));
+                    deletions.read(current, std::mem::take(&mut read.session_deletions));
                     // So does the update asked of it, and the newest release.
                     updates.read(current, std::mem::take(&mut read.updates));
                     if let Some(release) = read.release.take().filter(|_| current) {
@@ -938,6 +957,7 @@ fn own<S, A, C>(
                         &mut replies,
                         &mut sessions,
                         &mut new_sessions,
+                        &mut deletions,
                         now,
                     );
                     updates.rename(machine.clone());
@@ -967,6 +987,7 @@ fn own<S, A, C>(
                     work,
                     now,
                 );
+                follow_deletions(&refresher, &mut deletions, sessions.confirmed(), work, now);
             }
             Message::NewSessionCreated(id, result) => {
                 if let Ok(view) = &result {
@@ -1002,6 +1023,19 @@ fn own<S, A, C>(
                     work,
                     now,
                 );
+            }
+            Message::SessionDeleted(id, result) => {
+                deletions.deleted(&id, result);
+                follow_deletions(&refresher, &mut deletions, sessions.confirmed(), work, now);
+            }
+            Message::SessionDeletionReported(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::SessionDeletionReported => Ok(()),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                deletions.reported(current, outcome, now);
+                follow_deletions(&refresher, &mut deletions, sessions.confirmed(), work, now);
             }
             Message::UpdateInstalled(id, result) => {
                 updates.installed(&id, result);
@@ -1122,6 +1156,7 @@ fn own<S, A, C>(
                         &mut replies,
                         &mut sessions,
                         &mut new_sessions,
+                        &mut deletions,
                         now,
                     );
                 }
@@ -1141,6 +1176,7 @@ fn own<S, A, C>(
                         &mut replies,
                         &mut sessions,
                         &mut new_sessions,
+                        &mut deletions,
                         now,
                     );
                 }
@@ -1508,6 +1544,7 @@ fn rename(
     replies: &mut ReplySync,
     sessions: &mut SessionSync,
     new_sessions: &mut NewSessionSync,
+    deletions: &mut SessionDeletionSync,
     now: Duration,
 ) {
     eprintln!(
@@ -1518,6 +1555,7 @@ fn rename(
     replies.rename(machine.to_owned(), now);
     sessions.rename(machine.to_owned(), now);
     new_sessions.rename(machine.to_owned());
+    deletions.rename(machine.to_owned());
 }
 
 /// Start the next chat read or upload, when one is due: only while signed in
@@ -1657,6 +1695,43 @@ fn follow_new_sessions<S, A, C>(
                 }
                 None => {
                     new_sessions.reported(false, Err(FeedFailure::Unauthorized), now);
+                    return;
+                }
+            },
+            None => return,
+        }
+    }
+}
+
+/// Start what sessions asked on rakumux.com to be deleted need next: delete
+/// one (or decide it can't be), then report. Only while signed in with the
+/// account's feed on and rakumux.com `confirmed` this machine's name.
+fn follow_deletions<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    deletions: &mut SessionDeletionSync,
+    confirmed: bool,
+    work: &Workers<A, C>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled =
+        refresher.account().is_some() && refresher.feed_switch() == Some(true) && confirmed;
+    deletions.set_enabled(enabled, now);
+    // One deletion and one report out at a time: a few rounds at most.
+    for _ in 0..4 {
+        match deletions.next_work(now) {
+            Some(DeletionWork::Delete { id, session }) => {
+                let _ = work.send(Work::DeleteSession(id, session));
+            }
+            Some(DeletionWork::Report(request)) => match refresher.feed_job(request) {
+                Some(job) => {
+                    let _ = work.send(Work::SessionDeletionReport(job));
+                }
+                None => {
+                    deletions.reported(false, Err(FeedFailure::Unauthorized), now);
                     return;
                 }
             },
@@ -2145,6 +2220,20 @@ where
             Ok(Work::CreateSession(id, request)) => {
                 let result = api.create(request).map_err(|error| error.code);
                 Message::NewSessionCreated(id, result)
+            }
+            Ok(Work::DeleteSession(id, session)) => {
+                let result = api.delete(&session).map_err(|error| error.code);
+                Message::SessionDeleted(id, result)
+            }
+            Ok(Work::SessionDeletionReport(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::SessionDeletionReported(completion),
+                    Err(_) => Message::SessionDeletionReported(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
             }
             Ok(Work::NewSessionReport(job)) => {
                 let revision = job.revision;

@@ -27,6 +27,12 @@
       "maxItems": 20,
       "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/newSession" }
     },
+    "session_deletions": {
+      "description": "Only for a reader that names itself (`machine`) and whose latest session list advertises `delete_sessions`: the sessions asked of that machine on rakumux.com to delete that are still pending, oldest first, with every read until the machine reports them or they expire, whatever `after` says (they take no seq); absent otherwise.",
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/sessionDeletion" }
+    },
     "release": {
       "description": "The newest stable Rakumux release rakumux.com knows of; absent while it knows none (and from an older rakumux.com).",
       "$ref": "urn:rakumux:feed:v1:common#/$defs/release"

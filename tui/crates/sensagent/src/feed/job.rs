@@ -53,6 +53,8 @@ pub(crate) enum FeedResult {
     Revoked,
     /// rakumux.com took a new session's status.
     NewSessionReported,
+    /// A session deletion's status was taken.
+    SessionDeletionReported,
     /// rakumux.com took an update's status.
     UpdateReported,
 }
@@ -87,6 +89,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::MachineEnrol { .. }
             | FeedRequest::MachineRevoke { .. }
             | FeedRequest::NewSessionStatus { .. }
+            | FeedRequest::SessionDeletionStatus { .. }
             | FeedRequest::UpdateStatus { .. } => String::new(),
         };
         let http = match &self.request {
@@ -105,6 +108,7 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::MachineEnrol { body } => FeedHttp::MachineEnrol(body),
             FeedRequest::MachineRevoke { machine } => FeedHttp::MachineRevoke(machine),
             FeedRequest::NewSessionStatus { body } => FeedHttp::NewSessionStatus(body),
+            FeedRequest::SessionDeletionStatus { body } => FeedHttp::SessionDeletionStatus(body),
             FeedRequest::UpdateStatus { body } => FeedHttp::UpdateStatus(body),
         };
         let outcome = self
@@ -147,6 +151,10 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                     }
                     FeedRequest::NewSessionStatus { .. } => super::new_sessions::reported(&reply)
                         .map(|()| FeedResult::NewSessionReported),
+                    FeedRequest::SessionDeletionStatus { .. } => {
+                        super::session_deletions::reported(&reply)
+                            .map(|()| FeedResult::SessionDeletionReported)
+                    }
                     FeedRequest::UpdateStatus { .. } => {
                         super::updates::reported(&reply).map(|()| FeedResult::UpdateReported)
                     }

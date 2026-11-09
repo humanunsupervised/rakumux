@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:session-deletion-status",
+  "title": "POST /api/v1/feed/session-deletions/status request",
+  "description": "The machine a deletion was asked of says it deleted the session (`deleted`) or couldn't (`failed`, with why). Only a pending request changes, and only for the machine it names; otherwise the stored request comes back unchanged.",
+  "x-maxBodyBytes": 4096,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "machine", "status"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "status": { "type": "string", "enum": ["deleted", "failed"] },
+    "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/sessionDeletionFailure" }
+  },
+  "oneOf": [
+    { "properties": { "status": { "const": "deleted" }, "failure": false } },
+    {
+      "required": ["failure"],
+      "properties": {
+        "status": { "const": "failed" },
+        "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/sessionDeletionFailure" }
+      }
+    }
+  ]
+}

@@ -172,6 +172,7 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     reply_state: Option<std::path::PathBuf>,
     /// Where new sessions keep which were started across a restart.
     new_session_state: Option<std::path::PathBuf>,
+    session_deletion_state: Option<std::path::PathBuf>,
     /// Where updates keep which were installed across a restart.
     update_state: Option<std::path::PathBuf>,
     /// Installs the releases asked of this machine on rakumux.com.
@@ -219,6 +220,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             log_files: None,
             reply_state: None,
             new_session_state: None,
+            session_deletion_state: None,
             update_state: None,
             updater: None,
             version: None,
@@ -291,12 +293,22 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Keep which new sessions were started or decided here, and the reports
     /// not yet taken, in `path`, so a restarted service never starts one
     /// twice (memory only without it).
+    /// Keep which deletions asked for on rakumux.com were handled in `path`.
+    pub fn with_session_deletion_state(mut self, path: std::path::PathBuf) -> Self {
+        self.session_deletion_state = Some(path);
+        self
+    }
+
     pub fn with_new_session_state(mut self, path: std::path::PathBuf) -> Self {
         self.new_session_state = Some(path);
         self
     }
 
     /// Where new sessions keep their state, if anywhere.
+    pub(crate) fn session_deletion_state(&self) -> Option<std::path::PathBuf> {
+        self.session_deletion_state.clone()
+    }
+
     pub(crate) fn new_session_state(&self) -> Option<std::path::PathBuf> {
         self.new_session_state.clone()
     }

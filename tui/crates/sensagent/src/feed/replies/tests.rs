@@ -70,6 +70,7 @@ fn page_of(
         poll: None,
         resources_wanted: false,
         new_sessions: vec![],
+        session_deletions: Vec::new(),
         release: None,
         updates: vec![],
     }))
@@ -546,6 +547,7 @@ fn reads_come_as_soon_as_rakumux_com_says() {
             poll,
             resources_wanted: false,
             new_sessions: vec![],
+            session_deletions: Vec::new(),
             release: None,
             updates: vec![],
         }))
@@ -603,6 +605,7 @@ fn read_messages(messages: Vec<SessionMessage>) -> Result<FeedResult, FeedFailur
         poll: None,
         resources_wanted: false,
         new_sessions: vec![],
+        session_deletions: Vec::new(),
         release: None,
         updates: vec![],
     }))
@@ -1374,6 +1377,7 @@ fn a_sessions_replies_and_messages_go_in_in_the_order_they_were_written() {
         poll: None,
         resources_wanted: false,
         new_sessions: vec![],
+        session_deletions: Vec::new(),
         release: None,
         updates: vec![],
     }));

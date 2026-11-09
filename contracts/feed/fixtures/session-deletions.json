@@ -1,0 +1,215 @@
+{
+  "deletion": {
+    "valid": [
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "status": "pending",
+        "created_at": 1761220000000,
+        "status_at": 1761220000000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "status": "deleted",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "status": "expired",
+        "created_at": 1761220000000,
+        "status_at": 1761220600000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "status": "failed",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "failure": "not_listed"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "status": "failed",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "failure": "refused"
+      }
+    ],
+    "invalid": [
+      {
+        "note": "a command",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "command": "rm -rf ~"
+        }
+      },
+      {
+        "note": "a path",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "cwd": "/home/me"
+        }
+      },
+      {
+        "note": "a session id that isn't a ULID",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "brave-otter",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "no session",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "failed without why",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "status": "failed",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "pending with a failure",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "deleted with a failure",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "status": "deleted",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "a failure outside this version",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "status": "failed",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "failure": "disk_full"
+        }
+      },
+      {
+        "note": "an unknown status",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "status": "running",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      }
+    ]
+  },
+  "status": {
+    "valid": [
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "deleted"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "not_listed"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "refused"
+      }
+    ],
+    "invalid": [
+      {
+        "note": "failed without why",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "failed"
+        }
+      },
+      {
+        "note": "deleted with a failure",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "deleted",
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "pending isn't reported",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "no machine",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "status": "deleted"
+        }
+      }
+    ]
+  }
+}

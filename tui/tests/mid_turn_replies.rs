@@ -246,6 +246,84 @@ fn replies_written_while_claude_code_works_go_in_one_at_a_time_across_a_restart(
 /// A security checkpoint in front of rakumux.com (an HTML 403) is an outage,
 /// not the cloud's refusal: the report that met it is sent again.
 #[test]
+fn a_session_asked_on_rakumux_com_to_be_deleted_goes_to_its_history_once() {
+    let world = World::new();
+    let mut daemon = world.start_daemon();
+    let client = world.client();
+    let session = world.start_claude(&client);
+    let mut service = world.start_service(1);
+    world.wait("the session list to say it deletes sessions", || {
+        let state = world.cloud.state();
+        state.says("delete_sessions")
+            && state.sessions.as_ref().is_some_and(|list| {
+                list["sessions"]
+                    .as_array()
+                    .is_some_and(|sessions| sessions.iter().any(|s| s["id"] == session.id.as_str()))
+            })
+    });
+
+    let deleted = world.cloud.ask_deletion(MACHINE, session.id.as_str());
+    let unknown = world.cloud.ask_deletion(MACHINE, &ulid());
+    let reported = |id: &str| -> Option<Value> {
+        world
+            .cloud
+            .state()
+            .deletion_reports
+            .iter()
+            .find(|report| report["id"] == id)
+            .cloned()
+    };
+    world.wait("both deletions reported", || {
+        reported(&deleted).is_some() && reported(&unknown).is_some()
+    });
+    assert_eq!(
+        reported(&deleted).unwrap()["status"],
+        "deleted",
+        "{}",
+        world.diagnostics()
+    );
+    let refused = reported(&unknown).unwrap();
+    assert_eq!(refused["status"], "failed", "{}", world.diagnostics());
+    assert_eq!(refused["failure"], "not_listed", "{}", world.diagnostics());
+
+    // It's gone from the daemon's sessions, and in the session history.
+    assert!(client.get(&session.id).is_err(), "{}", world.diagnostics());
+    let history = client.history(None, None, None).unwrap();
+    assert!(
+        history.sessions.iter().any(|gone| gone.id == session.id),
+        "{}",
+        world.diagnostics()
+    );
+
+    // A request still read as pending after a restart is never carried out twice.
+    world
+        .cloud
+        .state()
+        .deletions
+        .iter_mut()
+        .for_each(|deletion| {
+            if deletion["id"] == deleted.as_str() {
+                deletion["status"] = json!("pending");
+            }
+        });
+    service.stop();
+    let reads = world.cloud.state().reads.len();
+    service = world.start_service(2);
+    world.wait("the restarted service to read replies", || {
+        world.cloud.state().reads.len() >= reads + 2
+    });
+    assert_eq!(
+        world.cloud.state().deletion_reports.len(),
+        2,
+        "{}",
+        world.diagnostics()
+    );
+    service.stop();
+    let _ = client.shutdown();
+    daemon.stop();
+}
+
+#[test]
 fn a_report_that_meets_a_security_checkpoint_is_sent_again() {
     let world = World::new();
     let _daemon = world.start_daemon();

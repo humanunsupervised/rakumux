@@ -122,6 +122,10 @@ pub struct State {
     pub titles: Vec<(u64, Value)>,
     /// How many of the next status reports meet a security checkpoint.
     pub checkpoints: usize,
+    /// Sessions asked to be deleted (`sessionDeletion`), as stored.
+    pub deletions: Vec<Value>,
+    /// Deletion status reports, as sent.
+    pub deletion_reports: Vec<Value>,
 }
 
 impl State {
@@ -259,6 +263,17 @@ impl FakeCloud {
     /// in chat `conversation`, as the user does on rakumux.com: `answers`
     /// as `questionAnswer`'s, `text` saying them. (`question_answers.rs`'s.)
     #[allow(dead_code)]
+    /// Ask this machine to delete `session`, as the website does; the request's id.
+    pub fn ask_deletion(&self, machine: &str, session: &str) -> String {
+        let id = ulid();
+        let at = now_ms();
+        self.state()
+            .deletions
+            .push(json!({"id": id, "machine": machine, "session": session,
+            "status": "pending", "created_at": at, "status_at": at}));
+        id
+    }
+
     pub fn write_answer(
         &self,
         session: (&str, &str),
@@ -449,11 +464,33 @@ impl Served {
                     .into_iter()
                     .map(|reply| reply.wire(&self.machine.name))
                     .collect();
-                answer(
-                    200,
-                    json!({"version": 1, "replies": replies, "latest_seq": state.seq,
-                        "more": false, "poll_ms": 1000}),
-                )
+                let mut read = json!({"version": 1, "replies": replies, "latest_seq": state.seq,
+                    "more": false, "poll_ms": 1000});
+                if state.says("delete_sessions") {
+                    let pending: Vec<&Value> = state
+                        .deletions
+                        .iter()
+                        .filter(|deletion| deletion["status"] == "pending")
+                        .collect();
+                    read["session_deletions"] = json!(pending);
+                }
+                answer(200, read)
+            }
+            ("POST", "/api/v1/feed/session-deletions/status") => {
+                let Some(stored) = state
+                    .deletions
+                    .iter_mut()
+                    .find(|deletion| deletion["id"] == body["id"])
+                else {
+                    return error(404, "invalid_request");
+                };
+                stored["status"] = body["status"].clone();
+                if !body["failure"].is_null() {
+                    stored["failure"] = body["failure"].clone();
+                }
+                let stored = stored.clone();
+                state.deletion_reports.push(body);
+                answer(200, json!({"version": 1, "session_deletion": stored}))
             }
             ("POST", "/api/v1/feed/replies/status") => {
                 let id = body["id"].as_str().unwrap_or_default().to_owned();
