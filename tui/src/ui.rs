@@ -1629,7 +1629,7 @@ mod tests {
         assert!(list[docs].contains(" docs "), "{wide}");
         assert!(list[docs].starts_with("  ★ docs "), "{wide}");
         // Its repositories, the toggle in the gutter; no folder or branch.
-        assert!(list[docs + 1].starts_with("  ▸  repo"), "{wide}");
+        assert!(list[docs + 1].starts_with("  ▸ repo"), "{wide}");
         assert!(list[refactor + 2].contains("claude"), "{wide}");
         // No branch while the places are closed.
         assert!(!wide.contains("⎇ sessions-refactor"), "{wide}");
@@ -1683,7 +1683,7 @@ mod tests {
             .unwrap();
         assert!(list[main].starts_with("    main-work "), "{wide}");
         assert!(list[work].starts_with("    feature-work "), "{wide}");
-        assert!(list[work + 1].starts_with("  ▸  monorepo"), "{wide}");
+        assert!(list[work + 1].starts_with("  ▸ monorepo"), "{wide}");
     }
 
     #[test]

@@ -5747,10 +5747,10 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
         .iter()
         .position(|line| line.contains(" agent "))
         .expect("its name");
-    assert_eq!(in_list(&screen[name + 1]), "  ▸  repo", "{text}");
+    assert_eq!(in_list(&screen[name + 1]), "  ▸ repo", "{text}");
     assert_eq!(
         column(&screen[name + 1], "repo"),
-        column(&screen[name], "agent").map(|at| at + 1)
+        column(&screen[name], "agent")
     );
     assert!(!text.contains("worktrees/fix"), "closed: {text}");
     assert!(!text.contains("⎇ main"), "closed: {text}");
@@ -5760,7 +5760,7 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     h.press(KeyCode::Char('w')).await;
     let screen = screen_rows(&mut h, 160, 48);
     let text = screen.join("\n");
-    assert_eq!(in_list(&screen[name + 1]), "  ▾  repo", "{text}");
+    assert_eq!(in_list(&screen[name + 1]), "  ▾ repo", "{text}");
     let pair = |path: &str| {
         screen
             .iter()
@@ -5829,13 +5829,13 @@ async fn a_sessions_places_open_under_its_row_with_w_or_a_click() {
     };
     let screen = screen_rows(&mut h, 160, 48);
     let mark = toggles[0];
-    assert_eq!(usize::from(mark.width), "▸  repo ".chars().count());
-    assert!(screen[usize::from(mark.y)][..].contains("▸  repo"));
+    assert_eq!(usize::from(mark.width), "▸ repo".chars().count());
+    assert!(screen[usize::from(mark.y)][..].contains("▸ repo"));
     click(&mut h, mark.x, mark.y);
     assert!(h.app.places_open(&a));
     assert_eq!(h.app.list.selection(), &Selection::Session(b.clone()));
     let screen = screen_rows(&mut h, 160, 48);
-    assert!(screen[usize::from(mark.y)][..].contains("▾  repo"));
+    assert!(screen[usize::from(mark.y)][..].contains("▾ repo"));
     // A click on where it works now copies its path.
     let (path, _) = *h
         .app
@@ -6156,8 +6156,8 @@ async fn open_places_read_as_pairs_on_a_phone() {
         eprintln!("{width} columns:\n{}\n", block.join("\n"));
         block[1.min(block.len())..].to_vec()
     };
-    assert_eq!(places(&mut h, 60), [" ▸  focal-md", "   claude"]);
-    assert_eq!(places(&mut h, 40), [" ▸  focal-md", "   claude"]);
+    assert_eq!(places(&mut h, 60), [" ▸ focal-md", "   claude"]);
+    assert_eq!(places(&mut h, 40), [" ▸ focal-md", "   claude"]);
     h.app.places_open.insert(a);
     // Past where it works now, onto the second of the others.
     h.press(KeyCode::Char('j')).await;
@@ -6166,7 +6166,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 60),
         [
-            " ▾  focal-md",
+            " ▾ focal-md",
             "     ──────────────────────────────────────────────────────",
             "     /work/focal-md-paper-links",
             "     focal-md ⎇ paper-links                              9d",
@@ -6185,7 +6185,7 @@ async fn open_places_read_as_pairs_on_a_phone() {
     assert_eq!(
         places(&mut h, 40),
         [
-            " ▾  focal-md",
+            " ▾ focal-md",
             "     ──────────────────────────────────",
             "     /work/focal-md-paper-links",
             "     focal-md ⎇ paper-links          9d",
@@ -6309,7 +6309,7 @@ async fn places_name_their_repository_before_the_branch() {
             "  ○ ready                                     3 sessions",
             "",
             "    Paper links                                        1h ○",
-            "  ▾  focal-md   rakumux",
+            "  ▾ focal-md  rakumux",
             "      ─────────────────────────────────────────────────────",
             "      /work/focal-md-paper-links",
             "      focal-md ⎇ paper-links                             9d",
@@ -6325,11 +6325,11 @@ async fn places_name_their_repository_before_the_branch() {
             "    claude",
             "",
             "    Citations                                         10m ○",
-            "  ▸  focal-md",
+            "  ▸ focal-md",
             "    codex",
             "",
             "    Release notes                                      2m ○",
-            "  ▸  focal-md",
+            "  ▸ focal-md",
             "    claude",
             "",
             " + New session                                     ☁ Sprite",
@@ -6346,7 +6346,7 @@ async fn places_name_their_repository_before_the_branch() {
             "  ○ ready                 3 sessions",
             "",
             "    Paper links                    1h ○",
-            "  ▾  focal-md   rakumux",
+            "  ▾ focal-md  rakumux",
             "      ─────────────────────────────────",
             "      /work/focal-md-paper-links",
             "      focal-md ⎇ paper-links         9d",
@@ -6362,11 +6362,11 @@ async fn places_name_their_repository_before_the_branch() {
             "    claude",
             "",
             "    Citations                     10m ○",
-            "  ▸  focal-md",
+            "  ▸ focal-md",
             "    codex",
             "",
             "    Release notes                  2m ○",
-            "  ▸  focal-md",
+            "  ▸ focal-md",
             "    claude",
             "",
             " + New session                 ☁ Sprite",
@@ -6433,13 +6433,13 @@ async fn session_rows_line_up_with_their_headers_text() {
             "  ● unread                                     1 session",
             "",
             "    Citations                                         10m ●",
-            "  ▸  focal-md",
+            "  ▸ focal-md",
             "    codex",
             "",
             "  ○ ready                                      1 session",
             "",
             "    Paper links                                        1h ○",
-            "  ▾  focal-md",
+            "  ▾ focal-md",
             "      ─────────────────────────────────────────────────────",
             "      /work/focal-md-paper-links",
             "      focal-md ⎇ paper-links                             9d",
@@ -6467,13 +6467,13 @@ async fn session_rows_line_up_with_their_headers_text() {
             "  ● unread                 1 session",
             "",
             "    Citations                     10m ●",
-            "  ▸  focal-md",
+            "  ▸ focal-md",
             "    codex",
             "",
             "  ○ ready                  1 session",
             "",
             "    Paper links                    1h ○",
-            "  ▾  focal-md",
+            "  ▾ focal-md",
             "      ─────────────────────────────────",
             "      /work/focal-md-paper-links",
             "      focal-md ⎇ paper-links         9d",
@@ -6526,7 +6526,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             " ● unread                                      1 session ▾",
             "",
             "   Citations                                          10m ●",
-            " ▸  focal-md",
+            " ▸ focal-md",
             "   codex",
             "",
             " ○ ready                                       1 session ▾",
@@ -6534,7 +6534,7 @@ async fn session_rows_line_up_with_their_headers_text() {
             "  ◷ last hour                                  1 session",
             "",
             "    Paper links                                        1h ○",
-            "  ▾  focal-md",
+            "  ▾ focal-md",
             "      ─────────────────────────────────────────────────────",
             "      /work/focal-md-paper-links",
             "      focal-md ⎇ paper-links                             9d",

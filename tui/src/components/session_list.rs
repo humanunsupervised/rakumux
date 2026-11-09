@@ -143,8 +143,8 @@ fn nesting(rows: &[ListRow]) -> Vec<usize> {
 /// gap so a long line doesn't run up against them.
 const RIGHT_COLUMN: usize = 10;
 
-/// Blank columns inside a repository's label, each side of its name.
-const LABEL_PADDING: usize = 1;
+/// Blank columns between two repositories' names on a session's row.
+const REPO_NAME_GAP: usize = 2;
 
 /// Shown left of a session while it's dragged.
 const DRAG_MARK: &str = "▎";
@@ -626,44 +626,38 @@ fn git_spans(repo: String, branch: String, style: Style) -> Vec<Span<'static>> {
     spans
 }
 
-/// `repos` as labels, in at most `room` columns: each name on a background
-/// of its repository's colour, a column apart. Short of room the last one
-/// that fits is cut at its end and `…` stands for any after it.
+/// `repos` in at most `room` columns: each name in its repository's colour,
+/// [`REPO_NAME_GAP`] apart. Short of room the last one that fits is cut at
+/// its end and `…` stands for any after it.
 fn repo_labels(app: &App, repos: &[String], room: usize) -> Vec<Span<'static>> {
     let p = theme::palette();
     let colors = p.repo_labels();
     let mut spans = Vec::new();
     let mut left = room;
     for repo in repos {
-        let gap = usize::from(!spans.is_empty());
-        let name_room = left.saturating_sub(gap + 2 * LABEL_PADDING);
+        let gap = if spans.is_empty() { 0 } else { REPO_NAME_GAP };
+        let name_room = left.saturating_sub(gap);
         // Not even a letter and its `…`.
         if name_room < str_width(repo).min(2) {
-            if gap == 1 && left >= 2 {
-                spans.push(Span::raw(" "));
+            if gap > 0 && left > gap {
+                spans.push(Span::raw(" ".repeat(gap)));
                 spans.push(Span::styled("…", Style::default().fg(p.text_muted)));
             }
             break;
         }
-        if gap == 1 {
-            spans.push(Span::raw(" "));
+        if gap > 0 {
+            spans.push(Span::raw(" ".repeat(gap)));
         }
         let name = truncate(repo, name_room);
-        left = left.saturating_sub(gap + 2 * LABEL_PADDING + str_width(&name));
+        left = left.saturating_sub(gap + str_width(&name));
         let color = colors[app.repo_colors.of(repo, colors.len())];
-        spans.push(Span::styled(
-            format!(" {name} "),
-            Style::default()
-                .fg(p.background)
-                .bg(color)
-                .add_modifier(Modifier::BOLD),
-        ));
+        spans.push(Span::styled(name, Style::default().fg(color)));
     }
     spans
 }
 
 /// A session's place lines, under its name, after the gutter. First the
-/// repositories it works in, as coloured labels ([`repo_labels`],
+/// repositories it works in, as coloured names ([`repo_labels`],
 /// [`session_repos`]; outside any, the folder it works in now), with `▸` in
 /// the gutter. While they're open (`▾`), its places, each a pair of lines
 /// [`PLACE_INDENT`] further in with a rule above: where it works now first
@@ -1587,31 +1581,33 @@ mod tests {
             let PlaceLines { lines, places, .. } =
                 place_content(&h.app, &session, 40, selected, None, 1000);
             // No folder or worktree, no branch: the toggle and the names.
-            assert_eq!(text(&lines), ["▸  focal-md   other "]);
+            assert_eq!(text(&lines), ["▸ focal-md  other"]);
             assert!(places.is_empty());
             assert_eq!(lines[0][0].style.fg, Some(p.accent_primary));
-            // Each on a background of its own, the column between them bare.
+            // Each in a text colour of its own, on no background.
             let (first, gap, second) = (&lines[0][1], &lines[0][2], &lines[0][3]);
             assert_eq!(gap.style, Style::default());
             for label in [first, second] {
-                assert!(label.style.add_modifier.contains(Modifier::BOLD));
-                assert_eq!(label.style.fg, Some(p.background));
-                assert!(p.repo_labels().contains(&label.style.bg.unwrap()));
+                assert_eq!(label.style.bg, None);
+                assert!(!label.style.add_modifier.contains(Modifier::BOLD));
+                assert!(p.repo_labels().contains(&label.style.fg.unwrap()));
             }
-            assert_ne!(first.style.bg, second.style.bg);
+            assert_ne!(first.style.fg, second.style.fg);
         }
         // The same repository is the same colour in any session.
         let mut alone = with_places(&[]);
         named(&mut alone.git, "other");
         let lines_alone = place_content(&h.app, &alone, 40, false, None, 1000).lines;
         let lines = place_content(&h.app, &session, 40, false, None, 1000).lines;
-        assert_eq!(lines_alone[0][1].style.bg, lines[0][3].style.bg);
+        assert_eq!(lines_alone[0][1].style.fg, lines[0][3].style.fg);
         // Cut at their end, never wrapped, where the right column (the age
         // and mark above) starts: the last that fits, then `…` for the rest.
         let lines = place_content(&h.app, &session, 26, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸  focal-md  …"]);
+        assert_eq!(text(&lines), ["▸ focal-md  oth…"]);
+        let lines = place_content(&h.app, &session, 23, false, None, 1000).lines;
+        assert_eq!(text(&lines), ["▸ focal-md  …"]);
         let lines = place_content(&h.app, &session, 18, false, None, 1000).lines;
-        assert_eq!(text(&lines), ["▸  foc… "]);
+        assert_eq!(text(&lines), ["▸ focal…"]);
         for width in 0..50 {
             let lines = place_content(&h.app, &session, width, false, None, 1000).lines;
             let room = width.saturating_sub(GUTTER + RIGHT_COLUMN);
@@ -1687,7 +1683,7 @@ mod tests {
         assert_eq!(
             text(&lines),
             [
-                "▾  repo ".to_string(),
+                "▾ repo".to_string(),
                 rule(36),
                 "    repo".into(),
                 branch("⎇ main", 28, "5m"),
@@ -1742,7 +1738,7 @@ mod tests {
         assert_eq!(
             text(&lines),
             [
-                "▾  r… ".to_string(),
+                "▾ repo".to_string(),
                 rule(12),
                 "    repo".into(),
                 branch("⎇ main", 4, "5m"),

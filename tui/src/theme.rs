@@ -61,9 +61,8 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// The colours a repository's label can have in the session list
-    /// ([`crate::components::format::RepoColors`]), far apart in hue, each
-    /// with [`Self::background`] as its text.
+    /// The text colours a repository's name can have in the session list
+    /// ([`crate::components::format::RepoColors`]), far apart in hue.
     pub fn repo_labels(&self) -> [Color; 10] {
         [
             self.label_blue,
@@ -631,8 +630,11 @@ mod tests {
             let labels = p.repo_labels();
             for (i, label) in labels.iter().enumerate() {
                 assert!(!labels[i + 1..].contains(label), "{label:?}");
-                let contrast = (luminance(*label) + 0.05) / (luminance(p.background) + 0.05);
-                assert!(contrast >= 4.5, "{label:?}: {contrast}");
+                // Text on the list, and on its one selected row.
+                for (behind, floor) in [(p.panel, 4.5), (p.selection, 3.0)] {
+                    let contrast = (luminance(*label) + 0.05) / (luminance(behind) + 0.05);
+                    assert!(contrast >= floor, "{label:?} on {behind:?}: {contrast}");
+                }
             }
         }
     }
