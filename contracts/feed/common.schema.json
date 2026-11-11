@@ -664,6 +664,67 @@
         }
       ]
     },
+    "sessionRenameStatus": {
+      "description": "`pending` until its machine renames the session (`renamed`) or can't (`failed`); `expired` when it stayed pending 10 minutes.",
+      "type": "string",
+      "enum": ["pending", "renamed", "failed", "expired"]
+    },
+    "sessionRenameFailure": {
+      "description": "Why a machine didn't rename a session asked of it on rakumux.com: it doesn't list that session now (`not_listed`: gone already, or private), another session of its folder has that name (`name_taken`: names are unique within a folder), or its daemon couldn't rename it (`refused`). Readers take a value they don't know as a failure without a reason.",
+      "type": "string",
+      "enum": ["not_listed", "name_taken", "refused"]
+    },
+    "sessionName": {
+      "description": "A session's new name: one visible line of at most 64 characters, without white space at either end.",
+      "type": "string",
+      "$ref": "#/$defs/label",
+      "maxLength": 64,
+      "maxUtf8Bytes": 256,
+      "pattern": "^\\S(?:.*\\S)?$"
+    },
+    "sessionRename": {
+      "description": "A session asked on rakumux.com to be renamed, for the machine that lists it. It names the session by its id and carries the new name, never a path or a command. The machine renames only a session it lists to rakumux.com, as its user would, and reports it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "machine", "session", "name", "status", "created_at", "status_at"],
+      "properties": {
+        "id": {
+          "description": "The ULID the page made for the request: a machine carries out at most one rename for an id.",
+          "$ref": "#/$defs/ulid"
+        },
+        "machine": {
+          "description": "The machine the session is on, as its session list names it.",
+          "$ref": "#/$defs/machine"
+        },
+        "session": {
+          "description": "The session to rename, by the id the machine's session list gives it.",
+          "$ref": "#/$defs/ulid"
+        },
+        "name": { "$ref": "#/$defs/sessionName" },
+        "status": { "$ref": "#/$defs/sessionRenameStatus" },
+        "failure": { "$ref": "#/$defs/sessionRenameFailure" },
+        "created_at": { "$ref": "#/$defs/timestampMs" },
+        "status_at": {
+          "description": "When its status last changed (`created_at` while pending).",
+          "$ref": "#/$defs/timestampMs"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": { "enum": ["pending", "renamed", "expired"] },
+            "failure": false
+          }
+        },
+        {
+          "required": ["failure"],
+          "properties": {
+            "status": { "const": "failed" },
+            "failure": { "$ref": "#/$defs/sessionRenameFailure" }
+          }
+        }
+      ]
+    },
     "rakumuxVersion": {
       "description": "A stable Rakumux release's version, as its tag names it without the `v` (`0.1.48`).",
       "type": "string",

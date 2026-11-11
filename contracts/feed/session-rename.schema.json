@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:session-rename-answer",
+  "title": "A session rename request, as stored",
+  "description": "The answer to a session rename's status report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "session_rename"],
+  "properties": {
+    "version": { "const": 1 },
+    "session_rename": { "$ref": "urn:rakumux:feed:v1:common#/$defs/sessionRename" }
+  }
+}

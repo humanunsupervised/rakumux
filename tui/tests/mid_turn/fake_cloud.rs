@@ -126,6 +126,10 @@ pub struct State {
     pub deletions: Vec<Value>,
     /// Deletion status reports, as sent.
     pub deletion_reports: Vec<Value>,
+    /// Sessions asked to be renamed (`sessionRename`), as stored.
+    pub renames: Vec<Value>,
+    /// Rename status reports, as sent.
+    pub rename_reports: Vec<Value>,
 }
 
 impl State {
@@ -259,11 +263,8 @@ impl FakeCloud {
 }
 
 impl FakeCloud {
-    /// Write an answer to the question `call_id` that `session`'s agent asks
-    /// in chat `conversation`, as the user does on rakumux.com: `answers`
-    /// as `questionAnswer`'s, `text` saying them. (`question_answers.rs`'s.)
-    #[allow(dead_code)]
     /// Ask this machine to delete `session`, as the website does; the request's id.
+    #[allow(dead_code)]
     pub fn ask_deletion(&self, machine: &str, session: &str) -> String {
         let id = ulid();
         let at = now_ms();
@@ -274,6 +275,22 @@ impl FakeCloud {
         id
     }
 
+    /// Ask this machine to name `session` `name`, as the website does; the request's id.
+    #[allow(dead_code)]
+    pub fn ask_rename(&self, machine: &str, session: &str, name: &str) -> String {
+        let id = ulid();
+        let at = now_ms();
+        self.state().renames.push(
+            json!({"id": id, "machine": machine, "session": session, "name": name,
+            "status": "pending", "created_at": at, "status_at": at}),
+        );
+        id
+    }
+
+    /// Write an answer to the question `call_id` that `session`'s agent asks
+    /// in chat `conversation`, as the user does on rakumux.com: `answers`
+    /// as `questionAnswer`'s, `text` saying them. (`question_answers.rs`'s.)
+    #[allow(dead_code)]
     pub fn write_answer(
         &self,
         session: (&str, &str),
@@ -474,6 +491,14 @@ impl Served {
                         .collect();
                     read["session_deletions"] = json!(pending);
                 }
+                if state.says("rename_sessions") {
+                    let pending: Vec<&Value> = state
+                        .renames
+                        .iter()
+                        .filter(|rename| rename["status"] == "pending")
+                        .collect();
+                    read["session_renames"] = json!(pending);
+                }
                 answer(200, read)
             }
             ("POST", "/api/v1/feed/session-deletions/status") => {
@@ -491,6 +516,22 @@ impl Served {
                 let stored = stored.clone();
                 state.deletion_reports.push(body);
                 answer(200, json!({"version": 1, "session_deletion": stored}))
+            }
+            ("POST", "/api/v1/feed/session-renames/status") => {
+                let Some(stored) = state
+                    .renames
+                    .iter_mut()
+                    .find(|rename| rename["id"] == body["id"])
+                else {
+                    return error(404, "invalid_request");
+                };
+                stored["status"] = body["status"].clone();
+                if !body["failure"].is_null() {
+                    stored["failure"] = body["failure"].clone();
+                }
+                let stored = stored.clone();
+                state.rename_reports.push(body);
+                answer(200, json!({"version": 1, "session_rename": stored}))
             }
             ("POST", "/api/v1/feed/replies/status") => {
                 let id = body["id"].as_str().unwrap_or_default().to_owned();

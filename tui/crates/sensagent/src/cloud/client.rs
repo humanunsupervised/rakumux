@@ -31,6 +31,7 @@ const FEED_RESOURCES_PATH: &str = "/api/v1/feed/resources";
 const FEED_LOGS_PATH: &str = "/api/v1/feed/logs";
 const FEED_NEW_SESSION_STATUS_PATH: &str = "/api/v1/feed/new-sessions/status";
 const FEED_SESSION_DELETION_STATUS_PATH: &str = "/api/v1/feed/session-deletions/status";
+const FEED_SESSION_RENAME_STATUS_PATH: &str = "/api/v1/feed/session-renames/status";
 const FEED_UPDATE_STATUS_PATH: &str = "/api/v1/feed/updates/status";
 const FEED_REALTIME_PATH: &str = "/api/v1/feed/realtime";
 /// Followed by `/{id}`, a ULID.
@@ -65,6 +66,7 @@ pub struct CloudAIConfig {
     feed_logs: Url,
     feed_new_session_status: Url,
     feed_session_deletion_status: Url,
+    feed_session_rename_status: Url,
     feed_update_status: Url,
     feed_attachments: Url,
     feed_realtime: Url,
@@ -168,6 +170,8 @@ pub(crate) enum FeedHttp<'a> {
     NewSessionStatus(&'a [u8]),
     /// `POST /api/v1/feed/session-deletions/status` with a deletion's status.
     SessionDeletionStatus(&'a [u8]),
+    /// `POST /api/v1/feed/session-renames/status` with a rename's status.
+    SessionRenameStatus(&'a [u8]),
     /// `POST /api/v1/feed/updates/status` with an update's status.
     UpdateStatus(&'a [u8]),
     /// `GET /api/v1/feed/replies/attachments/{id}`: a file of `size` bytes.
@@ -244,6 +248,7 @@ impl CloudAIConfig {
         let feed_logs = path(FEED_LOGS_PATH);
         let feed_new_session_status = path(FEED_NEW_SESSION_STATUS_PATH);
         let feed_session_deletion_status = path(FEED_SESSION_DELETION_STATUS_PATH);
+        let feed_session_rename_status = path(FEED_SESSION_RENAME_STATUS_PATH);
         let feed_update_status = path(FEED_UPDATE_STATUS_PATH);
         let feed_realtime = path(FEED_REALTIME_PATH);
         let feed_attachments = path(FEED_ATTACHMENTS_PATH);
@@ -265,6 +270,7 @@ impl CloudAIConfig {
             feed_logs,
             feed_new_session_status,
             feed_session_deletion_status,
+            feed_session_rename_status,
             feed_update_status,
             feed_attachments,
             feed_realtime,
@@ -501,6 +507,7 @@ impl CloudAIClient {
             | FeedHttp::Logs(body)
             | FeedHttp::NewSessionStatus(body)
             | FeedHttp::SessionDeletionStatus(body)
+            | FeedHttp::SessionRenameStatus(body)
             | FeedHttp::UpdateStatus(body) => {
                 let url = match request {
                     FeedHttp::Messages(_) => &self.config.feed_messages,
@@ -511,6 +518,7 @@ impl CloudAIClient {
                     FeedHttp::Logs(_) => &self.config.feed_logs,
                     FeedHttp::NewSessionStatus(_) => &self.config.feed_new_session_status,
                     FeedHttp::SessionDeletionStatus(_) => &self.config.feed_session_deletion_status,
+                    FeedHttp::SessionRenameStatus(_) => &self.config.feed_session_rename_status,
                     FeedHttp::UpdateStatus(_) => &self.config.feed_update_status,
                     _ => &self.config.feed_entries,
                 };

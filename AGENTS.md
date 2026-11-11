@@ -444,7 +444,7 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    line, at most 300 characters), only once the answer `accepts` `output`; as it changes the
    list, it goes with it, at most every 3 s, so rakumux.com shows what each agent is doing. A
    list that would pass the contract's 256 KiB goes without places and outputs. The list says
-   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents", "delete_sessions", "remote_update"]`,
+   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents", "delete_sessions", "rename_sessions", "remote_update"]`,
    and `resources` as below, and this Rakumux's version (`rakumux_version`).
    **Releases and updates from rakumux.com** (`feed/updates.rs`, `UpdateSync`; contract
    `contracts/feed/`, "Releases and updates"): each replies read may say the newest release
@@ -510,6 +510,19 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `refused` (`POST /api/v1/feed/session-deletions/status`). One at a time; each id is marked handled
    before the daemon is asked and kept with the reports not yet taken in
    `sensagent/status/session-deletions.json` (0600, an hour), so a request is carried out at most once.
+   **Sessions renamed from rakumux.com** (`feed/session_renames.rs`, `SessionRenameSync`; contract
+   `contracts/feed/`, "Renaming sessions"): because its list says `rename_sessions`, the machine's
+   replies read brings the renames asked of it (`session_renames`, with every read until reported),
+   while the feed is on and its name is confirmed. The service renames each through the daemon as the
+   user (`session_rename`, so `auto_named` goes and automatic titles leave the session alone, as after
+   `r`), only a session it lists to rakumux.com (live or exited, never private or another machine's),
+   and only to a name as the daemon takes it (one line, trimmed, at most 64 characters; a request with
+   another is left out and expires), and reports `renamed`, or `failed`: `not_listed`, `name_taken`
+   (the daemon's `invalid_argument`: another session of its folder has it), `refused`
+   (`POST /api/v1/feed/session-renames/status`). Its next session list carries the new name. One at
+   a time; each id is marked handled before the daemon is asked and kept with the reports not yet
+   taken in `sensagent/status/session-renames.json` (0600, an hour), so a request is carried out at
+   most once.
    **Logs for the owner's viewer** (`feed/logs.rs`, `LogSync`; contract `contracts/feed/`, "Logs"):
    while `GET /api/v1/features` says `logs: {level}` (rakumux.com decides per account, owners only
    unless the deployment says otherwise) and this machine's name is confirmed, the service follows
@@ -1153,8 +1166,9 @@ accidents; they don't stop a hostile process running as the same user.
                                  handed to the daemon, and reports not yet taken;
                                  new-sessions.json:
                                  new sessions from rakumux.com started or decided here and
-                                 reports not yet taken; session-deletions.json: the same for
-                                 sessions deleted from rakumux.com), machine.json (this
+                                 reports not yet taken; session-deletions.json and
+                                 session-renames.json: the same for sessions deleted and
+                                 renamed from rakumux.com), machine.json (this
                                  machine's feed name and id), its registration and private socket
   uploads/<reply id>/            0700: files attached to feed replies (0600), fetched by the
                                  account service and typed to the agent as paths; kept 7 days

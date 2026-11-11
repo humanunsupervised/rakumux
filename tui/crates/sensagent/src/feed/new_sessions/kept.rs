@@ -1,4 +1,4 @@
-//! What requests from rakumux.com (new sessions, deletions) keep across a
+//! What requests from rakumux.com (new sessions, deletions, renames) keep across a
 //! restart of the service, in a file (0600) when given one: the requests
 //! handled here (carried out, being carried out, or decided: never carried
 //! out again) and the reports rakumux.com hasn't taken yet. Written before

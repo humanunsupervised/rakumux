@@ -24,6 +24,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/logs` | [logs-upload](logs-upload.schema.json) | [logs-stored](logs-stored.schema.json) |
 | `POST /api/v1/feed/new-sessions/status` | [new-session-status](new-session-status.schema.json) | [new-session](new-session.schema.json) |
 | `POST /api/v1/feed/session-deletions/status` | [session-deletion-status](session-deletion-status.schema.json) | [session-deletion](session-deletion.schema.json) |
+| `POST /api/v1/feed/session-renames/status` | [session-rename-status](session-rename-status.schema.json) | [session-rename](session-rename.schema.json) |
 | `POST /api/v1/feed/updates/status` | [update-status](update-status.schema.json) | [machine-update](machine-update.schema.json) |
 | `GET /api/v1/feed/realtime` | header only | [realtime](realtime.schema.json) |
 | WebSocket at the realtime `url` | bearer `token` | [poke](poke.schema.json) messages |
@@ -195,7 +196,8 @@ conformance tests, not an HTTP server, database or local runtime.
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
   fetches a reply's attachments and gives the agent their paths; `resources`, it sends what it
   uses while rakumux.com asks (below); `delete_sessions`, it deletes sessions asked of it on
-  rakumux.com (below); `new_sessions`, it takes new sessions asked of it on
+  rakumux.com (below); `rename_sessions`, it renames sessions asked of it on rakumux.com
+  (below); `new_sessions`, it takes new sessions asked of it on
   rakumux.com (below); `new_session_agents`, it starts every agent in them, not only Claude
   Code, Codex and OpenCode (below); `question_answers`, it gives answers written on rakumux.com to
   the questions Claude Code asks in its own dialog (above); `question_answers.copilot`,
@@ -258,6 +260,22 @@ conformance tests, not an HTTP server, database or local runtime.
   `refused`). Readers take a `failure` they don't know as a failure without a reason. One still
   pending 10 minutes after it was written is `expired`. When the request is written the cloud
   pokes the account's machines (and wakes an enrolled one, below), as for a reply.
+- **Renaming sessions:** on rakumux.com the user can ask the machine that lists a session to rename
+  it. The cloud stores the request (`sessionRename` in common, under the id the page made, so a
+  request sent again is stored once) `pending` with the new name (`sessionName`: one line, at most
+  64 characters, trimmed), only for a session that machine's latest list names and only when that
+  list advertises `rename_sessions`. The machine's replies read (naming itself with `machine`)
+  carries `session_renames`, its requests still pending, oldest first, at most 20, with every read
+  until reported or expired, whatever `after` says; they take no seq, so a machine takes each by its
+  `id`, at most once. A request carries no path and no command. The machine renames only a session
+  it lists to rakumux.com (never a private session or another machine's), as its user would, so
+  automatic titles leave that session alone from then on, and reports `session-rename-status` (only
+  the request's own machine, only a pending request, or one that expired while the machine was
+  renaming it): `renamed`, or `failed` with why (`not_listed`, `name_taken`: another session of its
+  folder has that name, or `refused`). Readers take a `failure` they don't know as a failure without
+  a reason. Its next session list carries the new name. One still pending 10 minutes after it was
+  written is `expired`. When the request is written the cloud pokes the account's machines (and
+  wakes an enrolled one, below), as for a reply.
 - **Releases and updates:** every replies read may say `release` (`{version}`), the newest
   stable Rakumux release rakumux.com knows of: GitHub's latest release, read again every few
   minutes and as one is published. A machine's account service passes it to the TUIs, which offer

@@ -240,6 +240,7 @@ pub fn serve(
         .with_reply_state(layout.status_dir().join("replies.json"))
         .with_new_session_state(layout.status_dir().join("new-sessions.json"))
         .with_session_deletion_state(layout.status_dir().join("session-deletions.json"))
+        .with_session_rename_state(layout.status_dir().join("session-renames.json"))
         .with_update_state(layout.status_dir().join("updates.json"))
         .with_version(version)
         .with_titles(layout.status_dir().join("titles.json"))

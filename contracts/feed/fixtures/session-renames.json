@@ -1,0 +1,358 @@
+{
+  "rename": {
+    "valid": [
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "name": "fix login",
+        "status": "pending",
+        "created_at": 1761220000000,
+        "status_at": 1761220000000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "name": "fix login",
+        "status": "renamed",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "name": "fix login",
+        "status": "expired",
+        "created_at": 1761220000000,
+        "status_at": 1761220600000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "name": "fix login",
+        "status": "failed",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "failure": "not_listed"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "name": "fix login",
+        "status": "failed",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "failure": "name_taken"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "name": "fix login",
+        "status": "failed",
+        "created_at": 1761220000000,
+        "status_at": 1761220002000,
+        "failure": "refused"
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "name": "修正 ログイン ✨",
+        "status": "pending",
+        "created_at": 1761220000000,
+        "status_at": 1761220000000
+      },
+      {
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+        "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "status": "pending",
+        "created_at": 1761220000000,
+        "status_at": 1761220000000
+      }
+    ],
+    "invalid": [
+      {
+        "note": "a command",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix login",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "command": "rm -rf ~"
+        }
+      },
+      {
+        "note": "a path",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix login",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "cwd": "/home/me"
+        }
+      },
+      {
+        "note": "a session id that isn't a ULID",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "brave-otter",
+          "name": "fix login",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "no name",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "an empty name",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "a name of white space",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "   ",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "white space before the name",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": " fix login",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "white space after the name",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix login ",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "a name over 64 characters",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "a name of two lines",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix\nlogin",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "a name with a terminal control",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix\u001b[31mlogin",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "failed without why",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix login",
+          "status": "failed",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      },
+      {
+        "note": "pending with a failure",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix login",
+          "status": "pending",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "failure": "refused"
+        }
+      },
+      {
+        "note": "renamed with a failure",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix login",
+          "status": "renamed",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "failure": "name_taken"
+        }
+      },
+      {
+        "note": "a failure outside this version",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix login",
+          "status": "failed",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000,
+          "failure": "disk_full"
+        }
+      },
+      {
+        "note": "an unknown status",
+        "value": {
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "session": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+          "name": "fix login",
+          "status": "running",
+          "created_at": 1761220000000,
+          "status_at": 1761220000000
+        }
+      }
+    ]
+  },
+  "status": {
+    "valid": [
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "renamed"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "not_listed"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "name_taken"
+      },
+      {
+        "version": 1,
+        "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+        "machine": "studio",
+        "status": "failed",
+        "failure": "refused"
+      }
+    ],
+    "invalid": [
+      {
+        "note": "failed without why",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "failed"
+        }
+      },
+      {
+        "note": "renamed with a failure",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "renamed",
+          "failure": "name_taken"
+        }
+      },
+      {
+        "note": "pending isn't reported",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "pending"
+        }
+      },
+      {
+        "note": "a name isn't reported",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "machine": "studio",
+          "status": "renamed",
+          "name": "fix login"
+        }
+      },
+      {
+        "note": "no machine",
+        "value": {
+          "version": 1,
+          "id": "01K8A2B3C4D5E6F7G8H9J0K1M2",
+          "status": "renamed"
+        }
+      }
+    ]
+  }
+}

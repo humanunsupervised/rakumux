@@ -243,8 +243,116 @@ fn replies_written_while_claude_code_works_go_in_one_at_a_time_across_a_restart(
     eprintln!("mid-turn replies end to end: {:?}", started.elapsed());
 }
 
-/// A security checkpoint in front of rakumux.com (an HTML 403) is an outage,
-/// not the cloud's refusal: the report that met it is sent again.
+/// A rename asked on rakumux.com names the session as its user would (so
+/// automatic titles leave it alone), once; a name its folder has, or a session
+/// this machine doesn't list, is reported as such.
+#[test]
+fn a_session_asked_on_rakumux_com_to_be_renamed_takes_the_name_once() {
+    let world = World::new();
+    let mut daemon = world.start_daemon();
+    let client = world.client();
+    let session = world.start_claude(&client);
+    let other = client
+        .create(CreateSession {
+            scope: Some(ScopeRoot::resolve(&world.work).unwrap()),
+            name: Some("review".into()),
+            cwd: None,
+            argv: Some(vec!["/bin/sleep".into(), "600".into()]),
+            startup_cmds: Vec::new(),
+            env: Vec::new(),
+            cols: 80,
+            rows: 24,
+            machine: None,
+            prefill: None,
+        })
+        .unwrap();
+    let mut service = world.start_service(1);
+    let listed_as = |id: &str| -> Option<String> {
+        let state = world.cloud.state();
+        state.sessions.as_ref().and_then(|list| {
+            list["sessions"]
+                .as_array()?
+                .iter()
+                .find(|s| s["id"] == id)?["name"]
+                .as_str()
+                .map(String::from)
+        })
+    };
+    world.wait("the session list to say it renames sessions", || {
+        world.cloud.state().says("rename_sessions")
+            && listed_as(session.id.as_str()).is_some()
+            && listed_as(other.id.as_str()).is_some()
+    });
+
+    let taken = world
+        .cloud
+        .ask_rename(MACHINE, session.id.as_str(), "review");
+    let renamed = world
+        .cloud
+        .ask_rename(MACHINE, session.id.as_str(), "parser rewrite");
+    let unknown = world.cloud.ask_rename(MACHINE, &ulid(), "anything");
+    let reported = |id: &str| -> Option<Value> {
+        world
+            .cloud
+            .state()
+            .rename_reports
+            .iter()
+            .find(|report| report["id"] == id)
+            .cloned()
+    };
+    world.wait("the three renames reported", || {
+        [&taken, &renamed, &unknown]
+            .iter()
+            .all(|id| reported(id).is_some())
+    });
+    let report = reported(&taken).unwrap();
+    assert_eq!(report["status"], "failed", "{}", world.diagnostics());
+    assert_eq!(report["failure"], "name_taken", "{}", world.diagnostics());
+    assert_eq!(
+        reported(&renamed).unwrap()["status"],
+        "renamed",
+        "{}",
+        world.diagnostics()
+    );
+    let report = reported(&unknown).unwrap();
+    assert_eq!(report["status"], "failed", "{}", world.diagnostics());
+    assert_eq!(report["failure"], "not_listed", "{}", world.diagnostics());
+
+    // The daemon has the new name as the user's (not generated), the other
+    // session kept its own, and the next session list carries it.
+    let view = client.get(&session.id).unwrap();
+    assert_eq!(view.name, "parser rewrite", "{}", world.diagnostics());
+    assert!(!view.auto_named, "{}", world.diagnostics());
+    assert_eq!(client.get(&other.id).unwrap().name, "review");
+    world.wait("the session list to carry the new name", || {
+        listed_as(session.id.as_str()).as_deref() == Some("parser rewrite")
+    });
+
+    // A request still read as pending after a restart is never carried out twice.
+    client.rename(&session.id, "by hand").unwrap();
+    world.cloud.state().renames.iter_mut().for_each(|rename| {
+        if rename["id"] == renamed.as_str() {
+            rename["status"] = json!("pending");
+        }
+    });
+    service.stop();
+    let reads = world.cloud.state().reads.len();
+    service = world.start_service(2);
+    world.wait("the restarted service to read replies", || {
+        world.cloud.state().reads.len() >= reads + 2
+    });
+    assert_eq!(
+        world.cloud.state().rename_reports.len(),
+        3,
+        "{}",
+        world.diagnostics()
+    );
+    assert_eq!(client.get(&session.id).unwrap().name, "by hand");
+    service.stop();
+    let _ = client.shutdown();
+    daemon.stop();
+}
+
 #[test]
 fn a_session_asked_on_rakumux_com_to_be_deleted_goes_to_its_history_once() {
     let world = World::new();
@@ -323,6 +431,8 @@ fn a_session_asked_on_rakumux_com_to_be_deleted_goes_to_its_history_once() {
     daemon.stop();
 }
 
+/// A security checkpoint in front of rakumux.com (an HTML 403) is an outage,
+/// not the cloud's refusal: the report that met it is sent again.
 #[test]
 fn a_report_that_meets_a_security_checkpoint_is_sent_again() {
     let world = World::new();

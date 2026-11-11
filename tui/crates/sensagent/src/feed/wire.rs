@@ -142,6 +142,8 @@ pub(crate) enum FeedRequest {
     NewSessionStatus { body: Vec<u8> },
     /// Say whether a session rakumux.com asked to delete was deleted, as `body`.
     SessionDeletionStatus { body: Vec<u8> },
+    /// Say whether a session rakumux.com asked to rename was renamed, as `body`.
+    SessionRenameStatus { body: Vec<u8> },
     /// Say how an update asked for on rakumux.com went, as `body`.
     UpdateStatus { body: Vec<u8> },
 }
@@ -1033,6 +1035,9 @@ struct WireReplies {
     /// Sessions asked of this machine to delete (`session_deletions`), read row by row.
     #[serde(default)]
     session_deletions: Option<serde_json::Value>,
+    /// Sessions asked of this machine to rename (`session_renames`), read row by row.
+    #[serde(default)]
+    session_renames: Option<serde_json::Value>,
     /// The newest release rakumux.com knows of (`release`).
     #[serde(default)]
     release: Option<serde_json::Value>,
@@ -1061,6 +1066,8 @@ pub(crate) struct RepliesRead {
     pub new_sessions: Vec<super::new_sessions::NewSessionAsk>,
     /// The deletions pending for this machine, when the read brought them.
     pub session_deletions: Vec<super::session_deletions::DeletionAsk>,
+    /// The renames pending for this machine, when the read brought them.
+    pub session_renames: Vec<super::session_renames::RenameAsk>,
     /// The newest stable release rakumux.com knows of, when it says.
     pub release: Option<String>,
     /// The update asked of this machine, when the read brought one.
@@ -1122,6 +1129,7 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
         resources_wanted: page.resources_wanted,
         new_sessions: super::new_sessions::asks(page.new_sessions),
         session_deletions: super::session_deletions::asks(page.session_deletions),
+        session_renames: super::session_renames::asks(page.session_renames),
         release: super::updates::release(page.release),
         updates: super::updates::asks(page.updates),
     })
