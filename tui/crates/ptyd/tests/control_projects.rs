@@ -386,7 +386,7 @@ fn users_list_and_watch_several_projects() {
 }
 
 #[test]
-fn session_callers_stay_in_their_own_project() {
+fn session_callers_see_every_project_but_manage_none() {
     let h = Harness::new();
     let mine = h.create(Some("mine"));
     h.create_in(&h.other_scope(), Some("elsewhere"));
@@ -394,8 +394,12 @@ fn session_callers_stay_in_their_own_project() {
     std::fs::create_dir_all(&extra).unwrap();
     let me = h.session_caller(&mine.id);
 
-    let seen: Vec<_> = projects(&h, &me).into_iter().map(|p| p.path).collect();
-    assert_eq!(seen, vec![h.scope.clone()]);
+    let mut seen: Vec<_> = projects(&h, &me).into_iter().map(|p| p.path).collect();
+    seen.sort_by(|a, b| a.path().cmp(b.path()));
+    let mut every: Vec<_> = projects(&h, &h.user).into_iter().map(|p| p.path).collect();
+    every.sort_by(|a, b| a.path().cmp(b.path()));
+    assert_eq!(seen, every);
+    assert_eq!(seen.len(), 2);
 
     let denied = [
         Request::ProjectAdd {
@@ -412,22 +416,17 @@ fn session_callers_stay_in_their_own_project() {
     }
     assert_eq!(projects(&h, &h.user).len(), 2, "nothing was added");
 
-    // Naming its own project is fine; any other one is out of scope.
-    let own = h.handle(
-        &me,
-        Request::SessionList {
-            scope: None,
-            scopes: vec![h.scope.clone()],
-            include_dead: true,
-            all: false,
-        },
-    );
-    assert_eq!(names(&sessions(own)), ["mine"]);
-    for (scope, scopes) in [
-        (None, vec![h.scope.clone(), h.other_scope()]),
-        (Some(h.scope.clone()), vec![h.other_scope()]),
+    // Any project it names.
+    for (scope, scopes, expected) in [
+        (None, vec![h.scope.clone()], vec!["mine"]),
+        (None, vec![h.other_scope()], vec!["elsewhere"]),
+        (
+            Some(h.scope.clone()),
+            vec![h.other_scope()],
+            vec!["elsewhere", "mine"],
+        ),
     ] {
-        let err = error(h.handle(
+        let listed = h.handle(
             &me,
             Request::SessionList {
                 scope,
@@ -435,10 +434,12 @@ fn session_callers_stay_in_their_own_project() {
                 include_dead: true,
                 all: false,
             },
-        ));
-        assert_eq!(err.code, ErrorCode::OutOfScope);
+        );
+        let mut listed = names(&sessions(listed));
+        listed.sort();
+        assert_eq!(listed, expected);
     }
-    let err = h
+    assert!(h
         .control
         .subscribe(
             &me,
@@ -447,8 +448,7 @@ fn session_callers_stay_in_their_own_project() {
                 ..Default::default()
             },
         )
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::OutOfScope);
+        .is_ok());
 
     let denials: Vec<_> = h
         .audit()
@@ -456,9 +456,7 @@ fn session_callers_stay_in_their_own_project() {
         .filter(|row| row.decision == "denied")
         .map(|row| row.method)
         .collect();
-    for method in ["project.add", "project.remove", "session.list", "subscribe"] {
-        assert!(denials.iter().any(|m| m == method), "{method}: {denials:?}");
-    }
+    assert_eq!(denials, ["project.add", "project.remove"]);
 }
 
 #[test]
@@ -592,7 +590,7 @@ fn users_watch_every_project_including_new_ones() {
 }
 
 #[test]
-fn session_callers_cannot_list_or_watch_every_project() {
+fn session_callers_list_and_watch_every_project() {
     let h = Harness::new();
     let mine = h.create(Some("mine"));
     h.create_in(&h.other_scope(), Some("elsewhere"));
@@ -617,9 +615,9 @@ fn session_callers_cannot_list_or_watch_every_project() {
     assert_eq!(delegated.session_id(), Some(&mine.id));
 
     for caller in [&me, &delegated] {
-        // Naming its own project doesn't make `all` acceptable.
+        // `all`, whatever else it names, is every project.
         for scope in [None, Some(h.scope.clone())] {
-            let err = error(h.handle(
+            let listed = h.handle(
                 caller,
                 Request::SessionList {
                     scope: scope.clone(),
@@ -627,9 +625,11 @@ fn session_callers_cannot_list_or_watch_every_project() {
                     include_dead: true,
                     all: true,
                 },
-            ));
-            assert_eq!(err.code, ErrorCode::OutOfScope);
-            let err = h
+            );
+            let mut listed = names(&sessions(listed));
+            listed.sort();
+            assert_eq!(listed, ["elsewhere", "mine"]);
+            assert!(h
                 .control
                 .subscribe(
                     caller,
@@ -639,11 +639,10 @@ fn session_callers_cannot_list_or_watch_every_project() {
                         ..Default::default()
                     },
                 )
-                .unwrap_err();
-            assert_eq!(err.code, ErrorCode::OutOfScope);
+                .is_ok());
         }
     }
-    // Their own project, as before.
+    // Without a project, their own, as before.
     let own = h.handle(
         &me,
         Request::SessionList {
@@ -654,23 +653,7 @@ fn session_callers_cannot_list_or_watch_every_project() {
         },
     );
     assert_eq!(names(&sessions(own)), ["mine"]);
-
-    let label = format!("session:{}", mine.id);
-    let scope = path_str(h.scope.path());
-    let denials: Vec<_> = h
-        .audit()
-        .into_iter()
-        .filter(|row| row.decision == "denied")
-        .collect();
-    for method in ["session.list", "subscribe"] {
-        let rows: Vec<_> = denials.iter().filter(|row| row.method == method).collect();
-        assert_eq!(rows.len(), 4, "{method}: {denials:?}");
-        for row in rows {
-            assert_eq!(row.caller, label);
-            assert_eq!(row.scope.as_deref(), Some(scope.as_str()));
-            assert!(row.detail.as_deref().unwrap().contains("own folder"));
-        }
-    }
+    assert!(h.audit().iter().all(|row| row.decision != "denied"));
 }
 
 #[test]
@@ -946,8 +929,8 @@ fn agent_working_directory_follows_internal_worktree_switches_without_changing_s
             },
         );
         assert!(
-            matches!(outside, Response::Error { error } if error.code == ErrorCode::OutOfScope),
-            "a logical working directory must not change the agent's authenticated folder"
+            matches!(&outside, Response::Sessions { sessions } if sessions.iter().all(|s| s.id != started.id)),
+            "a logical working directory must not change the agent's folder: {outside:?}"
         );
         assert_eq!(
             active.cwd, root,

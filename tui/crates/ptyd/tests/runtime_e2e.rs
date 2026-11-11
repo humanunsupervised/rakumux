@@ -215,7 +215,9 @@ fn terminal_pane_operations_refuse_session_callers_and_invalid_requests() {
             token_file.display()
         )],
     );
-    assert!(wait_until(TIMEOUT, || token_file.exists()));
+    // Created first, written a moment later.
+    assert!(wait_until(TIMEOUT, || std::fs::read_to_string(&token_file)
+        .is_ok_and(|token| !token.is_empty())));
     let client = pane_client(&home);
     let mut config = client.config().clone();
     config.auth = AuthMode::Session {

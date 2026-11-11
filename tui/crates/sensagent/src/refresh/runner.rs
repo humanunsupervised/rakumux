@@ -349,7 +349,7 @@ pub struct RefreshClient {
 
 impl RefreshRunner {
     /// Start following `api`'s sessions (it must be a user client: session callers
-    /// see only their own folder and can't capture). Refreshing starts once the
+    /// can't capture replies). Refreshing starts once the
     /// first session list arrives, and only under the coordinator's confirmed consent.
     pub fn spawn<S, A, C>(
         refresher: StatusRefresher<S, A, C>,

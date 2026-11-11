@@ -7,7 +7,7 @@ info:
     `rakumux-api` exposes a subset of the session operations of the running
     Rakumux daemon (`rakumux-ptyd`). It listens on **127.0.0.1** and, with
     remote access on, on a **remote listener** too (see below). It is a thin
-    adapter: the daemon decides permissions and folder confinement.
+    adapter: the daemon decides permissions.
 
     **Discovery.** While it runs, the API writes
     `<RAKUMUX_HOME or ~/.rakumux>/api.json` (mode 0600):
@@ -45,9 +45,11 @@ info:
     **Identity.** Without identity headers the API acts as the user. With both
     `X-Rakumux-Session-Id` and `X-Rakumux-Session-Token` (the
     `RAKUMUX_SESSION_ID` / `RAKUMUX_SESSION_TOKEN` of a process running in
-    a Rakumux session) it acts as that session: the daemon confines it to
-    its own folder and applies its agent policy (today: read anything in the
-    folder, create sessions in it within limits, rename only itself). With
+    a Rakumux session) it acts as that session and the daemon applies its
+    agent policy: it reaches every folder, reads, waits on and drives any
+    other session (input, submit, kill, revive), creates sessions in any
+    folder within limits, and renames only itself; never drives itself, and
+    deleting, attaching and the session history stay the user's. With
     both `X-Rakumux-Agent` and `X-Rakumux-Agent-Conversation` instead
     (for agents whose tool calls don't carry the session's environment, such
     as OpenCode 2.x) it acts as the running session that bound that
@@ -71,7 +73,8 @@ info:
     **Errors** use one envelope, `{"error": {"code", "message", "details"?}}`.
     Daemon error codes map to statuses: `not_found` 404, `invalid_argument`
     400, `unauthenticated` 401, `out_of_scope` and `permission_denied` 403,
-    `session_not_live` and `session_in_use` 409, `limit_exceeded` 429,
+    `session_not_live`, `session_in_use`, `session_blocked` and
+    `foreground_changed` 409, `limit_exceeded` 429,
     `timeout` 504,
     `daemon_unavailable` 503, `unsupported` 501, anything else 500. The API's
     own codes: `method_not_allowed` 405, `payload_too_large` 413,
@@ -190,8 +193,7 @@ paths:
         - name: all
           in: query
           description: >
-            Every folder's sessions (user callers; session callers get 403
-            `out_of_scope`). Not with `folder` (400).
+            Every folder's sessions. Not with `folder` (400).
           schema: { type: boolean, default: false }
         - name: folder
           in: query
@@ -380,6 +382,114 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/NotLive" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/sessions/{id}/input:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    post:
+      tags: [sessions]
+      operationId: sendInput
+      summary: Type keys and text into a session.
+      description: >
+        Named keys first, then the text, typed as they are: no Enter unless a key
+        says so. Keys are checked before anything is typed (an unknown one is a
+        400). For answering a prompt or a menu (`y`, `esc`, `down`, `enter`) or
+        interrupting (`ctrl+c`); a line or a prompt goes better with
+        `/submit`. A session caller can't type into itself (403).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Input" }
+      responses:
+        "204": { description: Typed. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/NotLive" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/sessions/{id}/submit:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    post:
+      tags: [sessions]
+      operationId: submitText
+      summary: Send a line or a prompt to a session.
+      description: >
+        Pastes the text (one paste, so several lines stay one prompt) and presses
+        Enter half a second later: a command to a shell, a prompt to a coding
+        agent. By default (`refuse_if_blocked`) it's refused with 409
+        `session_blocked` while the session's agent asks something (a permission
+        prompt, a question or a menu would take the text as its answer) or
+        isn't at its prompt yet; with `quiet_ms`, with 409 `session_in_use`
+        while someone typed there that recently. Nothing is typed then; try
+        again later, or answer the prompt with `/input`. A session caller can't
+        submit to itself (403).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Submit" }
+      responses:
+        "204": { description: "Pasted, and Enter pressed." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: >
+            `session_not_live`, `session_blocked` (its agent asks something or
+            isn't at its prompt), `session_in_use` (someone typed there within
+            `quiet_ms`) or `foreground_changed`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/sessions/{id}/wait:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    post:
+      tags: [sessions]
+      operationId: waitForSession
+      summary: Wait until a session gets somewhere.
+      description: >
+        Holds the request until the session's lifecycle or screen says what
+        `until` asks, the timeout passes (`timeout_ms`, default 30 000, at most
+        600 000), or it can't happen any more (the session ended). Always 200
+        with `matched`; `settled` is the usual one after a submit: its agent
+        finished (`idle`, `done`), asks something (`blocked`) or the session
+        ended.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Wait" }
+      responses:
+        "200":
+          description: Where the session got.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WaitOutcome" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "503": { $ref: "#/components/responses/DaemonUnavailable" }
   /v1/sessions/{id}/attach:
     parameters:
@@ -823,8 +933,7 @@ components:
           type: string
           description: >
             Directory (absolute; `~/` expanded) or name of a known folder. Required
-            for user callers; session callers may omit it (their own folder) and
-            may not name another one (403 `out_of_scope`).
+            for user callers; session callers may omit it (their own folder).
         project:
           type: string
           deprecated: true
@@ -875,6 +984,69 @@ components:
       properties:
         cols: { type: integer, minimum: 0, maximum: 65535, description: 0 or omitted → default. }
         rows: { type: integer, minimum: 0, maximum: 65535, description: 0 or omitted → default. }
+    Input:
+      type: object
+      additionalProperties: false
+      description: Body of `POST /v1/sessions/{id}/input`; `keys`, `text` or both.
+      properties:
+        keys:
+          type: array
+          items: { type: string }
+          description: >
+            Keys, typed first, in order: a single character (`y`, `1`) or a
+            named key (`enter`, `esc`, `tab`, `backspace`, `space`, `up`,
+            `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`,
+            `insert`, `delete`, `f1`–`f12`), with `ctrl+`, `alt+` or `shift+`
+            (`ctrl+c`, `shift+tab`).
+        text: { type: string, description: Typed as it is, after the keys. }
+    Submit:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1 }
+        quiet_ms:
+          type: integer
+          minimum: 0
+          description: Refused (409 `session_in_use`) while someone typed in the session within this many ms.
+        refuse_if_blocked:
+          type: boolean
+          default: true
+          description: >
+            Refused (409 `session_blocked`) while the session's agent asks
+            something or isn't at its prompt yet.
+    Wait:
+      type: object
+      additionalProperties: false
+      required: [until]
+      properties:
+        until:
+          type: string
+          enum: [settled, idle, blocked, working, exited, reported, output]
+          description: >
+            `settled`: idle, done, blocked or exited. `reported`: the session
+            reports something new about itself. `output`: the screen shows
+            `pattern`.
+        pattern: { type: string, description: "For `output`: text the screen must show (a substring)." }
+        timeout_ms: { type: integer, minimum: 0, maximum: 600000, default: 30000 }
+    WaitOutcome:
+      type: object
+      required: [matched, status, lifecycle, reason]
+      properties:
+        matched: { type: boolean, description: "False after the timeout, or when it can't happen any more." }
+        status: { type: string, enum: [live, exited, dead] }
+        lifecycle: { type: string, enum: [working, blocked, done, idle, unknown, none] }
+        reported:
+          type: object
+          description: What the session last reported about itself. Written by its own program; untrusted.
+          required: [at]
+          properties:
+            state: { type: string, enum: [working, blocked, done, idle] }
+            text: { type: string }
+            summary: { type: string }
+            files: { type: array, items: { type: string } }
+            at: { type: string, format: date-time }
+        reason: { type: string, description: Why it ended, e.g. "timeout after 30000 ms". }
     EventMessage:
       description: A text message of `GET /v1/events` (server → client).
       oneOf:

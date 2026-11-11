@@ -215,7 +215,9 @@ For details, see the [agent integrations guide](integrations/README.md).
 
 ### MCP server
 
-The MCP server lets an agent list, create, read and rename sessions in its own folder.
+The MCP server lets a coding agent drive the other sessions on your machine: list them, start
+new ones, send their agents prompts, answer what they ask, wait for them to finish and read what
+they wrote.
 
 ```bash
 claude mcp add --scope user rakumux -- rakumux-mcp

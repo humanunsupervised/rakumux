@@ -109,7 +109,10 @@ pub fn status_for(code: ErrorCode) -> StatusCode {
         ErrorCode::InvalidArgument => StatusCode::BAD_REQUEST,
         ErrorCode::Unauthenticated => StatusCode::UNAUTHORIZED,
         ErrorCode::OutOfScope | ErrorCode::PermissionDenied => StatusCode::FORBIDDEN,
-        ErrorCode::SessionNotLive | ErrorCode::SessionInUse => StatusCode::CONFLICT,
+        ErrorCode::SessionNotLive
+        | ErrorCode::SessionInUse
+        | ErrorCode::SessionBlocked
+        | ErrorCode::ForegroundChanged => StatusCode::CONFLICT,
         ErrorCode::LimitExceeded => StatusCode::TOO_MANY_REQUESTS,
         ErrorCode::Timeout => StatusCode::GATEWAY_TIMEOUT,
         ErrorCode::DaemonUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -140,6 +143,8 @@ mod tests {
             (ErrorCode::PermissionDenied, 403),
             (ErrorCode::SessionNotLive, 409),
             (ErrorCode::SessionInUse, 409),
+            (ErrorCode::SessionBlocked, 409),
+            (ErrorCode::ForegroundChanged, 409),
             (ErrorCode::LimitExceeded, 429),
             (ErrorCode::Timeout, 504),
             (ErrorCode::DaemonUnavailable, 503),

@@ -1,5 +1,6 @@
-//! Identity, scope confinement, the stage-A permission matrix, sessions
-//! creating sessions (and its limits) and audit.
+//! Identity, what sessions reach (every folder), the stage-B permission
+//! matrix (agents drive other sessions), sessions creating sessions (and its
+//! limits) and audit.
 
 mod control_common;
 
@@ -117,26 +118,27 @@ fn protocol_mismatch_is_reported_before_credentials() {
 }
 
 #[test]
-fn session_callers_are_confined_to_their_scope() {
+fn session_callers_reach_every_folder() {
     let h = Harness::new();
     let mine = h.create(Some("mine"));
     let neighbour = h.create(Some("neighbour"));
     let elsewhere = h.create_in(&h.other_scope(), Some("elsewhere"));
     let me = h.session_caller(&mine.id);
-
-    // Own scope by default; another scope is refused.
-    let listed = match h.handle(
+    let list = |scope: Option<session_core::model::ScopeRoot>, all: bool| match h.handle(
         &me,
         Request::SessionList {
             scopes: Vec::new(),
-            scope: None,
+            scope,
             include_dead: true,
-            all: false,
+            all,
         },
     ) {
         session_core::api::Response::Sessions { sessions } => sessions,
         other => panic!("{other:?}"),
     };
+
+    // Own folder by default.
+    let listed = list(None, false);
     let ids: Vec<_> = listed.iter().map(|s| s.id.clone()).collect();
     assert!(ids.contains(&mine.id) && ids.contains(&neighbour.id));
     assert!(!ids.contains(&elsewhere.id));
@@ -148,14 +150,18 @@ fn session_callers_are_confined_to_their_scope() {
             .unwrap()
             .is_self
     );
+    // Another folder when named, and every folder with `all`.
+    let other: Vec<_> = list(Some(h.other_scope()), false)
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(other, vec![elsewhere.id.clone()]);
+    let every: Vec<_> = list(None, true).into_iter().map(|s| s.id).collect();
+    for id in [&mine.id, &neighbour.id, &elsewhere.id] {
+        assert!(every.contains(id), "{id} in every folder's list");
+    }
 
-    let out_of_scope = [
-        Request::SessionList {
-            scopes: Vec::new(),
-            scope: Some(h.other_scope()),
-            include_dead: false,
-            all: false,
-        },
+    let reads = [
         Request::SessionGet {
             id: elsewhere.id.clone(),
         },
@@ -171,12 +177,25 @@ fn session_callers_are_confined_to_their_scope() {
             pattern: None,
             timeout_ms: 0,
         }),
+        Request::ProjectList,
     ];
-    for request in out_of_scope {
-        let err = error(h.handle(&me, request.clone()));
-        assert_eq!(err.code, ErrorCode::OutOfScope, "{request:?}");
+    for request in reads {
+        let response = h.handle(&me, request.clone());
+        assert!(
+            !matches!(response, session_core::api::Response::Error { .. }),
+            "{request:?}: {response:?}"
+        );
     }
-    let err = h
+    match h.handle(&me, Request::ProjectList) {
+        session_core::api::Response::Projects { projects } => {
+            assert!(
+                projects.iter().any(|p| p.path == h.other_scope()),
+                "{projects:?}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(h
         .control
         .subscribe(
             &me,
@@ -185,8 +204,17 @@ fn session_callers_are_confined_to_their_scope() {
                 ..Default::default()
             },
         )
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::OutOfScope);
+        .is_ok());
+    assert!(h
+        .control
+        .subscribe(
+            &me,
+            &SubscribeRequest {
+                all: true,
+                ..Default::default()
+            },
+        )
+        .is_ok());
 
     // User callers must name the scope; they may act across scopes by id.
     let err = error(h.handle(
@@ -260,27 +288,69 @@ fn session_caller_permission_matrix() {
         .subscribe(&me, &SubscribeRequest::default())
         .is_ok());
 
-    let denied = vec![
+    // Driving another session: keys, text and Enter, kill, revive.
+    let drive = vec![
         Request::SessionSend(SendRequest {
             id: other.id.clone(),
-            keys: vec!["enter".into()],
-            text: None,
+            keys: vec!["esc".into()],
+            text: Some("y".into()),
         }),
+        Request::SessionSubmit {
+            id: other.id.clone(),
+            text: "run the tests".into(),
+            quiet_ms: Some(1_000),
+            expect_foreground: None,
+            refuse_if_blocked: true,
+        },
+        Request::SessionKill {
+            id: other.id.clone(),
+            tree: false,
+        },
+    ];
+    for request in drive {
+        let response = h.handle(&me, request.clone());
+        assert!(
+            !matches!(response, session_core::api::Response::Error { .. }),
+            "{request:?} should be allowed, got {response:?}"
+        );
+    }
+    {
+        let terminal = h.host.terminal(h.host.terminal_of(&other.id));
+        assert_eq!(terminal.submits, vec!["run the tests".to_owned()]);
+        assert_eq!(
+            terminal.keys,
+            vec![(vec!["esc".to_owned()], Some("y".to_owned()))]
+        );
+        assert!(terminal.terminated);
+    }
+    h.host.exit(&other.id, Some(0));
+    eventually("exit processed", || {
+        (h.get(&other.id).status == session_core::model::SessionStatus::Exited).then_some(())
+    });
+    session(h.handle(
+        &me,
+        Request::SessionRevive(ReviveSession {
+            id: other.id.clone(),
+            env: vec![],
+            cols: 80,
+            rows: 24,
+            resume: true,
+        }),
+    ));
+
+    // Never itself, and the user's own things stay the user's.
+    let denied = vec![
         Request::SessionSend(SendRequest {
             id: my_id.clone(),
             keys: vec!["enter".into()],
             text: None,
         }),
         Request::SessionSubmit {
-            id: other.id.clone(),
-            text: "rm -rf /".into(),
+            id: my_id.clone(),
+            text: "loop".into(),
             quiet_ms: None,
             expect_foreground: None,
             refuse_if_blocked: false,
-        },
-        Request::SessionKill {
-            id: other.id.clone(),
-            tree: false,
         },
         Request::SessionKill {
             id: my_id.clone(),
@@ -289,13 +359,6 @@ fn session_caller_permission_matrix() {
         Request::SessionDelete {
             id: other.id.clone(),
         },
-        Request::SessionRevive(ReviveSession {
-            id: other.id.clone(),
-            env: vec![],
-            cols: 80,
-            rows: 24,
-            resume: true,
-        }),
         Request::SessionRename {
             id: other.id.clone(),
             name: "hijacked".into(),
@@ -326,13 +389,13 @@ fn session_caller_permission_matrix() {
     let err = error(h.handle(
         &me,
         Request::SessionKill {
-            id: other.id.clone(),
+            id: my_id.clone(),
             tree: false,
         },
     ));
     assert!(
-        err.message.contains("later release"),
-        "message explains stage B: {}",
+        err.message.contains("doesn't drive itself"),
+        "{}",
         err.message
     );
     for id in [&my_id, &other.id] {
@@ -355,7 +418,7 @@ fn session_caller_permission_matrix() {
     assert_eq!(h.get(&other.id).name, "other");
     assert!(h
         .host
-        .terminal(h.host.terminal_of(&other.id))
+        .terminal(h.host.terminal_of(&my_id))
         .submits
         .is_empty());
     assert_eq!(h.get(&my_id).name, "me renamed");
@@ -375,7 +438,7 @@ fn agent_create(h: &Harness, name: &str) -> CreateSession {
 }
 
 #[test]
-fn sessions_create_sessions_in_their_own_project() {
+fn sessions_create_sessions_in_any_folder() {
     let h = Harness::new();
     let parent = h.create(Some("parent"));
     let me = h.session_caller(&parent.id);
@@ -402,15 +465,16 @@ fn sessions_create_sessions_in_their_own_project() {
     );
     assert!(h.get(&parent.id).children.contains(&child.id));
 
-    // Naming its own project is fine; another project or a working
-    // directory outside it is not.
+    // Its own folder or another; a working directory outside the folder
+    // is refused.
     let mut named = agent_create(&h, "named");
     named.scope = Some(h.scope.clone());
     session(h.handle(&me, Request::SessionCreate(named)));
     let mut elsewhere = agent_create(&h, "elsewhere");
     elsewhere.scope = Some(h.other_scope());
-    let err = error(h.handle(&me, Request::SessionCreate(elsewhere)));
-    assert_eq!(err.code, ErrorCode::OutOfScope);
+    let elsewhere = session(h.handle(&me, Request::SessionCreate(elsewhere)));
+    assert_eq!(elsewhere.scope, h.other_scope());
+    assert_eq!(elsewhere.parent_id.as_ref(), Some(&parent.id));
     let mut outside = agent_create(&h, "outside");
     outside.cwd = Some(h.root().join("other"));
     let err = error(h.handle(&me, Request::SessionCreate(outside)));
@@ -419,7 +483,6 @@ fn sessions_create_sessions_in_their_own_project() {
     sub.cwd = Some("sub".into());
     let sub = session(h.handle(&me, Request::SessionCreate(sub)));
     assert_eq!(sub.cwd, h.scope.path().join("sub"));
-    assert!(h.list(false).iter().all(|s| s.scope == h.scope));
 }
 
 /// The `LimitExceeded` details name the limit that was reached.
@@ -622,13 +685,7 @@ fn audit_records_mutations_and_denials_but_not_reads() {
     );
     h.handle(&h.user, Request::SessionGet { id: a.id.clone() });
     let agent = h.session_caller(&a.id);
-    error(h.handle(
-        &agent,
-        Request::SessionKill {
-            id: b.id.clone(),
-            tree: false,
-        },
-    ));
+    error(h.handle(&agent, Request::SessionDelete { id: b.id.clone() }));
     error(h.handle(
         &h.user,
         Request::SessionKill {
@@ -650,7 +707,7 @@ fn audit_records_mutations_and_denials_but_not_reads() {
             ("user:test", "session.create", "allowed"),
             ("user:test", "session.rename", "allowed"),
             ("user:test", "session.submit", "allowed"),
-            (agent_label.as_str(), "session.kill", "denied"),
+            (agent_label.as_str(), "session.delete", "denied"),
             ("user:test", "session.kill", "error"),
         ]
     );
@@ -666,6 +723,6 @@ fn audit_records_mutations_and_denials_but_not_reads() {
         201,
         "detail is clipped to 200 chars"
     );
-    assert!(rows[4].detail.as_deref().unwrap().contains("later release"));
+    assert!(rows[4].detail.as_deref().unwrap().contains("user clients"));
     assert_eq!(rows[5].target.as_deref(), Some("MISSING"));
 }

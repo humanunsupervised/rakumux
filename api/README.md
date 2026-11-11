@@ -3,7 +3,7 @@
 Rakumux's external API: HTTP/1.1 + JSON on **127.0.0.1**, exposing a subset of the session
 operations of the running Rakumux daemon (`rakumux-ptyd`), plus WebSocket streams for a live
 terminal and for session events. It is a thin adapter over `session_core::client`: the daemon
-still decides everything (folder confinement, permissions, audit). The contract is
+still decides everything (permissions, limits, audit). The contract is
 [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1).
 
 `rakumux-mcp` (see `../mcp`) is its main local client; scripts can use it directly. With
@@ -72,9 +72,10 @@ X-Rakumux-Session-Token: $RAKUMUX_SESSION_TOKEN
 ```
 
 (the variables Rakumux sets in every session) the API opens a daemon client **as that session**,
-so the daemon's agent policy applies: the session is confined to its own folder, may read and
-list anything in it, may create sessions in it, and may rename only itself (controlling other
-sessions is planned for 0.7.0). Creates are limited: at most 4 running sessions per creating
+so the daemon's agent policy applies: the session reaches every folder, may read, list and wait
+on any session, **drive** any other session (`input`, `submit`, `kill`, `revive`), create
+sessions in any folder, and rename only itself; it never drives itself, and deleting, attaching
+and the session history stay the user's. Creates are limited: at most 4 running sessions per creating
 session, nesting 2 deep, 8 running agent-created sessions per folder and 10 creates a minute;
 beyond that the answer is 429 `limit_exceeded`, with the limit in `details`. Sending only one of the
 two headers is a 400.
@@ -97,17 +98,20 @@ absolute directory (`~/` expanded) or the name of a known folder.
 | Method and path | Purpose |
 |---|---|
 | `GET /v1/health` | API version, pid, whether the daemon answers and its capabilities. No auth; never starts the daemon. |
-| `GET /v1/folders` | Folders the caller can see (users: all; sessions: their own): `{"folders": [...], "projects": [...]}`. A daemon without the `projects` capability answers 501 `unsupported`. |
+| `GET /v1/folders` | Every folder: `{"folders": [...], "projects": [...]}`. A daemon without the `projects` capability answers 501 `unsupported`. |
 | `GET /v1/sessions?folder=&name=&q=&include_dead=` | List sessions. `folder` (directory or folder name) may repeat; omitted → the caller's own folder (sessions) or every folder (users; a daemon without `projects` gets a 400 asking for `folder`, with `details.missing = "folder"`). `name` is exact, `q` a case-insensitive substring of the name. |
 | `GET /v1/sessions/{id}` | One session. |
 | `POST /v1/sessions` | Create: `{folder, name?, cwd?, command?: [argv], startup_commands?: [..], cols?, rows?}` → 201 + `Location`. |
 | `GET /v1/sessions/{id}/content?source=screen\|scrollback&lines=&format=text\|ansi` | Read the terminal. `scrollback` defaults to the last 200 lines. Output is untrusted (`untrusted: true`). |
 | `PATCH /v1/sessions/{id}` | `{name}` → rename. |
-| `GET /v1/sessions?all=true` | Every folder's sessions (the daemon's `sessions.all`, else the union of its folders), most recently active first. Not with `folder`; session callers get 403. |
+| `GET /v1/sessions?all=true` | Every folder's sessions (the daemon's `sessions.all`, else the union of its folders), most recently active first. Not with `folder`. |
 | `POST /v1/sessions/{id}/revive` | Revive a dead or exited session (its resume command runs) → 200 `{"session": {...}}`, the same envelope as the other session routes. Optional body `{cols?, rows?}`; a live session is a 400. |
 | `POST /v1/sessions/{id}/kill` | End its program (not the sessions it created) → 204; not live → 409 `session_not_live`. |
+| `POST /v1/sessions/{id}/input` | Type `{keys?: [..], text?}` as they are: keys first (a character, or a named key such as `enter`, `esc`, `down`, `ctrl+c`), then the text; no Enter unless a key says so → 204. |
+| `POST /v1/sessions/{id}/submit` | `{text, quiet_ms?, refuse_if_blocked? (true)}`: paste the text, then Enter (a command to a shell, a prompt to an agent) → 204. 409 `session_blocked` while its agent asks something or isn't at its prompt yet, `session_in_use` while someone typed there within `quiet_ms`; nothing is typed then. |
+| `POST /v1/sessions/{id}/wait` | `{until: settled\|idle\|blocked\|working\|exited\|reported\|output, pattern?, timeout_ms? (30 000, ≤ 600 000)}` → 200 `{matched, status, lifecycle, reported?, reason}` once it gets there, times out or can't any more. |
 | `DELETE /v1/sessions/{id}` | Delete the session → 204. It stays in the session history 90 days (`rakumux history`, `rakumux restore`). |
-| `GET /v1/events` (WebSocket) | Session events of every folder (a session caller: its own). |
+| `GET /v1/events` (WebSocket) | Session events of every folder. |
 | `GET /v1/sessions/{id}/attach?role=observer\|controller&cols=&rows=` (WebSocket) | The live terminal. `cols`/`rows` are required for a controller. |
 
 Sessions come back as `{"session": {...}}` / `{"sessions": [...]}` with `folder` (the daemon's
@@ -126,7 +130,7 @@ marked deprecated in the OpenAPI document:
 
 Errors are `{"error": {"code", "message", "details"?}}`. Daemon codes map to statuses:
 `not_found` 404, `invalid_argument` 400, `unauthenticated` 401, `out_of_scope`/`permission_denied`
-403, `session_not_live`/`session_in_use` 409, `limit_exceeded` 429, `timeout` 504, `daemon_unavailable` 503,
+403, `session_not_live`/`session_in_use`/`session_blocked`/`foreground_changed` 409, `limit_exceeded` 429, `timeout` 504, `daemon_unavailable` 503,
 `unsupported` 501, anything else 500. The API's own: `method_not_allowed` 405 (with `Allow`),
 `payload_too_large` 413, `unsupported_media_type` 415, `upgrade_required` 426 (a WebSocket route
 without the upgrade).

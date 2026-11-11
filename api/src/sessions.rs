@@ -1,19 +1,30 @@
 //! Session use cases of the API: list (with filters), get, create, rename,
-//! read, revive, kill and delete. Each takes the caller's `SessionApi`; the
-//! daemon enforces permissions and folder confinement.
+//! read, revive, kill, delete, and driving a session (keys, a submitted
+//! line, waiting for it). Each takes the caller's `SessionApi`; the daemon
+//! enforces permissions.
 
-use crate::dto::{Content, CreateSessionBody, ReviveSessionBody, Session, UpdateSessionBody};
+use crate::dto::{
+    Content, CreateSessionBody, InputBody, ReviveSessionBody, Session, SubmitBody,
+    UpdateSessionBody, WaitBody, WaitFor, WaitOutcome,
+};
 use crate::error::HttpError;
 use crate::folders;
 use crate::query::{ContentQuery, ListQuery};
 use session_core::api::{
-    CallerInfo, CreateSession, ErrorCode, ReadRequest, ReviveSession, CAPABILITY_SESSIONS_ALL,
+    CallerInfo, CreateSession, ErrorCode, ReadRequest, ReviveSession, SendRequest, WaitRequest,
+    CAPABILITY_SESSIONS_ALL,
 };
 use session_core::client::SessionApi;
 use session_core::ids::SessionId;
 use session_core::model::{ScopeRoot, SessionView};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::Duration;
+
+/// How long `wait` waits when the body doesn't say.
+pub const DEFAULT_WAIT_MS: u64 = 30_000;
+/// The longest `wait` an HTTP request may hold.
+pub const MAX_WAIT_MS: u64 = 600_000;
 
 /// `GET /v1/sessions`.
 ///
@@ -50,8 +61,7 @@ pub fn list(api: &dyn SessionApi, query: &ListQuery) -> Result<Vec<Session>, Htt
 
 /// `all=true`: every folder's sessions, most recently active first, with
 /// the daemon's list of every folder (capability `sessions.all`), else the
-/// union of the folders it knows. Session callers see one folder only: the
-/// daemon refuses them (`out_of_scope`).
+/// union of the folders it knows.
 fn every_folder(api: &dyn SessionApi, include_dead: bool) -> Result<Vec<SessionView>, HttpError> {
     let supported = api
         .daemon_capabilities()
@@ -66,21 +76,10 @@ fn every_folder(api: &dyn SessionApi, include_dead: bool) -> Result<Vec<SessionV
             Err(error) => return Err(error.into()),
         }
     }
-    match api.caller() {
-        CallerInfo::User => known_folders(api, include_dead),
-        CallerInfo::Session { scope, .. } => {
-            Err(HttpError::from(session_core::api::ApiError::new(
-                ErrorCode::OutOfScope,
-                format!(
-                    "sessions see only their own folder ({}); leave out all=true",
-                    scope.path().display()
-                ),
-            )))
-        }
-    }
+    known_folders(api, include_dead)
 }
 
-/// Every folder the daemon knows (`projects`), for user callers.
+/// Every folder the daemon knows (`projects`).
 fn known_folders(api: &dyn SessionApi, include_dead: bool) -> Result<Vec<SessionView>, HttpError> {
     let all = match api.projects() {
         Ok(folders) => folders.into_iter().map(|f| f.path).collect::<Vec<_>>(),
@@ -146,19 +145,9 @@ pub fn create(api: &dyn SessionApi, body: CreateSessionBody) -> Result<Session, 
                 "folder is required: the directory the session belongs to",
             ))
         }
-        // The daemon creates a session caller's sessions in its own folder.
-        (CallerInfo::Session { .. }, None) => None,
-        (CallerInfo::Session { scope: own, .. }, Some(scope)) if scope == *own => None,
-        (CallerInfo::Session { scope: own, .. }, Some(scope)) => {
-            return Err(HttpError::from(session_core::api::ApiError::new(
-                ErrorCode::OutOfScope,
-                format!(
-                    "sessions may only create sessions in their own folder ({}), not {}",
-                    own.path().display(),
-                    scope.path().display()
-                ),
-            )))
-        }
+        // Without one, the daemon creates a session caller's sessions in
+        // its own folder.
+        (CallerInfo::Session { .. }, requested) => requested,
     };
     let request = CreateSession {
         scope,
@@ -218,6 +207,59 @@ pub fn kill(api: &dyn SessionApi, id: &SessionId) -> Result<(), HttpError> {
 /// `DELETE /v1/sessions/{id}`: end the program and remove the session.
 pub fn delete(api: &dyn SessionApi, id: &SessionId) -> Result<(), HttpError> {
     Ok(api.delete(id)?)
+}
+
+/// `POST /v1/sessions/{id}/input`: keys and text, typed as they are.
+pub fn input(api: &dyn SessionApi, id: &SessionId, body: InputBody) -> Result<(), HttpError> {
+    if body.keys.is_empty() && body.text.as_deref().is_none_or(str::is_empty) {
+        return Err(HttpError::invalid("nothing to type: pass `keys` or `text`"));
+    }
+    Ok(api.send(SendRequest {
+        id: id.clone(),
+        keys: body.keys,
+        text: body.text,
+    })?)
+}
+
+/// `POST /v1/sessions/{id}/submit`: the text pasted, then Enter.
+pub fn submit(api: &dyn SessionApi, id: &SessionId, body: SubmitBody) -> Result<(), HttpError> {
+    if body.text.trim().is_empty() {
+        return Err(HttpError::invalid("text must not be empty"));
+    }
+    let quiet = Duration::from_millis(body.quiet_ms.unwrap_or(0));
+    let result = if body.refuse_if_blocked {
+        api.submit_unless_blocked(id, &body.text, quiet, None)
+    } else if body.quiet_ms.is_some() {
+        api.submit_when_quiet(id, &body.text, quiet)
+    } else {
+        api.submit(id, &body.text)
+    };
+    Ok(result?)
+}
+
+/// `POST /v1/sessions/{id}/wait`: until the session gets where `until`
+/// says, the timeout, or it can't any more.
+pub fn wait(
+    api: &dyn SessionApi,
+    id: &SessionId,
+    body: WaitBody,
+) -> Result<WaitOutcome, HttpError> {
+    let timeout_ms = body.timeout_ms.unwrap_or(DEFAULT_WAIT_MS);
+    if timeout_ms > MAX_WAIT_MS {
+        return Err(HttpError::invalid(format!(
+            "timeout_ms must be at most {MAX_WAIT_MS}"
+        )));
+    }
+    if body.until == WaitFor::Output && body.pattern.as_deref().is_none_or(str::is_empty) {
+        return Err(HttpError::invalid("waiting for output needs a `pattern`"));
+    }
+    let result = api.wait(WaitRequest {
+        id: id.clone(),
+        until: body.until.into(),
+        pattern: body.pattern,
+        timeout_ms,
+    })?;
+    Ok(result.into())
 }
 
 /// `GET /v1/sessions/{id}/content`.
@@ -433,13 +475,6 @@ mod tests {
             error.body.details,
             Some(serde_json::json!({"missing": "folder"}))
         );
-        let (_dir, _, _, daemon) = setup(|own| CallerInfo::Session {
-            id: SessionId::from_string("S"),
-            scope: ScopeRoot::from_canonical(own.to_path_buf()),
-        });
-        let error = list(&daemon, &all).unwrap_err();
-        assert_eq!(error.status.as_u16(), 403);
-        assert_eq!(error.code(), "out_of_scope");
     }
 
     #[test]
@@ -495,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn sessions_list_and_create_in_their_own_folder() {
+    fn sessions_list_their_own_folder_and_create_in_any() {
         let (_dir, a, b, daemon) = setup(|own| CallerInfo::Session {
             id: SessionId::from_string("S"),
             scope: ScopeRoot::from_canonical(own.to_path_buf()),
@@ -504,20 +539,22 @@ mod tests {
         assert_eq!(own.len(), 2);
         assert_eq!(daemon.lists.lock().unwrap().as_slice(), [None]);
 
-        // Naming another folder is refused before the daemon is asked.
+        // Another folder goes to the daemon as named; none is its own.
         let other = CreateSessionBody {
             folder: Some(b.display().to_string()),
             ..CreateSessionBody::default()
         };
-        let error = create(&daemon, other).unwrap_err();
-        assert_eq!(error.status.as_u16(), 403);
-        assert_eq!(error.code(), "out_of_scope");
-        assert!(error.body.message.contains("their own folder"));
-        // The own folder (or none) is left to the daemon.
+        assert_eq!(create(&daemon, other).unwrap().folder, b);
         let mine = CreateSessionBody {
             folder: Some(a.display().to_string()),
             ..CreateSessionBody::default()
         };
-        assert_eq!(create(&daemon, mine).unwrap().folder, Path::new("/own"));
+        assert_eq!(create(&daemon, mine).unwrap().folder, a);
+        assert_eq!(
+            create(&daemon, CreateSessionBody::default())
+                .unwrap()
+                .folder,
+            Path::new("/own")
+        );
     }
 }

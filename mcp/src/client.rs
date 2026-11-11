@@ -306,6 +306,26 @@ impl Api<'_> {
         self.send(Method::POST, path, &[], Some(body)).await
     }
 
+    /// A POST answered with no body (204).
+    pub async fn post_no_content(&self, path: &str, body: &Value) -> Result<(), ToolError> {
+        self.exchange(Method::POST, path, &[], Some(body), REQUEST_TIMEOUT)
+            .await
+            .map(drop)
+    }
+
+    /// A POST the API may hold for up to `holds` (a wait).
+    pub async fn post_held<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &Value,
+        holds: Duration,
+    ) -> Result<T, ToolError> {
+        let bytes = self
+            .exchange(Method::POST, path, &[], Some(body), holds + REQUEST_TIMEOUT)
+            .await?;
+        parse(&bytes)
+    }
+
     pub async fn patch<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -321,6 +341,21 @@ impl Api<'_> {
         query: &[(&str, String)],
         body: Option<&Value>,
     ) -> Result<T, ToolError> {
+        let bytes = self
+            .exchange(method, path, query, body, REQUEST_TIMEOUT)
+            .await?;
+        parse(&bytes)
+    }
+
+    /// The body of a successful answer, or the API's error.
+    async fn exchange(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Option<&Value>,
+        timeout: Duration,
+    ) -> Result<Vec<u8>, ToolError> {
         if matches!(self.acting, Acting::Refused) {
             return Err(incomplete_identity());
         }
@@ -332,6 +367,7 @@ impl Api<'_> {
                 .http
                 .request(method.clone(), format!("{}{path}", info.url))
                 .bearer_auth(&info.token)
+                .timeout(timeout)
                 .query(query);
             match &self.acting {
                 Acting::User | Acting::Refused => {}
@@ -373,12 +409,7 @@ impl Api<'_> {
                 ToolError::api_unavailable(format!("reading the answer of rakumux-api: {error}"))
             })?;
             if status.is_success() {
-                return serde_json::from_slice(&bytes).map_err(|error| {
-                    ToolError::new(
-                        "internal",
-                        format!("unexpected answer from rakumux-api: {error}"),
-                    )
-                });
+                return Ok(bytes.to_vec());
             }
             // A restarted API has a new token: rediscover once.
             if status == StatusCode::UNAUTHORIZED && !refreshed && self.token_changed(&info) {
@@ -402,6 +433,15 @@ impl Api<'_> {
     fn token_changed(&self, info: &ApiInfo) -> bool {
         ApiInfo::load(&self.client.layout).map_or(true, |current| current.token != info.token)
     }
+}
+
+fn parse<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ToolError> {
+    serde_json::from_slice(bytes).map_err(|error| {
+        ToolError::new(
+            "internal",
+            format!("unexpected answer from rakumux-api: {error}"),
+        )
+    })
 }
 
 #[cfg(test)]

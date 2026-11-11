@@ -100,7 +100,12 @@ fn handshake_lists_tools_with_schemas_and_instructions() {
             "get_session",
             "create_session",
             "read_session",
-            "rename_session"
+            "rename_session",
+            "send_prompt",
+            "send_keys",
+            "wait_for_session",
+            "kill_session",
+            "revive_session"
         ]
     );
     for tool in &tools {

@@ -708,10 +708,8 @@ impl Inner {
             policy::authorize(caller, Op::ReplyList, None)?;
         }
         let state = self.lock();
-        let scopes = self.caller_scopes(
-            &state,
+        let scopes = caller_scopes(
             caller,
-            Op::Subscribe,
             request.scope.clone(),
             request.scopes.clone(),
             request.all,
@@ -803,7 +801,7 @@ impl Inner {
         include_dead: bool,
     ) -> Result<Response, ApiError> {
         let mut state = self.lock();
-        let scopes = self.caller_scopes(&state, caller, Op::List, scope, scopes, all)?;
+        let scopes = caller_scopes(caller, scope, scopes, all)?;
         let registry = registry(&state.registry)?;
         let (records, bad) = match &scopes {
             Scopes::All => registry.list_all()?,
@@ -976,22 +974,10 @@ impl Inner {
         if let Some(text) = &prefill {
             validate_prefill(text)?;
         }
-        let scope = match &caller.info {
-            CallerInfo::User => validate_scope(scope)?,
-            // A session creates sessions in its own project only.
-            CallerInfo::Session { scope: own, .. } => match scope {
-                Some(scope) if scope != *own => {
-                    return Err(ApiError::new(
-                        ErrorCode::OutOfScope,
-                        format!(
-                            "a session may only create sessions in its own folder ({}), not {}",
-                            own.path().display(),
-                            scope.path().display()
-                        ),
-                    ))
-                }
-                _ => own.clone(),
-            },
+        let scope = match (&caller.info, scope) {
+            // A session's own folder unless it names another.
+            (CallerInfo::Session { scope: own, .. }, None) => own.clone(),
+            (_, scope) => validate_scope(scope)?,
         };
         let cwd = resolve_cwd(&scope, cwd.as_deref())?;
         if let Some(argv) = &argv {
@@ -2311,7 +2297,6 @@ impl Inner {
             registry
                 .projects()?
                 .into_iter()
-                .filter(|project| policy::check_scope(caller, &project.path).is_ok())
                 .map(|project| project_view(&project, sessions.get(&project.path), &live))
                 .collect::<Vec<_>>()
         };
@@ -3662,10 +3647,7 @@ impl Inner {
             }
             return Err(error);
         };
-        let target = Target {
-            id: &record.id,
-            scope: &record.scope,
-        };
+        let target = Target { id: &record.id };
         if let Err(error) = policy::authorize(caller, op, Some(target)) {
             self.audit(
                 state,
@@ -3679,64 +3661,6 @@ impl Inner {
             return Err(error);
         }
         Ok(record)
-    }
-
-    /// The scopes a list/subscribe applies to: for user callers every scope
-    /// with `all` (`scope` and `scopes` are then ignored), else the union of
-    /// `scope` and `scopes` (at least one is required); for session callers
-    /// their own, and naming any other scope or `all` is `OutOfScope`.
-    /// Denials are audited.
-    fn caller_scopes(
-        &self,
-        state: &State,
-        caller: &Caller,
-        op: Op,
-        scope: Option<ScopeRoot>,
-        scopes: Vec<ScopeRoot>,
-        all: bool,
-    ) -> Result<Scopes, ApiError> {
-        if all {
-            if let Err(error) = policy::check_all_scopes(caller) {
-                self.audit(
-                    state,
-                    caller,
-                    op,
-                    own_scope(caller),
-                    None,
-                    Decision::Denied,
-                    Some(error.message.clone()),
-                );
-                return Err(error);
-            }
-            return Ok(Scopes::All);
-        }
-        let mut requested: Vec<ScopeRoot> = Vec::new();
-        for scope in scope.into_iter().chain(scopes) {
-            if !requested.contains(&scope) {
-                requested.push(scope);
-            }
-        }
-        if requested.is_empty() {
-            match &caller.info {
-                CallerInfo::Session { scope, .. } => requested.push(scope.clone()),
-                CallerInfo::User => return Err(invalid("scope is required for user clients")),
-            }
-        }
-        for scope in &requested {
-            if let Err(error) = policy::check_scope(caller, scope) {
-                self.audit(
-                    state,
-                    caller,
-                    op,
-                    Some(scope),
-                    None,
-                    Decision::Denied,
-                    Some(error.message.clone()),
-                );
-                return Err(error);
-            }
-        }
-        Ok(Scopes::Only(requested))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3830,6 +3754,34 @@ fn merge_agent(detected: Option<&str>, reported: Option<&AgentInfo>) -> Option<A
 
 /// User callers name the scope: an existing directory given in canonical
 /// form (as `ScopeRoot::resolve` produces).
+/// The scopes a list/subscribe applies to: every scope with `all`
+/// (`scope` and `scopes` are then ignored), else the union of `scope` and
+/// `scopes`; naming none is the calling session's own scope, and for user
+/// callers an error.
+fn caller_scopes(
+    caller: &Caller,
+    scope: Option<ScopeRoot>,
+    scopes: Vec<ScopeRoot>,
+    all: bool,
+) -> Result<Scopes, ApiError> {
+    if all {
+        return Ok(Scopes::All);
+    }
+    let mut requested: Vec<ScopeRoot> = Vec::new();
+    for scope in scope.into_iter().chain(scopes) {
+        if !requested.contains(&scope) {
+            requested.push(scope);
+        }
+    }
+    if requested.is_empty() {
+        match &caller.info {
+            CallerInfo::Session { scope, .. } => requested.push(scope.clone()),
+            CallerInfo::User => return Err(invalid("scope is required for user clients")),
+        }
+    }
+    Ok(Scopes::Only(requested))
+}
+
 fn validate_scope(scope: Option<ScopeRoot>) -> Result<ScopeRoot, ApiError> {
     let scope = scope.ok_or_else(|| invalid("scope is required for user clients"))?;
     let path = scope.path();

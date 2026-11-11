@@ -1,6 +1,6 @@
 //! `rakumux folders [add|rm]` (alias `projects`): the folders sessions
 //! belong to, as the daemon knows them (`project_*` on the wire). Session
-//! callers see only their own folder and can't add or remove any.
+//! callers see them all and can't add or remove any.
 //!
 //! `--json` prints `{"folders": [...], "projects": [...]}`: the same list
 //! under both names, so scripts written against `projects --json` keep

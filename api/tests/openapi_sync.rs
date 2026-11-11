@@ -56,6 +56,9 @@ fn routes_and_parameters_are_documented() {
         "/v1/sessions/{id}/content:",
         "/v1/sessions/{id}/revive:",
         "/v1/sessions/{id}/kill:",
+        "/v1/sessions/{id}/input:",
+        "/v1/sessions/{id}/submit:",
+        "/v1/sessions/{id}/wait:",
         "/v1/sessions/{id}/attach:",
         "/v1/events:",
     ] {
@@ -65,6 +68,9 @@ fn routes_and_parameters_are_documented() {
         "operationId: deleteSession",
         "operationId: reviveSession",
         "operationId: killSession",
+        "operationId: sendInput",
+        "operationId: submitText",
+        "operationId: waitForSession",
         "operationId: attachSession",
         "operationId: sessionEvents",
     ] {
@@ -181,6 +187,45 @@ fn every_json_field_is_documented() {
             added_at: "a".into(),
             git: Some(git()),
         }]),
+    );
+    assert_documented(
+        "Input",
+        InputBody {
+            keys: vec!["esc".into()],
+            text: Some("y".into()),
+        },
+    );
+    assert_documented(
+        "Submit",
+        SubmitBody {
+            text: "t".into(),
+            quiet_ms: Some(1),
+            refuse_if_blocked: true,
+        },
+    );
+    assert_documented(
+        "Wait",
+        WaitBody {
+            until: WaitFor::Output,
+            pattern: Some("p".into()),
+            timeout_ms: Some(1),
+        },
+    );
+    assert_documented(
+        "WaitOutcome",
+        WaitOutcome {
+            matched: true,
+            status: SessionStatus::Live,
+            lifecycle: Lifecycle::Idle,
+            reported: Some(Reported {
+                state: Some(Lifecycle::Done),
+                text: Some("t".into()),
+                summary: Some("s".into()),
+                files: vec!["f".into()],
+                at: "1970-01-01T00:00:00Z".into(),
+            }),
+            reason: "r".into(),
+        },
     );
     assert_documented(
         "Content",

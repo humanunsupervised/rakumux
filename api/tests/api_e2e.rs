@@ -489,7 +489,7 @@ fn session_identity_applies_the_daemon_policy() {
     let id = agent["id"].as_str().unwrap().to_owned();
     let token = wait_for_session_token(&api, &id);
 
-    // Without a folder, a session sees its own folder only.
+    // Without a folder, a session lists its own folder.
     let reply = api.call_as(&id, &token, "GET", "/v1/sessions", None);
     assert_eq!(reply.status, 200, "{:?}", reply.body);
     let sessions = reply.body["sessions"].as_array().unwrap();
@@ -497,35 +497,107 @@ fn session_identity_applies_the_daemon_policy() {
     let me = sessions.iter().find(|s| s["id"] == id.as_str()).unwrap();
     assert_eq!(me["is_self"], true);
 
-    // A session sees only its own folder.
+    // It sees every folder, and another folder's sessions.
     let reply = api.call_as(&id, &token, "GET", "/v1/folders", None);
     if reply.status != 501 {
         assert_eq!(reply.status, 200, "{:?}", reply.body);
         let folders = reply.body["folders"].as_array().unwrap();
-        assert_eq!(folders.len(), 1, "{folders:?}");
-        assert_eq!(folders[0]["path"], json!(api.env.project));
+        assert_eq!(folders.len(), 2, "{folders:?}");
     }
-
-    // Other folders are out of scope.
     let path = format!(
         "/v1/sessions?folder={}",
         enc(&api.env.other_project.display().to_string())
     );
     let reply = api.call_as(&id, &token, "GET", &path, None);
-    assert_eq!(reply.status, 403);
-    assert_eq!(reply.code(), "out_of_scope");
-    let elsewhere_path = format!("/v1/sessions/{}", elsewhere["id"].as_str().unwrap());
-    let reply = api.call_as(&id, &token, "GET", &elsewhere_path, None);
-    assert_eq!(reply.status, 403);
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.body["sessions"][0]["id"], elsewhere["id"]);
+    let reply = api.call_as(&id, &token, "GET", "/v1/sessions?all=true", None);
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.body["sessions"].as_array().unwrap().len(), 3);
+    let elsewhere_id = elsewhere["id"].as_str().unwrap().to_owned();
+    let reply = api.call_as(
+        &id,
+        &token,
+        "GET",
+        &format!("/v1/sessions/{elsewhere_id}"),
+        None,
+    );
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+
+    // It drives another folder's session: a line, then keys, waiting for each.
     let reply = api.call_as(
         &id,
         &token,
         "POST",
-        "/v1/sessions",
-        Some(json!({"folder": api.env.other_project, "command": bash()})),
+        &format!("/v1/sessions/{elsewhere_id}/submit"),
+        Some(json!({"text": "echo DRIVEN_$((6*7))", "quiet_ms": 1000})),
     );
-    assert_eq!(reply.status, 403);
-    assert_eq!(reply.code(), "out_of_scope");
+    assert_eq!(reply.status, 204, "{:?}", reply.body);
+    let reply = api.call_as(
+        &id,
+        &token,
+        "POST",
+        &format!("/v1/sessions/{elsewhere_id}/wait"),
+        Some(json!({"until": "output", "pattern": "DRIVEN_42", "timeout_ms": 10000})),
+    );
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.body["matched"], true, "{:?}", reply.body);
+    assert_eq!(reply.body["status"], "live");
+    let reply = api.call_as(
+        &id,
+        &token,
+        "POST",
+        &format!("/v1/sessions/{elsewhere_id}/input"),
+        Some(json!({"text": "echo KEYS_$((2+3))", "keys": []})),
+    );
+    assert_eq!(reply.status, 204, "{:?}", reply.body);
+    let reply = api.call_as(
+        &id,
+        &token,
+        "POST",
+        &format!("/v1/sessions/{elsewhere_id}/input"),
+        Some(json!({"keys": ["enter"]})),
+    );
+    assert_eq!(reply.status, 204, "{:?}", reply.body);
+    wait_for_text(&api, &elsewhere_id, "KEYS_5");
+    // A wait that times out says so.
+    let reply = api.call_as(
+        &id,
+        &token,
+        "POST",
+        &format!("/v1/sessions/{elsewhere_id}/wait"),
+        Some(json!({"until": "output", "pattern": "NEVER_SHOWN", "timeout_ms": 300})),
+    );
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.body["matched"], false);
+    assert!(reply.body["reason"].as_str().unwrap().contains("timeout"));
+
+    // Never itself.
+    for (route, body) in [
+        ("submit", json!({"text": "echo loop"})),
+        ("input", json!({"keys": ["enter"]})),
+        ("kill", json!({})),
+    ] {
+        let reply = api.call_as(
+            &id,
+            &token,
+            "POST",
+            &format!("/v1/sessions/{id}/{route}"),
+            Some(body),
+        );
+        assert_eq!(reply.status, 403, "{route}: {:?}", reply.body);
+        assert_eq!(reply.code(), "permission_denied");
+        assert!(reply.message().contains("doesn't drive itself"), "{route}");
+    }
+    // Deleting stays the user's.
+    let reply = api.call_as(
+        &id,
+        &token,
+        "DELETE",
+        &format!("/v1/sessions/{elsewhere_id}"),
+        None,
+    );
+    assert_eq!(reply.status, 403, "{:?}", reply.body);
 
     // A session may rename itself, not others.
     let reply = api.call_as(
@@ -547,7 +619,7 @@ fn session_identity_applies_the_daemon_policy() {
     assert_eq!(reply.status, 403, "{:?}", reply.body);
     assert_eq!(reply.code(), "permission_denied");
 
-    // A session creates sessions in its own folder, not in another.
+    // A session creates sessions in its own folder, or one it names.
     let reply = api.call_as(
         &id,
         &token,
@@ -573,10 +645,14 @@ fn session_identity_applies_the_daemon_policy() {
         "/v1/sessions",
         Some(json!({"folder": api.env.other_project, "name": "away", "command": bash()})),
     );
-    assert_eq!(reply.status, 403, "{:?}", reply.body);
-    assert_eq!(reply.code(), "out_of_scope");
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+    assert_eq!(
+        reply.body["session"]["folder"],
+        json!(api.env.other_project)
+    );
+    assert_eq!(reply.body["session"]["parent_id"], id.as_str());
 
-    // Reading content as the session works within its folder.
+    // Reading its own content works too.
     let reply = api.call_as(
         &id,
         &token,
@@ -657,6 +733,23 @@ fn agent_conversations_act_as_the_session_that_bound_them() {
         "POST",
         "/v1/sessions",
         Some(json!({"folder": api.env.other_project, "name": "away", "command": bash()})),
+    );
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+    assert_eq!(reply.body["session"]["parent_id"], id.as_str());
+    // It drives others as that session, never the session itself.
+    let away = reply.body["session"]["id"].as_str().unwrap().to_owned();
+    let reply = as_conversation(
+        "ses_e2e",
+        "POST",
+        &format!("/v1/sessions/{away}/input"),
+        Some(json!({"keys": ["ctrl+c"]})),
+    );
+    assert_eq!(reply.status, 204, "{:?}", reply.body);
+    let reply = as_conversation(
+        "ses_e2e",
+        "POST",
+        &format!("/v1/sessions/{id}/input"),
+        Some(json!({"keys": ["ctrl+c"]})),
     );
     assert_eq!(reply.status, 403, "{:?}", reply.body);
 }

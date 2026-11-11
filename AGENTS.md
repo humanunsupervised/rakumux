@@ -47,7 +47,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    the folder it was started in, and its cwd must be inside it when created. The TUI shows the
    sessions of all folders by default, live (sessions in a new folder appear as they start), and
    narrows them with a folder filter (one folder or several; not saved); the CLI defaults to the
-   current folder (`--folder`, `--all`). Agents (session callers) only ever see their own folder.
+   current folder (`--folder`, `--all`). Agents (session callers) list their own folder unless
+   they name another (or `all`), and may drive any other session (see "Permissions").
    See `tui/src/app/folders.rs` and `api/README.md`.
 4. **The daemon owns the session API.** Registry, scope confinement, identity, permissions, waits,
    lifecycle and audit live in the daemon. TUI and CLI are thin clients of
@@ -114,7 +115,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 8. **`rakumux-api`** (`api/`, workspace member through `package.workspace = "../tui"`): HTTP/1.1
    and JSON on 127.0.0.1, a thin adapter over `session_core::client` (contract:
    `api/openapi.yaml`). Routes `/v1/health`, `/v1/folders`, `/v1/sessions[/{id}[/content]]`
-   (`?all=true`: every folder), `POST /v1/sessions/{id}/revive|kill`, `DELETE /v1/sessions/{id}`,
+   (`?all=true`: every folder), `POST /v1/sessions/{id}/revive|kill`, `POST
+   /v1/sessions/{id}/input|submit|wait` (keys and text; a paste then Enter, refused while its
+   agent asks something; until it settles), `DELETE /v1/sessions/{id}`,
    and the WebSockets `GET /v1/events` (session events) and `GET /v1/sessions/{id}/attach` (the
    live terminal: checkpoint, then output as binary frames; input and resize/promote/demote/fit
    back; `api/src/streams.rs`, tokio-tungstenite over a hyper upgrade). It says `folder` (a
@@ -135,9 +138,14 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    machine's own sessions only. Runs in the foreground or with `--detach`; a user client of
    the daemon (spawns it on demand), one API per Rakumux home. See `api/README.md`.
 9. **`rakumux-mcp`** (`mcp/`): MCP server on stdio for coding agents, built on `rmcp` (exact
-   pinned, confined to `mcp/src/server.rs`). Tools: `list_folders`, `list_sessions`,
-   `get_session`, `create_session`, `read_session`, `rename_session`; a `folder` argument (alias
-   `project`, deprecated) narrows names or places new sessions. Finds the API through
+   pinned, confined to `mcp/src/server.rs`). Tools: `list_folders`, `list_sessions`
+   (`all_folders`), `get_session`, `create_session`, `read_session`, `rename_session`, and to
+   **drive** a session: `send_prompt` (`POST …/submit`: a paste, then Enter; refused, typing
+   nothing, while its agent asks something or isn't at its prompt yet, `refuse_if_blocked`, or
+   while the user typed there in the last 5 s), `send_keys` (`…/input`: keys, then text),
+   `wait_for_session` (`…/wait`: `settled` by default, at most 600 s a call), `kill_session` and
+   `revive_session`; a `folder` argument (alias `project`, deprecated) narrows names or places
+   new sessions, and a name without one is looked up in every folder. Finds the API through
    `api.json` and starts `rakumux-api --detach` when needed; forwards `RAKUMUX_SESSION_ID`/
    `RAKUMUX_SESSION_TOKEN` as identity headers (with only one of them, an agent that strips
    `*TOKEN*` variables or forwards only those it's told, it refuses every call rather than act as
@@ -1076,7 +1084,7 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
 | Caller | How it authenticates | May |
 |---|---|---|
 | User (TUI, CLI outside any session) | token from `service.json` | everything |
-| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | list/get/read/wait/subscribe within its own folder (naming another, or `all`, → `out_of_scope`); create sessions in its own folder, within `control::Limits` (→ `limit_exceeded`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); everything else → `permission_denied` (agent control of other sessions is planned for 0.7.0) |
+| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | every folder of this machine: list/get/read/wait/subscribe any session (its own folder when it names none; `all` too) and list folders; create sessions in any folder, within `control::Limits` (→ `limit_exceeded`); **drive** any other session: send keys, submit, kill, revive (never itself: `permission_denied`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); delete, attach, answer a question dialog, read an agent's turn or chat, the session history, terminal panes, replies and managing folders → `permission_denied`; other machines' sessions are the user's alone |
 | Delegated (the API for an agent conversation, e.g. OpenCode 2.x via `rakumux-mcp`) | user token + agent kind + conversation id | exactly what the session that bound the conversation may do; `unauthenticated` when no running session bound it |
 
 `control::Limits` apply only to sessions created by sessions: at most 4 running per creating session,
@@ -1398,8 +1406,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 
 - **Session**: a folder + a terminal; durable record in the registry, live terminal in the daemon.
 - **Folder** (scope, scope root; `project` on the wire): the directory a session was started in;
-  the TUI shows all folders, grouped, and the folder filter narrows them; agents see only their
-  own.
+  the TUI shows all folders, grouped, and the folder filter narrows them; agents list their
+  own unless they name another.
 - **Folder filter**: the Repos tab's filter (`▤ Repos ▾`, `▤ web ▾`, `▤ 3 folders ▾`)
   and the Folders modal it opens; local to one window and not saved.
 - **List tabs** (`app/grouping.rs`, `Grouping`): the session list's top row, Pinned, Status, Repos,
@@ -1451,7 +1459,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
   (`machine_add`); a session there shows `☁` before its name.
 - **Sprite**: a Fly.io VM that pauses when idle; with your own Sprites token, Rakumux sets one
   up as a machine (`rakumux sprite connect`, the `☁ Sprite` toggle).
-- **MCP server**: `rakumux-mcp`, the tools coding agents call; a client of the external API.
+- **MCP server**: `rakumux-mcp`, the tools coding agents call to see and drive sessions (one
+  agent prompting the agents in other sessions); a client of the external API.
 - **User caller / session caller**: a client authenticated with the daemon's user token, or with a
   session's own id + token (from inside that session).
 - **Controller / observer**: the one attachment that sends input / any other read-only attachment.

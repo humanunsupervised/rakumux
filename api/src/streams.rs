@@ -29,7 +29,7 @@ use hyper::header::{
 use hyper::upgrade::Upgraded;
 use hyper::{Body, Request, Response, StatusCode};
 use session_core::api::{
-    AttachRequest, CallerInfo, HelloOk, SubscribeRequest, CAPABILITY_SESSIONS_ALL,
+    AttachRequest, CallerInfo, ErrorCode, HelloOk, SubscribeRequest, CAPABILITY_SESSIONS_ALL,
 };
 use session_core::client::{AttachEvent, AttachStream, EventStream, SessionApi};
 use session_core::ids::SessionId;
@@ -129,30 +129,30 @@ pub async fn events(
     Ok(switching_protocols(&accept))
 }
 
-/// Every folder's events for the user (the daemon's `all`, or the folders
-/// it knows when it predates `sessions.all`); its own folder's for a
-/// session caller.
+/// Every folder's events (the daemon's `all`, or the folders it knows when
+/// it predates `sessions.all`). A session caller of a daemon from before
+/// agents reached every folder gets its own folder's.
 fn subscribe_everything(api: &dyn SessionApi) -> Result<EventStream, HttpError> {
-    let request = match api.caller() {
-        CallerInfo::Session { .. } => SubscribeRequest::default(),
-        CallerInfo::User => {
-            let all = api
-                .daemon_capabilities()
-                .is_none_or(|caps| caps.iter().any(|c| c == CAPABILITY_SESSIONS_ALL));
-            if all {
-                SubscribeRequest {
-                    all: true,
-                    ..SubscribeRequest::default()
-                }
-            } else {
-                SubscribeRequest {
-                    scopes: api.projects()?.into_iter().map(|p| p.path).collect(),
-                    ..SubscribeRequest::default()
-                }
-            }
+    let all = api
+        .daemon_capabilities()
+        .is_none_or(|caps| caps.iter().any(|c| c == CAPABILITY_SESSIONS_ALL));
+    let request = if all {
+        SubscribeRequest {
+            all: true,
+            ..SubscribeRequest::default()
+        }
+    } else {
+        SubscribeRequest {
+            scopes: api.projects()?.into_iter().map(|p| p.path).collect(),
+            ..SubscribeRequest::default()
         }
     };
-    Ok(api.subscribe(request)?)
+    match (api.subscribe(request), api.caller()) {
+        (Err(error), CallerInfo::Session { .. }) if error.code == ErrorCode::OutOfScope => {
+            Ok(api.subscribe(SubscribeRequest::default())?)
+        }
+        (result, _) => Ok(result?),
+    }
 }
 
 /// Check an upgrade request (RFC 6455 §4.2.1); returns the

@@ -414,8 +414,7 @@ impl FolderList {
 #[serde(deny_unknown_fields)]
 pub struct CreateSessionBody {
     /// The folder (absolute path, or the name of a known folder). Required
-    /// for user callers; session callers may omit it (their own folder) and
-    /// may not name another one.
+    /// for user callers; session callers may omit it (their own folder).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
     /// Deprecated alias of `folder`; when both are given they must agree.
@@ -458,6 +457,109 @@ pub struct ReviveSessionBody {
     pub cols: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rows: Option<u16>,
+}
+
+/// `POST /v1/sessions/{id}/input`: named keys, then text, typed into the
+/// session's terminal as they are (no Enter unless a key says so).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputBody {
+    /// Named keys, e.g. `enter`, `esc`, `tab`, `up`, `ctrl+c`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// `POST /v1/sessions/{id}/submit`: text pasted into the session, then Enter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubmitBody {
+    pub text: String,
+    /// Refused (`409 session_in_use`) while someone typed in the session
+    /// within this many milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet_ms: Option<u64>,
+    /// Refused (`409 session_blocked`) while the session's agent asks
+    /// something (a permission prompt, a question or a menu, which would
+    /// take the text as its answer) or isn't at its prompt yet. Default
+    /// true.
+    #[serde(default = "yes")]
+    pub refuse_if_blocked: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// What `POST /v1/sessions/{id}/wait` waits for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WaitFor {
+    /// Idle, done, blocked or exited: the agent stopped and wants something.
+    Settled,
+    Idle,
+    Blocked,
+    Working,
+    Exited,
+    /// The session reports something new about itself.
+    Reported,
+    /// The screen shows `pattern`.
+    Output,
+}
+
+impl From<WaitFor> for session_core::api::WaitUntil {
+    fn from(until: WaitFor) -> Self {
+        use session_core::api::WaitUntil as W;
+        match until {
+            WaitFor::Settled => W::Settled,
+            WaitFor::Idle => W::Idle,
+            WaitFor::Blocked => W::Blocked,
+            WaitFor::Working => W::Working,
+            WaitFor::Exited => W::Exited,
+            WaitFor::Reported => W::Reported,
+            WaitFor::Output => W::Output,
+        }
+    }
+}
+
+/// `POST /v1/sessions/{id}/wait`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WaitBody {
+    pub until: WaitFor,
+    /// Text the screen must show, for `output` (a substring).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+    /// How long to wait (default 30 000, at most 600 000).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+}
+
+/// The answer to `POST /v1/sessions/{id}/wait`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WaitOutcome {
+    /// What was waited for happened; false after the timeout, or when it
+    /// can't happen any more (the session ended).
+    pub matched: bool,
+    pub status: SessionStatus,
+    pub lifecycle: Lifecycle,
+    /// What the session last reported about itself: untrusted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported: Option<Reported>,
+    pub reason: String,
+}
+
+impl From<session_core::api::WaitResult> for WaitOutcome {
+    fn from(result: session_core::api::WaitResult) -> Self {
+        Self {
+            matched: result.matched,
+            status: result.status,
+            lifecycle: result.lifecycle,
+            reported: result.reported.map(Reported::from),
+            reason: result.reason,
+        }
+    }
 }
 
 // ------------------------------------------------------------ WebSocket streams

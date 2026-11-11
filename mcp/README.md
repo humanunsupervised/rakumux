@@ -6,7 +6,9 @@ optional Claude Code/Codex activity hooks.
 Activity does not depend on MCP; it uses the daemon's authenticated self-report protocol.
 
 An [MCP](https://modelcontextprotocol.io) server (stdio) that lets coding agents (Claude Code,
-Codex, OpenCode, …) see and drive Rakumux sessions and their folders. It is a client of Rakumux's
+Codex, OpenCode, …) see and drive Rakumux sessions and their folders: one agent can prompt the
+coding agents working in your other sessions, answer what they ask, wait for them and read what
+they wrote. It's optional: add it to the agents you want to have it (below). It is a client of Rakumux's
 external API (`rakumux-api`, see `../api`), which it starts on demand, and the API in turn talks
 to the session daemon (`rakumux-ptyd`).
 
@@ -29,9 +31,19 @@ A session's **folder** is the directory it was started in (a repository, a workt
 | `create_session` | Start a session: `folder`, `name?`, `cwd?`, `command?` (argv), `startup_commands?` | creates |
 | `read_session` | A session's screen (`source: "screen"`) or scrollback (`"scrollback"`, `lines`, default 120), capped at `max_bytes` (default 16 KiB) | read-only |
 | `rename_session` | Rename a session (`session`, `name`) | idempotent |
+| `send_prompt` | Paste `text` into a session, then Enter: a prompt to its agent or a command line. Refused, typing nothing, with `session_blocked` while its agent asks something (a permission prompt, a question, a menu) or isn't at its prompt yet, and with `session_in_use` while the user typed there in the last 5 s | destructive |
+| `send_keys` | Press `keys` in order (a character or a named key: `enter`, `esc`, `down`, `ctrl+c`, `shift+tab`, …), then type `text`; no Enter unless a key says so. For answering what an agent asks, or interrupting | destructive |
+| `wait_for_session` | Until `settled` (default: its agent finished, waits, asks something, or the session ended), `working`, `blocked`, `idle`, `exited`, `reported` or `output` (`pattern` on its screen); `timeout_seconds` (default 60, at most 600), then `matched: false` | read-only |
+| `kill_session` | End the session's program; it stays, `exited` | destructive |
+| `revive_session` | Start an exited or dead session again with its resume command (an agent continues its conversation) | |
 
-- A `session` argument takes an **id or a name**. Names are unique only within a folder; an
-  ambiguous name is an error listing the candidates (`get_session` returns them all instead).
+Driving an agent goes `send_prompt` → `wait_for_session` → `read_session`; a `blocked` agent asks
+something, which `read_session` shows and `send_keys` answers. No tool drives the session the
+agent itself runs in.
+
+- A `session` argument takes an **id or a name**, looked up in every folder unless `folder` names
+  one. Names are unique only within a folder; an ambiguous name is an error listing the
+  candidates (`get_session` returns them all instead).
 - A `folder` argument is an absolute path (`~/` allowed) or the name of a known folder. Tools still
   accept `project`, its deprecated alias from earlier builds (declared `deprecated` in the input
   schemas); `folder` and `project` naming different folders is an `invalid_argument` error.
@@ -39,8 +51,9 @@ A session's **folder** is the directory it was started in (a repository, a workt
 - Every tool declares input and output JSON schemas and returns `structuredContent` plus a short
   text rendering. API errors come back as tool results with `isError: true` and
   `{"error": {"code", "message", "details"?}}`; unknown tools are JSON-RPC errors.
-- Without `folder`, an agent inside a Rakumux session sees its own folder; outside a session
-  every folder is listed (a daemon that can't list folders yet asks for `folder` instead).
+- Without `folder`, `list_sessions` from an agent inside a Rakumux session lists its own folder
+  (`all_folders: true` lists every folder); outside a session every folder (a daemon that can't
+  list folders yet asks for `folder` instead).
 
 ## Untrusted output
 
@@ -68,16 +81,18 @@ The server's `instructions` (sent at `initialize`) explain sessions and folders 
 
 When `RAKUMUX_SESSION_ID` and `RAKUMUX_SESSION_TOKEN` are both set (Rakumux sets them in
 every session), the server sends them to the API as `X-Rakumux-Session-Id` /
-`X-Rakumux-Session-Token`, so the daemon treats the agent as that session: confined to its own
-folder, may read and list there, may create sessions there (within limits: 4 running sessions it
-started, nesting 2 deep, 8 running agent-created sessions per folder, 10 creates a minute; beyond
-that `limit_exceeded`), and may rename only itself (controlling other sessions is planned for
-0.7.0). Without either it acts as the user. With only one of them it never does: every call that
+`X-Rakumux-Session-Token`, so the daemon treats the agent as that session: it reaches every
+folder, may read, list and wait on any session, drive any other session (`send_prompt`,
+`send_keys`, `kill_session`, `revive_session`) but never its own, create sessions in any folder
+(within limits: 4 running sessions it started, nesting 2 deep, 8 running agent-created sessions
+per folder, 10 creates a minute; beyond that `limit_exceeded`), and rename only itself. What it
+does is audited as that session (`session:<id>` in the daemon's audit log). Without either it
+acts as the user. With only one of them it never does: every call that
 isn't for a bound agent conversation (below) is refused (`unauthenticated`), since the server runs
 inside a session whose agent didn't pass both.
 
 Whether the variables reach the MCP server depends on the agent: Claude
-Code passes its environment to the servers it spawns (expected, not verified); Codex forwards only
+Code passes its environment to the servers it spawns (verified with 2.1.321); Codex forwards only
 variables listed in `env_vars`, so list both; GitHub Copilot CLI passes its environment, both
 variables included (verified with 1.0.105); agents that remove variables named like `*TOKEN*`
 from MCP servers' environment (Gemini CLI) need both mapped explicitly in the server's `env`;
@@ -129,8 +144,10 @@ Rakumux install ships it next to `rakumux`:
 claude mcp add --scope user rakumux -- rakumux-mcp
 ```
 
-(Command syntax checked against `claude mcp add --help`. Claude Code is expected to pass its own
-environment, including `RAKUMUX_SESSION_*`, to the server: not verified.)
+Claude Code passes its environment, `RAKUMUX_SESSION_ID` and `RAKUMUX_SESSION_TOKEN` included,
+to the server (checked with Claude Code 2.1.321: a headless Claude Code in a Rakumux session,
+given the server with `--mcp-config`, prompted an interactive Claude Code in another folder's
+session with `send_prompt`, waited for it and read its answer, all audited as its own session).
 
 ### Codex
 
@@ -258,7 +275,7 @@ pi mcp add rakumux --exposure direct -- rakumux-mcp   # absolute path recommende
 ```
 
 This writes `~/.pi/agent/mcp.json` (`$PI_CODING_AGENT_DIR/mcp.json`). `--exposure direct` gives
-the model the six tools as `mcp__rakumux__<tool>`; Pi's default (`codemode`) reaches them only
+the model the tools as `mcp__rakumux__<tool>`; Pi's default (`codemode`) reaches them only
 from codemode scripts. Pi starts the server in its own process with its whole environment, so
 `RAKUMUX_SESSION_ID` and `RAKUMUX_SESSION_TOKEN` both reach it: don't set `inheritEnv: false`
 for it, or pass both in its `env`. Checked with Pi 1.4.0: `list_sessions`, called by the model
@@ -284,7 +301,7 @@ and run `/plugins install <folder>`). Without the plugin, `~/.kimi-code/mcp.json
 project's `.kimi-code/mcp.json`) takes `{"mcpServers": {"rakumux": {"command": "rakumux-mcp"}}}`.
 Kimi names the tools `mcp__plugin-rakumux_rakumux__<tool>`; in Always Ask mode it asks before
 each call ("Approve for this session" stops asking for that tool). Verified with Kimi Code
-2.4.0 in a Rakumux session (offline, against a mock model): the six tools, and `list_sessions`
+2.4.0 in a Rakumux session (offline, against a mock model): the tools of the time, and `list_sessions`
 naming its own session "this is you". See [Kimi Code integration](../integrations/kimi/README.md).
 
 ### Amp
@@ -331,7 +348,8 @@ mcp/
   src/untrusted.rs     sanitizing, size caps, nonce-delimited blocks
   src/instructions.rs  server instructions
   tests/mcp_stdio.rs   the real binary over JSON-RPC against a stub API
-  tests/full_stack.rs  rakumux-mcp → real rakumux-api → real rakumux-ptyd
+  tests/full_stack.rs  rakumux-mcp → real rakumux-api → real rakumux-ptyd, an agent's identity
+                       driving a session in another folder
 ```
 
 Build and test from `tui/` (the Cargo workspace root): `cargo test -p rakumux-mcp`.

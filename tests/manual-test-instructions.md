@@ -155,7 +155,7 @@ Launch from a test folder with the local build: `cd /tmp/orch-a && /path/to/raku
   back dead; in the TUI, `H` finds it by typing and Enter restores, revives and goes into it.
 - [ ] Inside a session: `rakumux session list`, `rakumux session read <id>` and
       `rakumux session report --state working --text "running tests"` work; `rakumux kill`
-      on another session is refused with a "later release" message.
+      on another session works, and on the session itself is refused ("doesn't drive itself").
 
 ## 7. Command history and AI naming
 

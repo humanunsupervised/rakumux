@@ -128,3 +128,174 @@ fn an_agent_creates_reads_and_renames_a_real_session() {
         "stack-renamed"
     );
 }
+
+/// The session token a session's startup command printed (`TOKEN=…`).
+fn session_token(mcp: &mut Mcp, id: &str) -> String {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let result = mcp.call("read_session", json!({"session": id}));
+        let token = result["structuredContent"]["text"]
+            .as_str()
+            .unwrap_or("")
+            .lines()
+            .filter_map(|line| line.strip_prefix("TOKEN="))
+            .find(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+            .map(str::to_owned);
+        if let Some(token) = token {
+            return token;
+        }
+        assert!(Instant::now() < deadline, "no token: {result}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[test]
+fn an_agent_in_one_session_drives_a_session_in_another_folder() {
+    let api_bin = workspace_binary("rakumux-api", "rakumux-api");
+    let ptyd_bin = workspace_binary("rakumux-ptyd", "rakumux-ptyd");
+    let (dir, layout) = temp_home();
+    let _cleanup = Cleanup(layout.clone());
+    let here = layout.home.parent().unwrap().join("here");
+    let there = layout.home.parent().unwrap().join("there");
+    std::fs::create_dir_all(&here).unwrap();
+    std::fs::create_dir_all(&there).unwrap();
+    let home = dir.path().display().to_string();
+    let api_bin = api_bin.display().to_string();
+    let ptyd_bin = ptyd_bin.display().to_string();
+    let base = [
+        ("RAKUMUX_API_BIN", api_bin.as_str()),
+        ("RAKUMUX_PTYD_BIN", ptyd_bin.as_str()),
+        ("HOME", home.as_str()),
+        ("SHELL", "/bin/bash"),
+        ("PS1", "$ "),
+    ];
+    let bash = json!(["bash", "--norc", "--noprofile"]);
+
+    // As the user: the agent's own session, and a shell in another folder.
+    let (mut user, _) = Mcp::initialized(&layout, &base);
+    let result = user.call(
+        "create_session",
+        json!({"folder": here, "name": "driver", "command": bash,
+               "startup_commands": ["echo TOKEN=$RAKUMUX_SESSION_TOKEN"]}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let driver = result["structuredContent"]["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let result = user.call(
+        "create_session",
+        json!({"folder": there, "name": "worker", "command": bash}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let worker = result["structuredContent"]["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let token = session_token(&mut user, &driver);
+
+    // As the agent in `driver`, as Rakumux starts it there.
+    let mut env = base.to_vec();
+    env.push(("RAKUMUX_SESSION_ID", driver.as_str()));
+    env.push(("RAKUMUX_SESSION_TOKEN", token.as_str()));
+    let (mut agent, init) = Mcp::initialized(&layout, &env);
+    assert!(init["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("send_prompt"));
+
+    // Its own folder by default; every folder when asked.
+    let result = agent.call("list_sessions", json!({}));
+    let names: Vec<_> = result["structuredContent"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["driver"], "{result}");
+    let result = agent.call("list_sessions", json!({"all_folders": true}));
+    assert_eq!(result["structuredContent"]["count"], 2, "{result}");
+
+    // A command, found by name in the other folder, then waited for.
+    let result = agent.call(
+        "send_prompt",
+        json!({"session": "worker", "text": "echo DRIVEN_$((6*7))"}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["session_id"], worker.as_str());
+    let result = agent.call(
+        "wait_for_session",
+        json!({"session": worker, "until": "output", "pattern": "DRIVEN_42", "timeout_seconds": 10}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["matched"], true, "{result}");
+    assert_eq!(result["structuredContent"]["status"], "live");
+
+    // Keys: text without Enter, then Enter.
+    let result = agent.call(
+        "send_keys",
+        json!({"session": worker, "text": "echo KEYS_$((2+3))"}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let result = agent.call("send_keys", json!({"session": worker, "keys": ["enter"]}));
+    assert_eq!(result["isError"], false, "{result}");
+    let result = agent.call(
+        "wait_for_session",
+        json!({"session": worker, "until": "output", "pattern": "KEYS_5", "timeout_seconds": 10}),
+    );
+    assert_eq!(result["structuredContent"]["matched"], true, "{result}");
+    let result = agent.call(
+        "send_keys",
+        json!({"session": worker, "keys": ["no-such-key"]}),
+    );
+    assert_eq!(result["isError"], true, "{result}");
+
+    // A wait that runs out says so, and how to go on.
+    let result = agent.call(
+        "wait_for_session",
+        json!({"session": worker, "until": "output", "pattern": "NEVER_SHOWN", "timeout_seconds": 1}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["matched"], false);
+    assert!(text(&result).contains("again"), "{result}");
+
+    // Never itself.
+    for (tool, arguments) in [
+        (
+            "send_prompt",
+            json!({"session": driver, "text": "echo loop"}),
+        ),
+        ("send_keys", json!({"session": driver, "keys": ["enter"]})),
+        ("kill_session", json!({"session": driver})),
+    ] {
+        let result = agent.call(tool, arguments);
+        assert_eq!(result["isError"], true, "{tool}: {result}");
+        assert_eq!(
+            result["structuredContent"]["error"]["code"], "permission_denied",
+            "{tool}: {result}"
+        );
+    }
+
+    // Ended, waited for, and started again.
+    let result = agent.call("kill_session", json!({"session": worker}));
+    assert_eq!(result["isError"], false, "{result}");
+    let result = agent.call(
+        "wait_for_session",
+        json!({"session": worker, "until": "exited", "timeout_seconds": 10}),
+    );
+    assert_eq!(result["structuredContent"]["matched"], true, "{result}");
+    assert_eq!(result["structuredContent"]["status"], "exited");
+    let result = agent.call("revive_session", json!({"session": worker}));
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["session"]["status"], "live");
+    let result = agent.call(
+        "send_prompt",
+        json!({"session": worker, "text": "echo BACK_$((1+1))"}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let result = agent.call(
+        "wait_for_session",
+        json!({"session": worker, "until": "output", "pattern": "BACK_2", "timeout_seconds": 10}),
+    );
+    assert_eq!(result["structuredContent"]["matched"], true, "{result}");
+}

@@ -9,8 +9,8 @@
 
 use crate::daemon::{DaemonPool, Identity};
 use crate::dto::{
-    CreateSessionBody, FolderList, Health, ReviveSessionBody, SessionEnvelope, SessionList,
-    UpdateSessionBody,
+    CreateSessionBody, FolderList, Health, InputBody, ReviveSessionBody, SessionEnvelope,
+    SessionList, SubmitBody, UpdateSessionBody, WaitBody,
 };
 use crate::error::HttpError;
 use crate::{folders, guard, log, query, sessions, streams};
@@ -66,6 +66,12 @@ enum Route {
     Content(String),
     Revive(String),
     Kill(String),
+    /// Keys and text typed into the session.
+    Input(String),
+    /// Text pasted, then Enter.
+    Submit(String),
+    /// Until the session gets somewhere.
+    Wait(String),
     /// WebSocket: the session's terminal.
     Attach(String),
     /// WebSocket: session events.
@@ -89,6 +95,9 @@ impl Route {
             ["sessions", session, "content"] => id(session).map(Route::Content),
             ["sessions", session, "revive"] => id(session).map(Route::Revive),
             ["sessions", session, "kill"] => id(session).map(Route::Kill),
+            ["sessions", session, "input"] => id(session).map(Route::Input),
+            ["sessions", session, "submit"] => id(session).map(Route::Submit),
+            ["sessions", session, "wait"] => id(session).map(Route::Wait),
             ["sessions", session, "attach"] => id(session).map(Route::Attach),
             _ => None,
         }
@@ -98,7 +107,11 @@ impl Route {
         match self {
             Route::Health | Route::Folders | Route::Content(_) => &[Method::GET],
             Route::Attach(_) | Route::Events | Route::Daemon => &[Method::GET],
-            Route::Revive(_) | Route::Kill(_) => &[Method::POST],
+            Route::Revive(_)
+            | Route::Kill(_)
+            | Route::Input(_)
+            | Route::Submit(_)
+            | Route::Wait(_) => &[Method::POST],
             Route::Sessions => &[Method::GET, Method::POST],
             Route::Session(_) => &[Method::GET, Method::PATCH, Method::DELETE],
         }
@@ -250,6 +263,27 @@ async fn route(
             let id = session_id(&id)?;
             call(state, identity, move |api| sessions::kill(api, &id)).await?;
             Ok(no_content())
+        }
+        (Route::Input(id), _) => {
+            query::parse_none(query.as_deref())?;
+            let id = session_id(&id)?;
+            let body: InputBody = read_json(request).await?;
+            call(state, identity, move |api| sessions::input(api, &id, body)).await?;
+            Ok(no_content())
+        }
+        (Route::Submit(id), _) => {
+            query::parse_none(query.as_deref())?;
+            let id = session_id(&id)?;
+            let body: SubmitBody = read_json(request).await?;
+            call(state, identity, move |api| sessions::submit(api, &id, body)).await?;
+            Ok(no_content())
+        }
+        (Route::Wait(id), _) => {
+            query::parse_none(query.as_deref())?;
+            let id = session_id(&id)?;
+            let body: WaitBody = read_json(request).await?;
+            let outcome = call(state, identity, move |api| sessions::wait(api, &id, body)).await?;
+            json(StatusCode::OK, outcome)
         }
         (Route::Attach(id), _) => {
             let query = query::parse_attach(query.as_deref())?;
@@ -521,6 +555,14 @@ mod tests {
             Route::parse("/v1/sessions/01J/kill"),
             Some(Route::Kill("01J".into()))
         );
+        for (path, route) in [
+            ("/v1/sessions/01J/input", Route::Input("01J".into())),
+            ("/v1/sessions/01J/submit", Route::Submit("01J".into())),
+            ("/v1/sessions/01J/wait", Route::Wait("01J".into())),
+        ] {
+            assert_eq!(Route::parse(path), Some(route));
+            assert!(check_method(&Route::parse(path).unwrap(), &Method::GET).is_err());
+        }
         assert_eq!(
             Route::parse("/v1/sessions/01J/attach"),
             Some(Route::Attach("01J".into()))
