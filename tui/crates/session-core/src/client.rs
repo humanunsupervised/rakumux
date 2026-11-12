@@ -14,7 +14,8 @@ use crate::api::{
     SubscribeRequest, WaitRequest, WaitResult,
 };
 use crate::frame::{self, Frame};
-use crate::ids::{MachineId, ReplyId, SessionId};
+use crate::heartbeat::{Heartbeat, HeartbeatEdit, HeartbeatSpec};
+use crate::ids::{HeartbeatId, MachineId, ReplyId, SessionId};
 use crate::model::{MachineView, ProjectView, ScopeRoot, SessionView};
 use crate::paths::{Layout, Registration};
 use std::io;
@@ -65,6 +66,42 @@ pub trait SessionApi: Send + Sync {
         Err(unsupported("restoring deleted sessions"))
     }
     fn revive(&self, request: ReviveSession) -> Result<SessionView>;
+    /// Heartbeats (daemon capability `heartbeats`): every folder's, or
+    /// `scope`'s alone.
+    fn heartbeats(&self, scope: Option<&ScopeRoot>) -> Result<Vec<Heartbeat>> {
+        let _ = scope;
+        Err(unsupported("heartbeats"))
+    }
+    /// One heartbeat, by id.
+    fn heartbeat(&self, id: &HeartbeatId) -> Result<Heartbeat> {
+        let _ = id;
+        Err(unsupported("heartbeats"))
+    }
+    /// A new heartbeat; see `Request::HeartbeatCreate`.
+    fn heartbeat_create(&self, spec: HeartbeatSpec) -> Result<Heartbeat> {
+        let _ = spec;
+        Err(unsupported("heartbeats"))
+    }
+    /// Change a heartbeat; see `Request::HeartbeatUpdate`.
+    fn heartbeat_update(&self, edit: HeartbeatEdit) -> Result<Heartbeat> {
+        let _ = edit;
+        Err(unsupported("heartbeats"))
+    }
+    /// Enable (approve) or pause a heartbeat (user only).
+    fn heartbeat_enable(&self, id: &HeartbeatId, enabled: bool) -> Result<Heartbeat> {
+        let _ = (id, enabled);
+        Err(unsupported("heartbeats"))
+    }
+    /// Forget a heartbeat (user only); its runs stay as sessions.
+    fn heartbeat_delete(&self, id: &HeartbeatId) -> Result<()> {
+        let _ = id;
+        Err(unsupported("heartbeats"))
+    }
+    /// Start a heartbeat's run now (user only): the run's session.
+    fn heartbeat_run(&self, id: &HeartbeatId) -> Result<SessionView> {
+        let _ = id;
+        Err(unsupported("heartbeats"))
+    }
     fn report(&self, report: Report) -> Result<()>;
     fn read(&self, request: ReadRequest) -> Result<ReadResult>;
     fn wait(&self, request: WaitRequest) -> Result<WaitResult>;
@@ -459,6 +496,13 @@ impl Client {
         }
     }
 
+    fn expect_heartbeat(&self, request: &Request) -> Result<Heartbeat> {
+        match self.request(request)? {
+            Response::Heartbeat { heartbeat } => Ok(heartbeat),
+            other => Err(unexpected(&other)),
+        }
+    }
+
     fn expect_session(&self, request: &Request) -> Result<SessionView> {
         match self.request(request)? {
             Response::Session { session } => Ok(session),
@@ -707,6 +751,42 @@ impl SessionApi for Client {
 
     fn revive(&self, request: ReviveSession) -> Result<SessionView> {
         self.expect_session(&Request::SessionRevive(request))
+    }
+
+    fn heartbeats(&self, scope: Option<&ScopeRoot>) -> Result<Vec<Heartbeat>> {
+        match self.request(&Request::HeartbeatList {
+            scope: scope.cloned(),
+        })? {
+            Response::Heartbeats { heartbeats } => Ok(heartbeats),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    fn heartbeat(&self, id: &HeartbeatId) -> Result<Heartbeat> {
+        self.expect_heartbeat(&Request::HeartbeatGet { id: id.clone() })
+    }
+
+    fn heartbeat_create(&self, spec: HeartbeatSpec) -> Result<Heartbeat> {
+        self.expect_heartbeat(&Request::HeartbeatCreate(spec))
+    }
+
+    fn heartbeat_update(&self, edit: HeartbeatEdit) -> Result<Heartbeat> {
+        self.expect_heartbeat(&Request::HeartbeatUpdate(edit))
+    }
+
+    fn heartbeat_enable(&self, id: &HeartbeatId, enabled: bool) -> Result<Heartbeat> {
+        self.expect_heartbeat(&Request::HeartbeatEnable {
+            id: id.clone(),
+            enabled,
+        })
+    }
+
+    fn heartbeat_delete(&self, id: &HeartbeatId) -> Result<()> {
+        self.expect_ok(&Request::HeartbeatDelete { id: id.clone() })
+    }
+
+    fn heartbeat_run(&self, id: &HeartbeatId) -> Result<SessionView> {
+        self.expect_session(&Request::HeartbeatRun { id: id.clone() })
     }
 
     fn report(&self, report: Report) -> Result<()> {
@@ -1659,6 +1739,7 @@ mod tests {
             last_message_at: None,
             terminal: None,
             machine: None,
+            heartbeat: None,
         }
     }
 
@@ -2013,6 +2094,15 @@ mod tests {
                 Request::SessionRestore { id } => Response::Session {
                     session: named(id.as_str(), "restored"),
                 },
+                Request::HeartbeatList { .. }
+                | Request::HeartbeatGet { .. }
+                | Request::HeartbeatCreate(_)
+                | Request::HeartbeatUpdate(_)
+                | Request::HeartbeatEnable { .. }
+                | Request::HeartbeatDelete { .. }
+                | Request::HeartbeatRun { .. } => Response::Error {
+                    error: ApiError::new(ErrorCode::Unsupported, "no heartbeats here"),
+                },
                 Request::ProjectRelocate { .. } => Response::Ok,
                 Request::Hello(_) => Response::Error {
                     error: ApiError::new(ErrorCode::InvalidArgument, "hello twice"),
@@ -2314,6 +2404,7 @@ mod tests {
             rows: 30,
             machine: None,
             prefill: None,
+            first_input: None,
         };
         assert_eq!(client.create(create.clone()).unwrap().name, "web");
         assert_eq!(client.rename(&s1, "renamed").unwrap().name, "renamed");
@@ -2464,6 +2555,7 @@ mod tests {
             rows: 24,
             machine: None,
             prefill: None,
+            first_input: None,
         };
         assert_eq!(client.create(create).unwrap().name, "again");
         assert_eq!(daemon.hello_count(), 2);

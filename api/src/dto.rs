@@ -823,6 +823,7 @@ mod tests {
                 origin: None,
             }),
             machine: None,
+            heartbeat: None,
         }
     }
 

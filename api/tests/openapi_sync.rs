@@ -332,6 +332,7 @@ fn every_stream_message_is_documented() {
         pinned: false,
         git: None,
         machine: None,
+        heartbeat: None,
     };
     let reported = ModelReported {
         state: Some(Lifecycle::Done),

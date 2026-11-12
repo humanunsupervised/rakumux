@@ -39,7 +39,8 @@ use session_core::api::{
     Hello, ReadRequest, ReadSource, Report, Request, Response, ReviveSession, Role, SendRequest,
     SessionEvent, SubscribeRequest, TextFormat, WaitRequest, WaitResult, WaitUntil,
 };
-use session_core::ids::{ReplyId, SessionId, TerminalId, Token};
+use session_core::heartbeat::{Heartbeat, HeartbeatRunRef};
+use session_core::ids::{HeartbeatId, ReplyId, SessionId, TerminalId, Token};
 use session_core::model::{
     AgentInfo, Creator, LaunchSpec, Lifecycle, ProjectView, Reported, ResumeSource, ResumeSpec,
     ScopeRoot, SessionStatus, SessionView, TerminalView,
@@ -50,6 +51,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
+
+mod heartbeats;
 
 /// At most one `Activity` event per session per this interval.
 const ACTIVITY_INTERVAL_MS: i64 = 1000;
@@ -139,6 +142,8 @@ struct LiveSession {
     /// What the agent's conversation showed of its questions, as of its last
     /// read (`session_answer`).
     questions: crate::agent_output::questions::Asked,
+    /// Text for its agent once its prompt shows (`CreateSession::first_input`).
+    first_input: Option<heartbeats::PendingInput>,
 }
 
 impl LiveSession {
@@ -167,6 +172,7 @@ impl LiveSession {
             places_scan: None,
             places_checked_ms: 0,
             questions: Default::default(),
+            first_input: None,
         }
     }
 }
@@ -212,6 +218,10 @@ struct State {
     /// tick reads each one's screen and agent conversation as output would,
     /// since a quiet one (an agent waiting for a prompt) shows none.
     adopted: Vec<(SessionId, TerminalId)>,
+    /// Every heartbeat, as the registry holds it.
+    heartbeats: std::collections::BTreeMap<HeartbeatId, Heartbeat>,
+    /// Which sessions are heartbeats' runs (`SessionView::heartbeat`).
+    runs: HashMap<SessionId, HeartbeatRunRef>,
 }
 
 struct Binding {
@@ -310,6 +320,7 @@ impl Inner {
             .into_iter()
             .map(|(id, at)| (id, LastMessage { at, saved: at }))
             .collect();
+        let (heartbeats, runs) = heartbeats::load(&registry, clock());
         Self {
             places_excluded: places::Excluded::of_this_machine(),
             store: ScrollbackStore::new(config.layout.clone()),
@@ -333,6 +344,8 @@ impl Inner {
                 git: GitContexts::default(),
                 places: Places::new(saved_places),
                 last_messages,
+                heartbeats,
+                runs,
             }),
             changed: Condvar::new(),
             events: EventBus::default(),
@@ -612,6 +625,13 @@ impl Inner {
             Request::ProjectRelocate { from, to } => self.relocate_project(caller, &from, &to),
             Request::ReplyCapture { enabled } => self.reply_capture(caller, enabled),
             Request::ReplyList { after } => self.reply_list(caller, after.as_ref()),
+            Request::HeartbeatList { scope } => self.heartbeat_list(caller, scope.as_ref()),
+            Request::HeartbeatGet { id } => self.heartbeat_get(caller, &id),
+            Request::HeartbeatCreate(spec) => self.heartbeat_create(caller, spec),
+            Request::HeartbeatUpdate(edit) => self.heartbeat_update(caller, edit),
+            Request::HeartbeatEnable { id, enabled } => self.heartbeat_enable(caller, &id, enabled),
+            Request::HeartbeatDelete { id } => self.heartbeat_delete(caller, &id),
+            Request::HeartbeatRun { id } => self.heartbeat_run(caller, &id),
             Request::MachineAdd { .. } | Request::MachineList | Request::MachineRemove { .. } => {
                 Err(no_machines())
             }
@@ -967,12 +987,16 @@ impl Inner {
             rows,
             machine,
             prefill,
+            first_input,
         } = request;
         if machine.is_some() {
             return Err(no_machines());
         }
         if let Some(text) = &prefill {
             validate_prefill(text)?;
+        }
+        if let Some(input) = &first_input {
+            heartbeats::validate_first_input(input)?;
         }
         let scope = match (&caller.info, scope) {
             // A session's own folder unless it names another.
@@ -1062,6 +1086,9 @@ impl Inner {
                 .entry(parent.clone())
                 .or_default()
                 .push(Instant::now());
+        }
+        if let (Some(input), Some(live)) = (first_input, state.live.get_mut(&id)) {
+            live.first_input = Some(heartbeats::PendingInput::new(input, now));
         }
         let directory = self.git_directory(&state, &record);
         state.git.ensure(&id, &directory);
@@ -1289,6 +1316,7 @@ impl Inner {
         state.git.remove(&record.id);
         state.places.remove(&record.id);
         state.last_messages.remove(&record.id);
+        self.forget_run(state, &record.id);
         self.save_running(state);
         self.publish(&record.scope, &record.id, SessionEvent::Removed);
         for orphan in orphans {
@@ -2486,6 +2514,8 @@ impl Inner {
         if sweep_due {
             self.sweep_places();
         }
+        self.run_due_heartbeats();
+        self.give_first_inputs();
         let adopted = std::mem::take(&mut self.lock().adopted);
         for (id, terminal) in adopted {
             // Its log is found for the agent the screen showed before, so the
@@ -3380,6 +3410,7 @@ impl Inner {
                 .map(|last| last.at / 1000),
             terminal: runtime.view,
             machine: None,
+            heartbeat: state.runs.get(&record.id).cloned(),
         }
     }
 

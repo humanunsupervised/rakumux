@@ -62,6 +62,7 @@ pub(crate) fn live_view(id: &SessionId, folder: &str, pid: u32) -> SessionView {
         pinned: false,
         git: None,
         machine: None,
+        heartbeat: None,
     }
 }
 

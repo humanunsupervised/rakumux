@@ -255,6 +255,9 @@ pub struct SessionView {
     /// machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<MachineRef>,
+    /// The heartbeat this session is a run of (capability `heartbeats`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat: Option<crate::heartbeat::HeartbeatRunRef>,
 }
 
 /// A deleted session in the session history (`session_history`): its
@@ -470,6 +473,7 @@ mod tests {
             agent_turn: None,
             places: vec![],
             machine: None,
+            heartbeat: None,
         };
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("exit_code"));

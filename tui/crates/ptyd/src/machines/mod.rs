@@ -1404,6 +1404,7 @@ mod tests {
             agent_turn: None,
             places: vec![],
             machine: None,
+            heartbeat: None,
         }
     }
 

@@ -311,6 +311,7 @@ fn answers(agent: &Agent) {
             rows: 40,
             machine: None,
             prefill: None,
+            first_input: None,
         })
         .unwrap();
     let screen = || {

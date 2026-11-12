@@ -13,6 +13,10 @@
 //!   reading an agent's conversation, the session history and managing
 //!   folders stay the user's. Other machines' sessions are the user's alone
 //!   (`Caller::reaches_machines`).
+//! - Heartbeats: session callers list, read, create and change them in any
+//!   folder (what they make or change waits for the user's approval, paused:
+//!   the service sees to that); enabling, running and deleting one are the
+//!   user's.
 
 use crate::control_api::Caller;
 use session_core::api::{ApiError, CallerInfo, ErrorCode};
@@ -52,6 +56,13 @@ pub(crate) enum Op {
     ProjectRelocate,
     ReplyCapture,
     ReplyList,
+    HeartbeatList,
+    HeartbeatGet,
+    HeartbeatCreate,
+    HeartbeatUpdate,
+    HeartbeatEnable,
+    HeartbeatDelete,
+    HeartbeatRun,
 }
 
 impl Op {
@@ -87,6 +98,13 @@ impl Op {
             Op::ProjectRelocate => "project.relocate",
             Op::ReplyCapture => "reply.capture",
             Op::ReplyList => "reply.list",
+            Op::HeartbeatList => "heartbeat.list",
+            Op::HeartbeatGet => "heartbeat.get",
+            Op::HeartbeatCreate => "heartbeat.create",
+            Op::HeartbeatUpdate => "heartbeat.update",
+            Op::HeartbeatEnable => "heartbeat.enable",
+            Op::HeartbeatDelete => "heartbeat.delete",
+            Op::HeartbeatRun => "heartbeat.run",
         }
     }
 
@@ -114,6 +132,11 @@ impl Op {
                 | Op::ProjectRemove
                 | Op::ProjectRelocate
                 | Op::ReplyCapture
+                | Op::HeartbeatCreate
+                | Op::HeartbeatUpdate
+                | Op::HeartbeatEnable
+                | Op::HeartbeatDelete
+                | Op::HeartbeatRun
         )
     }
 }
@@ -139,6 +162,12 @@ pub(crate) fn authorize(
     let on_self = target.is_some_and(|target| target.id == self_id);
     match op {
         Op::Get | Op::Read | Op::Wait | Op::ProjectList => Ok(()),
+        // What a session makes or changes waits for approval (the service).
+        Op::HeartbeatList | Op::HeartbeatGet | Op::HeartbeatCreate | Op::HeartbeatUpdate => Ok(()),
+        Op::HeartbeatEnable | Op::HeartbeatDelete | Op::HeartbeatRun => Err(denied(
+            op,
+            "heartbeats are enabled, run and deleted by the user",
+        )),
         // In any folder: the service applies the limits.
         Op::Create => Ok(()),
         // Binds conversations to the caller itself (the service checks).
@@ -196,7 +225,7 @@ mod tests {
         }
     }
 
-    const ALL: [Op; 29] = [
+    const ALL: [Op; 36] = [
         Op::TerminalOpen,
         Op::TerminalAttach,
         Op::Get,
@@ -226,6 +255,13 @@ mod tests {
         Op::ProjectRelocate,
         Op::ReplyCapture,
         Op::ReplyList,
+        Op::HeartbeatList,
+        Op::HeartbeatGet,
+        Op::HeartbeatCreate,
+        Op::HeartbeatUpdate,
+        Op::HeartbeatEnable,
+        Op::HeartbeatDelete,
+        Op::HeartbeatRun,
     ];
 
     #[test]
@@ -256,7 +292,16 @@ mod tests {
             let on_other = authorize(&me, op, Some(Target { id: &other }));
             let anywhere = matches!(
                 op,
-                Op::Get | Op::Read | Op::Wait | Op::ProjectList | Op::Create | Op::Bind
+                Op::Get
+                    | Op::Read
+                    | Op::Wait
+                    | Op::ProjectList
+                    | Op::Create
+                    | Op::Bind
+                    | Op::HeartbeatList
+                    | Op::HeartbeatGet
+                    | Op::HeartbeatCreate
+                    | Op::HeartbeatUpdate
             );
             let self_only = matches!(op, Op::Report | Op::Touch | Op::Rename | Op::Pin);
             let drives = matches!(op, Op::Send | Op::Submit | Op::Kill | Op::Revive);

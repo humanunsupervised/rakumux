@@ -669,7 +669,9 @@ tui/
       control_api.rs         # Control trait (server ↔ control)
       control/               # ControlService: registry, scope, identity, permissions, waits, audit,
                              # replies (reply capture's memory-only ring), places (where sessions
-                             # worked), program_status (a program's OSC 7501 records)
+                             # worked), program_status (a program's OSC 7501 records), schedule
+                             # (heartbeats' due times, local time), service/heartbeats (heartbeat
+                             # requests, the scheduler, runs, a new session's first input)
       host.rs                # TerminalHost trait (control ↔ terminals), SpawnSpec, HostEvent
       terminal/              # Host: PTY actors, emulators, replay ring, attach fan-out, adopt/handoff
       handoff.rs             # restart in place: HandoffState across exec, target check
@@ -733,7 +735,8 @@ thread its Rakumux plugin keeps: `integrations/output.rs`),
 `user_prompt` (what the user last typed to that agent, read the same way), `agent_turn` (`{id,
 messages, conversation_id?}`: that agent's current turn, the user's last prompt and every message
 since, whose content `session_turn` returns; the conversation tells chats apart for their one
-automatic AI title), `places` (below), and `terminal` (pid, foreground process, title, size,
+automatic AI title), `places` (below), `heartbeat` (`{heartbeat, run}`: the heartbeat this
+session is a run of, below), and `terminal` (pid, foreground process, title, size,
 `controlled`, `alternate_screen`) while live. Folders are `ProjectView {path, name, sessions, live,
 last_active_at, added_at, git}` on the wire.
 
@@ -1072,6 +1075,46 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   where each was read to (`TranscriptCursor.subagents`). Read so, a Claude Code subagent started
   in the background ends with its call's result: its `<task-notification>` (failed unless
   `completed`), not the acknowledgement it got when it started.
+- **Heartbeats** (capability `heartbeats`; `session_core::heartbeat`, `control/service/heartbeats.rs`,
+  `control/schedule.rs`): tasks the daemon runs on a clock. A heartbeat is `{id, scope, name,
+  agent?, command, prompt, schedule?, enabled, awaiting_approval, created_by, created_at,
+  updated_at, next_run_at?, runs, last_run?}`; `schedule` is `every {minutes}` (5 minutes to a
+  week, counted from the last due time), `daily {at: "HH:MM"}` or `weekdays {days, at}`, in this
+  machine's local time (a time clocks skip runs at the first minute after it, one they repeat
+  once), `unknown` from a newer Rakumux. Requests: `heartbeat_list {scope?}`, `heartbeat_get
+  {id}`, `heartbeat_create {scope?, name?, agent?, command?, prompt?, schedule?, by_agent?,
+  enabled?}`, `heartbeat_update {id, name?, agent?, command?, prompt?, schedule?, by_agent?}`,
+  and, user only, `heartbeat_enable {id, enabled}`, `heartbeat_delete {id}` (its runs stay as
+  plain sessions) and `heartbeat_run {id}` (a run now, answered with its `Session`). Ids read
+  with or without their `hb_`. Without a command, a new heartbeat's (and a changed agent's) is
+  the one the user last started that agent (or any) with in the folder: the newest session's
+  known-agent resume command without what names its conversation (`resume::start_command`,
+  the flags that shape a session kept), else the agent's name, else `claude`. What a session
+  caller makes, or anything with `by_agent` (`rakumux-mcp` sets it), waits for the user's
+  approval: `awaiting_approval`, paused; an agent's change to an enabled one's agent, command,
+  prompt or schedule pauses it again, a rename doesn't. Enabling needs a command, a prompt and a
+  known schedule (`invalid_argument` names what's missing), clears `awaiting_approval` and sets
+  `next_run_at`. At most 50 heartbeats, names unique in a folder (`Heartbeat`, `Heartbeat 2`, …
+  without one). **Runs**: on the control tick, an enabled heartbeat whose `next_run_at` came
+  starts `<name> #<n>` in its folder as the daemon for the user (`created_by: user`, depth 0, the
+  daemon's environment, a login shell with the command as its startup command and the prompt as
+  its sent first input). Its earlier runs whose agent waits (lifecycle idle, done or none) are
+  ended first (their final screens kept, Enter resumes them); while one is working, blocked or
+  unknown (still starting) the due time is skipped (`last_run.outcome: skipped`), but a run asked
+  for starts beside it. The newest 10 runs stay; older ended ones go to the session history.
+  The next due time counts from now, so a machine asleep (or a daemon down) through several gets
+  one run. `last_run`: `started`, `task_given`, `no_agent` (the prompt never showed in 2
+  minutes), `skipped` or `failed` (its session couldn't start; `detail` says why). Audited
+  (`heartbeat.*`) with the id and name, never the prompt. **First input** (capability
+  `session.first_input`): `CreateSession::first_input {text, submit}` is kept until an agent is
+  in the session's foreground and waits at its prompt: detection reads its screen idle (or
+  done), its hooks don't say working or blocked, and its screen has been quiet 1 s for an agent
+  whose prompt detection reads (`detect::knows_its_prompt`) or 3 s for one whose screen shows
+  none (Cursor, Droid, Amp: a quiet screen reads idle as soon as they draw anything); then it's
+  typed (sent with `session_submit`'s guards when `submit`: nobody typed for 2 s, the same
+  foreground, the Enter held back if a dialog opened; else typed without Enter, one line), never
+  into the shell; dropped after 2 minutes. Memory only: a restart in place drops one not yet
+  given. No events: clients read `heartbeat_list` again.
 - Resource use (user only, capability `resources`; `resources.rs`, `procinfo/`):
   `resource_usage` answers a `ResourceSample {at_ms, machine, daemon, clients, sessions}` read
   when asked, nothing kept between requests: the machine's counters (`MachineUsage`: CPUs, busy
@@ -1097,7 +1140,7 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
 | Caller | How it authenticates | May |
 |---|---|---|
 | User (TUI, CLI outside any session) | token from `service.json` | everything |
-| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | every folder of this machine: list/get/read/wait/subscribe any session (its own folder when it names none; `all` too) and list folders; create sessions in any folder, within `control::Limits` (→ `limit_exceeded`); **drive** any other session: send keys, submit, kill, revive (never itself: `permission_denied`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); delete, attach, answer a question dialog, read an agent's turn or chat, the session history, terminal panes, replies and managing folders → `permission_denied`; other machines' sessions are the user's alone |
+| Session (any process inside a session, e.g. an agent) | `RAKUMUX_SESSION_ID` + `RAKUMUX_SESSION_TOKEN` | every folder of this machine: list/get/read/wait/subscribe any session (its own folder when it names none; `all` too) and list folders; create sessions in any folder, within `control::Limits` (→ `limit_exceeded`); **drive** any other session: send keys, submit, kill, revive (never itself: `permission_denied`); report, touch, rename and pin **itself**; bind its agent's conversations to itself (`session_bind`); delete, attach, answer a question dialog, read an agent's turn or chat, the session history, terminal panes, replies and managing folders → `permission_denied`; heartbeats: list, get, create (any folder, its own when it names none) and update, what it makes or changes waits for approval, paused; enable, run and delete → `permission_denied`; other machines' sessions are the user's alone |
 | Delegated (the API for an agent conversation, e.g. OpenCode 2.x via `rakumux-mcp`) | user token + agent kind + conversation id | exactly what the session that bound the conversation may do; `unauthenticated` when no running session bound it |
 
 `control::Limits` apply only to sessions created by sessions: at most 4 running per creating session,
@@ -1188,6 +1231,10 @@ accidents; they don't stop a hostile process running as the same user.
   `deleted_sessions` (`sessions_v2`'s columns plus `deleted_at`, `view_agent_json`, `git_json`),
   created when missing: the session history, which a deleted session's places and last message
   rows go on serving until it's restored or purged (90 days); the loaders skip them meanwhile.
+  `heartbeats(id, scope_root, name, agent, command, prompt, schedule_json, enabled,
+  awaiting_approval, created_by_json, created_at, updated_at, next_run_at, runs, last_run_json)`
+  (unique `(scope_root, name)`) and `heartbeat_runs(session_id, heartbeat_id, run, started_at)`
+  (a run's row goes with its session's delete), created when missing.
   `PRAGMA user_version = 3` (schema 2 is migrated in place, `projects` backfilled from session
   scopes); the 0.5.x `sessions` table is dropped on first open. Live
   state (terminal ids, session tokens) is in daemon memory only.

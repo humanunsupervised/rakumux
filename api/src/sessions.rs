@@ -163,6 +163,7 @@ pub fn create(api: &dyn SessionApi, body: CreateSessionBody) -> Result<Session, 
         rows: body.rows.unwrap_or(0),
         machine: None,
         prefill: None,
+        first_input: None,
     };
     Ok(api.create(request)?.into())
 }
@@ -339,6 +340,7 @@ mod tests {
             pinned: false,
             git: None,
             machine: None,
+            heartbeat: None,
         }
     }
 

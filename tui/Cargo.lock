@@ -1319,6 +1319,7 @@ name = "rakumux-ptyd"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "chrono",
  "libc",
  "portable-pty",
  "rakumux-session-core",

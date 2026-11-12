@@ -426,6 +426,7 @@ fn copilot_in_a_session_end_to_end() {
             rows: 40,
             machine: None,
             prefill: None,
+            first_input: None,
         })
         .unwrap();
     let id = session.id.clone();

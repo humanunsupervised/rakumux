@@ -106,6 +106,7 @@ fn new(
         rows,
         machine,
         prefill,
+        first_input: None,
     };
     let session = api.create(request)?;
     if args.detach {

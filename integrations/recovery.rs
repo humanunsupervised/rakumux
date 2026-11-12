@@ -174,6 +174,55 @@ pub fn plan(ctx: &Context<'_>) -> Plan {
     }
 }
 
+/// The command that starts a new conversation of the agent `resume` (a
+/// [`Plan::Resume`] command) resumes, with the flags it kept: the resume
+/// command without what names the conversation. None for a command no known
+/// agent's resume form.
+pub fn start_command(resume: &[String]) -> Option<Vec<String>> {
+    let (program, args) = resume.split_first()?;
+    let name = program.rsplit('/').next().unwrap_or(program);
+    let flags: Vec<String> = match name {
+        "claude" | "cursor-agent" | "grok" | "droid" => without_option(args, &["--resume"]),
+        "copilot" => without_option(args, &["--resume", "-r", "--session-id"]),
+        "opencode" | "opencode2" => without_option(args, &["-s", "--session"]),
+        "kimi" => without_option(args, &["-r", "--resume"]),
+        "pi" => without_option(args, &["--session"]),
+        // `codex resume <flags> <id>`.
+        "codex" => {
+            let rest = args.strip_prefix(&["resume".to_string()])?;
+            let (_id, flags) = rest.split_last()?;
+            flags.to_vec()
+        }
+        // `amp threads continue <id | --last> <flags>`.
+        "amp" => {
+            let rest = args.strip_prefix(&["threads".to_string(), "continue".to_string()])?;
+            rest.get(1..)?.to_vec()
+        }
+        _ => return None,
+    };
+    let mut argv = vec![program.clone()];
+    argv.extend(flags);
+    Some(argv)
+}
+
+/// `args` without the options `names` and the value each takes (`--x v` or
+/// `--x=v`).
+fn without_option(args: &[String], names: &[&str]) -> Vec<String> {
+    let mut kept = Vec::new();
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        if names.contains(&word.as_str()) {
+            words.next();
+        } else if !names.iter().any(|name| {
+            word.strip_prefix(name)
+                .is_some_and(|rest| rest.starts_with('='))
+        }) {
+            kept.push(word.clone());
+        }
+    }
+    kept
+}
+
 /// The command line as typed: the arguments, or the words of a command line
 /// a program rewrote into one string.
 fn command_line(process: &ProcessInfo) -> Option<Vec<String>> {
@@ -288,6 +337,44 @@ fn keep_flags(args: &[String], switches: &[&str], options: &[&str], lists: &[&st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_resume_command_starts_a_new_conversation_with_its_flags() {
+        let start = |words: &[&str]| start_command(&args(words));
+        assert_eq!(
+            start(&[
+                "claude",
+                "--permission-mode",
+                "acceptEdits",
+                "--resume",
+                "abc"
+            ]),
+            Some(args(&["claude", "--permission-mode", "acceptEdits"]))
+        );
+        assert_eq!(
+            start(&["codex", "resume", "--full-auto", "-m", "o3", "019a"]),
+            Some(args(&["codex", "--full-auto", "-m", "o3"]))
+        );
+        assert_eq!(
+            start(&["copilot", "--allow-all-tools", "--resume=abc"]),
+            Some(args(&["copilot", "--allow-all-tools"]))
+        );
+        assert_eq!(
+            start(&["opencode2", "-m", "x", "-s", "ses_1"]),
+            Some(args(&["opencode2", "-m", "x"]))
+        );
+        assert_eq!(start(&["kimi", "-r", "k1"]), Some(args(&["kimi"])));
+        assert_eq!(start(&["pi", "--session", "/f.jsonl"]), Some(args(&["pi"])));
+        assert_eq!(
+            start(&["amp", "threads", "continue", "--last", "--mode", "ultra"]),
+            Some(args(&["amp", "--mode", "ultra"]))
+        );
+        assert_eq!(
+            start(&["droid", "--auto", "high", "--resume", "d"]),
+            Some(args(&["droid", "--auto", "high"]))
+        );
+        assert_eq!(start(&["npm", "test"]), None);
+    }
 
     fn args(words: &[&str]) -> Vec<String> {
         words.iter().map(|w| w.to_string()).collect()

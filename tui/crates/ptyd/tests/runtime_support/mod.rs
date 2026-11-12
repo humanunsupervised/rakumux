@@ -235,6 +235,7 @@ impl FakeControl {
                 alternate_screen: i.alternate_screen,
             }),
             machine: None,
+            heartbeat: None,
         }
     }
 
@@ -486,6 +487,7 @@ impl TestClient {
             rows,
             machine: None,
             prefill: None,
+            first_input: None,
         }));
         match response {
             Response::Session { session } => session,

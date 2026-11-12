@@ -128,6 +128,7 @@ fn an_answer_written_on_rakumux_com_answers_claude_codes_question() {
             rows: 40,
             machine: None,
             prefill: None,
+            first_input: None,
         })
         .unwrap();
     // A folder Claude Code doesn't know yet: trusted, as the user would.

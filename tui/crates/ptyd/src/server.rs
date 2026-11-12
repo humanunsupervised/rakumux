@@ -80,6 +80,8 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_PROJECTS_CREATE,
     session_core::api::CAPABILITY_MACHINES,
     session_core::api::CAPABILITY_HISTORY,
+    session_core::api::CAPABILITY_HEARTBEATS,
+    session_core::api::CAPABILITY_FIRST_INPUT,
     "attach",
     "subscribe",
     "list",
@@ -149,6 +151,13 @@ const KNOWN_OPS: &[&str] = &[
     "machine_add",
     "machine_list",
     "machine_remove",
+    "heartbeat_list",
+    "heartbeat_get",
+    "heartbeat_create",
+    "heartbeat_update",
+    "heartbeat_enable",
+    "heartbeat_delete",
+    "heartbeat_run",
 ];
 
 /// `kind` tags of `api::Auth`.
@@ -1945,6 +1954,7 @@ mod tests {
     #[test]
     fn known_ops_cover_every_request_variant() {
         let id = SessionId::from_string("S");
+        let hb = session_core::ids::HeartbeatId::from_string("h");
         let requests = vec![
             hello(),
             Request::Ping,
@@ -1969,6 +1979,7 @@ mod tests {
                 rows: 24,
                 machine: None,
                 prefill: None,
+                first_input: None,
             }),
             Request::SessionRename {
                 id: id.clone(),
@@ -2086,6 +2097,20 @@ mod tests {
             Request::MachineRemove {
                 id: session_core::ids::MachineId::from_string("m"),
             },
+            Request::HeartbeatList { scope: None },
+            Request::HeartbeatGet { id: hb.clone() },
+            Request::HeartbeatCreate(Default::default()),
+            Request::HeartbeatUpdate(session_core::heartbeat::HeartbeatEdit {
+                id: hb.clone(),
+                name: None,
+                fields: Default::default(),
+            }),
+            Request::HeartbeatEnable {
+                id: hb.clone(),
+                enabled: true,
+            },
+            Request::HeartbeatDelete { id: hb.clone() },
+            Request::HeartbeatRun { id: hb.clone() },
         ];
         assert_eq!(requests.len(), KNOWN_OPS.len());
         // A new variant breaks this match: list it above and in KNOWN_OPS.
@@ -2122,6 +2147,13 @@ mod tests {
                 | Request::TerminalOpen(_)
                 | Request::TerminalAttach(_)
                 | Request::Subscribe(_)
+                | Request::HeartbeatList { .. }
+                | Request::HeartbeatGet { .. }
+                | Request::HeartbeatCreate(_)
+                | Request::HeartbeatUpdate(_)
+                | Request::HeartbeatEnable { .. }
+                | Request::HeartbeatDelete { .. }
+                | Request::HeartbeatRun { .. }
                 | Request::DaemonStatus
                 | Request::ResourceUsage
                 | Request::DaemonShutdown

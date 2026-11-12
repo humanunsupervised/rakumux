@@ -383,6 +383,7 @@ impl World {
                 rows: ROWS,
                 machine: None,
                 prefill: None,
+                first_input: None,
             })
             .unwrap()
             .id
@@ -894,6 +895,7 @@ fn pi_with_the_rakumux_extension() {
             rows: ROWS,
             machine: None,
             prefill: None,
+            first_input: None,
         })
         .unwrap();
     world.submit(&id, "MCP list_sessions");

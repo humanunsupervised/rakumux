@@ -25,6 +25,7 @@ pub fn request(
         rows,
         machine: None,
         prefill: None,
+        first_input: None,
     }
 }
 

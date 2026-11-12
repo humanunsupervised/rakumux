@@ -250,6 +250,7 @@ fn cursors_chat_reaches_the_session_feed_places_and_revive() {
         rows: 30,
         machine: None,
         prefill: None,
+        first_input: None,
     })) {
         Response::Session { session } => session,
         other => panic!("create failed: {other:?}"),

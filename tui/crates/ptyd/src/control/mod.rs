@@ -35,6 +35,7 @@ mod program_status;
 mod registry;
 mod replies;
 mod saved;
+mod schedule;
 mod service;
 mod waits;
 mod working_directory;

@@ -14,6 +14,7 @@ pub mod activity;
 pub mod api;
 pub mod client;
 pub mod frame;
+pub mod heartbeat;
 pub mod ids;
 pub mod logfile;
 pub mod model;

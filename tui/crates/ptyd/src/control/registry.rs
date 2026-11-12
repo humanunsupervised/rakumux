@@ -28,7 +28,8 @@ use std::time::Duration;
 
 /// `PRAGMA user_version` of the current schema: 2 introduced `sessions_v2`
 /// (0.6), 3 added projects and pinning. Tables added since (`session_places`,
-/// `session_last_message`, `deleted_sessions`) are created when missing, so
+/// `session_last_message`, `deleted_sessions`, `heartbeats`,
+/// `heartbeat_runs`) are created when missing, so
 /// older daemons still open the registry.
 pub(crate) const SCHEMA_VERSION: i64 = 3;
 
@@ -38,6 +39,9 @@ pub(crate) const AUDIT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// Deleted sessions older than this leave the session history for good.
 pub(crate) const HISTORY_RETENTION_MS: i64 =
     session_core::api::HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+mod heartbeats;
+pub(crate) use heartbeats::RunRow;
 
 const BUSY_TIMEOUT: Duration = Duration::from_millis(2000);
 
@@ -304,6 +308,7 @@ impl Registry {
         } else {
             conn.execute_batch(SCHEMA).map_err(sql_io)?;
         }
+        conn.execute_batch(heartbeats::SCHEMA).map_err(sql_io)?;
         restrict_file(path);
         let registry = Self { conn };
         registry
@@ -408,6 +413,7 @@ impl Registry {
                 params![id, path_text(&scope)?, path_text(&cwd)?],
             )?;
         }
+        Registry::relocate_heartbeats(&transaction, from, to)?;
         transaction.execute(
             "INSERT INTO projects (path, added_at, last_used_at) \
              SELECT ?2, added_at, last_used_at FROM projects WHERE path = ?1 \

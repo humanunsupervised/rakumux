@@ -516,6 +516,7 @@ fn create(scope: ScopeRoot, agent: Option<Agent>) -> CreateSession {
         rows: 0,
         machine: None,
         prefill: None,
+        first_input: None,
     }
 }
 

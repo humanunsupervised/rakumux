@@ -347,6 +347,7 @@ fn create(
         rows: 24,
         machine: None,
         prefill: None,
+        first_input: None,
     }));
     match response {
         Response::Session { session } => session,
@@ -846,6 +847,7 @@ fn sessions_come_back_after_a_crash_but_not_after_a_stop() {
             rows: 24,
             machine: None,
             prefill: None,
+            first_input: None,
         })) {
             Response::Session { session } => session,
             other => panic!("create failed: {other:?}"),
@@ -1004,6 +1006,7 @@ fn a_reply_never_answers_a_prompt_its_agent_opened_after_the_paste() {
             rows: 30,
             machine: None,
             prefill: None,
+            first_input: None,
         })) {
             Response::Session { session } => session,
             other => panic!("create failed: {other:?}"),

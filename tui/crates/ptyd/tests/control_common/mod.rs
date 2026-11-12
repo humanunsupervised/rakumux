@@ -669,6 +669,7 @@ impl Harness {
             rows: 24,
             machine: None,
             prefill: None,
+            first_input: None,
         }
     }
 

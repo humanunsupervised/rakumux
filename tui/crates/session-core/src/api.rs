@@ -11,7 +11,8 @@
 //! Compatibility: new fields are optional; enums have an `Unknown` fallback;
 //! an op never changes meaning (add a new op instead).
 
-use crate::ids::{MachineId, PaneId, ReplyId, SessionId};
+use crate::heartbeat::{Heartbeat, HeartbeatEdit, HeartbeatSpec};
+use crate::ids::{HeartbeatId, MachineId, PaneId, ReplyId, SessionId};
 use crate::model::{
     AgentInfo, DeletedSession, Lifecycle, MachineView, ProjectView, ReportResult, Reported,
     ScopeRoot, SessionStatus, SessionView,
@@ -327,6 +328,37 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after: Option<ReplyId>,
     },
+    /// Heartbeats (capability `heartbeats`), every folder's, or `scope`'s
+    /// alone. Answered with `Heartbeats`.
+    HeartbeatList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<ScopeRoot>,
+    },
+    /// One heartbeat. Answered with `Heartbeat`.
+    HeartbeatGet {
+        id: HeartbeatId,
+    },
+    /// A new heartbeat, paused unless the user asks for it enabled (one an
+    /// agent makes waits for approval). Answered with `Heartbeat`.
+    HeartbeatCreate(HeartbeatSpec),
+    /// Change a heartbeat; an agent's change to what it runs pauses it for
+    /// approval. Answered with `Heartbeat`.
+    HeartbeatUpdate(HeartbeatEdit),
+    /// User only: run it on its schedule (approving it), or pause it.
+    /// Answered with `Heartbeat`.
+    HeartbeatEnable {
+        id: HeartbeatId,
+        enabled: bool,
+    },
+    /// User only: forget a heartbeat; its runs stay as plain sessions.
+    HeartbeatDelete {
+        id: HeartbeatId,
+    },
+    /// User only: start a run now, whatever its schedule. Answered with the
+    /// run's `Session`.
+    HeartbeatRun {
+        id: HeartbeatId,
+    },
     /// User only (capability `session.transcript`): the messages of a live
     /// session's agent conversation (Claude Code, Codex, OpenCode) after
     /// `after` (from its start without one, or when it names another
@@ -386,7 +418,32 @@ pub struct CreateSession {
     /// (capability `session.prefill`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefill: Option<String>,
+    /// Typed into the session's agent once its prompt shows, never into its
+    /// shell (capability `session.first_input`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_input: Option<FirstInput>,
 }
+
+/// Text for a new session's agent (`CreateSession::first_input`): the daemon
+/// keeps it until an agent runs in the session's foreground and waits at
+/// its prompt (screen detection reads it idle, its hooks don't say it's
+/// busy, and its screen has been quiet a moment: a second for an agent whose
+/// prompt Rakumux reads, three for one whose screen shows none,
+/// `detect::knows_its_prompt`), then types it, and sends it when `submit`
+/// (the Enter held back if a dialog opened). After
+/// [`FIRST_INPUT_TIMEOUT_MS`] without such a prompt it's dropped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FirstInput {
+    /// At most [`MAX_FIRST_INPUT_BYTES`]; one line unless `submit`.
+    pub text: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub submit: bool,
+}
+
+/// The longest [`FirstInput::text`], in UTF-8 bytes.
+pub const MAX_FIRST_INPUT_BYTES: usize = 16 * 1024;
+/// How long a [`FirstInput`] waits for its agent's prompt.
+pub const FIRST_INPUT_TIMEOUT_MS: i64 = 120_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReviveSession {
@@ -597,6 +654,14 @@ pub struct SubscribeRequest {
 /// The capability a daemon announces when it accepts `all` on
 /// `session_list` and `subscribe`.
 pub const CAPABILITY_SESSIONS_ALL: &str = "sessions.all";
+
+/// `heartbeat_*` requests and `SessionView::heartbeat`: tasks the daemon
+/// runs on a clock.
+pub const CAPABILITY_HEARTBEATS: &str = "heartbeats";
+
+/// `CreateSession::first_input`: text typed into a new session's agent once
+/// its prompt shows.
+pub const CAPABILITY_FIRST_INPUT: &str = "session.first_input";
 
 /// The capability a daemon announces when it accepts `daemon_restart`:
 /// it restarts in place and running sessions keep running.
@@ -968,6 +1033,14 @@ pub enum Response {
         replies: Vec<AgentReply>,
         /// Capture is on.
         capturing: bool,
+    },
+    /// The answer to `heartbeat_list`.
+    Heartbeats {
+        heartbeats: Vec<Heartbeat>,
+    },
+    /// The answer to the other `heartbeat_*` requests.
+    Heartbeat {
+        heartbeat: Heartbeat,
     },
     Error {
         error: ApiError,
@@ -1347,6 +1420,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn heartbeat_requests_are_flat_on_the_wire() {
+        use crate::heartbeat::{HeartbeatEdit, HeartbeatFields, HeartbeatSpec, Schedule};
+        let create = Request::HeartbeatCreate(HeartbeatSpec {
+            scope: Some(ScopeRoot::from_canonical("/w".into())),
+            name: Some("deps".into()),
+            fields: HeartbeatFields {
+                prompt: Some("update".into()),
+                schedule: Some(Schedule::Every { minutes: 30 }),
+                by_agent: true,
+                ..Default::default()
+            },
+            enabled: false,
+        });
+        let json = serde_json::to_value(&create).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"op": "heartbeat_create", "scope": "/w", "name": "deps",
+                "prompt": "update", "schedule": {"kind": "every", "minutes": 30}, "by_agent": true})
+        );
+        assert_eq!(serde_json::from_value::<Request>(json).unwrap(), create);
+        let update: Request = serde_json::from_value(serde_json::json!(
+            {"op": "heartbeat_update", "id": "hb_01", "command": "codex"}
+        ))
+        .unwrap();
+        assert_eq!(
+            update,
+            Request::HeartbeatUpdate(HeartbeatEdit {
+                id: crate::ids::HeartbeatId::from_string("01"),
+                name: None,
+                fields: HeartbeatFields {
+                    command: Some("codex".into()),
+                    ..Default::default()
+                },
+            })
+        );
+        let first: CreateSession = serde_json::from_value(serde_json::json!(
+            {"cols": 80, "rows": 24, "first_input": {"text": "go", "submit": true}}
+        ))
+        .unwrap();
+        assert_eq!(first.first_input.map(|f| f.submit), Some(true));
+    }
+
+    #[test]
     fn machine_fields_are_left_out_unless_used() {
         let create = CreateSession {
             scope: None,
@@ -1359,6 +1475,7 @@ mod tests {
             rows: 24,
             machine: None,
             prefill: None,
+            first_input: None,
         };
         let json = serde_json::to_string(&Request::SessionCreate(create.clone())).unwrap();
         assert!(

@@ -553,6 +553,7 @@ impl<'a, W: Write, S: FnMut() -> (u16, u16)> AttachLoop<'a, W, S> {
             rows,
             machine: None,
             prefill: None,
+            first_input: None,
         };
         match self.api.create(request) {
             Ok(session) => {

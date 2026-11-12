@@ -133,6 +133,44 @@ impl fmt::Display for MachineId {
     }
 }
 
+/// A heartbeat (`heartbeat_*`): a ULID, kept in the registry. Shown as
+/// `hb_<id>` where a person reads it, and read back either way.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct HeartbeatId(String);
+
+impl<'de> Deserialize<'de> for HeartbeatId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::from_string)
+    }
+}
+
+impl HeartbeatId {
+    pub fn generate() -> Self {
+        Self(SessionId::generate().0)
+    }
+
+    /// Wrap an id received from the wire or the registry; a leading `hb_`
+    /// (as shown) is dropped.
+    pub fn from_string(value: impl Into<String>) -> Self {
+        let value = value.into();
+        match value.strip_prefix("hb_") {
+            Some(rest) => Self(rest.to_owned()),
+            None => Self(value),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for HeartbeatId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Daemon-assigned terminal (PTY) id. Not stable across daemon restarts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]

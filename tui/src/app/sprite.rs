@@ -109,6 +109,7 @@ impl App {
                             rows,
                             machine: Some(machine.id),
                             prefill,
+                            first_input: None,
                         }),
                     };
                     // Said after the session's "Created".

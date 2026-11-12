@@ -51,6 +51,7 @@ pub fn session(id: &str, name: &str) -> SessionView {
         last_message_at: None,
         terminal: None,
         machine: None,
+        heartbeat: None,
     }
 }
 
