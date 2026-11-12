@@ -26,6 +26,7 @@ pub mod dto;
 pub mod error;
 pub mod folders;
 pub mod guard;
+pub mod heartbeats;
 pub mod instance;
 pub mod log;
 pub mod probe;

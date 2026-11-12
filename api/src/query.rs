@@ -183,6 +183,21 @@ pub fn parse_content(query: Option<&str>) -> Result<ContentQuery, HttpError> {
 }
 
 /// Reject any query parameter (routes that take none).
+/// `GET /v1/heartbeats`: an optional `folder` (a directory or folder name).
+pub fn parse_heartbeats(query: Option<&str>) -> Result<Option<String>, HttpError> {
+    let mut folder = None;
+    for (key, value) in pairs(query) {
+        match key.as_str() {
+            "folder" if value.trim().is_empty() => {
+                return Err(HttpError::invalid("folder must not be empty"))
+            }
+            "folder" => set_once(&mut folder, "folder", value)?,
+            other => return Err(unknown(other, "folder")),
+        }
+    }
+    Ok(folder)
+}
+
 pub fn parse_none(query: Option<&str>) -> Result<(), HttpError> {
     match pairs(query).into_iter().next() {
         Some((key, _)) => Err(unknown(&key, "none")),

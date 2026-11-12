@@ -36,6 +36,9 @@ A session's **folder** is the directory it was started in (a repository, a workt
 | `wait_for_session` | Until `settled` (default: its agent finished, waits, asks something, or the session ended), `working`, `blocked`, `idle`, `exited`, `reported` or `output` (`pattern` on its screen); `timeout_seconds` (default 60, at most 600), then `matched: false` | read-only |
 | `kill_session` | End the session's program; it stays, `exited` | destructive |
 | `revive_session` | Start an exited or dead session again with its resume command (an agent continues its conversation) | |
+| `list_heartbeats` | Heartbeats (tasks Rakumux runs on a clock), `folder` narrows; prompts under `untrusted` | read-only |
+| `create_heartbeat` | Save a task to run on a schedule: `prompt`, `schedule` (`{"kind": "every", "minutes": 30}`, `{"kind": "daily", "at": "09:00"}`, `{"kind": "weekdays", "days": ["mon"], "at": "09:00"}`), `folder?`, `name?`, `agent?`, `command?`. It waits for the user's approval | creates |
+| `update_heartbeat` | Change one (`heartbeat`: id or name; `name?`, `prompt?`, `schedule?`, `agent?`, `command?`); a change to what it runs pauses it for approval again | idempotent |
 
 Driving an agent goes `send_prompt` → `wait_for_session` → `read_session`; a `blocked` agent asks
 something, which `read_session` shows and `send_keys` answers. No tool drives the session the

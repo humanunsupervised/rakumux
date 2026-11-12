@@ -18,6 +18,8 @@ pub const SUBCOMMANDS: &[&str] = &[
     "rm",
     "history",
     "restore",
+    "heartbeat",
+    "heartbeats",
     "folders",
     "projects",
     "daemon",
@@ -114,6 +116,16 @@ pub enum Command {
     Restore {
         /// Its id, or its name when one deleted session has it
         target: String,
+    },
+    /// Tasks Rakumux runs on a clock: each due time starts a new session in
+    /// the heartbeat's folder and gives its agent the task
+    ///
+    /// One an agent makes or changes from inside a session waits for your
+    /// approval (`rakumux heartbeat enable`).
+    #[command(alias = "heartbeats")]
+    Heartbeat {
+        #[command(subcommand)]
+        command: HeartbeatCommand,
     },
     /// List the folders sessions belong to, or add or remove one
     ///
@@ -248,6 +260,134 @@ pub enum MachineCommand {
         /// Machine name or id
         target: String,
     },
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+pub enum HeartbeatCommand {
+    /// The heartbeats of this folder, of another, or of every folder
+    Ls {
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+        /// This folder instead of the current one
+        #[arg(long, value_name = "DIR", conflicts_with = "all")]
+        folder: Option<PathBuf>,
+        /// Every folder
+        #[arg(short, long)]
+        all: bool,
+    },
+    /// One heartbeat in full: its task, command and schedule
+    Show {
+        /// Its name (in this folder, else the only one so named) or `hb_` id
+        target: String,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Make a heartbeat in this folder; it runs once it has a task and a
+    /// schedule (paused with `--paused`)
+    ///
+    /// Without `--command`, its command is the agent you last ran in the
+    /// folder, with the flags it ran with (`--agent` picks which).
+    Add(HeartbeatAddArgs),
+    /// Change a heartbeat; what you don't name stays
+    Update(HeartbeatUpdateArgs),
+    /// Run it on its schedule (approving it, when an agent made or changed it)
+    #[command(alias = "resume", alias = "approve")]
+    Enable {
+        /// Its name or `hb_` id
+        target: String,
+    },
+    /// Stop running it on its schedule
+    Pause {
+        /// Its name or `hb_` id
+        target: String,
+    },
+    /// Start a run now, whatever its schedule
+    Run {
+        /// Its name or `hb_` id
+        target: String,
+    },
+    /// Forget a heartbeat; its runs stay as sessions
+    #[command(alias = "remove")]
+    Rm {
+        /// Its name or `hb_` id
+        target: String,
+    },
+}
+
+/// When a heartbeat runs: one of `--every`, `--daily`, or `--days` with
+/// `--at`.
+#[derive(Args, Debug, PartialEq, Default)]
+pub struct ScheduleArgs {
+    /// Every so long: `30m`, `2h`, `1d` (at least 5 minutes)
+    #[arg(long, value_name = "INTERVAL", conflicts_with_all = ["daily", "days"])]
+    pub every: Option<String>,
+    /// Every day at this time, `HH:MM` (local time)
+    #[arg(long, value_name = "HH:MM", conflicts_with = "days")]
+    pub daily: Option<String>,
+    /// On these days (`mon,wed,fri`, `weekdays`, `weekends`), with `--at`
+    #[arg(long, value_name = "DAYS", requires = "at")]
+    pub days: Option<String>,
+    /// The time of day for `--days`, `HH:MM`
+    #[arg(long, value_name = "HH:MM", requires = "days")]
+    pub at: Option<String>,
+}
+
+#[derive(Args, Debug, PartialEq, Default)]
+pub struct HeartbeatAddArgs {
+    /// Its name (default: `Heartbeat`, `Heartbeat 2`, …)
+    pub name: Option<String>,
+    #[command(flatten)]
+    pub schedule: ScheduleArgs,
+    /// The agent to run (`claude`, `codex`, …)
+    #[arg(long)]
+    pub agent: Option<String>,
+    /// The command each run types to start the agent, flags included
+    #[arg(long, value_name = "COMMAND")]
+    pub command: Option<String>,
+    /// The task (`-` reads it from stdin); or give it after `--`
+    #[arg(long, value_name = "TEXT")]
+    pub prompt: Option<String>,
+    /// Make it paused
+    #[arg(long)]
+    pub paused: bool,
+    /// Its folder (default: this one)
+    #[arg(long, value_name = "DIR")]
+    pub folder: Option<PathBuf>,
+    /// Print the heartbeat as JSON
+    #[arg(long)]
+    pub json: bool,
+    /// The task, as words after `--`
+    #[arg(last = true, value_name = "PROMPT")]
+    pub words: Vec<String>,
+}
+
+#[derive(Args, Debug, PartialEq, Default)]
+pub struct HeartbeatUpdateArgs {
+    /// Its name or `hb_` id
+    pub target: String,
+    /// A new name
+    #[arg(long)]
+    pub name: Option<String>,
+    #[command(flatten)]
+    pub schedule: ScheduleArgs,
+    /// The agent to run; without `--command`, its command becomes the one
+    /// you last ran that agent with here
+    #[arg(long)]
+    pub agent: Option<String>,
+    /// The command each run types to start the agent, flags included
+    #[arg(long, value_name = "COMMAND")]
+    pub command: Option<String>,
+    /// The task (`-` reads it from stdin); or give it after `--`
+    #[arg(long, value_name = "TEXT")]
+    pub prompt: Option<String>,
+    /// Print the heartbeat as JSON
+    #[arg(long)]
+    pub json: bool,
+    /// The task, as words after `--`
+    #[arg(last = true, value_name = "PROMPT")]
+    pub words: Vec<String>,
 }
 
 #[derive(Subcommand, Debug, PartialEq)]

@@ -105,7 +105,10 @@ fn handshake_lists_tools_with_schemas_and_instructions() {
             "send_keys",
             "wait_for_session",
             "kill_session",
-            "revive_session"
+            "revive_session",
+            "list_heartbeats",
+            "create_heartbeat",
+            "update_heartbeat"
         ]
     );
     for tool in &tools {

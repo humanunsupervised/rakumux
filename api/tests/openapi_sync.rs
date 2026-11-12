@@ -61,6 +61,11 @@ fn routes_and_parameters_are_documented() {
         "/v1/sessions/{id}/wait:",
         "/v1/sessions/{id}/attach:",
         "/v1/events:",
+        "/v1/heartbeats:",
+        "/v1/heartbeats/{id}:",
+        "/v1/heartbeats/{id}/run:",
+        "/v1/heartbeats/{id}/enable:",
+        "/v1/heartbeats/{id}/pause:",
     ] {
         assert!(SPEC.contains(path), "{path} missing");
     }
@@ -73,6 +78,14 @@ fn routes_and_parameters_are_documented() {
         "operationId: waitForSession",
         "operationId: attachSession",
         "operationId: sessionEvents",
+        "operationId: listHeartbeats",
+        "operationId: createHeartbeat",
+        "operationId: getHeartbeat",
+        "operationId: updateHeartbeat",
+        "operationId: deleteHeartbeat",
+        "operationId: runHeartbeat",
+        "operationId: enableHeartbeat",
+        "operationId: pauseHeartbeat",
     ] {
         assert!(SPEC.contains(operation), "{operation} missing");
     }
@@ -162,6 +175,10 @@ fn every_json_field_is_documented() {
             rows: 24,
             controlled: true,
             alternate_screen: true,
+        }),
+        heartbeat: Some(SessionHeartbeat {
+            id: "hb_1".into(),
+            run: 2,
         }),
     };
     assert_documented(
@@ -279,6 +296,67 @@ fn every_json_field_is_documented() {
         rakumux_api::error::HttpError::invalid("m")
             .with_details(serde_json::json!(null))
             .envelope(),
+    );
+    let heartbeat = Heartbeat {
+        id: "hb_1".into(),
+        name: "n".into(),
+        folder: "/p".into(),
+        agent: Some("claude".into()),
+        command: "claude".into(),
+        prompt: "p".into(),
+        schedule: Some(session_core::heartbeat::Schedule::Weekdays {
+            days: vec![session_core::heartbeat::Weekday::Mon],
+            at: "09:00".into(),
+        }),
+        enabled: true,
+        awaiting_approval: false,
+        created_by: Creator::User,
+        created_at: "c".into(),
+        updated_at: "u".into(),
+        next_run_at: Some("n".into()),
+        runs: 1,
+        last_run: Some(HeartbeatRun {
+            run: 1,
+            at: "a".into(),
+            session_id: Some("s".into()),
+            outcome: session_core::heartbeat::RunOutcome::TaskGiven,
+            detail: Some("d".into()),
+        }),
+    };
+    assert_documented(
+        "HeartbeatList",
+        HeartbeatList {
+            heartbeats: vec![heartbeat.clone()],
+        },
+    );
+    assert_documented("HeartbeatEnvelope", HeartbeatEnvelope { heartbeat });
+    assert_documented(
+        "Every",
+        session_core::heartbeat::Schedule::Every { minutes: 30 },
+    );
+    assert_documented(
+        "CreateHeartbeat",
+        CreateHeartbeatBody {
+            folder: Some("/p".into()),
+            name: Some("n".into()),
+            agent: Some("a".into()),
+            command: Some("c".into()),
+            prompt: Some("p".into()),
+            schedule: Some(session_core::heartbeat::Schedule::Daily { at: "09:00".into() }),
+            enabled: true,
+            by_agent: true,
+        },
+    );
+    assert_documented(
+        "UpdateHeartbeat",
+        UpdateHeartbeatBody {
+            name: Some("n".into()),
+            agent: Some("a".into()),
+            command: Some("c".into()),
+            prompt: Some("p".into()),
+            schedule: None,
+            by_agent: true,
+        },
     );
     assert_documented(
         "ReviveSession",

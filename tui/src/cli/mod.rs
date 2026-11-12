@@ -19,6 +19,7 @@ mod daemon;
 #[cfg(test)]
 mod fake;
 mod folders;
+mod heartbeat;
 mod hooks;
 mod remote;
 mod session;

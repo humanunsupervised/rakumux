@@ -300,6 +300,7 @@ mod tests {
             created_at: "2026-10-13T00:00:00Z".into(),
             last_active_at: "2026-10-13T00:00:00Z".into(),
             terminal: None,
+            heartbeat: None,
         }
     }
 

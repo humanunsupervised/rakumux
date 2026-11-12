@@ -12,6 +12,7 @@ use session_core::api::{
     Attached, EventEnvelope, ReadResult, ReadSource, Role, SessionEvent, StreamCommand,
     StreamEvent, TextFormat,
 };
+use session_core::heartbeat::{RunOutcome, Schedule};
 use session_core::model::{
     Creator, GitInfo, Lifecycle, ProjectView, Reported as ModelReported, SessionStatus,
     SessionView, TerminalView,
@@ -85,6 +86,17 @@ pub struct Session {
     /// Present while the session is live.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<Terminal>,
+    /// The heartbeat this session is a run of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat: Option<SessionHeartbeat>,
+}
+
+/// Which heartbeat a session is a run of, and which run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionHeartbeat {
+    /// The heartbeat's id (`hb_…`).
+    pub id: String,
+    pub run: u32,
 }
 
 /// The coding agent detected or reported in a session.
@@ -180,6 +192,10 @@ impl From<SessionView> for Session {
             created_at: rfc3339(view.created_at),
             last_active_at: rfc3339(view.last_active_at),
             terminal: view.terminal.map(Terminal::from),
+            heartbeat: view.heartbeat.map(|run| SessionHeartbeat {
+                id: format!("hb_{}", run.heartbeat),
+                run: run.run,
+            }),
         }
     }
 }
@@ -1063,4 +1079,138 @@ mod tests {
         assert_eq!(json["folders"][0]["path"], "/repo");
         assert_eq!(json["projects"], json["folders"]);
     }
+}
+
+// ---------------------------------------------------------------- heartbeats
+
+/// A heartbeat (`Heartbeat` in the OpenAPI document): a task Rakumux runs on
+/// a clock, each run a new session in its folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Heartbeat {
+    /// `hb_…`; the routes take it with or without `hb_`.
+    pub id: String,
+    /// Unique within its folder; runs are named `<name> #<n>`.
+    pub name: String,
+    /// The folder its runs start in.
+    pub folder: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// What each run types into its login shell to start the agent.
+    pub command: String,
+    /// The task given to the agent once its prompt shows. Written by whoever
+    /// made the heartbeat, perhaps an agent: untrusted.
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<Schedule>,
+    pub enabled: bool,
+    /// An agent made or changed it: paused until the user enables it.
+    pub awaiting_approval: bool,
+    pub created_by: Creator,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_run_at: Option<String>,
+    pub runs: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<HeartbeatRun>,
+}
+
+/// What a heartbeat's last due time did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatRun {
+    /// The run's number; 0 when none started.
+    pub run: u32,
+    pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub outcome: RunOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl From<session_core::heartbeat::Heartbeat> for Heartbeat {
+    fn from(heartbeat: session_core::heartbeat::Heartbeat) -> Self {
+        Self {
+            id: heartbeat.handle(),
+            name: heartbeat.name,
+            folder: heartbeat.scope.path().to_path_buf(),
+            agent: heartbeat.agent,
+            command: heartbeat.command,
+            prompt: heartbeat.prompt,
+            schedule: heartbeat.schedule,
+            enabled: heartbeat.enabled,
+            awaiting_approval: heartbeat.awaiting_approval,
+            created_by: heartbeat.created_by,
+            created_at: rfc3339(heartbeat.created_at),
+            updated_at: rfc3339(heartbeat.updated_at),
+            next_run_at: heartbeat.next_run_at.map(rfc3339),
+            runs: heartbeat.runs,
+            last_run: heartbeat.last_run.map(|run| HeartbeatRun {
+                run: run.run,
+                at: rfc3339(run.at),
+                session_id: run.session_id.map(|id| id.to_string()),
+                outcome: run.outcome,
+                detail: run.detail,
+            }),
+        }
+    }
+}
+
+/// `{"heartbeats": [...]}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatList {
+    pub heartbeats: Vec<Heartbeat>,
+}
+
+/// `{"heartbeat": {...}}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatEnvelope {
+    pub heartbeat: Heartbeat,
+}
+
+/// `POST /v1/heartbeats`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateHeartbeatBody {
+    /// The folder (absolute path, or the name of a known folder). Required
+    /// for user callers; session callers may omit it (their own folder).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<Schedule>,
+    /// Start it enabled (user callers; one an agent makes waits for
+    /// approval).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enabled: bool,
+    /// Made for an agent (MCP sets it): it waits for approval.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub by_agent: bool,
+}
+
+/// `PATCH /v1/heartbeats/{id}`: fields to change.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateHeartbeatBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<Schedule>,
+    /// Changed for an agent (MCP sets it): a change to what it runs waits
+    /// for approval.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub by_agent: bool,
 }

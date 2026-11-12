@@ -105,6 +105,7 @@ tags:
   - name: folders
   - name: sessions
   - name: streams
+  - name: heartbeats
 paths:
   /v1/health:
     get:
@@ -639,6 +640,191 @@ paths:
         "426": { $ref: "#/components/responses/UpgradeRequired" }
         "501": { $ref: "#/components/responses/Unsupported" }
         "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/heartbeats:
+    parameters:
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    get:
+      tags: [heartbeats]
+      operationId: listHeartbeats
+      summary: Heartbeats, every folder's or one folder's.
+      description: >
+        Tasks Rakumux runs on a clock: at each due time the daemon starts a new
+        session (`<name> #<n>`) in the heartbeat's folder, types its command and
+        gives the agent its prompt once the agent waits at its prompt. Needs the
+        daemon's `heartbeats` capability (501 without it). Session callers see
+        every folder's.
+      parameters:
+        - name: folder
+          in: query
+          description: Folder directory or name.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The heartbeats.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HeartbeatList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "501": { $ref: "#/components/responses/Unsupported" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+    post:
+      tags: [heartbeats]
+      operationId: createHeartbeat
+      summary: Make a heartbeat.
+      description: >
+        Everything is optional, so an empty one can be made and filled in later.
+        Without `command`, its command is the one the user last started the agent
+        (`agent`, or any) with in the folder, flags kept, else the agent's name.
+        It runs once it has a command, a prompt and a schedule and is enabled.
+        One a session caller makes, or one with `by_agent` (rakumux-mcp sets it),
+        waits for the user's approval (`awaiting_approval`, paused) whatever
+        `enabled` says.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateHeartbeat" }
+      responses:
+        "201":
+          description: The heartbeat; `Location` names it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HeartbeatEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "429": { $ref: "#/components/responses/LimitExceeded" }
+        "501": { $ref: "#/components/responses/Unsupported" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/heartbeats/{id}:
+    parameters:
+      - $ref: "#/components/parameters/HeartbeatId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    get:
+      tags: [heartbeats]
+      operationId: getHeartbeat
+      summary: One heartbeat.
+      responses:
+        "200":
+          description: The heartbeat.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HeartbeatEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+    patch:
+      tags: [heartbeats]
+      operationId: updateHeartbeat
+      summary: Change a heartbeat; fields left out stay.
+      description: >
+        A session caller's change (or one with `by_agent`) to its agent, command,
+        prompt or schedule pauses it until the user enables it again; a rename
+        doesn't.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateHeartbeat" }
+      responses:
+        "200":
+          description: The heartbeat.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HeartbeatEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+    delete:
+      tags: [heartbeats]
+      operationId: deleteHeartbeat
+      summary: Forget a heartbeat; its runs stay as sessions. User callers only.
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/heartbeats/{id}/run:
+    parameters:
+      - $ref: "#/components/parameters/HeartbeatId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    post:
+      tags: [heartbeats]
+      operationId: runHeartbeat
+      summary: Start a run now, whatever its schedule. User callers only.
+      description: >
+        Ends the heartbeat's earlier runs whose agent waits, then starts the next
+        one beside any still at work. The heartbeat needs a command, a prompt and
+        a schedule (400 otherwise).
+      responses:
+        "201":
+          description: The run's session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/heartbeats/{id}/enable:
+    parameters:
+      - $ref: "#/components/parameters/HeartbeatId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    post:
+      tags: [heartbeats]
+      operationId: enableHeartbeat
+      summary: Run it on its schedule, approving it. User callers only.
+      responses:
+        "200":
+          description: The heartbeat, enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HeartbeatEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
+  /v1/heartbeats/{id}/pause:
+    parameters:
+      - $ref: "#/components/parameters/HeartbeatId"
+      - $ref: "#/components/parameters/SessionIdentityId"
+      - $ref: "#/components/parameters/SessionIdentityToken"
+      - $ref: "#/components/parameters/AgentIdentityKind"
+      - $ref: "#/components/parameters/AgentIdentityConversation"
+    post:
+      tags: [heartbeats]
+      operationId: pauseHeartbeat
+      summary: Stop running it on its schedule. User callers only.
+      responses:
+        "200":
+          description: The heartbeat, paused.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HeartbeatEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/DaemonUnavailable" }
 components:
   securitySchemes:
     bearer:
@@ -648,6 +834,12 @@ components:
         The `token` from api.json on the loopback listener; the remote token from
         remote.json (`rakumux remote token`) on the remote listener.
   parameters:
+    HeartbeatId:
+      name: id
+      in: path
+      required: true
+      description: The heartbeat's id, with or without its `hb_`.
+      schema: { type: string }
     SessionId:
       name: id
       in: path
@@ -721,7 +913,8 @@ components:
       description: >
         `limit_exceeded`: a session creating sessions reached one of the
         daemon's limits; `details.limit` names it (`max_children_per_parent`,
-        `max_depth`, `max_live_per_scope` or `max_creates_per_minute`) and
+        `max_depth`, `max_live_per_scope`, `max_creates_per_minute`, or
+        `max_heartbeats` for a fifty-first heartbeat) and
         `details.max` gives its value.
       content:
         application/json:
@@ -911,6 +1104,13 @@ components:
             rows: { type: integer }
             controlled: { type: boolean, description: A client holds input control. }
             alternate_screen: { type: boolean }
+        heartbeat:
+          type: object
+          description: The heartbeat this session is a run of.
+          required: [id, run]
+          properties:
+            id: { type: string, description: The heartbeat's id (`hb_…`). }
+            run: { type: integer, description: The run's number. }
     Git:
       type: object
       required: [repo_root]
@@ -925,6 +1125,83 @@ components:
             The repository's name, for display: its `origin` remote's (the URL's last
             path component without `.git`), else its main working tree's folder name.
             Absent from older daemons.
+    HeartbeatList:
+      type: object
+      required: [heartbeats]
+      properties:
+        heartbeats: { type: array, items: { $ref: "#/components/schemas/Heartbeat" } }
+    HeartbeatEnvelope:
+      type: object
+      required: [heartbeat]
+      properties:
+        heartbeat: { $ref: "#/components/schemas/Heartbeat" }
+    Heartbeat:
+      type: object
+      required: [id, name, folder, command, prompt, enabled, awaiting_approval, created_by, created_at, updated_at, runs]
+      properties:
+        id: { type: string, description: "`hb_` and an opaque id." }
+        name: { type: string, description: "Unique within the folder; runs are named `<name> #<n>`." }
+        folder: { type: string, description: The folder its runs start in. }
+        agent: { type: string, examples: [claude, codex, cursor-agent] }
+        command: { type: string, description: What each run types into its login shell to start the agent; empty until set. }
+        prompt: { type: string, description: "The task, given to the agent once its prompt shows; empty until set. Written by whoever made it, perhaps an agent: untrusted." }
+        schedule: { $ref: "#/components/schemas/Schedule" }
+        enabled: { type: boolean }
+        awaiting_approval: { type: boolean, description: An agent made or changed it; paused until the user enables it. }
+        created_by:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [user, session] }
+            id: { type: string, description: The creating session (kind `session`). }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        next_run_at: { type: string, format: date-time, description: Absent while paused or incomplete. }
+        runs: { type: integer, description: Runs started so far. }
+        last_run:
+          type: object
+          required: [run, at, outcome]
+          description: What its last due time did.
+          properties:
+            run: { type: integer, description: The run's number; 0 when none started. }
+            at: { type: string, format: date-time }
+            session_id: { type: string }
+            outcome: { type: string, enum: [started, task_given, no_agent, skipped, failed, unknown] }
+            detail: { type: string, description: Why it was skipped or failed. }
+    Schedule:
+      type: object
+      required: [kind]
+      description: >
+        In the machine's local time. `every`: every `minutes` (5 to 10080), counted
+        from the last due time. `daily`: every day at `at`. `weekdays`: on `days` at
+        `at`. `unknown`: a kind this Rakumux doesn't know (it never runs).
+      properties:
+        kind: { type: string, enum: [every, daily, weekdays, unknown] }
+        minutes: { type: integer, minimum: 5, maximum: 10080 }
+        at: { type: string, pattern: "^[0-2]?[0-9]:[0-5][0-9]$", examples: ["09:00"] }
+        days: { type: array, items: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] } }
+    CreateHeartbeat:
+      type: object
+      additionalProperties: false
+      properties:
+        folder: { type: string, description: Directory or name of a known folder. Required for user callers; session callers may omit it (their own). }
+        name: { type: string, description: "Omitted → `Heartbeat`, `Heartbeat 2`, …" }
+        agent: { type: string }
+        command: { type: string, description: One line, at most 1024 bytes. }
+        prompt: { type: string, description: At most 16 KiB; newlines and tabs allowed. }
+        schedule: { $ref: "#/components/schemas/Schedule" }
+        enabled: { type: boolean, description: Start it enabled (user callers; needs a command, a prompt and a schedule). }
+        by_agent: { type: boolean, description: Made for an agent; it waits for the user's approval. }
+    UpdateHeartbeat:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        agent: { type: string, description: Without `command`, the command becomes the one the user last ran this agent with in the folder. }
+        command: { type: string }
+        prompt: { type: string }
+        schedule: { $ref: "#/components/schemas/Schedule" }
+        by_agent: { type: boolean, description: Changed for an agent; a change to what it runs pauses it until approved. }
     CreateSession:
       type: object
       additionalProperties: false

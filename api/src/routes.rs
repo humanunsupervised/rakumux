@@ -9,11 +9,12 @@
 
 use crate::daemon::{DaemonPool, Identity};
 use crate::dto::{
-    CreateSessionBody, FolderList, Health, InputBody, ReviveSessionBody, SessionEnvelope,
-    SessionList, SubmitBody, UpdateSessionBody, WaitBody,
+    CreateHeartbeatBody, CreateSessionBody, FolderList, Health, HeartbeatEnvelope, HeartbeatList,
+    InputBody, ReviveSessionBody, SessionEnvelope, SessionList, SubmitBody, UpdateHeartbeatBody,
+    UpdateSessionBody, WaitBody,
 };
 use crate::error::HttpError;
-use crate::{folders, guard, log, query, sessions, streams};
+use crate::{folders, guard, heartbeats, log, query, sessions, streams};
 use hyper::body::HttpBody;
 use hyper::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use hyper::{Body, Method, Request, Response, StatusCode};
@@ -78,6 +79,12 @@ enum Route {
     Events,
     /// WebSocket: the daemon's own protocol (the remote listener only).
     Daemon,
+    Heartbeats,
+    Heartbeat(String),
+    /// A heartbeat's run, now.
+    HeartbeatRun(String),
+    HeartbeatEnable(String),
+    HeartbeatPause(String),
 }
 
 impl Route {
@@ -99,6 +106,11 @@ impl Route {
             ["sessions", session, "submit"] => id(session).map(Route::Submit),
             ["sessions", session, "wait"] => id(session).map(Route::Wait),
             ["sessions", session, "attach"] => id(session).map(Route::Attach),
+            ["heartbeats"] => Some(Route::Heartbeats),
+            ["heartbeats", heartbeat] => id(heartbeat).map(Route::Heartbeat),
+            ["heartbeats", heartbeat, "run"] => id(heartbeat).map(Route::HeartbeatRun),
+            ["heartbeats", heartbeat, "enable"] => id(heartbeat).map(Route::HeartbeatEnable),
+            ["heartbeats", heartbeat, "pause"] => id(heartbeat).map(Route::HeartbeatPause),
             _ => None,
         }
     }
@@ -111,9 +123,14 @@ impl Route {
             | Route::Kill(_)
             | Route::Input(_)
             | Route::Submit(_)
-            | Route::Wait(_) => &[Method::POST],
-            Route::Sessions => &[Method::GET, Method::POST],
-            Route::Session(_) => &[Method::GET, Method::PATCH, Method::DELETE],
+            | Route::Wait(_)
+            | Route::HeartbeatRun(_)
+            | Route::HeartbeatEnable(_)
+            | Route::HeartbeatPause(_) => &[Method::POST],
+            Route::Sessions | Route::Heartbeats => &[Method::GET, Method::POST],
+            Route::Session(_) | Route::Heartbeat(_) => {
+                &[Method::GET, Method::PATCH, Method::DELETE]
+            }
         }
     }
 }
@@ -301,6 +318,71 @@ async fn route(
         (Route::Daemon, _) => {
             query::parse_none(query.as_deref())?;
             streams::daemon(state, &mut request).await
+        }
+        (Route::Heartbeats, Method::GET) => {
+            let folder = query::parse_heartbeats(query.as_deref())?;
+            let heartbeats = call(state, identity, move |api| {
+                heartbeats::list(api, folder.as_deref())
+            })
+            .await?;
+            json(StatusCode::OK, HeartbeatList { heartbeats })
+        }
+        (Route::Heartbeats, _) => {
+            query::parse_none(query.as_deref())?;
+            let body: CreateHeartbeatBody = read_json(request).await?;
+            let heartbeat = call(state, identity, move |api| heartbeats::create(api, body)).await?;
+            let location = HeaderValue::from_str(&format!("/v1/heartbeats/{}", heartbeat.id)).ok();
+            let mut response = json(StatusCode::CREATED, HeartbeatEnvelope { heartbeat })?;
+            if let Some(location) = location {
+                response.headers_mut().insert("location", location);
+            }
+            Ok(response)
+        }
+        (Route::Heartbeat(id), Method::GET) => {
+            query::parse_none(query.as_deref())?;
+            let id = heartbeats::id(&id)?;
+            let heartbeat = call(state, identity, move |api| heartbeats::get(api, &id)).await?;
+            json(StatusCode::OK, HeartbeatEnvelope { heartbeat })
+        }
+        (Route::Heartbeat(id), Method::DELETE) => {
+            query::parse_none(query.as_deref())?;
+            let id = heartbeats::id(&id)?;
+            call(state, identity, move |api| heartbeats::delete(api, &id)).await?;
+            Ok(no_content())
+        }
+        (Route::Heartbeat(id), _) => {
+            query::parse_none(query.as_deref())?;
+            let id = heartbeats::id(&id)?;
+            let body: UpdateHeartbeatBody = read_json(request).await?;
+            let heartbeat = call(state, identity, move |api| {
+                heartbeats::update(api, &id, body)
+            })
+            .await?;
+            json(StatusCode::OK, HeartbeatEnvelope { heartbeat })
+        }
+        (Route::HeartbeatRun(id), _) => {
+            query::parse_none(query.as_deref())?;
+            let id = heartbeats::id(&id)?;
+            let session = call(state, identity, move |api| heartbeats::run(api, &id)).await?;
+            json(StatusCode::CREATED, SessionEnvelope { session })
+        }
+        (Route::HeartbeatEnable(id), _) => {
+            query::parse_none(query.as_deref())?;
+            let id = heartbeats::id(&id)?;
+            let heartbeat = call(state, identity, move |api| {
+                heartbeats::enable(api, &id, true)
+            })
+            .await?;
+            json(StatusCode::OK, HeartbeatEnvelope { heartbeat })
+        }
+        (Route::HeartbeatPause(id), _) => {
+            query::parse_none(query.as_deref())?;
+            let id = heartbeats::id(&id)?;
+            let heartbeat = call(state, identity, move |api| {
+                heartbeats::enable(api, &id, false)
+            })
+            .await?;
+            json(StatusCode::OK, HeartbeatEnvelope { heartbeat })
         }
         (Route::Health, _) => Err(HttpError::internal(
             "health is answered before authentication",

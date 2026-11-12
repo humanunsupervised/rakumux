@@ -117,8 +117,10 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    `api/openapi.yaml`). Routes `/v1/health`, `/v1/folders`, `/v1/sessions[/{id}[/content]]`
    (`?all=true`: every folder), `POST /v1/sessions/{id}/revive|kill`, `POST
    /v1/sessions/{id}/input|submit|wait` (keys and text; a paste then Enter, refused while its
-   agent asks something; until it settles), `DELETE /v1/sessions/{id}`,
-   and the WebSockets `GET /v1/events` (session events) and `GET /v1/sessions/{id}/attach` (the
+   agent asks something; until it settles), `DELETE /v1/sessions/{id}`, the heartbeats
+   (`GET|POST /v1/heartbeats`, `GET|PATCH|DELETE /v1/heartbeats/{id}`, `POST
+   /v1/heartbeats/{id}/run|enable|pause`; `api/src/heartbeats.rs`; ids `hb_…`; a body's
+   `by_agent` makes it wait for approval), and the WebSockets `GET /v1/events` (session events) and `GET /v1/sessions/{id}/attach` (the
    live terminal: checkpoint, then output as binary frames; input and resize/promote/demote/fit
    back; `api/src/streams.rs`, tokio-tungstenite over a hyper upgrade). It says `folder` (a
    session's folder: the daemon's `scope`) and still accepts the deprecated `/v1/projects` and
@@ -138,7 +140,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    machine's own sessions only. Runs in the foreground or with `--detach`; a user client of
    the daemon (spawns it on demand), one API per Rakumux home. See `api/README.md`.
 9. **`rakumux-mcp`** (`mcp/`): MCP server on stdio for coding agents, built on `rmcp` (exact
-   pinned, confined to `mcp/src/server.rs`). Tools: `list_folders`, `list_sessions`
+   pinned, confined to `mcp/src/server.rs`). Tools: `list_heartbeats`, `create_heartbeat` and
+   `update_heartbeat` (always `by_agent`: what an agent makes or changes waits for the user's
+   approval, whoever the API caller is), `list_folders`, `list_sessions`
    (`all_folders`), `get_session`, `create_session`, `read_session`, `rename_session`, and to
    **drive** a session: `send_prompt` (`POST …/submit`: a paste, then Enter; refused, typing
    nothing, while its agent asks something or isn't at its prompt yet, `refuse_if_blocked`, or
@@ -1567,6 +1571,7 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 | `rakumux rename [<name\|id>] <new name>` | Rename (defaults to the current session) |
 | `rakumux pin <name\|id>` / `rakumux unpin <name\|id>` | Pin (into the list's Pinned tab) / unpin |
 | `rakumux kill <name\|id> [--tree]` / `rakumux rm <name\|id>` | Terminate / delete (into the session history, 90 days) |
+| `rakumux heartbeat ls [--json] [--folder DIR \| --all] \| show <name\|id> \| add [NAME] (--every 30m \| --daily HH:MM \| --days mon,fri --at HH:MM) [--agent A] [--command C] [--prompt P \| -- PROMPT] [--paused] \| update <name\|id> … \| enable \| pause \| run \| rm <name\|id>` | Heartbeats: tasks run on a clock (`add` enables one that has a prompt and a schedule; `enable` approves an agent's; `run` starts a run now). Inside a session `add` and `update` work and wait for approval, so an agent needs no MCP (`$RAKUMUX_BIN heartbeat update hb_… --prompt … --every …`) |
 | `rakumux history [QUERY] [--json]` / `rakumux restore <id\|name>` | Deleted sessions, most recently deleted first / bring one back into its folder, dead (`attach` or Enter revives it); a name only when one deleted session has it |
 | `rakumux folders [--json]` / `rakumux folders add\|rm <dir>` | List folders / add one / forget one without sessions (`projects` is a hidden alias; `--json` prints `{"folders": [...], "projects": [...]}`, the same list twice) |
 | `rakumux --new-server` | Replace the running daemon with this Rakumux's (in place: sessions keep running), or start one; then the TUI |

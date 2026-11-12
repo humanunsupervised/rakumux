@@ -299,3 +299,121 @@ fn an_agent_in_one_session_drives_a_session_in_another_folder() {
     );
     assert_eq!(result["structuredContent"]["matched"], true, "{result}");
 }
+
+#[test]
+fn an_agent_saves_a_heartbeat_that_waits_for_the_users_approval() {
+    let api_bin = workspace_binary("rakumux-api", "rakumux-api");
+    let ptyd_bin = workspace_binary("rakumux-ptyd", "rakumux-ptyd");
+    let (dir, layout) = temp_home();
+    let _cleanup = Cleanup(layout.clone());
+    let here = layout.home.parent().unwrap().join("here");
+    std::fs::create_dir_all(&here).unwrap();
+    let home = dir.path().display().to_string();
+    let api_bin = api_bin.display().to_string();
+    let ptyd_bin = ptyd_bin.display().to_string();
+    let base = [
+        ("RAKUMUX_API_BIN", api_bin.as_str()),
+        ("RAKUMUX_PTYD_BIN", ptyd_bin.as_str()),
+        ("HOME", home.as_str()),
+        ("SHELL", "/bin/bash"),
+        ("PS1", "$ "),
+    ];
+    let (mut user, _) = Mcp::initialized(&layout, &base);
+    let result = user.call(
+        "create_session",
+        json!({"folder": here, "name": "agent", "command": ["bash", "--norc", "--noprofile"],
+               "startup_commands": ["echo TOKEN=$RAKUMUX_SESSION_TOKEN"]}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let id = result["structuredContent"]["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let token = session_token(&mut user, &id);
+
+    // The agent in that session saves one: in its folder, waiting.
+    let mut env = base.to_vec();
+    env.push(("RAKUMUX_SESSION_ID", id.as_str()));
+    env.push(("RAKUMUX_SESSION_TOKEN", token.as_str()));
+    let (mut agent, init) = Mcp::initialized(&layout, &env);
+    assert!(init["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("create_heartbeat"));
+    let result = agent.call(
+        "create_heartbeat",
+        json!({"name": "nightly", "prompt": "Run the tests and fix what fails.",
+               "schedule": {"kind": "daily", "at": "02:00"}, "command": "echo nightly"}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let heartbeat = &result["structuredContent"]["heartbeat"];
+    assert_eq!(heartbeat["folder"], json!(here));
+    assert_eq!(heartbeat["enabled"], false);
+    assert_eq!(heartbeat["awaiting_approval"], true);
+    assert!(
+        text(&result).contains("waits for the user's approval"),
+        "{result}"
+    );
+    let hb = heartbeat["id"].as_str().unwrap().to_owned();
+    assert!(hb.starts_with("hb_"));
+
+    // Even outside any session (the user's caller), what MCP makes waits.
+    let result = user.call(
+        "create_heartbeat",
+        json!({"folder": here, "name": "deps", "prompt": "Update the dependencies.",
+               "schedule": {"kind": "every", "minutes": 60}}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(
+        result["structuredContent"]["heartbeat"]["awaiting_approval"],
+        true
+    );
+    assert_eq!(result["structuredContent"]["heartbeat"]["enabled"], false);
+    // Bad schedules are the daemon's to refuse.
+    let result = agent.call(
+        "create_heartbeat",
+        json!({"prompt": "x", "schedule": {"kind": "every", "minutes": 1}}),
+    );
+    assert_eq!(result["isError"], true, "{result}");
+
+    // The user approves it; the agent changing its prompt (by name) pauses it.
+    let client = Client::connect(ClientConfig {
+        layout: layout.clone(),
+        client_name: "mcp-test".into(),
+        version: "test".into(),
+        auth: AuthMode::User,
+        spawn: false,
+        ptyd_path: None,
+    })
+    .unwrap();
+    let approved = client
+        .heartbeat_enable(
+            &session_core::ids::HeartbeatId::from_string(hb.as_str()),
+            true,
+        )
+        .unwrap();
+    assert!(approved.enabled);
+    let result = agent.call(
+        "update_heartbeat",
+        json!({"heartbeat": "nightly", "prompt": "Run the tests, fix what fails, push."}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["heartbeat"]["enabled"], false);
+    assert_eq!(
+        result["structuredContent"]["heartbeat"]["awaiting_approval"],
+        true
+    );
+    let result = agent.call("list_heartbeats", json!({}));
+    assert_eq!(result["structuredContent"]["count"], 2, "{result}");
+    let nightly = result["structuredContent"]["heartbeats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["name"] == "nightly")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        nightly["untrusted"]["prompt"],
+        "Run the tests, fix what fails, push."
+    );
+}

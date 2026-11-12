@@ -11,7 +11,9 @@ Tools: list_folders, list_sessions, get_session, read_session (what a terminal s
 create_session (start a shell or agent in a folder), rename_session, and to drive a session: \
 send_prompt (a prompt to its agent, or a command line, then Enter), send_keys (answer a \
 question, a menu or a permission prompt, interrupt), wait_for_session (until its agent \
-finishes or asks something), kill_session and revive_session.
+finishes or asks something), kill_session and revive_session. Heartbeats (tasks Rakumux runs \
+on a clock, each run a new session given the task): list_heartbeats, create_heartbeat, \
+update_heartbeat; what you make or change waits for the user's approval.
 
 - Use them when the user asks about their Rakumux sessions, wants work started in a separate \
 terminal, or wants you to direct the agents in their other sessions; not just because work \

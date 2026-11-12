@@ -111,13 +111,18 @@ absolute directory (`~/` expanded) or the name of a known folder.
 | `POST /v1/sessions/{id}/submit` | `{text, quiet_ms?, refuse_if_blocked? (true)}`: paste the text, then Enter (a command to a shell, a prompt to an agent) → 204. 409 `session_blocked` while its agent asks something or isn't at its prompt yet, `session_in_use` while someone typed there within `quiet_ms`; nothing is typed then. |
 | `POST /v1/sessions/{id}/wait` | `{until: settled\|idle\|blocked\|working\|exited\|reported\|output, pattern?, timeout_ms? (30 000, ≤ 600 000)}` → 200 `{matched, status, lifecycle, reported?, reason}` once it gets there, times out or can't any more. |
 | `DELETE /v1/sessions/{id}` | Delete the session → 204. It stays in the session history 90 days (`rakumux history`, `rakumux restore`). |
+| `GET /v1/heartbeats?folder=` | Heartbeats (tasks Rakumux runs on a clock), every folder's or one folder's: `{"heartbeats": [...]}`. A daemon without `heartbeats` answers 501. |
+| `POST /v1/heartbeats` | Make one: `{folder, name?, agent?, command?, prompt?, schedule?, enabled?, by_agent?}` → 201 + `Location`. `schedule` is `{"kind": "every", "minutes"}` (≥ 5), `{"kind": "daily", "at": "HH:MM"}` or `{"kind": "weekdays", "days": ["mon", …], "at"}`, local time. Without `command`, the agent the user last ran in the folder, flags kept. A session caller's (or one with `by_agent`) waits for approval, paused. |
+| `GET /v1/heartbeats/{id}` / `PATCH` / `DELETE` | One heartbeat (`hb_…` or the bare id); change it (`{name?, agent?, command?, prompt?, schedule?, by_agent?}`; an agent's change to what it runs pauses it for approval); forget it (user only; its runs stay as sessions) → 204. |
+| `POST /v1/heartbeats/{id}/run` | User only: start a run now → 201 `{"session": {...}}`. |
+| `POST /v1/heartbeats/{id}/enable` / `pause` | User only: run it on its schedule (approving it) / stop → 200 `{"heartbeat": {...}}`. |
 | `GET /v1/events` (WebSocket) | Session events of every folder. |
 | `GET /v1/sessions/{id}/attach?role=observer\|controller&cols=&rows=` (WebSocket) | The live terminal. `cols`/`rows` are required for a controller. |
 
 Sessions come back as `{"session": {...}}` / `{"sessions": [...]}` with `folder` (the daemon's
 `scope`), `status` (`live`/`exited`/`dead`), `lifecycle` (`working`/`blocked`/`done`/`idle`/
-`unknown`/`none`), `command`, `git`, `terminal` and RFC 3339 times; see `Session` in the OpenAPI
-document.
+`unknown`/`none`), `command`, `git`, `terminal`, `heartbeat` (`{id, run}` for a heartbeat's
+run) and RFC 3339 times; see `Session` in the OpenAPI document.
 
 **Deprecated `project` names.** Earlier builds said "project"; those names still work and are
 marked deprecated in the OpenAPI document:
