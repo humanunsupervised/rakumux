@@ -166,6 +166,8 @@ pub struct FakeState {
     /// What `resources` answers, in turn; the last again and again. None
     /// answers `unsupported`.
     pub resources: Vec<session_core::api::ResourceSample>,
+    /// The heartbeats, as a daemon keeps them.
+    pub heartbeats: Vec<session_core::heartbeat::Heartbeat>,
 }
 
 impl FakeState {
@@ -387,6 +389,110 @@ impl FakeApi {
 }
 
 impl SessionApi for FakeApi {
+    fn heartbeats(
+        &self,
+        scope: Option<&ScopeRoot>,
+    ) -> Result<Vec<session_core::heartbeat::Heartbeat>> {
+        self.take_failure("heartbeats")?;
+        let state = self.state.lock().unwrap();
+        Ok(state
+            .heartbeats
+            .iter()
+            .filter(|h| scope.is_none_or(|scope| &h.scope == scope))
+            .cloned()
+            .collect())
+    }
+
+    fn heartbeat_create(
+        &self,
+        spec: session_core::heartbeat::HeartbeatSpec,
+    ) -> Result<session_core::heartbeat::Heartbeat> {
+        self.take_failure("heartbeat_create")?;
+        let mut state = self.state.lock().unwrap();
+        state.next_id += 1;
+        let id = session_core::ids::HeartbeatId::from_string(format!("HB{}", state.next_id));
+        let name = spec.name.unwrap_or_else(|| "Heartbeat".into());
+        state.calls.push(format!("heartbeat_create {name}"));
+        let heartbeat = session_core::heartbeat::Heartbeat {
+            id,
+            scope: spec.scope.unwrap_or_else(scope),
+            name,
+            agent: Some("claude".into()),
+            command: spec
+                .fields
+                .command
+                .unwrap_or_else(|| "claude --permission-mode acceptEdits".into()),
+            prompt: spec.fields.prompt.unwrap_or_default(),
+            schedule: spec.fields.schedule,
+            enabled: spec.enabled,
+            awaiting_approval: spec.fields.by_agent,
+            created_by: Creator::User,
+            created_at: state.now,
+            updated_at: state.now,
+            next_run_at: None,
+            runs: 0,
+            last_run: None,
+        };
+        state.heartbeats.push(heartbeat.clone());
+        Ok(heartbeat)
+    }
+
+    fn heartbeat_enable(
+        &self,
+        id: &session_core::ids::HeartbeatId,
+        enabled: bool,
+    ) -> Result<session_core::heartbeat::Heartbeat> {
+        self.take_failure("heartbeat_enable")?;
+        let mut state = self.state.lock().unwrap();
+        state.calls.push(format!("heartbeat_enable {id} {enabled}"));
+        let heartbeat = state
+            .heartbeats
+            .iter_mut()
+            .find(|h| &h.id == id)
+            .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no heartbeat"))?;
+        heartbeat.enabled = enabled;
+        if enabled {
+            heartbeat.awaiting_approval = false;
+        }
+        Ok(heartbeat.clone())
+    }
+
+    fn heartbeat_delete(&self, id: &session_core::ids::HeartbeatId) -> Result<()> {
+        self.take_failure("heartbeat_delete")?;
+        let mut state = self.state.lock().unwrap();
+        state.calls.push(format!("heartbeat_delete {id}"));
+        state.heartbeats.retain(|h| &h.id != id);
+        Ok(())
+    }
+
+    fn heartbeat_run(&self, id: &session_core::ids::HeartbeatId) -> Result<SessionView> {
+        self.take_failure("heartbeat_run")?;
+        let mut state = self.state.lock().unwrap();
+        state.calls.push(format!("heartbeat_run {id}"));
+        let (name, run) = {
+            let heartbeat = state
+                .heartbeats
+                .iter_mut()
+                .find(|h| &h.id == id)
+                .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no heartbeat"))?;
+            heartbeat.runs += 1;
+            (heartbeat.name.clone(), heartbeat.runs)
+        };
+        state.next_id += 1;
+        state.now += 1;
+        let mut session = view(
+            &format!("R{}", state.next_id),
+            &format!("{name} #{run}"),
+            state.now,
+        );
+        session.heartbeat = Some(session_core::heartbeat::HeartbeatRunRef {
+            heartbeat: id.clone(),
+            run,
+        });
+        state.sessions.push(session.clone());
+        Ok(session)
+    }
+
     fn open_terminal(
         &self,
         request: session_core::api::OpenTerminal,

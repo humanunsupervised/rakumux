@@ -255,6 +255,8 @@ pub enum KeyAction {
     Rtop,
     /// `H`: the session history, deleted sessions to bring back.
     SessionHistory,
+    /// `B`: the drawer's Beats tab, the heartbeats (tasks run on a clock).
+    Beats,
     Help,
     Settings,
     /// Sign in to the Rakumux account, or see who's signed in.
@@ -275,7 +277,7 @@ pub enum KeyAction {
 
 impl KeyAction {
     /// The actions as Settings lists them, in order.
-    pub const ALL: [KeyAction; 52] = [
+    pub const ALL: [KeyAction; 53] = [
         KeyAction::RakumuxMode,
         KeyAction::BackToSession,
         KeyAction::GoIn,
@@ -317,6 +319,7 @@ impl KeyAction {
         KeyAction::TerminalPanelBelow,
         KeyAction::Pinned,
         KeyAction::Rtop,
+        KeyAction::Beats,
         KeyAction::SessionHistory,
         KeyAction::Help,
         KeyAction::Settings,
@@ -374,6 +377,7 @@ impl KeyAction {
             | KeyAction::TerminalPanelBelow
             | KeyAction::Pinned
             | KeyAction::Rtop
+            | KeyAction::Beats
             | KeyAction::SessionHistory => "Sessions and folders",
             KeyAction::Help
             | KeyAction::Settings
@@ -431,6 +435,7 @@ impl KeyAction {
             KeyAction::TerminalPanelBelow => "Terminal panel below the session",
             KeyAction::Pinned => "Pinned sessions",
             KeyAction::Rtop => "rtop (show, focus or hide)",
+            KeyAction::Beats => "Heartbeats (show, focus or hide)",
             KeyAction::SessionHistory => "Session history",
             KeyAction::Help => "Help",
             KeyAction::Settings => "Settings",
@@ -506,6 +511,7 @@ impl KeyAction {
             KeyAction::TerminalPanelBelow => plain(&["-"]),
             KeyAction::Pinned => plain(&["*"]),
             KeyAction::Rtop => plain(&["t"]),
+            KeyAction::Beats => plain(&["B"]),
             KeyAction::SessionHistory => plain(&["H"]),
             KeyAction::Help => plain(&["?"]),
             KeyAction::Settings => format!("comma (,), {SETTINGS_KEY}"),
@@ -658,6 +664,14 @@ impl KeyAction {
                  session's processes, Enter goes into it, Esc gives the list the keys back. \
                  Network counts each process's TCP connections to other machines (Linux; the \
                  machine's total everywhere). Nothing is recorded."
+                .into(),
+            KeyAction::Beats => "Heartbeats: tasks Rakumux runs on a clock, in the drawer's \
+                 Beats tab. At each due time a new session (♥) starts in the heartbeat's folder \
+                 and its agent gets the task once its prompt shows; earlier runs that wait are \
+                 ended. Enter shows one whole (its prompt, command and runs; Enter there goes \
+                 into a run), e approves or enables it (one an agent made or changed waits for \
+                 you, marked ?), p pauses, r runs it now, d twice deletes it. n makes an empty \
+                 one and starts the agent you last ran here, asked to fill it in with you."
                 .into(),
             KeyAction::SessionHistory => "Sessions you deleted or closed in the last 90 \
                  days, on this machine, newest first. Type to search by name, folder, agent \

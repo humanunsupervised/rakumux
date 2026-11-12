@@ -1413,6 +1413,10 @@ impl App {
                     self.click_rtop_row(index);
                     return;
                 }
+                Some(Hit::BeatRow(index)) => {
+                    self.click_beat_row(index);
+                    return;
+                }
                 Some(Hit::Drawer | Hit::DrawerBarTab) => {
                     self.focus_drawer();
                     return;
@@ -1475,6 +1479,7 @@ impl App {
             };
             match self.drawer_tab() {
                 DrawerTab::Rtop => return self.rtop_move(step),
+                DrawerTab::Beats => return self.beats_move(step),
                 DrawerTab::Feed => {}
             }
             let on_reply = match self.feed_columns() {

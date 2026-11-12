@@ -189,6 +189,10 @@ pub fn run_action(app: &mut App, action: KeyAction) -> AppResult {
             leave(app);
             app.toggle_rtop();
         }
+        KeyAction::Beats => {
+            leave(app);
+            app.toggle_beats();
+        }
         KeyAction::SessionHistory => app.open_history(),
         KeyAction::Reload => app.refresh(),
         KeyAction::Restart => app.request_restart(),

@@ -1484,8 +1484,8 @@ and offers a restart: in place when the daemon has `daemon.restart` (sessions ke
 - **Section bar**: a section's header in the list (a status's, a repository's, an agent's): a
   bar on a background of its own; a click or tap on it, or Space on it, collapses its sessions
   under it and opens them again.
-- **Drawer** (`app/drawer.rs`): what shows beside the sessions, with two tabs, the
-  **Feed** and **rtop**: a pane on the right in Master detail, a tab in Tabs, the screen on a phone.
+- **Drawer** (`app/drawer.rs`): what shows beside the sessions, with three tabs, the
+  **Feed**, **Beats** (heartbeats) and **rtop**: a pane on the right in Master detail, a tab in Tabs, the screen on a phone.
   It takes Rakumux mode's keys from the list while focused. Hidden at every start; never opens
   by itself.
 - **Feed** (`app/feed`, `f`): what agents said, across sessions and machines: the drawer's
@@ -1591,7 +1591,7 @@ on). Rakumux mode (also where the TUI starts): `↑/↓`, `j/k`, `Option`/`Alt`+
 session preview fades by 30% in Rakumux mode and 45% under a dialog or for saved output,
 while the list never fades; the tabs, a header and + New session keep the last session in view,
 one the filters show), `←`/`→` switch between the tabs, Pinned, Status, Repos and Agent,
-wherever the selection is (`h`/`l` on the tabs row), `*` the Pinned tab, `f` the feed and `t` rtop, the drawer's tabs (shows the drawer on that tab with the keys,
+wherever the selection is (`h`/`l` on the tabs row), `*` the Pinned tab, `f` the feed, `B` the heartbeats and `t` rtop, the drawer's tabs (shows the drawer on that tab with the keys,
 switches to it, gives it the keys, hides it; below),
 `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `{`/`}` (previous/next folder, app or status) (a Ctrl or Alt
 that no shortcut uses is ignored, so Ctrl-↑ from a phone's key bar moves and Alt-q quits), `Enter`/`i`/`l` go in (revive/restart; on a
@@ -1628,13 +1628,13 @@ session works or is read; stepping
 Tabs that don't fit scroll to keep the selected one in view, holding still while it moves among
 those shown (`layout::render_tabs_from`, `App::tab_first`), and the ends say how many are hidden
 (`‹3`, `5›`; a click goes to the nearest one).
-**The drawer** (`app/drawer.rs`, `components/drawer.rs`) holds two tabs, the feed (`f`, the
-footer's Feed button, or Settings; `app/feed/pane.rs`) and rtop (`t`, or Settings; below), named
-on its band (`≡ Feed   ▥ rtop`, as tall as the list's tabs: the active one bold and underlined,
+**The drawer** (`app/drawer.rs`, `components/drawer.rs`) holds three tabs, the feed (`f`, the
+footer's Feed button, or Settings; `app/feed/pane.rs`), Beats (`B`, or Settings; below) and rtop
+(`t`, or Settings; below), named on its band (`≡ Feed   ♥ Beats   ▥ rtop`, as tall as the list's tabs: the active one bold and underlined,
 in the accent while the drawer has the keys; a click on a name shows that tab with the keys). It
 is hidden at every start and never opens by itself; the shown/hidden state and its tab are this
-window's, never saved. Only the tab on screen works: the feed is read every 2 s and rtop samples
-only while their tab shows. Master
+window's, never saved. Only the tab on screen works: the feed and the heartbeats are read every
+2 s and rtop samples only while their tab shows. Master
 detail docks it on the right (`layout::split_with`, `Screen::feed`): list | session | a
 one-column line (`Screen::feed_divider`, dragged to resize, saved as
 `sessions.feed_width`) | the drawer, `layout::default_feed_width` (44 columns, a quarter of wide
@@ -1696,7 +1696,7 @@ local build's `v0.1.0`). In Rakumux mode, just left of the buttons, a **tip** (`
 panel`, `f every agent's replies`, `t rtop: what sessions use`, the Rakumux key's `session or
 Rakumux mode`, `U update (sessions stay up)`, `w where it changed files`, `v Master detail or
 Tabs`, `p pin to the top`, `Tab last session`, `a answer agents from the web` only while signed
-out, `drag copies a session's text`, `rakumux remote on pairs a phone`), its keys bold as a
+out, `drag copies a session's text`, `rakumux remote on pairs a phone`, `B heartbeats: tasks on a clock`), its keys bold as a
 button's, its text in the version's ink. The local date picks it, so it's the same all day and the
 next day shows the next one; a click or tap on it (`Hit::FooterTip`) shows the next one (this
 window's, memory only), never runs it. None in session mode (those keys aren't Rakumux's there),
@@ -1920,6 +1920,25 @@ highlighted, and a click selects one: again, or a tap on a phone, goes in; the w
 `←`/`→` (`h`/`l`) and Space fold and unfold a session's processes; `s` sorts sessions by memory
 (the default), CPU, network or name; Enter goes into the selected row's session; Esc gives the
 list the keys; `t` hides the drawer. A daemon without `resources` gets "restart it (S)".
+
+**Beats** (heartbeats). `B` in Rakumux mode or Settings → Heartbeats (`app/heartbeats.rs`,
+`components/heartbeats.rs`) shows the drawer's Beats tab: the heartbeats of every folder, read
+with `SessionApi::heartbeats` off the UI thread every 2 s while the tab is on screen (the daemon
+sends no heartbeat events), two lines each: a mark (`?` waiting for approval, orange; `●` on;
+`○` paused or empty), the name and when it runs next (`in 25m`, `approve?`, `paused`, `empty`),
+then its schedule, folder and last run; those waiting for approval first, then by folder and
+name. With the drawer's keys: `↑`/`↓` (`j`/`k`) select; `Enter` shows one whole (how it runs,
+its command and prompt in full, then its runs, newest first: `↑`/`↓` pick one, `Enter` goes into
+it); `e` from the list shows it whole first, and there approves or enables it, so nothing an agent
+wrote runs unread; `p` pauses; `r` runs it now; `d` twice deletes it (its runs stay); `n` makes an
+empty heartbeat in the current folder and a session there running its command (the agent last
+run in the folder, its flags kept) whose first input, typed once the agent's prompt shows and not
+sent, asks the agent to ask the user what to run and how often and save both with
+`"$RAKUMUX_BIN" heartbeat update hb_… --prompt … --every …` (or `update_heartbeat`), then goes
+into it (`heartbeats::setup_prompt`); `Esc` goes back, then gives the list the keys. A click
+selects a row, a second (a tap on a phone) does what Enter does. A heartbeat's runs show `♥`
+before their name in the list and the tab bar (`Icons::beats`). A daemon without `heartbeats`
+gets "restart it (S)".
 
 **Terminal panel.** `T` in Rakumux mode or Settings → Terminal panel opens the shown session's
 terminal panel: a temporary daemon-owned login shell below or beside the main detail, without a

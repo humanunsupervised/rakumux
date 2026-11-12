@@ -46,7 +46,11 @@ pub fn tab_items(app: &App) -> (Vec<TabItem>, usize) {
             let (glyph, glyph_style) = status_glyph(session);
             let badge = activity_badge(session);
             TabItem {
-                name: session.name.clone(),
+                name: match session.heartbeat {
+                    // A heartbeat's run.
+                    Some(_) => format!("{} {}", app.icons().beats(), session.name),
+                    None => session.name.clone(),
+                },
                 glyph: if badge.is_some() {
                     String::new()
                 } else {

@@ -2586,7 +2586,7 @@ mod tests {
         assert!(wide.contains("hello from the fake"), "{wide}");
         assert_eq!(screen.detail.unwrap().right(), feed.x - 1);
         // The pane's band names it, bright while it has the keys.
-        assert_eq!(pane[1], "   ≡ Feed   ▥ rtop", "{wide}");
+        assert_eq!(pane[1], "   ≡ Feed   ♥ Beats   ▥ rtop", "{wide}");
         assert_eq!(pane[2], "   ▁▁▁▁▁▁", "{wide}");
         let mut terminal = Terminal::new(TestBackend::new(160, 48)).unwrap();
         terminal.draw(|f| draw(f, &mut h.app)).unwrap();
@@ -2629,7 +2629,7 @@ mod tests {
         h.press(KeyCode::Enter).await;
         let wide = render(&mut h.app, 160, 48);
         let pane = pane_column(&wide, feed.x);
-        assert_eq!(pane[1], "   ‹ ≡ Feed   ▥ rtop", "{wide}");
+        assert_eq!(pane[1], "   ‹ ≡ Feed   ♥ Beats   ▥ rtop", "{wide}");
         assert!(wide.contains("Enter goes into its session"), "{wide}");
         assert!(wide.contains("Run cargo test to check."), "{wide}");
         assert!(wide.contains("hello from the fake"), "{wide}");
@@ -2934,7 +2934,7 @@ mod tests {
         let phone = render(&mut h.app, 45, 40);
         assert_eq!(
             phone.lines().nth(1).unwrap().trim_end(),
-            "   ≡ Feed   ▥ rtop",
+            "   ≡ Feed   ♥ Beats   ▥ rtop",
             "{phone}"
         );
         assert!(phone.contains("nightly-build"), "{phone}");
@@ -2943,7 +2943,7 @@ mod tests {
         let reading = render(&mut h.app, 45, 40);
         assert_eq!(
             reading.lines().nth(1).unwrap().trim_end(),
-            "   ‹ ≡ Feed   ▥ rtop",
+            "   ‹ ≡ Feed   ♥ Beats   ▥ rtop",
             "{reading}"
         );
         assert!(reading.contains("finished 5m ago"), "{reading}");
@@ -2983,7 +2983,7 @@ mod tests {
         // Selected: the cards on the left, the selected reply beside them.
         let width = usize::from(crate::layout::sidebar_width(160));
         let cards = list_column(&screen, width);
-        assert_eq!(cards[2], "   ≡ Feed   ▥ rtop", "{screen}");
+        assert_eq!(cards[2], "   ≡ Feed   ♥ Beats   ▥ rtop", "{screen}");
         assert!(cards[5].starts_with(" ╭ api  claude · repo ─"), "{screen}");
         assert!(rows[2].chars().nth(width) == Some('│'), "{screen}");
         assert!(screen.contains("finished 2m ago"), "{screen}");
@@ -3414,5 +3414,138 @@ mod tests {
         let screen = render(&mut h.app, 160, 48);
         assert!(screen.contains("evil?]0;PWNED?dir"), "{screen}");
         assert!(screen.contains("main?]52;c;SGk=??31m"), "{screen}");
+    }
+
+    fn heartbeat(
+        id: &str,
+        name: &str,
+        waiting: bool,
+        prompt: &str,
+        command: &str,
+    ) -> session_core::heartbeat::Heartbeat {
+        session_core::heartbeat::Heartbeat {
+            id: session_core::ids::HeartbeatId::from_string(id),
+            scope: scope(),
+            name: name.into(),
+            agent: Some("claude".into()),
+            command: command.into(),
+            prompt: prompt.into(),
+            schedule: Some(session_core::heartbeat::Schedule::Daily { at: "02:00".into() }),
+            enabled: !waiting,
+            awaiting_approval: waiting,
+            created_by: session_core::model::Creator::User,
+            created_at: 0,
+            updated_at: 0,
+            next_run_at: None,
+            runs: 0,
+            last_run: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn beats_shows_a_heartbeat_whole_before_approving_it_and_n_starts_its_setup() {
+        let mut h = harness(vec![view("A", "fix-login", 20)]);
+        h.fake.state.lock().unwrap().heartbeats = vec![
+            heartbeat(
+                "HB1",
+                "nightly",
+                true,
+                "Run the tests.\nThen push to main.",
+                "claude --dangerously-skip-permissions",
+            ),
+            heartbeat("HB2", "deps", false, "Update the deps.", "codex"),
+        ];
+        let enables = |h: &Harness| {
+            h.fake
+                .calls()
+                .into_iter()
+                .filter(|c| c.starts_with("heartbeat_"))
+                .collect::<Vec<_>>()
+        };
+
+        // B: the drawer on Beats, the agent's heartbeat first, waiting.
+        h.press(KeyCode::Char('B')).await;
+        assert!(h.app.beats_has_keys());
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("♥ Beats"), "{screen}");
+        assert!(screen.contains("? nightly"), "{screen}");
+        assert!(screen.contains("approve?"), "{screen}");
+        assert!(screen.contains("● deps"), "{screen}");
+
+        // e from the list shows it whole: its prompt and command, nothing
+        // enabled yet; e there approves it.
+        h.press(KeyCode::Char('e')).await;
+        assert!(enables(&h).is_empty());
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("Then push to main."), "{screen}");
+        // In full, wrapped in the drawer.
+        assert!(
+            screen.contains("--dangerously-skip-permissions"),
+            "{screen}"
+        );
+        assert!(screen.contains("e approves"), "{screen}");
+        h.press(KeyCode::Char('e')).await;
+        assert_eq!(enables(&h), ["heartbeat_enable HB1 true"]);
+        assert!(h
+            .app
+            .status()
+            .is_some_and(|m| m.contains("Approved nightly")));
+
+        // r runs it now; its run is listed with ♥ and among its runs.
+        h.press(KeyCode::Char('r')).await;
+        let run = h
+            .fake
+            .state
+            .lock()
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|s| s.heartbeat.is_some())
+            .cloned()
+            .unwrap();
+        h.event(
+            run.id.as_str(),
+            session_core::api::SessionEvent::Created {
+                session: run.clone(),
+            },
+        );
+        let screen = render(&mut h.app, 160, 48);
+        assert!(screen.contains("♥ nightly #1"), "{screen}");
+        assert_eq!(
+            h.app
+                .heartbeat_runs(&run.heartbeat.as_ref().unwrap().heartbeat)
+                .len(),
+            1
+        );
+
+        // Esc back to the list; d twice deletes the selected one.
+        h.press(KeyCode::Esc).await;
+        assert!(h.app.beats.reading.is_none());
+        h.press(KeyCode::Char('k')).await;
+        assert_eq!(
+            h.app.beats.selected().map(|b| b.name.as_str()),
+            Some("deps")
+        );
+        h.press(KeyCode::Char('d')).await;
+        assert!(!enables(&h)
+            .iter()
+            .any(|c| c.starts_with("heartbeat_delete")));
+        h.press(KeyCode::Char('d')).await;
+        assert!(enables(&h).contains(&"heartbeat_delete HB2".to_string()));
+
+        // n: an empty heartbeat, and a session running its command whose
+        // agent is asked (typed, not sent) to fill it in.
+        h.press(KeyCode::Char('n')).await;
+        assert!(enables(&h).contains(&"heartbeat_create Heartbeat".to_string()));
+        let setup = h.fake.creates().last().cloned().unwrap();
+        assert_eq!(setup.startup_cmds, ["claude --permission-mode acceptEdits"]);
+        let first = setup.first_input.unwrap();
+        assert!(!first.submit);
+        assert!(
+            first.text.contains("heartbeat update hb_HB"),
+            "{}",
+            first.text
+        );
+        assert_eq!(h.app.focus, Focus::Session);
     }
 }

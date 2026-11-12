@@ -514,6 +514,10 @@ fn session_content(
         Some(_) => format!("{MACHINE_MARK} {}", session.name),
         None => session.name.clone(),
     };
+    // A heartbeat's run.
+    if session.heartbeat.is_some() {
+        name = format!("{} {name}", app.icons().beats());
+    }
     if app.is_self_session(&session.id) {
         name.push_str(" (this)");
     }

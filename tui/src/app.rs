@@ -37,6 +37,7 @@ pub mod feed;
 pub mod folders;
 pub mod grouping;
 mod handlers;
+pub mod heartbeats;
 mod history;
 mod keys;
 mod list_tabs;
@@ -211,6 +212,9 @@ pub enum Hit {
     /// A row of rtop (its index): selects it, or goes into its session as
     /// Enter does when it's selected already (at once on a phone).
     RtopRow(usize),
+    /// A row of the Beats tab (a heartbeat, or reading one, a run): selects
+    /// it, or does what Enter does when it's selected already.
+    BeatRow(usize),
     /// The open Folders modal (clicks inside it don't close it).
     FolderMenu,
     /// A row of the Folders modal.
@@ -345,8 +349,12 @@ pub struct App {
     /// The drawer has Rakumux mode's keys (its pane focused, its tab
     /// selected) rather than the list. Session mode clears it.
     drawer_focused: bool,
-    /// The drawer's tab: the Feed or rtop.
+    /// The drawer's tab: the Feed, Beats or rtop.
     drawer_tab: drawer::DrawerTab,
+    /// The Beats tab (`app/heartbeats.rs`): the heartbeats as last read.
+    pub beats: heartbeats::BeatsView,
+    /// Beats was on screen when last checked.
+    beats_on_screen: bool,
     /// rtop (`app/rtop.rs`): its samples while it's on screen, its sort,
     /// folds and selection for as long as the window runs.
     pub rtop: rtop::RtopView,
@@ -509,6 +517,8 @@ impl App {
             drawer_tab: drawer::DrawerTab::Feed,
             rtop: rtop::RtopView::default(),
             rtop_on_screen: false,
+            beats: heartbeats::BeatsView::default(),
+            beats_on_screen: false,
             feed_on_screen: false,
             feed_divider: DividerState::default(),
             connection: Connection::Connecting,
@@ -1085,6 +1095,7 @@ impl App {
             })
             || self.creating_session
             || (self.rtop_on_screen && self.rtop.waiting())
+            || (self.beats_on_screen && self.beats.waiting())
             || self.terminal_panel.busy()
             || matches!(self.detail.view, DetailView::Loading(_))
             || match &self.mode {
@@ -1121,6 +1132,7 @@ impl App {
         }
         self.account_timers(now);
         self.feed_timers(now);
+        self.beats_timers(now);
         self.rtop_timers(now);
         changed |= self.update_timers(now);
         changed
@@ -1201,6 +1213,8 @@ impl App {
             AppEvent::PhoneOff(result) => self.on_phone_off(result),
             AppEvent::AccountChecked(result) => self.on_account_checked(result),
             AppEvent::Resources { generation, result } => self.on_resources(generation, result),
+            AppEvent::Heartbeats { generation, result } => self.on_heartbeats(generation, result),
+            AppEvent::HeartbeatDone { result } => self.on_heartbeat_done(result),
             AppEvent::SignIn(result) => self.on_sign_in(result),
             AppEvent::SignInCancelled(result) => {
                 if let Err(error) = result {

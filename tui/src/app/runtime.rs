@@ -192,6 +192,16 @@ pub enum AppEvent {
         generation: u64,
         result: Result<session_core::api::ResourceSample, ApiError>,
     },
+    /// The heartbeats for the Beats tab (`generation`: the showing it was
+    /// asked for).
+    Heartbeats {
+        generation: u64,
+        result: Result<Vec<session_core::heartbeat::Heartbeat>, ApiError>,
+    },
+    /// A heartbeat change this window asked for: what to say.
+    HeartbeatDone {
+        result: Result<String, ApiError>,
+    },
     /// A background job panicked or couldn't run.
     JobFailed(String),
 }

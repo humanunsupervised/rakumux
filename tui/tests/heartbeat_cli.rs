@@ -197,4 +197,32 @@ fn heartbeats_are_made_and_run_from_the_cli_and_an_agents_wait_for_approval() {
     assert_eq!(world.heartbeats().len(), 1);
     // Its run stays, as a plain session.
     assert!(world.ok(&["ls", "--json"]).contains("\"deps #1\""));
+
+    // The TUI's `n`: an empty heartbeat, filled in by the agent of a session
+    // with the line its setup prompt gives (no MCP), then waiting.
+    let empty = world.ok(&["heartbeat", "add", "--json"]);
+    let empty: Value = serde_json::from_str(&empty).unwrap();
+    let handle = empty["heartbeat"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(empty["heartbeat"]["name"], "Heartbeat");
+    assert_eq!(empty["heartbeat"]["enabled"], false);
+    let filled = world.work.join("filled.out");
+    let line = format!(
+        "\"$RAKUMUX_BIN\" heartbeat update hb_{handle} --prompt 'Check the build, fix it if red.' --every 30m > {} 2>&1",
+        filled.display()
+    );
+    world.ok(&["new", "--detach", "--name", "setup", "--cmd", &line]);
+    world.wait("the agent's update", || {
+        std::fs::read_to_string(&filled).is_ok_and(|text| text.contains("Heartbeat"))
+    });
+    let said = std::fs::read_to_string(&filled).unwrap();
+    assert!(said.contains("waits for approval"), "{said}");
+    let shown: Value =
+        serde_json::from_str(&world.ok(&["heartbeat", "show", &format!("hb_{handle}"), "--json"]))
+            .unwrap();
+    assert_eq!(
+        shown["heartbeat"]["prompt"],
+        "Check the build, fix it if red."
+    );
+    assert_eq!(shown["heartbeat"]["schedule"]["minutes"], 30);
+    assert_eq!(shown["heartbeat"]["awaiting_approval"], true);
 }

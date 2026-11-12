@@ -103,6 +103,11 @@ const TIPS: &[Entry] = &[
         "pairs a phone",
         Source::Command("remote on"),
     ),
+    tip(
+        "B",
+        "heartbeats: tasks on a clock",
+        Source::Key(KeyAction::Beats),
+    ),
 ];
 
 /// Today in local time, as a day number: the tip changes at midnight.
@@ -290,6 +295,6 @@ mod tests {
                 entry.text
             );
         }
-        assert!((10..=12).contains(&TIPS.len()));
+        assert!((10..=13).contains(&TIPS.len()));
     }
 }

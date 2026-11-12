@@ -107,6 +107,7 @@ pub fn handle_list_key(app: &mut App, key: KeyEvent) -> AppResult {
         KeyCode::Char('-') => app.terminal_panel_at(PanelPlacement::Below),
         KeyCode::Char('t') => app.toggle_rtop(),
         KeyCode::Char('H') => app.open_history(),
+        KeyCode::Char('B') => app.toggle_beats(),
         KeyCode::Char('b') => app.toggle_list(),
         KeyCode::Char('f') => app.toggle_feed(),
         KeyCode::Char('*') => app.show_pinned(),

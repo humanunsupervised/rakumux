@@ -65,6 +65,16 @@ impl Icons {
     }
 
     /// Marks rtop: what this machine and Rakumux use now.
+    /// The drawer's Beats tab (heartbeats), and a heartbeat's runs.
+    pub fn beats(self) -> &'static str {
+        match self {
+            Icons::Plain => "♥",
+            Icons::Emoji => "💓",
+            // nf-fa-heartbeat
+            Icons::Nerd => "\u{f21e}",
+        }
+    }
+
     pub fn rtop(self) -> &'static str {
         match self {
             Icons::Plain => "▥",

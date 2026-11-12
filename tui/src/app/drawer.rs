@@ -1,6 +1,6 @@
-//! The drawer: what shows beside the sessions on the right, with two tabs,
-//! the Feed (`feed/`) and rtop (`rtop.rs`). Every start
-//! hides it; `f` shows it on the Feed, `t` on rtop (or
+//! The drawer: what shows beside the sessions on the right, with three
+//! tabs, the Feed (`feed/`), Beats (`heartbeats.rs`) and rtop (`rtop.rs`).
+//! Every start hides it; `f` shows it on the Feed, `B` on Beats, `t` on rtop (or
 //! Settings for either). Master detail docks
 //! it as a pane on the right, a draggable line left of it, and the
 //! session's pane narrows (the session on screen takes the new size, as a
@@ -33,17 +33,20 @@ pub enum DrawerTab {
     /// What agents said when they finished a turn (`app/feed`).
     #[default]
     Feed,
+    /// The heartbeats: tasks run on a clock (`app/heartbeats.rs`).
+    Beats,
     /// What this machine, Rakumux and every session use now (`app/rtop.rs`).
     Rtop,
 }
 
 impl DrawerTab {
-    pub const ALL: [DrawerTab; 2] = [DrawerTab::Feed, DrawerTab::Rtop];
+    pub const ALL: [DrawerTab; 3] = [DrawerTab::Feed, DrawerTab::Beats, DrawerTab::Rtop];
 
     /// Its name on the band and the Tabs layout's tab.
     pub fn label(self) -> &'static str {
         match self {
             DrawerTab::Feed => "Feed",
+            DrawerTab::Beats => "Beats",
             DrawerTab::Rtop => "rtop",
         }
     }
@@ -169,6 +172,7 @@ impl App {
     pub fn drawer_back(&mut self) {
         match self.drawer_tab {
             DrawerTab::Feed => self.feed_back(),
+            DrawerTab::Beats => self.beats_back(),
             DrawerTab::Rtop => self.unfocus_drawer(),
         }
     }
@@ -177,6 +181,7 @@ impl App {
     pub fn drawer_to_top(&mut self) {
         match self.drawer_tab {
             DrawerTab::Feed => self.feed_to_top(),
+            DrawerTab::Beats => self.beats_move(isize::MIN / 2),
             DrawerTab::Rtop => self.rtop_move(isize::MIN / 2),
         }
     }
@@ -186,6 +191,7 @@ impl App {
     pub fn move_drawer_selection(&mut self, delta: isize) {
         match self.drawer_tab {
             DrawerTab::Feed => self.move_feed_selection(delta),
+            DrawerTab::Beats => self.beats_move(delta),
             DrawerTab::Rtop => self.rtop_move(delta),
         }
     }
@@ -195,6 +201,7 @@ impl App {
     pub fn drawer_session(&self) -> Option<&session_core::model::SessionView> {
         match self.drawer_tab {
             DrawerTab::Feed => self.feed_session(),
+            DrawerTab::Beats => self.beats_session(),
             DrawerTab::Rtop => self.rtop_session(),
         }
     }
@@ -204,6 +211,7 @@ impl App {
     pub fn drawer_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
         match self.drawer_tab {
             DrawerTab::Feed => self.feed_key(key),
+            DrawerTab::Beats => self.beats_key(key),
             DrawerTab::Rtop => self.rtop_key(key),
         }
     }
@@ -217,6 +225,7 @@ impl App {
         self.sync_terminal_size();
         let now = Instant::now();
         self.feed_timers(now);
+        self.beats_timers(now);
         self.rtop_timers(now);
     }
 }

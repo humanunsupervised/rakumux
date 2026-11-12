@@ -14,6 +14,7 @@ use ratatui::{
 };
 
 use super::feed::draw_feed;
+use super::heartbeats::draw_beats;
 use super::rtop::draw_rtop;
 use super::session_list::folder_item_height;
 use crate::app::drawer::DrawerTab;
@@ -33,7 +34,7 @@ pub fn draw_drawer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
     }
     match app.drawer_tab() {
         DrawerTab::Feed => draw_feed(f, app, area, hits),
-        DrawerTab::Rtop => {
+        DrawerTab::Rtop | DrawerTab::Beats => {
             let p = theme::palette();
             f.render_widget(
                 Block::default().style(Style::default().fg(p.text_primary).bg(p.panel)),
@@ -49,7 +50,10 @@ pub fn draw_drawer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
                 height: area.height - band.height,
                 ..area
             };
-            draw_rtop(f, app, body, hits);
+            match app.drawer_tab() {
+                DrawerTab::Beats => draw_beats(f, app, body, hits),
+                _ => draw_rtop(f, app, body, hits),
+            }
         }
     }
     hits.push((area, Hit::Drawer));
@@ -59,6 +63,7 @@ pub fn draw_drawer(f: &mut Frame, app: &App, area: Rect, hits: &mut Vec<(Rect, H
 pub(super) fn tab_icon(app: &App, tab: DrawerTab) -> &'static str {
     match tab {
         DrawerTab::Feed => app.icons().feed(),
+        DrawerTab::Beats => app.icons().beats(),
         DrawerTab::Rtop => app.icons().rtop(),
     }
 }
