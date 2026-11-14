@@ -5,6 +5,7 @@ use super::*;
 use flate2::{write::GzEncoder, Compression};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::os::unix::process::CommandExt;
 
 /// A fake GitHub release: its files by URL, and the URLs fetched.
 struct Source(HashMap<String, Vec<u8>>, RefCell<Vec<String>>);
@@ -166,7 +167,10 @@ fn replacing_an_installation_does_not_end_a_running_program_from_the_old_bundle(
     let directory = tempfile::tempdir().unwrap();
     let root = installed(directory.path());
     fs::copy("/bin/sleep", root.join("rakumux-ptyd")).unwrap();
+    // Named `sleep` as it runs: a multi-call coreutils (Ubuntu 26.04's) picks
+    // its tool by that name and refuses `rakumux-ptyd`.
     let mut child = Command::new(root.join("rakumux-ptyd"))
+        .arg0("sleep")
         .arg("60")
         .spawn()
         .unwrap();
