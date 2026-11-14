@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:heartbeats-upload",
+  "title": "POST /api/v1/feed/heartbeats request",
+  "description": "A machine's whole list of heartbeats now, replacing what was stored for it: a heartbeat left out is gone (an empty list clears them). Sent only once a `sessions-stored` answer `accepts` `heartbeats`, while the machine's daemon runs heartbeats: when the list changes and every 10 minutes meanwhile. `at` is the machine's clock (Unix ms).",
+  "x-maxBodyBytes": 1048576,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "machine", "heartbeats", "at"],
+  "properties": {
+    "version": { "const": 1 },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "heartbeats": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "urn:rakumux:feed:v1:common#/$defs/heartbeatState" }
+    },
+    "at": { "$ref": "urn:rakumux:feed:v1:common#/$defs/timestampMs" }
+  }
+}

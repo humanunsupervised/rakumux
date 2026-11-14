@@ -562,6 +562,10 @@
         "choice": {
           "description": "The prompt with numbered options its agent shows now, for answering from rakumux.com (`choiceAnswer`). Only while the session is live and its agent asks something, only from a machine that advertises `choice_answers`, and only to a cloud that said it takes it (`sessions-stored` `accepts` has `choices`); absent otherwise.",
           "$ref": "#/$defs/choicePrompt"
+        },
+        "heartbeat": {
+          "description": "The heartbeat this session is a run of. Only to a cloud that said it takes it (`sessions-stored` `accepts` has `heartbeats`); absent otherwise.",
+          "$ref": "#/$defs/heartbeatRunRef"
         }
       }
     },
@@ -786,6 +790,225 @@
             "status": { "const": "failed" },
             "failure": { "$ref": "#/$defs/sessionRenameFailure" }
           }
+        }
+      ]
+    },
+    "heartbeatSchedule": {
+      "description": "When a heartbeat runs, in its machine's local time: every `minutes` (counted from the last due time), daily at `at`, or on the weekdays `days` at `at`. Readers take a `kind` they don't know as no schedule.",
+      "type": "object",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["kind", "minutes"],
+          "properties": {
+            "kind": { "const": "every" },
+            "minutes": { "type": "integer", "minimum": 5, "maximum": 10080 }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["kind", "at"],
+          "properties": {
+            "kind": { "const": "daily" },
+            "at": { "$ref": "#/$defs/heartbeatTime" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["kind", "days", "at"],
+          "properties": {
+            "kind": { "const": "weekdays" },
+            "days": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 7,
+              "uniqueItems": true,
+              "items": { "type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] }
+            },
+            "at": { "$ref": "#/$defs/heartbeatTime" }
+          }
+        }
+      ]
+    },
+    "heartbeatTime": {
+      "description": "A time of day, `HH:MM` on a 24-hour clock.",
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
+    "heartbeatText": {
+      "description": "A heartbeat's command or task as plain text, masked on the machine as chat text is (keys, credential assignments and tokens; the home directory as `~`). Tab, LF and CR are allowed; other terminal controls, format controls, default-ignorables and lone surrogates are not. May be empty.",
+      "type": "string",
+      "not": { "pattern": "[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\\p{Cf}\\p{Cs}\\p{Default_Ignorable_Code_Point}]" }
+    },
+    "heartbeatRunOutcome": {
+      "description": "How a heartbeat's run went: `started` (its session started, its task not typed yet), `task_given` (its agent took the task), `no_agent` (the agent's prompt never showed), `skipped` (an earlier run was still at work at the due time) or `failed` (its session couldn't start). Readers take a value they don't know as unknown.",
+      "type": "string",
+      "enum": ["started", "task_given", "no_agent", "skipped", "failed"]
+    },
+    "heartbeatState": {
+      "description": "One of a machine's heartbeats: a task its daemon runs on a clock, each run a new session in its folder. Sent whole by the machine (`heartbeats-upload`), its command and task masked; never a path (its folder's name only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "folder", "command", "prompt", "enabled", "awaiting_approval", "by_agent", "updated_at", "runs"],
+      "properties": {
+        "id": {
+          "description": "The daemon's id for the heartbeat (shown as `hb_` and this).",
+          "$ref": "#/$defs/ulid"
+        },
+        "name": {
+          "type": "string",
+          "$ref": "#/$defs/label",
+          "maxLength": 64,
+          "maxUtf8Bytes": 256
+        },
+        "folder": {
+          "description": "The last path component of the folder its runs start in.",
+          "type": "string",
+          "$ref": "#/$defs/label",
+          "maxLength": 128,
+          "maxUtf8Bytes": 512,
+          "not": { "pattern": "/" }
+        },
+        "agent": {
+          "description": "The agent its runs start, when it's one the feed names; absent otherwise.",
+          "$ref": "#/$defs/agent"
+        },
+        "command": {
+          "description": "What its runs start in a login shell (the agent and its flags), masked.",
+          "type": "string",
+          "$ref": "#/$defs/heartbeatText",
+          "maxUtf8Bytes": 1024
+        },
+        "prompt": {
+          "description": "The task typed to the agent once its prompt shows, masked.",
+          "type": "string",
+          "$ref": "#/$defs/heartbeatText",
+          "maxUtf8Bytes": 16384
+        },
+        "schedule": {
+          "description": "Absent when it has none, or one this contract doesn't name.",
+          "$ref": "#/$defs/heartbeatSchedule"
+        },
+        "enabled": { "type": "boolean" },
+        "awaiting_approval": {
+          "description": "An agent made or changed it: paused until the user reads it and approves it (`enable`).",
+          "type": "boolean"
+        },
+        "by_agent": {
+          "description": "An agent made it (a session, not the user).",
+          "type": "boolean"
+        },
+        "updated_at": {
+          "description": "When it last changed: the version an `enable` action names, so what the user approved is what runs.",
+          "$ref": "#/$defs/timestampMs"
+        },
+        "next_run_at": {
+          "description": "When it runs next, while it's enabled.",
+          "$ref": "#/$defs/timestampMs"
+        },
+        "runs": {
+          "description": "How many runs it has started.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["run", "at", "outcome"],
+          "properties": {
+            "run": { "type": "integer", "minimum": 1 },
+            "at": { "$ref": "#/$defs/timestampMs" },
+            "outcome": { "$ref": "#/$defs/heartbeatRunOutcome" },
+            "session": {
+              "description": "The run's session, by the id the machine's session list gives it.",
+              "$ref": "#/$defs/ulid"
+            }
+          }
+        }
+      }
+    },
+    "heartbeatRunRef": {
+      "description": "The heartbeat a session is a run of, and which run.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heartbeat", "run"],
+      "properties": {
+        "heartbeat": { "$ref": "#/$defs/ulid" },
+        "run": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "heartbeatActionStatus": {
+      "description": "`pending` until its machine carries it out (`done`) or can't (`failed`); `expired` when it stayed pending 10 minutes.",
+      "type": "string",
+      "enum": ["pending", "done", "failed", "expired"]
+    },
+    "heartbeatActionFailure": {
+      "description": "Why a machine didn't carry out a heartbeat action asked of it on rakumux.com: it has no such heartbeat now (`not_listed`), the heartbeat changed since the version approved (`changed`: read it again), it has no command, task or schedule to run with (`incomplete`), or its daemon refused (`refused`). Readers take a value they don't know as a failure without a reason.",
+      "type": "string",
+      "enum": ["not_listed", "changed", "incomplete", "refused"]
+    },
+    "heartbeatAction": {
+      "description": "Something asked on rakumux.com of one of a machine's heartbeats: `enable` (approve it, when an agent made or changed it, and turn it on), `pause` or `run` (a run now). It names the heartbeat by its id, never a path, a command or a task. The machine carries it out as its user would and reports it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "machine", "heartbeat", "action", "status", "created_at", "status_at"],
+      "properties": {
+        "id": {
+          "description": "The ULID the page made for the request: a machine carries out at most one action for an id.",
+          "$ref": "#/$defs/ulid"
+        },
+        "machine": {
+          "description": "The machine the heartbeat is on, as its session list names it.",
+          "$ref": "#/$defs/machine"
+        },
+        "heartbeat": {
+          "description": "The heartbeat, by the id the machine's heartbeats upload gives it.",
+          "$ref": "#/$defs/ulid"
+        },
+        "action": { "type": "string", "enum": ["enable", "pause", "run"] },
+        "updated_at": {
+          "description": "For `enable`: the heartbeat's `updated_at` the user saw as they approved it. The machine enables it only while it's still that version.",
+          "$ref": "#/$defs/timestampMs"
+        },
+        "status": { "$ref": "#/$defs/heartbeatActionStatus" },
+        "failure": { "$ref": "#/$defs/heartbeatActionFailure" },
+        "session": {
+          "description": "With `done` for `run`: the run's session, by the id the machine's session list gives it.",
+          "$ref": "#/$defs/ulid"
+        },
+        "created_at": { "$ref": "#/$defs/timestampMs" },
+        "status_at": {
+          "description": "When its status last changed (`created_at` while pending).",
+          "$ref": "#/$defs/timestampMs"
+        }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "status": { "enum": ["pending", "done", "expired"] },
+                "failure": false
+              }
+            },
+            {
+              "required": ["failure"],
+              "properties": {
+                "status": { "const": "failed" },
+                "failure": { "$ref": "#/$defs/heartbeatActionFailure" },
+                "session": false
+              }
+            }
+          ]
+        },
+        {
+          "if": { "properties": { "action": { "const": "enable" } } },
+          "then": { "required": ["updated_at"], "properties": { "updated_at": { "$ref": "#/$defs/timestampMs" } } },
+          "else": { "properties": { "updated_at": false } }
+        },
+        {
+          "if": { "properties": { "action": { "const": "run" } } },
+          "else": { "properties": { "session": false } }
         }
       ]
     },

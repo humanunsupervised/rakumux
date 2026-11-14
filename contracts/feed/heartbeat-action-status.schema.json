@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:heartbeat-action-status",
+  "title": "POST /api/v1/feed/heartbeat-actions/status request",
+  "description": "The machine a heartbeat action was asked of says it carried it out (`done`, with the run's session for `run`) or couldn't (`failed`, with why). Only a pending action changes (or one that expired while the machine was carrying it out), and only for the machine it names; otherwise the stored action comes back unchanged.",
+  "x-maxBodyBytes": 4096,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "machine", "status"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" },
+    "machine": { "$ref": "urn:rakumux:feed:v1:common#/$defs/machine" },
+    "status": { "type": "string", "enum": ["done", "failed"] },
+    "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/heartbeatActionFailure" },
+    "session": { "$ref": "urn:rakumux:feed:v1:common#/$defs/ulid" }
+  },
+  "oneOf": [
+    { "properties": { "status": { "const": "done" }, "failure": false } },
+    {
+      "required": ["failure"],
+      "properties": {
+        "status": { "const": "failed" },
+        "failure": { "$ref": "urn:rakumux:feed:v1:common#/$defs/heartbeatActionFailure" },
+        "session": false
+      }
+    }
+  ]
+}

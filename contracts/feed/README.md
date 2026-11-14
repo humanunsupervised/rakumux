@@ -25,6 +25,8 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/new-sessions/status` | [new-session-status](new-session-status.schema.json) | [new-session](new-session.schema.json) |
 | `POST /api/v1/feed/session-deletions/status` | [session-deletion-status](session-deletion-status.schema.json) | [session-deletion](session-deletion.schema.json) |
 | `POST /api/v1/feed/session-renames/status` | [session-rename-status](session-rename-status.schema.json) | [session-rename](session-rename.schema.json) |
+| `POST /api/v1/feed/heartbeats` | [heartbeats-upload](heartbeats-upload.schema.json) | [heartbeats-stored](heartbeats-stored.schema.json) |
+| `POST /api/v1/feed/heartbeat-actions/status` | [heartbeat-action-status](heartbeat-action-status.schema.json) | [heartbeat-action](heartbeat-action.schema.json) |
 | `POST /api/v1/feed/updates/status` | [update-status](update-status.schema.json) | [machine-update](machine-update.schema.json) |
 | `GET /api/v1/feed/realtime` | header only | [realtime](realtime.schema.json) |
 | WebSocket at the realtime `url` | bearer `token` | [poke](poke.schema.json) messages |
@@ -295,6 +297,25 @@ conformance tests, not an HTTP server, database or local runtime.
   a reason. Its next session list carries the new name. One still pending 10 minutes after it was
   written is `expired`. When the request is written the cloud pokes the account's machines (and
   wakes an enrolled one, below), as for a reply.
+- **Heartbeats:** a machine whose daemon runs heartbeats (tasks on a clock, each run a new
+  session) says `heartbeats` in its session list's `capabilities`. Once a `sessions-stored` answer
+  `accepts` `heartbeats`, it uploads its whole list of heartbeats (`heartbeats-upload`, at most 50,
+  `heartbeatState` in common: name, folder name, agent, schedule in the machine's local time,
+  whether it's on or waits for approval, who made it, its command and task masked as chat text, when
+  it runs next and its last run), replacing what was stored, when the list changes and every 10
+  minutes meanwhile, and marks each session that is a heartbeat's run (`sessionState` `heartbeat`).
+  Never a path. On rakumux.com the user can ask the machine to `enable` one (approving it, when an
+  agent made or changed it), `pause` it or `run` it now: the cloud stores the action
+  (`heartbeatAction` in common, under the id the page made) `pending`, only for a heartbeat that
+  machine's latest upload lists and only while its session list advertises `heartbeats`; an `enable`
+  carries the `updated_at` the user saw. The machine's replies read carries `heartbeat_actions`, its
+  actions still pending, oldest first, at most 20, with every read until reported or expired,
+  whatever `after` says; it takes each by its `id`, at most once, as its user would, and reports
+  `heartbeat-action-status`: `done` (with the run's `session` for `run`), or `failed` with why
+  (`not_listed`; `changed`: an `enable` whose heartbeat changed since that version, nothing enabled;
+  `incomplete`: no command, task or schedule; `refused`). Readers take a `failure` they don't know as
+  a failure without a reason. Its next upload carries the change. One still pending 10 minutes after
+  it was written is `expired`. Writing one pokes the account's machines, as a reply does.
 - **Releases and updates:** every replies read may say `release` (`{version}`), the newest
   stable Rakumux release rakumux.com knows of: GitHub's latest release, read again every few
   minutes and as one is published. A machine's account service passes it to the TUIs, which offer

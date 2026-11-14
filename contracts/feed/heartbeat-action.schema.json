@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rakumux:feed:v1:heartbeat-action-answer",
+  "title": "A heartbeat action, as stored",
+  "description": "The answer to a heartbeat action's status report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "heartbeat_action"],
+  "properties": {
+    "version": { "const": 1 },
+    "heartbeat_action": { "$ref": "urn:rakumux:feed:v1:common#/$defs/heartbeatAction" }
+  }
+}
