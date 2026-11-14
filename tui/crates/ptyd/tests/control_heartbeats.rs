@@ -559,11 +559,13 @@ fn heartbeats_and_runs_survive_a_restart_and_deleting_one_leaves_its_runs() {
             id: created.id.clone(),
         },
     ));
+    // The run sets the next due time from its own second.
+    let before = get(&h, &created.id);
     h.restart();
     assert_eq!(heartbeats(&h).len(), 1);
     let kept = get(&h, &created.id);
     assert_eq!(kept.runs, 1);
-    assert_eq!(kept.next_run_at, created.next_run_at);
+    assert_eq!(kept.next_run_at, before.next_run_at);
     assert_eq!(h.get(&view.id).heartbeat.as_ref().map(|r| r.run), Some(1));
     assert_eq!(
         h.handle(

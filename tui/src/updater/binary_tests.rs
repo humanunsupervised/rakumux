@@ -70,7 +70,18 @@ fn install(
     version: &str,
     platform: &str,
 ) -> Result<PathBuf> {
-    super::install(source, &keys(), root, version, platform)
+    // A parallel test's fork holds an inherited copy of the install's lock
+    // until it execs, so a lock found held is tried again for a moment.
+    let mut tries = 0;
+    loop {
+        match super::install(source, &keys(), root, version, platform) {
+            Err(error) if UpdateBusy::is(&error) && tries < 100 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            result => return result,
+        }
+    }
 }
 
 /// Release v0.1.5 with `bytes` as its Linux package, signed by [`KEY`].
@@ -198,7 +209,14 @@ fn simultaneous_updates_fail_without_replacing_any_files() {
     let directory = tempfile::tempdir().unwrap();
     let root = installed(directory.path());
     let held = lock(directory.path()).unwrap();
-    let error = install(&source(package("0.1.5"), None), &root, "0.1.5", "linux-x64").unwrap_err();
+    let error = super::install(
+        &source(package("0.1.5"), None),
+        &keys(),
+        &root,
+        "0.1.5",
+        "linux-x64",
+    )
+    .unwrap_err();
     // Another window's install, not a failure of this one.
     assert!(UpdateBusy::is(&error), "{error:#}");
     assert_eq!(fs::read(root.join("rakumux")).unwrap(), b"old");
