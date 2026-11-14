@@ -134,6 +134,10 @@ struct DaemonFeatures {
     /// Which agents beyond Claude Code it answers the questions of
     /// (`wire::AGENT_ANSWERS`, in order).
     agent_answers: [bool; crate::feed::AGENT_ANSWERS.len()],
+    /// It reads agents' prompts with numbered options and picks their
+    /// options (capability `session.choose`): picks from rakumux.com are
+    /// taken only then.
+    choices: bool,
 }
 
 impl DaemonFeatures {
@@ -148,6 +152,7 @@ impl DaemonFeatures {
             answers: has(CAPABILITY_ANSWER),
             agent_answers: crate::feed::AGENT_ANSWERS
                 .map(|(daemon, _)| has(CAPABILITY_ANSWER) && has(daemon)),
+            choices: has(session_core::api::CAPABILITY_CHOOSE),
         }
     }
 }
@@ -262,6 +267,9 @@ enum Work<A, C> {
     /// Give a reply's answers (its id) to the question (its call) a session's
     /// agent asks in its own dialog.
     Answer(String, SessionId, String, Vec<QuestionAnswer>),
+    /// Pick a reply's option (its id; the prompt's key, the option's
+    /// number) of the prompt a session's agent shows.
+    Choose(String, SessionId, String, u8),
     /// Fetch one of a reply's files and save it.
     Fetch(FeedJob<A, C>, Fetch, Uploads),
     /// Remove a reply's saved files.
@@ -317,6 +325,7 @@ impl<A, C> Workers<A, C> {
         match work {
             Work::Submit(..)
             | Work::Answer(..)
+            | Work::Choose(..)
             | Work::WriteReply(..)
             | Work::WriteMessage(..)
             | Work::Enrol(..)
@@ -836,7 +845,9 @@ fn own<S, A, C>(
                 sessions.set_resources(daemon.resources);
                 sessions.set_answers(daemon.answers);
                 sessions.set_agent_answers(&daemon.agent_answers);
+                sessions.set_choices(daemon.choices);
                 replies.set_answers(daemon.answers);
+                replies.set_choices(daemon.choices);
                 // Every session the daemon has: what's kept of others goes.
                 refresher.keep_only(views.iter().map(|view| &view.id));
                 let views: Vec<SessionView> = views
@@ -1677,6 +1688,14 @@ fn follow_replies<S, A, C>(
             }) => {
                 let _ = work.send(Work::Answer(reply, session, call_id, answers));
             }
+            Some(ReplyWork::Choose {
+                reply,
+                session,
+                key,
+                option,
+            }) => {
+                let _ = work.send(Work::Choose(reply, session, key, option));
+            }
             Some(ReplyWork::Fetch(fetch)) => {
                 // Nowhere to save files: a reply never goes in without them.
                 let Some(uploads) = uploads else {
@@ -2197,6 +2216,14 @@ where
                 // question is open and shows before any key.
                 let result = api
                     .answer(&session, &call_id, &answers, crate::feed::TYPING_QUIET)
+                    .map_err(|error| error.code);
+                Message::AnswerGiven(reply, result)
+            }
+            Ok(Work::Choose(reply, session, key, option)) => {
+                // Only while nobody typed there lately: the daemon checks the
+                // prompt still shows before the key.
+                let result = api
+                    .choose(&session, &key, option, crate::feed::TYPING_QUIET)
                     .map_err(|error| error.code);
                 Message::AnswerGiven(reply, result)
             }

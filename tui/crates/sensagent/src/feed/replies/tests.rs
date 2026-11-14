@@ -589,6 +589,7 @@ fn message(id: &str, seq: u64, conversation: Option<&str>) -> SessionMessage {
         from: None,
         status: ReplyStatus::Pending,
         answer: None,
+        choice: None,
     }
 }
 
@@ -3153,4 +3154,102 @@ fn an_answer_handed_to_the_daemon_is_never_given_again_after_a_restart() {
     replies.request_done(true, Ok(FeedResult::Reply(reply("01K8A3", 7, None))), NOW);
     let work = after_reading_messages(&mut replies, vec![answer_message("01K8A3", 6, CHAT)]);
     assert!(given(work).is_none());
+}
+
+fn pick_message(id: &str, seq: u64, option: u8) -> SessionMessage {
+    SessionMessage {
+        text: "Do you want to proceed? Yes".into(),
+        choice: Some(ChoiceReply {
+            key: "9f3c1a2b4d5e6f70".into(),
+            option,
+        }),
+        ..message(id, seq, None)
+    }
+}
+
+fn picked(work: Option<ReplyWork>) -> Option<(String, String, u8)> {
+    match work {
+        Some(ReplyWork::Choose {
+            reply,
+            session,
+            key,
+            option,
+        }) => {
+            assert_eq!(session, SessionId::from_string("S"));
+            Some((reply, key, option))
+        }
+        _ => None,
+    }
+}
+
+/// Read `pending` messages as a service whose daemon picks options, then
+/// return what comes next.
+fn after_reading_picks(replies: &mut ReplySync, pending: Vec<SessionMessage>) -> Option<ReplyWork> {
+    match replies.next_work(NOW) {
+        Some(ReplyWork::Request(FeedRequest::Replies { choices, .. })) => {
+            assert!(choices, "the read asks for picks");
+        }
+        other => panic!("expected a read, got {other:?}"),
+    }
+    replies.request_done(true, read_messages(pending), NOW);
+    replies.next_work(NOW)
+}
+
+#[test]
+fn a_pick_goes_to_the_daemon_while_its_agent_asks_whatever_chat_it_shows() {
+    let mut replies = on(&[view("S", Lifecycle::Blocked, Some(CHAT))]);
+    replies.set_choices(true);
+    let work = after_reading_picks(&mut replies, vec![pick_message("01K8A3", 6, 1)]);
+    assert_eq!(
+        picked(work),
+        Some(("01K8A3".into(), "9f3c1a2b4d5e6f70".into(), 1))
+    );
+    // Given once: nothing more for it while the daemon picks.
+    assert!(picked(replies.next_work(NOW)).is_none());
+    replies.answer_done("01K8A3".into(), Ok(()), NOW);
+    let body = report_of(next_at(&mut replies, NOW));
+    assert_eq!(
+        (&body["id"], &body["status"]),
+        (&"01K8A3".into(), &"delivered".into())
+    );
+}
+
+#[test]
+fn a_pick_whose_prompt_is_gone_fails_and_one_waits_while_nothing_asks() {
+    let mut replies = on(&[view("S", Lifecycle::Working, Some(CHAT))]);
+    replies.set_choices(true);
+    // Asking nothing: it waits, then the daemon is asked whether the prompt
+    // is still there.
+    let work = after_reading_picks(&mut replies, vec![pick_message("01K8A3", 6, 2)]);
+    assert!(picked(work).is_none());
+    let later = NOW + ANSWER_GONE_AFTER;
+    let (reply, ..) = picked(next_at(&mut replies, later)).expect("asked after a while");
+    replies.answer_done(reply, Err(ErrorCode::QuestionGone), later);
+    let body = report_of(next_at(&mut replies, later));
+    assert_eq!(
+        (&body["status"], &body["failure"]),
+        (&"failed".into(), &"question_gone".into())
+    );
+}
+
+#[test]
+fn without_a_daemon_that_picks_no_pick_is_asked_for_or_given() {
+    let mut replies = on(&[view("S", Lifecycle::Blocked, Some(CHAT))]);
+    match replies.next_work(NOW) {
+        Some(ReplyWork::Request(FeedRequest::Replies { choices, .. })) => assert!(!choices),
+        other => panic!("expected a read, got {other:?}"),
+    }
+    replies.request_done(true, read_messages(vec![pick_message("01K8A3", 6, 1)]), NOW);
+    for at in [NOW, NOW + ANSWER_GONE_AFTER * 2] {
+        let work = replies.next_work(at);
+        assert!(
+            !matches!(
+                work,
+                Some(ReplyWork::Choose { .. } | ReplyWork::Submit { .. })
+                    | Some(ReplyWork::Request(FeedRequest::ReplyStatus { .. }))
+            ),
+            "{work:?}"
+        );
+        replies.request_done(true, read_messages(vec![]), at);
+    }
 }

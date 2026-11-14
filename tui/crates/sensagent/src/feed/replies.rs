@@ -54,7 +54,9 @@ use session_core::model::{Lifecycle, SessionStatus, SessionView};
 
 use super::cache::{FeedReply, ReplyAttachment, ReplyFailure, ReplyStatus};
 use super::job::FeedResult;
-use super::wire::{self, FeedFailure, FeedRequest, QuestionReply, RepliesRead, SessionMessage};
+use super::wire::{
+    self, ChoiceReply, FeedFailure, FeedRequest, QuestionReply, RepliesRead, SessionMessage,
+};
 
 mod kept;
 use kept::{Kept, TypedInto};
@@ -247,6 +249,14 @@ pub(crate) enum ReplyWork {
         call_id: String,
         answers: Vec<session_core::api::QuestionAnswer>,
     },
+    /// Pick option `option` of the prompt `key` that `session`'s agent shows
+    /// (`session_choose`).
+    Choose {
+        reply: String,
+        session: SessionId,
+        key: String,
+        option: u8,
+    },
     /// Fetch one of a reply's files from rakumux.com and save it.
     Fetch(Fetch),
     /// Remove a reply's saved files: it won't be typed in.
@@ -422,6 +432,9 @@ enum Target {
         conversation: String,
         answer: QuestionReply,
     },
+    /// A pick of an option of the prompt with numbered options the
+    /// session's agent shows: picked by the daemon, never typed as text.
+    Choice(ChoiceReply),
 }
 
 /// A reply (or session message) pending for this machine.
@@ -451,8 +464,9 @@ impl Pending {
     }
 
     fn message(message: &SessionMessage) -> Self {
-        let target = match (&message.answer, &message.conversation_id) {
-            (Some(answer), Some(conversation)) => Target::Answer {
+        let target = match (&message.choice, &message.answer, &message.conversation_id) {
+            (Some(choice), ..) => Target::Choice(choice.clone()),
+            (None, Some(answer), Some(conversation)) => Target::Answer {
                 conversation: conversation.clone(),
                 answer: answer.clone(),
             },
@@ -768,6 +782,9 @@ pub(crate) struct ReplySync {
     /// The daemon answers agents' questions in their own dialogs
     /// (`session.answer`): answers are read, and given, only then.
     answers: bool,
+    /// The daemon picks options of agents' prompts (`session.choose`):
+    /// picks are read, and given, only then.
+    choices: bool,
     /// The answer the daemon is giving now, and its session: one at a time,
     /// and its session takes no reply meanwhile.
     answering: Option<(String, SessionId)>,
@@ -808,6 +825,7 @@ impl ReplySync {
             discards: VecDeque::new(),
             restored,
             answers: false,
+            choices: false,
             answering: None,
             answer_waits: HashMap::new(),
         }
@@ -820,6 +838,13 @@ impl ReplySync {
     /// pending until rakumux.com expires it.
     pub fn set_answers(&mut self, answers: bool) {
         self.answers = answers;
+    }
+
+    /// Whether the daemon picks options of agents' prompts with numbered
+    /// options (capability `session.choose`, read at each connect), as
+    /// [`set_answers`](Self::set_answers) for answers.
+    pub fn set_choices(&mut self, choices: bool) {
+        self.choices = choices;
     }
 
     /// Follow the account: signed in with its feed on. Off, replies are
@@ -986,6 +1011,7 @@ impl ReplySync {
                 after: self.cursor,
                 machine: self.machine.clone(),
                 answers: self.answers,
+                choices: self.choices,
             }));
         }
         None
@@ -1021,9 +1047,9 @@ impl ReplySync {
             .pending
             .iter()
             .filter(|(id, reply)| {
-                // Answers go apart (`answer_next`): only while their agent
-                // asks something, when nothing else goes in.
-                !matches!(reply.target, Target::Answer { .. })
+                // Answers and picks go apart (`answer_next`): only while
+                // their agent asks something, when nothing else goes in.
+                !matches!(reply.target, Target::Answer { .. } | Target::Choice(_))
                     && !self.kept.handled(id)
                     && !being_typed.contains(reply.session_id.as_str())
                     && !self.held.contains_key(&reply.session_id)
@@ -1069,7 +1095,7 @@ impl ReplySync {
                     // without one (a shell) is waited for, never typed into.
                     Target::Session => Ok(takes(seen)),
                     // Given apart (`answer_next`).
-                    Target::Answer { .. } => Ok(false),
+                    Target::Answer { .. } | Target::Choice(_) => Ok(false),
                 },
             };
             match outcome {
@@ -1166,26 +1192,30 @@ impl ReplySync {
         }
     }
 
-    /// The first pending answer to an agent's question that can be decided
-    /// now: given to the daemon while its session's agent asks something in
-    /// that chat (or, asking nothing, after [`ANSWER_GONE_AFTER`], for the
-    /// daemon to say whether the question is still open), or failed. One at a
+    /// The first pending answer to an agent's question, or pick of an
+    /// option of its prompt, that can be decided now: given to the daemon
+    /// while its session's agent asks something (an answer, in its chat), or,
+    /// asking nothing, after [`ANSWER_GONE_AFTER`], for the daemon to say
+    /// whether the question or prompt is still there; or failed. One at a
     /// time; answers don't wait behind replies (which wait while the agent
     /// asks something), and replies don't wait for answers but while one is
     /// being given.
     fn answer_next(&mut self, now: Duration) -> Option<ReplyWork> {
         let pending = &self.pending;
         self.answer_waits.retain(|id, _| pending.contains_key(id));
-        if !self.answers || self.answering.is_some() {
+        if self.answering.is_some() {
             return None;
         }
         let mut ids: Vec<(u64, String)> = self
             .pending
             .iter()
             .filter(|(id, reply)| {
-                matches!(reply.target, Target::Answer { .. })
-                    && !self.kept.handled(id)
-                    && !self.held.contains_key(&reply.session_id)
+                let given = match reply.target {
+                    Target::Answer { .. } => self.answers,
+                    Target::Choice(_) => self.choices,
+                    _ => false,
+                };
+                given && !self.kept.handled(id) && !self.held.contains_key(&reply.session_id)
             })
             .map(|(id, reply)| (reply.seq, id.clone()))
             .collect();
@@ -1194,12 +1224,11 @@ impl ReplySync {
             let Some(reply) = self.pending.get(&id) else {
                 continue;
             };
-            let Target::Answer {
-                conversation,
-                answer,
-            } = &reply.target
-            else {
-                continue;
+            // The chat it must show: an answer's; a pick, any.
+            let conversation = match &reply.target {
+                Target::Answer { conversation, .. } => Some(conversation),
+                Target::Choice(_) => None,
+                _ => continue,
             };
             let session = SessionId::from_string(reply.session_id.clone());
             let outcome = match self.sessions.get(&session) {
@@ -1211,7 +1240,10 @@ impl ReplySync {
                     Err(ReplyFailure::ConversationChanged)
                 }
                 Some(seen) => match &seen.conversation {
-                    Some(shown) if shown != conversation => Err(ReplyFailure::ConversationChanged),
+                    Some(shown) if conversation.is_some_and(|wanted| shown != wanted) => {
+                        Err(ReplyFailure::ConversationChanged)
+                    }
+                    _ if conversation.is_none() && seen.lifecycle == Lifecycle::Blocked => Ok(true),
                     Some(_) if seen.lifecycle == Lifecycle::Blocked => Ok(true),
                     // Asking nothing (yet, or any more), or its chat not known yet.
                     _ => {
@@ -1223,18 +1255,27 @@ impl ReplySync {
             match outcome {
                 Ok(false) => continue,
                 Ok(true) => {
-                    let (call_id, answers) = (answer.call_id.clone(), answer.answers.clone());
+                    let work = match &reply.target {
+                        Target::Answer { answer, .. } => ReplyWork::Answer {
+                            reply: id.clone(),
+                            session: session.clone(),
+                            call_id: answer.call_id.clone(),
+                            answers: answer.answers.clone(),
+                        },
+                        Target::Choice(choice) => ReplyWork::Choose {
+                            reply: id.clone(),
+                            session: session.clone(),
+                            key: choice.key.clone(),
+                            option: choice.option,
+                        },
+                        _ => continue,
+                    };
                     self.answer_waits.remove(&id);
                     // Never given again, even if this service stops before
                     // the daemon answers.
                     self.kept.answering(&id);
-                    self.answering = Some((id.clone(), session.clone()));
-                    return Some(ReplyWork::Answer {
-                        reply: id,
-                        session,
-                        call_id,
-                        answers,
-                    });
+                    self.answering = Some((id, session));
+                    return Some(work);
                 }
                 Err(failure) => {
                     self.answer_waits.remove(&id);
@@ -1496,7 +1537,7 @@ impl ReplySync {
                     Target::Chat(conversation) | Target::Answer { conversation, .. } => {
                         Some(conversation.clone())
                     }
-                    Target::Session => self
+                    Target::Session | Target::Choice(_) => self
                         .sessions
                         .get(&session)
                         .and_then(|seen| seen.conversation.clone()),

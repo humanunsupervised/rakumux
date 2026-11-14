@@ -49,6 +49,7 @@ fn the_daemons_features_are_read_again_at_each_resubscribe() {
             guards_prompts: false,
             answers: false,
             agent_answers: [false; 5],
+            choices: false,
         })
     );
     assert_eq!(
@@ -59,6 +60,7 @@ fn the_daemons_features_are_read_again_at_each_resubscribe() {
             answers: true,
             // Grok Build's and Kimi Code's, not Copilot's, Droid's or OpenCode's.
             agent_answers: [false, false, false, true, true],
+            choices: false,
         })
     );
     // Capabilities not known (an adapter, a fake): neither.

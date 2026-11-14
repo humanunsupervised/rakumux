@@ -1,0 +1,24 @@
+     Plan: add goodbye.py
+
+     Context: You asked for a small script that prints "goodbye".
+
+     1. Create goodbye.py in the project root containing print("goodbye").
+     2. Run python3 goodbye.py.
+     3. Confirm that the output is goodbye.
+
+● Write(goodbye.py)
+
+────────────────────────────────────────────────────────────────────────────────
+ Create file
+ goodbye.py
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 print("goodbye")
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create goodbye.py?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file
+      commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend
+─────────────────────────────────────────────────────────── add-goodbye-script ─

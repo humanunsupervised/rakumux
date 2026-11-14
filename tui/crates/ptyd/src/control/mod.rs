@@ -277,6 +277,7 @@ fn remote_target(request: &Request) -> Option<&SessionId> {
         | Request::SessionDelete { id }
         | Request::SessionSubmit { id, .. }
         | Request::SessionAnswer { id, .. }
+        | Request::SessionChoose { id, .. }
         | Request::SessionTouch { id }
         | Request::SessionTurn { id }
         | Request::SessionPin { id, .. }

@@ -828,6 +828,7 @@ mod tests {
                 rows: 24,
                 controlled: false,
                 alternate_screen: true,
+                choice: None,
             }),
             pinned: true,
             git: Some(GitInfo {

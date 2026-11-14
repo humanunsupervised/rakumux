@@ -158,6 +158,14 @@ pub trait SessionApi: Send + Sync {
         let _ = (id, call_id, answers, quiet);
         Err(unsupported("answering an agent's question"))
     }
+    /// Pick option `option` of the prompt `key` the session's agent shows
+    /// (`TerminalView::choice`), refused with `session_in_use` (nothing
+    /// typed) while someone typed in the session within `quiet` (user only,
+    /// capability `session.choose`; see [`Request::SessionChoose`]).
+    fn choose(&self, id: &SessionId, key: &str, option: u8, quiet: Duration) -> Result<()> {
+        let _ = (id, key, option, quiet);
+        Err(unsupported("picking an option of an agent's prompt"))
+    }
     fn touch(&self, id: &SessionId) -> Result<()>;
     fn status(&self) -> Result<DaemonStatusInfo>;
     fn shutdown(&self) -> Result<()>;
@@ -875,6 +883,15 @@ impl SessionApi for Client {
             id: id.clone(),
             call_id: call_id.to_owned(),
             answers: answers.to_vec(),
+            quiet_ms: Some(u64::try_from(quiet.as_millis()).unwrap_or(u64::MAX)),
+        })
+    }
+
+    fn choose(&self, id: &SessionId, key: &str, option: u8, quiet: Duration) -> Result<()> {
+        self.expect_ok(&Request::SessionChoose {
+            id: id.clone(),
+            key: key.to_owned(),
+            option,
             quiet_ms: Some(u64::try_from(quiet.as_millis()).unwrap_or(u64::MAX)),
         })
     }
@@ -1999,6 +2016,7 @@ mod tests {
                 | Request::SessionSend(_)
                 | Request::SessionSubmit { .. }
                 | Request::SessionAnswer { .. }
+                | Request::SessionChoose { .. }
                 | Request::SessionTouch { .. } => Response::Ok,
                 Request::SessionRevive(revive) => Response::Session {
                     session: named(revive.id.as_str(), "revived"),

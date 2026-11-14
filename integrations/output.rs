@@ -52,6 +52,8 @@ use std::path::{Path, PathBuf};
 
 #[path = "amp/output.rs"]
 mod amp;
+#[path = "choices.rs"]
+pub mod choices;
 #[path = "claude-code/output.rs"]
 mod claude;
 #[path = "codex/output.rs"]

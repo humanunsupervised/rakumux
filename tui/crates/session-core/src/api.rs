@@ -204,7 +204,7 @@ pub enum Request {
     },
     /// User only (capability `session.answer`): answer the question the
     /// session's agent asks in its own dialog (Claude Code's
-    /// `AskUserQuestion`), never a prompt for permission. The daemon checks
+    /// `AskUserQuestion`), never a prompt for permission (`SessionChoose`). The daemon checks
     /// that the conversation it follows has `call_id` as its newest question
     /// without a result and that the screen shows that dialog, then works
     /// it key by key, reading the screen between steps and stopping as soon
@@ -221,6 +221,24 @@ pub enum Request {
         call_id: String,
         /// One per question asked, by its text.
         answers: Vec<QuestionAnswer>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quiet_ms: Option<u64>,
+    },
+    /// User only (capability `session.choose`): pick option `option` of the
+    /// prompt with numbered options the session's agent shows
+    /// (`TerminalView::choice`: Claude Code's prompts for permission and its
+    /// plan to approve), by the number that picks it. Only while the screen
+    /// shows the prompt named `key` with that option and the agent asks
+    /// something: `question_gone` otherwise, nothing typed. Answered `ok`
+    /// once the prompt left the screen; `not_taken` when the number went in
+    /// but the prompt stayed, `session_in_use` (nothing typed) while someone
+    /// typed in the session within `quiet_ms`.
+    SessionChoose {
+        id: SessionId,
+        /// The prompt, as `TerminalView::choice` named it.
+        key: String,
+        /// The option's number (`ChoiceOption::number`).
+        option: u8,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         quiet_ms: Option<u64>,
     },
@@ -745,6 +763,10 @@ pub const CAPABILITY_SUBMIT_BLOCKED: &str = "session.submit.blocked";
 /// `session_answer`: answer the question an agent asks in its own dialog
 /// (Claude Code's `AskUserQuestion`; the agents below each say so too).
 pub const CAPABILITY_ANSWER: &str = "session.answer";
+/// `session_choose` and `TerminalView::choice`: prompts with numbered
+/// options read from an agent's screen (Claude Code's prompts for
+/// permission and its plan to approve), and picking one.
+pub const CAPABILITY_CHOOSE: &str = "session.choose";
 /// `session_answer` answers GitHub Copilot's `ask_user` form.
 pub const CAPABILITY_ANSWER_COPILOT: &str = "session.answer.copilot";
 /// `session_answer` answers Droid's `AskUser` questionnaire.

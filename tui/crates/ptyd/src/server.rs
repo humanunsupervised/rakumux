@@ -69,6 +69,7 @@ pub const CAPABILITIES: &[&str] = &[
     session_core::api::CAPABILITY_SUBMIT_EXPECT,
     session_core::api::CAPABILITY_SUBMIT_BLOCKED,
     session_core::api::CAPABILITY_ANSWER,
+    session_core::api::CAPABILITY_CHOOSE,
     session_core::api::CAPABILITY_ANSWER_COPILOT,
     session_core::api::CAPABILITY_ANSWER_DROID,
     session_core::api::CAPABILITY_ANSWER_OPENCODE,
@@ -131,6 +132,7 @@ const KNOWN_OPS: &[&str] = &[
     "session_send",
     "session_submit",
     "session_answer",
+    "session_choose",
     "session_touch",
     "session_turn",
     "session_transcript",
@@ -2034,6 +2036,12 @@ mod tests {
                 answers: vec![],
                 quiet_ms: None,
             },
+            Request::SessionChoose {
+                id: id.clone(),
+                key: "0123456789abcdef".into(),
+                option: 1,
+                quiet_ms: None,
+            },
             Request::SessionTouch { id: id.clone() },
             Request::SessionTurn { id: id.clone() },
             Request::SessionTranscript {
@@ -2134,6 +2142,7 @@ mod tests {
                 | Request::SessionSend(_)
                 | Request::SessionSubmit { .. }
                 | Request::SessionAnswer { .. }
+                | Request::SessionChoose { .. }
                 | Request::SessionTouch { .. }
                 | Request::SessionTurn { .. }
                 | Request::SessionTranscript { .. }

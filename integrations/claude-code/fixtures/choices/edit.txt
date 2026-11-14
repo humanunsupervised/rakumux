@@ -1,0 +1,24 @@
+
+❯ Use the Edit tool to change "line two" to "line 2" in notes.txt. Nothing
+  else.
+
+  Read 1 file
+
+● Update(notes.txt)
+
+────────────────────────────────────────────────────────────────────────────────
+ Edit file
+ notes.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 1  line one
+ 2 -line two
+ 2 +line 2
+ 3  line three
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to notes.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file
+      commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

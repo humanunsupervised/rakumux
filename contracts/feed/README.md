@@ -16,7 +16,7 @@ conformance tests, not an HTTP server, database or local runtime.
 | `POST /api/v1/feed/messages` | [chat-upload](chat-upload.schema.json) | [chat-accepted](chat-accepted.schema.json) |
 | `GET /api/v1/feed/turn?entry=ID[&after=POSITION]` | query only | [turn](turn.schema.json), increasing position |
 | `POST /api/v1/feed/replies` | [reply-upload](reply-upload.schema.json) | [reply](reply.schema.json) |
-| `GET /api/v1/feed/replies?after=SEQ&limit=N&machine=NAME&session_messages=1&question_answers=1` | query only | [replies](replies.schema.json), increasing seq |
+| `GET /api/v1/feed/replies?after=SEQ&limit=N&machine=NAME&session_messages=1&question_answers=1&choice_answers=1` | query only | [replies](replies.schema.json), increasing seq |
 | `POST /api/v1/feed/replies/status` | [reply-status](reply-status.schema.json) | [reply](reply.schema.json) |
 | `GET /api/v1/feed/replies/attachments/{id}` | path only | the file's bytes, not JSON (below) |
 | `POST /api/v1/feed/sessions` | [sessions-upload](sessions-upload.schema.json) | [sessions-stored](sessions-stored.schema.json) |
@@ -151,6 +151,23 @@ conformance tests, not an HTTP server, database or local runtime.
   another question asked, or its dialog not on screen), `not_taken` when keys went in but the
   dialog didn't take the answers as given (it may be partly answered there), and
   `conversation_changed`, `session_gone`, `private` or `refused` as for a reply.
+- **Prompts with numbered options:** while an agent asks with a prompt of its own whose options
+  are numbered (Claude Code's prompts for permission, `Do you want to proceed?` over `1. Yes` …
+  `3. No`, and its plan to approve), nothing in its chat says what the prompt offers: the machine
+  reads it off the session's screen and lists it with the session (`choice`, `choicePrompt` in
+  common: its `title`, what it's about as far as the screen shows, `detail`, its `question` and
+  the `options` picked as they are, each by its `number`; `key` names this very prompt), only to a
+  cloud whose `sessions-stored` `accepts` `choices`, and only while the session is live and its
+  agent asks something. On rakumux.com the user can then pick an option: a session message with
+  `choice` (`choiceAnswer` in common: the prompt's `key` and the option's `number`); its `text`
+  says the pick, for showing. No files, no `answer`, and no reply names it. The cloud sends it
+  only to a reader that asks with `choice_answers=1` and whose machine advertises
+  `choice_answers` (below). The machine picks the option, its number as one key, only while the
+  session is live, not private, its agent asks something and its screen shows that prompt (the
+  same `key`) offering that option; it reports `delivered` once the prompt left the screen, or
+  `failed`: `question_gone` when nothing was typed (the prompt answered in the session first,
+  another one asked, or none on screen), `not_taken` when the number went in but the prompt
+  stayed, and `session_gone`, `private` or `refused` as for a reply.
 - **Attachments:** on rakumux.com the user can attach up to 5 files of at most **4 MiB**
   (4194304 bytes) each to a reply or session message, which still has its `text`. The reply
   lists them as `attachments`, `{id, name, media_type, size}` each (`attachment` in common):
@@ -191,7 +208,8 @@ conformance tests, not an HTTP server, database or local runtime.
   path; **`output`**, a live session's agent's latest step as Rakumux's session row shows it
   (its reasoning, a tool call or its reply), one line of at most 300 characters, masked as chat
   text is, only for an agent the feed takes: it changes the list, which goes when it changes, at
-  most every 3 s; and **`subagents`**, subagents' messages in chat uploads (below). The upload also says what the machine
+  most every 3 s; **`choices`**, the prompt with numbered options a session's agent shows
+  (`choice`, above), from a machine that advertises `choice_answers`; and **`subagents`**, subagents' messages in chat uploads (below). The upload also says what the machine
   handles beyond the first version of this contract (`capabilities`, at most 16 unique names
   matching `^[a-z][a-z0-9_.]{0,31}$`; absent from older machines): `reply_attachments`, it
   fetches a reply's attachments and gives the agent their paths; `resources`, it sends what it
@@ -203,7 +221,8 @@ conformance tests, not an HTTP server, database or local runtime.
   the questions Claude Code asks in its own dialog (above); `question_answers.copilot`,
   `question_answers.droid`, `question_answers.opencode`, `question_answers.grok` and
   `question_answers.kimi`, beside it, to those GitHub Copilot, Droid, OpenCode, Grok Build and Kimi
-  Code ask too. The cloud keeps the latest list and
+  Code ask too; `choice_answers`, it lists the prompts with numbered options its sessions' agents
+  show and picks the option a session message names (above). The cloud keeps the latest list and
   ignores names it doesn't know.
 - **Resources (rtop):** while someone has rtop open on rakumux.com, every machine of the account
   says what it uses now. A replies read answers `resources_wanted: true` then (and only then);

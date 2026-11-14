@@ -16,8 +16,9 @@
 //! - A question or a prompt for permission its hooks reported (`NeedsInput`)
 //!   doesn't go stale while the daemon follows that conversation in the
 //!   agent's log and it hasn't moved on since: it ends with a newer hook, the
-//!   agent leaving or the conversation moving on (an answer, an Esc), then
-//!   goes stale as hooks do. Without a followed conversation, it goes stale.
+//!   agent leaving or the conversation moving on (an answer, an Esc, a prompt
+//!   for permission refused), fresh or not, as no hook says it was answered.
+//!   Without a followed conversation, it goes stale.
 //! - Without fresh hook activity, what the program says through OSC 7501
 //!   (the Program Status Protocol: Pi, Kimi Code) wins over the screen while
 //!   detection names an agent; its child records count as subagents. It has
@@ -127,13 +128,14 @@ impl LifecycleTracker {
     /// followed conversation hasn't moved past
     /// ([`ActivityTracker::unanswered`]), which has no heartbeat.
     fn counts(&self, activity: &ActivityTracker, now_ms: i64) -> bool {
-        activity.fresh(now_ms)
-            || self
-                .followed
-                .as_ref()
-                .is_some_and(|(conversation, moved_at)| {
-                    activity.unanswered(conversation, *moved_at)
-                })
+        match &self.followed {
+            // What it asks in the conversation followed holds exactly until
+            // that conversation moves on.
+            Some((conversation, moved_at)) if activity.asks_in(conversation) => {
+                activity.unanswered(conversation, *moved_at)
+            }
+            _ => activity.fresh(now_ms),
+        }
     }
 
     /// The conversation `agent`'s hook activity is about, while it has some.
@@ -722,14 +724,14 @@ mod tests {
         assert_eq!(t.current(), Lifecycle::Idle);
         assert!(t.activity().is_none() && !t.hook_asks(esc));
 
-        // Answered within the two minutes: the usual freshness from then on.
+        // Answered (or refused) within the two minutes: it asks nothing from
+        // then on, fresh as its hook still is; no hook says it was answered.
         let mut t = LifecycleTracker::default();
         t.on_detection(detection(Lifecycle::Idle), 0);
         t.on_activity(&phase(ActivityPhase::NeedsInput), 1_000);
         t.on_followed(Some(("root", Some(30_000))), 30_000);
-        assert_eq!(t.current(), Lifecycle::Blocked, "fresh still");
-        t.tick(1_000 + FRESH_MS);
-        assert_eq!(t.current(), Lifecycle::Idle);
+        assert_eq!(t.current(), Lifecycle::Idle, "moved on");
+        assert!(!t.hook_asks(30_000));
     }
 
     #[test]
@@ -798,12 +800,15 @@ mod tests {
         t.on_conversation_left("root", later);
         t.on_detection(detection(Lifecycle::Idle), later + 1);
         assert_eq!(t.current(), Lifecycle::Idle);
-        // Esc within the two minutes, then a subagent's update: fresh as
-        // hooks are, never held again.
+        // Esc (or a prompt for permission refused) within the two minutes:
+        // the conversation moved on, so it asks nothing, fresh or not; a
+        // subagent's update after it doesn't hold it again.
         let mut t = LifecycleTracker::default();
         t.on_detection(detection(Lifecycle::Idle), 0);
         t.on_activity(&phase(ActivityPhase::NeedsInput), 1_000);
+        assert_eq!(t.current(), Lifecycle::Blocked);
         t.on_followed(Some(("root", Some(30_000))), 30_000);
+        assert_eq!(t.current(), Lifecycle::Idle, "moved on since it asked");
         t.on_activity(
             &hook(ActivityEvent::Subagent {
                 id: "child".into(),
@@ -811,10 +816,7 @@ mod tests {
             }),
             40_000,
         );
-        assert_eq!(t.current(), Lifecycle::Blocked);
-        t.tick(40_000 + super::super::activity::FRESH_WITH_SUBAGENTS_MS);
-        assert!(t.activity().is_none(), "moved on since it asked");
-        assert_eq!(t.current(), Lifecycle::Idle);
+        assert_ne!(t.current(), Lifecycle::Blocked);
     }
 
     #[test]

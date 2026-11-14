@@ -423,7 +423,49 @@ pub struct TerminalView {
     pub controlled: bool,
     #[serde(default)]
     pub alternate_screen: bool,
+    /// The prompt its agent shows on screen to be answered by picking one
+    /// of its numbered options (capability `session.choose`): Claude Code's
+    /// prompts for permission and its plan to approve. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<ChoicePrompt>,
 }
+
+/// A prompt an agent shows on its screen that is answered by picking one of
+/// its numbered options (`TerminalView::choice`, `session_choose`), as read
+/// from the screen: what it's about, its question and its options.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChoicePrompt {
+    /// Names this prompt as the screen shows it: the same while it shows,
+    /// another for any other prompt (what it asks about, its question or
+    /// its options differ). `session_choose` answers only the prompt it
+    /// names.
+    pub key: String,
+    /// Its heading (`Bash command`, `Edit file`, `Ready to code?`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// What it shows between its heading and its question (the command,
+    /// the file and its changes, the plan), as far as the screen shows it:
+    /// lines of at most [`MAX_CHOICE_DETAIL_CHARS`] characters in all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Its question (`Do you want to proceed?`).
+    pub question: String,
+    /// The options it offers that are picked as they are, in order (one that
+    /// opens a field to type in isn't among them).
+    pub options: Vec<ChoiceOption>,
+}
+
+/// One option of a [`ChoicePrompt`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChoiceOption {
+    /// Its number on screen, the key that picks it (1–9).
+    pub number: u8,
+    /// Its label, as one line.
+    pub label: String,
+}
+
+/// The most characters [`ChoicePrompt::detail`] holds.
+pub const MAX_CHOICE_DETAIL_CHARS: usize = 2_000;
 
 #[cfg(test)]
 mod tests {

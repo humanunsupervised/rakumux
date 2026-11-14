@@ -397,7 +397,16 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    dismissed in the session first, another question asked, its dialog not on screen),
    `not_taken` (keys went in but the dialog didn't take them as given), `session_gone`,
    `private`, `conversation_changed` or `refused`; the daemon refusing because someone typed
-   there holds it 2 s, as a reply. No reply names it (`reply_to`). **Files attached** on rakumux.com (`attachments`, at
+   there holds it 2 s, as a reply. No reply names it (`reply_to`). **Picks of a prompt's
+   option** (`ReplySync::answer_next` too): while the daemon says `session.choose`, the session
+   list says `choice_answers` and, to a cloud whose `sessions-stored` `accepts` `choices`, carries
+   each live, asking session's prompt with numbered options (`choice`: Claude Code's prompts for
+   permission and its plan to approve, from `TerminalView::choice`, its detail masked as chat
+   text is), and replies are read with `choice_answers=1`: a session message with `choice`
+   (`{key, option}`) is given to the daemon (`session_choose`, the 10 s `quiet_ms`) one at a time
+   with answers, while its session is live, not private and its agent asks something (any chat),
+   or asking nothing for 10 s, for the daemon to say whether the prompt is still there; reported
+   as an answer is (`delivered`, `question_gone`, `not_taken`, …). **Files attached** on rakumux.com (`attachments`, at
    most 5 of 4 MiB each; `feed/uploads.rs`): once a reply could otherwise be typed in, the
    service fetches its files one at a time (`GET /api/v1/feed/replies/attachments/{id}`, the
    body read as bytes up to its declared `size`, 60 s a file), each once, into
@@ -610,7 +619,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
 
 ## File structure
 
-Agent-specific hooks, detection profiles, resume code, question dialogs' drivers
+Agent-specific hooks, detection profiles, resume code, question dialogs' drivers and prompt
+readers (`choices.rs`)
 (`questions.rs`), the OpenCode, Kimi Code and Amp plugins and the Pi extension (each with its
 installer) live under
 `integrations/{open-code,claude-code,codex,pi,copilot,cursor-agent,grok,kimi,droid,amp}/`. Shared engines live in `integrations/`.
@@ -741,7 +751,8 @@ messages, conversation_id?}`: that agent's current turn, the user's last prompt 
 since, whose content `session_turn` returns; the conversation tells chats apart for their one
 automatic AI title), `places` (below), `heartbeat` (`{heartbeat, run}`: the heartbeat this
 session is a run of, below), and `terminal` (pid, foreground process, title, size,
-`controlled`, `alternate_screen`) while live. Folders are `ProjectView {path, name, sessions, live,
+`controlled`, `alternate_screen`, and `choice`: the prompt with numbered options its agent shows,
+capability `session.choose`) while live. Folders are `ProjectView {path, name, sessions, live,
 last_active_at, added_at, git}` on the wire.
 
 - **Places** (capability `session.places`; `integrations/places.rs`, `control/places.rs`):
@@ -803,7 +814,8 @@ last_active_at, added_at, git}` on the wire.
   can misread it, so it lasts until a newer hook, the agent leaving, or that conversation moving
   on after it (`Follower::moved_at`, by the log's own clock: a prompt, an agent message or what
   the user's side adds, as Claude Code's tool result on an answer and the refused result and the
-  interruption on an Esc; never its bookkeeping), then goes stale as hooks do; its log is read
+  interruption on an Esc, a prompt for permission refused; never its bookkeeping), fresh or not
+  (no hook says it was answered); its log is read
   meanwhile though the screen is quiet, as any agent's is while it's `blocked`. Without a followed conversation it goes stale at 2
   minutes. Without hook activity, what an agent's program
   says through OSC 7501, the Program Status Protocol (Pi, Kimi Code: `idle`, `working`, `blocked`,
@@ -919,9 +931,20 @@ Defined in `session-core/src/{api.rs, frame.rs}`.
   then and of which agent, the foreground process and the terminal size, never the text; an
   Enter held back writes another.
   The daemon asks the terminal without its state lock.
+- `session_choose {id, key, option, quiet_ms?}` (user only, capability `session.choose`;
+  `integrations/choices.rs`, `integrations/claude-code/choices.rs`): picks option `option` of the
+  prompt with numbered options the session's agent shows, as the daemon reads it off the screen
+  at each output while detection reads the agent asking (`TerminalView::choice`: `ChoicePrompt
+  {key, title?, detail?, question, options: [{number, label}]}`; Claude Code's prompts for
+  permission and its plan to approve, whose option that opens a field to type in isn't listed;
+  `key` an FNV-1a hash of what it shows, so another command or question has another). Only while
+  the screen shows the prompt `key` names offering that option and the agent asks something
+  (else `question_gone` / `invalid_argument`, nothing typed) and nobody typed there within
+  `quiet_ms` (`session_in_use`): the option's number, one key, and `ok` once the prompt left the
+  screen (3 s at most, else `not_taken`). Audited and logged with the option's number.
 - `session_answer {id, call_id, answers: [{question, choices?, text?}], quiet_ms?}` (user only,
   capability `session.answer`; `control/answers.rs`, `integrations/questions.rs`): answers the
-  question the session's agent asks in a dialog of its own, never a prompt for permission. Claude
+  question the session's agent asks in a dialog of its own, never a prompt for permission (those are `session_choose`'s). Claude
   Code's `AskUserQuestion` (`integrations/claude-code/questions.rs`), and, each with a capability
   of its own (`session.answer.copilot`, `.droid`, `.opencode`, `.grok`, `.kimi`), GitHub
   Copilot's `ask_user` (a form; `integrations/copilot/questions.rs`), Droid's `AskUser` (a

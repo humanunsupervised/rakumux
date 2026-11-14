@@ -58,6 +58,7 @@ pub(crate) fn live_view(id: &SessionId, folder: &str, pid: u32) -> SessionView {
             rows: 24,
             controlled: false,
             alternate_screen: false,
+            choice: None,
         }),
         pinned: false,
         git: None,

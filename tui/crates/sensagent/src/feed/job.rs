@@ -78,7 +78,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                 after,
                 machine,
                 answers,
-            } => FeedRequest::replies_query(*after, machine, *answers),
+                choices,
+            } => FeedRequest::replies_query(*after, machine, *answers, *choices),
             FeedRequest::Upload { .. }
             | FeedRequest::Messages { .. }
             | FeedRequest::ReplyUpload { .. }

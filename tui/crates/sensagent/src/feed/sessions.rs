@@ -64,7 +64,81 @@ pub(crate) struct SessionState {
     /// A live session's agent's latest step, one line, masked.
     #[serde(skip_serializing_if = "Option::is_none")]
     output: Option<String>,
+    /// The prompt with numbered options its agent shows while it asks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    choice: Option<ChoiceState>,
 }
+
+/// The prompt with numbered options a session's agent shows, as the website
+/// lists it (`contracts/feed/` `choicePrompt`): its text cleaned of anything
+/// a terminal would act on, its detail masked as chat text is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ChoiceState {
+    key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    question: String,
+    options: Vec<ChoiceOptionState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct ChoiceOptionState {
+    number: u8,
+    label: String,
+}
+
+impl ChoiceState {
+    /// `prompt` within the contract's bounds; `None` when its question or
+    /// an option has nothing left to show, or it's off the contract.
+    fn of(prompt: &session_core::model::ChoicePrompt) -> Option<Self> {
+        let one_line = |text: &str, max: usize| {
+            let text = crate::cloud::chat_text(text)?;
+            let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let line: String = line.chars().take(max).collect();
+            (!line.is_empty()).then_some(line)
+        };
+        let key = prompt.key.len() == 16
+            && prompt
+                .key
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
+        let options: Option<Vec<ChoiceOptionState>> = prompt
+            .options
+            .iter()
+            .take(9)
+            .map(|option| {
+                (1..=9).contains(&option.number).then_some(())?;
+                Some(ChoiceOptionState {
+                    number: option.number,
+                    label: one_line(&option.label, 1000)?,
+                })
+            })
+            .collect();
+        let options = options.filter(|options| !options.is_empty())?;
+        if !key {
+            return None;
+        }
+        Some(Self {
+            key: prompt.key.clone(),
+            title: prompt
+                .title
+                .as_deref()
+                .and_then(|title| one_line(title, 200)),
+            detail: prompt.detail.as_deref().and_then(|detail| {
+                let text = crate::cloud::chat_text(detail)?;
+                let text: String = text.trim().chars().take(MAX_CHOICE_DETAIL).collect();
+                (!text.is_empty()).then_some(text)
+            }),
+            question: one_line(&prompt.question, 1000)?,
+            options,
+        })
+    }
+}
+
+/// The most characters a prompt's detail carries (contract).
+const MAX_CHOICE_DETAIL: usize = 2000;
 
 /// A place a session worked in, as the website lists it (`contracts/feed/`
 /// `sessionPlace`): its path in the session's folder (`.` for the folder
@@ -196,6 +270,14 @@ impl SessionState {
             } else {
                 None
             },
+            choice: if status == "live" && view.lifecycle == Lifecycle::Blocked {
+                view.terminal
+                    .as_ref()
+                    .and_then(|terminal| terminal.choice.as_ref())
+                    .and_then(ChoiceState::of)
+            } else {
+                None
+            },
         })
     }
 }
@@ -274,6 +356,9 @@ pub(crate) struct SessionSync {
     subagents: bool,
     /// The cloud's last answer said it takes agents' latest steps.
     output: bool,
+    /// The cloud's last answer said it takes agents' prompts with numbered
+    /// options.
+    choices: bool,
     /// rakumux.com answered a list under this name with anything but
     /// `machine_taken` (or a failure for now) since the switch was turned on:
     /// the name is this machine's, and its replies may be read.
@@ -309,6 +394,7 @@ impl SessionSync {
             places: false,
             subagents: false,
             output: false,
+            choices: false,
             confirmed: false,
             sessions: BTreeMap::new(),
             sent: None,
@@ -344,6 +430,7 @@ impl SessionSync {
         self.places = false;
         self.subagents = false;
         self.output = false;
+        self.choices = false;
         self.confirmed = false;
         self.sent = None;
         self.retry = RETRY_MIN;
@@ -365,6 +452,14 @@ impl SessionSync {
     /// that gives the answer. A change goes with the next upload.
     pub fn set_answers(&mut self, supported: bool) {
         self.set_capability(wire::QUESTION_ANSWERS, supported);
+    }
+
+    /// Whether the daemon reads agents' prompts with numbered options and
+    /// picks their options (capability `session.choose`): the list says
+    /// `choice_answers`, and carries the prompts, only then. A change goes
+    /// with the next upload.
+    pub fn set_choices(&mut self, supported: bool) {
+        self.set_capability(wire::CHOICE_ANSWERS, supported);
     }
 
     /// Which agents beyond Claude Code the daemon answers the questions of
@@ -461,6 +556,9 @@ impl SessionSync {
         if !self.output {
             without_output(&mut list);
         }
+        if !self.choices || !self.capabilities.contains(&wire::CHOICE_ANSWERS) {
+            without_choices(&mut list);
+        }
         list
     }
 
@@ -491,6 +589,7 @@ impl SessionSync {
             let mut smaller = list.clone();
             without_places(&mut smaller);
             without_output(&mut smaller);
+            without_choices(&mut smaller);
             request = wire::sessions_upload(
                 &self.machine,
                 &smaller,
@@ -530,6 +629,7 @@ impl SessionSync {
                 self.places = stored.places;
                 self.subagents = stored.subagents;
                 self.output = stored.output;
+                self.choices = stored.choices;
                 self.sent = sent;
                 self.retry = RETRY_MIN;
                 self.next_send = now + SETTLE;
@@ -552,6 +652,13 @@ impl SessionSync {
 fn without_places(list: &mut [SessionState]) {
     for session in list {
         session.places.clear();
+    }
+}
+
+/// `list` without its sessions' agents' prompts.
+fn without_choices(list: &mut [SessionState]) {
+    for session in list {
+        session.choice = None;
     }
 }
 

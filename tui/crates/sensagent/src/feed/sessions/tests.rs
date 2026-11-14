@@ -41,6 +41,7 @@ fn stored(places: bool) -> wire::SessionsStored {
         places,
         subagents: false,
         output: false,
+        choices: false,
     }
 }
 
@@ -109,6 +110,7 @@ fn the_list_says_what_the_tuis_status_and_folders_tabs_group_by() {
         true,
         Ok(wire::SessionsStored {
             output: true,
+            choices: false,
             ..stored(false)
         }),
         NOW,
@@ -205,6 +207,7 @@ fn rakumux_com_says_how_many_it_holds() {
             places: false,
             subagents: false,
             output: false,
+            choices: false,
         })
     );
     // A cloud that takes places says so; names it doesn't know are ignored.
@@ -218,6 +221,7 @@ fn rakumux_com_says_how_many_it_holds() {
             places: true,
             subagents: false,
             output: false,
+            choices: false,
         })
     );
     // One that takes subagents' messages in chats says that too.
@@ -231,6 +235,7 @@ fn rakumux_com_says_how_many_it_holds() {
             places: true,
             subagents: true,
             output: false,
+            choices: false,
         })
     );
     // And one that takes agents' latest steps.
@@ -244,6 +249,7 @@ fn rakumux_com_says_how_many_it_holds() {
             places: true,
             subagents: true,
             output: true,
+            choices: false,
         })
     );
     assert_eq!(
@@ -528,4 +534,68 @@ fn the_name_is_confirmed_by_rakumux_coms_answer_and_renamed_when_another_machine
     sessions.set_enabled(false, later);
     sessions.set_enabled(true, later);
     assert!(!sessions.confirmed());
+}
+
+#[test]
+fn a_prompt_with_numbered_options_goes_while_the_daemon_picks_and_the_cloud_takes_it() {
+    use session_core::model::{ChoiceOption, ChoicePrompt};
+    let mut asking = agent(view("01K89ZQ4D2F6H8J0K2M4N6P8R0"));
+    asking.lifecycle = Lifecycle::Blocked;
+    if let Some(terminal) = asking.terminal.as_mut() {
+        terminal.choice = Some(ChoicePrompt {
+            key: "9f3c1a2b4d5e6f70".into(),
+            title: Some("Bash command".into()),
+            detail: Some("export API_KEY=sk-abcdefghijklmnopqrstuvwx && cargo test".into()),
+            question: "Do you want to proceed?".into(),
+            options: vec![
+                ChoiceOption {
+                    number: 1,
+                    label: "Yes".into(),
+                },
+                ChoiceOption {
+                    number: 2,
+                    label: "No".into(),
+                },
+            ],
+        });
+    }
+    let mut sessions = on(&[asking.clone()]);
+    // Neither the daemon nor the cloud said so yet: none.
+    let upload = body(sessions.next_request(NOW, WALL));
+    assert!(upload["sessions"][0].get("choice").is_none(), "{upload}");
+    assert!(!upload["capabilities"]
+        .to_string()
+        .contains("choice_answers"));
+    let takes = || wire::SessionsStored {
+        choices: true,
+        ..stored(false)
+    };
+    sessions.done(true, Ok(takes()), NOW);
+    let upload = body(sessions.next_request(NOW + HEARTBEAT, WALL));
+    assert!(
+        upload["sessions"][0].get("choice").is_none(),
+        "the daemon doesn't pick"
+    );
+    sessions.done(true, Ok(takes()), NOW + HEARTBEAT);
+    sessions.set_choices(true);
+    let upload = body(sessions.next_request(NOW + HEARTBEAT + SETTLE, WALL));
+    assert!(upload["capabilities"]
+        .to_string()
+        .contains("choice_answers"));
+    let choice = &upload["sessions"][0]["choice"];
+    assert_eq!(choice["key"], "9f3c1a2b4d5e6f70");
+    assert_eq!(choice["question"], "Do you want to proceed?");
+    assert_eq!(
+        choice["options"][1],
+        serde_json::json!({"number": 2, "label": "No"})
+    );
+    // Masked as chat text is.
+    let detail = choice["detail"].as_str().unwrap();
+    assert!(!detail.contains("sk-abcdef"), "{detail}");
+    // Asking nothing any more: gone.
+    asking.lifecycle = Lifecycle::Working;
+    sessions.done(true, Ok(takes()), NOW + HEARTBEAT + SETTLE);
+    sessions.connected(&[asking]);
+    let upload = body(sessions.next_request(NOW + 2 * HEARTBEAT, WALL));
+    assert!(upload["sessions"][0].get("choice").is_none(), "{upload}");
 }

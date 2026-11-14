@@ -1,0 +1,38 @@
+{
+  "session": {
+    "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0",
+    "name": "fix-tests",
+    "folder": "rakumux",
+    "agent": "claude-code",
+    "status": "live",
+    "lifecycle": "blocked",
+    "phase": "needs_input",
+    "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+    "pinned": false,
+    "last_active_at": 1761219990000,
+    "choice": {
+      "key": "9f3c1a2b4d5e6f70",
+      "title": "Bash command",
+      "detail": "cargo test -p rakumux-sensagent --locked",
+      "question": "Do you want to proceed?",
+      "options": [
+        { "number": 1, "label": "Yes" },
+        { "number": 2, "label": "Yes, and don't ask again for cargo test commands in /home/me/rakumux" },
+        { "number": 3, "label": "No" }
+      ]
+    }
+  },
+  "reply": {
+    "seq": 10,
+    "id": "01K8A3C4D5E6F7G8H9J0K1M2NQ",
+    "machine": "studio",
+    "session": { "id": "01K89ZQ4D2F6H8J0K2M4N6P8R0", "name": "fix-tests", "folder": "rakumux" },
+    "agent": "claude-code",
+    "conversation_id": "5f1c2a90-3b7e-4d1a-9c2e-6a8b0d4f1e23",
+    "text": "Do you want to proceed? Yes",
+    "choice": { "key": "9f3c1a2b4d5e6f70", "option": 1 },
+    "status": "pending",
+    "created_at": 1761220100000,
+    "status_at": 1761220100000
+  }
+}

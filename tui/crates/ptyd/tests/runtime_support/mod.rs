@@ -233,6 +233,7 @@ impl FakeControl {
                 rows: i.rows,
                 controlled: i.controlled,
                 alternate_screen: i.alternate_screen,
+                choice: None,
             }),
             machine: None,
             heartbeat: None,

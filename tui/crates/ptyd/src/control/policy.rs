@@ -44,6 +44,7 @@ pub(crate) enum Op {
     Send,
     Submit,
     Answer,
+    Choose,
     Touch,
     Pin,
     Bind,
@@ -86,6 +87,7 @@ impl Op {
             Op::Send => "session.send",
             Op::Submit => "session.submit",
             Op::Answer => "session.answer",
+            Op::Choose => "session.choose",
             Op::Touch => "session.touch",
             Op::Pin => "session.pin",
             Op::Bind => "session.bind",
@@ -125,6 +127,7 @@ impl Op {
                 | Op::Send
                 | Op::Submit
                 | Op::Answer
+                | Op::Choose
                 | Op::Touch
                 | Op::Pin
                 | Op::Bind
@@ -187,6 +190,10 @@ pub(crate) fn authorize(
             op,
             "answering an agent's question is for user clients",
         )),
+        Op::Choose => Err(denied(
+            op,
+            "answering an agent's prompt is for user clients",
+        )),
         Op::TerminalOpen | Op::TerminalAttach => {
             Err(denied(op, "temporary terminals are for user clients"))
         }
@@ -225,7 +232,7 @@ mod tests {
         }
     }
 
-    const ALL: [Op; 36] = [
+    const ALL: [Op; 37] = [
         Op::TerminalOpen,
         Op::TerminalAttach,
         Op::Get,
@@ -245,6 +252,7 @@ mod tests {
         Op::Send,
         Op::Submit,
         Op::Answer,
+        Op::Choose,
         Op::Touch,
         Op::Pin,
         Op::Bind,

@@ -144,6 +144,9 @@ struct LiveSession {
     questions: crate::agent_output::questions::Asked,
     /// Text for its agent once its prompt shows (`CreateSession::first_input`).
     first_input: Option<heartbeats::PendingInput>,
+    /// The prompt with numbered options its agent's screen showed at its
+    /// last output (`TerminalView::choice`, `session_choose`).
+    choice: Option<session_core::model::ChoicePrompt>,
 }
 
 impl LiveSession {
@@ -173,6 +176,7 @@ impl LiveSession {
             places_checked_ms: 0,
             questions: Default::default(),
             first_input: None,
+            choice: None,
         }
     }
 }
@@ -604,6 +608,18 @@ impl Inner {
                 &id,
                 &call_id,
                 &answers,
+                quiet_ms.map(Duration::from_millis),
+            ),
+            Request::SessionChoose {
+                id,
+                key,
+                option,
+                quiet_ms,
+            } => self.choose(
+                caller,
+                &id,
+                &key,
+                option,
                 quiet_ms.map(Duration::from_millis),
             ),
             Request::SessionTouch { id } => self.touch(caller, &id),
@@ -2115,6 +2131,93 @@ impl Inner {
         result.map(|()| Response::Ok)
     }
 
+    /// `session_choose`: pick option `option` of the prompt `key` the
+    /// session's agent shows (`TerminalView::choice`), for user callers. Only
+    /// while the screen shows that prompt with that option and the agent
+    /// asks something (nothing typed otherwise: `question_gone`); the
+    /// option's number is the one key sent, and `ok` once the prompt left
+    /// the screen. Audited with the option's number. Works without the
+    /// state lock: it waits for the screen.
+    fn choose(
+        &self,
+        caller: &Caller,
+        id: &SessionId,
+        key: &str,
+        option: u8,
+        quiet: Option<Duration>,
+    ) -> Result<Response, ApiError> {
+        use crate::agent_output::choices;
+        let (record, terminal, agent) = {
+            let state = self.lock();
+            let record = self.target(&state, caller, Op::Choose, id)?;
+            let terminal = self.running_terminal(&state, id);
+            let agent = state
+                .live
+                .get(id)
+                .and_then(|live| live.tracker.detected_agent().map(String::from));
+            (record, terminal, agent)
+        };
+        let result = (|| {
+            let terminal = terminal.ok_or_else(|| not_live(id))?;
+            let agent = agent.ok_or_else(|| question_gone("no agent runs in the session"))?;
+            let shown = || {
+                self.host
+                    .read(terminal, ReadSource::Visible, None, TextFormat::Text)
+                    .ok()
+                    .and_then(|read| choices::read(&agent, &read.text))
+                    .filter(|prompt| prompt.key == key)
+            };
+            let prompt =
+                shown().ok_or_else(|| question_gone("the screen doesn't show that prompt"))?;
+            if !prompt
+                .options
+                .iter()
+                .any(|offered| offered.number == option)
+            {
+                return Err(invalid("the prompt offers no such option".to_owned()));
+            }
+            let asking = self
+                .lock()
+                .live
+                .get(id)
+                .filter(|live| live.terminal == terminal)
+                .is_some_and(|live| live.tracker.current() == Lifecycle::Blocked)
+                || asks_now(&*self.host, self.detector, terminal);
+            if !asking {
+                return Err(question_gone("the agent asks nothing now"));
+            }
+            let keys = [option.to_string()];
+            match quiet {
+                Some(quiet) => self.host.send_keys_when_quiet(terminal, &keys, None, quiet),
+                None => self.host.send_keys(terminal, &keys, None),
+            }
+            .map_err(host_error)?;
+            let start = Instant::now();
+            while start.elapsed() < CHOICE_WAIT {
+                std::thread::sleep(Duration::from_millis(40));
+                if shown().is_none() {
+                    return Ok(());
+                }
+            }
+            Err(ApiError::new(
+                ErrorCode::NotTaken,
+                "the prompt stayed on screen",
+            ))
+        })();
+        crate::log_info!("control: picking option {option} of {id}'s prompt: {result:?}");
+        let state = self.lock();
+        self.audit_outcome(
+            &state,
+            caller,
+            Op::Choose,
+            Some(&record.scope),
+            Some(id),
+            Some(audit::clip(&format!("option {option}"))),
+            &result,
+        );
+        result.map(|()| Response::Ok)
+    }
+
     /// Mark a session as just used: list ordering, and `done` → `idle`.
     /// `session_turn`: the live agent's current turn, for user callers.
     fn turn(&self, caller: &Caller, id: &SessionId) -> Result<Response, ApiError> {
@@ -2641,6 +2744,9 @@ impl Inner {
 
     fn on_output(&self, terminal: TerminalId, session_id: &SessionId) {
         let detection = self.detect(terminal);
+        let choice = detection
+            .as_ref()
+            .and_then(|detection| self.choice_on(terminal, detection));
         let process = self.host.info(terminal).and_then(|info| info.foreground);
         let now = self.now();
         let plan = self.resume_plan(terminal, session_id, now);
@@ -2658,6 +2764,7 @@ impl Inner {
             return;
         };
         live.output_ms = now;
+        live.choice = choice;
         if let Some(detection) = detection {
             let changed_agent = live.working_directory.as_ref().is_some_and(|context| {
                 detection.agent.as_deref() != Some(context.agent.as_str())
@@ -3120,6 +3227,26 @@ impl Inner {
         self.changed.notify_all();
     }
 
+    /// The prompt with numbered options the terminal's screen shows, while
+    /// `detection` reads its agent asking something. Called without the
+    /// state lock held.
+    fn choice_on(
+        &self,
+        terminal: TerminalId,
+        detection: &Detection,
+    ) -> Option<session_core::model::ChoicePrompt> {
+        if detection.lifecycle != Lifecycle::Blocked {
+            return None;
+        }
+        let agent = detection.agent.as_deref()?;
+        let screen = self
+            .host
+            .read(terminal, ReadSource::Visible, None, TextFormat::Text)
+            .ok()?
+            .text;
+        crate::agent_output::choices::read(agent, &screen)
+    }
+
     /// Run detection on the terminal's visible screen and foreground
     /// process. Called without the state lock held.
     fn detect(&self, terminal: TerminalId) -> Option<Detection> {
@@ -3272,6 +3399,7 @@ impl Inner {
                             rows: info.rows,
                             controlled: info.controlled,
                             alternate_screen: info.alternate_screen,
+                            choice: live.choice.clone(),
                         }),
                     },
                     TerminalState::Exited { code } => Runtime {
@@ -4101,6 +4229,10 @@ fn asks_now(host: &dyn TerminalHost, detector: Detector, terminal: TerminalId) -
 /// How long `session_answer` waits, once the dialog closed, for its
 /// question's result in the agent's log (read at most every second).
 const ANSWER_RESULT_WAIT: Duration = Duration::from_secs(10);
+
+/// How long `session_choose` waits for the prompt to leave the screen once
+/// the option's number went in.
+const CHOICE_WAIT: Duration = Duration::from_secs(3);
 
 /// A session's terminal as `session_answer` works it.
 struct AnswerTerminal<'a> {

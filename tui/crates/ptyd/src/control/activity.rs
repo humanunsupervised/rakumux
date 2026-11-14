@@ -228,6 +228,13 @@ impl ActivityTracker {
         self.received_ms
     }
 
+    /// Whether it asks the user something (`NeedsInput`) in `conversation`.
+    pub fn asks_in(&self, conversation: &str) -> bool {
+        self.phase == ActivityPhase::NeedsInput
+            && self.conversation == conversation
+            && self.asked_ms.is_some()
+    }
+
     /// Whether it asks the user something (`NeedsInput`) that `conversation`,
     /// as the agent's log shows it, hasn't moved past: nothing of it is dated
     /// after the update that asked (`moved_at`, by the conversation's clock,

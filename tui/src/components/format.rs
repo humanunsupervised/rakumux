@@ -834,6 +834,7 @@ mod tests {
             rows: 24,
             controlled: false,
             alternate_screen: true,
+            choice: None,
         });
         assert_eq!(secondary_text(&session, 40, Icons::Plain, true), "htop");
         session.agent = Some(session_core::model::AgentInfo {
