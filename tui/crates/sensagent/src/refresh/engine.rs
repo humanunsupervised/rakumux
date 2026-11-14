@@ -174,6 +174,7 @@ pub struct StatusRefresher<S, A, C = SystemClock> {
     new_session_state: Option<std::path::PathBuf>,
     session_deletion_state: Option<std::path::PathBuf>,
     session_rename_state: Option<std::path::PathBuf>,
+    heartbeat_action_state: Option<std::path::PathBuf>,
     /// Where updates keep which were installed across a restart.
     update_state: Option<std::path::PathBuf>,
     /// Installs the releases asked of this machine on rakumux.com.
@@ -223,6 +224,7 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
             new_session_state: None,
             session_deletion_state: None,
             session_rename_state: None,
+            heartbeat_action_state: None,
             update_state: None,
             updater: None,
             version: None,
@@ -307,6 +309,12 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
         self
     }
 
+    /// Keep which heartbeat actions asked for on rakumux.com were handled in `path`.
+    pub fn with_heartbeat_action_state(mut self, path: std::path::PathBuf) -> Self {
+        self.heartbeat_action_state = Some(path);
+        self
+    }
+
     pub fn with_new_session_state(mut self, path: std::path::PathBuf) -> Self {
         self.new_session_state = Some(path);
         self
@@ -320,6 +328,11 @@ impl<S: StatusStore, A: CredentialStore, C: WallClock> StatusRefresher<S, A, C> 
     /// Where renames keep their state, if anywhere.
     pub(crate) fn session_rename_state(&self) -> Option<std::path::PathBuf> {
         self.session_rename_state.clone()
+    }
+
+    /// Where heartbeat actions keep their state, if anywhere.
+    pub(crate) fn heartbeat_action_state(&self) -> Option<std::path::PathBuf> {
+        self.heartbeat_action_state.clone()
     }
 
     pub(crate) fn new_session_state(&self) -> Option<std::path::PathBuf> {

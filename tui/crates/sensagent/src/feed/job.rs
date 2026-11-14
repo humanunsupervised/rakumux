@@ -59,6 +59,10 @@ pub(crate) enum FeedResult {
     SessionRenameReported,
     /// rakumux.com took an update's status.
     UpdateReported,
+    /// This machine's heartbeats were stored.
+    HeartbeatsStored,
+    /// A heartbeat action's status was taken.
+    HeartbeatActionReported,
 }
 
 /// A finished feed request, tagged with the account revision it was made for.
@@ -94,7 +98,9 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             | FeedRequest::NewSessionStatus { .. }
             | FeedRequest::SessionDeletionStatus { .. }
             | FeedRequest::SessionRenameStatus { .. }
-            | FeedRequest::UpdateStatus { .. } => String::new(),
+            | FeedRequest::UpdateStatus { .. }
+            | FeedRequest::Heartbeats { .. }
+            | FeedRequest::HeartbeatActionStatus { .. } => String::new(),
         };
         let http = match &self.request {
             FeedRequest::Upload { body, .. } => FeedHttp::Upload(body),
@@ -115,6 +121,8 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
             FeedRequest::SessionDeletionStatus { body } => FeedHttp::SessionDeletionStatus(body),
             FeedRequest::SessionRenameStatus { body } => FeedHttp::SessionRenameStatus(body),
             FeedRequest::UpdateStatus { body } => FeedHttp::UpdateStatus(body),
+            FeedRequest::Heartbeats { body } => FeedHttp::Heartbeats(body),
+            FeedRequest::HeartbeatActionStatus { body } => FeedHttp::HeartbeatActionStatus(body),
         };
         let outcome = self
             .account
@@ -166,6 +174,13 @@ impl<A: CredentialStore, C: WallClock> FeedJob<A, C> {
                     }
                     FeedRequest::UpdateStatus { .. } => {
                         super::updates::reported(&reply).map(|()| FeedResult::UpdateReported)
+                    }
+                    FeedRequest::Heartbeats { .. } => {
+                        super::heartbeats::stored(&reply).map(|()| FeedResult::HeartbeatsStored)
+                    }
+                    FeedRequest::HeartbeatActionStatus { .. } => {
+                        super::heartbeat_actions::reported(&reply)
+                            .map(|()| FeedResult::HeartbeatActionReported)
                     }
                 },
                 Some(Err(error)) => Err(transport(error)),

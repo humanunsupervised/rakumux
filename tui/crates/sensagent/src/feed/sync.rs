@@ -320,7 +320,9 @@ impl FeedSync {
                 | FeedResult::NewSessionReported
                 | FeedResult::SessionDeletionReported
                 | FeedResult::SessionRenameReported
-                | FeedResult::UpdateReported,
+                | FeedResult::UpdateReported
+                | FeedResult::HeartbeatsStored
+                | FeedResult::HeartbeatActionReported,
             ) => {}
             Err(failure) => self.fail(failure, now),
         }

@@ -9,9 +9,10 @@ use std::time::{Duration, Instant, SystemTime};
 use session_core::api::{
     AgentReply, CallerInfo, CreateSession, ErrorCode, EventEnvelope, QuestionAnswer,
     ResourceSample, SessionEvent, SubscribeRequest, TranscriptCursor, TranscriptPage,
-    CAPABILITY_ANSWER, CAPABILITY_RESOURCES, CAPABILITY_SUBMIT_BLOCKED,
+    CAPABILITY_ANSWER, CAPABILITY_HEARTBEATS, CAPABILITY_RESOURCES, CAPABILITY_SUBMIT_BLOCKED,
 };
 use session_core::client::SessionApi;
+use session_core::heartbeat::Heartbeat;
 use session_core::ids::{ReplyId, SessionId};
 use session_core::model::{SessionStatus, SessionView};
 use thiserror::Error;
@@ -30,11 +31,12 @@ use crate::auth::{
 use crate::cloud::FeatureChange;
 use crate::dispatch::{DispatchError, FeaturesCompletion, FeaturesJob, StatusConsentOffer};
 use crate::feed::{
-    ChatSync, ChatWork, DeletionWork, FeedCompletion, FeedFailure, FeedJob, FeedPage, FeedReply,
-    FeedRequest, FeedResult, FeedSync, Fetch, Fetched, LogSync, NewSessionSync, NewSessionWork,
-    PokeEvent, PokeSync, RealtimeToken, RenameWork, ReplySync, ReplyWork, ResourceSync,
-    ResourceWork, SessionDeletionSync, SessionMessage, SessionRenameSync, SessionSync, TurnRead,
-    UpdateSync, UpdateWork, Uploads,
+    ActionWork, ChatSync, ChatWork, DeletionWork, FeedCompletion, FeedFailure, FeedJob, FeedPage,
+    FeedReply, FeedRequest, FeedResult, FeedSync, Fetch, Fetched, HeartbeatAction,
+    HeartbeatActionFailure, HeartbeatActionSync, HeartbeatSync, HeartbeatWork, LogSync,
+    NewSessionSync, NewSessionWork, PokeEvent, PokeSync, RealtimeToken, RenameWork, ReplySync,
+    ReplyWork, ResourceSync, ResourceWork, SessionDeletionSync, SessionMessage, SessionRenameSync,
+    SessionSync, TurnRead, UpdateSync, UpdateWork, Uploads,
 };
 use crate::status::{ConsentRevision, ConsentSnapshot, FolderConsent, StatusStore};
 
@@ -138,6 +140,9 @@ struct DaemonFeatures {
     /// options (capability `session.choose`): picks from rakumux.com are
     /// taken only then.
     choices: bool,
+    /// It runs heartbeats (capability `heartbeats`): they're uploaded, and
+    /// actions on them taken, only then.
+    heartbeats: bool,
 }
 
 impl DaemonFeatures {
@@ -153,6 +158,7 @@ impl DaemonFeatures {
             agent_answers: crate::feed::AGENT_ANSWERS
                 .map(|(daemon, _)| has(CAPABILITY_ANSWER) && has(daemon)),
             choices: has(session_core::api::CAPABILITY_CHOOSE),
+            heartbeats: has(CAPABILITY_HEARTBEATS),
         }
     }
 }
@@ -223,6 +229,15 @@ enum Message {
     SessionRenamed(String, Result<(), ErrorCode>),
     /// A rename's status report finished.
     SessionRenameReported(FeedCompletion),
+    /// The daemon's heartbeats, as read (or why not).
+    Heartbeats(Result<Vec<Heartbeat>, ErrorCode>),
+    /// The heartbeats' upload finished.
+    HeartbeatsDone(FeedCompletion),
+    /// The daemon carried out a heartbeat action from rakumux.com (its id),
+    /// or didn't: the run's session for a run.
+    HeartbeatActed(String, Result<Option<String>, HeartbeatActionFailure>),
+    /// A heartbeat action's status report finished.
+    HeartbeatActionReported(FeedCompletion),
     /// The updater finished an update asked of this machine (its id).
     UpdateInstalled(String, Result<(), crate::service::UpdateFailure>),
     /// An update's status report finished.
@@ -305,6 +320,14 @@ enum Work<A, C> {
     RenameSession(String, SessionId, String),
     /// Report a rename's status.
     SessionRenameReport(FeedJob<A, C>),
+    /// Ask the daemon for its heartbeats.
+    ReadHeartbeats,
+    /// Upload this machine's heartbeats.
+    HeartbeatsUpload(FeedJob<A, C>),
+    /// Carry out a heartbeat action from rakumux.com (its id, the heartbeat).
+    HeartbeatAct(String, String, HeartbeatAction),
+    /// Report a heartbeat action's status.
+    HeartbeatActionReport(FeedJob<A, C>),
     /// Report an update's status.
     UpdateReport(FeedJob<A, C>),
 }
@@ -334,7 +357,9 @@ impl<A, C> Workers<A, C> {
             | Work::ResourcesUpload(..)
             | Work::CreateSession(..)
             | Work::DeleteSession(..)
-            | Work::RenameSession(..) => self.replies.send(work),
+            | Work::RenameSession(..)
+            | Work::ReadHeartbeats
+            | Work::HeartbeatAct(..) => self.replies.send(work),
             work => self.shared.send(work),
         }
     }
@@ -702,6 +727,11 @@ fn own<S, A, C>(
     let mut deletions =
         SessionDeletionSync::new(machine.clone(), refresher.session_deletion_state());
     let mut renames = SessionRenameSync::new(machine.clone(), refresher.session_rename_state());
+    let mut heartbeats = HeartbeatSync::new(machine.clone(), std::env::var("HOME").ok());
+    let mut heartbeat_actions =
+        HeartbeatActionSync::new(machine.clone(), refresher.heartbeat_action_state());
+    // The daemon runs heartbeats (capability `heartbeats`).
+    let mut daemon_heartbeats = false;
     let updater = refresher.updater();
     let mut updates = UpdateSync::new(machine.clone(), updater.is_some(), refresher.update_state());
     let uploads = refresher.uploads().map(Uploads::new);
@@ -774,6 +804,21 @@ fn own<S, A, C>(
             follow_new_sessions(&refresher, &mut new_sessions, confirmed, work, now);
             follow_deletions(&refresher, &mut deletions, confirmed, work, now);
             follow_renames(&refresher, &mut renames, confirmed, work, now);
+            follow_heartbeats(
+                &refresher,
+                &mut heartbeats,
+                &sessions,
+                daemon_heartbeats,
+                work,
+                now,
+            );
+            follow_heartbeat_actions(
+                &refresher,
+                &mut heartbeat_actions,
+                confirmed && daemon_heartbeats,
+                work,
+                now,
+            );
             follow_updates(
                 &refresher,
                 &mut updates,
@@ -846,6 +891,9 @@ fn own<S, A, C>(
                 sessions.set_answers(daemon.answers);
                 sessions.set_agent_answers(&daemon.agent_answers);
                 sessions.set_choices(daemon.choices);
+                sessions.set_heartbeats(daemon.heartbeats);
+                daemon_heartbeats = daemon.heartbeats;
+                heartbeats.connected(now);
                 replies.set_answers(daemon.answers);
                 replies.set_choices(daemon.choices);
                 // Every session the daemon has: what's kept of others goes.
@@ -912,6 +960,14 @@ fn own<S, A, C>(
                 });
                 sessions.done(current, outcome, now);
                 chats.set_subagents(sessions.subagents(), now);
+                follow_heartbeats(
+                    &refresher,
+                    &mut heartbeats,
+                    &sessions,
+                    daemon_heartbeats,
+                    work,
+                    now,
+                );
                 if taken && renamed_at.is_none_or(|at| now.saturating_sub(at) >= RENAME_EVERY) {
                     renamed_at = Some(now);
                     machine = identity.rename();
@@ -924,6 +980,8 @@ fn own<S, A, C>(
                         &mut new_sessions,
                         &mut deletions,
                         &mut renames,
+                        &mut heartbeats,
+                        &mut heartbeat_actions,
                         now,
                     );
                 }
@@ -963,6 +1021,7 @@ fn own<S, A, C>(
                     new_sessions.read(current, std::mem::take(&mut read.new_sessions));
                     deletions.read(current, std::mem::take(&mut read.session_deletions));
                     renames.read(current, std::mem::take(&mut read.session_renames));
+                    heartbeat_actions.read(current, std::mem::take(&mut read.heartbeat_actions));
                     // So does the update asked of it, and the newest release.
                     updates.read(current, std::mem::take(&mut read.updates));
                     if let Some(release) = read.release.take().filter(|_| current) {
@@ -989,6 +1048,8 @@ fn own<S, A, C>(
                         &mut new_sessions,
                         &mut deletions,
                         &mut renames,
+                        &mut heartbeats,
+                        &mut heartbeat_actions,
                         now,
                     );
                     updates.rename(machine.clone());
@@ -1020,6 +1081,13 @@ fn own<S, A, C>(
                 );
                 follow_deletions(&refresher, &mut deletions, sessions.confirmed(), work, now);
                 follow_renames(&refresher, &mut renames, sessions.confirmed(), work, now);
+                follow_heartbeat_actions(
+                    &refresher,
+                    &mut heartbeat_actions,
+                    sessions.confirmed() && daemon_heartbeats,
+                    work,
+                    now,
+                );
             }
             Message::NewSessionCreated(id, result) => {
                 if let Ok(view) = &result {
@@ -1068,6 +1136,68 @@ fn own<S, A, C>(
                 });
                 deletions.reported(current, outcome, now);
                 follow_deletions(&refresher, &mut deletions, sessions.confirmed(), work, now);
+            }
+            Message::Heartbeats(result) => {
+                heartbeats.read_done(result, now);
+                follow_heartbeats(
+                    &refresher,
+                    &mut heartbeats,
+                    &sessions,
+                    daemon_heartbeats,
+                    work,
+                    now,
+                );
+            }
+            Message::HeartbeatsDone(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::HeartbeatsStored => Ok(()),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                heartbeats.done(current, outcome, now);
+                follow_heartbeats(
+                    &refresher,
+                    &mut heartbeats,
+                    &sessions,
+                    daemon_heartbeats,
+                    work,
+                    now,
+                );
+            }
+            Message::HeartbeatActed(id, result) => {
+                heartbeat_actions.acted(&id, result);
+                // What changed goes up at once.
+                heartbeats.changed(now);
+                follow_heartbeats(
+                    &refresher,
+                    &mut heartbeats,
+                    &sessions,
+                    daemon_heartbeats,
+                    work,
+                    now,
+                );
+                follow_heartbeat_actions(
+                    &refresher,
+                    &mut heartbeat_actions,
+                    sessions.confirmed() && daemon_heartbeats,
+                    work,
+                    now,
+                );
+            }
+            Message::HeartbeatActionReported(completion) => {
+                let current = refresher.is_current(completion.revision);
+                let outcome = completion.outcome.and_then(|result| match result {
+                    FeedResult::HeartbeatActionReported => Ok(()),
+                    _ => Err(FeedFailure::Invalid),
+                });
+                heartbeat_actions.reported(current, outcome, now);
+                follow_heartbeat_actions(
+                    &refresher,
+                    &mut heartbeat_actions,
+                    sessions.confirmed() && daemon_heartbeats,
+                    work,
+                    now,
+                );
             }
             Message::SessionRenamed(id, result) => {
                 renames.renamed(&id, result);
@@ -1203,6 +1333,8 @@ fn own<S, A, C>(
                         &mut new_sessions,
                         &mut deletions,
                         &mut renames,
+                        &mut heartbeats,
+                        &mut heartbeat_actions,
                         now,
                     );
                 }
@@ -1224,6 +1356,8 @@ fn own<S, A, C>(
                         &mut new_sessions,
                         &mut deletions,
                         &mut renames,
+                        &mut heartbeats,
+                        &mut heartbeat_actions,
                         now,
                     );
                 }
@@ -1593,6 +1727,8 @@ fn rename(
     new_sessions: &mut NewSessionSync,
     deletions: &mut SessionDeletionSync,
     renames: &mut SessionRenameSync,
+    heartbeats: &mut HeartbeatSync,
+    heartbeat_actions: &mut HeartbeatActionSync,
     now: Duration,
 ) {
     eprintln!(
@@ -1605,6 +1741,8 @@ fn rename(
     new_sessions.rename(machine.to_owned());
     deletions.rename(machine.to_owned());
     renames.rename(machine.to_owned());
+    heartbeats.rename(machine.to_owned(), now);
+    heartbeat_actions.rename(machine.to_owned());
 }
 
 /// Start the next chat read or upload, when one is due: only while signed in
@@ -1915,6 +2053,86 @@ fn follow_sessions<S, A, C>(
             let _ = work.send(Work::SessionsUpload(job));
         }
         None => sessions.done(false, Err(FeedFailure::Unauthorized), now),
+    }
+}
+
+/// Start the next read of the daemon's heartbeats or upload of them, when one
+/// is due: only signed in with the account's feed on, this machine's name
+/// confirmed, rakumux.com taking heartbeats and the daemon running them.
+fn follow_heartbeats<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    heartbeats: &mut HeartbeatSync,
+    sessions: &SessionSync,
+    daemon: bool,
+    work: &Workers<A, C>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled = refresher.account().is_some()
+        && refresher.feed_switch() == Some(true)
+        && sessions.confirmed()
+        && sessions.heartbeats()
+        && daemon;
+    heartbeats.set_enabled(enabled, now);
+    for _ in 0..2 {
+        match heartbeats.next_work(now, wall_ms()) {
+            Some(HeartbeatWork::Read) => {
+                let _ = work.send(Work::ReadHeartbeats);
+            }
+            Some(HeartbeatWork::Upload(request)) => match refresher.feed_job(request) {
+                Some(job) => {
+                    let _ = work.send(Work::HeartbeatsUpload(job));
+                }
+                None => {
+                    heartbeats.done(false, Err(FeedFailure::Unauthorized), now);
+                    return;
+                }
+            },
+            None => return,
+        }
+    }
+}
+
+/// Start what heartbeat actions asked on rakumux.com need next: carry one out,
+/// then report. Only while signed in with the account's feed on, this
+/// machine's name `confirmed` and the daemon running heartbeats.
+fn follow_heartbeat_actions<S, A, C>(
+    refresher: &StatusRefresher<S, A, C>,
+    actions: &mut HeartbeatActionSync,
+    confirmed: bool,
+    work: &Workers<A, C>,
+    now: Duration,
+) where
+    S: StatusStore,
+    A: CredentialStore + 'static,
+    C: WallClock + 'static,
+{
+    let enabled =
+        refresher.account().is_some() && refresher.feed_switch() == Some(true) && confirmed;
+    actions.set_enabled(enabled, now);
+    for _ in 0..4 {
+        match actions.next_work(now) {
+            Some(ActionWork::Act {
+                id,
+                heartbeat,
+                action,
+            }) => {
+                let _ = work.send(Work::HeartbeatAct(id, heartbeat, action));
+            }
+            Some(ActionWork::Report(request)) => match refresher.feed_job(request) {
+                Some(job) => {
+                    let _ = work.send(Work::HeartbeatActionReport(job));
+                }
+                None => {
+                    actions.reported(false, Err(FeedFailure::Unauthorized), now);
+                    return;
+                }
+            },
+            None => return,
+        }
     }
 }
 
@@ -2333,6 +2551,33 @@ where
                     .map(|_| ())
                     .map_err(|error| error.code);
                 Message::SessionRenamed(id, result)
+            }
+            Ok(Work::ReadHeartbeats) => {
+                Message::Heartbeats(api.heartbeats(None).map_err(|error| error.code))
+            }
+            Ok(Work::HeartbeatsUpload(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::HeartbeatsDone(completion),
+                    Err(_) => Message::HeartbeatsDone(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
+            }
+            Ok(Work::HeartbeatAct(id, heartbeat, action)) => {
+                let result = crate::feed::carry_out_heartbeat_action(api, &heartbeat, action);
+                Message::HeartbeatActed(id, result)
+            }
+            Ok(Work::HeartbeatActionReport(job)) => {
+                let revision = job.revision;
+                match panic::catch_unwind(AssertUnwindSafe(|| job.run())) {
+                    Ok(completion) => Message::HeartbeatActionReported(completion),
+                    Err(_) => Message::HeartbeatActionReported(FeedCompletion {
+                        revision,
+                        outcome: Err(FeedFailure::Unavailable(None)),
+                    }),
+                }
             }
             Ok(Work::SessionRenameReport(job)) => {
                 let revision = job.revision;

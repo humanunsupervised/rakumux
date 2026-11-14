@@ -354,6 +354,132 @@ fn a_session_asked_on_rakumux_com_to_be_renamed_takes_the_name_once() {
     daemon.stop();
 }
 
+/// Heartbeats on rakumux.com: once the cloud takes them, the machine uploads
+/// an agent's heartbeat waiting for approval (its task masked, its folder by
+/// name), and carries out what's asked of it there: an `enable` naming an
+/// older version fails `changed`, one naming the version read approves it,
+/// `pause` pauses it, `run` starts a run (whose session the list marks) and
+/// reports its session, and one for a heartbeat this machine hasn't fails
+/// `not_listed`.
+#[test]
+fn heartbeats_go_to_rakumux_com_and_are_approved_paused_and_run_from_there() {
+    use session_core::heartbeat::{HeartbeatFields, HeartbeatSpec, Schedule};
+    let world = World::new();
+    world.cloud.state().accepts = vec!["heartbeats"];
+    let mut daemon = world.start_daemon();
+    let client = world.client();
+    let made = client
+        .heartbeat_create(HeartbeatSpec {
+            scope: Some(ScopeRoot::resolve(&world.work).unwrap()),
+            name: Some("nightly".into()),
+            fields: HeartbeatFields {
+                agent: None,
+                command: Some("sleep 600".into()),
+                prompt: Some(
+                    "Use OPENAI_API_KEY=sk-e2eabcdefghijklmnopqrstuvwxyz0123456789 and open a PR"
+                        .into(),
+                ),
+                schedule: Some(Schedule::Every { minutes: 30 }),
+                by_agent: true,
+            },
+            enabled: false,
+        })
+        .unwrap();
+    assert!(made.awaiting_approval);
+    let id = made.id.as_str().to_owned();
+    let mut service = world.start_service(1);
+    let uploaded = |id: &str| -> Option<Value> {
+        let state = world.cloud.state();
+        state.heartbeats.as_ref().and_then(|list| {
+            list["heartbeats"]
+                .as_array()?
+                .iter()
+                .find(|heartbeat| heartbeat["id"] == id)
+                .cloned()
+        })
+    };
+    world.wait("the heartbeat uploaded, waiting for approval", || {
+        world.cloud.state().says("heartbeats") && uploaded(&id).is_some()
+    });
+    let state = uploaded(&id).unwrap();
+    assert_eq!(state["awaiting_approval"], true, "{state}");
+    // Made through the user's client (as `rakumux-mcp` does): not a session's.
+    assert_eq!(state["by_agent"], false, "{state}");
+    assert_eq!(state["folder"], "work", "{state}");
+    assert_eq!(state["schedule"], json!({"kind": "every", "minutes": 30}));
+    assert!(
+        !state["prompt"].as_str().unwrap().contains("sk-e2e"),
+        "{state}"
+    );
+    let version = state["updated_at"].as_i64().unwrap();
+
+    let stale = world
+        .cloud
+        .ask_heartbeat_action(MACHINE, &id, "enable", Some(version - 1000));
+    let approve = world
+        .cloud
+        .ask_heartbeat_action(MACHINE, &id, "enable", Some(version));
+    let run = world.cloud.ask_heartbeat_action(MACHINE, &id, "run", None);
+    let pause = world
+        .cloud
+        .ask_heartbeat_action(MACHINE, &id, "pause", None);
+    let unknown = world
+        .cloud
+        .ask_heartbeat_action(MACHINE, &ulid(), "pause", None);
+    let reported = |action: &str| -> Option<Value> {
+        world
+            .cloud
+            .state()
+            .heartbeat_action_reports
+            .iter()
+            .find(|report| report["id"] == action)
+            .cloned()
+    };
+    world.wait("the five actions reported", || {
+        [&stale, &approve, &run, &pause, &unknown]
+            .iter()
+            .all(|action| reported(action).is_some())
+    });
+    let report = reported(&stale).unwrap();
+    assert_eq!(report["status"], "failed", "{}", world.diagnostics());
+    assert_eq!(report["failure"], "changed", "{}", world.diagnostics());
+    assert_eq!(reported(&approve).unwrap()["status"], "done");
+    assert_eq!(reported(&pause).unwrap()["status"], "done");
+    let report = reported(&unknown).unwrap();
+    assert_eq!(report["failure"], "not_listed", "{}", world.diagnostics());
+    let report = reported(&run).unwrap();
+    assert_eq!(report["status"], "done", "{}", world.diagnostics());
+    let session = report["session"].as_str().unwrap().to_owned();
+
+    // The daemon has it approved, then paused, and the run is its session.
+    let heartbeat = client.heartbeat(&made.id).unwrap();
+    assert!(!heartbeat.awaiting_approval);
+    assert!(!heartbeat.enabled);
+    let view = client
+        .get(&session_core::ids::SessionId::from_string(session.clone()))
+        .unwrap();
+    assert_eq!(view.heartbeat.unwrap().heartbeat, made.id);
+    world.wait("the upload and the session list to say so", || {
+        let listed = world.cloud.state().sessions.as_ref().is_some_and(|list| {
+            list["sessions"].as_array().is_some_and(|sessions| {
+                sessions.iter().any(|s| {
+                    s["id"] == session.as_str()
+                        && s["heartbeat"] == json!({"heartbeat": id, "run": 1})
+                })
+            })
+        });
+        listed
+            && uploaded(&id).is_some_and(|state| {
+                state["awaiting_approval"] == false
+                    && state["enabled"] == false
+                    && state["runs"] == 1
+            })
+    });
+    service.stop();
+    let _ = client.shutdown();
+    daemon.stop();
+}
+
 #[test]
 fn a_session_asked_on_rakumux_com_to_be_deleted_goes_to_its_history_once() {
     let world = World::new();

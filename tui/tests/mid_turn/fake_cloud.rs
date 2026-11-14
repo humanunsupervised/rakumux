@@ -130,6 +130,14 @@ pub struct State {
     pub renames: Vec<Value>,
     /// Rename status reports, as sent.
     pub rename_reports: Vec<Value>,
+    /// What a session list's answer says the cloud takes (`accepts`).
+    pub accepts: Vec<&'static str>,
+    /// The latest heartbeats upload, as sent.
+    pub heartbeats: Option<Value>,
+    /// Heartbeat actions asked (`heartbeatAction`), as stored.
+    pub heartbeat_actions: Vec<Value>,
+    /// Heartbeat action status reports, as sent.
+    pub heartbeat_action_reports: Vec<Value>,
 }
 
 impl State {
@@ -284,6 +292,28 @@ impl FakeCloud {
             json!({"id": id, "machine": machine, "session": session, "name": name,
             "status": "pending", "created_at": at, "status_at": at}),
         );
+        id
+    }
+
+    /// Ask this machine to `action` (`enable`, `pause`, `run`) its heartbeat
+    /// `heartbeat`, as the website does (`enable` with the `updated_at` the
+    /// user saw); the action's id.
+    #[allow(dead_code)]
+    pub fn ask_heartbeat_action(
+        &self,
+        machine: &str,
+        heartbeat: &str,
+        action: &str,
+        updated_at: Option<i64>,
+    ) -> String {
+        let id = ulid();
+        let at = now_ms();
+        let mut asked = json!({"id": id, "machine": machine, "heartbeat": heartbeat,
+            "action": action, "status": "pending", "created_at": at, "status_at": at});
+        if let Some(updated_at) = updated_at {
+            asked["updated_at"] = json!(updated_at);
+        }
+        self.state().heartbeat_actions.push(asked);
         id
     }
 
@@ -454,7 +484,34 @@ impl Served {
             ("POST", "/api/v1/feed/sessions") => {
                 let stored = body["sessions"].as_array().map_or(0, Vec::len);
                 state.sessions = Some(body);
+                let mut stored = json!({"version": 1, "stored": stored});
+                if !state.accepts.is_empty() {
+                    stored["accepts"] = json!(state.accepts);
+                }
+                answer(200, stored)
+            }
+            ("POST", "/api/v1/feed/heartbeats") if state.accepts.contains(&"heartbeats") => {
+                let stored = body["heartbeats"].as_array().map_or(0, Vec::len);
+                state.heartbeats = Some(body);
                 answer(200, json!({"version": 1, "stored": stored}))
+            }
+            ("POST", "/api/v1/feed/heartbeat-actions/status") => {
+                let Some(stored) = state
+                    .heartbeat_actions
+                    .iter_mut()
+                    .find(|action| action["id"] == body["id"])
+                else {
+                    return error(404, "invalid_request");
+                };
+                stored["status"] = body["status"].clone();
+                for field in ["failure", "session"] {
+                    if !body[field].is_null() {
+                        stored[field] = body[field].clone();
+                    }
+                }
+                let stored = stored.clone();
+                state.heartbeat_action_reports.push(body);
+                answer(200, json!({"version": 1, "heartbeat_action": stored}))
             }
             ("GET", "/api/v1/feed/replies") => {
                 if request.query.get("machine") != Some(&self.machine.name) {
@@ -498,6 +555,14 @@ impl Served {
                         .filter(|rename| rename["status"] == "pending")
                         .collect();
                     read["session_renames"] = json!(pending);
+                }
+                if state.says("heartbeats") {
+                    let pending: Vec<&Value> = state
+                        .heartbeat_actions
+                        .iter()
+                        .filter(|action| action["status"] == "pending")
+                        .collect();
+                    read["heartbeat_actions"] = json!(pending);
                 }
                 answer(200, read)
             }

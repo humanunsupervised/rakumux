@@ -457,7 +457,8 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    line, at most 300 characters), only once the answer `accepts` `output`; as it changes the
    list, it goes with it, at most every 3 s, so rakumux.com shows what each agent is doing. A
    list that would pass the contract's 256 KiB goes without places and outputs. The list says
-   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents", "delete_sessions", "rename_sessions", "remote_update"]`,
+   `capabilities: ["reply_attachments", "new_sessions", "new_session_agents", "delete_sessions", "rename_sessions", "remote_update"]`
+   (and `heartbeats` while the daemon runs them),
    and `resources` as below, and this Rakumux's version (`rakumux_version`).
    **Releases and updates from rakumux.com** (`feed/updates.rs`, `UpdateSync`; contract
    `contracts/feed/`, "Releases and updates"): each replies read may say the newest release
@@ -536,6 +537,22 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    a time; each id is marked handled before the daemon is asked and kept with the reports not yet
    taken in `sensagent/status/session-renames.json` (0600, an hour), so a request is carried out at
    most once.
+   **Heartbeats on rakumux.com** (`feed/heartbeats.rs`, `HeartbeatSync`; `feed/heartbeat_actions.rs`,
+   `HeartbeatActionSync`; contract `contracts/feed/`, "Heartbeats"): while the daemon announces
+   `heartbeats` the session list says `heartbeats`, and once its answer `accepts` `heartbeats` (with
+   the feed on and the name confirmed) the service reads `heartbeat_list` every 5 s and uploads the
+   whole list (`POST /api/v1/feed/heartbeats`, at most 50) when it changes and every 10 minutes:
+   each heartbeat's folder name (never a path), agent, schedule, whether it's on or waits for
+   approval, `by_agent` (a session made it), `updated_at`, next run, runs and last run, its command
+   and task masked as chat text (the home directory as `~`); the session list marks each run
+   (`heartbeat`). The replies read brings the actions asked of them on rakumux.com
+   (`heartbeat_actions`), carried out as the user one at a time: `enable` only while the heartbeat's
+   `updated_at` is the one the user saw (else `changed`, nothing enabled; it approves an agent's),
+   `pause`, `run` (reported with the run's session); `not_listed`, `incomplete` (no command, task
+   or schedule) or `refused` otherwise (`POST /api/v1/feed/heartbeat-actions/status`). Each id is
+   marked handled before the daemon is asked and kept with the reports not yet taken in
+   `sensagent/status/heartbeat-actions.json` (0600, an hour), so an action is carried out at most
+   once.
    **Logs for the owner's viewer** (`feed/logs.rs`, `LogSync`; contract `contracts/feed/`, "Logs"):
    while `GET /api/v1/features` says `logs: {level}` (rakumux.com decides per account, owners only
    unless the deployment says otherwise) and this machine's name is confirmed, the service follows
@@ -1238,7 +1255,8 @@ accidents; they don't stop a hostile process running as the same user.
                                  new sessions from rakumux.com started or decided here and
                                  reports not yet taken; session-deletions.json and
                                  session-renames.json: the same for sessions deleted and
-                                 renamed from rakumux.com), machine.json (this
+                                 renamed from rakumux.com; heartbeat-actions.json: the same for
+                                 heartbeat actions), machine.json (this
                                  machine's feed name and id), its registration and private socket
   uploads/<reply id>/            0700: files attached to feed replies (0600), fetched by the
                                  account service and typed to the agent as paths; kept 7 days

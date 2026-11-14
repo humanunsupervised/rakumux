@@ -67,6 +67,16 @@ pub(crate) struct SessionState {
     /// The prompt with numbered options its agent shows while it asks.
     #[serde(skip_serializing_if = "Option::is_none")]
     choice: Option<ChoiceState>,
+    /// The heartbeat this session is a run of.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    heartbeat: Option<HeartbeatRef>,
+}
+
+/// The heartbeat a session is a run of (`contracts/feed/` `heartbeatRunRef`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct HeartbeatRef {
+    heartbeat: String,
+    run: u32,
 }
 
 /// The prompt with numbered options a session's agent shows, as the website
@@ -278,6 +288,13 @@ impl SessionState {
             } else {
                 None
             },
+            heartbeat: view.heartbeat.as_ref().and_then(|run| {
+                let heartbeat = run.heartbeat.as_str().to_owned();
+                (run.run >= 1 && crate::feed::is_entry_id(&heartbeat)).then_some(HeartbeatRef {
+                    heartbeat,
+                    run: run.run,
+                })
+            }),
         })
     }
 }
@@ -359,6 +376,8 @@ pub(crate) struct SessionSync {
     /// The cloud's last answer said it takes agents' prompts with numbered
     /// options.
     choices: bool,
+    /// The cloud's last answer said it takes heartbeats.
+    heartbeats: bool,
     /// rakumux.com answered a list under this name with anything but
     /// `machine_taken` (or a failure for now) since the switch was turned on:
     /// the name is this machine's, and its replies may be read.
@@ -395,6 +414,7 @@ impl SessionSync {
             subagents: false,
             output: false,
             choices: false,
+            heartbeats: false,
             confirmed: false,
             sessions: BTreeMap::new(),
             sent: None,
@@ -431,6 +451,7 @@ impl SessionSync {
         self.subagents = false;
         self.output = false;
         self.choices = false;
+        self.heartbeats = false;
         self.confirmed = false;
         self.sent = None;
         self.retry = RETRY_MIN;
@@ -469,6 +490,18 @@ impl SessionSync {
         for ((_, capability), supported) in wire::AGENT_ANSWERS.iter().zip(supported) {
             self.set_capability(capability, *supported);
         }
+    }
+
+    /// Whether the daemon runs heartbeats (capability `heartbeats`): the list
+    /// says `heartbeats` only then, so rakumux.com asks actions of them only
+    /// of a machine that carries them out. A change goes with the next upload.
+    pub fn set_heartbeats(&mut self, supported: bool) {
+        self.set_capability(super::HEARTBEATS, supported);
+    }
+
+    /// Whether rakumux.com's last answer said it takes heartbeats.
+    pub fn heartbeats(&self) -> bool {
+        self.heartbeats
     }
 
     fn set_capability(&mut self, capability: &'static str, supported: bool) {
@@ -559,6 +592,11 @@ impl SessionSync {
         if !self.choices || !self.capabilities.contains(&wire::CHOICE_ANSWERS) {
             without_choices(&mut list);
         }
+        if !self.heartbeats {
+            for session in &mut list {
+                session.heartbeat = None;
+            }
+        }
         list
     }
 
@@ -630,6 +668,7 @@ impl SessionSync {
                 self.subagents = stored.subagents;
                 self.output = stored.output;
                 self.choices = stored.choices;
+                self.heartbeats = stored.heartbeats;
                 self.sent = sent;
                 self.retry = RETRY_MIN;
                 self.next_send = now + SETTLE;

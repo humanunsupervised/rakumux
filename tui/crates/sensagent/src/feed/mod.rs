@@ -7,7 +7,8 @@
 //! machine's session list, for the website's Status and Folder (`sessions`);
 //! while someone has rtop open there, what the machine uses (`resources`);
 //! and the new sessions asked of it there (`new_sessions`), the deletions
-//! (`session_deletions`) and the renames (`session_renames`).
+//! (`session_deletions`) and the renames (`session_renames`); and its
+//! heartbeats (`heartbeats`) and the actions asked of them (`heartbeat_actions`).
 //!
 //! The cache and the upload queue are memory only, gone when the status
 //! service stops; where each chat's upload is up to is kept in the status
@@ -17,6 +18,8 @@
 mod agents;
 mod cache;
 mod chats;
+mod heartbeat_actions;
+mod heartbeats;
 mod job;
 mod logs;
 mod machine;
@@ -39,6 +42,11 @@ pub use cache::{
     ReplyFailure, ReplyStatus,
 };
 pub(crate) use chats::{write_private, ChatSync, ChatWork, READ_BYTES};
+pub(crate) use heartbeat_actions::{
+    carry_out as carry_out_heartbeat_action, Action as HeartbeatAction,
+    ActionFailure as HeartbeatActionFailure, ActionWork, HeartbeatActionSync,
+};
+pub(crate) use heartbeats::{HeartbeatSync, HeartbeatWork, HEARTBEATS};
 pub(crate) use job::FeedResult;
 pub use job::{FeedCompletion, FeedJob};
 pub(crate) use logs::LogSync;

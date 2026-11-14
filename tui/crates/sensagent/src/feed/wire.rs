@@ -153,6 +153,10 @@ pub(crate) enum FeedRequest {
     SessionRenameStatus { body: Vec<u8> },
     /// Say how an update asked for on rakumux.com went, as `body`.
     UpdateStatus { body: Vec<u8> },
+    /// Upload this machine's whole list of heartbeats, as `body`.
+    Heartbeats { body: Vec<u8> },
+    /// Say how a heartbeat action asked for on rakumux.com went, as `body`.
+    HeartbeatActionStatus { body: Vec<u8> },
 }
 
 impl FeedRequest {
@@ -411,6 +415,9 @@ pub(crate) struct SessionsStored {
     /// It takes each session's prompt with numbered options (`accepts` has
     /// `choices`).
     pub choices: bool,
+    /// It takes this machine's heartbeats, and which sessions are their runs
+    /// (`accepts` has `heartbeats`).
+    pub heartbeats: bool,
 }
 
 /// How many sessions rakumux.com holds for this machine now, and whether it
@@ -430,6 +437,7 @@ pub(crate) fn sessions_stored(reply: &FeedHttpReply) -> Result<SessionsStored, F
         subagents: stored.accepts.iter().any(|name| name == "subagents"),
         output: stored.accepts.iter().any(|name| name == "output"),
         choices: stored.accepts.iter().any(|name| name == "choices"),
+        heartbeats: stored.accepts.iter().any(|name| name == "heartbeats"),
     })
 }
 
@@ -1103,6 +1111,9 @@ struct WireReplies {
     /// Sessions asked of this machine to rename (`session_renames`), read row by row.
     #[serde(default)]
     session_renames: Option<serde_json::Value>,
+    /// Heartbeat actions asked of this machine (`heartbeat_actions`), read row by row.
+    #[serde(default)]
+    heartbeat_actions: Option<serde_json::Value>,
     /// The newest release rakumux.com knows of (`release`).
     #[serde(default)]
     release: Option<serde_json::Value>,
@@ -1133,6 +1144,8 @@ pub(crate) struct RepliesRead {
     pub session_deletions: Vec<super::session_deletions::DeletionAsk>,
     /// The renames pending for this machine, when the read brought them.
     pub session_renames: Vec<super::session_renames::RenameAsk>,
+    /// The heartbeat actions pending for this machine, when the read brought them.
+    pub heartbeat_actions: Vec<super::heartbeat_actions::ActionAsk>,
     /// The newest stable release rakumux.com knows of, when it says.
     pub release: Option<String>,
     /// The update asked of this machine, when the read brought one.
@@ -1195,6 +1208,7 @@ pub(crate) fn replies(reply: &FeedHttpReply) -> Result<RepliesRead, FeedFailure>
         new_sessions: super::new_sessions::asks(page.new_sessions),
         session_deletions: super::session_deletions::asks(page.session_deletions),
         session_renames: super::session_renames::asks(page.session_renames),
+        heartbeat_actions: super::heartbeat_actions::asks(page.heartbeat_actions),
         release: super::updates::release(page.release),
         updates: super::updates::asks(page.updates),
     })

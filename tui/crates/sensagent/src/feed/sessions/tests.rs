@@ -42,6 +42,7 @@ fn stored(places: bool) -> wire::SessionsStored {
         subagents: false,
         output: false,
         choices: false,
+        heartbeats: false,
     }
 }
 
@@ -111,6 +112,7 @@ fn the_list_says_what_the_tuis_status_and_folders_tabs_group_by() {
         Ok(wire::SessionsStored {
             output: true,
             choices: false,
+            heartbeats: false,
             ..stored(false)
         }),
         NOW,
@@ -208,6 +210,7 @@ fn rakumux_com_says_how_many_it_holds() {
             subagents: false,
             output: false,
             choices: false,
+            heartbeats: false,
         })
     );
     // A cloud that takes places says so; names it doesn't know are ignored.
@@ -222,6 +225,7 @@ fn rakumux_com_says_how_many_it_holds() {
             subagents: false,
             output: false,
             choices: false,
+            heartbeats: false,
         })
     );
     // One that takes subagents' messages in chats says that too.
@@ -236,6 +240,7 @@ fn rakumux_com_says_how_many_it_holds() {
             subagents: true,
             output: false,
             choices: false,
+            heartbeats: false,
         })
     );
     // And one that takes agents' latest steps.
@@ -250,6 +255,7 @@ fn rakumux_com_says_how_many_it_holds() {
             subagents: true,
             output: true,
             choices: false,
+            heartbeats: false,
         })
     );
     assert_eq!(
