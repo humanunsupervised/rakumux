@@ -5,7 +5,6 @@ use super::*;
 use flate2::{write::GzEncoder, Compression};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::os::unix::process::CommandExt;
 
 /// A fake GitHub release: its files by URL, and the URLs fetched.
 struct Source(HashMap<String, Vec<u8>>, RefCell<Vec<String>>);
@@ -166,14 +165,25 @@ fn checksum_version_and_unknown_files_fail_before_mutating_the_installation() {
 fn replacing_an_installation_does_not_end_a_running_program_from_the_old_bundle() {
     let directory = tempfile::tempdir().unwrap();
     let root = installed(directory.path());
-    fs::copy("/bin/sleep", root.join("rakumux-ptyd")).unwrap();
-    // Named `sleep` as it runs: a multi-call coreutils (Ubuntu 26.04's) picks
-    // its tool by that name and refuses `rakumux-ptyd`.
-    let mut child = Command::new(root.join("rakumux-ptyd"))
-        .arg0("sleep")
-        .arg("60")
-        .spawn()
-        .unwrap();
+    // A shell, not `sleep`: Ubuntu 26.04's sleep is the Rust coreutils'
+    // multi-call binary, which refuses to run under another name. The loop
+    // keeps the copied shell itself running.
+    fs::copy("/bin/sh", root.join("rakumux-ptyd")).unwrap();
+    // A parallel test's fork can hold the copy open for writing until it
+    // execs (ETXTBSY), so starting it is tried again for a moment.
+    let mut tries = 0;
+    let mut child = loop {
+        match Command::new(root.join("rakumux-ptyd"))
+            .args(["-c", "while :; do sleep 1; done"])
+            .spawn()
+        {
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 100 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            started => break started.unwrap(),
+        }
+    };
     let pid = child.id();
     let result = install(&source(package("0.1.5"), None), &root, "0.1.5", "linux-x64");
     let still_running = child.try_wait().unwrap().is_none();
