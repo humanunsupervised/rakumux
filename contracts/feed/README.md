@@ -304,8 +304,11 @@ conformance tests, not an HTTP server, database or local runtime.
   whether it's on or waits for approval, who made it, its command and task masked as chat text, when
   it runs next and its last run), replacing what was stored, when the list changes and every 10
   minutes meanwhile, and marks each session that is a heartbeat's run (`sessionState` `heartbeat`).
-  Never a path. On rakumux.com the user can ask the machine to `enable` one (approving it, when an
-  agent made or changed it), `pause` it or `run` it now: the cloud stores the action
+  Never a path. On rakumux.com the user can ask the machine to `pause` one. The contract also
+  carries `enable` (approving or turning one on) and `run` (a run now), but a machine refuses both
+  (`refused`, nothing asked of its daemon): whoever can write to rakumux.com could otherwise have a
+  command run there, so heartbeats are approved, turned on and run only on the machine itself
+  (releases before 0.1.61 carry them out). The cloud stores an action
   (`heartbeatAction` in common, under the id the page made) `pending`, only for a heartbeat that
   machine's latest upload lists and only while its session list advertises `heartbeats`; an `enable`
   carries the `updated_at` the user saw. The machine's replies read carries `heartbeat_actions`, its
@@ -313,7 +316,7 @@ conformance tests, not an HTTP server, database or local runtime.
   whatever `after` says; it takes each by its `id`, at most once, as its user would, and reports
   `heartbeat-action-status`: `done` (with the run's `session` for `run`), or `failed` with why
   (`not_listed`; `changed`: an `enable` whose heartbeat changed since that version, nothing enabled;
-  `incomplete`: no command, task or schedule; `refused`). Readers take a `failure` they don't know as
+  `incomplete`: no command, task or schedule; `refused`: the daemon refused, or an `enable` or `run`). Readers take a `failure` they don't know as
   a failure without a reason. Its next upload carries the change. One still pending 10 minutes after
   it was written is `expired`. Writing one pokes the account's machines, as a reply does.
 - **Releases and updates:** every replies read may say `release` (`{version}`), the newest
@@ -325,7 +328,8 @@ conformance tests, not an HTTP server, database or local runtime.
   (`machineUpdateState` in common: one open per machine, `pending`), pokes the account's
   machines, and gives it to that machine only (`updates` in its replies read, `{id, version}`,
   at most one, with every read until done or expired). It carries no command and no URL: the
-  machine installs that version through its own verified path (signed GitHub releases), restarts
+  machine installs that version through its own verified path (signed GitHub releases), never one
+  older than its own (`install_failed`, nothing fetched; from 0.1.61), restarts
   its server in place (sessions keep running) and its services, and reports `update-status`:
   `installing` as it starts, then `updated`, or `failed` with why (`unsupported`: npm, Homebrew
   or a source build; `install_failed`; `restart_failed`), each at most once and only for its own

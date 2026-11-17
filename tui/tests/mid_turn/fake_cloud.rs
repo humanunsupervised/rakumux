@@ -138,6 +138,10 @@ pub struct State {
     pub heartbeat_actions: Vec<Value>,
     /// Heartbeat action status reports, as sent.
     pub heartbeat_action_reports: Vec<Value>,
+    /// Updates asked of machines (`machineUpdate`), as stored.
+    pub updates: Vec<Value>,
+    /// Update status reports, as sent.
+    pub update_reports: Vec<Value>,
 }
 
 impl State {
@@ -314,6 +318,18 @@ impl FakeCloud {
             asked["updated_at"] = json!(updated_at);
         }
         self.state().heartbeat_actions.push(asked);
+        id
+    }
+
+    /// Ask `machine` to update to `version`, as the website does; the update's
+    /// id.
+    pub fn ask_update(&self, machine: &str, version: &str) -> String {
+        let id = ulid();
+        let at = now_ms();
+        self.state()
+            .updates
+            .push(json!({"id": id, "machine": machine,
+            "version": version, "status": "pending", "created_at": at, "status_at": at}));
         id
     }
 
@@ -513,6 +529,22 @@ impl Served {
                 state.heartbeat_action_reports.push(body);
                 answer(200, json!({"version": 1, "heartbeat_action": stored}))
             }
+            ("POST", "/api/v1/feed/updates/status") => {
+                let Some(stored) = state
+                    .updates
+                    .iter_mut()
+                    .find(|update| update["id"] == body["id"])
+                else {
+                    return error(404, "invalid_request");
+                };
+                stored["status"] = body["status"].clone();
+                if !body["failure"].is_null() {
+                    stored["failure"] = body["failure"].clone();
+                }
+                let stored = stored.clone();
+                state.update_reports.push(body);
+                answer(200, json!({"version": 1, "update": stored}))
+            }
             ("GET", "/api/v1/feed/replies") => {
                 if request.query.get("machine") != Some(&self.machine.name) {
                     return error(400, "invalid_request");
@@ -563,6 +595,15 @@ impl Served {
                         .filter(|action| action["status"] == "pending")
                         .collect();
                     read["heartbeat_actions"] = json!(pending);
+                }
+                if state.says("remote_update") {
+                    let pending: Vec<&Value> = state
+                        .updates
+                        .iter()
+                        .filter(|update| update["status"] == "pending")
+                        .take(1)
+                        .collect();
+                    read["updates"] = json!(pending);
                 }
                 answer(200, read)
             }

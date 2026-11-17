@@ -465,6 +465,19 @@ impl MachineUpdater {
 impl service::Updater for MachineUpdater {
     fn install(&self, version: &str) -> Result<(), service::UpdateFailure> {
         use crate::updater::{InstallMethod, SystemUpdateService, UpdateService};
+        // Never back: whoever can write to rakumux.com could otherwise move
+        // this machine to an older signed release, with the holes it had.
+        // The same version goes ahead (an automatic update may have
+        // installed it already, and its install then changes nothing).
+        if !matches!(
+            crate::updater::compare_versions(self.version, version),
+            Ok(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) {
+            eprintln!(
+                "rakumux-status: an update asked on rakumux.com wasn't newer than this release"
+            );
+            return Err(service::UpdateFailure::InstallFailed);
+        }
         let updater = SystemUpdateService;
         if updater.method() != InstallMethod::Binary {
             return Err(service::UpdateFailure::Unsupported);

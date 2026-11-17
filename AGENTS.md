@@ -467,7 +467,9 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    update: the read brings it (`updates`, `{id, version}`); the service marks the id handled
    (`sensagent/status/updates.json`, 0600, so it installs at most once), reports `installing`,
    and has the binary's updater (`service::Updater`, `account.rs`'s `MachineUpdater`) install that
-   version through `U`'s verified path (a binary installation only, else `unsupported`), restart
+   version through `U`'s verified path (a binary installation only, else `unsupported`; never one
+   older than this release, else `install_failed`, so nobody who can write to rakumux.com can move
+   a machine back to a release with holes since fixed), restart
    the server in place with the new `rakumux-ptyd` (sessions keep running) and the local API;
    it reports `updated` (or `failed`: `install_failed`, `restart_failed`), then hands over to the
    new release's service (`rakumux account restart-service`, hidden, detached). Open TUIs find
@@ -546,10 +548,11 @@ secret/history audit. See `PUBLISHING.md` for that release boundary.
    approval, `by_agent` (a session made it), `updated_at`, next run, runs and last run, its command
    and task masked as chat text (the home directory as `~`); the session list marks each run
    (`heartbeat`). The replies read brings the actions asked of them on rakumux.com
-   (`heartbeat_actions`), carried out as the user one at a time: `enable` only while the heartbeat's
-   `updated_at` is the one the user saw (else `changed`, nothing enabled; it approves an agent's),
-   `pause`, `run` (reported with the run's session); `not_listed`, `incomplete` (no command, task
-   or schedule) or `refused` otherwise (`POST /api/v1/feed/heartbeat-actions/status`). Each id is
+   (`heartbeat_actions`), one at a time: only `pause` is carried out, as the user (`not_listed`,
+   `incomplete` or `refused` when the daemon won't); `enable` and `run` fail `refused`, the daemon
+   never asked, since whoever can write to rakumux.com could otherwise have a command run here:
+   heartbeats are approved, turned on and run only on this machine (the Beats tab, `rakumux
+   heartbeat`) (`POST /api/v1/feed/heartbeat-actions/status`). Each id is
    marked handled before the daemon is asked and kept with the reports not yet taken in
    `sensagent/status/heartbeat-actions.json` (0600, an hour), so an action is carried out at most
    once.

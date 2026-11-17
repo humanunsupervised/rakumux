@@ -354,15 +354,58 @@ fn a_session_asked_on_rakumux_com_to_be_renamed_takes_the_name_once() {
     daemon.stop();
 }
 
+/// Updates asked on rakumux.com go only forward: one for a release older than
+/// this machine's fails `install_failed` before anything is fetched, and one
+/// for a newer release gets as far as the installation's own check (this
+/// source build can't update itself: `unsupported`).
+#[test]
+fn an_update_from_rakumux_com_never_goes_back() {
+    let world = World::new();
+    let mut daemon = world.start_daemon();
+    let mut service = world.start_service(1);
+    world.wait("the machine to say it takes updates", || {
+        world.cloud.state().says("remote_update")
+    });
+    let report = |id: &str| -> Option<Value> {
+        world
+            .cloud
+            .state()
+            .update_reports
+            .iter()
+            .find(|report| report["id"] == id && report["status"] == "failed")
+            .cloned()
+    };
+    let older = world.cloud.ask_update(MACHINE, "0.0.9");
+    world.wait("the older release refused", || report(&older).is_some());
+    assert_eq!(
+        report(&older).unwrap()["failure"],
+        "install_failed",
+        "{}",
+        world.diagnostics()
+    );
+    let newer = world.cloud.ask_update(MACHINE, "99.0.0");
+    world.wait("the newer release reaching the install", || {
+        report(&newer).is_some()
+    });
+    assert_eq!(
+        report(&newer).unwrap()["failure"],
+        "unsupported",
+        "{}",
+        world.diagnostics()
+    );
+    service.stop();
+    daemon.stop();
+}
+
 /// Heartbeats on rakumux.com: once the cloud takes them, the machine uploads
 /// an agent's heartbeat waiting for approval (its task masked, its folder by
-/// name), and carries out what's asked of it there: an `enable` naming an
-/// older version fails `changed`, one naming the version read approves it,
-/// `pause` pauses it, `run` starts a run (whose session the list marks) and
-/// reports its session, and one for a heartbeat this machine hasn't fails
-/// `not_listed`.
+/// name), and of what's asked of it there carries out only `pause`: `enable`
+/// (approving it, even naming the version read) and `run` fail `refused`
+/// with nothing approved or run, since whoever can write to rakumux.com
+/// could otherwise have a command run here; a `pause` for a heartbeat this
+/// machine hasn't fails `not_listed`.
 #[test]
-fn heartbeats_go_to_rakumux_com_and_are_approved_paused_and_run_from_there() {
+fn heartbeats_go_to_rakumux_com_and_only_pause_comes_back() {
     use session_core::heartbeat::{HeartbeatFields, HeartbeatSpec, Schedule};
     let world = World::new();
     world.cloud.state().accepts = vec!["heartbeats"];
@@ -413,9 +456,6 @@ fn heartbeats_go_to_rakumux_com_and_are_approved_paused_and_run_from_there() {
     );
     let version = state["updated_at"].as_i64().unwrap();
 
-    let stale = world
-        .cloud
-        .ask_heartbeat_action(MACHINE, &id, "enable", Some(version - 1000));
     let approve = world
         .cloud
         .ask_heartbeat_action(MACHINE, &id, "enable", Some(version));
@@ -435,46 +475,31 @@ fn heartbeats_go_to_rakumux_com_and_are_approved_paused_and_run_from_there() {
             .find(|report| report["id"] == action)
             .cloned()
     };
-    world.wait("the five actions reported", || {
-        [&stale, &approve, &run, &pause, &unknown]
+    world.wait("the four actions reported", || {
+        [&approve, &run, &pause, &unknown]
             .iter()
             .all(|action| reported(action).is_some())
     });
-    let report = reported(&stale).unwrap();
-    assert_eq!(report["status"], "failed", "{}", world.diagnostics());
-    assert_eq!(report["failure"], "changed", "{}", world.diagnostics());
-    assert_eq!(reported(&approve).unwrap()["status"], "done");
+    for refused in [&approve, &run] {
+        let report = reported(refused).unwrap();
+        assert_eq!(report["status"], "failed", "{}", world.diagnostics());
+        assert_eq!(report["failure"], "refused", "{}", world.diagnostics());
+    }
     assert_eq!(reported(&pause).unwrap()["status"], "done");
     let report = reported(&unknown).unwrap();
     assert_eq!(report["failure"], "not_listed", "{}", world.diagnostics());
-    let report = reported(&run).unwrap();
-    assert_eq!(report["status"], "done", "{}", world.diagnostics());
-    let session = report["session"].as_str().unwrap().to_owned();
 
-    // The daemon has it approved, then paused, and the run is its session.
+    // Still waiting for approval, never run: approving and running are this
+    // machine's alone.
     let heartbeat = client.heartbeat(&made.id).unwrap();
-    assert!(!heartbeat.awaiting_approval);
+    assert!(heartbeat.awaiting_approval);
     assert!(!heartbeat.enabled);
-    let view = client
-        .get(&session_core::ids::SessionId::from_string(session.clone()))
-        .unwrap();
-    assert_eq!(view.heartbeat.unwrap().heartbeat, made.id);
-    world.wait("the upload and the session list to say so", || {
-        let listed = world.cloud.state().sessions.as_ref().is_some_and(|list| {
-            list["sessions"].as_array().is_some_and(|sessions| {
-                sessions.iter().any(|s| {
-                    s["id"] == session.as_str()
-                        && s["heartbeat"] == json!({"heartbeat": id, "run": 1})
-                })
-            })
-        });
-        listed
-            && uploaded(&id).is_some_and(|state| {
-                state["awaiting_approval"] == false
-                    && state["enabled"] == false
-                    && state["runs"] == 1
-            })
-    });
+    assert_eq!(heartbeat.runs, 0);
+    assert!(client
+        .list_all(true)
+        .unwrap()
+        .iter()
+        .all(|session| session.heartbeat.is_none()));
     service.stop();
     let _ = client.shutdown();
     daemon.stop();

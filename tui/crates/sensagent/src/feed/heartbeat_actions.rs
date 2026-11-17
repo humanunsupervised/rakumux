@@ -1,11 +1,12 @@
 //! Heartbeat actions from rakumux.com (`contracts/feed/` `heartbeatAction`):
 //! while the account's feed is on, the replies read brings the actions
 //! pending for this machine (the cloud sends them only because its session
-//! list says `heartbeats`), and the status service carries out each through
-//! the daemon as the user: `enable` (approving it) only while the heartbeat
-//! is still the version the user read (`updated_at`), `pause`, or `run` (a
-//! run now), then reports it `done` (with the run's session), or `failed`
-//! with why.
+//! list says `heartbeats`), and the status service carries out `pause`
+//! through the daemon as the user, then reports it `done`, or `failed` with
+//! why. `enable` (approving or turning one on) and `run` are refused without
+//! asking the daemon: whoever can write to rakumux.com could otherwise have a
+//! command run on this machine, so a heartbeat is approved, turned on and run
+//! only here (the TUI's Beats tab, `rakumux heartbeat`).
 //!
 //! Each action is carried out at most once: its id is kept as handled before
 //! the daemon is asked, and with the reports rakumux.com hasn't taken yet,
@@ -36,11 +37,10 @@ const RATE_LIMIT_MAX: Duration = Duration::from_secs(60);
 /// What is asked of a heartbeat.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
-    /// Approve and enable it, while it's the version `updated_at` (ms) names.
-    Enable {
-        updated_at: i64,
-    },
+    /// Approve and enable it (refused here).
+    Enable,
     Pause,
+    /// Run it now (refused here).
     Run,
 }
 
@@ -73,7 +73,7 @@ impl WireAsk {
             return None;
         }
         let action = match (self.action.as_str(), self.updated_at) {
-            ("enable", Some(updated_at)) => Action::Enable { updated_at },
+            ("enable", Some(_)) => Action::Enable,
             ("pause", None) => Action::Pause,
             ("run", None) => Action::Run,
             _ => return None,
@@ -105,11 +105,10 @@ pub(crate) fn asks(value: Option<serde_json::Value>) -> Vec<ActionAsk> {
 pub(crate) enum ActionFailure {
     /// No such heartbeat here now.
     NotListed,
-    /// It changed since the version approved: nothing enabled.
-    Changed,
     /// No command, task or schedule to run with.
     Incomplete,
-    /// The daemon refused.
+    /// The daemon refused, or it's done only on this machine (`enable`,
+    /// `run`).
     Refused,
 }
 
@@ -127,40 +126,20 @@ pub(crate) enum Outcome {
 }
 
 /// Carry out `action` on heartbeat `id` through the daemon, as the user:
-/// the run's session for `run`.
+/// only `pause`; `enable` and `run` are refused, the daemon never asked.
 pub(crate) fn carry_out(
     api: &dyn SessionApi,
     id: &str,
     action: Action,
 ) -> Result<Option<String>, ActionFailure> {
-    let id = HeartbeatId::from_string(id);
-    let failure = |code: ErrorCode| match code {
-        ErrorCode::NotFound => ActionFailure::NotListed,
-        ErrorCode::InvalidArgument => ActionFailure::Incomplete,
-        _ => ActionFailure::Refused,
-    };
     match action {
-        Action::Enable { updated_at } => {
-            let heartbeat = api.heartbeat(&id).map_err(|error| match error.code {
-                ErrorCode::NotFound => ActionFailure::NotListed,
-                _ => ActionFailure::Refused,
-            })?;
-            if heartbeat.updated_at.saturating_mul(1000) != updated_at {
-                return Err(ActionFailure::Changed);
-            }
-            api.heartbeat_enable(&id, true)
-                .map(|_| None)
-                .map_err(|error| failure(error.code))
-        }
+        Action::Enable | Action::Run => Err(ActionFailure::Refused),
         Action::Pause => api
-            .heartbeat_enable(&id, false)
+            .heartbeat_enable(&HeartbeatId::from_string(id), false)
             .map(|_| None)
-            .map_err(|error| failure(error.code)),
-        Action::Run => api
-            .heartbeat_run(&id)
-            .map(|session| Some(session.id.as_str().to_owned()))
             .map_err(|error| match error.code {
                 ErrorCode::NotFound => ActionFailure::NotListed,
+                ErrorCode::InvalidArgument => ActionFailure::Incomplete,
                 _ => ActionFailure::Refused,
             }),
     }
@@ -421,10 +400,10 @@ mod tests {
             asks(Some(json!([row("enable", Some(1_761_220_000_000))]))),
         );
         sync.next_work(NOW);
-        sync.acted(ACTION, Err(ActionFailure::Changed));
+        sync.acted(ACTION, Err(ActionFailure::Refused));
         let report = report_of(sync.next_work(NOW));
         assert_eq!(report["status"], "failed");
-        assert_eq!(report["failure"], "changed");
+        assert_eq!(report["failure"], "refused");
         assert!(report.get("session").is_none());
     }
 
